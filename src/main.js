@@ -132,6 +132,15 @@ const HAND_LIGHT_RADIUS = 8;
 const HAND_LIGHT_REACH = 9.5;
 const HAND_LIGHT_GAIN = 2.1;
 
+/**
+ * How long a new planet keeps the husks off, in seconds.
+ *
+ * Long enough to cut some wood, find your feet and light a spot; short enough
+ * that the first night is still a night. Only new worlds get it — see
+ * _beginGrace.
+ */
+const NEW_WORLD_GRACE = 180;
+
 /** (di, dj) toward the wall a torch of each facing is bracketed to. */
 const TORCH_WALL_STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -503,7 +512,28 @@ class Game {
     this.player.health = this.player.maxHealth;
     this.breath = 1;
     this.energy = 1;
+    this.graceT = 0;
+    // Cleared here as well as when it runs out: quitting to the menu mid-grace
+    // and loading a save would otherwise leave the flag set on the mob system
+    // and switch the night off permanently.
+    this.mobs.spawnGrace = false;
     this.worldReady = false;
+  }
+
+  /**
+   * The few minutes a new planet gives you before the dark takes an interest.
+   *
+   * Only on a new world, and only ever once — loading a save drops you back
+   * into a world you already know, at whatever hour you left it, and handing
+   * that player a quiet night would be taking the game away from them.
+   */
+  _beginGrace() {
+    this.graceT = NEW_WORLD_GRACE;
+    this.mobs.spawnGrace = true;
+    for (const m of [...this.mobs.list]) if (m.spec.hostile) this.mobs._die(m, []);
+    // Enough to light a camp with, which is the thing you actually want in the
+    // first five minutes and cannot make without finding coal first.
+    this.inventory.add(itemIdOf('torch'), 6);
   }
 
   newGame() {
@@ -662,6 +692,7 @@ class Game {
     } else {
       this._spawnPlayer();
       this.mobs.populate(this.player);
+      this._beginGrace();
       // Commit the new planet at once. Autosave only fires every 90 seconds, so
       // starting a new game and quitting before then left the *old* world on
       // disk — Continue brought it back and New Game looked like it had done
@@ -1498,6 +1529,7 @@ class Game {
     this._safeTick('water', () => this.water.update(dt));
     this._safeTick('freeze', () => this._tickFreeze(dt));
     this._safeTick('vitals', () => this._tickVitals(dt));
+    this._safeTick('grace', () => this._tickGrace(dt));
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
     // A merchant that has walked out of range, run out of life or been killed
     // takes its shop with it. Without this the screen stays up over a stock
@@ -1668,6 +1700,20 @@ class Game {
    * season frozen at whatever it was when the world loaded, which is the same
    * bug as counting only waking hours, just with a different cause.
    */
+  _tickGrace(dt) {
+    if (!(this.graceT > 0)) return;
+    this.graceT -= dt;
+    if (this.graceT > 0) return;
+    this.graceT = 0;
+    this.mobs.spawnGrace = false;
+    // Say so. A player who has been quietly protected should learn that it has
+    // stopped from a warning, not from dying.
+    const t = this.timeOfDay();
+    if (t < 0.25 || t > 0.75) {
+      this.ui.toast('Something is moving in the dark.', itemIdOf('torch'), 4200);
+    }
+  }
+
   _tickClock(dt) {
     const mins = this.settings.dayMinutes;
     const days = mins > 0 ? dt / (mins * 60) : dt / 86400;

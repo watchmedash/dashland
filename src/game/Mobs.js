@@ -1589,11 +1589,18 @@ export class Mobs {
       // on the surface spawned nothing and a player could stand in the open
       // until dawn untouched. Measured: seven hostiles alive, six aggroed, none
       // of them within thirty seconds' walk of anything.
-      if (night && this._countHostile(false) < MAX_HOSTILE_SURFACE) {
+      // A brand-new world holds them off for a few minutes. The planet keeps
+      // the player's own clock now, so starting a new game after dark is
+      // ordinary rather than exceptional — and measured, that opening was
+      // unplayable: first hit two seconds in, dead inside a minute, seven
+      // hostiles already up, against someone with an empty inventory who has
+      // not yet found the mouse. Night is meant to be the pressure that makes
+      // torches and walls matter, not a loading screen you die on.
+      if (night && !this.spawnGrace && this._countHostile(false) < MAX_HOSTILE_SURFACE) {
         const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
         if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = false; }
       }
-      if (this._countHostile(true) < MAX_HOSTILE_CAVE) {
+      if (!this.spawnGrace && this._countHostile(true) < MAX_HOSTILE_CAVE) {
         const spot = this._findDarkColumn(playerCol, player.position);
         if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = true; }
       }

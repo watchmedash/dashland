@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Dash Craft — Tiny Planet</title>
+<link rel="stylesheet" href="/src/ui/style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪐</text></svg>" />
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <!-- ── loading ─────────────────────────────────────────── -->
+  <div id="loader">
+    <div class="loader-inner">
+      <div class="planet-mark"><span></span><span></span><span></span></div>
+      <h1>DASH<em>CRAFT</em></h1>
+      <p class="tagline">A tiny planet, entirely yours.</p>
+      <div class="bar"><div class="bar-fill" id="load-fill"></div></div>
+      <p class="status" id="load-status">Waking the void…</p>
+    </div>
+  </div>
+
+  <!-- ── main menu ───────────────────────────────────────── -->
+  <div id="menu" class="overlay hidden">
+    <div class="menu-card">
+      <h1>DASH<em>CRAFT</em></h1>
+      <p class="tagline">A tiny planet, entirely yours.</p>
+      <div class="menu-actions">
+        <button id="mm-continue" class="primary">Continue<small id="mm-save-info"></small></button>
+        <button id="mm-new">New Game</button>
+        <button id="mm-settings">Settings</button>
+        <button id="mm-controls">Controls</button>
+      </div>
+      <p class="menu-foot" id="mm-clock">—</p>
+      <p class="menu-credit">Textures: <strong>Stylized Texture Pack</strong> by Lynocs</p>
+    </div>
+  </div>
+
+  <!-- ── HUD ─────────────────────────────────────────────── -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
+
+    <div id="status-bar">
+      <div class="chip" id="chip-clock"><span class="dial" id="clock-dial"></span><span id="clock-text">--:--</span></div>
+      <div class="chip" id="chip-weather">Clear</div>
+      <div class="chip" id="chip-season">Spring</div>
+      <div class="chip" id="chip-biome">—</div>
+      <!-- Only while a pack is waiting to be recovered. A distance with no
+           bearing is not findable on a sphere, so the arrow is the point. -->
+      <div class="chip hidden" id="chip-pack"><i class="pack-arrow"></i><span id="pack-dist"></span></div>
+    </div>
+
+    <!-- Vitals live top-left as labelled bars. Pip rows read as decoration at a
+         glance; a bar's length is legible in peripheral vision, which is where
+         you actually watch your health from. -->
+    <div id="vitals">
+      <div class="vital" id="v-health"><i class="v-ico"></i><span class="v-track"><b></b></span><em class="v-num"></em></div>
+      <div class="vital hidden" id="v-food"><i class="v-ico"></i><span class="v-track"><b></b></span><em class="v-num"></em></div>
+      <div class="vital hidden" id="v-stamina"><i class="v-ico"></i><span class="v-track"><b></b></span><em class="v-num"></em></div>
+      <div class="vital hidden" id="v-breath"><i class="v-ico"></i><span class="v-track"><b></b></span><em class="v-num"></em></div>
+    </div>
+
+    <div id="bottom">
+      <div id="hotbar"></div>
+      <!-- Pinned to the top edge of the bottom cluster rather than to the
+           viewport, so they can never land on top of the meter rows. -->
+      <div id="above-bar">
+        <div id="hint" class="hidden"></div>
+        <div id="item-name"></div>
+      </div>
+    </div>
+
+    <div id="debug" class="hidden"></div>
+  </div>
+
+  <!-- Outside #hud: toasts have to read over the pause overlay. -->
+  <div id="toasts" class="hidden"></div>
+
+  <!-- ── inventory / crafting / kiln ─────────────────────── -->
+  <div id="screen" class="overlay hidden">
+    <div class="panel inv-panel">
+      <header>
+        <h2 id="screen-title">Inventory</h2>
+        <button class="ghost" data-close-screen>Close <kbd>Esc</kbd></button>
+      </header>
+
+      <div class="inv-body">
+        <div class="inv-left">
+          <div id="screen-top"></div>
+          <div class="inv-section">
+            <div class="inv-grid" id="inv-main"></div>
+            <div class="inv-grid inv-hot" id="inv-hot"></div>
+          </div>
+        </div>
+        <aside class="recipe-panel" id="recipe-panel">
+          <h3>Can Craft <span id="recipe-count"></span></h3>
+          <div id="recipe-list"></div>
+          <p class="recipe-empty" id="recipe-empty">Gather materials to see what you can make.</p>
+        </aside>
+      </div>
+    </div>
+  </div>
+  <div id="cursor-stack" class="hidden"><img alt="" /><span></span></div>
+  <div id="tooltip" class="hidden"></div>
+
+  <!-- ── pause ───────────────────────────────────────────── -->
+  <div id="pause" class="overlay hidden">
+    <div class="menu-card small">
+      <h2>Paused</h2>
+      <div class="menu-actions">
+        <button id="pz-resume" class="primary">Resume</button>
+        <button id="pz-settings">Settings</button>
+        <button id="pz-controls">Controls</button>
+        <button id="pz-save">Save Game</button>
+        <button id="pz-quit">Save &amp; Quit to Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── settings ────────────────────────────────────────── -->
+  <div id="settings" class="overlay hidden">
+    <div class="panel">
+      <header><h2>Settings</h2><button class="ghost" data-close-settings>Back</button></header>
+      <div class="settings">
+        <label>Field of view <span class="val" id="fov-val">75</span>
+          <input id="set-fov" type="range" min="60" max="110" value="75" />
+        </label>
+        <label>Mouse sensitivity <span class="val" id="sens-val">1.00</span>
+          <input id="set-sens" type="range" min="0.2" max="3" step="0.05" value="1" />
+        </label>
+        <label>Render scale <span class="val" id="scale-val">1.00</span>
+          <input id="set-scale" type="range" min="0.5" max="1.5" step="0.05" value="1" />
+        </label>
+        <label>Master volume <span class="val" id="vol-val">70</span>
+          <input id="set-vol" type="range" min="0" max="100" value="70" />
+        </label>
+        <label>Music volume <span class="val" id="mus-val">35</span>
+          <input id="set-mus" type="range" min="0" max="100" value="35" />
+        </label>
+        <label class="row"><input id="set-post" type="checkbox" checked /> Post-processing</label>
+        <label class="row"><input id="set-bob" type="checkbox" checked /> View bobbing</label>
+        <label class="row"><input id="set-invert" type="checkbox" /> Invert mouse Y</label>
+        <label class="row"><input id="set-autojump" type="checkbox" /> Auto-jump onto ledges</label>
+        <label>Day length <span class="val" id="day-val">24 min</span>
+          <input id="set-day" type="range" min="0" max="60" step="4" value="24" />
+        </label>
+        <p class="note">A full day and night takes as long as <strong>day length</strong> says.
+          Set it to zero and the planet follows your device clock instead — pretty, but a
+          cycle then lasts a real day, so you would rarely meet what comes out after dark.
+          Weather changes on its own. There is a single rendering configuration — drop
+          <strong>render scale</strong> below 1.0 if you need more performance.</p>
+        <p class="note credits">
+          <strong>Credits</strong><br />
+          Block materials from the <strong>Stylized Texture Pack</strong> by <strong>Lynocs</strong>,
+          free for private and commercial use — 464 unique hand-painted textures with
+          full PBR map sets. Please don't resell the pack, or the atlases baked from it.
+          Plants, tools, machines and item art are generated procedurally by the game.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── controls ────────────────────────────────────────── -->
+  <div id="controls" class="overlay hidden">
+    <div class="panel">
+      <header><h2>Controls</h2><button class="ghost" data-close-controls>Back</button></header>
+      <div class="controls-grid">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>
+        <div><kbd>Space</kbd><span>Jump / Swim up</span></div>
+        <div><kbd>Shift</kbd><span>Sprint</span></div>
+        <div><kbd>Ctrl</kbd><span>Sneak / Swim down</span></div>
+        <div><kbd>LMB</kbd><span>Mine (hold)</span></div>
+        <div><kbd>RMB</kbd><span>Place / Use</span></div>
+        <div><kbd>1</kbd>–<kbd>9</kbd><span>Hotbar</span></div>
+        <div><kbd>Wheel</kbd><span>Cycle hotbar</span></div>
+        <div><kbd>E</kbd><span>Inventory</span></div>
+        <div><kbd>Q</kbd><span>Drop held item</span></div>
+        <div><kbd>RMB</kbd><span>Hold to eat food</span></div>
+        <div><kbd>RMB</kbd><span>Trade with a merchant</span></div>
+        <div><kbd>RMB</kbd><span>Open a crate</span></div>
+        <div><kbd>RMB</kbd><span>Use a bed</span></div>
+        <div><kbd>RMB</kbd><span>Open or shut a door</span></div>
+        <div><kbd>RMB</kbd><span>Cast and strike with a rod</span></div>
+        <div><kbd>F3</kbd><span>Debug overlay</span></div>
+        <div><kbd>Esc</kbd><span>Pause</span></div>
+      </div>
+      <p class="note">Dig soil with a <strong>shovel</strong> to make farmland, sow <strong>seeds</strong> on it, and harvest the wheat once it ripens — farmland near water grows twice as fast.<br />
+        Items on the ground are picked up automatically when you walk near them.
+        A <strong>fishing rod</strong> is three sticks and two hides. Aim at open water and click to cast, then watch
+        the float: when it dips, click again. Strike too early or too late and it is gone. Fish grill on a kiln.<br />
+        A <strong>door</strong> is six planks and stands two blocks tall — right-click to swing it. Shut, it seals
+        a doorway against the night; open, you walk straight through.<br />
+        <strong>Ladders</strong> are seven sticks for three. Hang them on a wall and hold <kbd>Space</kbd> to climb,
+        <kbd>Ctrl</kbd> to go down; let go and you simply hang there. Catching one cancels a fall.<br />
+        The year turns every three days — <strong>spring, summer, autumn, winter</strong>, shown next to
+        the weather. Crops race through spring and barely stir in winter, so sow early; in deep winter
+        the rain falls as snow wherever you are, not just in the north.<br />
+        <strong>Fences</strong> are four planks and two sticks for three, and they join themselves up
+        as you place them. One stands higher than a block, so nothing walks or hops over a line of
+        them — a ring of fence keeps a herd where you left it, and you can still see across it.<br />
+        A <strong>sign</strong> is six planks and a stick, for three. Place one and type a line; after that
+        just look at it to read it, so a row of signs at a junction reads itself as you turn.<br />
+        Build a <strong>bed</strong> early and use it: you wake up there when you die, and on a planet this
+        size that is the difference between losing a night and losing your house. Sleeping skips to dawn,
+        but only once nothing hostile is nearby.<br />
+        Husks come out after dark, and out of any unlit space at any hour. <strong>Torches keep them out</strong> —
+        light a mine as you dig it and nothing will spawn behind you.<br />
+        Craft <strong>armour</strong> — hide first, then copper, iron, astral and cinder — and shift-click a piece
+        to wear it. A full set takes between a quarter and four fifths off every blow, and wears out by what it stops.<br />
+        A <strong>crate</strong> holds twenty-seven stacks — shift-click to move a whole stack in or out,
+        and break one to get everything back. Crates you find already standing in the world have something in them.
+        Listen for a <strong>bell</strong>: it means a wandering merchant is somewhere within earshot.
+        He buys almost anything and sells a pack of oddments — click a line to trade one, shift-click for ten.
+        Most traders are also <strong>after something</strong>, and pay well over the odds for it — bring what he asks
+        and hand it over at the top of his screen. Each trader wants his own thing, so the next one is a new errand.
+        He carries what he carries, and he only has so many coins, so sell the good stuff while he can still pay.
+        In the inventory, the <strong>Can Craft</strong> sidebar lists everything your materials allow —
+        click to craft one, shift-click to craft as many as you can.</p>
+    </div>
+  </div>
+
+  <!-- ── writing a sign ──────────────────────────────────── -->
+  <div id="sign-write" class="overlay hidden">
+    <div class="menu-card small">
+      <h2>Sign</h2>
+      <p class="tagline">Two lines, and keep them short.</p>
+      <input id="sign-line" maxlength="48" autocomplete="off" spellcheck="false" />
+      <div class="menu-actions">
+        <button id="sign-ok" class="primary">Carve it</button>
+        <button id="sign-cancel">Leave it blank</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── death ───────────────────────────────────────────── -->
+  <div id="death" class="overlay hidden">
+    <div class="menu-card small">
+      <h2 class="death-title">You Blacked Out</h2>
+      <p class="tagline" id="death-cause">The planet keeps turning.</p>
+      <div class="menu-actions">
+        <button id="dz-respawn" class="primary">Wake Up</button>
+        <button id="dz-quit">Quit to Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

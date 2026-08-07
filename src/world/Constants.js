@@ -1,0 +1,76 @@
+// Cubesphere world constants.
+//
+// The planet is a quadrilateralised cube: six FxF grids of radial columns,
+// each column D layers deep. Every voxel is a curved hexahedron whose "up" is
+// the radial direction, so blocks stand upright everywhere on the surface —
+// no staircase terracing, unlike an axis-aligned voxel cube.
+
+// Scale note: a cell must stay about one block across, and its width is
+// (R * pi/2) / F — so the face resolution and the radius have to move together.
+// F 64 -> 208 with R_SEA 40 -> 130 keeps the cell at 0.98 units while giving
+// 10.6x the surface area. Everything radial (shell thickness, digging depth) is
+// measured in blocks and is deliberately *not* scaled.
+export const FACES = 6;
+export const F = 208;                // cells per face axis
+export const D = 44;                 // radial layers
+export const R_MIN = 100;            // radius of layer 0
+export const R_MAX = R_MIN + D;      // 144
+
+export const COLUMNS = FACES * F * F;        // 259 584
+export const NUM_VOXELS = COLUMNS * D;       // 11 421 696
+
+export const CHUNK_T = 16;           // cells per chunk along i and j
+export const CHUNK_K = 11;           // layers per chunk
+export const CT = F / CHUNK_T;       // 13 chunks per face axis
+export const CK = D / CHUNK_K;       // 4 chunks radially
+export const NUM_CHUNKS = FACES * CT * CT * CK;   // 4 056
+
+/**
+ * How far from the player a chunk keeps a mesh, and how far out it survives
+ * before being freed. Meshing the whole planet was fine at 384 chunks; at 4 056
+ * it would be about half a gigabyte of geometry resident at all times.
+ *
+ * The horizon does the work here. On a sphere of this radius an eye two blocks
+ * up sees the ground fall away at ~23 units, and the tallest terrain stays
+ * visible to about 79 — so 100 is already past anything that can be seen, and
+ * the gap up to 128 is hysteresis so walking a boundary doesn't thrash.
+ */
+export const CHUNK_LOAD_DIST = 100;
+export const CHUNK_KEEP_DIST = 128;
+
+/** voxel index from (face, i, j, k) */
+export const vidx = (f, i, j, k) => (((f * F + i) * F + j) * D + k);
+/** column index from (face, i, j) */
+export const cidx = (f, i, j) => ((f * F + i) * F + j);
+
+export const chunkIdx = (f, ci, cj, ck) => (((f * CT + ci) * CT + cj) * CK + ck);
+
+export const R_CORE = 103;           // unbreakable core shell
+export const R_MANTLE = 108;
+export const R_SEA = 130;            // ocean surface radius
+export const R_SURFACE = 130.9;      // mean land radius
+export const R_TERRAIN_MAX = 142;
+
+export const GRAVITY = 26;
+
+// Biome ids
+export const BIOME = {
+  OCEAN: 0, BEACH: 1, PLAINS: 2, FOREST: 3, PINE_FOREST: 4,
+  DESERT: 5, SAVANNA: 6, TUNDRA: 7, SNOW: 8, MOUNTAIN: 9, MEADOW: 10, BADLANDS: 11,
+};
+
+/** grass tint, foliage tint, water tint */
+export const BIOME_COLORS = [
+  { grass: [0.32, 0.55, 0.42], foliage: [0.30, 0.52, 0.38], water: [0.16, 0.42, 0.62] },
+  { grass: [0.72, 0.74, 0.52], foliage: [0.55, 0.68, 0.40], water: [0.22, 0.55, 0.70] },
+  { grass: [0.55, 0.78, 0.40], foliage: [0.45, 0.70, 0.34], water: [0.20, 0.50, 0.68] },
+  { grass: [0.42, 0.70, 0.34], foliage: [0.34, 0.60, 0.28], water: [0.18, 0.46, 0.60] },
+  { grass: [0.38, 0.60, 0.38], foliage: [0.26, 0.48, 0.32], water: [0.16, 0.42, 0.56] },
+  { grass: [0.80, 0.74, 0.42], foliage: [0.68, 0.66, 0.36], water: [0.26, 0.60, 0.72] },
+  { grass: [0.74, 0.76, 0.38], foliage: [0.62, 0.66, 0.32], water: [0.24, 0.56, 0.68] },
+  { grass: [0.60, 0.68, 0.56], foliage: [0.48, 0.60, 0.48], water: [0.28, 0.54, 0.68] },
+  { grass: [0.70, 0.80, 0.78], foliage: [0.56, 0.70, 0.66], water: [0.36, 0.62, 0.76] },
+  { grass: [0.48, 0.62, 0.44], foliage: [0.38, 0.54, 0.36], water: [0.24, 0.52, 0.68] },
+  { grass: [0.62, 0.84, 0.46], foliage: [0.50, 0.76, 0.38], water: [0.22, 0.54, 0.72] },
+  { grass: [0.76, 0.60, 0.36], foliage: [0.66, 0.54, 0.30], water: [0.30, 0.50, 0.56] },
+];

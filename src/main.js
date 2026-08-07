@@ -1,0 +1,2168 @@
+// Dash Craft — a voxel tiny planet.
+
+import * as THREE from 'three';
+import { Planet } from './world/Planet.js';
+import { Player } from './player/Player.js';
+import { ViewModel } from './player/ViewModel.js';
+import { Input } from './player/Input.js';
+import { Sky } from './render/Sky.js';
+import { PostFX } from './render/PostFX.js';
+import { Particles } from './render/Particles.js';
+import { createVoxelMaterials, buildTileTextures, buildCrackTexture, voxelUniforms } from './render/VoxelMaterial.js';
+import { loadTileAtlas } from './render/TileAtlas.js';
+import { Audio } from './audio/Audio.js';
+import { UI } from './ui/UI.js';
+import { IconFactory } from './ui/Icons.js';
+import { Inventory, Slot, HOTBAR } from './game/Inventory.js';
+import { Drops } from './game/Drops.js';
+import { Weather } from './game/Weather.js';
+import { Seasons } from './game/Seasons.js';
+import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
+import * as MobModels from './game/MobModels.js';
+import { Farming } from './game/Farming.js';
+import { Water } from './game/Water.js';
+import { Save } from './game/Save.js';
+import {
+  ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, ARMOUR_SLOT_ORDER,
+} from './game/Items.js';
+import { smeltingFor, FUEL } from './game/Recipes.js';
+import {
+  BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
+  IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT,
+} from './world/Blocks.js';
+import {
+  F, D, R_MIN, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
+  FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
+  CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
+} from './world/Constants.js';
+import {
+  colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
+} from './world/Sphere.js';
+import { makeRng } from './util/Noise.js';
+
+/**
+ * World-space centre of every chunk, built once. The streamer runs a distance
+ * test against all 4 056 of them a few times a second; recomputing the centres
+ * each time would cost more than the test.
+ */
+const CHUNK_CENTER = (() => {
+  const out = new Float32Array(NUM_CHUNKS * 3);
+  const p = [0, 0, 0];
+  for (let f = 0; f < FACES; f++) {
+    for (let ci = 0; ci < CT; ci++) {
+      for (let cj = 0; cj < CT; cj++) {
+        for (let ck = 0; ck < CK; ck++) {
+          cellCenterPos(f, ci * CHUNK_T + CHUNK_T / 2, cj * CHUNK_T + CHUNK_T / 2,
+            ck * CHUNK_K + CHUNK_K / 2, p);
+          const o = chunkIdx(f, ci, cj, ck) * 3;
+          out[o] = p[0]; out[o + 1] = p[1]; out[o + 2] = p[2];
+        }
+      }
+    }
+  }
+  return out;
+})();
+
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+// Owned by the drop-burn callback alone: it fires from inside Drops.update,
+// where the shared scratch vectors above may be mid-use by the caller.
+const _burnUp = new THREE.Vector3();
+
+/** Three rows of nine, so a crate is worth the eight planks it costs. */
+const CRATE_SLOTS = 27;
+
+/** Seconds for a swing to come back up to full weight. */
+const ATTACK_PERIOD = 0.62;
+
+/**
+ * Bar restored per point of nourishment.
+ *
+ * At 0.09 anything above 11 nourishment overflowed a full bar, which quietly
+ * flattened the top half of the pantry: a Hearty Stew (14) restored 126% and a
+ * loaf of bread (8) restored 72%, so the entire cooking chain above bread was
+ * cosmetic. At 0.06 the ladder is real end to end — berries 18%, bread 48%,
+ * stew 84% — and nothing you can cook is wasted on a bar that cannot hold it.
+ *
+ * Set against the drain, which is 0.0022/s scaled by effort: a bar lasts about
+ * 42 minutes standing still, 11 walking and 5 sprinting. One loaf is roughly
+ * five minutes of hard travelling.
+ */
+const FOOD_TO_ENERGY = 0.06;
+
+// Fishing. The wait is the whole point — long enough that you put the mouse
+// down and look at the water, short enough that it is not a punishment.
+const FISH_WAIT_MIN = 4;
+const FISH_WAIT_MAX = 13;
+/** How long the fish is on before it shakes the hook. Generous but not free. */
+const FISH_BITE_WINDOW = 1.1;
+/** Walk this far from your own float and the line comes in. */
+const FISH_LEASH = 9;
+/** Height of the float above a water cell's centre — half a cell, plus a little. */
+const BOBBER_FLOAT = 0.56;
+
+/** No sleeping with a husk this close. */
+const SLEEP_SAFE_DIST = 16;
+/** A night's sleep costs you a meal's worth of nourishment. */
+const SLEEP_HUNGER = 0.14;
+const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
+const WHITE = new THREE.Color(1, 1, 1);
+const WHITE_L = [1, 1, 1];
+/** Cells the hand-light scan reaches; must cover the brightest block light. */
+const HAND_LIGHT_RADIUS = 8;
+/** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
+const HURT_IMMUNITY = 0.5;
+
+const DEFAULT_SETTINGS = {
+  fov: 75, sensitivity: 1.0, renderScale: 1,
+  volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: false,
+  // Minutes for one full day and night, or 0 to follow the device clock.
+  //
+  // Following the wall clock is charming and was the original behaviour, but it
+  // makes a cycle 24 real hours long, which quietly puts half the game out of
+  // reach: husks only surface after dark and burn at dawn, torches only matter
+  // at night, and someone playing at noon would never meet any of it. A game
+  // cycle is the default for that reason; the clock-synced mode is still there
+  // for anyone who wants the planet to keep their own hours.
+  dayMinutes: 24,
+};
+
+class Game {
+  constructor() {
+    this.settings = { ...DEFAULT_SETTINGS, ...(Save.settings() || {}) };
+    this.state = 'loading';
+    this.clock = new THREE.Clock();
+    this.frameTimes = [];
+    this.editSeq = 0;
+    this.playtime = 0;
+    // Position in the day/night cycle, 0..1, with 0 at midnight to match what
+    // the wall clock would report. Seeded to mid-morning so a new world opens
+    // in daylight rather than dropping you straight into a husk night.
+    this.dayT = 8 / 24;
+    this.stats = { mined: 0, placed: 0, crafted: 0 };
+    this.kilns = new Map();
+    // Crate contents, keyed the same way kilns are. Thirty-six carried slots is
+    // nothing against a hundred and seventy block types: without somewhere to
+    // put things, building anything large means a constant round trip to a hole
+    // in the ground you filled with the overflow.
+    this.crates = new Map();
+    /** {col, k} of the bed you last used, or null. */
+    this.homeSpawn = null;
+    /** Where your pack is waiting, while any of it is still out there. */
+    this.deathSite = null;
+    /** The cast currently in the water, or null. */
+    this.fishing = null;
+    this.bobber = null;
+    /** Sign text, keyed like the kilns and crates. */
+    this.signs = new Map();
+    this.seed = 0;
+    this.worldReady = false;
+    this.autosaveTimer = 0;
+    /** chunk ids that currently have (or have been asked for) a mesh */
+    this.liveChunks = new Set();
+    this._streamPending = false;
+    this._streamTimer = 0;
+    this._hurtGuard = 0;
+
+    this._initRenderer();
+    this.inventory = new Inventory();
+    this.ui = new UI(this);
+    this.audio = new Audio();
+    this.audio.setVolumes(this.settings.volume, this.settings.music);
+    this.input = new Input(this.canvas);
+    this.input.invertY = this.settings.invertY;
+    this.input.onLockChange = (locked) => {
+      if (!locked && this.state === 'playing' && !this.ui.screenOpen) {
+        // Esc is also what dropped the pointer lock, and that key press has now
+        // been spent on opening this menu. Swallow it, or the global Escape
+        // handler would close the pause screen in the very same frame.
+        this.input.justPressed.delete('Escape');
+        this.pause();
+      }
+    };
+    this.inventory.onChange = () => this.ui.refresh();
+
+    this.materials = createVoxelMaterials();
+    this.planet = new Planet(this.materials);
+    this.scene.add(this.planet.root);
+
+    this.player = new Player(this.planet);
+    this.player.autoJump = !!this.settings.autoJump;
+    this.viewModel = new ViewModel((id) => this.drops.createItemMesh(id));
+    this.sky = new Sky(this.scene, this.renderer);
+    this.particles = new Particles(this.scene, this.planet);
+    this.drops = new Drops(this.scene, this.planet, this.materials);
+    this.mobs = new Mobs(this.scene, this.planet, this.drops);
+    // Creatures speak for themselves — idle calls, pain and death, all anchored
+    // in the world so you can hear which direction the herd is in.
+    this.mobs.onSound = (kind, mob) => this.audio.mob(mob.type, kind, mob.pos);
+    this.mobs.onAttack = (dmg, mob) => this._takeHit(dmg, mob);
+    this.mobs.onBurn = (mob) => this.particles.embers(mob.pos, mob.up, 2, 0.55);
+    this.drops.onBurn = (pos) => {
+      _burnUp.copy(pos).normalize();
+      this.particles.embers(pos, _burnUp, 5, 0.7);
+    };
+    // A merchant is rare enough that missing one because you were facing the
+    // other way would be a genuine loss. Say so once, and let the bells do the
+    // rest of the work.
+    //
+    // Measured: over 150 seconds a trader never came within talking range of a
+    // player who stayed put — closest 11 cells, median 28 — while ringing 15
+    // times. He is found by walking towards the sound, never by waiting, so
+    // this line has to be a reason to set off rather than a description of a
+    // noise. Naming what he wants does that; it does not say where he is,
+    // which is the bell's job.
+    this.mobs.onMerchant = (mob) => {
+      // Quoted with its count rather than lowercased into a sentence: item
+      // labels are singular nouns, and "after ruby" or "after glass" reads
+      // wrong however you bend it. A quantity dodges the grammar and tells the
+      // player whether they can already fill it.
+      const req = mob.request;
+      const wants = req && !req.done
+        ? ` Someone wants ${req.count} × ${ITEMS[req.item]?.label ?? 'something'}.`
+        : '';
+      this.ui.toast(`Bells, somewhere close by.${wants}`, itemIdOf('coin'), 5200);
+      this.audio.mob(mob.type, 'idle', mob.pos);
+    };
+    this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
+    this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
+    this.weather = new Weather();
+    this.weather.onThunder = () => this.audio.thunder(0.85 + Math.random() * 0.35);
+    this.seasons = new Seasons();
+    this.postfx = new PostFX(this.renderer, this.scene, this.camera);
+    this.postfx.enabled = this.settings.post;
+    this.postfx.setSize(this.width, this.height);
+    this.viewModel.setSize(this.width, this.height);
+    // One fixed rendering configuration. Performance is tuned with the render
+    // scale slider instead of preset tiers.
+    this.renderer.shadowMap.enabled = true;
+    this.sky.sunLight.shadow.mapSize.set(2048, 2048);
+
+    this._initHighlight();
+    this._bindPlayerEvents();
+    this._bindWindow();
+    // One pass through the resize path so the sky and particle pixel ratios pick
+    // up the saved render scale too, rather than waiting for the first resize.
+    this._resize();
+
+    this.mining = { key: null, progress: 0 };
+    this.placeCooldown = 0;
+    this.useCooldown = 0;
+    /** Seconds since the last swing landed, for the attack rhythm. */
+    this.attackT = ATTACK_PERIOD;
+    this.damageFlash = 0;
+    this.breath = 1;
+    this.energy = 1;      // nourishment: gates health regeneration
+    this.eating = 0;      // seconds held on a food item
+    this.shelter = 1;     // 0 under cover, 1 in open sky — gates precipitation
+    this._hlCol = -1; this._hlK = -1; this._hlSeq = -1;
+    this._hlValue = { r: 0, g: 0, b: 0 };
+
+    this._loadAssets();
+    // Never let one bad frame end the game. An exception thrown inside the
+    // animation callback stops the rAF chain for good: the picture freezes,
+    // input dies, and the only clue is a line in the console. Log it once per
+    // distinct error and keep drawing — a glitched frame beats a dead tab.
+    this._frameErrors = new Set();
+    this.renderer.setAnimationLoop(() => {
+      try {
+        this._frame();
+      } catch (err) {
+        const key = String(err?.stack ?? err);
+        if (!this._frameErrors.has(key)) {
+          this._frameErrors.add(key);
+          console.error('[frame]', err);
+        }
+      }
+    });
+  }
+
+  // --- boot -----------------------------------------------------------------
+
+  _initRenderer() {
+    this.canvas = document.getElementById('view');
+    const renderer = new THREE.WebGLRenderer({
+      canvas: this.canvas, antialias: false, powerPreference: 'high-performance',
+      stencil: false, alpha: false,
+    });
+    // The saved render scale has to be folded in here, not on the first resize.
+    // PostFX reads the renderer's pixel ratio when it builds its buffers, so a
+    // player who dropped the scale for performance would otherwise get a
+    // full-resolution first session every time they reloaded.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * this.settings.renderScale);
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer = renderer;
+    this.width = window.innerWidth; this.height = window.innerHeight;
+
+    this.scene = new THREE.Scene();
+    // Far plane is deliberately tight. Nothing depth-tested lives beyond the
+    // cloud shell (~95 units); the sky dome, stars and sun all draw with
+    // depthTest off. A huge far plane wrecks depth precision, which shows up as
+    // GTAO haze over the sky and softer shadows.
+    this.camera = new THREE.PerspectiveCamera(this.settings.fov, this.width / this.height, 0.06, 420);
+    this.camera.position.set(0, R_TERRAIN_MAX + 10, 0);
+    this.scene.add(this.camera);
+  }
+
+  _initHighlight() {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(24 * 3), 3));
+    this.highlight = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+      color: 0x08080d, transparent: true, opacity: 0.38, depthTest: true,
+    }));
+    this.highlight.frustumCulled = false;
+    this.highlight.visible = false;
+    this.highlight.renderOrder = 30;
+    this.scene.add(this.highlight);
+    this._hlCorners = Array.from({ length: 8 }, () => [0, 0, 0]);
+  }
+
+  /** Draw the wireframe of a curved cell. */
+  _showHighlight(col, k) {
+    const { f, i, j } = colParts(col);
+    const c = this._hlCorners;
+    cornerPos(f, i, j, k, c[0]);
+    cornerPos(f, i + 1, j, k, c[1]);
+    cornerPos(f, i + 1, j + 1, k, c[2]);
+    cornerPos(f, i, j + 1, k, c[3]);
+    cornerPos(f, i, j, k + 1, c[4]);
+    cornerPos(f, i + 1, j, k + 1, c[5]);
+    cornerPos(f, i + 1, j + 1, k + 1, c[6]);
+    cornerPos(f, i, j + 1, k + 1, c[7]);
+    const edges = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7];
+    const arr = this.highlight.geometry.attributes.position.array;
+    // nudge outward a hair so the outline never z-fights
+    for (let e = 0; e < 24; e++) {
+      const p = c[edges[e]];
+      const l = Math.hypot(p[0], p[1], p[2]) || 1;
+      const s = (l + 0.006) / l;
+      arr[e * 3] = p[0] * s; arr[e * 3 + 1] = p[1] * s; arr[e * 3 + 2] = p[2] * s;
+    }
+    this.highlight.geometry.attributes.position.needsUpdate = true;
+    this.highlight.visible = true;
+  }
+
+  _bindPlayerEvents() {
+    this.player.onStep = (blockId) => {
+      const b = BLOCKS[blockId] || BLOCKS[1];
+      this.audio.step(b.sound);
+      if (blockId) this.particles.footDust(this.player.position, this.player.up, blockId);
+    };
+    this.player.onLand = () => {
+      const b = BLOCKS[this.player.groundBlock()] || BLOCKS[1];
+      this.audio.step(b.sound);
+    };
+    this.player.onHurt = (dmg) => {
+      this.damageFlash = Math.min(1, 0.35 + dmg * 0.1);
+      this.audio.hurt();
+      if (this.player.health <= 0) this._die('The fall was further than it looked.');
+    };
+  }
+
+  _bindWindow() {
+    window.addEventListener('resize', () => this._resize());
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('beforeunload', () => {
+      if (this.state === 'playing' || this.state === 'paused') this.saveGame(false);
+    });
+    this.canvas.addEventListener('click', () => {
+      if (this.state === 'playing' && !this.input.locked && !this.ui.screenOpen) this.input.requestLock();
+    });
+  }
+
+  _resize() {
+    this.width = window.innerWidth; this.height = window.innerHeight;
+    this.camera.aspect = this.width / this.height;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(this.width, this.height, false);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * this.settings.renderScale);
+    this.postfx.setSize(this.width, this.height);
+    this.viewModel.setSize(this.width, this.height);
+    const pr = this.renderer.getPixelRatio();
+    this.sky.setPixelRatio(pr);
+    this.particles.setPixelRatio(pr);
+  }
+
+  setRenderScale() { this._resize(); }
+
+  persistSettings() { Save.writeSettings(this.settings); }
+
+  async _loadAssets() {
+    this.ui.progress(0.02, 'Loading materials');
+    // Single source of truth: the pre-baked atlases. If they're missing the
+    // right answer is a loud failure, not silently falling back to a different
+    // set of textures.
+    const tex = await loadTileAtlas((p, label) => this.ui.progress(0.02 + p * 0.9, label));
+
+    const arrays = buildTileTextures(tex.tiles, this.renderer);
+    voxelUniforms.uMap.value = arrays.map;
+    voxelUniforms.uNormalMap.value = arrays.normalMap;
+    voxelUniforms.uArm.value = arrays.arm;
+    voxelUniforms.uCrack.value = buildCrackTexture(tex.crack);
+
+    const icons = new IconFactory(tex.tiles.albedo, tex.tiles.size, tex.tiles.layers);
+    this.ui.setIcons(icons);
+    this.drops.setIcons(icons);
+
+    // Creature models, up front. `spawn` runs from the frame loop and from world
+    // load, so it has to stay synchronous — an animal that appears two frames
+    // after the terrain it stands on is worse than a slightly longer load.
+    this.ui.progress(0.95, 'Waking the wildlife');
+    await MobModels.prepare(MOB_MODEL_URLS);
+
+    this.ui.progress(1, 'Ready');
+    this.ui.loaded();
+    this.state = 'menu';
+    this.ui.showMenu(Save.meta());
+  }
+
+  // --- world lifecycle ------------------------------------------------------
+
+  _startWorker() {
+    if (this.worldWorker) this.worldWorker.terminate();
+    this.worldWorker = new Worker(new URL('./workers/world.worker.js', import.meta.url), { type: 'module' });
+    this.worldWorker.onmessage = (e) => this._onWorldMessage(e.data);
+  }
+
+  _resetWorld() {
+    this.planet.clearMeshes();
+    this.planet.facing.clear();
+    this.liveChunks.clear();
+    this._streamPending = false;
+    this._streamTimer = 0;
+    this._welcome = false;
+    this.drops.clear();
+    this.mobs.clear();
+    // The flow sim keys everything by cell index, so its sources and levels are
+    // meaningless against a different planet — carried over, they marked cells
+    // of the new world as springs at random.
+    this.water.clear();
+    this.farming.clear();
+    this.kilns.clear();
+    this.crates.clear();
+    this.homeSpawn = null;
+    this.deathSite = null;
+    this.signs.clear();
+    this.seasons.fromJSON(0);
+    this._pushSeason();
+    this.inventory = new Inventory();
+    this.inventory.onChange = () => this.ui.refresh();
+    this.stats = { mined: 0, placed: 0, crafted: 0 };
+    this.playtime = 0;
+    this.player.health = this.player.maxHealth;
+    this.breath = 1;
+    this.energy = 1;
+    this.worldReady = false;
+  }
+
+  newGame() {
+    this.ui.hideMenu();
+    document.body.appendChild(this._makeLoaderShell());
+    this.ui.progress(0, 'Igniting the core');
+    this._resetWorld();
+    this.seed = (Math.random() * 0x7fffffff) | 0;
+    this._pendingSave = null;
+    this._startWorker();
+    this.worldWorker.postMessage({ type: 'init', seed: this.seed });
+  }
+
+  async continueGame() {
+    const data = await Save.read();
+    if (!data) { this.ui.showMenu(null); return; }
+    this.ui.hideMenu();
+    document.body.appendChild(this._makeLoaderShell());
+    this.ui.progress(0, 'Recalling your planet');
+    this._resetWorld();
+    this.seed = data.seed;
+    this._pendingSave = data;
+    this._startWorker();
+    // `facing` is absent in saves written before directional blocks existed;
+    // the worker defaults every directional block it finds without an entry.
+    this.worldWorker.postMessage({
+      type: 'load', blocks: data.blocks, colBiome: data.colBiome, facing: data.facing || null,
+    });
+  }
+
+  _makeLoaderShell() {
+    let el = document.getElementById('loader');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'loader';
+    el.innerHTML = `<div class="loader-inner">
+      <div class="planet-mark"><span></span><span></span><span></span></div>
+      <h1>DASH<em>CRAFT</em></h1>
+      <p class="tagline">A tiny planet, entirely yours.</p>
+      <div class="bar"><div class="bar-fill" id="load-fill"></div></div>
+      <p class="status" id="load-status">Working…</p></div>`;
+    this.ui.el.loader = el;
+    this.ui.el.loadFill = el.querySelector('#load-fill');
+    this.ui.el.loadStatus = el.querySelector('#load-status');
+    return el;
+  }
+
+  _onWorldMessage(msg) {
+    switch (msg.type) {
+      case 'progress': this.ui.progress(msg.p, msg.label); break;
+      case 'world':
+        this.planet.setWorld(msg.blocks, msg.colBiome, msg.facing);
+        // The voxels have arrived but nothing is meshed yet. Put the player
+        // where they belong first, so the terrain we ask for is the terrain
+        // they will actually be looking at.
+        this._placeEntities();
+        this._streamChunks(true);
+        break;
+      case 'chunk': {
+        // A chunk requested just before the player turned away can land after
+        // we have already evicted it. Without this it would be re-added with no
+        // entry in liveChunks, so nothing would ever free it again.
+        const id = chunkIdx(msg.f, msg.ci, msg.cj, msg.ck);
+        if (this.liveChunks.has(id)) this.planet.applyChunk(msg.f, msg.ci, msg.cj, msg.ck, msg.groups);
+        break;
+      }
+      case 'streamDone': this._streamPending = false; break;
+      case 'ready': this._streamPending = false; this._onWorldReady(); break;
+    }
+  }
+
+  /**
+   * Keep meshed geometry to what can be seen. Chunks inside CHUNK_LOAD_DIST are
+   * requested, chunks past CHUNK_KEEP_DIST are freed; the gap between the two is
+   * hysteresis so standing on a boundary doesn't rebuild the same chunk forever.
+   * @param {boolean} initial first batch — the loading screen waits on it
+   */
+  _streamChunks(initial = false) {
+    if (!this.planet.blocks) return;
+    // One batch of *new* geometry in flight at a time — queueing more only
+    // starves the worker of the edit messages that need to be timely. Eviction
+    // is never held back, so memory comes down the moment it can.
+    const canAdd = initial || !this._streamPending;
+    const eye = this.player.position;
+    const load = CHUNK_LOAD_DIST * CHUNK_LOAD_DIST;
+    const keep = CHUNK_KEEP_DIST * CHUNK_KEEP_DIST;
+    const add = [], drop = [];
+    const live = this.liveChunks;
+    for (let id = 0; id < NUM_CHUNKS; id++) {
+      const o = id * 3;
+      const dx = CHUNK_CENTER[o] - eye.x;
+      const dy = CHUNK_CENTER[o + 1] - eye.y;
+      const dz = CHUNK_CENTER[o + 2] - eye.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const has = live.has(id);
+      if (!has && d2 <= load) { if (canAdd) { add.push(id); live.add(id); } }
+      else if (has && d2 > keep) { drop.push(id); live.delete(id); }
+    }
+    if (drop.length) for (const id of drop) this.planet.dropChunk(id);
+    if (!add.length && !drop.length && !initial) return;
+    this._streamPending = true;
+    this.worldWorker.postMessage({ type: 'chunks', add, drop, initial });
+  }
+
+  /** Player, inventory and world state — everything that must exist before we
+   *  can decide which chunks to build. */
+  _placeEntities() {
+    // Worldgen's oceans and lakes are the springs; register them before any
+    // flow runs, so an unmarked water cell can be treated as a stale orphan.
+    this.water.seedSources(this.planet);
+    const save = this._pendingSave;
+    if (save) {
+      this.player.cell.f = save.player.cell[0];
+      this.player.cell.ci = save.player.cell[1];
+      this.player.cell.cj = save.player.cell[2];
+      this.player.cell.ck = save.player.cell[3];
+      this.player._sync();
+      this.player.forward.fromArray(save.player.forward);
+      this.player.pitch = save.player.pitch;
+      this.player.health = save.player.health;
+      this.breath = save.player.breath ?? 1;
+      this.inventory.fromJSON(save.inventory);
+      this.drops.fromJSON(save.drops);
+      this.mobs.fromJSON(save.mobs);
+      if (save.crops) this.farming.fromJSON(save.crops); else this.farming.rescan();
+      this.energy = save.player.energy ?? 1;
+      this.weather.fromJSON(save.weather);
+      this.playtime = save.playtime || 0;
+      // Time of day is world state, not a setting: quitting at dusk and coming
+      // back should still be dusk, or a saved world is a way to skip the night.
+      if (save.dayT !== undefined) this.dayT = save.dayT;
+      // Same reasoning one scale up: a world saved in autumn comes back in
+      // autumn. Worlds saved before seasons existed start at day zero, which is
+      // the first day of spring — a fair place to find yourself.
+      this.seasons.fromJSON(save.season);
+      this._pushSeason();
+      this.stats = { ...this.stats, ...(save.stats || {}) };
+      for (const k of save.kilns || []) {
+        this.kilns.set(k.key, {
+          input: Slot.fromJSON(k.in), fuel: Slot.fromJSON(k.fu), output: Slot.fromJSON(k.out),
+          burn: k.b, burnMax: k.bm, progress: k.p, progressMax: k.pm, col: k.c, k: k.k,
+        });
+      }
+      for (const c of save.crates || []) {
+        this.crates.set(c.key, {
+          slots: Array.from({ length: CRATE_SLOTS }, (_, i) => Slot.fromJSON(c.s[i])),
+          col: c.c, k: c.k,
+        });
+      }
+      this.homeSpawn = Array.isArray(save.home)
+        ? { col: save.home[0], k: save.home[1] }
+        : null;
+      this.signs = new Map(save.signs || []);
+      this._pendingSave = null;
+    } else {
+      this._spawnPlayer();
+      this.mobs.populate(this.player);
+      // Commit the new planet at once. Autosave only fires every 90 seconds, so
+      // starting a new game and quitting before then left the *old* world on
+      // disk — Continue brought it back and New Game looked like it had done
+      // nothing at all.
+      this.saveGame(false);
+      this._welcome = true;
+    }
+    this.ui.refresh();
+  }
+
+  /** The first batch of terrain is up — hand control to the player. */
+  _onWorldReady() {
+    this.worldReady = true;
+
+    const el = document.getElementById('loader');
+    if (el) { el.classList.add('done'); setTimeout(() => el.remove(), 650); }
+
+    this.state = 'playing';
+    this.ui.showHud(true);
+    this.audio.start();
+    this.audio.resume();
+    this.input.requestLock();
+
+    if (this._welcome) {
+      this._welcome = false;
+      this.ui.toast('You wake on a small, quiet world.', 0, 4200);
+      setTimeout(() => this.ui.toast('Punch a tree to begin.', itemIdOf('log_oak'), 5000), 4600);
+    }
+  }
+
+  /** Pick level, open, grassy ground for a good first frame. */
+  _spawnPlayer() {
+    const p = this.planet;
+    let best = -1, bestScore = -1, bestK = 0;
+    for (let n = 0; n < 3000; n++) {
+      const col = (Math.random() * COLUMNS) | 0;
+      const k = p.surfaceK(col);
+      if (k < 6 || k >= D - 6) continue;
+      const b = p.at(col, k);
+      let score = b === ID.grass ? 3 : b === ID.sand ? 1.4 : 0;
+      if (!score) continue;
+      if (R_MIN + k + 1 < R_SEA + 1) continue;
+      // headroom
+      if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2) || p.solidAt(col, k + 3)) continue;
+      // flatness across the four neighbours
+      let spread = 0;
+      for (let d = 0; d < 4; d++) spread += Math.abs(p.surfaceK(colNeighbor(col, d)) - k);
+      score += Math.max(0, 4 - spread);
+      if (score > bestScore) { bestScore = score; best = col; bestK = k; }
+      if (bestScore > 6.5) break;
+    }
+    if (best < 0) { best = 0; bestK = Math.max(0, p.surfaceK(0)); }
+    this.player.spawnAtColumn(best, bestK);
+    this.player.health = this.player.maxHealth;
+    this.sky.setSolarTime(this.player.up, this.timeOfDay());
+    this.player.updateCamera(this.camera, 1 / 60, this.settings.fov);
+  }
+
+  // --- state ----------------------------------------------------------------
+
+  /**
+   * Escape always closes the top-most thing, wherever you are: a Settings or
+   * Controls sheet first, then the pause screen, then an inventory/station
+   * screen, and only then does it pause the game. Death is the one screen it
+   * won't dismiss — that needs an actual choice.
+   */
+  _escape() {
+    const ui = this.ui;
+    if (ui.anyModalOpen) { ui.closeSettings(); ui.closeControls(); return; }
+    if (ui.deathOpen) return;
+    if (ui.pauseOpen) { this.resume(); return; }
+    if (ui.screenOpen) { this.closeScreen(); return; }
+    if (this.state === 'playing') this.pause();
+  }
+
+  pause() {
+    if (this.state !== 'playing') return;
+    this.state = 'paused';
+    this.ui.openPause();
+    this.input.exitLock();
+  }
+
+  resume() {
+    this.ui.closePause();
+    this.state = 'playing';
+    this.audio.resume();
+    this.input.requestLock();
+  }
+
+  _die(cause) {
+    if (this.state === 'dead') return;
+    this.state = 'dead';
+    this.input.exitLock();
+    this.closeScreen();
+    // Everything you carried stays where you fell, and stays there — `keep`
+    // exempts it from the despawn clock. What you were *wearing* stays on you:
+    // you respawn at a bed that may be a long way from your body, and sending
+    // you back for it with nothing on is how a setback becomes a spiral.
+    _v1.copy(this.player.position).addScaledVector(this.player.up, 0.6);
+    let dropped = 0;
+    for (const s of this.inventory.slots) {
+      if (s.empty) continue;
+      this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count, s.wear, null, true);
+      s.clear();
+      dropped++;
+    }
+    this.deathSite = dropped ? { pos: _v1.clone(), at: this.playtime } : null;
+    this.ui.refresh();
+    this.ui.showDeath(cause, dropped);
+  }
+
+  respawn() {
+    this.ui.hideDeath();
+    this.player.health = this.player.maxHealth;
+    this.breath = 1;
+    // Wake up at your bed if you have one and it is still there. Falling back to
+    // a fresh random column is only right for a player who has never slept: on a
+    // planet of 259,584 columns, being scattered at random after every death
+    // means the base you built is gone the first time something goes wrong.
+    const home = this.homeSpawn;
+    if (home && this.planet.at(home.col, home.k) === ID.bed) {
+      this.player.spawnAtColumn(home.col, home.k);
+    } else {
+      if (home) this.ui.toast('Your bed is gone.', itemIdOf('bed'), 3000);
+      this.homeSpawn = null;
+      this._spawnPlayer();
+    }
+    this.state = 'playing';
+    this.input.requestLock();
+  }
+
+  /**
+   * Use a bed: claim it as home, and sleep through to dawn if it is night.
+   *
+   * Sleeping is refused while a hostile is close, which is the one rule that
+   * keeps a bed from deleting the night wholesale — you have to have made the
+   * place safe first, which is what the torches and the walls are for.
+   */
+  _useBed(col, k) {
+    const claimed = !this.homeSpawn || this.homeSpawn.col !== col || this.homeSpawn.k !== k;
+    this.homeSpawn = { col, k };
+
+    const night = this.timeOfDay() < 0.25 || this.timeOfDay() > 0.75;
+    if (!night) {
+      this.ui.toast(claimed ? 'You will wake up here.' : 'Too early to sleep.',
+        itemIdOf('bed'), 2600);
+      this.audio.ui(claimed ? 620 : 300);
+      return;
+    }
+    const near = this.mobs.list.some((m) => m.spec.hostile && m.dying <= 0
+      && m.pos.distanceTo(this.player.position) < SLEEP_SAFE_DIST);
+    if (near) {
+      this.ui.toast('Too dangerous to sleep.', itemIdOf('bed'), 2600);
+      this.audio.ui(300);
+      return;
+    }
+    // Straight to first light, not to midnight-plus-one — the point of a bed is
+    // that the night is over.
+    //
+    // The year has to move with it. Sleeping is how most players will cross most
+    // nights, and a season counted only from waking hours would leave someone
+    // who beds down every dusk in a permanent spring.
+    this.seasons.advance((0.27 - this.dayT + 1) % 1);
+    this._pushSeason();
+    this.dayT = 0.27;
+    this.energy = Math.max(0, this.energy - SLEEP_HUNGER);
+    this.player.health = Math.min(this.player.maxHealth, this.player.health + 4);
+    this.ui.toast('You slept until dawn.', itemIdOf('bed'), 3000);
+    this.audio.ui(700);
+  }
+
+  async quitToMenu() {
+    await this.saveGame(false);
+    this.ui.closePause();
+    this.ui.hideDeath();
+    this.closeScreen();
+    this.ui.showHud(false);
+    this.input.exitLock();
+    this.state = 'menu';
+    this.ui.showMenu(Save.meta());
+  }
+
+  _savePayload() {
+    const c = this.player.cell;
+    return {
+      seed: this.seed,
+      blocks: this.planet.blocks.slice(),
+      colBiome: this.planet.colBiome.slice(),
+      facing: this.planet.facingPairs(),
+      player: {
+        cell: [c.f, c.ci, c.cj, c.ck],
+        forward: this.player.forward.toArray(),
+        pitch: this.player.pitch,
+        health: this.player.health,
+        breath: this.breath,
+        energy: this.energy,
+      },
+      inventory: this.inventory.toJSON(),
+      drops: this.drops.toJSON(),
+      mobs: this.mobs.toJSON(),
+      crops: this.farming.toJSON(),
+      weather: this.weather.toJSON(),
+      kilns: [...this.kilns].map(([key, k]) => ({
+        key, c: k.col, k: k.k, in: k.input.toJSON(), fu: k.fuel.toJSON(), out: k.output.toJSON(),
+        b: k.burn, bm: k.burnMax, p: k.progress, pm: k.progressMax,
+      })),
+      // Empty crates are written too, and have to be: an entry existing at all
+      // is what records "this one has been dealt with". Drop the empties and a
+      // looted worldgen cache would look untouched again on reload and restock
+      // itself every time you quit.
+      crates: [...this.crates]
+        .map(([key, c]) => ({ key, c: c.col, k: c.k, s: c.slots.map((s) => s.toJSON()) })),
+      home: this.homeSpawn ? [this.homeSpawn.col, this.homeSpawn.k] : null,
+      signs: [...this.signs],
+      playtime: this.playtime,
+      dayT: +this.dayT.toFixed(5),
+      season: this.seasons.toJSON(),
+      stats: this.stats,
+      biome: this.planet.colBiome[cidx(c.f, Math.floor(c.ci), Math.floor(c.cj))] ?? 2,
+    };
+  }
+
+  async saveGame(notify) {
+    if (!this.worldReady) return;
+    try {
+      await Save.write(this._savePayload());
+      if (notify) this.ui.toast('Planet saved');
+    } catch (err) {
+      console.error(err);
+      if (notify) this.ui.toast('Could not save');
+    }
+  }
+
+  // --- edits ----------------------------------------------------------------
+
+  _applyEdits(edits) {
+    for (const e of edits) {
+      // any change can open a path for water or cut one off
+      this.water?.onEdit(e.col, e.k);
+      this.planet.setAt(e.col, e.k, e.id);
+      // Resolve the facing here so the worker's mirror is told exactly what to
+      // store. An edit that carries no facing but writes a directional block
+      // (the kiln ⇄ lit-kiln swap) inherits whatever the cell already had.
+      const fac = this.planet.applyFacing(e.col, e.k, e.id, e.facing);
+      if (fac >= 0) e.facing = fac; else delete e.facing;
+    }
+    this.worldWorker.postMessage({ type: 'edit', edits, id: ++this.editSeq });
+  }
+
+  /**
+   * Facing for a directional block placed at (col, k): the front turns to meet
+   * the player. Resolved in the cell's own tangent frame, so it stays correct
+   * across cube-face seams where the player's frame and the block's differ.
+   * @returns {number} 0:+i 1:-i 2:+j 3:-j
+   */
+  /**
+   * Axis for a log from the face it was placed against: 0 upright, 1 along i,
+   * 2 along j. A log laid against a wall should lie down, showing its cut ends
+   * on the two faces the trunk runs through — placing one sideways and getting
+   * an upright block is the thing that reads as the game ignoring you.
+   */
+  _axisFromFace(hit, col, k) {
+    // The face normal is the step from the block hit to the cell being filled.
+    if (hit.col === col) return 0;                 // stacked above or below
+    const p = colParts(col);
+    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
+    _v1.copy(this.planet.centerOf(col, k, _v2))
+      .sub(this.planet.centerOf(hit.col, hit.k, _v3));
+    const da = Math.abs(_v1.x * _frame.ea[0] + _v1.y * _frame.ea[1] + _v1.z * _frame.ea[2]);
+    const db = Math.abs(_v1.x * _frame.eb[0] + _v1.y * _frame.eb[1] + _v1.z * _frame.eb[2]);
+    const up = Math.abs(_v1.x * _frame.up[0] + _v1.y * _frame.up[1] + _v1.z * _frame.up[2]);
+    if (up >= da && up >= db) return 0;
+    return da >= db ? 1 : 2;
+  }
+
+  /**
+   * Which half of its cell a slab should fill: 0 lower, 1 upper.
+   *
+   * Placing onto the underside of something wants the upper half, placing onto
+   * a top face wants the lower half, and placing against a wall is decided by
+   * which half of that face was clicked — the same rule Minecraft uses, and the
+   * only one that lets you build a run of steps without turning around.
+   */
+  _slabHalf(hit, col, k) {
+    if (hit.col === col) return hit.k > k ? 1 : 0;   // stacked: fill the near half
+    // Side placement: compare the aim point with the cell's mid-height.
+    const p = colParts(col);
+    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
+    _v1.copy(hit.point ?? this.player.eye).sub(this.planet.centerOf(col, k, _v2));
+    const up = _v1.x * _frame.up[0] + _v1.y * _frame.up[1] + _v1.z * _frame.up[2];
+    return up > 0 ? 1 : 0;
+  }
+
+  /**
+   * A stair's packed orientation: bits 0-1 the direction its low side faces,
+   * bit 2 set when it hangs from a ceiling.
+   *
+   * The low side points *away* from the player, so walking forward and placing
+   * builds a flight going up ahead of you rather than a wall of risers facing
+   * back. Upside-down follows the same rule slabs use — which half of the face
+   * you clicked.
+   */
+  _stairOrient(hit, col, k) {
+    // `_facingToward` gives the direction back toward the player; the step has
+    // to fall the other way, so the low side is the opposite of that.
+    const toward = this._facingToward(col, k);
+    const away = toward ^ 1;      // 0<->1 and 2<->3 are the opposing pairs
+    return away | (this._slabHalf(hit, col, k) ? 4 : 0);
+  }
+
+  /**
+   * Open the little writing panel for a sign, and store whatever comes back.
+   *
+   * Pointer lock has to go while the field has focus — typing "w" into a locked
+   * canvas walks you forward instead — so this runs as a modal like the pause
+   * screen, and restores the lock on the way out.
+   */
+  _writeSign(col, k) {
+    const key = col * D + k;
+    const el = document.getElementById('sign-write');
+    const input = document.getElementById('sign-line');
+    if (!el || !input) return;
+    this.state = 'paused';
+    this.input.exitLock();
+    el.classList.remove('hidden');
+    input.value = this.signs.get(key) ?? '';
+    setTimeout(() => { input.focus(); input.select(); }, 30);
+
+    const finish = (save) => {
+      el.classList.add('hidden');
+      document.getElementById('sign-ok').onclick = null;
+      document.getElementById('sign-cancel').onclick = null;
+      input.onkeydown = null;
+      if (save) {
+        const text = input.value.trim().slice(0, 48);
+        if (text) this.signs.set(key, text);
+        else this.signs.delete(key);
+        this.audio.ui(620);
+      }
+      this.state = 'playing';
+      this.input.requestLock();
+    };
+    document.getElementById('sign-ok').onclick = () => finish(true);
+    document.getElementById('sign-cancel').onclick = () => finish(false);
+    input.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    };
+  }
+
+  /**
+   * The two cells of the door you clicked, whichever half that was.
+   * @returns {number[]|null} [lowK, highK]
+   */
+  _doorHalves(col, k) {
+    if (!IS_DOOR[this.planet.at(col, k)]) return null;
+    const below = IS_DOOR[this.planet.at(col, k - 1)];
+    return below ? [k - 1, k] : [k, k + 1];
+  }
+
+  /** Swing a door, both halves together, and refuse if you are standing in it. */
+  _toggleDoor(col, k) {
+    const halves = this._doorHalves(col, k);
+    if (!halves) return;
+    const id = this.planet.at(col, halves[0]);
+    const byte = this.planet.facingAt(col, halves[0]);
+    const next = byte ^ 4;
+    // Closing a door onto yourself would leave the leaf inside your own box and
+    // the escape solve would shove you through the wall.
+    if (!((next >> 2) & 1)) {
+      for (const kk of halves) if (this._intersectsPlayer(col, kk)) return;
+    }
+    this._applyEdits(halves.map((kk) => ({ col, k: kk, id, facing: next })));
+    this.audio.place('wood', this.planet.centerOf(col, halves[0], _v1));
+    this.player.swing();
+    this.viewModel.punch();
+  }
+
+  /**
+   * Which wall a ladder hangs on: the one you clicked.
+   *
+   * A ladder is directional, but not in the way everything else is — the others
+   * turn to face the player, and a ladder has to fix itself to the surface the
+   * placement ray landed on, or it ends up floating in the middle of the shaft
+   * with its back to the rock.
+   */
+  _ladderFacing(hit, col, k) {
+    if (hit.col === col) return this._facingToward(col, k) ^ 1;   // no wall: face outward
+    const p = colParts(col);
+    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
+    _v1.copy(this.planet.centerOf(hit.col, hit.k, _v2))
+      .sub(this.planet.centerOf(col, k, _v3));
+    const da = _v1.x * _frame.ea[0] + _v1.y * _frame.ea[1] + _v1.z * _frame.ea[2];
+    const db = _v1.x * _frame.eb[0] + _v1.y * _frame.eb[1] + _v1.z * _frame.eb[2];
+    if (Math.abs(da) >= Math.abs(db)) return da > 0 ? 0 : 1;
+    return db > 0 ? 2 : 3;
+  }
+
+  _facingToward(col, k) {
+    const p = colParts(col);
+    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
+    // block → player, flattened onto the tangent plane
+    _v1.copy(this.player.eye).sub(this.planet.centerOf(col, k, _v2));
+    const da = _v1.x * _frame.ea[0] + _v1.y * _frame.ea[1] + _v1.z * _frame.ea[2];
+    const db = _v1.x * _frame.eb[0] + _v1.y * _frame.eb[1] + _v1.z * _frame.eb[2];
+    if (Math.abs(da) < 1e-6 && Math.abs(db) < 1e-6) return FACING_DEFAULT;
+    if (Math.abs(da) >= Math.abs(db)) return da >= 0 ? 0 : 1;
+    return db >= 0 ? 2 : 3;
+  }
+
+  _breakBlock(hit) {
+    const b = BLOCKS[hit.id];
+    if (b.hardness < 0 || hit.id === ID.core) return;
+    const heldDef = ITEMS[this.inventory.held().item];
+    const center = this.planet.centerOf(hit.col, hit.k, new THREE.Vector3());
+
+    const edits = [{ col: hit.col, k: hit.k, id: 0 }];
+
+    // A door is one object in two cells: break either half and the whole thing
+    // comes down, or you are left with half a door hanging in the wall.
+    if (IS_DOOR[hit.id]) {
+      const halves = this._doorHalves(hit.col, hit.k);
+      if (halves) for (const kk of halves) {
+        if (kk !== hit.k) edits.push({ col: hit.col, k: kk, id: 0 });
+      }
+    }
+
+    // whatever was resting on top falls with it
+    const above = this.planet.at(hit.col, hit.k + 1);
+    if (RENDER_TYPE[above] === R_CROSS) {
+      edits.push({ col: hit.col, k: hit.k + 1, id: 0 });
+      const ac = this.planet.centerOf(hit.col, hit.k + 1, _v2);
+      for (const d of computeDrops(above, heldDef)) this.drops.spawn(ac.x, ac.y, ac.z, d.item, d.count);
+    }
+
+    for (const d of computeDrops(hit.id, heldDef)) {
+      this.drops.spawn(center.x, center.y, center.z, d.item, d.count);
+    }
+
+    const key = hit.col * D + hit.k;
+    const kiln = this.kilns.get(key);
+    if (kiln) {
+      for (const s of [kiln.input, kiln.fuel, kiln.output]) {
+        if (!s.empty) this.drops.spawn(center.x, center.y, center.z, s.item, s.count, s.wear);
+      }
+      this.kilns.delete(key);
+      if (this.ui.screen === 'kiln' && this.ui.kiln === kiln) this.closeScreen();
+    }
+
+    // `_crateAt`, not `.get` — a worldgen cache you break without opening still
+    // has to hand over its contents.
+    if (IS_SIGN[hit.id]) this.signs.delete(key);
+
+    const crate = hit.id === ID.crate ? this._crateAt(hit.col, hit.k) : null;
+    if (crate) {
+      // Everything comes back out. Silently eating a full crate of ore because
+      // you mis-clicked would be the single worst thing this game could do.
+      for (const s of crate.slots) {
+        if (!s.empty) this.drops.spawn(center.x, center.y, center.z, s.item, s.count, s.wear);
+      }
+      this.crates.delete(key);
+      if (this.ui.screen === 'crate' && this.ui.crate === crate) this.closeScreen();
+    }
+
+    this._applyEdits(edits);
+    this.particles.blockBreak(center, hit.id, b.render === R_CROSS ? 10 : 26);
+    this.audio.break_(b.sound, center);
+    this.stats.mined++;
+    this.player.swing();
+    this.viewModel.punch();
+    if (heldDef?.tool && b.hardness > 0.15) this.inventory.damageHeld(1);
+  }
+
+  _placeBlock(hit) {
+    const held = this.inventory.held();
+    const def = ITEMS[held.item];
+    if (!def || def.block === undefined) return false;
+    if (hit.prevCol < 0) return false;
+    const id = def.block;
+    const col = hit.prevCol, k = hit.prevK;
+    if (k < 0 || k >= D) return false;
+    const existing = this.planet.at(col, k);
+    if (existing !== 0 && RENDER_TYPE[existing] !== R_LIQUID && RENDER_TYPE[existing] !== R_CROSS) return false;
+    if (IS_SOLID[id] && this._intersectsPlayer(col, k)) return false;
+    if (RENDER_TYPE[id] === R_CROSS && !this.planet.solidAt(col, k - 1)) return false;
+
+    // A door is two cells tall, so it needs the headroom before anything else.
+    if (IS_DOOR[id]) {
+      if (k + 1 >= D || this.planet.at(col, k + 1) !== 0) {
+        this.ui.setHint('No room for a door');
+        return false;
+      }
+      if (this._intersectsPlayer(col, k + 1)) return false;
+    }
+
+    const edit = { col, k, id };
+    if (IS_LADDER[id]) edit.facing = this._ladderFacing(hit, col, k);
+    else if (IS_DOOR[id]) edit.facing = this._facingToward(col, k) & 3;
+    else if (IS_DIRECTIONAL[id]) edit.facing = this._facingToward(col, k);
+    else if (IS_AXIS[id]) edit.facing = this._axisFromFace(hit, col, k);
+    else if (IS_SLAB[id]) edit.facing = this._slabHalf(hit, col, k);
+    else if (IS_STAIR[id]) edit.facing = this._stairOrient(hit, col, k);
+    // Both halves carry the same byte, so whichever one you later click or
+    // break can answer for the whole door without looking for its other half
+    // first.
+    this._applyEdits(IS_DOOR[id]
+      ? [edit, { col, k: k + 1, id, facing: edit.facing }]
+      : [edit]);
+    // Register a placed crate as empty straight away. An absent entry is the
+    // marker for "worldgen put this here", so a crate you set down yourself
+    // would otherwise fill itself with treasure the first time you opened it.
+    if (id === ID.crate) {
+      const key = col * D + k;
+      if (!this.crates.has(key)) {
+        this.crates.set(key, {
+          slots: Array.from({ length: CRATE_SLOTS }, () => new Slot()), col, k,
+        });
+      }
+    }
+    this.inventory.consumeHeld(1);
+    this.audio.place(BLOCKS[id].sound, this.planet.centerOf(col, k, _v1));
+    this.stats.placed++;
+    this.player.swing();
+    this.viewModel.punch();
+    return true;
+  }
+
+  _intersectsPlayer(col, k) {
+    const c = this.planet.centerOf(col, k, _v1);
+    for (const h of [0.28, 0.9, 1.55]) {
+      _v2.copy(this.player.position).addScaledVector(this.player.up, h);
+      if (_v2.distanceToSquared(c) < 0.78 * 0.78) return true;
+    }
+    return false;
+  }
+
+  // --- screens --------------------------------------------------------------
+
+  openScreen(kind, state) {
+    this.ui.openScreen(kind, state);
+    this.input.exitLock();
+    this.audio.ui(560);
+  }
+
+  closeScreen() {
+    if (!this.ui.screenOpen) return;
+    const spill = this.inventory.clearCraft();
+    const cur = this.inventory.cursor;
+    if (!cur.empty) {
+      const taken = this.inventory.add(cur.item, cur.count);
+      if (taken < cur.count) spill.push({ item: cur.item, count: cur.count - taken });
+      cur.clear();
+    }
+    for (const s of spill) {
+      _v1.copy(this.player.position).addScaledVector(this.player.up, 1);
+      this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count);
+    }
+    this.ui.closeScreen();
+    this.ui.refresh();
+    if (this.state === 'playing') this.input.requestLock();
+  }
+
+  /**
+   * Twenty-seven slots, created lazily so an untouched crate costs nothing.
+   *
+   * A crate with no entry yet is one the player has never touched, which — since
+   * placing one registers it empty — means worldgen put it there. Those get
+   * rolled loot on first contact. Doing it here rather than at generation time
+   * is what makes container loot possible at all: structures are built in the
+   * worker, which has no way to reach this map.
+   */
+  _crateAt(col, k) {
+    const key = col * D + k;
+    let c = this.crates.get(key);
+    if (!c) {
+      c = { slots: Array.from({ length: CRATE_SLOTS }, () => new Slot()), col, k };
+      this._fillCache(c);
+      this.crates.set(key, c);
+    }
+    return c;
+  }
+
+  /**
+   * Stock a worldgen crate. Deterministic in the world seed and the crate's own
+   * position, so the same cache always holds the same haul however you come at
+   * it — and re-rolling it by reloading is not a thing you can do.
+   *
+   * Depth is the whole difficulty curve here: a crate in a surface ruin is a
+   * handful of supplies, one at the bottom of a dungeon is worth the descent.
+   */
+  _fillCache(c) {
+    const below = Math.max(0, Math.round(R_SEA - R_MIN) - c.k);   // layers under sea level
+    const rng = makeRng(((this.seed ^ (c.col * 2654435761)) + c.k * 40503) | 0);
+    const deep = below > 8;
+    const mid = below > 2;
+
+    const COMMON = ['bread', 'coal', 'stick', 'planks', 'torch', 'seeds', 'apple', 'hide', 'flint'];
+    const GOOD = ['iron_ingot', 'copper_ingot', 'gold_ingot', 'amethyst', 'bucket', 'coin'];
+    const RICH = ['crystal', 'emerald', 'ruby', 'sapphire', 'void_shard', 'glowstone', 'coin'];
+
+    const rolls = 2 + Math.floor(rng() * (deep ? 4 : mid ? 3 : 2));
+    for (let n = 0; n < rolls; n++) {
+      const table = deep && rng() < 0.45 ? RICH : (mid || deep) && rng() < 0.5 ? GOOD : COMMON;
+      const name = table[(rng() * table.length) | 0];
+      const id = itemIdOf(name);
+      if (!id) continue;
+      const rich = table === RICH;
+      const count = rich ? 1 + Math.floor(rng() * 3)
+        : table === GOOD ? 2 + Math.floor(rng() * 5)
+          : 3 + Math.floor(rng() * 9);
+      const max = ITEMS[id]?.stack ?? 64;
+      // Merge onto a matching stack first — two separate piles of eleven planks
+      // in the same crate reads as a bug, not as loot.
+      const same = c.slots.find((s) => s.item === id && s.count < max);
+      if (same) same.count = Math.min(max, same.count + count);
+      else {
+        const slot = c.slots.find((s, i) => s.empty && i >= ((rng() * CRATE_SLOTS) | 0))
+          || c.slots.find((s) => s.empty);
+        if (slot) slot.set(id, Math.min(count, max));
+      }
+    }
+  }
+
+  _kilnAt(col, k) {
+    const key = col * D + k;
+    let s = this.kilns.get(key);
+    if (!s) {
+      s = {
+        input: new Slot(), fuel: new Slot(), output: new Slot(),
+        burn: 0, burnMax: 1, progress: 0, progressMax: 1, col, k,
+      };
+      this.kilns.set(key, s);
+    }
+    return s;
+  }
+
+  _tickKilns(dt) {
+    for (const k of this.kilns.values()) {
+      const recipe = k.input.empty ? null : smeltingFor(k.input.item);
+      const canOutput = recipe && (k.output.empty
+        || (k.output.item === recipe.out && k.output.count + recipe.count <= (ITEMS[recipe.out]?.stack ?? 64)));
+
+      if (k.burn > 0) k.burn -= dt;
+      if (k.burn <= 0 && recipe && canOutput && !k.fuel.empty && FUEL[k.fuel.item]) {
+        k.burnMax = FUEL[k.fuel.item];
+        k.burn = k.burnMax;
+        k.fuel.count--;
+        if (k.fuel.count <= 0) k.fuel.clear();
+      }
+
+      if (k.burn > 0 && recipe && canOutput) {
+        k.progressMax = recipe.time;
+        k.progress += dt;
+        if (k.progress >= recipe.time) {
+          k.progress = 0;
+          k.input.count--;
+          if (k.input.count <= 0) k.input.clear();
+          if (k.output.empty) k.output.set(recipe.out, recipe.count);
+          else k.output.count += recipe.count;
+        }
+      } else {
+        k.progress = Math.max(0, k.progress - dt * 0.6);
+      }
+
+      const want = k.burn > 0 ? ID.kiln_lit : ID.kiln;
+      const cur = this.planet.at(k.col, k.k);
+      if ((cur === ID.kiln || cur === ID.kiln_lit) && cur !== want) {
+        this._applyEdits([{ col: k.col, k: k.k, id: want }]);
+      }
+    }
+    if (this.ui.screen === 'kiln') this.ui.refresh();
+  }
+
+  // --- per-frame ------------------------------------------------------------
+
+  _frame() {
+    const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length > 60) this.frameTimes.shift();
+
+    // Escape is handled outside the play loop so it means the same thing in
+    // every state — including paused, where `_update` never runs.
+    if (this.input.pressed('Escape')) this._escape();
+
+    if (this.state === 'playing') this._update(dt);
+    else if (this.state === 'menu' || this.state === 'loading') this._idleUpdate(dt);
+    else this._frozenUpdate(dt);
+
+    voxelUniforms.uTime.value += dt;
+    this.postfx.render(dt, { damage: this.damageFlash, underwater: this.player.headInWater });
+    if (this.state === 'playing' || this.state === 'paused') this.viewModel.render(this.renderer);
+    this.damageFlash = Math.max(0, this.damageFlash - dt * 1.6);
+    this.input.endFrame();
+  }
+
+  _idleUpdate(dt) {
+    const t = performance.now() * 0.00005;
+    const r = R_TERRAIN_MAX + 34;
+    this.camera.position.set(Math.cos(t) * r, Math.sin(t * 0.53) * r * 0.38, Math.sin(t) * r);
+    this.camera.lookAt(0, 0, 0);
+    if (this.camera.fov !== 44) { this.camera.fov = 44; this.camera.updateProjectionMatrix(); }
+    const up = _v1.copy(this.camera.position).normalize();
+    this.sky.setSolarTime(up, this.timeOfDay());
+    this.sky.update(dt, this.camera, up, this.planet.center);
+    this.particles.update(dt, this.camera, up, this.sky);
+    this._updateSharedUniforms();
+  }
+
+  /**
+   * Stand-in for the real input while a container screen is up: the world keeps
+   * simulating, but the player holds still instead of sprinting off because a
+   * movement key happened to be down when the screen opened.
+   */
+  static NO_INPUT = { down: () => false };
+
+  _frozenUpdate(dt) {
+    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob);
+    this.sky.setSolarTime(this.player.up, this.timeOfDay());
+    this.sky.update(dt, this.camera, this.player.up, this.player.position);
+    this._updateSharedUniforms();
+  }
+
+  _update(dt) {
+    const input = this.input;
+    const ui = this.ui;
+    this.playtime += dt;
+    this._tickClock(dt);
+
+    if (input.pressed('KeyE')) {
+      if (ui.screenOpen) this.closeScreen();
+      else this.openScreen('inventory');
+      return;
+    }
+    if (input.pressed('F3')) ui.toggleDebug();
+
+    // A container screen takes your hands, not the world. It used to return
+    // early here, which froze breath, hunger, health, physics and every animal
+    // while crops and kilns carried on — you could stand underwater in your
+    // inventory indefinitely and never drown. Minecraft doesn't pause for a
+    // chest either. The screen now only suppresses *input*: the body below runs
+    // every frame, driven by a neutral input while a screen is up.
+    const busy = ui.screenOpen;
+    const act = busy ? Game.NO_INPUT : input;
+
+    if (!busy) {
+      for (let i = 1; i <= HOTBAR; i++) {
+        if (input.pressed(`Digit${i}`)) { this.inventory.selected = i - 1; this._announceHeld(); }
+      }
+      if (input.wheel) {
+        // A single frame can swallow a whole flick of the wheel, so wrap properly
+        // instead of assuming one step: `(sel + wheel + 9) % 9` goes negative past
+        // ten notches, and a negative index leaves `held()` undefined.
+        const n = HOTBAR;
+        this.inventory.selected = (((this.inventory.selected + input.wheel) % n) + n) % n;
+        this._announceHeld();
+      }
+      if (input.pressed('KeyQ')) this._dropHeld();
+
+      if (input.locked && (input.mouseDX || input.mouseDY)) {
+        this.player.look(input.mouseDX, input.mouseDY, input.sensitivity * this.settings.sensitivity, input.invertY);
+      }
+    }
+    const wasInWater = this.player.inWater;
+    this.player.update(dt, act);
+    if (this.player.inWater && !wasInWater) {
+      this.particles.splash(this.player.position, this.player.up, 1.2);
+      this.audio.splash();
+    }
+    if (this.player.headInWater && Math.random() < dt * 5) {
+      this.particles.bubbles(this.player.eye, this.player.up, 2);
+    }
+
+    if (this.player.headInWater) {
+      this.breath = Math.max(0, this.breath - dt / 9);
+      if (this.breath <= 0) {
+        this._drownTimer = (this._drownTimer || 0) + dt;
+        if (this._drownTimer > 0.7) {
+          this._drownTimer = 0;
+          this.player.health = Math.max(0, this.player.health - 1);
+          this.damageFlash = 0.5;
+          this.audio.hurt();
+          if (this.player.health <= 0) this._die('The water was deeper than it looked.');
+        }
+      }
+    } else {
+      this.breath = Math.min(1, this.breath + dt / 3);
+      this._drownTimer = 0;
+    }
+
+    this._tickFire(dt);
+
+    // Four times a second is plenty: a sprint covers about 2 units in that time
+    // and the load and keep radii are 28 apart.
+    this._streamTimer -= dt;
+    if (this._streamTimer <= 0) { this._streamTimer = 0.25; this._streamChunks(); }
+
+    // Ticked out here rather than inside _interact, which is skipped while a
+    // screen is open: a swing should come back up to weight while you are in
+    // your inventory, not sit frozen at whatever it was when you opened it.
+    this.attackT = Math.min(ATTACK_PERIOD, this.attackT + dt);
+
+    if (!busy) this._interact(dt, input);
+    // Each of these is isolated. The whole frame is already wrapped in a catch
+    // so a throw cannot kill the render loop, but that catch aborts everything
+    // *after* the throw as well — one bad kiln state silently stopped farming,
+    // water, mobs and vitals, and the only symptom was that the world quietly
+    // held still. Losing one subsystem for a frame is a glitch; losing the rest
+    // of the tick with it is indistinguishable from a freeze.
+    // The marker goes when there is nothing left of the pack to fetch, whether
+    // you picked it up, it burned, or something else got there first.
+    if (this.deathSite && !this.drops.list.some((d) => d.keep)) this.deathSite = null;
+
+    this._safeTick('kilns', () => this._tickKilns(dt));
+    this._safeTick('farming', () => this.farming.update(dt, this.seasons.growth));
+    this._safeTick('water', () => this.water.update(dt));
+    this._safeTick('vitals', () => this._tickVitals(dt));
+    this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
+    // A merchant that has walked out of range, run out of life or been killed
+    // takes its shop with it. Without this the screen stays up over a stock
+    // list belonging to a mob that no longer exists.
+    if (this.ui.screen === 'shop' && !this.mobs.list.includes(this.ui.shop)) {
+      this.closeScreen();
+      this.ui.toast('The merchant moved on.', itemIdOf('coin'), 2600);
+    }
+    this.drops.update(dt, this.player, {
+      collect: (item, count) => {
+        const taken = this.inventory.add(item, count);
+        if (taken > 0) {
+          this.audio.pickup();
+          this.ui.toast(ITEMS[item].label, item, 1500);
+        }
+        return taken;
+      },
+      hasRoom: (item) => this.inventory.hasRoom(item),
+    });
+
+    const c = this.player.cell;
+    const biomeId = this.planet.colBiome[cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)))] ?? 2;
+    const altitude = this.player.position.length() - R_SEA;
+    this.weather.update(dt, biomeId, altitude, this.seasons.cold);
+    // Precipitation spawns in a box around the camera with no notion of the
+    // world, so without this it rains just as hard inside a cave or under a
+    // roof as it does in the open. Fade it out by how much sky is overhead,
+    // eased so stepping under a tree dims the rain rather than cutting it.
+    this.shelter += (this._skyExposure() - this.shelter) * Math.min(1, dt * 3.5);
+    this.particles.setWeather(this.weather.type, this.weather.precip * this.shelter);
+
+    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob);
+    this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
+    this.viewModel.update(dt, this.player, this.sky, this._handLight());
+    this.sky.setSolarTime(this.player.up, this.timeOfDay());
+    this.sky.update(dt, this.camera, this.player.up, this.player.position);
+    this.particles.update(dt, this.camera, this.player.up, this.sky);
+    this._updateSharedUniforms();
+    this._updateAudio();
+    this._updateHud(biomeId);
+
+    this.autosaveTimer += dt;
+    if (this.autosaveTimer > 90) { this.autosaveTimer = 0; this.saveGame(false); }
+  }
+
+  /**
+   * One damage entry point, so every source flashes, sounds and kills the same
+   * way. Returns true if it was fatal.
+   *
+   * `guarded` damage respects a short immunity window after the last hit. Every
+   * blow that can arrive in a crowd must be guarded: seven husks is the hostile
+   * cap, they all converge on the same spot, and at 3 half-hearts each a single
+   * synchronised swing round is 21 against a 20-point bar — an instant death
+   * with nothing the player could have done. Environmental damage opts out; it
+   * already paces itself on its own timer and cannot gang up.
+   */
+  /**
+   * @param {boolean} armoured whether worn armour applies. Blows land on you
+   *   through a suit; drowning and starving do not, and a helmet that saved you
+   *   from suffocating would be a strange thing to have to explain.
+   */
+  _takeHit(damage, cause, guarded = true, armoured = true) {
+    const p = this.player;
+    if (p.health <= 0) return true;
+    if (guarded && this._hurtGuard > 0) return false;
+    if (guarded) this._hurtGuard = HURT_IMMUNITY;
+
+    if (armoured) {
+      const soaked = damage * this.inventory.protection;
+      if (soaked > 0) {
+        damage -= soaked;
+        // Armour wears by what it actually stopped, so a hide cap outside a
+        // cave lasts for days and a chestplate that ate a husk night does not.
+        const broken = this.inventory.wearArmour(Math.max(1, Math.round(soaked)));
+        for (const i of broken) {
+          this.ui.toast(`${ARMOUR_SLOT_ORDER[i]} broke`, 0, 2200);
+          this.audio.ui(180);
+        }
+      }
+    }
+
+    // `cause` is the mob for a blow and a string for everything else, so this
+    // shoves you away from a husk but not away from drowning.
+    if (cause && cause.pos) p.knockback(cause.pos.x, cause.pos.y, cause.pos.z);
+
+    p.health = Math.max(0, p.health - damage);
+    this.damageFlash = Math.min(1, 0.32 + damage * 0.1);
+    this.audio.hurt();
+    if (p.health <= 0) {
+      this._die(typeof cause === 'string' ? cause : 'Something in the dark got you.');
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Lava, and staying alight after climbing out of it.
+   *
+   * Lava was previously inert: it generated in the mantle and in deep caverns,
+   * it lit the cave and shimmered in the shader, and touching it did nothing at
+   * all. That is a worse surprise than having no hazard, because the world
+   * visibly promises danger it does not deliver.
+   */
+  _tickFire(dt) {
+    const p = this.player;
+    this._hurtGuard = Math.max(0, this._hurtGuard - dt);
+    if (p.inLava) {
+      p.burning = 5.0;                    // relights for as long as you stand in it
+      this._lavaTimer = (this._lavaTimer || 0) + dt;
+      if (this._lavaTimer > 0.45) {
+        this._lavaTimer = 0;
+        if (this._takeHit(3, 'The lava was not as shallow as it looked.', false)) return;
+      }
+      this.particles.embers(p.eye, p.up, 3, 1.1);
+    } else if (p.burning > 0) {
+      // Water puts you out at once; otherwise it burns down on its own.
+      if (p.inWater) p.burning = 0;
+      else {
+        p.burning = Math.max(0, p.burning - dt);
+        this._burnTimer = (this._burnTimer || 0) + dt;
+        if (this._burnTimer > 0.9) {
+          this._burnTimer = 0;
+          if (this._takeHit(1, 'You burned.', false)) return;
+        }
+        if (Math.random() < dt * 12) this.particles.embers(p.eye, p.up, 1, 0.8);
+      }
+    }
+    this.damageFlash = Math.max(this.damageFlash, p.burning > 0 ? 0.14 : 0);
+  }
+
+  /**
+   * Run one subsystem's tick without letting it take the others down with it.
+   *
+   * Reported once per subsystem rather than once per frame: a broken tick
+   * throws sixty times a second, and a console with thousands of identical
+   * lines hides the first one, which is the only one that matters.
+   */
+  _safeTick(name, fn) {
+    try {
+      fn();
+    } catch (err) {
+      if (!this._tickErrors) this._tickErrors = new Set();
+      if (!this._tickErrors.has(name)) {
+        this._tickErrors.add(name);
+        console.error(`[tick:${name}]`, err);
+      }
+    }
+  }
+
+  /**
+   * Where the planet is in its day, 0..1 with 0 at midnight.
+   *
+   * One source for every consumer — sky, husk burning, husk spawning and the
+   * HUD clock — so they can never disagree about whether it is night.
+   */
+  timeOfDay() {
+    return this.settings.dayMinutes > 0 ? this.dayT : Sky.clockFraction();
+  }
+
+  /** Advance the game clock. No-op in clock-synced mode, which reads the OS. */
+  _tickClock(dt) {
+    const mins = this.settings.dayMinutes;
+    if (mins <= 0) return;
+    const days = dt / (mins * 60);
+    this.dayT = (this.dayT + days) % 1;
+    // The year turns off the same tick as the day, so they can never drift
+    // apart — counting wraps of dayT instead would lose a day every time the
+    // player loads a world mid-afternoon.
+    this.seasons.advance(days);
+    this._pushSeason();
+  }
+
+  /** Hand the current season to the shader that colours the world. */
+  _pushSeason() {
+    const s = this.seasons;
+    voxelUniforms.uSeasonColor.value.set(s.color[0], s.color[1], s.color[2]);
+    voxelUniforms.uSeasonStrength.value = s.strength;
+  }
+
+  /** Nourishment drains with effort and slowly heals you while it lasts. */
+  _tickVitals(dt) {
+    const p = this.player;
+    const working = p.sprinting ? 1.6 : (p.moveAmount > 0.6 ? 0.7 : 0.18);
+    this.energy = Math.max(0, this.energy - dt * 0.0022 * working);
+
+    if (this.energy > 0.55 && p.health < p.maxHealth) {
+      this._regen = (this._regen || 0) + dt;
+      if (this._regen > 4.5) {
+        this._regen = 0;
+        p.health = Math.min(p.maxHealth, p.health + 1);
+        this.energy = Math.max(0, this.energy - 0.02);
+      }
+    } else this._regen = 0;
+
+    // running on empty hurts, slowly
+    if (this.energy <= 0) {
+      this._starve = (this._starve || 0) + dt;
+      if (this._starve > 8) {
+        this._starve = 0;
+        p.health = Math.max(1, p.health - 1);
+        this.damageFlash = 0.35;
+      }
+    } else this._starve = 0;
+  }
+
+  /**
+   * Rough block light reaching the player, for lighting the held item.
+   *
+   * The authoritative light field lives in the world worker and is never sent
+   * to the main thread — it's a million cells and would have to be re-shipped
+   * on every block edit. For one point of light on one hand, a short scan of
+   * the emitters nearby is both cheaper and accurate enough: it's a handful of
+   * cells, and anything further than a few blocks contributes almost nothing.
+   */
+  _handLight() {
+    const c = this.player.cell;
+    const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
+    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
+
+    // Nothing about this changes until you cross into another cell or the world
+    // is edited, and the scan is ~2000 cell reads — by far the most expensive
+    // thing in the update loop if left to run every frame. Cache on both.
+    if (this._hlCol === baseCol && this._hlK === ck && this._hlSeq === this.editSeq) {
+      return this._hlValue;
+    }
+    this._hlCol = baseCol; this._hlK = ck; this._hlSeq = this.editSeq;
+
+    let r = 0, g = 0, b = 0;
+    // The scan has to reach at least as far as the brightest light carries, or
+    // the contribution clips at the boundary instead of fading — walking away
+    // from a torch would step the hand light from 0.21 straight to 0.
+    const RAD = HAND_LIGHT_RADIUS;
+    for (let di = -RAD; di <= RAD; di++) {
+      for (let dj = -RAD; dj <= RAD; dj++) {
+        const col = stepColumn(baseCol, di, dj);
+        for (let dk = -3; dk <= 4; dk++) {
+          const k = ck + dk;
+          if (k < 0 || k >= D) continue;
+          const bl = BLOCKS[this.planet.at(col, k)];
+          const emit = bl?.light;
+          if (!emit) continue;
+          // Falloff in cells, capped at the scan radius so it always reaches
+          // exactly zero at the edge rather than being cut off mid-curve.
+          const d2 = di * di + dj * dj + dk * dk;
+          const reach = Math.min(emit * 0.55 + 1, RAD);
+          const fall = Math.max(0, 1 - Math.sqrt(d2) / reach);
+          if (fall <= 0) continue;
+          const w = (emit / 15) * fall * fall;
+          const lc = bl.lightColor || WHITE_L;
+          r = Math.max(r, lc[0] * w); g = Math.max(g, lc[1] * w); b = Math.max(b, lc[2] * w);
+        }
+      }
+    }
+    this._hlValue = { r, g, b };
+    return this._hlValue;
+  }
+
+  /** Crosshair prompt when you're looking at an animal. */
+  _feedHint(mob) {
+    if (!mob) return null;
+    if (mob.spec.trader) return `<kbd>RMB</kbd> Trade`;
+    if (mob.baby > 0) return 'Calf';
+    if (mob.love > 0) return 'Ready to breed';
+    const held = this.inventory.held();
+    if (!held.empty && this.mobs.canFeed(held.item) && mob.breedCooldown <= 0) {
+      return `<kbd>RMB</kbd> Feed`;
+    }
+    return null;
+  }
+
+  _announceHeld() {
+    const s = this.inventory.held();
+    this.ui.showItemName(s.empty ? '' : ITEMS[s.item].label);
+    this.ui.refresh();
+  }
+
+  _dropHeld() {
+    const s = this.inventory.held();
+    if (s.empty) return;
+    const p = _v1.copy(this.player.eye).addScaledVector(this.player.lookDir, 0.8);
+    const impulse = _v2.copy(this.player.lookDir).multiplyScalar(4.5);
+    this.drops.spawn(p.x, p.y, p.z, s.item, 1, s.wear, impulse);
+    s.count--;
+    if (s.count <= 0) s.clear();
+    this.inventory.changed();
+  }
+
+  _interact(dt, input) {
+    const hit = this.planet.raycast(this.player.eye, this.player.lookDir, this.player.reach);
+
+    // a creature in front of the block takes the hit instead
+    const mobHit = this.mobs.raycast(this.player.eye, this.player.lookDir, this.player.reach);
+    if (mobHit && (!hit || mobHit.dist < hit.dist)) {
+      this.ui.setCrosshairActive(true);
+      this.highlight.visible = false;
+      if (input.clicked[0] && input.locked) {
+        const held = ITEMS[this.inventory.held().item];
+        // Swings have a rhythm. Clicking is edge-triggered with no cooldown, so
+        // once blows started knocking husks backwards a player could hold one
+        // in the air indefinitely by clicking fast — free, skill-less immunity.
+        // A swing landed early still lands, at a fraction of its weight and
+        // with no shove behind it, which makes timing worth something without
+        // punishing the player for touching the button.
+        const charge = Math.min(1, this.attackT / ATTACK_PERIOD);
+        const dmg = (held?.damage ?? 1) * (0.3 + 0.7 * charge);
+        this.attackT = 0;
+        this.player.swing();
+        this.viewModel.punch();
+        // soft flesh impact at the animal, not a grass footstep at your feet.
+        // The species' own hurt/death cry comes from Mobs via onSound.
+        this.audio.mobHit(mobHit.mob.pos);
+        this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge > 0.85 ? 1 : 0);
+        if (held?.tool) this.inventory.damageHeld(1);
+      }
+      // Right-click offers whatever you're holding. Feeding is how a herd
+      // grows, and it's the only reason to keep an animal alive.
+      const heldSlot = this.inventory.held();
+      if (input.clicked[2] && input.locked && this.useCooldown === 0) {
+        this.useCooldown = 0.3;
+        // The merchant answers the same button, empty-handed or not — it is the
+        // one creature you interact with rather than feed.
+        if (mobHit.mob.spec.trader) {
+          this.openScreen('shop', mobHit.mob);
+        } else if (!heldSlot.empty && this.mobs.feed(mobHit.mob, heldSlot.item)) {
+          this.inventory.consumeHeld(1);
+          this.player.swing();
+          this.viewModel.punch();
+          this.ui.toast(mobHit.mob.baby > 0 ? 'Fed the calf' : 'Ready to breed',
+            heldSlot.item, 1300);
+        }
+      }
+      this.ui.setHint(this._feedHint(mobHit.mob));
+      this.placeCooldown = Math.max(0, this.placeCooldown - dt);
+      this.useCooldown = Math.max(0, this.useCooldown - dt);
+      voxelUniforms.uBreakStage.value = -1;
+      this.mining.key = null;
+      this.mining.progress = 0;
+      return;
+    }
+    this.placeCooldown = Math.max(0, this.placeCooldown - dt);
+    this.useCooldown = Math.max(0, this.useCooldown - dt);
+
+    if (hit) {
+      this._showHighlight(hit.col, hit.k);
+      this.ui.setCrosshairActive(true);
+    } else {
+      this.highlight.visible = false;
+      this.ui.setCrosshairActive(false);
+    }
+
+    // An over-tier block still shatters and drops nothing. Silently losing six
+    // seconds to an iron vein reads as a broken game, so name the tool needed.
+    // One chain, one winner. Setting a hint anywhere above this ran into the
+    // unconditional clear at the end of it and lasted exactly zero frames.
+    const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.held().item]) : null;
+    if (hit && IS_SIGN[hit.id]) {
+      // Reading is looking: no key to press and nothing to open, so a row of
+      // signs can be read by sweeping across them.
+      const text = this.signs.get(hit.col * D + hit.k);
+      this.ui.setHint(text ? `“${text}”` : 'A blank sign');
+    } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
+      this.ui.setHint(`<kbd>RMB</kbd> ${hit.id === ID.bench ? 'Craft' : 'Smelt'}`);
+    } else if (needTool) {
+      this.ui.setHint(needTool);
+    } else this.ui.setHint(null);
+
+    const m = this.mining;
+    const heldDef = ITEMS[this.inventory.held().item];
+    if (input.buttons[0] && hit && input.locked) {
+      const key = hit.col * D + hit.k;
+      if (m.key !== key) { m.key = key; m.progress = 0; }
+      const time = miningTime(hit.id, heldDef);
+      if (isFinite(time) && hit.id !== ID.core) {
+        m.progress += dt / time;
+        if (Math.random() < dt * 10) {
+          this.particles.hitSpark(hit.point, hit.normal, hit.id);
+          this.audio.dig(BLOCKS[hit.id].sound, hit.point);
+        }
+        if (this.player.swingT >= 1) { this.player.swing(); this.viewModel.punch(); }
+        if (m.progress >= 1) {
+          this._breakBlock(hit);
+          m.progress = 0; m.key = null;
+        }
+      }
+    } else {
+      m.key = null;
+      m.progress = Math.max(0, m.progress - dt * 3.5);
+    }
+
+    const stage = m.progress > 0.001 && m.key !== null ? Math.min(9, Math.floor(m.progress * 10)) : -1;
+    voxelUniforms.uBreakStage.value = stage;
+    if (stage >= 0 && hit) {
+      this.planet.centerOf(hit.col, hit.k, voxelUniforms.uBreakPos.value);
+    }
+
+    // --- eating: hold RMB on any food ---
+    const heldSlot = this.inventory.held();
+    const heldItem = ITEMS[heldSlot.item];
+    if (heldItem?.food && input.buttons[2] && input.locked) {
+      this.eating += dt;
+      if (Math.random() < dt * 9) {
+        this.audio.step('grass');
+        this.particles.footDust(this.player.eye, this.player.up, ID.dirt);
+      }
+      if (this.eating >= 1.3) {
+        this.eating = 0;
+        this.energy = Math.min(1, this.energy + heldItem.food * FOOD_TO_ENERGY);
+        this.player.health = Math.min(this.player.maxHealth, this.player.health + Math.ceil(heldItem.food * 0.35));
+        this.inventory.consumeHeld(1);
+        this.audio.pickup();
+        this.ui.toast(`Ate ${heldItem.label}`, heldSlot.item, 1400);
+      }
+      return;
+    }
+    this.eating = 0;
+
+    // --- bucket: scoop or pour ------------------------------------------
+    // Handled before the `hit` gate below, because filling needs a ray that
+    // *stops* on liquid — the ordinary interaction ray passes straight through
+    // water, so a lake never registers as something you can click.
+    if (input.clicked[2] && input.locked && this.useCooldown === 0
+        && (heldSlot.item === itemIdOf('bucket') || heldSlot.item === itemIdOf('water_bucket'))) {
+      this.useCooldown = 0.28;
+      if (this._useBucket(heldSlot)) return;
+    }
+
+    // --- fishing: cast, wait, strike ------------------------------------
+    if (heldItem?.tool?.kind === 'rod') {
+      if (input.clicked[2] && input.locked && this.useCooldown === 0) {
+        this.useCooldown = 0.3;
+        this._rodClick();
+      }
+      this._tickFishing(dt);
+      if (this.fishing) {          // holding the line: nothing else to do
+        this.ui.setHint(this.fishing.bite > 0 ? 'A bite! Click.' : 'Waiting…');
+        return;
+      }
+    } else if (this.fishing) {
+      this._stopFishing();
+    }
+
+    if (input.clicked[2] && hit && input.locked && this.useCooldown === 0) {
+      this.useCooldown = 0.22;
+      if (hit.id === ID.bench) { this.openScreen('bench'); return; }
+      if (hit.id === ID.kiln || hit.id === ID.kiln_lit) {
+        this.openScreen('kiln', this._kilnAt(hit.col, hit.k));
+        return;
+      }
+      if (hit.id === ID.crate) {
+        this.openScreen('crate', this._crateAt(hit.col, hit.k));
+        return;
+      }
+      if (hit.id === ID.bed) { this._useBed(hit.col, hit.k); return; }
+      if (IS_DOOR[hit.id]) { this._toggleDoor(hit.col, hit.k); return; }
+      if (IS_SIGN[hit.id]) { this._writeSign(hit.col, hit.k); return; }
+      // --- till soil with a shovel ---
+      if (heldItem?.tool?.kind === 'shovel' && this.farming.canTill(hit.id)) {
+        this.farming.till(hit.col, hit.k);
+        this.audio.place('soil');
+        this.player.swing();
+        this.viewModel.punch();
+        this.inventory.damageHeld(1);
+        return;
+      }
+      // --- sow seeds on farmland ---
+      if (heldSlot.item === itemIdOf('seeds') && this.farming.plant(hit.col, hit.k)) {
+        this.inventory.consumeHeld(1);
+        this.audio.place('grass');
+        this.player.swing();
+        this.viewModel.punch();
+        this.ui.toast('Planted', heldSlot.item, 1200);
+        return;
+      }
+    }
+    if (input.buttons[2] && hit && this.placeCooldown === 0 && input.locked) {
+      this.placeCooldown = this._placeBlock(hit) ? 0.2 : 0.12;
+    }
+  }
+
+  /**
+   * Fill an empty bucket from a water cell, or pour a full one into the open
+   * cell in front of whatever was hit. Water here is a static source block —
+   * the world has no flow simulation — so pouring places exactly one cell,
+   * which is also what makes this safe to add without liquid physics.
+   * @returns {boolean} true if the bucket did something
+   */
+  /**
+   * One click of the rod: cast if the line is out of the water, strike if it
+   * is in, and reel in empty-handed if you struck too early or too late.
+   */
+  _rodClick() {
+    if (!this.fishing) {
+      const wet = this.planet.raycast(
+        this.player.eye, this.player.lookDir, this.player.reach + 3, { hitLiquid: true },
+      );
+      if (!wet || this.planet.at(wet.col, wet.k) !== ID.water) {
+        this.ui.setHint('Cast at open water');
+        return;
+      }
+      const c = this.planet.centerOf(wet.col, wet.k, new THREE.Vector3());
+      this.fishing = {
+        col: wet.col, k: wet.k, pos: c,
+        wait: FISH_WAIT_MIN + Math.random() * (FISH_WAIT_MAX - FISH_WAIT_MIN),
+        bite: 0, bob: 0,
+      };
+      this._showBobber(c);
+      this.audio.splash(c);
+      this.player.swing();
+      this.viewModel.punch();
+      return;
+    }
+    // Line is out. Striking during the bite window lands it.
+    if (this.fishing.bite > 0) this._landCatch();
+    else {
+      this.ui.toast('Too soon.', itemIdOf('fishing_rod'), 1400);
+      this._stopFishing();
+    }
+  }
+
+  _tickFishing(dt) {
+    const f = this.fishing;
+    if (!f) return;
+    // Wander off and the line comes in on its own, rather than fishing a lake
+    // you are no longer standing beside.
+    if (this.player.position.distanceTo(f.pos) > FISH_LEASH) { this._stopFishing(); return; }
+
+    if (f.bite > 0) {
+      f.bite -= dt;
+      if (f.bite <= 0) {
+        this.ui.toast('It got away.', itemIdOf('fishing_rod'), 1600);
+        this._stopFishing();
+      }
+      return;
+    }
+    f.wait -= dt;
+    if (f.wait <= 0) {
+      f.bite = FISH_BITE_WINDOW;
+      this.audio.splash(f.pos);
+      this.particles.splash(f.pos, this.player.up, 0.7);
+    } else if (Math.random() < dt * 0.7) {
+      // the odd nibble, so the wait is not a blank stare
+      this.particles.bubbles(f.pos, this.player.up, 1);
+    }
+    f.bob += dt;
+    if (this.bobber) {
+      // `centerOf` is the middle of the cell, and the water's surface is half a
+      // cell above that — offsetting from the centre left the float sunk inside
+      // the block, where it rendered as nothing at all.
+      _v1.copy(f.pos).addScaledVector(this.player.up,
+        BOBBER_FLOAT + Math.sin(f.bob * 2.2) * 0.05 - (f.bite > 0 ? 0.22 : 0));
+      this.bobber.position.copy(_v1);
+      this.bobber.visible = true;
+    }
+  }
+
+  _landCatch() {
+    const f = this.fishing;
+    if (!f) return;
+    const roll = Math.random();
+    let name = 'fish';
+    if (roll > 0.93) name = ['amethyst', 'coin', 'coin', 'emerald'][(Math.random() * 4) | 0];
+    else if (roll > 0.78) name = ['stick', 'seeds', 'clay'][(Math.random() * 3) | 0];
+    const id = itemIdOf(name);
+    const count = name === 'coin' ? 3 + ((Math.random() * 6) | 0) : 1;
+    const taken = this.inventory.add(id, count);
+    if (taken < count) {
+      _v1.copy(this.player.position).addScaledVector(this.player.up, 0.8);
+      this.drops.spawn(_v1.x, _v1.y, _v1.z, id, count - taken);
+    }
+    this.ui.toast(`Caught ${ITEMS[id]?.label}`, id, 2000);
+    this.audio.pickup();
+    this.stats.fished = (this.stats.fished ?? 0) + 1;
+    this.inventory.damageHeld(1);
+    this._stopFishing();
+  }
+
+  _showBobber(pos) {
+    if (!this.bobber) {
+      const geo = new THREE.SphereGeometry(0.09, 10, 8);
+      const mat = new THREE.MeshBasicMaterial({ color: 0xd94f3d });
+      this.bobber = new THREE.Mesh(geo, mat);
+      this.bobber.renderOrder = 6;
+      this.scene.add(this.bobber);
+    }
+    _v1.copy(pos).addScaledVector(this.player.up, BOBBER_FLOAT);
+    this.bobber.position.copy(_v1);
+    this.bobber.visible = true;
+  }
+
+  _stopFishing() {
+    this.fishing = null;
+    if (this.bobber) this.bobber.visible = false;
+    this.ui.setHint('');
+  }
+
+  _useBucket(heldSlot) {
+    const empty = heldSlot.item === itemIdOf('bucket');
+    // A ray that stops on liquid, which the normal interaction ray does not.
+    const wet = this.planet.raycast(
+      this.player.eye, this.player.lookDir, this.player.reach, { hitLiquid: true },
+    );
+
+    if (empty) {
+      if (!wet || wet.id !== ID.water) return false;
+      this._applyEdits([{ col: wet.col, k: wet.k, id: 0 }]);
+      this.water.sources.delete(this.water.key(wet.col, wet.k));
+      this.water.onEdit(wet.col, wet.k);
+      this.inventory.consumeHeld(1);
+      this.inventory.add(itemIdOf('water_bucket'), 1);
+      this.inventory.changed();
+      this.audio.splash();
+      this.player.swing();
+      this.viewModel.punch();
+      return true;
+    }
+
+    // Pouring: take the empty cell the ray entered through, so water lands in
+    // front of a wall rather than replacing it.
+    const target = wet && wet.prevCol >= 0 ? { col: wet.prevCol, k: wet.prevK } : null;
+    if (!target) return false;
+    if (this.planet.at(target.col, target.k) !== 0) return false;
+    // Pouring at your own feet is allowed on purpose. It's what you'd expect,
+    // it's how you break a fall or make a climb, and it can't strand you: the
+    // source is a single static cell you can scoop straight back up.
+    this._applyEdits([{ col: target.col, k: target.k, id: ID.water }]);
+    // Poured water is a spring, not a puddle: it feeds a flow and never drains.
+    this.water.addSource(target.col, target.k);
+    this.inventory.consumeHeld(1);
+    this.inventory.add(itemIdOf('bucket'), 1);
+    this.inventory.changed();
+    this.audio.splash();
+    this.player.swing();
+    this.viewModel.punch();
+    return true;
+  }
+
+  /**
+   * How exposed to the sky the player is, 0 (fully covered) to 1 (open air).
+   * Counts solid cells in the player's own column above their head; a couple of
+   * blocks of leaf canopy should still let some rain through, a rock ceiling
+   * should not.
+   */
+  _skyExposure() {
+    const c = this.player.cell;
+    const col = cidx(c.f, Math.min(F - 1, Math.max(0, Math.floor(c.ci))),
+      Math.min(F - 1, Math.max(0, Math.floor(c.cj))));
+    let blocked = 0;
+    for (let k = Math.floor(c.ck) + 2; k < D; k++) {
+      if (this.planet.solidAt(col, k)) { blocked++; if (blocked >= 3) return 0; }
+    }
+    return 1 - blocked / 3;
+  }
+
+  _updateSharedUniforms() {
+    const p = this.sky.palette;
+    const w = this.weather;
+    voxelUniforms.uSkyColor.value.copy(p.zenith).lerp(p.horizon, 0.55).lerp(WHITE, 0.34);
+    voxelUniforms.uSkyIntensity.value = (0.34 + p.sunIntensity * 0.72) * (0.5 + w.sun * 0.5);
+    voxelUniforms.uBounceColor.value.copy(p.fog).lerp(WHITE, 0.2).multiplyScalar(0.7);
+    voxelUniforms.uFogColor.value.copy(p.fog);
+    voxelUniforms.uFogDensity.value = this.player.headInWater ? 0 : 0.0013 * Math.min(1.9, w.fog);
+    voxelUniforms.uCamPos.value.copy(this.camera.position);
+    voxelUniforms.uUnderwater.value = this.player.headInWater ? 1 : 0;
+    if (this.player.headInWater) {
+      // tie the murk to the sky so night dives are properly dark
+      const lit = 0.25 + p.sunIntensity * 0.5;
+      voxelUniforms.uWaterFog.value.setRGB(0.03 * lit, 0.17 * lit, 0.26 * lit);
+      voxelUniforms.uWaterTint.value.setRGB(0.30 * lit, 0.66 * lit, 0.72 * lit);
+    }
+    voxelUniforms.uWind.value = w.wind;
+
+    this.sky.cloudUniforms.uCoverage.value = w.coverage;
+    this.sky.cloudUniforms.uOpacity.value = w.opacity;
+    this.sky.sunLight.intensity = p.sunIntensity * w.sun;
+    if (w.lightning > 0.5) this.sky.sunLight.intensity += 2.4 * w.lightning;
+  }
+
+  _updateAudio() {
+    // Listener rides the camera. On a sphere the up vector is the player's own
+    // local up — feeding world +Y here would swing the stereo image as you walk
+    // round the planet.
+    const cam = this.camera;
+    cam.getWorldDirection(_v1);
+    _v2.copy(this.player.up);
+    this.audio.setListener(
+      cam.position.x, cam.position.y, cam.position.z,
+      _v1.x, _v1.y, _v1.z,
+      _v2.x, _v2.y, _v2.z,
+    );
+
+    const alt = Math.max(0, this.player.position.length() - R_SEA);
+    const openness = THREE.MathUtils.clamp(alt / 8, 0, 1);
+    this.audio.setAmbience({
+      wind: (0.3 + openness * 0.7) * (0.6 + this.weather.wind * 0.5),
+      water: this._nearLiquid() * 0.6 + this.weather.precip * 0.8,
+      cave: 1 - openness,
+      underwater: this.player.headInWater ? 1 : 0,
+    });
+  }
+
+  _nearLiquid() {
+    const c = this.player.cell;
+    const col = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    let n = 0;
+    for (let d = 0; d < 4; d++) {
+      const nb = colNeighbor(col, d);
+      for (let dk = -1; dk <= 1; dk++) if (this.planet.liquidAt(nb, Math.floor(c.ck) + dk)) n++;
+    }
+    return Math.min(1, n / 6);
+  }
+
+  _updateHud(biomeId) {
+    this.ui.updateVitals(this.player.health, this.player.maxHealth, this.breath, this.player.stamina, this.energy);
+    this.ui.updateStatus(this.timeOfDay(), biomeId, this.weather.label, this.seasons);
+
+    if (this.ui.debugOn) {
+      const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+      const info = this.renderer.info;
+      const c = this.player.cell;
+      this.ui.setDebug(
+        `${(1 / avg).toFixed(0)} fps   ${(avg * 1000).toFixed(1)} ms\n` +
+        `face ${c.f}  i ${c.ci.toFixed(2)}  j ${c.cj.toFixed(2)}  k ${c.ck.toFixed(2)}\n` +
+        `alt  ${(this.player.position.length() - R_SEA).toFixed(1)}\n` +
+        `draw ${info.render.calls}   tris ${(info.render.triangles / 1000).toFixed(0)}k\n` +
+        `chunks ${this.planet.meshes.size}   drops ${this.drops.list.length}\n` +
+        `sun ${this.sky.elevation?.toFixed(2)}   ${this.weather.state} ${(this.weather.precip * 100) | 0}%\n` +
+        `grnd ${this.player.grounded ? 'y' : 'n'}  water ${this.player.inWater ? 'y' : 'n'}  ${(this.playtime / 60) | 0}m`,
+      );
+    }
+  }
+}
+
+window.game = new Game();

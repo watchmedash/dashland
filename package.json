@@ -1,0 +1,20 @@
+{
+  "name": "dash-craft",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "bake": "node scripts/bake-textures.mjs",
+    "sheet": "node scripts/contact-sheet.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.3",
+    "vite": "^7.0.0"
+  }
+}

@@ -1,0 +1,140 @@
+// Animated GLB models for the animals and the hostile.
+//
+// The mobs used to be built out of boxes in code, with a hand-written animator
+// swinging four leg pivots. That produced a decent gait, but every species had
+// to be described limb by limb and adding one meant writing a new build
+// function. These models arrive with their animation already authored — eight
+// clips each, keyed on named nodes rather than a skeleton — so the job here is
+// to load each one once, hand out cheap clones, and drive a mixer.
+//
+// Assets: Kenney "Cube Pets" and "Blocky Characters", both CC0.
+
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const loader = new GLTFLoader();
+
+/**
+ * url -> { scene, clips, height, radius }. `scene` is a *prototype*: it is never
+ * added to the world, only cloned, so geometry and materials stay shared across
+ * every instance of that species — one upload for a whole herd. The flip side is
+ * that nothing may ever dispose them; releasing a mob only detaches it.
+ */
+const protos = new Map();
+
+/** True once `url` is loaded and `instantiate` will succeed. */
+export const isReady = (url) => protos.has(url);
+
+/**
+ * Load and measure every model in `urls`. Called once at world start so that
+ * `spawn` can stay synchronous — it runs from the frame loop and from world
+ * load, and making it async would have animals appear a beat after everything
+ * that depends on them.
+ *
+ * A model that fails to load is simply absent from `protos`; the caller checks
+ * `isReady` and skips that species rather than crashing the spawn loop.
+ */
+export async function prepare(urls) {
+  await Promise.all([...new Set(urls)].map(async (url) => {
+    if (protos.has(url)) return;
+    let gltf;
+    try {
+      gltf = await new Promise((res, rej) => loader.load(url, res, undefined, rej));
+    } catch (e) {
+      console.warn('[MobModels]', url, 'failed to load', e);
+      return;
+    }
+    // Deliberately minimal. GLTFLoader already sets the base-colour texture to
+    // sRGB and picks sane filtering; every extra adjustment tried here — point
+    // filtering for the palette atlas, forcing roughness, clamping metalness —
+    // ended with the animals rendering flat white, while the untouched loader
+    // output rendered correctly. Shadow flags are the only safe thing to set.
+    gltf.scene.traverse((n) => {
+      if (!n.isMesh) return;
+      n.castShadow = true;
+      n.receiveShadow = true;
+    });
+
+    // Measure the rest pose. Clips move the parts around, but the rest pose is
+    // what the collision footprint should be sized from — an animal is not
+    // wider because its leg happens to be forward on this frame.
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    protos.set(url, {
+      scene: gltf.scene,
+      clips: gltf.animations || [],
+      height: size.y || 1,
+      radius: Math.max(size.x, size.z) * 0.5 || 0.5,
+      // The exports put their origin at the feet; this is what would put a
+      // model back on the ground if one ever did not.
+      footOffset: -box.min.y,
+    });
+  }));
+}
+
+/** Clip names a model actually ships, for choosing fallbacks. */
+export const clipNames = (url) => (protos.get(url)?.clips || []).map((c) => c.name);
+
+/** Rest-pose height in model units, before the per-species scale. */
+export const modelHeight = (url) => protos.get(url)?.height ?? 1;
+export const modelRadius = (url) => protos.get(url)?.radius ?? 0.5;
+export const footOffset = (url) => protos.get(url)?.footOffset ?? 0;
+
+/**
+ * A fresh, independently animatable copy.
+ * @returns {{root: THREE.Group, mixer: THREE.AnimationMixer,
+ *            actions: Object<string, THREE.AnimationAction>, current: string|null}|null}
+ */
+export function instantiate(url) {
+  const proto = protos.get(url);
+  if (!proto) return null;
+  const root = proto.scene.clone(true);
+  const mixer = new THREE.AnimationMixer(root);
+  const actions = {};
+  for (const clip of proto.clips) actions[clip.name] = mixer.clipAction(clip);
+  return { root, mixer, actions, current: null };
+}
+
+/**
+ * Crossfade to one clip. Re-requesting the clip already playing is a no-op, so
+ * this is safe to call every frame straight from the behaviour state machine.
+ *
+ * @param {{actions: Object, current: string|null}} model
+ * @param {string} name
+ * @param {number} fade seconds
+ * @param {boolean} once play once and hold the last frame — death, and attacks
+ */
+export function play(model, name, fade = 0.22, once = false) {
+  const next = model.actions[name];
+  if (!next || model.current === name) return;
+  const prev = model.current ? model.actions[model.current] : null;
+
+  next.reset();
+  next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+  next.clampWhenFinished = once;
+  next.enabled = true;
+  next.setEffectiveTimeScale(1);
+  next.setEffectiveWeight(1);
+  next.play();
+  if (prev && prev !== next) next.crossFadeFrom(prev, fade, false);
+  model.current = name;
+}
+
+/**
+ * Fire a one-shot clip and come back to whatever was playing. Used for the
+ * attack swing, which must not leave the mob frozen mid-lunge.
+ */
+export function playOnce(model, name, timeScale = 1) {
+  const act = model.actions[name];
+  if (!act) return 0;
+  act.reset();
+  act.setLoop(THREE.LoopOnce, 1);
+  act.clampWhenFinished = false;
+  act.setEffectiveTimeScale(timeScale);
+  act.setEffectiveWeight(1);
+  act.enabled = true;
+  act.play();
+  model.current = null;   // force the next play() to re-blend
+  return act.getClip().duration / timeScale;
+}

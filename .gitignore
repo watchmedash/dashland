@@ -1,0 +1,22 @@
+# Installed by `npm install`.
+node_modules/
+
+# Build output — `npm run build` regenerates it.
+dist/
+
+# Local dev server log.
+.vite.log
+
+# Local editor/agent settings, including machine-specific paths.
+.claude/
+
+# WAM — the art-model language the item models are authored in. It is its own
+# git repository with its own history, so committing it here would store a
+# submodule pointer and clone as an empty folder. The game does not need it to
+# run: the compiled models it loads are in `public/models/wam/`, which ARE
+# committed.
+wam
+
+# The Lynocs texture pack is not redistributed here — see CREDITS.md. The bake
+# script reads it from a path outside this tree, and the baked atlases it
+# produces (`public/tiles/`) are committed so the game runs without it.

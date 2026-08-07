@@ -1,0 +1,353 @@
+// Item registry. Every placeable block gets a matching item, plus the raw
+// materials and tools that only exist in the inventory.
+
+import { BLOCKS, ID } from '../world/Blocks.js';
+
+export const ITEMS = [null];
+export const ITEM_ID = {};
+
+function add(def) {
+  def.id = ITEMS.length;
+  def.stack = def.stack ?? 64;
+  ITEMS.push(def);
+  ITEM_ID[def.name] = def.id;
+  return def.id;
+}
+
+// Blocks the player can hold. Fluids, the planet core and internal states stay out.
+const NOT_OBTAINABLE = new Set([
+  'air', 'water', 'lava', 'core', 'farmland_wet', 'kiln_lit',
+  'wheat_0', 'wheat_1', 'wheat_2', 'wheat_3',
+]);
+
+for (const b of BLOCKS) {
+  if (NOT_OBTAINABLE.has(b.name)) continue;
+  add({ name: b.name, label: b.label, block: ID[b.name], sound: b.sound });
+}
+
+// --- food -------------------------------------------------------------------
+
+/**
+ * The nourishment ladder.
+ *
+ * `food: N` restores `N * 0.09` of the energy bar (see `_tickVitals` in main.js)
+ * and heals `ceil(N * 0.35)`, so 11 is a full bar from empty and anything above
+ * that is wasted on a hungry player. Every tier is priced off this number too —
+ * the trader derives coin value from item properties — so the ladder is the one
+ * place the whole food economy is decided:
+ *
+ *   2-4    raw and foraged. Edible in a pinch, never a plan.
+ *   6-9    simple cooked. One fire, one ingredient. Cooking always beats raw:
+ *          every smelt result is worth strictly more than what went in.
+ *   10-14  proper meals. Several ingredients, a bench, and near a full bar.
+ *   3-6    treats. Deliberately below cooked staples at a higher price: a
+ *          sweet is a luxury, and buying rations from the trader should never
+ *          be cheaper than farming them.
+ *
+ * `shopOnly: true` marks food with no recipe and no drop anywhere in the world.
+ * It exists so the merchant has stock the player cannot undercut; nothing else
+ * reads the flag, and an item without it is expected to be obtainable.
+ */
+const FOOD = [
+  // raw / foraged
+  { name: 'berries', label: 'Berries', food: 3, color: '#b8283f', shine: '#e4566d' },
+  { name: 'carrot', label: 'Carrot', food: 3, color: '#d9711f', shine: '#f2a45c' },
+  { name: 'corn', label: 'Corn', food: 3, color: '#d9b02c', shine: '#f5dc78' },
+  { name: 'tomato', label: 'Tomato', food: 3, color: '#c33227', shine: '#ee6a55' },
+  { name: 'egg', label: 'Egg', food: 2, color: '#dfd0b4', shine: '#f6ecd9', shopOnly: true },
+  // No longer shop-only: a rod is the way to get one, which is the point of
+  // having a lake within sight of everything you build.
+  { name: 'fish', label: 'Raw Fish', food: 3, color: '#6f8697', shine: '#a9c0cf' },
+  { name: 'cheese', label: 'Cheese', food: 4, color: '#dda52d', shine: '#f7d472', shopOnly: true },
+
+  // simple cooked
+  { name: 'cooked_fish', label: 'Grilled Fish', food: 8, cooked: true, color: '#c9702f', shine: '#eda468' },
+  { name: 'cooked_egg', label: 'Fried Egg', food: 6, cooked: true, color: '#e8e2d2', shine: '#f7cf4a' },
+  { name: 'salad', label: 'Garden Salad', food: 6, color: '#4f8a35', shine: '#8cc25e' },
+  { name: 'pancakes', label: 'Pancakes', food: 9, color: '#c98b3f', shine: '#eeba74', shopOnly: true },
+
+  // proper meals. Stack low: a hot meal you can carry sixty-four of is not a
+  // meal, it is a supply line, and it would flatten the trader's food prices.
+  { name: 'sandwich', label: 'Sandwich', food: 10, stack: 16, color: '#c9a057', shine: '#ecc98d' },
+  { name: 'soup', label: 'Glowcap Soup', food: 10, stack: 16, color: '#8a5a35', shine: '#c08d5c' },
+  { name: 'pie', label: 'Pumpkin Pie', food: 11, stack: 16, color: '#c07a2c', shine: '#e8ab63' },
+  { name: 'cake', label: 'Berry Cake', food: 12, stack: 16, color: '#e6d3c2', shine: '#f2a0b4' },
+  { name: 'stew', label: 'Hearty Stew', food: 14, stack: 16, color: '#7a4a28', shine: '#b8794a' },
+  { name: 'pizza', label: 'Pizza', food: 12, stack: 16, color: '#c4762c', shine: '#eaa95e', shopOnly: true },
+  { name: 'burger', label: 'Burger', food: 13, stack: 16, color: '#b07a3a', shine: '#e0ad6c', shopOnly: true },
+
+  // treats
+  { name: 'cookie', label: 'Cookie', food: 4, color: '#b0763a', shine: '#dda86c' },
+  { name: 'donut', label: 'Donut', food: 5, color: '#d98fb0', shine: '#f4c2d6', shopOnly: true },
+  { name: 'ice_cream', label: 'Ice Cream', food: 4, color: '#e8a9c4', shine: '#f8dce9', shopOnly: true },
+  { name: 'chocolate', label: 'Chocolate Bar', food: 5, color: '#5a3520', shine: '#8d5c39', shopOnly: true },
+  { name: 'muffin', label: 'Muffin', food: 6, color: '#b4794a', shine: '#dfae7c', shopOnly: true },
+  { name: 'candy', label: 'Lollipop', food: 3, color: '#d64a86', shine: '#f79cc0', shopOnly: true },
+  { name: 'croissant', label: 'Croissant', food: 6, color: '#c9963f', shine: '#eec87e', shopOnly: true },
+];
+
+// --- materials --------------------------------------------------------------
+
+const MATERIALS = [
+  // The planet's one currency. Stacks high because prices are quoted in whole
+  // coins and a trader should never be limited by your pockets.
+  { name: 'coin', label: 'Coin', art: 'coin', stack: 999, color: '#d9a52b', shine: '#ffe58a' },
+  { name: 'stick', label: 'Stick', art: 'stick' },
+  { name: 'coal', label: 'Coal', art: 'lump', color: '#232326', shine: '#4a4a52', fuel: 8 },
+  { name: 'charcoal', label: 'Charcoal', art: 'lump', color: '#2c2722', shine: '#524a40', fuel: 8 },
+  { name: 'raw_iron', label: 'Raw Iron', art: 'lump', color: '#9c7a5e', shine: '#d6b295' },
+  { name: 'raw_gold', label: 'Raw Gold', art: 'lump', color: '#c39428', shine: '#ffdc76' },
+  { name: 'iron_ingot', label: 'Iron Ingot', art: 'ingot', color: '#b9bcc4', shine: '#eef0f6' },
+  { name: 'gold_ingot', label: 'Gold Ingot', art: 'ingot', color: '#d2a02e', shine: '#ffe28c' },
+  { name: 'crystal', label: 'Astral Crystal', art: 'crystal', color: '#5fb6e4', shine: '#d6f4ff' },
+  // The rest of the metal ladder. `art` is reused rather than extended: every
+  // raw ore is a lump, every smelted bar an ingot and every gem a crystal, so
+  // the item models needed nothing new for eleven new materials.
+  { name: 'raw_copper', label: 'Raw Copper', art: 'lump', color: '#a05a2c', shine: '#e09055' },
+  { name: 'copper_ingot', label: 'Copper Ingot', art: 'ingot', color: '#c9713a', shine: '#f0a870' },
+  { name: 'raw_silver', label: 'Raw Silver', art: 'lump', color: '#8d939c', shine: '#ccd2dc' },
+  { name: 'silver_ingot', label: 'Silver Ingot', art: 'ingot', color: '#cfd4dc', shine: '#ffffff' },
+  { name: 'sulfur', label: 'Sulfur', art: 'lump', color: '#c8b420', shine: '#f4e668', fuel: 4 },
+  { name: 'amethyst', label: 'Amethyst', art: 'crystal', color: '#9a5ad8', shine: '#dcb6ff' },
+  { name: 'emerald', label: 'Emerald', art: 'crystal', color: '#2fae52', shine: '#96f0ac' },
+  { name: 'ruby', label: 'Ruby', art: 'crystal', color: '#c72a3c', shine: '#ff8a94' },
+  { name: 'sapphire', label: 'Sapphire', art: 'crystal', color: '#2f56c7', shine: '#8fa8ff' },
+  { name: 'void_shard', label: 'Void Shard', art: 'crystal', color: '#6b3fbf', shine: '#c9a4ff' },
+  { name: 'flint', label: 'Flint', art: 'lump', color: '#3a3f47', shine: '#6e7783' },
+  // Husks only. Nothing in the ground yields cinder, and husks only walk after
+  // dark — so this is the one material you cannot mine your way to. It exists
+  // because night was all threat and no payoff: walling up until dawn was
+  // strictly the better play, which quietly deleted half the day cycle.
+  { name: 'cinder', label: 'Husk Cinder', art: 'crystal', color: '#d1451f', shine: '#ffb06a' },
+  { name: 'wheat', label: 'Wheat', art: 'wheat' },
+  { name: 'seeds', label: 'Seeds', art: 'seeds' },
+  { name: 'apple', label: 'Apple', art: 'apple', food: 4 },
+  { name: 'bread', label: 'Bread', art: 'bread', food: 8 },
+  { name: 'roast', label: 'Roast Pumpkin', art: 'roast', food: 6 },
+  { name: 'hide', label: 'Hide', art: 'hide' },
+  { name: 'feather', label: 'Feather', art: 'feather' },
+  { name: 'meat', label: 'Raw Meat', art: 'meat', food: 3 },
+  { name: 'cooked_meat', label: 'Cooked Meat', art: 'meat', cooked: true, food: 8 },
+  ...FOOD,
+  // Carrying water is what turns farming from site-selection into engineering:
+  // wet farmland grows 2.1x faster, and without a pail you can only ever farm
+  // where the worldgen happened to leave a lake.
+  { name: 'bucket', label: 'Bucket', art: 'bucket', stack: 1, color: '#a8adb8', shine: '#e8ecf4' },
+  // The one thing you do slowly and on purpose. Everything else on this planet
+  // is a transaction with a timer on it; a rod is a reason to stand still by
+  // water and let a minute pass.
+  {
+    name: 'fishing_rod', label: 'Fishing Rod', art: 'rod', stack: 1,
+    color: '#8a6a3a', shine: '#c9a86a',
+    tool: { kind: 'rod', tier: 0, speed: 1, durability: 120 },
+  },
+  {
+    name: 'water_bucket', label: 'Water Bucket', art: 'bucket', stack: 1,
+    color: '#a8adb8', shine: '#e8ecf4', fill: '#2f8fd0', carries: 'water',
+  },
+];
+for (const m of MATERIALS) add(m);
+
+// --- tools ------------------------------------------------------------------
+
+export const TIERS = {
+  wood: { tier: 1, speed: 2.4, durability: 60, label: 'Wooden', color: '#9a6f3f', edge: '#c99a63' },
+  stone: { tier: 2, speed: 4.2, durability: 140, label: 'Stone', color: '#8c8c93', edge: '#c2c2ca' },
+  iron: { tier: 3, speed: 7.0, durability: 320, label: 'Iron', color: '#b9bcc4', edge: '#eef0f6' },
+  crystal: { tier: 4, speed: 11.0, durability: 820, label: 'Astral', color: '#5fb6e4', edge: '#d6f4ff' },
+  // The top of the ladder, and the only rung you cannot reach by digging: its
+  // ingredient drops from husks. Astral already harvests every block in the
+  // game, so cinder deliberately buys speed and life rather than access —
+  // otherwise the reward for surviving nights would be a gate, not a gift.
+  cinder: { tier: 5, speed: 15.5, durability: 2100, label: 'Cinder', color: '#c2451f', edge: '#ffbe7a' },
+};
+
+export const TOOL_KINDS = {
+  pick: { label: 'Pickaxe', art: 'pick' },
+  axe: { label: 'Axe', art: 'axe' },
+  shovel: { label: 'Shovel', art: 'shovel' },
+  sword: { label: 'Sword', art: 'sword' },
+};
+
+for (const [tName, t] of Object.entries(TIERS)) {
+  for (const [kName, k] of Object.entries(TOOL_KINDS)) {
+    add({
+      name: `${tName}_${kName}`,
+      label: `${t.label} ${k.label}`,
+      stack: 1,
+      art: k.art,
+      color: t.color,
+      edge: t.edge,
+      tool: { kind: kName, tier: t.tier, speed: k.art === 'sword' ? 1.5 : t.speed, durability: t.durability },
+      damage: kName === 'sword' ? 3 + t.tier * 1.5 : 1 + t.tier * 0.4,
+    });
+  }
+}
+
+// --- armour -----------------------------------------------------------------
+
+/**
+ * Every metal on the planet had exactly two fates: a storage block, or a tool
+ * you already owned a better version of. Armour is the sink that makes the
+ * middle of the ladder worth mining — and the only answer to a night that can
+ * kill a full-health player in seven seconds other than "do not go outside".
+ *
+ * Hide sits below the metals deliberately: it is craftable the first evening
+ * from what the animals already drop, so the progression starts before the
+ * first pickaxe rather than after the first forge.
+ */
+export const ARMOUR_TIERS = {
+  hide: { label: 'Hide', points: 1.5, durability: 90, mat: 'hide', color: '#8a6339', edge: '#c2905a' },
+  copper: { label: 'Copper', points: 2.25, durability: 190, mat: 'copper_ingot', color: '#c9713a', edge: '#f0a870' },
+  iron: { label: 'Iron', points: 3.5, durability: 420, mat: 'iron_ingot', color: '#b9bcc4', edge: '#eef0f6' },
+  // Deliberately short of the 80% cap: at 4.5 a full astral set already hit it,
+  // so cinder was an upgrade you could not feel except on the durability bar.
+  crystal: { label: 'Astral', points: 4.0, durability: 1000, mat: 'crystal', color: '#5fb6e4', edge: '#d6f4ff' },
+  cinder: { label: 'Cinder', points: 5.25, durability: 2400, mat: 'cinder', color: '#c2451f', edge: '#ffbe7a' },
+};
+
+/** `weight` shares the tier's protection out across the four pieces. */
+export const ARMOUR_SLOTS = {
+  helm: { label: 'Helm', weight: 0.9, art: 'helm', cost: 5 },
+  chest: { label: 'Chestplate', weight: 1.6, art: 'chest', cost: 8 },
+  legs: { label: 'Leggings', weight: 1.3, art: 'legs', cost: 7 },
+  boots: { label: 'Boots', weight: 0.8, art: 'boots', cost: 4 },
+};
+
+export const ARMOUR_SLOT_ORDER = ['helm', 'chest', 'legs', 'boots'];
+
+/** Each point takes 4% off a blow, and no suit ever stops all of one. */
+export const ARMOUR_PER_POINT = 0.04;
+export const ARMOUR_MAX_REDUCTION = 0.8;
+
+for (const [tName, t] of Object.entries(ARMOUR_TIERS)) {
+  for (const [sName, s] of Object.entries(ARMOUR_SLOTS)) {
+    add({
+      name: `${tName}_${sName}`,
+      label: `${t.label} ${s.label}`,
+      stack: 1,
+      art: s.art,
+      color: t.color,
+      edge: t.edge,
+      armour: { slot: sName, points: Math.round(t.points * s.weight * 10) / 10, durability: t.durability },
+    });
+  }
+}
+
+/**
+ * What a worn set takes off an incoming blow, 0..ARMOUR_MAX_REDUCTION.
+ * @param {Array} worn the four equipped slots, empties included
+ */
+export function armourReduction(worn) {
+  let points = 0;
+  for (const s of worn || []) {
+    if (!s || s.empty) continue;
+    points += ITEMS[s.item]?.armour?.points ?? 0;
+  }
+  return Math.min(ARMOUR_MAX_REDUCTION, points * ARMOUR_PER_POINT);
+}
+
+/** Lowest tier that can harvest each tier number, for naming in hints. */
+const TIER_LABEL = Object.fromEntries(
+  Object.values(TIERS).map((t) => [t.tier, t.label]),
+);
+
+/**
+ * Why the held item can't harvest this block, as a short player-facing phrase —
+ * or null when it can. Mining an over-tier block still destroys it and drops
+ * nothing, which reads as a broken game unless we say so up front.
+ * @returns {string|null} e.g. "Needs a Stone Pickaxe"
+ */
+export function harvestHint(blockId, toolItem) {
+  const b = BLOCKS[blockId];
+  if (!b || b.hardness < 0 || !b.tier) return null;
+  const held = toolItem?.tool?.tier ?? 0;
+  if (held >= b.tier) return null;
+  const tier = TIER_LABEL[b.tier] ?? `tier ${b.tier}`;
+  const kind = TOOL_KINDS[b.tool]?.label ?? 'Tool';
+  const article = /^[AEIOU]/.test(tier) ? 'an' : 'a';
+  return `Needs ${article} ${tier} ${kind}`;
+}
+
+export const N_ITEMS = ITEMS.length;
+export const item = (nameOrId) => (typeof nameOrId === 'string' ? ITEMS[ITEM_ID[nameOrId]] : ITEMS[nameOrId]);
+export const itemIdOf = (name) => ITEM_ID[name] ?? 0;
+
+/** item id for a block id, or 0 if it can't be held. */
+export const ITEM_FOR_BLOCK = new Uint16Array(BLOCKS.length);
+for (const it of ITEMS) {
+  if (it && it.block !== undefined) ITEM_FOR_BLOCK[it.block] = it.id;
+}
+
+/** Wild produce, in the order it is rolled. */
+const FORAGE = ['berries', 'carrot', 'corn', 'tomato'];
+
+/**
+ * What a block yields when mined with a given tool.
+ * @returns {Array<{item:number, count:number}>}
+ */
+export function computeDrops(blockId, toolItem, rng = Math.random) {
+  const b = BLOCKS[blockId];
+  if (!b || b.hardness < 0) return [];
+  const tier = toolItem?.tool?.tier ?? 0;
+
+  // leaves are a lottery, not a block drop
+  if (b.name.startsWith('leaves')) {
+    const out = [];
+    if (rng() < 0.06) out.push({ item: itemIdOf('sapling'), count: 1 });
+    if (b.name === 'leaves_oak' && rng() < 0.04) out.push({ item: itemIdOf('apple'), count: 1 });
+    if (rng() < 0.03) out.push({ item: itemIdOf('stick'), count: 1 });
+    return out;
+  }
+  if (b.name === 'tall_grass') {
+    // Tall grass is the only forage the planet has. Seeds stay the common roll;
+    // the vegetables ride underneath it at ~1 in 12 so that the cooked tier is
+    // reachable without a crop block for each one — adding those would mean new
+    // block ids and new growth stages, which is a far larger change than the
+    // meals they feed.
+    if (rng() < 0.22) return [{ item: itemIdOf('seeds'), count: 1 }];
+    if (rng() < 0.11) {
+      const pick = FORAGE[(rng() * FORAGE.length) | 0];
+      return [{ item: itemIdOf(pick), count: 1 }];
+    }
+    return [];
+  }
+  if (b.name === 'gravel') {
+    return rng() < 0.12
+      ? [{ item: itemIdOf('flint'), count: 1 }]
+      : [{ item: itemIdOf('gravel'), count: 1 }];
+  }
+  if (b.name.startsWith('wheat')) {
+    const ripe = b.name === 'wheat_3';
+    const out = [{ item: itemIdOf('seeds'), count: ripe ? 1 + Math.floor(rng() * 3) : 1 }];
+    if (ripe) out.push({ item: itemIdOf('wheat'), count: 1 + Math.floor(rng() * 2) });
+    return out;
+  }
+
+  if (b.tier > tier) return [];   // wrong tool: the block shatters with nothing to show
+  const name = b.drop;
+  if (!name) return [];
+  const id = itemIdOf(name);
+  if (!id) return [];
+  return [{ item: id, count: b.dropCount || 1 }];
+}
+
+/** Mining time in seconds for a block with the held item. */
+export function miningTime(blockId, toolItem) {
+  const b = BLOCKS[blockId];
+  if (!b || b.hardness < 0) return Infinity;
+  // Bare hands were as good as a tool on anything below the tier gate — stone
+  // came apart in three seconds with no penalty, which made the whole tool
+  // chain optional. Only stone and timber resist bare hands; soil is still
+  // meant to be diggable by hand, so shovel blocks are left alone.
+  const HAND_HARD = { pick: 0.30, axe: 0.42 };
+  let speed = (!toolItem?.tool && HAND_HARD[b.tool]) ? HAND_HARD[b.tool] : 1;
+  if (toolItem?.tool) {
+    if (toolItem.tool.kind === b.tool) speed = toolItem.tool.speed;
+    else if (toolItem.tool.kind === 'sword' && b.render === 2) speed = 12;
+    else speed = 1.15;
+  }
+  const base = b.hardness * 1.35;
+  const penalty = b.tier > (toolItem?.tool?.tier ?? 0) ? 3.2 : 1;
+  return Math.max(0.05, (base / speed) * penalty);
+}

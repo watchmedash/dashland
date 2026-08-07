@@ -481,7 +481,11 @@ export function createCutoutNormalMaterial(alphaTest = 0.42) {
  * first-person viewmodel. Same texture arrays, no fog and no voxel skylight.
  */
 export function createItemBlockMaterial() {
-  const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.0 });
+  // alphaTest, so the held and inventory copies of a cut-out block have their
+  // holes. Every ordinary block tile is fully opaque and unaffected by it; a
+  // ladder is mostly holes and without this came out as a solid orange brick
+  // with rungs painted on, in the hand and in the hotbar both.
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.0, alphaTest: 0.4 });
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uMap = voxelUniforms.uMap;
     shader.uniforms.uNormalMap = voxelUniforms.uNormalMap;

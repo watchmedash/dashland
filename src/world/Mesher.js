@@ -9,7 +9,7 @@ import {
 import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn } from './Sphere.js';
 import {
   BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
-  TINT_ID, R_CROSS, R_LIQUID, R_GLASS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
+  TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
   FACING_DEFAULT, sideTile, capTile, blockBoxes, IS_FENCE, fenceLinks,
 } from './Blocks.js';
 
@@ -32,6 +32,11 @@ for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
   if (b.render === R_LIQUID) GROUP[i] = GROUP_LIQUID;
   else if (b.render === R_CROSS) GROUP[i] = GROUP_CUTOUT;
+  // A ladder is mostly holes. Drawn in the opaque group its alpha was simply
+  // ignored, so the gaps between the rungs came out as solid timber and the
+  // whole thing read as a plank with a ladder painted on it — on the wall and
+  // in the inventory both.
+  else if (b.render === R_LADDER) GROUP[i] = GROUP_CUTOUT;
   else if (b.render === R_GLASS) GROUP[i] = b.name.startsWith('leaves') ? GROUP_CUTOUT : GROUP_TRANSPARENT;
   else GROUP[i] = GROUP_OPAQUE;
 }

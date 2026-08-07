@@ -535,7 +535,13 @@ export class Sky {
 
     this.entityFill.color.copy(p.zenith).lerp(p.horizon, 0.5).lerp(new THREE.Color(1, 1, 1), 0.35);
     this.entityFill.groundColor.copy(p.fog).multiplyScalar(0.5);
-    this.entityFill.intensity = 0.45 + p.sunIntensity * 0.55;
+    // Mobs are lit by scene lights; the terrain is lit by its own baked voxel
+    // light. That is fine by day, when both are bright, and wrong after dark:
+    // this fill used to bottom out at 0.45 while the world around it went to
+    // near black, so a husk at midnight was the brightest thing on screen and
+    // read as *glowing*. At night it drops to a rim of skylight, which leaves a
+    // silhouette — which is what a thing in the dark should be.
+    this.entityFill.intensity = 0.07 + p.sunIntensity * 0.93;
   }
 
   setPixelRatio(r) { this.stars.material.uniforms.uPixelRatio.value = r; }

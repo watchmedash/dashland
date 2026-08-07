@@ -235,7 +235,10 @@ const DECALS = {
   bench_side: 'planks',
   bed_top: 'planks',
   bed_side: 'planks',
-  ladder: 'planks',
+  // No ladder here on purpose. A decal is composited over an opaque base
+  // material, and a ladder is mostly holes — over planks it came out as a
+  // plank with a ladder drawn on it, both on the wall and in the inventory.
+  // It keeps its own alpha instead.
   door: 'planks',
   door_top: 'planks',
   sign: 'planks',

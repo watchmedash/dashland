@@ -102,10 +102,20 @@ const FISH_LEASH = 9;
 /** Height of the float above a water cell's centre — half a cell, plus a little. */
 const BOBBER_FLOAT = 0.56;
 
-/** No sleeping with a husk this close. */
-const SLEEP_SAFE_DIST = 16;
-/** A night's sleep costs you a meal's worth of nourishment. */
-const SLEEP_HUNGER = 0.14;
+
+// --- winter ice -------------------------------------------------------------
+// How much of the year's cold it takes before standing water skins over, and
+// how little before it lets go again. The gap between the two is hysteresis: a
+// single threshold would sit exactly on the boundary for a whole in-game day
+// and flicker a lake between water and ice every pass.
+const FREEZE_AT = 0.55;
+const THAW_AT = 0.35;
+/** Seconds between freeze passes, columns sampled per pass, cells changed. */
+const FREEZE_PERIOD = 1.1;
+const FREEZE_SCAN = 220;
+const FREEZE_BATCH = 14;
+/** How far from the player winter is allowed to work, in columns. */
+const FREEZE_RADIUS = 24;
 const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
 const WHITE = new THREE.Color(1, 1, 1);
 const WHITE_L = [1, 1, 1];
@@ -119,13 +129,12 @@ const DEFAULT_SETTINGS = {
   volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: false,
   // Minutes for one full day and night, or 0 to follow the device clock.
   //
-  // Following the wall clock is charming and was the original behaviour, but it
-  // makes a cycle 24 real hours long, which quietly puts half the game out of
-  // reach: husks only surface after dark and burn at dawn, torches only matter
-  // at night, and someone playing at noon would never meet any of it. A game
-  // cycle is the default for that reason; the clock-synced mode is still there
-  // for anyone who wants the planet to keep their own hours.
-  dayMinutes: 24,
+  // 0 is the default: the planet keeps your hours, so its evening is your
+  // evening. The cost is real and worth stating — a cycle is then 24 real hours
+  // long, so a player who only ever plays at noon never meets a husk, never
+  // needs a torch, and sees none of the night. The slider is still there for
+  // anyone who would rather have a short game cycle.
+  dayMinutes: 0,
 };
 
 class Game {
@@ -156,6 +165,15 @@ class Game {
     this.bobber = null;
     /** Sign text, keyed like the kilns and crates. */
     this.signs = new Map();
+    /**
+     * Cells winter turned to ice, keyed like the rest.
+     *
+     * This has to be remembered rather than worked out. Ice is a block a player
+     * can craft, carry and build with, and worldgen never places any — so
+     * "thaw every ice block in spring" would quietly demolish somebody's ice
+     * house on the first warm day. Only what winter froze is winter's to melt.
+     */
+    this.frozen = new Set();
     this.seed = 0;
     this.worldReady = false;
     this.autosaveTimer = 0;
@@ -449,6 +467,7 @@ class Game {
     this.homeSpawn = null;
     this.deathSite = null;
     this.signs.clear();
+    this.frozen.clear();
     this.seasons.fromJSON(0);
     this._pushSeason();
     this.inventory = new Inventory();
@@ -612,6 +631,7 @@ class Game {
         ? { col: save.home[0], k: save.home[1] }
         : null;
       this.signs = new Map(save.signs || []);
+      this.frozen = new Set(save.frozen || []);
       this._pendingSave = null;
     } else {
       this._spawnPlayer();
@@ -748,43 +768,24 @@ class Game {
   }
 
   /**
-   * Use a bed: claim it as home, and sleep through to dawn if it is night.
+   * Use a bed: claim it as the place you wake up.
    *
-   * Sleeping is refused while a hostile is close, which is the one rule that
-   * keeps a bed from deleting the night wholesale — you have to have made the
-   * place safe first, which is what the torches and the walls are for.
+   * A bed does not skip the night, and deliberately. The planet keeps the
+   * player's own clock, so a bed that jumped to dawn would be jumping *their*
+   * time of day — you would lie down at nine in the evening and stand up in a
+   * morning that is still nine in the evening, with the sky disagreeing with the
+   * clock in the corner of the screen for the rest of the session. The night is
+   * something to get through with a torch and a door, not something to skip.
+   *
+   * What it is still for is the thing that actually hurts: dying on a planet of
+   * a quarter of a million columns and having no idea where your house was.
    */
   _useBed(col, k) {
     const claimed = !this.homeSpawn || this.homeSpawn.col !== col || this.homeSpawn.k !== k;
     this.homeSpawn = { col, k };
-
-    const night = this.timeOfDay() < 0.25 || this.timeOfDay() > 0.75;
-    if (!night) {
-      this.ui.toast(claimed ? 'You will wake up here.' : 'Too early to sleep.',
-        itemIdOf('bed'), 2600);
-      this.audio.ui(claimed ? 620 : 300);
-      return;
-    }
-    const near = this.mobs.list.some((m) => m.spec.hostile && m.dying <= 0
-      && m.pos.distanceTo(this.player.position) < SLEEP_SAFE_DIST);
-    if (near) {
-      this.ui.toast('Too dangerous to sleep.', itemIdOf('bed'), 2600);
-      this.audio.ui(300);
-      return;
-    }
-    // Straight to first light, not to midnight-plus-one — the point of a bed is
-    // that the night is over.
-    //
-    // The year has to move with it. Sleeping is how most players will cross most
-    // nights, and a season counted only from waking hours would leave someone
-    // who beds down every dusk in a permanent spring.
-    this.seasons.advance((0.27 - this.dayT + 1) % 1);
-    this._pushSeason();
-    this.dayT = 0.27;
-    this.energy = Math.max(0, this.energy - SLEEP_HUNGER);
-    this.player.health = Math.min(this.player.maxHealth, this.player.health + 4);
-    this.ui.toast('You slept until dawn.', itemIdOf('bed'), 3000);
-    this.audio.ui(700);
+    this.ui.toast(claimed ? 'You will wake up here.' : 'This is already your home.',
+      itemIdOf('bed'), 2600);
+    this.audio.ui(claimed ? 620 : 420);
   }
 
   async quitToMenu() {
@@ -830,6 +831,7 @@ class Game {
         .map(([key, c]) => ({ key, c: c.col, k: c.k, s: c.slots.map((s) => s.toJSON()) })),
       home: this.homeSpawn ? [this.homeSpawn.col, this.homeSpawn.k] : null,
       signs: [...this.signs],
+      frozen: [...this.frozen],
       playtime: this.playtime,
       dayT: +this.dayT.toFixed(5),
       season: this.seasons.toJSON(),
@@ -1432,6 +1434,7 @@ class Game {
     this._safeTick('kilns', () => this._tickKilns(dt));
     this._safeTick('farming', () => this.farming.update(dt, this.seasons.growth));
     this._safeTick('water', () => this.water.update(dt));
+    this._safeTick('freeze', () => this._tickFreeze(dt));
     this._safeTick('vitals', () => this._tickVitals(dt));
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
     // A merchant that has walked out of range, run out of life or been killed
@@ -1592,17 +1595,90 @@ class Game {
     return this.settings.dayMinutes > 0 ? this.dayT : Sky.clockFraction();
   }
 
-  /** Advance the game clock. No-op in clock-synced mode, which reads the OS. */
+  /**
+   * Advance the game clock, and the year with it.
+   *
+   * In clock-synced mode the time of day comes from the OS and `dayT` is not
+   * used — but the *year* still has to turn, so it advances on wall-clock time
+   * instead: one real day is one planet day. Returning early here left the
+   * season frozen at whatever it was when the world loaded, which is the same
+   * bug as counting only waking hours, just with a different cause.
+   */
   _tickClock(dt) {
     const mins = this.settings.dayMinutes;
-    if (mins <= 0) return;
-    const days = dt / (mins * 60);
-    this.dayT = (this.dayT + days) % 1;
-    // The year turns off the same tick as the day, so they can never drift
-    // apart — counting wraps of dayT instead would lose a day every time the
-    // player loads a world mid-afternoon.
+    const days = mins > 0 ? dt / (mins * 60) : dt / 86400;
+    if (mins > 0) this.dayT = (this.dayT + days) % 1;
     this.seasons.advance(days);
     this._pushSeason();
+  }
+
+  /**
+   * Freeze standing water in winter, and let it go in spring.
+   *
+   * Only the top of a body of water freezes, and only where it can see the sky:
+   * a lake gets a lid you can walk out onto, an underground pool does not, and
+   * what is under the lid stays water. The work is spread a few cells to a pass
+   * so a lake ices over visibly from wherever you are standing rather than
+   * appearing solid between two frames — and so a hundred cells of edits never
+   * land on the mesher at once.
+   */
+  _tickFreeze(dt) {
+    this._freezeT = (this._freezeT ?? 0) - dt;
+    if (this._freezeT > 0) return;
+    this._freezeT = FREEZE_PERIOD;
+    const cold = this.seasons.cold;
+    if (cold >= FREEZE_AT) this._freezeSome();
+    else if (cold <= THAW_AT && this.frozen.size) this._thawSome();
+  }
+
+  /**
+   * The highest liquid cell in this column with open air above it, or -1.
+   *
+   * The scan starts *below* the reported surface, not above it: surfaceK counts
+   * the top of a lake as the surface, so beginning at surfaceK + 1 starts in the
+   * air over the water and never sees the water at all.
+   */
+  _openWaterK(col) {
+    const k0 = Math.max(1, this.planet.surfaceK(col) - 2);
+    for (let k = k0; k < Math.min(D - 1, k0 + 10); k++) {
+      if (RENDER_TYPE[this.planet.at(col, k)] !== R_LIQUID) continue;
+      if (this.planet.at(col, k + 1) === 0) return k;
+    }
+    return -1;
+  }
+
+  _freezeSome() {
+    const c = this.player.cell;
+    const base = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    const edits = [];
+    for (let n = 0; n < FREEZE_SCAN && edits.length < FREEZE_BATCH; n++) {
+      // Sampled rather than swept: a full disc is 2 000 columns a pass, and the
+      // point is a lake that creeps over, not one that snaps.
+      const di = Math.round((Math.random() * 2 - 1) * FREEZE_RADIUS);
+      const dj = Math.round((Math.random() * 2 - 1) * FREEZE_RADIUS);
+      const col = stepColumn(base, di, dj);
+      const k = this._openWaterK(col);
+      if (k < 0) continue;
+      const key = col * D + k;
+      if (this.frozen.has(key)) continue;
+      this.frozen.add(key);
+      edits.push({ col, k, id: ID.ice });
+    }
+    if (edits.length) this._applyEdits(edits);
+  }
+
+  _thawSome() {
+    const edits = [];
+    for (const key of this.frozen) {
+      if (edits.length >= FREEZE_BATCH) break;
+      this.frozen.delete(key);
+      const k = key % D, col = (key - k) / D;
+      // Mined out, built over, or already melted by other means — winter has no
+      // claim on it any more either way.
+      if (this.planet.at(col, k) !== ID.ice) continue;
+      edits.push({ col, k, id: ID.water });
+    }
+    if (edits.length) this._applyEdits(edits);
   }
 
   /** Hand the current season to the shader that colours the world. */

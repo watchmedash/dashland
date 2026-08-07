@@ -442,13 +442,13 @@ export class WorldGen {
     this.placeFlora(blocks, colHeight, colBiome, rng);
 
     // ---- 6. structures -----------------------------------------------------
-    // Last, and it has to be last. Caves eat `CARVEABLE` rock and veins
-    // overwrite `ORE_HOST` rock; neither test knows about brickwork, so running
-    // either afterwards would open a cave through a crypt wall or fill a vault
-    // with coal. Trees force their trunks over whatever is already in the cell,
-    // so a hall built before them would grow an oak out of its own floor.
-    onProgress(0.90, 'Raising ruins');
-    this.structureCounts = placeStructures(blocks, colHeight, colBiome, colSlope, this.seed);
+    // No ruins, crypts or vaults. A planet you can walk around in four minutes
+    // reads as *yours*; salting it with somebody else's architecture makes it
+    // read as a level someone built, which is the opposite of the point. The
+    // builder is kept — Structures.js still compiles and its patch mapping is
+    // used elsewhere — so this is one line to put back if that judgement
+    // changes.
+    this.structureCounts = {};
 
     onProgress(0.95, 'Ready');
     return { blocks, colBiome, colHeight, structures: this.structureCounts };

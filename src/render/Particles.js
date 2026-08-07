@@ -386,11 +386,17 @@ export class Particles {
     mu.uCam.value.copy(camera.position);
     mu.uUp.value.copy(up);
     const night = sky?.night ?? 0;
-    mu.uOpacity.value = THREE.MathUtils.lerp(0.30, 0.55, night) * (1 - this.weatherIntensity * 0.8);
+    // Night motes used to get *brighter* than daytime ones (0.55 against 0.30)
+    // and drift toward white. Additive white specks in a box that follows the
+    // camera is a star field glued to your head — which is what it looked like,
+    // and no amount of "they're fireflies" fixes a colour that isn't one. They
+    // are dimmer than daylight dust now, and warm, so the few you notice read as
+    // something alive rather than as a rendering artefact.
+    mu.uOpacity.value = THREE.MathUtils.lerp(0.30, 0.13, night) * (1 - this.weatherIntensity * 0.8);
     mu.uColor.value.setRGB(
-      THREE.MathUtils.lerp(1.0, 0.65, night),
-      THREE.MathUtils.lerp(0.90, 1.0, night),
-      THREE.MathUtils.lerp(0.66, 0.62, night),
+      THREE.MathUtils.lerp(1.0, 1.0, night),
+      THREE.MathUtils.lerp(0.90, 0.82, night),
+      THREE.MathUtils.lerp(0.66, 0.38, night),
     );
 
     // weather

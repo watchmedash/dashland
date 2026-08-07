@@ -219,17 +219,23 @@ G.hearth = (s) => {
                 lerp(n2(xi, yi + 1), n2(xi + 1, yi + 1), u), v);
   };
   s.each((i, x, y, u, v) => {
-    const f = smooth2(u * 5.5, v * 5.5) * 0.65 + smooth2(u * 13.0, v * 13.0) * 0.35;
-    // Near the threshold is a crack; well above it is solid plate.
-    const crack = smoothstep(0.52, 0.40, Math.abs(f - 0.5) * 2.2);
-    const heat = Math.pow(crack, 1.4);
-    const r = 34 + heat * 226, g = 22 + heat * 132, b = 20 + heat * 44;
+    // Scale matters more than colour here, and two attempts failed on it: a
+    // near-black crust with hairline seams read as mud with holes in it, and
+    // widening the seams turned the whole face orange with dark spots — cheese,
+    // not rock. Many small plates with thin bright seams between them is what
+    // reads as a banked fire at the size a block is actually seen.
+    const f = smooth2(u * 11.0, v * 11.0) * 0.6 + smooth2(u * 24.0, v * 24.0) * 0.4;
+    const seam = smoothstep(0.30, 0.06, Math.abs(f - 0.5) * 2.0);
+    const heat = Math.pow(seam, 1.3);
+    // Warm charcoal for the plates, so it is legibly rock even unlit, and a
+    // proper ember colour down in the seams.
+    const r = 62 + heat * 196, g = 34 + heat * 122, b = 28 + heat * 34;
     setRGB(s, i, px([r, g, b]));
     s.a[i] = 1;
     // The crust stands proud, the fire sits down in the gaps.
-    s.h[i] = 0.9 - heat * 0.75;
-    s.ao[i] = 1 - heat * 0.25;
-    s.rough[i] = 0.86 - heat * 0.3;
+    s.h[i] = 0.92 - heat * 0.8;
+    s.ao[i] = 1 - heat * 0.3;
+    s.rough[i] = 0.9 - heat * 0.35;
   });
   s.normalStrength = 2.0;
   return s;

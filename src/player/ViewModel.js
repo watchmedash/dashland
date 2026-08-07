@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { ITEMS } from '../game/Items.js';
+import { BLOCKS } from '../world/Blocks.js';
 import { createItemBlockMaterial } from '../render/VoxelMaterial.js';
 import { heldModel, hasModel } from '../render/ItemModels.js';
 
@@ -205,6 +206,13 @@ export class ViewModel {
     this.ownsGeometry = false;
 
     this.blockMaterial = createItemBlockMaterial();
+    // A second copy for blocks that are themselves alight. The viewmodel has
+    // no voxel light in it — that is baked into the world mesh — so a block
+    // that glows in your hand renders from its raw albedo, and the albedo of a
+    // thing that emits light is nearly black with bright cracks in it. Held,
+    // the planet hearth came out as dark mud with holes. Only one item is in
+    // the hand at a time, so one spare material covers every case.
+    this.glowMaterial = createItemBlockMaterial();
     this.spriteCache = new Map();
 
     this.swing = 1;
@@ -249,7 +257,23 @@ export class ViewModel {
     let mesh = null;
     if (isCube) {
       const src = this.dropsFactory(itemId);
-      if (src) mesh = new THREE.Mesh(src.geometry, this.blockMaterial);
+      // Light it by its own light if it has any, so a hearth or a lantern in
+      // the hand looks like the thing that is lighting the room.
+      const emit = BLOCKS[def.block]?.light ?? 0;
+      let mat = this.blockMaterial;
+      if (emit > 0) {
+        const lc = BLOCKS[def.block].lightColor || [1, 1, 1];
+        // Barely anything, and that is the finding rather than a fudge. The
+        // viewmodel already lights the item with a 1.9 key and a 1.1 fill, so
+        // an emissive on top of a tile whose hot seams are already near white
+        // clips: at full strength the hearth was a plain white cube, at a third
+        // it was cream. What a glowing block needs in the hand is a warm tint,
+        // not more light — it is being *held*, not lighting the scene.
+        const s = 0.04 + (emit / 15) * 0.07;
+        this.glowMaterial.emissive.setRGB(lc[0] * s, lc[1] * s, lc[2] * s);
+        mat = this.glowMaterial;
+      }
+      if (src) mesh = new THREE.Mesh(src.geometry, mat);
     } else {
       // Tools, weapons and torches have real 3D art. It loads lazily, so the
       // first equip of a given model still shows the sprite for a frame or two

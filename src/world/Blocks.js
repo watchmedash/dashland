@@ -96,7 +96,7 @@ export const TILES = [
   'flower_red', 'flower_blue', 'flower_gold', 'tall_grass', 'mushroom', 'sapling',
   'wheat_0', 'wheat_1', 'wheat_2', 'wheat_3',
   'pumpkin_side', 'pumpkin_top', 'cactus_side', 'cactus_top',
-  'iron_block', 'gold_block', 'crystal_block', 'lantern', 'crate', 'core',
+  'iron_block', 'gold_block', 'crystal_block', 'lantern', 'crate', 'core', 'hearth',
   'bench_top', 'bench_side', 'kiln_front', 'kiln_front_lit', 'kiln_side', 'kiln_top', 'torch',
   'bed_top', 'bed_side', 'ladder', 'door', 'door_top', 'sign', 'fence',
   'torch_stick', 'torch_flame',
@@ -236,6 +236,17 @@ export const BLOCKS = [
   // since is gated; these are the stragglers.
   block({ name: 'obsidian', label: 'Obsidian', all: 'obsidian', hardness: 6, tool: 'pick', tier: 3, particle: [0.12, 0.1, 0.18], sound: 'stone' }),
   block({ name: 'core', label: 'Planet Core', all: 'core', hardness: 24, tool: 'pick', tier: 4, drop: null, light: 8, lightColor: [1.0, 0.55, 0.25], particle: [1, 0.6, 0.2], sound: 'stone' }),
+  // What the planet gives you for coming all the way down.
+  //
+  // Thirty layers of basalt and lava used to end at a wall you cannot break and
+  // that says nothing — the deepest place on the planet was the only one with
+  // nothing in it. This is the one of these that exists, it cannot be crafted,
+  // and the planet only offers it once.
+  block({
+    name: 'hearth', label: 'Planet Hearth', all: 'hearth',
+    hardness: 1.4, tool: 'pick', light: 15, lightColor: [1.0, 0.72, 0.36],
+    particle: [1, 0.7, 0.3], sound: 'stone',
+  }),
 
   block({ name: 'farmland', label: 'Farmland', top: 'farmland', side: 'dirt', bottom: 'dirt', hardness: 0.6, tool: 'shovel', drop: 'dirt', particle: [0.32, 0.23, 0.16], sound: 'soil' }),
   block({ name: 'farmland_wet', label: 'Watered Farmland', top: 'farmland_wet', side: 'dirt', bottom: 'dirt', hardness: 0.6, tool: 'shovel', drop: 'dirt', particle: [0.22, 0.16, 0.12], sound: 'soil' }),

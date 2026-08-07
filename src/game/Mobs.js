@@ -78,6 +78,7 @@ const PATH_MAX_DROP = 3;
 /** How many waypoints ahead a mob steers. See _pathBearing. */
 const PATH_LOOKAHEAD = 3;
 const _pp = { f: 0, i: 0, j: 0 };
+const _wp = { f: 0, i: 0, j: 0 };
 
 /**
  * A binary min-heap keyed on score.
@@ -582,6 +583,8 @@ export class Mobs {
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       // a sandy seabed passes every test above, so reject anything submerged
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
+      // A hearth keeps the surface around it clear too, not just the caves.
+      if (this._warded(col, k)) continue;
       if (playerPos) {
         // don't materialise inside the player's view, and don't drop one just
         // outside the despawn ring where it would be culled again next second
@@ -798,6 +801,7 @@ export class Mobs {
       // Light keeps them out. This is checked last because it is the most
       // expensive test and the cheap ones reject most candidates first.
       if (this._litNear(col, k + 1)) continue;
+      if (this._warded(col, k)) continue;
       return { col, k };
     }
     return null;
@@ -857,6 +861,26 @@ export class Mobs {
    * as no torch at all. This runs only on candidates that have already passed
    * every cheaper test, so the full scan costs nothing worth saving.
    */
+  /**
+   * Is this spot inside the light of a hearth?
+   *
+   * Only *spawning* is refused. A husk already following you walks right into
+   * the ward and swings — a safe base means one that nothing appears inside,
+   * not one with an invisible wall around it.
+   */
+  _warded(col, k) {
+    const wards = this.wards;
+    if (!wards || !wards.length) return false;
+    const { f, i, j } = colParts(col, _wp);
+    cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
+    const r = this.wardRadius || 0;
+    for (let n = 0; n < wards.length; n++) {
+      const w = wards[n];
+      if (Math.hypot(_p[0] - w.x, _p[1] - w.y, _p[2] - w.z) < r) return true;
+    }
+    return false;
+  }
+
   _litNear(col, k) {
     const p = this.planet;
     for (let dk = -LIGHT_GUARD_K; dk <= LIGHT_GUARD_K; dk++) {

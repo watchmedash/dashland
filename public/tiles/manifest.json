@@ -2,7 +2,7 @@
   "size": 256,
   "cols": 12,
   "rows": 13,
-  "layers": 155,
+  "layers": 156,
   "ext": "webp",
   "crack": {
     "size": 64,
@@ -68,6 +68,7 @@
     "lantern",
     "crate",
     "core",
+    "hearth",
     "bench_top",
     "bench_side",
     "kiln_front",

@@ -203,6 +203,38 @@ G.door_top = (s) => {
   return s;
 };
 
+G.hearth = (s) => {
+  // Cooling crust with the fire still in the cracks. The pattern is a couple of
+  // octaves of value noise thresholded into plates, so the glow reads as gaps
+  // between them rather than as spots painted on.
+  const n2 = (x, y) => {
+    const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+    return v - Math.floor(v);
+  };
+  const smooth2 = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    return lerp(lerp(n2(xi, yi), n2(xi + 1, yi), u),
+                lerp(n2(xi, yi + 1), n2(xi + 1, yi + 1), u), v);
+  };
+  s.each((i, x, y, u, v) => {
+    const f = smooth2(u * 5.5, v * 5.5) * 0.65 + smooth2(u * 13.0, v * 13.0) * 0.35;
+    // Near the threshold is a crack; well above it is solid plate.
+    const crack = smoothstep(0.52, 0.40, Math.abs(f - 0.5) * 2.2);
+    const heat = Math.pow(crack, 1.4);
+    const r = 34 + heat * 226, g = 22 + heat * 132, b = 20 + heat * 44;
+    setRGB(s, i, px([r, g, b]));
+    s.a[i] = 1;
+    // The crust stands proud, the fire sits down in the gaps.
+    s.h[i] = 0.9 - heat * 0.75;
+    s.ao[i] = 1 - heat * 0.25;
+    s.rough[i] = 0.86 - heat * 0.3;
+  });
+  s.normalStrength = 2.0;
+  return s;
+};
+
 G.torch_stick = (s) => {
   // Charred, resinous wood, uniform across the tile.
   //

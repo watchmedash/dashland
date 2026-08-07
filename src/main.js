@@ -141,6 +141,18 @@ const HAND_LIGHT_GAIN = 2.1;
  */
 const NEW_WORLD_GRACE = 180;
 
+/**
+ * How deep counts as having reached the core, and how far a placed hearth
+ * keeps the dark away.
+ *
+ * The ward is generous on purpose: it is the reward for the longest journey in
+ * the game, and a base that is *actually* safe is worth more than one that is
+ * mostly safe. It only holds off spawning — anything already hunting you will
+ * still follow you home.
+ */
+const CORE_REACH_K = 5;
+const HEARTH_WARD = 46;
+
 /** (di, dj) toward the wall a torch of each facing is bracketed to. */
 const TORCH_WALL_STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -207,6 +219,10 @@ class Game {
      * house on the first warm day. Only what winter froze is winter's to melt.
      */
     this.frozen = new Set();
+    /** Placed hearths, keyed like the rest. See _refreshWards. */
+    this.hearths = new Set();
+    /** Has the planet already given up its one hearth? */
+    this.coreFound = false;
     /** Burning cells near the player, refilled by the hand-light scan. */
     this._flameCells = [];
     this.seed = 0;
@@ -503,6 +519,9 @@ class Game {
     this.deathSite = null;
     this.signs.clear();
     this.frozen.clear();
+    this.hearths.clear();
+    this.coreFound = false;
+    this.mobs.wards = null;
     this.seasons.fromJSON(0);
     this._pushSeason();
     this.inventory = new Inventory();
@@ -688,6 +707,9 @@ class Game {
         : null;
       this.signs = new Map(save.signs || []);
       this.frozen = new Set(save.frozen || []);
+      this.hearths = new Set(save.hearths || []);
+      this.coreFound = !!save.coreFound;
+      this._refreshWards();
       this._pendingSave = null;
     } else {
       this._spawnPlayer();
@@ -904,6 +926,8 @@ class Game {
       home: this.homeSpawn ? [this.homeSpawn.col, this.homeSpawn.k] : null,
       signs: [...this.signs],
       frozen: [...this.frozen],
+      hearths: [...this.hearths],
+      coreFound: this.coreFound,
       playtime: this.playtime,
       dayT: +this.dayT.toFixed(5),
       season: this.seasons.toJSON(),
@@ -935,8 +959,11 @@ class Game {
       // (the kiln ⇄ lit-kiln swap) inherits whatever the cell already had.
       const fac = this.planet.applyFacing(e.col, e.k, e.id, e.facing);
       if (fac >= 0) e.facing = fac; else delete e.facing;
+      if (e.id === ID.hearth) this.hearths.add(e.col * D + e.k);
     }
     this.worldWorker.postMessage({ type: 'edit', edits, id: ++this.editSeq });
+    // Cheap, and only does anything at all once a hearth exists.
+    if (this.hearths.size) this._refreshWards();
   }
 
   /**
@@ -1545,6 +1572,7 @@ class Game {
     this._safeTick('freeze', () => this._tickFreeze(dt));
     this._safeTick('vitals', () => this._tickVitals(dt));
     this._safeTick('grace', () => this._tickGrace(dt));
+    this._safeTick('core', () => this._tickCore(dt));
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
     // A merchant that has walked out of range, run out of life or been killed
     // takes its shop with it. Without this the screen stays up over a stock
@@ -1715,6 +1743,61 @@ class Game {
    * season frozen at whatever it was when the world loaded, which is the same
    * bug as counting only waking hours, just with a different cause.
    */
+  /**
+   * The bottom of the planet, the first time you get there.
+   *
+   * Thirty layers down through basalt, obsidian and the odd pocket of lava, and
+   * what was waiting was a block you cannot break and no acknowledgement that
+   * you had arrived. The planet gives you a hearth instead: the only one there
+   * will ever be, and the reason to have dug.
+   */
+  _tickCore(dt) {
+    if (this.coreFound) return;
+    this._coreT = (this._coreT ?? 0) - dt;
+    if (this._coreT > 0) return;
+    this._coreT = 0.4;
+    const c = this.player.cell;
+    if (c.ck > CORE_REACH_K) return;
+    // Actually next to it, not merely deep — the core tops out at layer 2 and
+    // the last few layers of basalt are not the same achievement.
+    const col = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    let touching = false;
+    for (let di = -1; di <= 1 && !touching; di++) {
+      for (let dj = -1; dj <= 1 && !touching; dj++) {
+        const cc = stepColumn(col, di, dj);
+        for (let k = Math.max(0, Math.floor(c.ck) - 2); k <= Math.floor(c.ck) + 1; k++) {
+          if (this.planet.at(cc, k) === ID.core) { touching = true; break; }
+        }
+      }
+    }
+    if (!touching) return;
+    this.coreFound = true;
+    this.inventory.add(itemIdOf('hearth'), 1);
+    this.ui.toast('The core is warm to the touch.', itemIdOf('hearth'), 5000);
+    setTimeout(() => this.ui.toast('It gives you a hearth. Nothing that walks at night will come near it.',
+      itemIdOf('hearth'), 6000), 5200);
+    this.audio.ui(880);
+  }
+
+  /**
+   * Where the hearths are, for the spawner to keep away from.
+   *
+   * The set is maintained by edits, and every entry is checked against the
+   * world before it is used — a cell can stop being a hearth by being mined,
+   * burned or built over, and a ward that outlives its hearth would switch the
+   * night off around an empty patch of ground for the rest of the game.
+   */
+  _refreshWards() {
+    const out = [];
+    for (const key of [...this.hearths]) {
+      const k = key % D, col = (key - k) / D;
+      if (this.planet.at(col, k) !== ID.hearth) { this.hearths.delete(key); continue; }
+      out.push(this.planet.centerOf(col, k, new THREE.Vector3()));
+    }
+    this.mobs.wards = out;
+    this.mobs.wardRadius = HEARTH_WARD;
+  }
+
   _tickGrace(dt) {
     if (!(this.graceT > 0)) return;
     this.graceT -= dt;

@@ -14,7 +14,7 @@
 // bugs this replaced.
 
 import * as THREE from 'three';
-import { F, D, GRAVITY, R_SEA, R_MIN, cidx } from '../world/Constants.js';
+import { F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx } from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn,
 } from '../world/Sphere.js';
@@ -437,15 +437,46 @@ function growthScale(mob) {
  * the cold-weather and aquatic species are picked by ground instead, so they
  * are absent here.
  */
-const SPAWN_TABLE = [
-  'cow', 'cow', 'cow', 'bunny', 'bunny', 'bunny', 'chick', 'chick', 'chick',
-  'deer', 'deer', 'fox', 'fox', 'dog', 'cat', 'beaver', 'crab',
-  'koala', 'parrot', 'bee', 'bee', 'caterpillar', 'monkey', 'panda',
-  'elephant', 'giraffe', 'lion', 'tiger',
-];
+/**
+ * Who lives where.
+ *
+ * One flat table used to serve the whole planet, with a single exception for
+ * penguins on ice — so a lion, a giraffe, a panda and a koala all turned up in
+ * the same temperate meadow. On a world you can walk around in four minutes
+ * that does not read as variety, it reads as a zoo with the fences taken out,
+ * and it flattens biomes that the terrain generator went to some trouble to
+ * make distinct.
+ *
+ * Weighted by repetition, which keeps the table legible: three cows to one dog
+ * is three entries to one. Anything not listed falls back to COMMON, so a new
+ * biome cannot spawn an empty world.
+ */
+/** Biome id → name, so the table above can be keyed by something readable. */
+const BIOME_NAME = [];
+for (const [name, id] of Object.entries(BIOME)) BIOME_NAME[id] = name;
+
+const COMMON = ['bunny', 'bunny', 'bee', 'caterpillar', 'fox'];
+const SPAWN_BY_BIOME = {
+  SNOW: ['penguin', 'penguin', 'polar', 'fox', 'deer'],
+  TUNDRA: ['deer', 'deer', 'fox', 'fox', 'bunny', 'polar'],
+  MOUNTAIN: ['deer', 'fox', 'bunny', 'bee', 'tiger'],
+  // Sparse on purpose: an empty-feeling desert is the point of a desert.
+  DESERT: ['lion', 'crab', 'caterpillar', 'bee'],
+  BADLANDS: ['lion', 'tiger', 'caterpillar'],
+  SAVANNA: ['giraffe', 'giraffe', 'elephant', 'lion', 'tiger', 'deer'],
+  FOREST: ['deer', 'deer', 'fox', 'bunny', 'bunny', 'panda', 'koala', 'monkey',
+    'parrot', 'bee', 'caterpillar'],
+  PINE_FOREST: ['deer', 'deer', 'fox', 'fox', 'bunny', 'beaver', 'bee'],
+  MEADOW: ['cow', 'cow', 'cow', 'bunny', 'bunny', 'chick', 'chick', 'dog', 'cat',
+    'bee', 'bee', 'deer'],
+  PLAINS: ['cow', 'cow', 'bunny', 'bunny', 'chick', 'chick', 'chick', 'dog',
+    'cat', 'deer', 'fox', 'bee'],
+  OCEAN: ['crab', 'crab', 'beaver'],
+  BEACH: ['crab', 'crab', 'crab', 'bunny', 'bee'],
+};
 
 // --- the merchant's own spawn path -------------------------------------------
-// Kept out of SPAWN_TABLE on purpose. Everything else is population: top the
+// Kept out of the biome tables on purpose. Everything else is population: top the
 // world up towards a headcount and pick a species by weight. A merchant is an
 // event — at most one alive, a long wait between them, and a life span, so the
 // one you met is gone by the time you come back for it and the next turns up
@@ -722,14 +753,12 @@ export class Mobs {
    * a full biome table would be a lot of bookkeeping for little gain.
    */
   _pickWildlife(col, k) {
-    const surf = this.planet.at(col, k);
-    // Snow gets its own two, so a penguin never turns up on a savanna.
-    if (surf === ID.snow || surf === ID.ice) {
-      const r = Math.random();
-      if (r < 0.5) return 'penguin';
-      if (r < 0.7) return 'polar';
-    }
-    return SPAWN_TABLE[(Math.random() * SPAWN_TABLE.length) | 0];
+    // The biome, not the block underfoot. Asking the block was enough while the
+    // only rule was "penguins on ice", and gets steadily wronger as the rules
+    // get more specific: a patch of sand inside a forest is a riverbank, not a
+    // desert, and the biome field already knows that.
+    const list = SPAWN_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]] || COMMON;
+    return list[(Math.random() * list.length) | 0];
   }
 
   /**

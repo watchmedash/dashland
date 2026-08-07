@@ -677,21 +677,28 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
       out.push([m - 0.02, m - 0.02, 0.60, m + w + 0.02, m + w + 0.02, 0.72]); // head
       return out;
     }
-    // Four rungs stepping away from the wall and up, then the head on the end.
-    for (let n = 0; n < 4; n++) {
-      const t = n / 4, k0 = 0.14 + n * 0.11;
-      // How far out from the wall this rung sits.
-      const a = 0.06 + t * 0.30, b = a + w;
-      if (dir === 0) out.push([1 - b, m, k0, 1 - a, m + w, k0 + 0.13]);
-      else if (dir === 1) out.push([a, m, k0, b, m + w, k0 + 0.13]);
-      else if (dir === 2) out.push([m, 1 - b, k0, m + w, 1 - a, k0 + 0.13]);
-      else out.push([m, a, k0, m + w, b, k0 + 0.13]);
+    // Five rungs climbing away from the wall, then the head on the end.
+    //
+    // The lean has to be big to read at all. The first version stepped out 0.30
+    // of a cell over its whole length and rose 0.44, which is a slope you have
+    // to be told about — on screen it was a short peg on a wall. This one
+    // starts hard against the wall and finishes past the middle of the cell,
+    // half a cell higher, so the diagonal is the first thing you see.
+    const STEPS = 5;
+    for (let n = 0; n < STEPS; n++) {
+      const t = n / (STEPS - 1);
+      const k0 = 0.10 + t * 0.46;
+      const a = 0.02 + t * 0.46, b = a + w;
+      if (dir === 0) out.push([1 - b, m, k0, 1 - a, m + w, k0 + 0.16]);
+      else if (dir === 1) out.push([a, m, k0, b, m + w, k0 + 0.16]);
+      else if (dir === 2) out.push([m, 1 - b, k0, m + w, 1 - a, k0 + 0.16]);
+      else out.push([m, a, k0, m + w, b, k0 + 0.16]);
     }
-    const a = 0.34, b = a + w + 0.04;
-    if (dir === 0) out.push([1 - b, m - 0.02, 0.55, 1 - a, m + w + 0.02, 0.68]);
-    else if (dir === 1) out.push([a, m - 0.02, 0.55, b, m + w + 0.02, 0.68]);
-    else if (dir === 2) out.push([m - 0.02, 1 - b, 0.55, m + w + 0.02, 1 - a, 0.68]);
-    else out.push([m - 0.02, a, 0.55, m + w + 0.02, b, 0.68]);
+    const a = 0.44, b = a + w + 0.05;
+    if (dir === 0) out.push([1 - b, m - 0.03, 0.68, 1 - a, m + w + 0.03, 0.84]);
+    else if (dir === 1) out.push([a, m - 0.03, 0.68, b, m + w + 0.03, 0.84]);
+    else if (dir === 2) out.push([m - 0.03, 1 - b, 0.68, m + w + 0.03, 1 - a, 0.84]);
+    else out.push([m - 0.03, a, 0.68, m + w + 0.03, b, 0.84]);
     return out;
   }
   if (IS_FENCE[id]) {

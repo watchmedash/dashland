@@ -332,8 +332,19 @@ export function computeDrops(blockId, toolItem, rng = Math.random) {
   return [{ item: id, count: b.dropCount || 1 }];
 }
 
-/** Mining time in seconds for a block with the held item. */
-export function miningTime(blockId, toolItem) {
+/** How much slower everything breaks with your head under water. */
+export const UNDERWATER_MINING = 3;
+
+/**
+ * How long this block takes to break, in seconds.
+ *
+ * @param {boolean} submerged whether the player's head is under water. Swinging
+ *   a pick with water in the way is slow: you cannot plant your feet, and the
+ *   swing is fighting the water the whole way down. Without this, the fastest
+ *   way to clear a lake bed was to dive into it, which is exactly backwards —
+ *   and it made the diving suit of an air supply worth nothing.
+ */
+export function miningTime(blockId, toolItem, submerged = false) {
   const b = BLOCKS[blockId];
   if (!b || b.hardness < 0) return Infinity;
   // Bare hands were as good as a tool on anything below the tier gate — stone
@@ -349,5 +360,8 @@ export function miningTime(blockId, toolItem) {
   }
   const base = b.hardness * 1.35;
   const penalty = b.tier > (toolItem?.tool?.tier ?? 0) ? 3.2 : 1;
-  return Math.max(0.05, (base / speed) * penalty);
+  // Three, not Minecraft's five. Five turns a lake bed into a chore rather than
+  // a decision, and the breath meter is already applying its own pressure.
+  const water = submerged ? UNDERWATER_MINING : 1;
+  return Math.max(0.05, (base / speed) * penalty * water);
 }

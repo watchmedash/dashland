@@ -1965,7 +1965,7 @@ class Game {
     if (input.buttons[0] && hit && input.locked) {
       const key = hit.col * D + hit.k;
       if (m.key !== key) { m.key = key; m.progress = 0; }
-      const time = miningTime(hit.id, heldDef);
+      const time = miningTime(hit.id, heldDef, this.player.headInWater);
       if (isFinite(time) && hit.id !== ID.core) {
         m.progress += dt / time;
         if (Math.random() < dt * 10) {

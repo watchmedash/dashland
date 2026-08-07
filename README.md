@@ -74,6 +74,24 @@ them. Two consequences bite:
 
 `H.topology()` checks the whole graph — all 259,584 columns — in about 70ms.
 
+## Reading the game from the console
+
+The shapes below are the ones an audit actually needs, and every one of them
+has been guessed wrong at least once — each guess produced a confident false
+finding ("buying is broken", "the errand pays twice", "the bobber leaks").
+
+| Thing | Shape | The trap |
+|---|---|---|
+| `Trade.buyFrom` | `(inventory, stock, itemId, want)` | Not `(inv, line, purse)`. A wrong signature returns 0 and looks like a broken shop. |
+| merchant errand | `{ item, count, reward, done }` | `!!m.request` stays true after it is paid. Check `request.done`. |
+| kiln | `{ input, fuel, output, burn, progress, col, k }` | Placing a kiln does not register it; the entry appears when the UI opens it. |
+| fishing | `game.fishing`, `game.bobber` | The bobber mesh is pooled, so `!!game.bobber` is always true once used. Check `.visible`. |
+| `computeDrops` | `(id, tool, rng)` | It rolls. A constant rng fails every roll and reports no drops. |
+| `Farming.update` | `(dt, seasonMultiplier)` | Safe to call with a large `dt` to fast-forward growth. |
+
+The pattern in all of them: asking whether an object *exists* rather than what
+it *says*.
+
 ## Two things that read wrong
 
 - **`surfaceK` is the ground, not the top.** On water it is the *bed* — the

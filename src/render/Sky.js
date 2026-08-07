@@ -180,7 +180,11 @@ void main() {
   float shade = clamp((d - lit) * 2.2 + 0.62, 0.25, 1.0);
   float rim = pow(clamp(dot(normalize(uSunDir), dir), 0.0, 1.0), 6.0);
 
-  vec3 col = mix(uZenith * 0.85, vec3(1.0), 0.72) * shade;
+  // Weather darkens the cloud itself, not just its extent. Fair-weather cumulus
+  // are nearly white and a storm deck is slate; without this every sky was made
+  // of the same bright cloud and a storm read as fog with the lights on.
+  float bright = mix(1.0, 0.46, smoothstep(0.35, 0.95, cloudy));
+  vec3 col = mix(uZenith * 0.85, vec3(1.0), 0.72) * shade * bright;
   col += uSunColor * rim * 0.55;
   col = mix(col, uSunColor, 0.18);
 

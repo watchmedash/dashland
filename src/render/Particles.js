@@ -168,7 +168,14 @@ export class Particles {
           vA = step(aSeed.z, uIntensity);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = mix(1.6, 4.2, uSnow) * uPixelRatio * (14.0 / max(1.0, -mv.z));
+          // Rain used to be drawn at 1.6px scaled by distance, which is about
+          // two pixels at ten units: at full storm intensity, with all six
+          // thousand drops showing, the ground-level view read as a few specks
+          // of dust while the sky was black with cloud. The density was never
+          // the problem — each drop was simply too small to see. The fragment
+          // below already squeezes them into vertical streaks, so the extra
+          // size becomes length rather than blobs.
+          gl_PointSize = mix(3.6, 4.6, uSnow) * uPixelRatio * (14.0 / max(1.0, -mv.z));
         }
       `,
       fragmentShader: /* glsl */`
@@ -176,9 +183,11 @@ export class Particles {
         void main() {
           if (vA < 0.5) discard;
           vec2 c = gl_PointCoord - 0.5;
-          float d = length(vec2(c.x * mix(2.6, 1.0, uSnow), c.y));
+          // Thinner across than it is long, so the bigger point above reads as
+          // a falling streak rather than a ball. Snow stays round.
+          float d = length(vec2(c.x * mix(3.4, 1.0, uSnow), c.y));
           float a = smoothstep(0.5, 0.05, d);
-          gl_FragColor = vec4(uColor, a * mix(0.55, 0.9, uSnow));
+          gl_FragColor = vec4(uColor, a * mix(0.72, 0.9, uSnow));
         }
       `,
       transparent: true, depthWrite: false,

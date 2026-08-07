@@ -14,7 +14,7 @@
 // bugs this replaced.
 
 import * as THREE from 'three';
-import { F, D, GRAVITY, cidx } from '../world/Constants.js';
+import { F, D, GRAVITY, R_SEA, R_MIN, cidx } from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn,
 } from '../world/Sphere.js';
@@ -64,6 +64,58 @@ const WALL_SLIDE_TURN = 1.15;
  * clever.
  */
 const PROBE_ANGLES = [0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.55, -1.55];
+
+// --- pathfinding -------------------------------------------------------------
+/** Seconds between route searches for one hunting mob. */
+const PATH_PERIOD = 0.9;
+/** How long a route may be followed after the player has moved off its end. */
+const PATH_MAX_AGE = 2.2;
+/** Columns expanded before a search gives up, and the longest route it returns. */
+const PATH_BUDGET = 900;
+const PATH_MAX_STEPS = 48;
+/** How far a body will step down without thinking of it as a fall. */
+const PATH_MAX_DROP = 3;
+const _pp = { f: 0, i: 0, j: 0 };
+
+/**
+ * A binary min-heap keyed on score.
+ *
+ * A* wants the cheapest open node and nothing else, and a linear scan over an
+ * open set that reaches into the hundreds is most of the search. Small enough
+ * to keep here rather than pull in a dependency for.
+ */
+class Heap {
+  constructor() { this.items = []; this.score = []; }
+  get size() { return this.items.length; }
+  push(item, score) {
+    let n = this.items.length;
+    this.items.push(item); this.score.push(score);
+    while (n > 0) {
+      const p = (n - 1) >> 1;
+      if (this.score[p] <= this.score[n]) break;
+      this._swap(p, n); n = p;
+    }
+  }
+  pop() {
+    const top = this.items[0], last = this.items.length - 1;
+    this.items[0] = this.items[last]; this.score[0] = this.score[last];
+    this.items.pop(); this.score.pop();
+    let n = 0;
+    for (;;) {
+      const l = n * 2 + 1, r = l + 1;
+      let m = n;
+      if (l < this.items.length && this.score[l] < this.score[m]) m = l;
+      if (r < this.items.length && this.score[r] < this.score[m]) m = r;
+      if (m === n) break;
+      this._swap(m, n); n = m;
+    }
+    return top;
+  }
+  _swap(a, b) {
+    const i = this.items[a]; this.items[a] = this.items[b]; this.items[b] = i;
+    const s = this.score[a]; this.score[a] = this.score[b]; this.score[b] = s;
+  }
+}
 /** How far past its own body a probe looks. */
 const PROBE_AHEAD = 0.9;
 
@@ -1230,6 +1282,14 @@ export class Mobs {
     const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
     mob.want = Math.atan2(rb, ra);
 
+    // ...unless there is something in the way, in which case walk the route
+    // rather than the bearing. The whisker probe further down can lean around a
+    // boulder but has no idea a wall has a door in it twelve cells to the left;
+    // it turns toward whichever whisker is clear and, against a long obstacle,
+    // slides along it forever. A path knows about the door.
+    const via = this._pathBearing(mob, dt, player, fr);
+    if (via !== null) mob.want = via;
+
     // Close the distance, then stop and swing. Walking into the player would
     // shove them around — _separate already pushes bodies apart.
     const reach = spec.reach + mob.radius;
@@ -1248,6 +1308,132 @@ export class Mobs {
     }
     mob.stateT = 0.5;
     return true;
+  }
+
+  // --- pathfinding ----------------------------------------------------------
+
+  /**
+   * Bearing to the next waypoint of a route to the player, or null to just walk
+   * at them.
+   *
+   * The route is recomputed on a timer rather than every frame, and only while
+   * something is actually hunting — at most a handful of hostiles exist at once
+   * and each search is bounded, so the whole system costs a few hundred
+   * microseconds a second. Between searches the mob walks its existing path,
+   * which is what stops it dithering when the player moves a step.
+   */
+  _pathBearing(mob, dt, player, fr) {
+    const goal = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
+    mob.pathT = (mob.pathT ?? 0) - dt;
+    const stale = mob.pathGoal !== goal && mob.pathT <= 0;
+    if (!mob.path || stale || mob.pathT <= -PATH_MAX_AGE) {
+      mob.pathT = PATH_PERIOD;
+      mob.pathGoal = goal;
+      mob.path = this._findPath(mob, goal);
+      mob.pathI = 0;
+    }
+    const path = mob.path;
+    if (!path || mob.pathI >= path.length) return null;
+
+    // Advance through waypoints we have already reached — after a jump or a
+    // shove a mob can skip one, and steering back to it walks it backwards.
+    const c = mob.cell;
+    const here = this._colOf(c.f, c.ci, c.cj);
+    for (let n = mob.pathI; n < Math.min(path.length, mob.pathI + 3); n++) {
+      if (path[n] === here) mob.pathI = n + 1;
+    }
+    if (mob.pathI >= path.length) return null;
+
+    const p = colParts(path[mob.pathI], _pp);
+    cellToWorld(p.f, p.i + 0.5, p.j + 0.5, c.ck, _p);
+    _rel.set(_p[0] - mob.pos.x, _p[1] - mob.pos.y, _p[2] - mob.pos.z);
+    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
+    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    if (Math.abs(ra) < 1e-5 && Math.abs(rb) < 1e-5) return null;
+    return Math.atan2(rb, ra);
+  }
+
+  /**
+   * A* over columns, from the mob to the player.
+   *
+   * Bounded three ways: a radius, a node budget, and a step limit. A husk that
+   * cannot find a way through inside that budget gets null and falls back to
+   * walking at the player and leaning around whatever it bumps into, which is
+   * what it always did — so the worst case is the old behaviour rather than a
+   * frame spike.
+   *
+   * @returns {number[]|null} columns from the first step to the goal
+   */
+  _findPath(mob, goal) {
+    const start = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
+    if (start === goal) return null;
+    const startK = this._groundK(start, Math.floor(mob.cell.ck) + 1);
+    if (startK < 0) return null;
+
+    const gScore = new Map([[start, 0]]);
+    const kAt = new Map([[start, startK]]);
+    const came = new Map();
+    const open = new Heap();
+    open.push(start, this._colDist(start, goal));
+    let expanded = 0;
+
+    while (open.size && expanded < PATH_BUDGET) {
+      const cur = open.pop();
+      if (cur === goal) return this._unwind(came, cur);
+      expanded++;
+      const g0 = gScore.get(cur);
+      if (g0 >= PATH_MAX_STEPS) continue;
+      const k0 = kAt.get(cur);
+      for (let d = 0; d < 4; d++) {
+        const nb = colNeighbor(cur, d);
+        if (nb < 0) continue;
+        const k1 = this._stepTo(nb, k0, mob);
+        if (k1 < 0) continue;
+        const g1 = g0 + 1;
+        if (gScore.has(nb) && gScore.get(nb) <= g1) continue;
+        gScore.set(nb, g1);
+        kAt.set(nb, k1);
+        came.set(nb, cur);
+        open.push(nb, g1 + this._colDist(nb, goal));
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Can a body standing on layer `fromK` walk into this column, and onto what?
+   * @returns {number} the layer it would stand on, or -1 if it cannot go there
+   */
+  _stepTo(col, fromK, mob) {
+    const p = this.planet;
+    const gk = this._groundK(col, fromK + 1);
+    if (gk < 0) return -1;
+    if (gk - fromK > 1) return -1;                 // too big a step up
+    if (fromK - gk > PATH_MAX_DROP) return -1;     // too far to fall
+    if (mob.spec.aquatic ? !p.liquidAt(col, gk + 1) : p.liquidAt(col, gk + 1)) return -1;
+    for (let h = 1; h <= mob.tall; h++) {
+      const above = p.at(col, gk + h);
+      if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) return -1;
+    }
+    return gk;
+  }
+
+  /** Straight-line distance between two column centres, in world units. */
+  _colDist(a, b) {
+    const pa = colParts(a, _pp);
+    cellToWorld(pa.f, pa.i + 0.5, pa.j + 0.5, R_SEA - R_MIN, _p);
+    const ax = _p[0], ay = _p[1], az = _p[2];
+    const pb = colParts(b, _pp);
+    cellToWorld(pb.f, pb.i + 0.5, pb.j + 0.5, R_SEA - R_MIN, _p);
+    return Math.hypot(ax - _p[0], ay - _p[1], az - _p[2]);
+  }
+
+  _unwind(came, end) {
+    const out = [];
+    let cur = end;
+    while (came.has(cur)) { out.push(cur); cur = came.get(cur); }
+    out.reverse();
+    return out.length ? out : null;
   }
 
   /**

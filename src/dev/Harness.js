@@ -112,6 +112,61 @@ class Harness {
     return this;
   }
 
+  /**
+   * Wait out a measurement window, and refuse to let it pass quietly if the
+   * world stopped being the one you started measuring.
+   *
+   * `alive()` checks the world at the moment you call it, which is the wrong
+   * moment: the usual mistake is to call it, then build something, then measure
+   * — and the thing you built is what kills the player. Three separate findings
+   * this session were "the feature emits nothing", and all three were a husk
+   * killing the player partway through the window, or the respawn moving them a
+   * hundred metres from the thing being measured. A stopped world reads as a
+   * clean zero, which is indistinguishable from a broken feature.
+   *
+   * So this polls rather than checking the ends. A death that is recovered from
+   * before the window closes still fails, because the numbers collected across
+   * it are still from a world that spent part of the time stopped.
+   *
+   * @param {number} seconds how long to wait
+   * @param {{maxDrift?: number, sample?: Function}} opts `maxDrift` is how far
+   *   the player may legitimately move; a respawn jumps much further than
+   *   anything walking does. `sample` is called each poll and its return values
+   *   are collected.
+   */
+  async during(seconds, opts = {}) {
+    const g = this.g;
+    if (g.state !== 'playing') {
+      throw new HarnessError(`world is "${g.state}" before the window even opened`);
+    }
+    const start = g.player.position.clone();
+    const t0 = performance.now();
+    const samples = [];
+    let stoppedAt = -1;
+    while (performance.now() - t0 < seconds * 1000) {
+      if (g.state !== 'playing' && stoppedAt < 0) {
+        stoppedAt = (performance.now() - t0) / 1000;
+      }
+      if (opts.sample) samples.push(opts.sample());
+      await sleep(100);
+    }
+    if (stoppedAt >= 0) {
+      throw new HarnessError(
+        `player died ${stoppedAt.toFixed(1)}s into a ${seconds}s window — the world was `
+        + 'stopped for the rest of it, so every number from this run is a flat zero '
+        + 'for a reason that has nothing to do with what you were testing. '
+        + 'Try clearHostiles() first, or measure somewhere safe.');
+    }
+    const drift = g.player.position.distanceTo(start);
+    const maxDrift = opts.maxDrift ?? 40;
+    if (drift > maxDrift) {
+      throw new HarnessError(
+        `player moved ${drift.toFixed(1)} units during the window (limit ${maxDrift}) — `
+        + 'if this was a respawn, whatever you set up is no longer anywhere near them.');
+    }
+    return samples;
+  }
+
   /** Prove the simulation is actually running before trusting any timing. */
   async ticking(ms = 900) {
     const g = this.g;

@@ -91,6 +91,10 @@ H.topology()               // every column's adjacency, ~70ms; expect clean: tru
 H.night()
 
 await H.watch({ seconds: 40, sample: (h) => ({ near: h.nearestHostile() }) })
+
+// Timed windows go through during(), which throws if the player died or was
+// respawned partway through instead of letting a stopped world read as a zero.
+await H.during(3, { sample: () => emberCount })
 ```
 
 It asserts its own preconditions on purpose. Measuring this game by hand has
@@ -102,6 +106,13 @@ cells away, well outside the 34-cell aggro range). Each looked like a game bug
 and was a broken measurement. `watch()` reports `ended: 'player died'` rather
 than handing back a flat line, `spawnAt` throws rather than placing a mob that
 can never arrive, and `itemsWon()` counts the ground as well as the pack.
+
+`alive()` is not enough on its own, and the reason is worth knowing: it checks
+the world at the moment you call it, but the usual mistake is to call it, build
+the test scene, and *then* measure — and the scene is what kills you. Sealing
+yourself in an unlit corridor is a husk spawner. `during()` polls across the
+whole window and throws on a death or a respawn, because a stopped world
+produces exactly the same clean zero as a feature that does nothing.
 
 ## Credits
 

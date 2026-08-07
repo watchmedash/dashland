@@ -71,10 +71,12 @@ const PATH_PERIOD = 0.9;
 /** How long a route may be followed after the player has moved off its end. */
 const PATH_MAX_AGE = 2.2;
 /** Columns expanded before a search gives up, and the longest route it returns. */
-const PATH_BUDGET = 900;
-const PATH_MAX_STEPS = 48;
+const PATH_BUDGET = 2600;
+const PATH_MAX_STEPS = 70;
 /** How far a body will step down without thinking of it as a fall. */
 const PATH_MAX_DROP = 3;
+/** How many waypoints ahead a mob steers. See _pathBearing. */
+const PATH_LOOKAHEAD = 3;
 const _pp = { f: 0, i: 0, j: 0 };
 
 /**
@@ -814,11 +816,14 @@ export class Mobs {
    *
    * @returns {number|null} a heading to steer to, or null if every way is barred
    */
-  _probeAround(mob, c, here, fr, player) {
-    _rel.copy(player.position).sub(mob.pos);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
-    const toTarget = Math.atan2(rb, ra);
+  _probeAround(mob, c, here, fr, player, aim) {
+    let toTarget = aim;
+    if (toTarget === undefined) {
+      _rel.copy(player.position).sub(mob.pos);
+      const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
+      const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+      toTarget = Math.atan2(rb, ra);
+    }
     const reach = mob.halfL * 2 + PROBE_AHEAD;
 
     let best = null, bestTurn = Infinity;
@@ -1261,6 +1266,19 @@ export class Mobs {
     // otherwise decide it was stuck and wander off mid-fight — the exact
     // opposite of what this is for.
     const closing = dist > spec.reach + mob.radius;
+    // Walking a route counts as progress even though it is not closing the
+    // straight-line gap — and often precisely because it is not. Getting out of
+    // a three-sided pen means walking away from the player for eight or nine
+    // cells, which is exactly what "nine seconds without getting any closer"
+    // was written to catch. The two rules are individually sensible and
+    // together they mean a husk gives up at the furthest point of every detour
+    // it takes: measured on a pen, neither pathing nor not-pathing ever reached
+    // the player, because the hunt was called off mid-way round. Consuming
+    // waypoints is the honest measure of progress while a route exists.
+    if (mob.onPath && mob.pathI > (mob.stallPathI ?? -1)) {
+      mob.stallPathI = mob.pathI;
+      mob.stallT = 0;
+    }
     if (dist < mob.bestDist - 0.4) { mob.bestDist = dist; mob.stallT = 0; }
     else if (closing) {
       mob.stallT += dt;
@@ -1331,8 +1349,12 @@ export class Mobs {
       mob.pathGoal = goal;
       mob.path = this._findPath(mob, goal);
       mob.pathI = 0;
+      // A fresh route restarts the progress clock, or the stall test would
+      // compare waypoint indices from two different paths.
+      mob.stallPathI = -1;
     }
     const path = mob.path;
+    mob.onPath = false;
     if (!path || mob.pathI >= path.length) return null;
 
     // Advance through waypoints we have already reached — after a jump or a
@@ -1344,12 +1366,21 @@ export class Mobs {
     }
     if (mob.pathI >= path.length) return null;
 
-    const p = colParts(path[mob.pathI], _pp);
+    // Aim several waypoints ahead, not at the next one. Waypoints are adjacent
+    // columns, so steering at the very next one means steering at a point about
+    // one body-length away: the mob overshoots it, turns back, overshoots
+    // again, and crawls along the route oscillating — slowly enough that the
+    // stall detector decides it is stuck and calls the hunt off. Looking
+    // further down the path gives it a heading worth committing to, and the
+    // corners still get taken because the waypoints are consumed in order.
+    const aimAt = Math.min(mob.pathI + PATH_LOOKAHEAD, path.length - 1);
+    const p = colParts(path[aimAt], _pp);
     cellToWorld(p.f, p.i + 0.5, p.j + 0.5, c.ck, _p);
     _rel.set(_p[0] - mob.pos.x, _p[1] - mob.pos.y, _p[2] - mob.pos.z);
     const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
     const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
     if (Math.abs(ra) < 1e-5 && Math.abs(rb) < 1e-5) return null;
+    mob.onPath = true;
     return Math.atan2(rb, ra);
   }
 
@@ -1792,6 +1823,19 @@ export class Mobs {
             // finds a gap only by luck; probing a fan of headings finds the
             // doorway on the frame it comes into view, which is the difference
             // between a door that matters and one that does not.
+            //
+            // The probe deliberately still aims at the *player*, not at the
+            // route's next waypoint, even while a route is being followed.
+            // Aiming it at the waypoint sounds obviously right — local
+            // avoidance serving the route rather than arguing with it — and
+            // measured worse across the board: the long-wall case went from
+            // reaching the player in 5.5s to never reaching them at all. When a
+            // body is pressed against a wall its next waypoint is usually
+            // straight through that wall, so every whisker reads as blocked,
+            // the probe returns null, and the mob falls through to a wall-slide
+            // in a random direction that no longer has anything to do with
+            // where the player is. Aiming at the player keeps the slide biased
+            // toward the goal, which is what actually finds gaps.
             const probed = this._probeAround(mob, c, here, fr, player);
             if (probed !== null) {
               mob.want = probed;

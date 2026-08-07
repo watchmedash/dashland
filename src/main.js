@@ -134,8 +134,19 @@ const HAND_LIGHT_GAIN = 2.1;
 
 /** (di, dj) toward the wall a torch of each facing is bracketed to. */
 const TORCH_WALL_STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+/**
+ * Blocks with an actual fire in them, as opposed to blocks that merely glow.
+ * Filled after the block table is imported, below.
+ */
+const FLAME_BLOCKS = new Set();
+/** How many flames are animated at once, and how often one throws an ember. */
+const MAX_FLAMES = 14;
+const FLAME_PERIOD = 0.14;
 /** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
 const HURT_IMMUNITY = 0.5;
+
+for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID[n]);
 
 const DEFAULT_SETTINGS = {
   fov: 75, sensitivity: 1.0, renderScale: 1,
@@ -187,6 +198,8 @@ class Game {
      * house on the first warm day. Only what winter froze is winter's to melt.
      */
     this.frozen = new Set();
+    /** Burning cells near the player, refilled by the hand-light scan. */
+    this._flameCells = [];
     this.seed = 0;
     this.worldReady = false;
     this.autosaveTimer = 0;
@@ -1520,6 +1533,7 @@ class Game {
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     this._updateHandLight(dt);
+    this._safeTick('flames', () => this._tickFlames(dt));
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     this.sky.update(dt, this.camera, this.player.up, this.player.position);
     this.particles.update(dt, this.camera, this.player.up, this.sky);
@@ -1787,6 +1801,12 @@ class Game {
     this._hlCol = baseCol; this._hlK = ck; this._hlSeq = this.editSeq;
 
     let r = 0, g = 0, b = 0;
+    // Every burning cell this scan passes is also somewhere a flame should be
+    // seen, and the scan is already here and already cached — collecting them
+    // costs a push. Doing it as its own sweep would be a second 2 000-cell walk
+    // per frame for the same answer.
+    const flames = this._flameCells;
+    flames.length = 0;
     // The scan has to reach at least as far as the brightest light carries, or
     // the contribution clips at the boundary instead of fading — walking away
     // from a torch would step the hand light from 0.21 straight to 0.
@@ -1797,9 +1817,15 @@ class Game {
         for (let dk = -3; dk <= 4; dk++) {
           const k = ck + dk;
           if (k < 0 || k >= D) continue;
-          const bl = BLOCKS[this.planet.at(col, k)];
+          const id = this.planet.at(col, k);
+          const bl = BLOCKS[id];
           const emit = bl?.light;
           if (!emit) continue;
+          // Only things that actually burn get a flame. Glowstone and crystal
+          // are lit, not alight.
+          if (FLAME_BLOCKS.has(id) && flames.length < MAX_FLAMES) {
+            flames.push({ col, k, id, byte: this.planet.facingAt(col, k) });
+          }
           // Falloff in cells, capped at the scan radius so it always reaches
           // exactly zero at the edge rather than being cut off mid-curve.
           const d2 = di * di + dj * dj + dk * dk;
@@ -1814,6 +1840,51 @@ class Game {
     }
     this._hlValue = { r, g, b };
     return this._hlValue;
+  }
+
+  /**
+   * Embers off everything burning nearby.
+   *
+   * A torch that emits light but sits perfectly still reads as a lamp. This is
+   * what makes it read as a fire, and it costs one particle every seventh of a
+   * second per flame — the cells themselves were already found by the hand-light
+   * scan, which is cached on the player's cell and the edit counter, so walking
+   * around does not re-walk them every frame.
+   */
+  _tickFlames(dt) {
+    const flames = this._flameCells;
+    if (!flames.length) return;
+    this._flameEmitT = (this._flameEmitT ?? 0) - dt;
+    if (this._flameEmitT > 0) return;
+    this._flameEmitT = FLAME_PERIOD;
+    // One flame per tick, round-robin, so twelve torches in a room cost exactly
+    // what one does.
+    this._flameNext = ((this._flameNext ?? 0) + 1) % flames.length;
+    const f = flames[this._flameNext];
+    this._flameHead(f, _v1);
+    const p = colParts(f.col);
+    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, f.k + 0.5, _frame);
+    _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
+    this.particles.embers(_v1, _v2, 1, 0.10);
+  }
+
+  /** Where the fire actually is in a burning cell, in world space. */
+  _flameHead(f, out) {
+    this.planet.centerOf(f.col, f.k, out);
+    const p = colParts(f.col);
+    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, f.k + 0.5, _frame);
+    if (!IS_TORCH[f.id]) return out;
+    // A floor torch burns just above its own centre; a wall torch burns out
+    // over the cell, at the far end of the bracket.
+    const byte = f.byte & 7;
+    if (byte === 0) return out.addScaledVector(
+      _v3.set(_frame.up[0], _frame.up[1], _frame.up[2]), 0.22);
+    const [di, dj] = TORCH_WALL_STEP[(byte - 1) & 3];
+    const ea = _frame.ea, eb = _frame.eb;
+    out.x += -(ea[0] * di + eb[0] * dj) * 0.16 + _frame.up[0] * 0.28;
+    out.y += -(ea[1] * di + eb[1] * dj) * 0.16 + _frame.up[1] * 0.28;
+    out.z += -(ea[2] * di + eb[2] * dj) * 0.16 + _frame.up[2] * 0.28;
+    return out;
   }
 
   /**

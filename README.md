@@ -74,6 +74,18 @@ them. Two consequences bite:
 
 `H.topology()` checks the whole graph — all 259,584 columns — in about 70ms.
 
+## Two things that read wrong
+
+- **`surfaceK` is the ground, not the top.** On water it is the *bed* — the
+  water sits at `surfaceK + 1`, so `liquidAt(col, surfaceK(col))` tests the sand
+  and is always false. Under a tree it is the canopy. This has caused a shipped
+  bug and two measurements that reported a planet with no water, on a planet
+  that is a fifth water.
+- **Drops are rolls.** `computeDrops` takes an rng; handing it a constant like
+  `() => 0.5` fails every probability test in it and reports that tall grass and
+  leaves drop nothing. They drop seeds, forage, saplings, apples and sticks.
+  Sample it a few thousand times with `Math.random`.
+
 ## Testing by hand
 
 `src/dev/Harness.js` drives the running game from the browser console. Nothing

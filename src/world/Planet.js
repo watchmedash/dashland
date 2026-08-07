@@ -127,7 +127,20 @@ export class Planet {
   upAt(pos, out = new THREE.Vector3()) { return out.copy(pos).normalize(); }
   radiusAt(pos) { return pos.length(); }
 
-  /** Highest non-air, non-water layer in a column. */
+  /**
+   * Highest non-air, non-water layer in a column — the *ground*, not the top of
+   * what is standing on it.
+   *
+   * Read that twice before using it near water. On a lake or a sea this is the
+   * bed, and the water is at `surfaceK(col) + 1`; `liquidAt(col, surfaceK(col))`
+   * is therefore the sand, and always false. That has now caused a shipped bug
+   * (winter ice scanned from the wrong layer and froze nothing) and two
+   * measurements that confidently reported a planet with no water on it, on a
+   * planet that is a fifth water.
+   *
+   * Leaves and logs are not air either, so under a tree this is the canopy top
+   * rather than the soil.
+   */
   surfaceK(col) {
     const base = col * D;
     for (let k = D - 1; k >= 0; k--) {

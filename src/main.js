@@ -718,8 +718,23 @@ class Game {
 
     if (this._welcome) {
       this._welcome = false;
+      // Waking at midnight is now an ordinary way to start, so the opening
+      // advice has to know which one happened. "Punch a tree to begin" is fine
+      // at noon and useless in the dark to someone who has not been told they
+      // are holding six torches.
+      const t = this.timeOfDay();
+      const dark = t < 0.25 || t > 0.75;
       this.ui.toast('You wake on a small, quiet world.', 0, 4200);
-      setTimeout(() => this.ui.toast('Punch a tree to begin.', itemIdOf('log_oak'), 5000), 4600);
+      setTimeout(() => {
+        if (dark) {
+          this.ui.toast('Night already. Plant a torch — light keeps the dark out.',
+            itemIdOf('torch'), 5200);
+          setTimeout(() => this.ui.toast('Punch a tree while it lasts.',
+            itemIdOf('log_oak'), 5000), 5600);
+        } else {
+          this.ui.toast('Punch a tree to begin.', itemIdOf('log_oak'), 5000);
+        }
+      }, 4600);
     }
   }
 

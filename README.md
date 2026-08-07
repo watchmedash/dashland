@@ -74,6 +74,27 @@ them. Two consequences bite:
 
 `H.topology()` checks the whole graph — all 259,584 columns — in about 70ms.
 
+## Measured baseline
+
+Taken on the dev server in Chrome, so treat them as a shape to regress against
+rather than as absolutes — a production build and a different machine will
+differ.
+
+| | |
+|---|---|
+| Frame rate, sprinting continuously for 60s | 59.9–60 fps, no decay |
+| Live chunks while moving | ~615, flat (streaming adds and drops in balance) |
+| Chunk geometry | ~76 MB over ~976 geometries |
+| Voxel + biome arrays, main thread | 11.1 MB |
+| Heap | ~1.4 GB against a 4.2 GB limit, oscillating, no upward trend |
+| Heap over three quit → new game cycles | returns to ~1.4 GB each time; no leak |
+| Six husks pathfinding at once | 57.2 fps |
+
+Save and load round-trip through a full page reload: seed, edited blocks, sign
+text, crate contents, kiln input and fuel mid-smelt, home spawn, growing crops,
+season day, time of day, inventory, stats, `coreFound`, and the hearth ward
+list, which is rebuilt from the world on load rather than saved.
+
 ## Reading the game from the console
 
 The shapes below are the ones an audit actually needs, and every one of them

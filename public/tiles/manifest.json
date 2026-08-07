@@ -2,7 +2,7 @@
   "size": 256,
   "cols": 12,
   "rows": 13,
-  "layers": 153,
+  "layers": 155,
   "ext": "webp",
   "crack": {
     "size": 64,
@@ -82,6 +82,8 @@
     "door_top",
     "sign",
     "fence",
+    "torch_stick",
+    "torch_flame",
     "limestone",
     "marble",
     "granite",

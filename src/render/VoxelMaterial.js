@@ -28,6 +28,10 @@ export const voxelUniforms = {
   // SEASON_FRAG.
   uSeasonColor: { value: new THREE.Vector3(1, 1, 1) },
   uSeasonStrength: { value: 0 },
+  // The only light in the world that moves — whatever the player is holding.
+  uHandLightPos: { value: new THREE.Vector3() },
+  uHandLightColor: { value: new THREE.Vector3() },
+  uHandLightRadius: { value: 0 },
 };
 
 const COMMON_VERT_HEAD = /* glsl */`
@@ -115,6 +119,9 @@ uniform vec3 uWaterTint;
 uniform float uTime;
 uniform vec3 uSeasonColor;
 uniform float uSeasonStrength;
+uniform vec3 uHandLightPos;
+uniform vec3 uHandLightColor;
+uniform float uHandLightRadius;
 varying float vLayer;
 varying float vAO;
 varying float vSun;
@@ -315,6 +322,31 @@ const LIGHTS_END = /* glsl */`
 
   reflectedLight.indirectDiffuse += diffuseColor.rgb * (skyFill + bounce) * aoTotal * RECIPROCAL_PI;
   reflectedLight.indirectDiffuse += diffuseColor.rgb * vBlock * uBlockIntensity * mix(0.65, 1.0, aoTotal) * RECIPROCAL_PI;
+
+  // What you are carrying.
+  //
+  // Every other light in this world is baked into the voxel grid, which is
+  // wonderfully cheap and cannot follow anything: a torch lit the cave it was
+  // planted in and a torch in your hand lit nothing at all, so the only way to
+  // see underground was to keep planting them. This is the one moving light,
+  // and it is worth the two uniforms — walking into the dark holding a flame
+  // and having the dark answer is most of what a torch is for.
+  //
+  // Inverse-square with a linear cutoff at the radius, so it reaches zero
+  // instead of trailing a faint wash across the whole chunk, and lambert-shaded
+  // off the surface normal so it wraps around geometry rather than flooding it.
+  if (uHandLightRadius > 0.0) {
+    vec3 toHand = uHandLightPos - vWorld;
+    float dist = length(toHand);
+    if (dist < uHandLightRadius) {
+      float fall = 1.0 - dist / uHandLightRadius;
+      float lambert = clamp(dot(normal, toHand / max(dist, 0.001)), 0.0, 1.0);
+      // A little ambient term so faces turned away are lifted out of pure black
+      // rather than vanishing; a real flame bounces off everything around it.
+      float shaped = mix(0.22, 1.0, lambert) * fall * fall;
+      reflectedLight.indirectDiffuse += diffuseColor.rgb * uHandLightColor * shaped * RECIPROCAL_PI;
+    }
+  }
   reflectedLight.indirectSpecular *= aoTotal;
 
   float shadowGate = smoothstep(0.0, 0.30, vSun);

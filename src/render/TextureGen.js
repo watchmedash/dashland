@@ -203,6 +203,52 @@ G.door_top = (s) => {
   return s;
 };
 
+G.torch_stick = (s) => {
+  // Charred, resinous wood, uniform across the tile.
+  //
+  // The old torch tile was a picture of a torch on a transparent field, which
+  // is right for two crossed quads and useless for boxes: a shaft box is 0.14
+  // of a cell wide, so its faces sample a thin vertical sliver of the tile,
+  // and on a picture of a torch that sliver is nearly all empty — every torch
+  // in the world alpha-tested itself out of existence. Box geometry wants a
+  // *material*, not a portrait.
+  s.each((i, x, y, u, v) => {
+    const grain = Math.sin(u * 39.0 + Math.sin(v * 4.1) * 0.7) * 0.5 + 0.5;
+    const streak = Math.pow(grain, 2.4);
+    // Darker toward the top: this end has been in a fire.
+    const char = smoothstep(0.55, 1.0, v);
+    const r = 96 - streak * 26 - char * 54;
+    const g = 66 - streak * 20 - char * 40;
+    const b = 38 - streak * 14 - char * 24;
+    setRGB(s, i, px([r, g, b]));
+    s.a[i] = 1;
+    s.h[i] = 0.82 - streak * 0.5;
+    s.ao[i] = 0.92 - streak * 0.18;
+    s.rough[i] = 0.95;
+  });
+  s.normalStrength = 1.5;
+  return s;
+};
+
+G.torch_flame = (s) => {
+  // The burning end, seen from above: embers at the centre falling off to ash.
+  s.each((i, x, y, u, v) => {
+    const d = Math.hypot(u - 0.5, v - 0.5) * 2;
+    const heat = Math.pow(Math.max(0, 1 - d), 1.5);
+    const flick = 0.85 + Math.sin(u * 30.0 + v * 24.0) * 0.15;
+    const r = 60 + heat * 210 * flick;
+    const g = 34 + heat * 150 * flick;
+    const b = 26 + heat * 44 * flick;
+    setRGB(s, i, px([r, g, b]));
+    s.a[i] = 1;
+    s.h[i] = 0.4 + heat * 0.3;
+    s.ao[i] = 1;
+    s.rough[i] = 0.75;
+  });
+  s.normalStrength = 0.8;
+  return s;
+};
+
 G.fence = (s) => {
   // Split timber: vertical grain and nothing else. A fence is built out of
   // boxes a quarter of a cell across, and the mesher scales the tile to each

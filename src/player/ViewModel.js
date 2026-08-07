@@ -4,9 +4,8 @@
 
 import * as THREE from 'three';
 import { ITEMS } from '../game/Items.js';
-import { RENDER_TYPE, R_CROSS } from '../world/Blocks.js';
 import { createItemBlockMaterial } from '../render/VoxelMaterial.js';
-import { heldModel } from '../render/ItemModels.js';
+import { heldModel, hasModel } from '../render/ItemModels.js';
 
 const _lampColor = new THREE.Color();
 
@@ -237,7 +236,16 @@ export class ViewModel {
     // same way — show empty hands and carry on.
     const def = ITEMS[itemId];
     if (!def) { this.heldItem = null; return; }
-    const isCube = def.block !== undefined && RENDER_TYPE[def.block] !== R_CROSS;
+    // Show authored art whenever there is any, and fall back to a textured cube
+    // for the ordinary blocks that have none.
+    //
+    // This used to ask `RENDER_TYPE[def.block] !== R_CROSS`, which worked only
+    // because the torch — the one block with a real model — happened to be the
+    // one block drawn as a cross. Giving the torch a proper 3D shape in the
+    // world therefore took the model out of the player's hand and replaced it
+    // with a cube, a change nobody would think to look for in a mesher commit.
+    // Asking whether the model exists cannot come apart that way.
+    const isCube = def.block !== undefined && !hasModel(itemId);
     let mesh = null;
     if (isCube) {
       const src = this.dropsFactory(itemId);

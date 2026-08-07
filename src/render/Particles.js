@@ -386,18 +386,18 @@ export class Particles {
     mu.uCam.value.copy(camera.position);
     mu.uUp.value.copy(up);
     const night = sky?.night ?? 0;
-    // Night motes used to get *brighter* than daytime ones (0.55 against 0.30)
-    // and drift toward white. Additive white specks in a box that follows the
-    // camera is a star field glued to your head — which is what it looked like,
-    // and no amount of "they're fireflies" fixes a colour that isn't one. They
-    // are dimmer than daylight dust now, and warm, so the few you notice read as
-    // something alive rather than as a rendering artefact.
-    mu.uOpacity.value = THREE.MathUtils.lerp(0.30, 0.13, night) * (1 - this.weatherIntensity * 0.8);
-    mu.uColor.value.setRGB(
-      THREE.MathUtils.lerp(1.0, 1.0, night),
-      THREE.MathUtils.lerp(0.90, 0.82, night),
-      THREE.MathUtils.lerp(0.66, 0.38, night),
-    );
+    // Motes are lit dust: they are visible because sunlight is catching them,
+    // so after dark there is nothing to catch and they go out entirely.
+    //
+    // They used to get *brighter* at night (0.55 against 0.30) and drift toward
+    // white, in a box that follows the camera — a star field glued to your
+    // head. Dimming them to 0.13 was not enough either: additive white on a
+    // near-black night still reads as specks, and against unlit ground there is
+    // nothing for dust to be lit *by*. Fireflies, if they are ever wanted, want
+    // to be their own thing — few, warm, and near the ground — rather than
+    // daylight dust with the brightness turned down.
+    mu.uOpacity.value = THREE.MathUtils.lerp(0.30, 0.0, night) * (1 - this.weatherIntensity * 0.8);
+    mu.uColor.value.setRGB(1.0, 0.90, 0.66);
 
     // weather
     const wu = this.weather.material.uniforms;

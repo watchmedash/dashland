@@ -27,7 +27,7 @@ import {
 } from './game/Items.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
-  BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
+  BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT,
 } from './world/Blocks.js';
 import {
@@ -121,6 +121,19 @@ const WHITE = new THREE.Color(1, 1, 1);
 const WHITE_L = [1, 1, 1];
 /** Cells the hand-light scan reaches; must cover the brightest block light. */
 const HAND_LIGHT_RADIUS = 8;
+/**
+ * How far a carried flame throws, in cells, and how hard.
+ *
+ * Deliberately shorter and softer than the light the same torch gives once it
+ * is planted in a wall. A carried torch that lit as far as a placed one would
+ * make placing them pointless, and the whole shape of mining — light the shaft
+ * behind you or lose it — depends on that trade.
+ */
+const HAND_LIGHT_REACH = 9.5;
+const HAND_LIGHT_GAIN = 2.1;
+
+/** (di, dj) toward the wall a torch of each facing is bracketed to. */
+const TORCH_WALL_STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 /** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
 const HURT_IMMUNITY = 0.5;
 
@@ -1017,6 +1030,26 @@ class Game {
     return db > 0 ? 2 : 3;
   }
 
+  /**
+   * Which way a torch goes in: 0 stood on the ground, 1 + facing bracketed to
+   * that wall. See R_TORCH.
+   *
+   * Clicking the top of a block stands one up; clicking the side of one hangs
+   * it there, which is the whole point — a shaft you are digging has walls long
+   * before it has a floor worth standing a torch on.
+   */
+  _torchFacing(hit, col, k) {
+    if (hit.col === col) return 0;              // hit the floor below: stand it up
+    return 1 + (this._ladderFacing(hit, col, k) & 3);
+  }
+
+  /** Is there anything for a torch in this cell, facing this way, to hold on to? */
+  _torchSupported(col, k, byte) {
+    if (byte === 0) return this.planet.solidAt(col, k - 1);
+    const wall = stepColumn(col, ...TORCH_WALL_STEP[(byte - 1) & 3]);
+    return this.planet.solidAt(wall, k);
+  }
+
   _facingToward(col, k) {
     const p = colParts(col);
     tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
@@ -1104,6 +1137,21 @@ class Game {
     if (existing !== 0 && RENDER_TYPE[existing] !== R_LIQUID && RENDER_TYPE[existing] !== R_CROSS) return false;
     if (IS_SOLID[id] && this._intersectsPlayer(col, k)) return false;
     if (RENDER_TYPE[id] === R_CROSS && !this.planet.solidAt(col, k - 1)) return false;
+    // A torch needs something to stand on or hang from, and which of those it
+    // is depends on the face you clicked.
+    let torchByte = 0;
+    if (IS_TORCH[id]) {
+      torchByte = this._torchFacing(hit, col, k);
+      if (!this._torchSupported(col, k, torchByte)) {
+        // Fall back to standing it up if the wall it was aimed at is not there,
+        // rather than silently eating the click.
+        torchByte = 0;
+        if (!this._torchSupported(col, k, 0)) {
+          this.ui.setHint('Nothing to fix a torch to');
+          return false;
+        }
+      }
+    }
 
     // A door is two cells tall, so it needs the headroom before anything else.
     if (IS_DOOR[id]) {
@@ -1115,7 +1163,8 @@ class Game {
     }
 
     const edit = { col, k, id };
-    if (IS_LADDER[id]) edit.facing = this._ladderFacing(hit, col, k);
+    if (IS_TORCH[id]) edit.facing = torchByte;
+    else if (IS_LADDER[id]) edit.facing = this._ladderFacing(hit, col, k);
     else if (IS_DOOR[id]) edit.facing = this._facingToward(col, k) & 3;
     else if (IS_DIRECTIONAL[id]) edit.facing = this._facingToward(col, k);
     else if (IS_AXIS[id]) edit.facing = this._axisFromFace(hit, col, k);
@@ -1470,6 +1519,7 @@ class Game {
     this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob);
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
+    this._updateHandLight(dt);
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     this.sky.update(dt, this.camera, this.player.up, this.player.position);
     this.particles.update(dt, this.camera, this.player.up, this.sky);
@@ -1764,6 +1814,41 @@ class Game {
     }
     this._hlValue = { r, g, b };
     return this._hlValue;
+  }
+
+  /**
+   * Push the light the player is *carrying* into the world shader.
+   *
+   * Held separately from _handLight above, which asks how bright the player's
+   * surroundings are so the viewmodel can be lit to match. This is the opposite
+   * direction: the thing in your hand lighting everything else.
+   */
+  _updateHandLight(dt) {
+    const held = ITEMS[this.inventory.held().item];
+    const block = held?.block ? BLOCKS[held.block] : null;
+    const emit = block?.light ?? 0;
+    const u = voxelUniforms;
+    if (!emit) {
+      // Ease out rather than cut, or putting a torch away snaps the whole cave
+      // to black in one frame.
+      u.uHandLightRadius.value = Math.max(0, u.uHandLightRadius.value - dt * 26);
+      if (u.uHandLightRadius.value <= 0.01) u.uHandLightColor.value.set(0, 0, 0);
+      return;
+    }
+    // A flame is never still. The wobble is small and slow enough to read as a
+    // flame rather than as a framerate problem.
+    this._flameT = (this._flameT ?? 0) + dt;
+    const flicker = 0.92 + Math.sin(this._flameT * 11.3) * 0.05 + Math.sin(this._flameT * 4.1) * 0.03;
+    const lc = block.lightColor || WHITE_L;
+    const strength = (emit / 15) * HAND_LIGHT_GAIN * flicker;
+    u.uHandLightColor.value.set(lc[0] * strength, lc[1] * strength, lc[2] * strength);
+    const want = HAND_LIGHT_REACH * (0.6 + 0.4 * (emit / 15));
+    u.uHandLightRadius.value += (want - u.uHandLightRadius.value) * Math.min(1, dt * 8);
+    // Just in front of and below the eye, where the hand actually is — lighting
+    // from the eye itself flattens everything into a torchlit photograph.
+    u.uHandLightPos.value.copy(this.player.eye)
+      .addScaledVector(this.player.lookDir, 0.45)
+      .addScaledVector(this.player.up, -0.35);
   }
 
   /** Crosshair prompt when you're looking at an animal. */

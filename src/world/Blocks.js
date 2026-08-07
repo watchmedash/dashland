@@ -64,6 +64,21 @@ export const R_SIGN = 9;
  * mesher interpolates the corner ring radially and is happy past the brim.
  */
 export const R_FENCE = 10;
+/**
+ * A torch: a tapered stick with a burning head, standing on the floor or
+ * angled out of a wall.
+ *
+ * It used to be an R_CROSS — two flat quads through the middle of the cell,
+ * which is how Minecraft draws one and which reads as a sticker the moment you
+ * walk past it, because there is nothing there when you see it edge-on. As
+ * boxes it has actual sides, catches the light on them, and can lean.
+ *
+ * Its byte is 0 for a torch stood on the ground, or 1 + facing (so 1..4) for
+ * one bracketed to the wall named by that facing. Packing it as a single
+ * "0 means floor" value rather than a facing plus a flag keeps it inside the
+ * three bits the side-table gives every block.
+ */
+export const R_TORCH = 11;
 
 // ---------------------------------------------------------------------------
 // Tiles — index in this array is the texture-array layer.
@@ -84,6 +99,7 @@ export const TILES = [
   'iron_block', 'gold_block', 'crystal_block', 'lantern', 'crate', 'core',
   'bench_top', 'bench_side', 'kiln_front', 'kiln_front_lit', 'kiln_side', 'kiln_top', 'torch',
   'bed_top', 'bed_side', 'ladder', 'door', 'door_top', 'sign', 'fence',
+  'torch_stick', 'torch_flame',
 
   // --- strata ---------------------------------------------------------------
   // One rock from the surface to the mantle made a shaft at depth 4 and a shaft
@@ -251,7 +267,13 @@ export const BLOCKS = [
   block({ name: 'bench', label: 'Workbench', top: 'bench_top', side: 'bench_side', bottom: 'planks', hardness: 1.4, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
   block({ name: 'kiln', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', particle: [0.45, 0.44, 0.46], sound: 'stone' }),
   block({ name: 'kiln_lit', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front_lit', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', light: 12, lightColor: [1.0, 0.62, 0.28], particle: [0.9, 0.5, 0.2], sound: 'stone' }),
-  block({ name: 'torch', label: 'Torch', render: R_CROSS, all: 'torch', solid: false, opaque: false, hardness: 0.05, light: 13, lightColor: [1.0, 0.76, 0.42], particle: [1, 0.7, 0.35], sound: 'wood' }),
+  // Not `directional`: that flag drives the generic "face the player" placement
+  // path, which writes a plain 0-3 and would collide with the 0-means-floor
+  // encoding above. A torch is given its byte explicitly when it is placed.
+  // `top` is the burning end: every box's upward face takes it, and the only
+  // upward face a torch has that you can actually see is the head's, because
+  // the shaft's is buried under it and dropped as an interior seam.
+  block({ name: 'torch', label: 'Torch', render: R_TORCH, top: 'torch_flame', side: 'torch_stick', bottom: 'torch_stick', solid: false, opaque: false, hardness: 0.05, light: 13, lightColor: [1.0, 0.76, 0.42], particle: [1, 0.7, 0.35], sound: 'wood' }),
   // Where you wake up. Dying used to drop you on a random column of a planet
   // with a quarter of a million of them, which on a world this size means your
   // house is simply gone.
@@ -499,6 +521,7 @@ export const IS_LADDER = new Uint8Array(N_BLOCKS);
 export const IS_DOOR = new Uint8Array(N_BLOCKS);
 export const IS_SIGN = new Uint8Array(N_BLOCKS);
 export const IS_FENCE = new Uint8Array(N_BLOCKS);
+export const IS_TORCH = new Uint8Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -544,6 +567,9 @@ const TINTS = { grass: 1, foliage: 2, foliage_dark: 3, moss: 4 };
 export const DOOR_THICK = 0.18;
 /** And a sign board, which is a plank rather than a slab. */
 export const SIGN_THICK = 0.12;
+
+/** How thick a torch shaft is. */
+export const TORCH_THICK = 0.14;
 
 /** Width of a fence post, centred in its cell. */
 export const FENCE_POST = 0.25;
@@ -611,9 +637,10 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_DOOR[i] = b.render === R_DOOR ? 1 : 0;
   IS_SIGN[i] = b.render === R_SIGN ? 1 : 0;
   IS_FENCE[i] = b.render === R_FENCE ? 1 : 0;
+  IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
   IS_SHAPED[i] = (b.render === R_SLAB || b.render === R_STAIR
     || b.render === R_LADDER || b.render === R_DOOR || b.render === R_SIGN
-    || b.render === R_FENCE) ? 1 : 0;
+    || b.render === R_FENCE || b.render === R_TORCH) ? 1 : 0;
   TINT_ID[i] = b.tint ? TINTS[b.tint] : 0;
 }
 
@@ -639,6 +666,34 @@ for (let i = 0; i < N_BLOCKS; i++) {
  */
 export function blockBoxes(id, byte = 0, links = 0b1111) {
   const out = [];
+  if (IS_TORCH[id]) {
+    // A stick and a head. Wall torches climb as they go out from the wall,
+    // which is what makes one read as *bracketed* rather than as a stick
+    // sticking out of a stone face — the stack of boxes is the lean.
+    const w = TORCH_THICK, m = 0.5 - w / 2;
+    const dir = byte === 0 ? -1 : (byte - 1) & 3;
+    if (dir < 0) {
+      out.push([m, m, 0, m + w, m + w, 0.60]);            // shaft
+      out.push([m - 0.02, m - 0.02, 0.60, m + w + 0.02, m + w + 0.02, 0.72]); // head
+      return out;
+    }
+    // Four rungs stepping away from the wall and up, then the head on the end.
+    for (let n = 0; n < 4; n++) {
+      const t = n / 4, k0 = 0.14 + n * 0.11;
+      // How far out from the wall this rung sits.
+      const a = 0.06 + t * 0.30, b = a + w;
+      if (dir === 0) out.push([1 - b, m, k0, 1 - a, m + w, k0 + 0.13]);
+      else if (dir === 1) out.push([a, m, k0, b, m + w, k0 + 0.13]);
+      else if (dir === 2) out.push([m, 1 - b, k0, m + w, 1 - a, k0 + 0.13]);
+      else out.push([m, a, k0, m + w, b, k0 + 0.13]);
+    }
+    const a = 0.34, b = a + w + 0.04;
+    if (dir === 0) out.push([1 - b, m - 0.02, 0.55, 1 - a, m + w + 0.02, 0.68]);
+    else if (dir === 1) out.push([a, m - 0.02, 0.55, b, m + w + 0.02, 0.68]);
+    else if (dir === 2) out.push([m - 0.02, 1 - b, 0.55, m + w + 0.02, 1 - a, 0.68]);
+    else out.push([m - 0.02, a, 0.55, m + w + 0.02, b, 0.68]);
+    return out;
+  }
   if (IS_FENCE[id]) {
     const p0 = 0.5 - FENCE_POST / 2, p1 = 0.5 + FENCE_POST / 2;
     const r0 = 0.5 - FENCE_RAIL / 2, r1 = 0.5 + FENCE_RAIL / 2;

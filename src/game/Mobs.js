@@ -1057,6 +1057,12 @@ export class Mobs {
     for (let k = Math.min(D - 1, fromK); k >= 0; k--) {
       if (!p.solidAt(col, k)) continue;
       if (isPassable(p.at(col, k), p.facingAt(col, k))) continue;
+      // Foliage is not a floor. Leaves are `solid` — you can stand on a canopy,
+      // and the player is welcome to — but for anything deciding where to
+      // *walk*, a canopy is a surface reachable by a one-block hop from the
+      // branch beside it, and husks were quietly climbing trees and spending
+      // the night standing on top of them.
+      if (IS_LEAF[p.at(col, k)]) continue;
       return k;
     }
     return -1;

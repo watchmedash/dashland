@@ -550,8 +550,11 @@ export class WorldGen {
     }
 
     const cfg = {
-      oak: { h: [5, 7], log: ID.log_oak, leaf: ID.leaves_oak, rad: 2.6, shape: 'round' },
-      birch: { h: [6, 9], log: ID.log_birch, leaf: ID.leaves_birch, rad: 2.2, shape: 'round' },
+      // Trunks a little taller than they were. The crown hangs three courses
+      // below its top, so a five-block trunk put leaves at knee height and the
+      // tree read as a bush; these leave two or three clear blocks of trunk.
+      oak: { h: [6, 8], log: ID.log_oak, leaf: ID.leaves_oak, rad: 2.6, shape: 'round' },
+      birch: { h: [7, 10], log: ID.log_birch, leaf: ID.leaves_birch, rad: 2.2, shape: 'round' },
       pine: { h: [7, 11], log: ID.log_pine, leaf: ID.leaves_pine, rad: 3.0, shape: 'cone' },
       savanna: { h: [5, 7], log: ID.log_oak, leaf: ID.leaves_oak, rad: 3.3, shape: 'flat' },
     }[kind];
@@ -561,15 +564,34 @@ export class WorldGen {
     const h = Math.min(room, cfg.h[0] + Math.floor(rng() * (cfg.h[1] - cfg.h[0] + 1)));
     for (let n = 0; n < h; n++) set(col, k0 + n, cfg.log, true);
 
-    const blob = (ck, rad, ragged) => {
-      const ri = Math.ceil(rad);
-      for (let di = -ri; di <= ri; di++) {
-        for (let dj = -ri; dj <= ri; dj++) {
-          for (let dk = -ri; dk <= ri; dk++) {
-            const d = Math.sqrt(di * di + dj * dj + dk * dk);
-            if (d > rad + (rng() - 0.5) * ragged * 2) continue;
-            if (d > rad * 0.7 && rng() < ragged) continue;
-            set(at(di, dj), ck + dk, cfg.leaf);
+    /**
+     * A canopy as a stack of discs, one per layer, with the radius given as a
+     * fraction of the tree's own.
+     *
+     * This replaced two overlapping spheres centred on the trunk. Measured on
+     * real trees, that gave leaves per layer running 1, 8, 32, 46, 54, 58, 59,
+     * 49, 14, 0 from the ground up — a mass that begins two blocks off the
+     * ground, swallows the trunk, and then stops. Both ends of that are wrong:
+     * a tree wants a visible trunk under it, and a crown that closes rather
+     * than one that is cut off. A profile makes the silhouette something you
+     * can read and tune directly instead of something that falls out of the
+     * intersection of two spheres.
+     *
+     * `ragged` frays the rim; the interior is left solid so the canopy still
+     * reads as a mass rather than as confetti.
+     */
+    const crown = (ckTop, profile, ragged) => {
+      for (let n = 0; n < profile.length; n++) {
+        const rad = cfg.rad * profile[n];
+        if (rad <= 0) continue;
+        const ri = Math.ceil(rad);
+        const ck = ckTop - (profile.length - 1 - n);
+        for (let di = -ri; di <= ri; di++) {
+          for (let dj = -ri; dj <= ri; dj++) {
+            const d = Math.hypot(di, dj);
+            if (d > rad + (rng() - 0.5) * ragged) continue;
+            if (d > rad * 0.72 && rng() < ragged * 0.5) continue;
+            set(at(di, dj), ck, cfg.leaf);
           }
         }
       }
@@ -599,8 +621,10 @@ export class WorldGen {
             set(at(di, dj), top + dk, cfg.leaf);
           }
     } else {
-      blob(top, cfg.rad, 0.25);
-      blob(top - 2, cfg.rad * 0.85, 0.3);
+      // Bottom to top: a narrow skirt, two full courses, then a rounded crown
+      // that closes over the trunk. The last entry is what stops the tree
+      // ending in a flat lid.
+      crown(top + 2, [0.55, 0.85, 1.0, 1.0, 0.78, 0.42], 0.9);
     }
   }
 

@@ -157,8 +157,18 @@ void main() {
   vec3 dir = normalize(vWorld - uCenter);
   vec3 p = dir * 9.0;
   vec3 drift = vec3(uTime * 0.012, uTime * 0.006, -uTime * 0.009);
-  // large-scale weather mask carves open sky between cloud fields
-  float mask = smoothstep(0.42, 0.72, fbm(p * 0.34 + drift * 0.35));
+  // Large-scale weather mask, carving open sky between cloud fields — and it
+  // has to widen with the weather. Held at a fixed threshold it zeroed most of
+  // the sky whatever the forecast said, so uCoverage could only thin the clouds
+  // inside fields that were already there: an overcast sky came out around four
+  // fifths blue with a few wisps in it, and a storm looked much the same. The
+  // labels promised weather the sky never delivered.
+  //
+  // Note uCoverage runs backwards — it is really clearness, high on a clear
+  // day — so this flips it first.
+  float cloudy = clamp(1.0 - uCoverage, 0.0, 1.0);
+  float m0 = mix(0.62, 0.08, cloudy);
+  float mask = smoothstep(m0, m0 + 0.30, fbm(p * 0.34 + drift * 0.35));
   float base = fbm(p + drift);
   float detail = fbm(p * 3.4 - drift * 1.7);
   float d = (base * 0.70 + detail * 0.30) * mask;

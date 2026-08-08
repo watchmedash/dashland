@@ -58,7 +58,8 @@ export class UI {
       vStamina: $('v-stamina'), vBreath: $('v-breath'),
       clockDial: $('clock-dial'), clockText: $('clock-text'),
       chipWeather: $('chip-weather'), chipBiome: $('chip-biome'), chipSeason: $('chip-season'),
-      chipPack: $('chip-pack'), packDist: $('pack-dist'),
+      chipPack: $('chip-pack'), packDist: $('pack-dist'), chipSave: $('chip-save'),
+      pzQuit: $('pz-quit'),
       toasts: $('toasts'), debug: $('debug'), hint: $('hint'),
       screenEl: $('screen'), screenTitle: $('screen-title'), screenTop: $('screen-top'),
       invMain: $('inv-main'), invHot: $('inv-hot'),
@@ -1267,6 +1268,37 @@ export class UI {
       this.el.chipSeason.textContent = `${season.name} ${season.dayOfSeason}`;
     }
     this._paintPackChip();
+  }
+
+  /**
+   * Show or hide the "not saving" chip.
+   *
+   * Driven from `Game.saveGame` rather than polled, and it carries the reason
+   * as a tooltip: the chip has room for two words, and "QuotaExceededError" is
+   * the difference between a player who clears some space and a player who
+   * thinks the game is broken.
+   *
+   * @param {boolean} on
+   * @param {string} why one line, shown on hover
+   */
+  setSaveWarning(on, why = '') {
+    const el = this.el.chipSave;
+    if (!el) return;
+    el.classList.toggle('hidden', !on);
+    el.title = on ? why : '';
+  }
+
+  /**
+   * Relabel Save & Quit after a failed save, so the second press cannot be an
+   * accident. A button that has just refused to do what it says must say what
+   * it will do instead — "press again" in a toast the player may have looked
+   * away from is not enough when the cost is the whole session.
+   */
+  setQuitConfirm(on) {
+    const el = this.el.pzQuit;
+    if (!el) return;
+    el.textContent = on ? 'Quit WITHOUT Saving' : 'Save & Quit to Menu';
+    el.classList.toggle('danger', on);
   }
 
   /** Distance and bearing back to the pack you dropped when you died. */

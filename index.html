@@ -72,6 +72,10 @@
       <!-- Only while a pack is waiting to be recovered. A distance with no
            bearing is not findable on a sphere, so the arrow is the point. -->
       <div class="chip hidden" id="chip-pack"><i class="pack-arrow"></i><span id="pack-dist"></span></div>
+      <!-- Only while the game has failed to save. It stays up until a save
+           succeeds, because a message that times out is exactly as good as no
+           message for the one thing you cannot undo. -->
+      <div class="chip hidden warn" id="chip-save">Not saving</div>
     </div>
 
     <!-- Vitals live top-left as labelled bars. Pip rows read as decoration at a

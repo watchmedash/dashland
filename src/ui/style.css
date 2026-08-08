@@ -567,6 +567,28 @@ button small { display: block; font-size: 10.5px; font-weight: 500; opacity: .8;
 /* The chips are uppercased as a set, which turned "79m" into "79M" — a
    distance that reads as a magnitude. This one keeps its lowercase unit. */
 #chip-pack { background: rgba(190, 92, 40, .82); color: #fff5ec; gap: 5px; text-transform: none; }
+
+/* A button that is about to throw something away. Only Save & Quit wears this,
+   and only after a save has actually failed — see `UI.setQuitConfirm`. */
+button.danger {
+  background: linear-gradient(180deg, #c4402f, #962c20);
+  border-color: #7d2318;
+  color: #fff3f0;
+}
+
+/* The save warning. Redder than the pack marker and slowly pulsing, because it
+   outranks every other chip: the pack is a thing you may go and get back, and
+   this is the one state where continuing to play is actively losing work.
+   The pulse is slow on purpose — a fast blink reads as an alarm to be dismissed,
+   and this cannot be dismissed, only fixed. */
+#chip-save { background: rgba(176, 46, 46, .88); color: #fff2f2; }
+@media (prefers-reduced-motion: no-preference) {
+  #chip-save { animation: saveWarn 2.4s ease-in-out infinite; }
+}
+@keyframes saveWarn {
+  0%, 100% { background: rgba(176, 46, 46, .88); }
+  50% { background: rgba(214, 74, 54, .95); }
+}
 .pack-arrow {
   width: 0; height: 0; display: inline-block;
   border-left: 4.5px solid transparent; border-right: 4.5px solid transparent;

@@ -275,6 +275,14 @@ class Game {
     /** The world finished while it was up, and `_onWorldReady` still owes a run. */
     this._readyHeld = false;
     this.autosaveTimer = 0;
+    /**
+     * Consecutive failed writes. Zero is the normal state and the only one that
+     * clears the chip; see `saveGame`, which reports on the edges rather than
+     * on every attempt.
+     */
+    this.saveFailures = 0;
+    /** Quit has already refused once and will go through on the next press. */
+    this._quitAnyway = false;
     /** chunk ids that currently have (or have been asked for) a mesh */
     this.liveChunks = new Set();
     /**
@@ -621,6 +629,13 @@ class Game {
     this.planet.resetWorld();
     this.liveChunks.clear();
     this.crossLight.clear();
+    // A new world has not failed to save yet. Carrying the count over would
+    // leave the chip up on a planet that has never been written, which is both
+    // wrong and the fastest way to teach a player to ignore it.
+    this.saveFailures = 0;
+    this._quitAnyway = false;
+    this.ui.setSaveWarning(false);
+    this.ui.setQuitConfirm(false);
     this._streamPending = false;
     this._streamTimer = 0;
     this._welcome = false;
@@ -749,8 +764,37 @@ class Game {
   }
 
   async continueGame() {
-    const data = await Save.read();
-    if (!data) { this.ui.showMenu(null); return; }
+    // The read half of the same problem `saveGame` has. An exception here used
+    // to escape the click handler as an unhandled rejection, so pressing
+    // Continue on an unreadable store did *nothing at all* — no load, no menu
+    // change, no message. A button that visibly does nothing is worse than one
+    // that reports a failure, because the player's next move is to press it
+    // again.
+    //
+    // Both branches keep the menu entry rather than quietly dropping it. These
+    // errors are usually transient — another tab holding the database, private
+    // mode, a profile still warming up — and deleting the one visible sign that
+    // a planet exists is exactly the wrong response to "I could not read it
+    // this time".
+    let data = null;
+    try {
+      data = await Save.read();
+    } catch (err) {
+      console.error(err);
+      this.ui.showMenu(Save.meta());
+      this.ui.toast('Could not read your planet — nothing is lost, try again', 0, 5200);
+      return;
+    }
+    if (!data) {
+      // Meta lives in localStorage and the planet lives in IndexedDB, so the
+      // two can disagree: a browser that cleared site data of one kind and not
+      // the other leaves a menu entry pointing at nothing. Say so, rather than
+      // letting a planet appear to vanish between launches.
+      const meta = Save.meta();
+      this.ui.showMenu(meta);
+      if (meta) this.ui.toast('That planet is not in this browser any more', 0, 5200);
+      return;
+    }
     if (!this._saveFitsWorld(data)) {
       this.ui.showMenu(Save.meta());
       this.ui.toast('That planet was made by an older version and cannot be opened', 0, 5200);
@@ -1430,8 +1474,30 @@ class Game {
     this.audio.ui(claimed ? 620 : 420);
   }
 
+  /**
+   * "Save & Quit to Menu" — and if it cannot save, it does not quit.
+   *
+   * It used to await a save whose result it never looked at and then tear the
+   * world down regardless, which turns a recoverable disk error into the total
+   * loss of a session. Leaving the player in the world instead costs them one
+   * more click and keeps everything they did.
+   *
+   * Refusing outright would be its own trap — a permanently broken store would
+   * leave no way out of the game — so a second press inside ten seconds leaves
+   * anyway, with the button saying exactly what it will do. That is a decision
+   * the player is allowed to make; it is only not one to make *for* them.
+   */
   async quitToMenu() {
-    await this.saveGame(false);
+    const saved = await this.saveGame(false);
+    if (!saved && !this._quitAnyway) {
+      this._quitAnyway = true;
+      setTimeout(() => { this._quitAnyway = false; this.ui.setQuitConfirm(false); }, 10000);
+      this.ui.setQuitConfirm(true);
+      this.ui.toast('Could not save — press again to leave anyway');
+      return;
+    }
+    this._quitAnyway = false;
+    this.ui.setQuitConfirm(false);
     this.ui.closePause();
     this.ui.hideDeath();
     this.closeScreen();
@@ -1555,14 +1621,51 @@ class Game {
     };
   }
 
+  /**
+   * Write the world, and be honest about it.
+   *
+   * `notify` used to gate the *failure* message as well as the success one, and
+   * every automatic caller passes false — the ninety-second autosave, the write
+   * on tab-hide, the one after worldgen, and `quitToMenu`. So a save that could
+   * not be written said nothing at all: the planet was gone and the only trace
+   * was a line in a console the player does not have open. A quiet success is
+   * good manners; a quiet failure is the one thing here that cannot be undone.
+   *
+   * Success stays quiet unless asked. Failure always speaks, but only on the
+   * *edge* — the first failure of a run — because the realistic causes (a full
+   * disk, a browser quota, private mode) do not clear up on their own, and a
+   * toast every ninety seconds is how a warning becomes wallpaper. The chip is
+   * what carries the state after that, and it stays up until a write succeeds.
+   *
+   * @returns {Promise<boolean>} whether the world is now on disk
+   */
   async saveGame(notify) {
-    if (!this.worldReady) return;
+    if (!this.worldReady) return false;
     try {
       await Save.write(this._savePayload());
-      if (notify) this.ui.toast('Planet saved');
+      if (this.saveFailures > 0) {
+        // Say so, and only here. Recovery is worth interrupting for precisely
+        // because the failure was: someone who has been playing under a red
+        // chip needs to know the work since it is now safe.
+        this.saveFailures = 0;
+        this.ui.setSaveWarning(false);
+        this.ui.toast('Saved again — your world is safe');
+      } else if (notify) {
+        this.ui.toast('Planet saved');
+      }
+      return true;
     } catch (err) {
       console.error(err);
-      if (notify) this.ui.toast('Could not save');
+      const first = this.saveFailures === 0;
+      this.saveFailures++;
+      // `err.name` is what distinguishes a full disk from a locked database,
+      // and it is the one part of an exception worth putting in front of a
+      // player. The chip's tooltip carries it; the toast stays plain English.
+      const n = this.saveFailures;
+      this.ui.setSaveWarning(true, `${n === 1 ? 'The last save failed' : `The last ${n} saves failed`}`
+        + `${err?.name ? ` (${err.name})` : ''}. Your world is only in this tab.`);
+      if (first || notify) this.ui.toast('Could not save your world');
+      return false;
     }
   }
 

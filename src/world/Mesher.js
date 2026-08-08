@@ -64,7 +64,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
  * chunk's baked voxel light and the wind sway.
  */
 const MODELLED_CROSS = new Uint8Array(N_BLOCKS);
-for (const n of ['flower_red', 'flower_blue', 'flower_gold']) {
+for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom']) {
   const i = BLOCKS.findIndex((b) => b.name === n);
   if (i > 0) MODELLED_CROSS[i] = 1;
 }

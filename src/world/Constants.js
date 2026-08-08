@@ -27,19 +27,19 @@ export const D = 66;                 // radial layers
 export const R_MIN = 250;            // radius of layer 0
 export const R_MAX = R_MIN + D;      // 316
 
-export const COLUMNS = FACES * F * F;        // 259 584
-export const NUM_VOXELS = COLUMNS * D;       // 11 421 696
+export const COLUMNS = FACES * F * F;        // 1 291 776
+export const NUM_VOXELS = COLUMNS * D;       // 85 257 216
 
 export const CHUNK_T = 16;           // cells per chunk along i and j
 export const CHUNK_K = 11;           // layers per chunk
-export const CT = F / CHUNK_T;       // 13 chunks per face axis
-export const CK = D / CHUNK_K;       // 4 chunks radially
-export const NUM_CHUNKS = FACES * CT * CT * CK;   // 4 056
+export const CT = F / CHUNK_T;       // 29 chunks per face axis
+export const CK = D / CHUNK_K;       // 6 chunks radially
+export const NUM_CHUNKS = FACES * CT * CT * CK;   // 30 276
 
 /**
  * How far from the player a chunk keeps a mesh, and how far out it survives
- * before being freed. Meshing the whole planet was fine at 384 chunks; at 4 056
- * it would be about half a gigabyte of geometry resident at all times.
+ * before being freed. Meshing the whole planet was fine at 384 chunks; at 30 276
+ * it would be several gigabytes of geometry resident at all times.
  *
  * The horizon does the work here, and it grows with the square root of the
  * radius rather than with the radius — sqrt(2*R*h). At R_SEA 130 an eye two
@@ -61,6 +61,64 @@ export const vidx = (f, i, j, k) => (((f * F + i) * F + j) * D + k);
 export const cidx = (f, i, j) => ((f * F + i) * F + j);
 
 export const chunkIdx = (f, ci, cj, ck) => (((f * CT + ci) * CT + cj) * CK + ck);
+
+// --- regions -----------------------------------------------------------------
+//
+// The unit of *generation*, as distinct from CHUNK_*, which is the unit of
+// meshing. A region is one CHUNK_T x CHUNK_T footprint of columns taken to its
+// full depth — the same tile as a chunk, but all CK of them stacked.
+//
+// Two reasons it is that and not something else. The generator's expensive work
+// (rock and soil, caves, ore) is per *column* and runs the whole column at once,
+// so splitting a region radially would buy nothing and cost a second pass over
+// the same noise. And a mesh request always names a chunk, so a region that is
+// exactly a chunk's footprint means "generate what this request needs" is a
+// lookup rather than a search — a batch of chunk ids maps onto a set of region
+// ids by dropping the ck.
+//
+// 5 046 of them at 16 896 voxels each. Small enough that one is a few
+// milliseconds of work, large enough that the per-region bookkeeping and the
+// generation margins are not most of the cost.
+export const NUM_REGIONS = FACES * CT * CT;       // 5 046
+export const REGION_COLS = CHUNK_T * CHUNK_T;     // 256
+export const REGION_VOXELS = REGION_COLS * D;     // 16 896
+
+export const regionIdx = (f, ri, rj) => ((f * CT + ri) * CT + rj);
+
+/** Which region owns a column. */
+export function regionOfCol(col) {
+  const f = (col / (F * F)) | 0;
+  const rem = col - f * F * F;
+  const i = (rem / F) | 0;
+  return ((f * CT + ((i / CHUNK_T) | 0)) * CT + (((rem % F) / CHUNK_T) | 0));
+}
+
+/** The 256 column indices a region owns, ascending. */
+export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
+  const rj = rid % CT;
+  const t = (rid - rj) / CT;
+  const ri = t % CT;
+  const f = (t - ri) / CT;
+  let n = 0;
+  for (let i = ri * CHUNK_T; i < ri * CHUNK_T + CHUNK_T; i++) {
+    for (let j = rj * CHUNK_T; j < rj * CHUNK_T + CHUNK_T; j++) out[n++] = cidx(f, i, j);
+  }
+  return out;
+}
+
+/**
+ * Bumped whenever a change to WorldGen would produce different terrain for the
+ * same seed.
+ *
+ * This exists because a save no longer stores the whole planet — it stores the
+ * regions the player has actually been to, and everything else is regenerated
+ * from the seed on load. That is only honest as long as the generator that
+ * regenerates it is the generator that made it. Without the stamp, tuning a
+ * noise threshold would leave old saves with a visited valley sitting in the
+ * middle of terrain that no longer joins up with it, which is a much worse
+ * outcome than being told the save cannot be opened.
+ */
+export const GEN_VERSION = 1;
 
 // All five keep their distance from R_MIN, so the crust reads the same from
 // below: core three layers up, mantle eight. What changed is the room above

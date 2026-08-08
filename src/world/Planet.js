@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import {
   F, D, R_MIN, R_MAX, COLUMNS, NUM_VOXELS, vidx, cidx, chunkIdx,
   CHUNK_T, CHUNK_K, CT, CK,
+  NUM_REGIONS, REGION_COLS, REGION_VOXELS, regionOfCol, regionColumns,
 } from './Constants.js';
 import { worldToCell, cellToWorld, stepColumn, centerDir, tangentFrame, cellArc } from './Sphere.js';
 import {
@@ -39,11 +40,75 @@ export class Planet {
     this.root.add(this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot);
     this.meshes = new Map();
     this.center = new THREE.Vector3(0, 0, 0);
+    /**
+     * The mirror is full-sized from the start but only partly filled.
+     *
+     * The worker builds the planet a region at a time and posts each one over
+     * as it is made, so `blocks` is authoritative only where `live` says it is.
+     * Everywhere else it is zeroes, which reads as air — and air is exactly the
+     * wrong default for physics, because the player would walk off a cliff into
+     * a region that has not been built rather than onto ground that has not
+     * arrived yet. `liveAt` is what the few places that could be asked about
+     * ungenerated ground use to tell the two apart; everything else is safe
+     * because the streamer keeps a hundred and fifty units of built world
+     * around the player at all times and nothing in the game reaches that far.
+     */
+    this.live = new Uint8Array(NUM_REGIONS);
+    /** Height field for the whole planet — cheap, eager, and always complete. */
+    this.colHeight = new Float32Array(COLUMNS);
   }
 
+  /** The per-column tables, which arrive complete before any voxel does. */
+  setGlobals(colBiome, colHeight) {
+    this.colBiome = colBiome;
+    this.colHeight = colHeight;
+  }
+
+  /** Wipe the mirror between worlds. The arrays are kept; only the data goes. */
+  resetWorld() {
+    this.blocks.fill(0);
+    this.live.fill(0);
+    this.facing.clear();
+  }
+
+  /**
+   * Copy freshly generated regions into the mirror.
+   *
+   * A region's 256 columns are sixteen contiguous runs in the block array — the
+   * ones sharing an `i` are consecutive — so this is sixteen copies per region
+   * rather than 256. Both ends of the wire pack it the same way.
+   * @param {(rid:number) => void} onRegion called once per region, after it lands
+   */
+  applyRegions(ids, data, onRegion) {
+    const tmp = new Int32Array(REGION_COLS);
+    for (let n = 0; n < ids.length; n++) {
+      const rid = ids[n];
+      regionColumns(rid, tmp);
+      let o = n * REGION_VOXELS;
+      for (let row = 0; row < CHUNK_T; row++) {
+        const base = tmp[row * CHUNK_T] * D;
+        this.blocks.set(data.subarray(o, o + CHUNK_T * D), base);
+        o += CHUNK_T * D;
+      }
+      this.live[rid] = 1;
+      onRegion?.(rid);
+    }
+  }
+
+  /** Has this column been generated? */
+  liveCol(col) { return this.live[regionOfCol(col)] === 1; }
+
+  /** Has the region containing this world point been generated? */
+  liveAt(x, y, z) {
+    const a = this.cellAt(x, y, z);
+    return a ? this.live[regionOfCol(a.col)] === 1 : false;
+  }
+
+  /** Legacy whole-planet handover. Nothing calls it now; see `applyRegions`. */
   setWorld(blocks, colBiome, facingPairs) {
     this.blocks = blocks;
     this.colBiome = colBiome;
+    this.live.fill(1);
     this.facing = new Map();
     if (facingPairs) for (const [idx, v] of facingPairs) this.facing.set(idx, v);
   }

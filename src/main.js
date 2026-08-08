@@ -35,6 +35,7 @@ import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
+  NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns,
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
@@ -43,7 +44,7 @@ import { makeRng } from './util/Noise.js';
 
 /**
  * World-space centre of every chunk, built once. The streamer runs a distance
- * test against all 4 056 of them a few times a second; recomputing the centres
+ * test against all 30 276 of them a few times a second; recomputing the centres
  * each time would cost more than the test.
  */
 const CHUNK_CENTER = (() => {
@@ -181,12 +182,17 @@ for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID
  * is a full-cell billboard, so anything near 1.0 is waist-high and looks like a
  * shrub. Ankle height on a 1.8-cell player is what the tile always drew.
  *
- * `tall_grass` and `mushroom` are cross blocks too and are deliberately not
- * here. Grass is a texture more than an object — it is the thing that carpets
- * every meadow, so it is by far the worst candidate for a model — and the
- * request was about flowers.
+ * The glowcap joins them: it was excluded when this list was about flowers, and
+ * "glowcap is still 2d" is a fair complaint about a mushroom that lights the
+ * cave around it and then turns edge-on to you. Its model carries its own glow
+ * on the gills — see `glowMatch` in ItemModels.
+ *
+ * `tall_grass` is a cross block too and stays out deliberately. Grass is a
+ * texture more than an object — it is the thing that carpets every meadow, so
+ * it is by far the worst candidate for a model, and it is the one whose loss of
+ * the wind sway would actually be felt.
  */
-const FLOWER_NAMES = ['flower_red', 'flower_blue', 'flower_gold'];
+const FLOWER_NAMES = ['flower_red', 'flower_blue', 'flower_gold', 'mushroom'];
 const FLOWER_KIND = [];
 const FLOWER_HEIGHT = 0.62;
 for (const n of FLOWER_NAMES) if (ID[n]) FLOWER_KIND[ID[n]] = n;
@@ -537,7 +543,9 @@ class Game {
 
   _resetWorld() {
     this.planet.clearMeshes();
-    this.planet.facing.clear();
+    // The mirror is reused rather than reallocated — it is 85MB, and two of
+    // them alive at once while the old one is collected is a stall you can see.
+    this.planet.resetWorld();
     this.liveChunks.clear();
     this._streamPending = false;
     this._streamTimer = 0;
@@ -617,10 +625,31 @@ class Game {
     this.seed = data.seed;
     this._pendingSave = data;
     this._startWorker();
+
+    // Put the saved regions straight into the mirror rather than waiting for
+    // the worker to echo them back. The message below is a structured clone —
+    // nothing is transferred — so both sides end up with their own copy for the
+    // price of the one the browser was going to make anyway.
+    if (data.regions && data.blocks) {
+      this.planet.applyRegions(data.regions, data.blocks, (rid) => this._seedWaterRegion(rid));
+    } else if (data.blocks) {
+      // A save from before the world went lazy: one flat array, all of it live.
+      this.planet.blocks.set(data.blocks);
+      this.planet.live.fill(1);
+      this.water.seedSources(this.planet);
+    }
+    for (const [idx, v] of data.facing || []) this.planet.facing.set(idx, v);
+
     // `facing` is absent in saves written before directional blocks existed;
     // the worker defaults every directional block it finds without an entry.
     this.worldWorker.postMessage({
-      type: 'load', blocks: data.blocks, colBiome: data.colBiome, facing: data.facing || null,
+      type: 'load',
+      seed: data.seed,
+      regions: data.regions || null,
+      data: data.regions ? data.blocks : null,
+      blocks: data.regions ? null : data.blocks,
+      colBiome: data.colBiome,
+      facing: data.facing || null,
     });
   }
 
@@ -641,7 +670,13 @@ class Game {
    */
   _saveFitsWorld(data) {
     if (!data?.blocks) return false;
-    if (data.blocks.length !== COLUMNS * D) return false;
+    if (data.regions) {
+      // A partial save. Its block payload is one region per id and everything
+      // else comes back out of the generator, so the generator has to be the
+      // one that made it — see GEN_VERSION.
+      if (data.regions.length * REGION_VOXELS !== data.blocks.length) return false;
+      if ((data.gen | 0) !== GEN_VERSION) return false;
+    } else if (data.blocks.length !== COLUMNS * D) return false;
     if (data.colBiome && data.colBiome.length !== COLUMNS) return false;
     if (Array.isArray(data.geom)) {
       const [f, d, rmin] = data.geom;
@@ -671,12 +706,25 @@ class Game {
     switch (msg.type) {
       case 'progress': this.ui.progress(msg.p, msg.label); break;
       case 'world':
-        this.planet.setWorld(msg.blocks, msg.colBiome, msg.facing);
-        // The voxels have arrived but nothing is meshed yet. Put the player
-        // where they belong first, so the terrain we ask for is the terrain
-        // they will actually be looking at.
-        this._placeEntities();
+        /**
+         * The per-column tables, and not a single voxel.
+         *
+         * The order of the next three steps is forced and it took a couple of
+         * goes to get right. The chunks we ask for depend on where the player
+         * is; where the player is used to depend on the voxels, because the
+         * spawn search read the top block of a few thousand columns; and the
+         * voxels now depend on which chunks we ask for. So the player is placed
+         * from the height field — which the worker has already chosen a column
+         * from — the neighbourhood is built around that, and only once it has
+         * arrived is anything asked a question about actual blocks.
+         */
+        this.planet.setGlobals(msg.colBiome, msg.colHeight);
+        for (const rid of msg.live || []) this.planet.live[rid] = 1;
+        this._seatPlayer(msg.spawn);
         this._streamChunks(true);
+        break;
+      case 'regions':
+        this.planet.applyRegions(msg.ids, msg.data, (rid) => this._seedWaterRegion(rid));
         break;
       case 'chunk': {
         // A chunk requested just before the player turned away can land after
@@ -687,7 +735,14 @@ class Game {
         break;
       }
       case 'streamDone': this._streamPending = false; break;
-      case 'ready': this._streamPending = false; this._onWorldReady(); break;
+      case 'ready':
+        this._streamPending = false;
+        // Now, and not before: everything below this line reads real blocks —
+        // the spawn refinement, the mob spawner's ground tests, the flow sim's
+        // source scan — and the first batch of regions has only just landed.
+        this._placeEntities();
+        this._onWorldReady();
+        break;
     }
   }
 
@@ -724,12 +779,58 @@ class Game {
     this.worldWorker.postMessage({ type: 'chunks', add, drop, initial });
   }
 
-  /** Player, inventory and world state — everything that must exist before we
-   *  can decide which chunks to build. */
+  /**
+   * Put the player somewhere before there is any world, so the streamer knows
+   * which part of it to build.
+   *
+   * On a new planet the worker has picked a column out of the height field; on
+   * a saved one the save says where. Either way the position is only used to
+   * choose a neighbourhood — `_spawnPlayer` gets the final say once that
+   * neighbourhood is real, and it never moves the player more than a few dozen
+   * columns, so the terrain built around this guess is the terrain they end up
+   * standing on.
+   */
+  _seatPlayer(spawnCol) {
+    const save = this._pendingSave;
+    if (save) {
+      this.player.cell.f = save.player.cell[0];
+      this.player.cell.ci = save.player.cell[1];
+      this.player.cell.cj = save.player.cell[2];
+      this.player.cell.ck = save.player.cell[3];
+      this.player._sync();
+      return;
+    }
+    const col = spawnCol ?? 0;
+    this.player.spawnAtColumn(col, Math.floor(this.planet.colHeight[col] - R_MIN - 0.5));
+  }
+
+  /**
+   * Register a newly arrived region's worldgen liquid as spring water.
+   *
+   * `Water.seedSources` scans the whole block array and clears what it finds
+   * first, which was fine when the whole planet existed at once and is exactly
+   * wrong now: run it after the second region lands and the first region's
+   * ocean stops being a source, which turns it into a stale orphan the flow sim
+   * is entitled to drain. So sources are added per region as it arrives, and
+   * the pass is never re-run on a lazily built world.
+   */
+  _seedWaterRegion(rid) {
+    const blocks = this.planet.blocks;
+    const cols = regionColumns(rid, this._regionCols
+      || (this._regionCols = new Int32Array(REGION_COLS)));
+    const level = this.water.level;
+    const sources = this.water.sources;
+    for (let n = 0; n < REGION_COLS; n++) {
+      const base = cols[n] * D;
+      for (let k = 0; k < D; k++) {
+        const i = base + k;
+        if (RENDER_TYPE[blocks[i]] === R_LIQUID && !level.has(i)) sources.add(i);
+      }
+    }
+  }
+
+  /** Player, inventory and world state — everything that needs real voxels. */
   _placeEntities() {
-    // Worldgen's oceans and lakes are the springs; register them before any
-    // flow runs, so an unmarked water cell can be treated as a stale orphan.
-    this.water.seedSources(this.planet);
     const save = this._pendingSave;
     if (save) {
       this.player.cell.f = save.player.cell[0];
@@ -786,7 +887,13 @@ class Game {
       // starting a new game and quitting before then left the *old* world on
       // disk — Continue brought it back and New Game looked like it had done
       // nothing at all.
-      this.saveGame(false);
+      //
+      // Deferred by a step rather than called here: `saveGame` refuses while
+      // `worldReady` is false, and this runs just before it is set. It has been
+      // a silent no-op ever since the loading order changed, and it matters
+      // more now — a partial save is the seed plus the regions that exist, so
+      // never writing one leaves the last planet on disk instead of this one.
+      this._saveOnReady = true;
       this._welcome = true;
     }
     this.ui.refresh();
@@ -795,6 +902,7 @@ class Game {
   /** The first batch of terrain is up — hand control to the player. */
   _onWorldReady() {
     this.worldReady = true;
+    if (this._saveOnReady) { this._saveOnReady = false; this.saveGame(false); }
 
     const el = document.getElementById('loader');
     if (el) { el.classList.add('done'); setTimeout(() => el.remove(), 650); }
@@ -827,12 +935,35 @@ class Game {
     }
   }
 
-  /** Pick level, open, grassy ground for a good first frame. */
+  /**
+   * Pick level, open, grassy ground for a good first frame.
+   *
+   * This used to sample three thousand columns from anywhere on the planet,
+   * which it could do because the whole planet was in memory. It cannot now:
+   * two thirds of a second of terrain has been built, around the column the
+   * worker nominated, and reading `surfaceK` anywhere else would find air and
+   * spawn the player inside the sky. So the search is a local one — forty
+   * columns either way, comfortably inside the built neighbourhood — and the
+   * planet-wide part of the choice has already been made from the height field
+   * by `WorldGen.pickSpawn`.
+   */
   _spawnPlayer() {
     const p = this.planet;
+    // The player's current column, which is always one that has been built:
+    // on a new world `_seatPlayer` has just put them on the generator's chosen
+    // spawn, and on a death it is where they fell. Searching outward from there
+    // rather than from anywhere on the planet is not only what lazy generation
+    // forces — it is also better behaviour, because respawning three thousand
+    // columns from everything you own was never what anyone wanted.
+    const c = this.player.cell;
+    const hint = cidx(c.f, Math.floor(c.ci), Math.floor(c.cj));
+    const REACH = 40;
     let best = -1, bestScore = -1, bestK = 0;
     for (let n = 0; n < 3000; n++) {
-      const col = (Math.random() * COLUMNS) | 0;
+      const col = stepColumn(hint,
+        ((Math.random() * (REACH * 2 + 1)) | 0) - REACH,
+        ((Math.random() * (REACH * 2 + 1)) | 0) - REACH);
+      if (!p.liveCol(col)) continue;
       const k = p.surfaceK(col);
       if (k < 6 || k >= D - 6) continue;
       const b = p.at(col, k);
@@ -848,7 +979,12 @@ class Game {
       if (score > bestScore) { bestScore = score; best = col; bestK = k; }
       if (bestScore > 6.5) break;
     }
-    if (best < 0) { best = 0; bestK = Math.max(0, p.surfaceK(0)); }
+    // Nothing scored? Stand on the hint column itself. It came out of the
+    // height field as open, dry, level ground, so the worst case is that the
+    // top block is podzol rather than grass — never a hole in the planet, which
+    // is what falling back to column 0 would have been now that column 0 may
+    // not have been built.
+    if (best < 0) { best = hint; bestK = Math.max(0, p.surfaceK(hint)); }
     this.player.spawnAtColumn(best, bestK);
     this.player.health = this.player.maxHealth;
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
@@ -960,6 +1096,44 @@ class Game {
     this.ui.showMenu(Save.meta());
   }
 
+  /**
+   * What a save of a half-built planet actually contains.
+   *
+   * Two honest options and this is the second of them. The first — generate the
+   * rest of the planet before writing — is a thirty-second freeze on the first
+   * autosave, which throws away the entire point of the change and does it
+   * ninety seconds after the player starts. So a save stores the regions that
+   * exist and the seed, and everything else is rebuilt by the generator on
+   * load.
+   *
+   * That is sound because generation is a pure function of (seed, region): a
+   * region has no dependence on the order regions were built in and none on its
+   * neighbours' contents, which is a property the rest of this change went to
+   * some trouble to establish. It is only sound while the generator does not
+   * change, which is what `GEN_VERSION` and `_saveFitsWorld` are for.
+   *
+   * It also makes a save small. A planet the player has walked one valley of is
+   * a couple of hundred regions — about four megabytes against the eighty-five
+   * the whole block array cost, every ninety seconds.
+   */
+  _saveBlocks() {
+    const live = [];
+    for (let rid = 0; rid < NUM_REGIONS; rid++) if (this.planet.live[rid]) live.push(rid);
+    const regions = new Int32Array(live);
+    const blocks = new Uint8Array(live.length * REGION_VOXELS);
+    const tmp = new Int32Array(REGION_COLS);
+    for (let n = 0; n < live.length; n++) {
+      regionColumns(live[n], tmp);
+      let o = n * REGION_VOXELS;
+      for (let row = 0; row < CHUNK_T; row++) {
+        const base = tmp[row * CHUNK_T] * D;
+        blocks.set(this.planet.blocks.subarray(base, base + CHUNK_T * D), o);
+        o += CHUNK_T * D;
+      }
+    }
+    return { regions, blocks };
+  }
+
   _savePayload() {
     const c = this.player.cell;
     return {
@@ -973,8 +1147,9 @@ class Game {
       // that looks almost plausible. Stamping the geometry in is what lets the
       // loader say no.
       geom: [F, D, R_MIN],
+      gen: GEN_VERSION,
       seed: this.seed,
-      blocks: this.planet.blocks.slice(),
+      ...this._saveBlocks(),
       colBiome: this.planet.colBiome.slice(),
       facing: this.planet.facingPairs(),
       player: {
@@ -1593,8 +1768,32 @@ class Game {
         this.player.look(input.mouseDX, input.mouseDY, input.sensitivity * this.settings.sensitivity, input.invertY);
       }
     }
+    /**
+     * The invariant, enforced rather than hoped for: the player never moves
+     * through ground that has not been built.
+     *
+     * It is already held by a wide margin — the streamer asks for every chunk
+     * within CHUNK_LOAD_DIST, a hundred and fifty units, four times a second,
+     * and a region is a few milliseconds of work in a worker that is otherwise
+     * idle. Nothing walks or swims at forty units a second. What this is really
+     * for is teleports: waking at a bed on the far side of the planet arrives
+     * somewhere that may genuinely not exist yet, and the alternative to
+     * standing still for two frames is falling through the world.
+     *
+     * Holding position is the right stop-gap rather than treating unbuilt
+     * ground as solid: solid would let you stand on nothing and then sink into
+     * it when the real terrain landed a block lower.
+     */
+    const pc = this.player.cell;
+    const onBuiltGround = this.planet
+      .liveCol(cidx(pc.f, Math.floor(pc.ci), Math.floor(pc.cj)));
+    if (!onBuiltGround) {
+      this._streamPending = false;
+      this._streamTimer = 0;
+      this.player.vel.i = 0; this.player.vel.j = 0; this.player.vel.k = 0;
+    }
     const wasInWater = this.player.inWater;
-    this.player.update(dt, act);
+    if (onBuiltGround) this.player.update(dt, act);
     if (this.player.inWater && !wasInWater) {
       this.particles.splash(this.player.position, this.player.up, 1.2);
       this.audio.splash();

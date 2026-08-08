@@ -5,7 +5,7 @@ import { Noise, makeRng, hash3, clamp, lerp, smoothstep } from '../util/Noise.js
 import {
   F, D, FACES, R_MIN, R_MAX, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX,
   R_SEABED_MIN, R_CANYON_MIN,
-  COLUMNS, NUM_VOXELS, vidx, cidx, BIOME,
+  COLUMNS, NUM_VOXELS, vidx, cidx, BIOME, regionOfCol,
 } from './Constants.js';
 import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
@@ -150,6 +150,116 @@ const CANYON_COUNT = 6;
 const CANYON_MAX_DEPTH = 20;
 const CANYON_BENCH = 3;        // wall terrace height, in blocks
 
+/**
+ * How far the canyon's influence on vegetation reaches, and how hard it bites.
+ *
+ * Index by `canyonNear` — 0 inside the gorge, 1..3 columns out from it, 4 for
+ * everything else — and multiply the biome's tree chance by what comes back.
+ *
+ * Zero at the rim itself is deliberate and it is the entry that actually does
+ * the work: a canopy is up to four columns across, so a tree standing *on* the
+ * lip hangs most of itself over the drop. One at each index further out gets
+ * the forest back to full density within four columns, which reads as the wood
+ * thinning toward a clearing rather than as a circle cut out of it.
+ *
+ * Nothing here stops undergrowth. A gorge floor with tufts of grass and the odd
+ * flower on it still reads as a gorge; a gorge with a roof on it does not.
+ */
+const CANYON_NEAR_MAX = 4;
+const CANYON_TREE_THIN = [0, 0, 0.35, 0.65, 1];
+
+/**
+ * Ore bands, deepest and rarest first. The loop takes the first vein that
+ * claims a cell and stops, so listing a common shallow ore above a rare deep
+ * one would starve the deep one wherever their bands touch.
+ *
+ * Two of the old entries were dead. `gold_ore` ran lo 108 hi 30 and
+ * `crystal_ore` lo 108 hi 26 — the radii are 100..144, so `hi` was below
+ * `lo` and both tests were unreachable for every voxel on the planet. Gold
+ * and crystal did not generate at all.
+ *
+ * The ladder the bands describe, from the surface down:
+ *   131-142  coal, copper                     stone
+ *   124-131  coal, copper, iron               stone / limestone
+ *   116-124  iron, silver, gold, moss         limestone / andesite
+ *   112-116  amethyst, crystal, sulfur        andesite / granite / tuff
+ *   108-116  the deep seam, in slate          slate / azurite
+ *   108-112  emerald, sapphire, ruby, void    slate
+ */
+const ORES = [
+  { id: ID.voidstone_ore, scale: 0.62, thr: 0.60, lo: R_MANTLE, hi: band(111), seed: 907 },
+  { id: ID.ruby_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(112.5), seed: 719 },
+  { id: ID.sapphire_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(113), seed: 733 },
+  { id: ID.emerald_ore, scale: 0.48, thr: 0.57, lo: R_MANTLE, hi: band(114), seed: 641 },
+  { id: ID.deep_crystal_ore, scale: 0.46, thr: 0.60, lo: R_MANTLE, hi: band(113), seed: 811 },
+  { id: ID.deep_gold_ore, scale: 0.38, thr: 0.58, lo: R_MANTLE, hi: band(114), seed: 557 },
+  { id: ID.deep_silver_ore, scale: 0.36, thr: 0.57, lo: R_MANTLE, hi: band(113.5), seed: 463 },
+  { id: ID.deep_iron_ore, scale: 0.30, thr: 0.55, lo: R_MANTLE, hi: band(116), seed: 389 },
+  { id: ID.deep_copper_ore, scale: 0.28, thr: 0.55, lo: R_MANTLE, hi: band(115), seed: 293 },
+  { id: ID.deep_coal_ore, scale: 0.24, thr: 0.53, lo: R_MANTLE, hi: band(116), seed: 197 },
+
+  { id: ID.sulfur_ore, scale: 0.34, thr: 0.57, lo: R_MANTLE, hi: band(118), seed: 101 },
+  { id: ID.amethyst_ore, scale: 0.42, thr: 0.60, lo: R_MANTLE + 2, hi: band(120), seed: 149 },
+  { id: ID.crystal_ore, scale: 0.40, thr: 0.62, lo: band(112), hi: band(121), seed: 219 },
+  { id: ID.gold_ore, scale: 0.34, thr: 0.60, lo: band(114), hi: band(125), seed: 143 },
+  { id: ID.silver_ore, scale: 0.32, thr: 0.58, lo: band(113), hi: band(124), seed: 89 },
+  { id: ID.iron_ore, scale: 0.26, thr: 0.56, lo: band(116), hi: R_SURFACE - 2, seed: 71 },
+  { id: ID.copper_ore, scale: 0.24, thr: 0.55, lo: band(120), hi: R_TERRAIN_MAX, seed: 37 },
+  { id: ID.coal_ore, scale: 0.20, thr: 0.52, lo: band(118), hi: R_TERRAIN_MAX, seed: 0 },
+
+  { id: ID.gravel, scale: 0.14, thr: 0.58, lo: R_MANTLE + 4, hi: R_TERRAIN_MAX, seed: 311 },
+  // Clay and moss keep the bands they always had — clay's `lo` was 32, i.e.
+  // below the innermost radius, so it has always meant "everywhere the host
+  // rock reaches". Narrowing it here would quietly halve the brick supply.
+  { id: ID.clay, scale: 0.22, thr: 0.62, lo: R_MANTLE, hi: R_SEA, seed: 407 },
+  { id: ID.moss_stone, scale: 0.18, thr: 0.60, lo: R_MANTLE, hi: R_SURFACE, seed: 503 },
+  // Moss is the only way to get a soft green block underground, and it is
+  // shallow on purpose: it belongs to the cave mouth, not to the deep.
+  { id: ID.moss_block, scale: 0.20, thr: 0.66, lo: band(124), hi: R_SURFACE, seed: 601 },
+];
+
+/**
+ * Which ores can possibly appear at each layer, worked out once.
+ *
+ * A band test is `r < o.lo || r > o.hi`, and `r` is a function of `k` alone —
+ * so the answer is the same for every one of the 1.3M columns and was being
+ * recomputed for all of them. This is by far the most expensive thing worldgen
+ * does, so the 22 comparisons per voxel it removes are worth having, and more
+ * usefully the bucket is *short*: the deep layers carry ten candidates and the
+ * bulk of the crust six or seven, rather than the whole table every time.
+ *
+ * Module scope rather than a field, now that the pass runs a column at a time:
+ * rebuilding it per region would be 66 filters for 256 columns of work.
+ */
+const ORE_BY_LAYER = [];
+for (let k = 0; k < D; k++) {
+  const r = R_MIN + k + 0.5;
+  ORE_BY_LAYER.push(ORES.filter((o) => r >= o.lo && r <= o.hi));
+}
+
+/** Shared scratch for the per-column passes — they are called a million times. */
+const _fillDir = [0, 0, 0];
+
+/**
+ * Volcano geometry. Module scope rather than locals now that choosing a site
+ * and building it are two different passes run at two different times, and both
+ * have to agree about how big the thing is — the region bookkeeping in the
+ * worker needs APRON too, to know which regions a site will eventually write.
+ */
+export const APRON = 20;   // columns of scorched ground
+const CONE = 11;           // columns of raised cone
+const CONE_H = 6;          // blocks at the summit
+const VENT = 4;            // columns of crater
+const VOLCANO_TARGET = 4;
+
+/**
+ * How far outside a region its decoration pass has to look. A pine's canopy is
+ * radius 3.0 plus up to 0.45 of fraying and one column of rounding; a boulder
+ * reaches 2. Six is that with room to spare, and being generous here is cheap —
+ * it costs a wider overlap, and getting it wrong costs a visible seam.
+ */
+export const DECOR_MARGIN = 6;
+
 // Scratch for dirToColumn — this is called a million times in the canyon walk.
 const _dtf = { f: 0, a: 0, b: 0 };
 const _dtc = { f: 0, i: 0, j: 0, col: 0 };
@@ -286,8 +396,33 @@ export class WorldGen {
     return BIOME.PLAINS;
   }
 
-  generate(onProgress = () => {}) {
-    const blocks = new Uint8Array(NUM_VOXELS);
+  /**
+   * The global phase: everything that has to see the whole planet at once, and
+   * deliberately nothing else.
+   *
+   * Splitting worldgen in two is the whole reason a New Game takes a few
+   * seconds instead of half a minute, and the line is drawn where the
+   * measurements put it rather than where the code happened to be divided.
+   * Timed over the whole planet: the height field 0.9s, weathering and biomes
+   * 0.5s, the ocean fill 0.05s, the canyons 0.07s, choosing the volcano sites
+   * 0.004s — a second and a half between them, and all of it per-column
+   * bookkeeping a few megabytes wide. Against that: rock and soil 5.3s, caves
+   * 6.4s, ore veins 14.8s. Twenty-seven seconds of voxel work, every bit of it
+   * per column, and not one column of it needing any column but its own.
+   *
+   * So the cheap passes stay eager and the expensive ones go lazy, region by
+   * region. Which way round that goes is not a preference: a canyon walks a
+   * path across the whole sphere, the sea is a flood fill outward from the
+   * ocean, the shore distance is a flood fill inward from it, and the volcano
+   * sites are chosen against every other site on the planet. None of those four
+   * can answer "what does this one region look like" without having answered
+   * for the rest of the planet first. The voxel passes can, and that is the only
+   * reason any of this works.
+   *
+   * Everything produced here is kept on `this`: the per-column methods below are
+   * the second half of the same generator and read all of it.
+   */
+  generateGlobal(onProgress = () => {}) {
     const colBiome = new Uint8Array(COLUMNS);
     const colHeight = new Float32Array(COLUMNS);
     const colSlope = new Float32Array(COLUMNS);
@@ -304,14 +439,14 @@ export class WorldGen {
           colHeight[col] = this.height(dir[0], dir[1], dir[2]);
         }
       }
-      onProgress(0.02 + 0.18 * ((f + 1) / FACES), 'Sculpting the sphere');
+      onProgress(0.02 + 0.58 * ((f + 1) / FACES), 'Sculpting the sphere');
     }
 
     // Relax the height field across the column graph. Voxel terrain quantises
     // to whole layers, so any residual high-frequency noise becomes a forest of
     // one-column spikes; a couple of gentle passes leaves the big landforms
     // intact and kills the needles.
-    onProgress(0.20, 'Weathering the surface');
+    onProgress(0.60, 'Weathering the surface');
     {
       const tmp = new Float32Array(COLUMNS);
       for (let pass = 0; pass < 3; pass++) {
@@ -412,7 +547,7 @@ export class WorldGen {
     // Ocean, and land is untouched. Doing it before the biome pass instead
     // moved the coastline, which moved the beaches, which moved the shore
     // distance field the beaches were grown from.
-    onProgress(0.205, 'Flooding the basins');
+    onProgress(0.90, 'Flooding the basins');
     {
       const oceanDist = new Int16Array(COLUMNS).fill(-1);
       const queue = new Int32Array(COLUMNS);
@@ -459,7 +594,7 @@ export class WorldGen {
     }
 
     // ---- canyons -----------------------------------------------------------
-    onProgress(0.21, 'Cutting the gorges');
+    onProgress(0.93, 'Cutting the gorges');
     const canyonMask = this.carveCanyons(colHeight, colBiome, rng);
 
     // ---- what the sea can actually reach -----------------------------------
@@ -533,122 +668,266 @@ export class WorldGen {
       colSlope[col] = s * 0.25;
     }
 
-    // ---- 2. fill columns ---------------------------------------------------
-    onProgress(0.22, 'Laying rock and soil');
-    for (let f = 0; f < FACES; f++) {
-      for (let i = 0; i < F; i++) {
-        for (let j = 0; j < F; j++) {
-          const col = cidx(f, i, j);
-          const h = colHeight[col];
-          const bi = colBiome[col];
-          const rocky = colSlope[col] > 1.35;
-          const base = col * D;
-          centerDir(f, i, j, dir);
-
-          // Surface material varies within a biome, not just between biomes: the
-          // same field that drifts tundra snow is reused to break up ocean silt,
-          // podzol under pines and the grit in a savanna, so no biome is a flat
-          // wash of one block.
-          const patch = this.nDetail.fbm3(dir[0] * 14, dir[1] * 14, dir[2] * 14, 3, 2, 0.5);
-
-          let top, sub;
-          switch (bi) {
-            // The seabed changes with depth, not just with noise.
-            //
-            // It was mud-or-gravel everywhere, which was invisible while the
-            // ocean was a puddle: the only water you could see the bottom of
-            // was the beach shelf, so the seabed read as "sand" and the two
-            // blocks it actually uses never got a look in. Now that there is a
-            // real water column, the floor is worth reading — so it goes sandy
-            // in the shallows where a beach would naturally continue under the
-            // water, silt and gravel over the slope, and clay and bare stone in
-            // the deep where nothing settles.
-            case BIOME.OCEAN: {
-              const depth = R_SEA - h;
-              if (depth < 4) { top = patch > 0.10 ? ID.sand : ID.gravel; sub = ID.sand; }
-              else if (depth < 11) { top = patch > 0.16 ? ID.mud : ID.gravel; sub = ID.dirt; }
-              else { top = patch > 0.22 ? ID.clay : (patch < -0.30 ? ID.stone : ID.gravel); sub = ID.stone; }
-              break;
-            }
-            case BIOME.BEACH: top = ID.sand; sub = ID.sand; break;
-            case BIOME.DESERT: top = ID.sand; sub = ID.sandstone; break;
-            // Badlands is the only red ground on the planet. It used to be plain
-            // sandstone, which made it indistinguishable from a desert cliff.
-            case BIOME.BADLANDS: top = patch > 0 ? ID.red_sand : ID.red_sandstone; sub = ID.red_sandstone; break;
-            case BIOME.SNOW: top = ID.snow; sub = patch < -0.2 ? ID.packed_ice : ID.dirt; break;
-            case BIOME.MOUNTAIN: top = rocky ? ID.stone : ID.grass; sub = ID.stone; break;
-            case BIOME.PINE_FOREST: top = patch > 0.08 ? ID.podzol : ID.grass; sub = ID.dirt; break;
-            case BIOME.SAVANNA: top = ID.grass; sub = patch > -0.05 ? ID.coarse_dirt : ID.dirt; break;
-            case BIOME.TUNDRA: {
-              // Frozen ground: drifts of snow lying over bare, frost-heaved
-              // soil and stone. Tundra had no case here at all and fell through
-              // to grass — the same block as a meadow, which is how a biome
-              // named for permafrost ended up green and full of flowers.
-              const drift = this.nDetail.fbm3(dir[0] * 16, dir[1] * 16, dir[2] * 16, 3, 2, 0.5);
-              top = drift > 0.10 ? ID.snow : (drift < -0.24 ? ID.gravel : ID.coarse_dirt);
-              // Permafrost bog. Peat is a fuel, so the biome that grows almost
-              // no wood is the one that hands you something to burn instead.
-              sub = drift < -0.05 ? ID.peat : ID.dirt;
-              break;
-            }
-            default: top = ID.grass; sub = ID.dirt; break;
-          }
-          if (rocky && bi !== BIOME.DESERT && bi !== BIOME.BADLANDS) { top = ID.stone; sub = ID.stone; }
-          // A canyon is cut in the height field, so without this the floor and
-          // the terraces inherit whatever the rim wears and a fourteen-block
-          // gorge comes out lined with meadow turf — a green ditch. The walls
-          // already handle themselves: they are steep, so the `rocky` test
-          // above turns them to stone, and everything below four blocks of
-          // depth is `stratum` and shows the bands the carve exposed.
-          if (canyonMask[col]) {
-            if (bi === BIOME.DESERT || bi === BIOME.BADLANDS) {
-              top = patch > 0.1 ? ID.red_sand : ID.gravel; sub = ID.red_sandstone;
-            } else {
-              top = patch > 0.22 ? ID.coarse_dirt : ID.gravel; sub = ID.stone;
-            }
-          }
-          // Sandy shallows, but only just off the shore. This used to be a flat
-          // "anything under sea level + 0.4 is sand" rule running independently
-          // of the biome, which is the other half of why the planet looked like
-          // one continuous beach — a column could be labelled Plains and still
-          // be built entirely out of sand.
-          if (h < R_SEA + 0.4 && bi !== BIOME.SNOW && shoreDist[col] <= BEACH_REACH + 1) {
-            top = ID.sand; sub = ID.sand;
-          }
-
-          for (let k = 0; k < D; k++) {
-            const r = R_MIN + k + 0.5;
-            let id;
-            if (r < R_CORE) id = ID.core;
-            else if (r < R_MANTLE) {
-              const m = this.nCave.fbm3(dir[0] * r * 0.22, dir[1] * r * 0.22, dir[2] * r * 0.22, 3, 2, 0.5);
-              id = m > 0.42 ? ID.obsidian
-                : m > 0.16 ? ID.ash_stone
-                  : (m < -0.5 ? ID.lava : ID.basalt);
-            } else if (r > h) {
-              id = (r <= R_SEA && submerged[col]) ? ID.water : ID.air;
-            } else {
-              const depth = h - r;
-              if (depth < 1.0) id = top;
-              else if (depth < 4.0) id = sub;
-              else id = this.stratum(r, dir[0], dir[1], dir[2]);
-            }
-            blocks[base + k] = id;
-          }
+    // ---- how near is a gorge? ----------------------------------------------
+    /**
+     * Distance in columns to the nearest canyon column, capped at 4.
+     *
+     * This is the fix for canyons coming out as wooded gullies. The floor and
+     * the terraced walls were never the problem on their own — `canyonMask`
+     * already re-surfaces them in gravel and coarse dirt, which is not a block
+     * a tree will stand on. What planted them was the *rim*: a rim column is
+     * ordinary forest, its canopy is up to four columns across, and a gorge is
+     * four to eleven columns wide. Two rows of oaks facing each other across a
+     * six-column slot close over the top of it, and from above and from inside
+     * the canyon simply is not there any more.
+     *
+     * So the thinning has to reach outside the mask, which means knowing how
+     * far outside. Three steps of dilation over the column graph is enough:
+     * a canopy cannot reach further than that, and beyond it the forest is
+     * left completely alone.
+     */
+    const canyonNear = new Uint8Array(COLUMNS).fill(CANYON_NEAR_MAX);
+    {
+      const queue = new Int32Array(COLUMNS);
+      let qn = 0;
+      for (let col = 0; col < COLUMNS; col++) {
+        if (canyonMask[col]) { canyonNear[col] = 0; queue[qn++] = col; }
+      }
+      for (let qi = 0; qi < qn; qi++) {
+        const col = queue[qi];
+        const d = canyonNear[col] + 1;
+        if (d >= CANYON_NEAR_MAX) continue;
+        for (let n = 0; n < 4; n++) {
+          const nb = colNeighbor(col, n);
+          if (nb < 0 || canyonNear[nb] <= d) continue;
+          canyonNear[nb] = d;
+          queue[qn++] = nb;
         }
       }
-      onProgress(0.22 + 0.24 * ((f + 1) / FACES), 'Laying rock and soil');
     }
 
-    // ---- 3. caves ----------------------------------------------------------
-    onProgress(0.47, 'Carving caverns');
+    // Published before the volcano pass, because that reads them.
+    this.colHeight = colHeight;
+    this.colBiome = colBiome;
+    this.colSlope = colSlope;
+    this.canyonMask = canyonMask;
+    this.canyonNear = canyonNear;
+    this.shoreDist = shoreDist;
+    this.submerged = submerged;
+
+    // ---- volcanic fields: where, but not yet what ---------------------------
+    // Site selection is planet-wide — a site is rejected for standing too near
+    // another one — so it has to happen here. The *building* is voxel work over
+    // a forty-column disc and waits until somebody goes near it; see
+    // `stampVolcano`.
+    onProgress(0.97, 'Lighting the vents');
+    this.placeVolcanoSites(rng);
+
+    // ---- structures --------------------------------------------------------
+    // No ruins, crypts or vaults. A planet you can walk around in four minutes
+    // reads as *yours*; salting it with somebody else's architecture makes it
+    // read as a level someone built, which is the opposite of the point. The
+    // builder is kept — Structures.js still compiles and its patch mapping is
+    // used elsewhere — so this is one line to put back if that judgement
+    // changes.
+    this.structureCounts = {};
+
+    onProgress(1, 'Ready');
+    return { colBiome, colHeight, spawn: this.pickSpawn() };
+  }
+
+  /**
+   * A first guess at somewhere to wake up, made from the height field alone.
+   *
+   * The old spawn search read the *voxels* — is the top block grass, is there
+   * headroom, how level are the four neighbours — and there are no voxels to
+   * read until a region has been generated, which is a circle: the region to
+   * generate is the one around the spawn. So the worker picks a column from the
+   * height field and the biome map, which is all it needs to find open, level,
+   * dry ground, and the main thread refines the answer against real blocks once
+   * that neighbourhood has actually been built.
+   */
+  pickSpawn() {
+    const rng = makeRng(this.seed ^ 0x1d5b3f11);
+    let best = -1, bestScore = -1;
+    for (let n = 0; n < 20000; n++) {
+      const col = (rng() * COLUMNS) | 0;
+      const bi = this.colBiome[col];
+      if (bi === BIOME.OCEAN || bi === BIOME.BEACH) continue;
+      // Not in a gorge and not on its rim: waking up fourteen blocks down a
+      // slot canyon is a memorable start and a miserable one.
+      if (this.canyonNear[col] < CANYON_NEAR_MAX) continue;
+      const h = this.colHeight[col];
+      if (h < R_SEA + 1.5 || h > R_SURFACE + 3.0) continue;
+      let score = 4 - Math.min(4, this.colSlope[col] * 3);
+      if (bi === BIOME.PLAINS || bi === BIOME.MEADOW || bi === BIOME.FOREST) score += 2;
+      if (score > bestScore) { bestScore = score; best = col; }
+      if (bestScore > 5.5) break;
+    }
+    return best < 0 ? 0 : best;
+  }
+
+  /** Unit direction through a column's centre, into the shared scratch. */
+  _dirOf(col, out) {
+    const f = (col / (F * F)) | 0;
+    const rem = col - f * F * F;
+    return centerDir(f, (rem / F) | 0, rem % F, out);
+  }
+
+  /**
+   * The ground layer of a column, read off the height field rather than out of
+   * the block array.
+   *
+   * The fill loop makes everything at r > h air or water and everything below it
+   * solid, so this is exactly what scanning down from the top would find — and
+   * unlike the scan it can be asked before the column exists. Neither caves nor
+   * ore change the answer: caves keep `skin` blocks of rock under the surface,
+   * and a vein replaces one rock with another.
+   */
+  groundKOf(col) {
+    const k = Math.floor(this.colHeight[col] - R_MIN - 0.5);
+    return k < 0 ? -1 : (k >= D ? D - 1 : k);
+  }
+
+  /**
+   * A private random stream for one column.
+   *
+   * Everything scattered on the surface — trees, boulders, grass, mushrooms —
+   * used to draw from one sequential `rng` walked in column order, and that is
+   * exactly the thing lazy generation cannot have: the hundredth column's trees
+   * depend on how many times the first ninety-nine called it, so a planet
+   * generated in the order the player walks would be a different planet. Seeding
+   * per column from the world seed makes the answer a pure function of (seed,
+   * column), which is the invariant the whole design rests on.
+   *
+   * The mixing is not decoration. xorshift32 seeded with a small integer takes
+   * several rounds to look random, and column indices are consecutive — feeding
+   * them in raw gave visibly correlated forests, with trees in diagonal stripes.
+   */
+  colRng(col, salt) {
+    let s = Math.imul(col ^ 0x9e3779b9, 0x85ebca6b);
+    s = Math.imul(s ^ (s >>> 13) ^ salt ^ this.seed, 0xc2b2ae35);
+    s ^= s >>> 16;
+    return makeRng(s | 0);
+  }
+
+  // --- per-column voxel work -------------------------------------------------
+
+  /**
+   * Rock, soil and sea for one column. Reads nothing but this column's own
+   * entry in the global tables, which is what makes it safe to run in any order
+   * and at any time.
+   */
+  fillColumn(blocks, col) {
+    const { colHeight, colBiome, colSlope, canyonMask, shoreDist, submerged } = this;
+    const dir = _fillDir;
+    const h = colHeight[col];
+    const bi = colBiome[col];
+    const rocky = colSlope[col] > 1.35;
+    const base = col * D;
+    this._dirOf(col, dir);
+
+    // Surface material varies within a biome, not just between biomes: the
+    // same field that drifts tundra snow is reused to break up ocean silt,
+    // podzol under pines and the grit in a savanna, so no biome is a flat
+    // wash of one block.
+    const patch = this.nDetail.fbm3(dir[0] * 14, dir[1] * 14, dir[2] * 14, 3, 2, 0.5);
+
+    let top, sub;
+    switch (bi) {
+      // The seabed changes with depth, not just with noise.
+      //
+      // It was mud-or-gravel everywhere, which was invisible while the
+      // ocean was a puddle: the only water you could see the bottom of
+      // was the beach shelf, so the seabed read as "sand" and the two
+      // blocks it actually uses never got a look in. Now that there is a
+      // real water column, the floor is worth reading — so it goes sandy
+      // in the shallows where a beach would naturally continue under the
+      // water, silt and gravel over the slope, and clay and bare stone in
+      // the deep where nothing settles.
+      case BIOME.OCEAN: {
+        const depth = R_SEA - h;
+        if (depth < 4) { top = patch > 0.10 ? ID.sand : ID.gravel; sub = ID.sand; }
+        else if (depth < 11) { top = patch > 0.16 ? ID.mud : ID.gravel; sub = ID.dirt; }
+        else { top = patch > 0.22 ? ID.clay : (patch < -0.30 ? ID.stone : ID.gravel); sub = ID.stone; }
+        break;
+      }
+      case BIOME.BEACH: top = ID.sand; sub = ID.sand; break;
+      case BIOME.DESERT: top = ID.sand; sub = ID.sandstone; break;
+      // Badlands is the only red ground on the planet. It used to be plain
+      // sandstone, which made it indistinguishable from a desert cliff.
+      case BIOME.BADLANDS: top = patch > 0 ? ID.red_sand : ID.red_sandstone; sub = ID.red_sandstone; break;
+      case BIOME.SNOW: top = ID.snow; sub = patch < -0.2 ? ID.packed_ice : ID.dirt; break;
+      case BIOME.MOUNTAIN: top = rocky ? ID.stone : ID.grass; sub = ID.stone; break;
+      case BIOME.PINE_FOREST: top = patch > 0.08 ? ID.podzol : ID.grass; sub = ID.dirt; break;
+      case BIOME.SAVANNA: top = ID.grass; sub = patch > -0.05 ? ID.coarse_dirt : ID.dirt; break;
+      case BIOME.TUNDRA: {
+        // Frozen ground: drifts of snow lying over bare, frost-heaved
+        // soil and stone. Tundra had no case here at all and fell through
+        // to grass — the same block as a meadow, which is how a biome
+        // named for permafrost ended up green and full of flowers.
+        const drift = this.nDetail.fbm3(dir[0] * 16, dir[1] * 16, dir[2] * 16, 3, 2, 0.5);
+        top = drift > 0.10 ? ID.snow : (drift < -0.24 ? ID.gravel : ID.coarse_dirt);
+        // Permafrost bog. Peat is a fuel, so the biome that grows almost
+        // no wood is the one that hands you something to burn instead.
+        sub = drift < -0.05 ? ID.peat : ID.dirt;
+        break;
+      }
+      default: top = ID.grass; sub = ID.dirt; break;
+    }
+    if (rocky && bi !== BIOME.DESERT && bi !== BIOME.BADLANDS) { top = ID.stone; sub = ID.stone; }
+    // A canyon is cut in the height field, so without this the floor and
+    // the terraces inherit whatever the rim wears and a fourteen-block
+    // gorge comes out lined with meadow turf — a green ditch. The walls
+    // already handle themselves: they are steep, so the `rocky` test
+    // above turns them to stone, and everything below four blocks of
+    // depth is `stratum` and shows the bands the carve exposed.
+    if (canyonMask[col]) {
+      if (bi === BIOME.DESERT || bi === BIOME.BADLANDS) {
+        top = patch > 0.1 ? ID.red_sand : ID.gravel; sub = ID.red_sandstone;
+      } else {
+        top = patch > 0.22 ? ID.coarse_dirt : ID.gravel; sub = ID.stone;
+      }
+    }
+    // Sandy shallows, but only just off the shore. This used to be a flat
+    // "anything under sea level + 0.4 is sand" rule running independently
+    // of the biome, which is the other half of why the planet looked like
+    // one continuous beach — a column could be labelled Plains and still
+    // be built entirely out of sand.
+    if (h < R_SEA + 0.4 && bi !== BIOME.SNOW && shoreDist[col] <= BEACH_REACH + 1) {
+      top = ID.sand; sub = ID.sand;
+    }
+
+    for (let k = 0; k < D; k++) {
+      const r = R_MIN + k + 0.5;
+      let id;
+      if (r < R_CORE) id = ID.core;
+      else if (r < R_MANTLE) {
+        const m = this.nCave.fbm3(dir[0] * r * 0.22, dir[1] * r * 0.22, dir[2] * r * 0.22, 3, 2, 0.5);
+        id = m > 0.42 ? ID.obsidian
+          : m > 0.16 ? ID.ash_stone
+            : (m < -0.5 ? ID.lava : ID.basalt);
+      } else if (r > h) {
+        id = (r <= R_SEA && submerged[col]) ? ID.water : ID.air;
+      } else {
+        const depth = h - r;
+        if (depth < 1.0) id = top;
+        else if (depth < 4.0) id = sub;
+        else id = this.stratum(r, dir[0], dir[1], dir[2]);
+      }
+      blocks[base + k] = id;
+    }
+  }
+
+  /** Caves, for one already-filled column. */
+  carveColumn(blocks, col) {
     const nc = this.nCave;
-    for (let col = 0; col < COLUMNS; col++) {
-      const h = colHeight[col];
-      const base = col * D;
-      const f = (col / (F * F)) | 0;
-      const rem = col - f * F * F;
-      centerDir(f, (rem / F) | 0, rem % F, dir);
+    const canyonMask = this.canyonMask;
+    const h = this.colHeight[col];
+    const base = col * D;
+    const dir = _fillDir;
+    this._dirOf(col, dir);
+    {
       // How much rock a cave has to leave under the surface. 2.2 everywhere
       // else, because a cave that breaks daylight at random leaves the planet
       // pocked with holes nobody dug — but in a canyon that is exactly the
@@ -694,126 +973,51 @@ export class WorldGen {
           blocks[base + k] = (r < R_MANTLE + 4 && cav > 0.7) ? ID.lava : ID.air;
         }
       }
-      if ((col & 4095) === 0) onProgress(0.47 + 0.1 * (col / COLUMNS), 'Carving caverns');
     }
+  }
 
-    // ---- 4. ores -----------------------------------------------------------
-    onProgress(0.58, 'Seeding ore veins');
-    // Depth bands, deepest and rarest first. The loop takes the first vein that
-    // claims a cell and stops, so listing a common shallow ore above a rare deep
-    // one would starve the deep one wherever their bands touch.
-    //
-    // Two of the old entries were dead. `gold_ore` ran lo 108 hi 30 and
-    // `crystal_ore` lo 108 hi 26 — the radii are 100..144, so `hi` was below
-    // `lo` and both tests were unreachable for every voxel on the planet. Gold
-    // and crystal did not generate at all.
-    //
-    // The ladder the bands describe, from the surface down:
-    //   131-142  coal, copper                     stone
-    //   124-131  coal, copper, iron               stone / limestone
-    //   116-124  iron, silver, gold, moss         limestone / andesite
-    //   112-116  amethyst, crystal, sulfur        andesite / granite / tuff
-    //   108-116  the deep seam, in slate          slate / azurite
-    //   108-112  emerald, sapphire, ruby, void    slate
-    const ores = [
-      { id: ID.voidstone_ore, scale: 0.62, thr: 0.60, lo: R_MANTLE, hi: band(111), seed: 907 },
-      { id: ID.ruby_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(112.5), seed: 719 },
-      { id: ID.sapphire_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(113), seed: 733 },
-      { id: ID.emerald_ore, scale: 0.48, thr: 0.57, lo: R_MANTLE, hi: band(114), seed: 641 },
-      { id: ID.deep_crystal_ore, scale: 0.46, thr: 0.60, lo: R_MANTLE, hi: band(113), seed: 811 },
-      { id: ID.deep_gold_ore, scale: 0.38, thr: 0.58, lo: R_MANTLE, hi: band(114), seed: 557 },
-      { id: ID.deep_silver_ore, scale: 0.36, thr: 0.57, lo: R_MANTLE, hi: band(113.5), seed: 463 },
-      { id: ID.deep_iron_ore, scale: 0.30, thr: 0.55, lo: R_MANTLE, hi: band(116), seed: 389 },
-      { id: ID.deep_copper_ore, scale: 0.28, thr: 0.55, lo: R_MANTLE, hi: band(115), seed: 293 },
-      { id: ID.deep_coal_ore, scale: 0.24, thr: 0.53, lo: R_MANTLE, hi: band(116), seed: 197 },
-
-      { id: ID.sulfur_ore, scale: 0.34, thr: 0.57, lo: R_MANTLE, hi: band(118), seed: 101 },
-      { id: ID.amethyst_ore, scale: 0.42, thr: 0.60, lo: R_MANTLE + 2, hi: band(120), seed: 149 },
-      { id: ID.crystal_ore, scale: 0.40, thr: 0.62, lo: band(112), hi: band(121), seed: 219 },
-      { id: ID.gold_ore, scale: 0.34, thr: 0.60, lo: band(114), hi: band(125), seed: 143 },
-      { id: ID.silver_ore, scale: 0.32, thr: 0.58, lo: band(113), hi: band(124), seed: 89 },
-      { id: ID.iron_ore, scale: 0.26, thr: 0.56, lo: band(116), hi: R_SURFACE - 2, seed: 71 },
-      { id: ID.copper_ore, scale: 0.24, thr: 0.55, lo: band(120), hi: R_TERRAIN_MAX, seed: 37 },
-      { id: ID.coal_ore, scale: 0.20, thr: 0.52, lo: band(118), hi: R_TERRAIN_MAX, seed: 0 },
-
-      { id: ID.gravel, scale: 0.14, thr: 0.58, lo: R_MANTLE + 4, hi: R_TERRAIN_MAX, seed: 311 },
-      // Clay and moss keep the bands they always had — clay's `lo` was 32, i.e.
-      // below the innermost radius, so it has always meant "everywhere the host
-      // rock reaches". Narrowing it here would quietly halve the brick supply.
-      { id: ID.clay, scale: 0.22, thr: 0.62, lo: R_MANTLE, hi: R_SEA, seed: 407 },
-      { id: ID.moss_stone, scale: 0.18, thr: 0.60, lo: R_MANTLE, hi: R_SURFACE, seed: 503 },
-      // Moss is the only way to get a soft green block underground, and it is
-      // shallow on purpose: it belongs to the cave mouth, not to the deep.
-      { id: ID.moss_block, scale: 0.20, thr: 0.66, lo: band(124), hi: R_SURFACE, seed: 601 },
-    ];
+  /** Ore veins, for one already-carved column. See ORE_BY_LAYER. */
+  oreColumn(blocks, col) {
     const no = this.nOre;
-    // Which ores can possibly appear at each layer, worked out once.
-    //
-    // A band test is `r < o.lo || r > o.hi`, and `r` is a function of `k` alone
-    // — so the answer is the same for every one of the 1.3M columns and was
-    // being recomputed for all of them. On the enlarged planet this loop is by
-    // far the most expensive thing worldgen does (39s of 63s measured), so the
-    // 22 comparisons per voxel it removes are worth having, and more usefully
-    // the bucket is *short*: the deep layers carry ten candidates and the bulk
-    // of the crust six or seven, rather than the whole table every time.
-    const byLayer = [];
+    const base = col * D;
+    const dir = _fillDir;
+    this._dirOf(col, dir);
     for (let k = 0; k < D; k++) {
+      if (!ORE_HOST[blocks[base + k]]) continue;
+      const bucket = ORE_BY_LAYER[k];
+      if (bucket.length === 0) continue;
       const r = R_MIN + k + 0.5;
-      byLayer.push(ores.filter((o) => r >= o.lo && r <= o.hi));
-    }
-    for (let col = 0; col < COLUMNS; col++) {
-      const base = col * D;
-      const f = (col / (F * F)) | 0;
-      const rem = col - f * F * F;
-      centerDir(f, (rem / F) | 0, rem % F, dir);
-      for (let k = 0; k < D; k++) {
-        if (!ORE_HOST[blocks[base + k]]) continue;
-        const bucket = byLayer[k];
-        if (bucket.length === 0) continue;
-        const r = R_MIN + k + 0.5;
-        const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
-        for (let oi = 0; oi < bucket.length; oi++) {
-          const o = bucket[oi];
-          // Two octaves, not three. A vein is a blob — the third octave was
-          // adding detail an order of magnitude smaller than one block, which
-          // no player can ever see, at a third of the cost of the single most
-          // expensive loop in worldgen. `veinNoise` then skips the second
-          // octave whenever the first already rules the threshold out, which is
-          // most of the time.
-          const n = veinNoise(no, px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, o.thr);
-          if (n > o.thr) { blocks[base + k] = o.id; break; }
-        }
+      const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
+      for (let oi = 0; oi < bucket.length; oi++) {
+        const o = bucket[oi];
+        // Two octaves, not three. A vein is a blob — the third octave was
+        // adding detail an order of magnitude smaller than one block, which
+        // no player can ever see, at a third of the cost of the single most
+        // expensive loop in worldgen. `veinNoise` then skips the second
+        // octave whenever the first already rules the threshold out, which is
+        // most of the time.
+        const n = veinNoise(no, px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, o.thr);
+        if (n > o.thr) { blocks[base + k] = o.id; break; }
       }
     }
+  }
 
-    // ---- 5. volcanic fields ------------------------------------------------
-    // After caves and ore, before trees. After caves because a caldera is built
-    // out of ash stone and basalt and both are `CARVEABLE` — carving afterwards
-    // would drill passages through the cone and, worse, out from under the vent
-    // pool. After ore for the same reason on `ORE_HOST`. Before trees because
-    // trees and flora key off the surface *block*, and ash stone is not one
-    // they grow on, so the scorched ground stays bare for free rather than
-    // needing a mask.
-    onProgress(0.68, 'Lighting the vents');
-    this.placeVolcanoes(blocks, colHeight, colBiome, colSlope, canyonMask, rng);
-
-    // ---- 6. trees + scatter ------------------------------------------------
-    onProgress(0.7, 'Growing forests');
-    this.placeTrees(blocks, colHeight, colBiome, colSlope, rng);
-    onProgress(0.86, 'Scattering flora');
-    this.placeFlora(blocks, colHeight, colBiome, rng);
-
-    // ---- 7. structures -----------------------------------------------------
-    // No ruins, crypts or vaults. A planet you can walk around in four minutes
-    // reads as *yours*; salting it with somebody else's architecture makes it
-    // read as a level someone built, which is the opposite of the point. The
-    // builder is kept — Structures.js still compiles and its patch mapping is
-    // used elsewhere — so this is one line to put back if that judgement
-    // changes.
-    this.structureCounts = {};
-
-    onProgress(0.95, 'Ready');
-    return { blocks, colBiome, colHeight, structures: this.structureCounts };
+  /**
+   * Everything a column's voxels need, in the order the three passes always ran
+   * in.
+   *
+   * They used to be three sweeps over the whole planet, and interleaving them
+   * per column changes nothing: none of the three ever reads a column but its
+   * own, so fill-then-carve-then-ore for one column at a time produces the same
+   * bytes as fill-everywhere-then-carve-everywhere-then-ore-everywhere. What it
+   * buys is that the column is touched once instead of three times, and — the
+   * point of the whole exercise — that a column can be built without building
+   * its neighbours.
+   */
+  terrainColumn(blocks, col) {
+    this.fillColumn(blocks, col);
+    this.carveColumn(blocks, col);
+    this.oreColumn(blocks, col);
   }
 
   /**
@@ -1148,30 +1352,28 @@ export class WorldGen {
    * legible from a distance: forty columns of grey burnt ground with orange in
    * it, against grass.
    */
-  placeVolcanoes(blocks, colHeight, colBiome, colSlope, canyonMask, rng) {
-    const APRON = 20;          // columns of scorched ground
-    const CONE = 11;           // columns of raised cone
-    const CONE_H = 6;          // blocks at the summit
-    const VENT = 4;            // columns of crater
-    const TARGET = 4;
+  /**
+   * Choose the sites, planet-wide, without building anything.
+   *
+   * This half has to be eager: a candidate is rejected for standing on ground
+   * another site has already claimed, so the answer for one site depends on
+   * every site before it, and asking "is there a volcano in this region" cannot
+   * be answered locally. It is also nearly free — four sites out of at most
+   * 300 000 tries against three per-column tables, measured at 4ms.
+   *
+   * The one thing that had to change to get it out of the voxel array is the
+   * ground test, which used to scan each column from the top for the first
+   * non-air block. `groundKOf` reads the same answer off the height field; see
+   * its note for why the two agree.
+   */
+  placeVolcanoSites(rng) {
+    const { colHeight, colBiome, colSlope, canyonMask } = this;
     const HOSTS = [BIOME.BADLANDS, BIOME.DESERT, BIOME.SAVANNA, BIOME.MOUNTAIN, BIOME.PLAINS];
-
-    const groundK = (col) => {
-      const base = col * D;
-      for (let k = D - 1; k >= 0; k--) {
-        const b = blocks[base + k];
-        if (b !== ID.air && b !== ID.water) return k;
-      }
-      return -1;
-    };
-    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[col * D + k] = id; };
-    const get = (col, k) => (k >= 0 && k < D ? blocks[col * D + k] : ID.stone);
-
     const claim = new Uint8Array(COLUMNS);
     const parts = { f: 0, i: 0, j: 0 };
-    let placed = 0;
+    const sites = [];
 
-    for (let t = 0; t < 300000 && placed < TARGET; t++) {
+    for (let t = 0; t < 300000 && sites.length < VOLCANO_TARGET; t++) {
       const col = (rng() * COLUMNS) | 0;
       if (!HOSTS.includes(colBiome[col]) || claim[col] || canyonMask[col]) continue;
       const h = colHeight[col];
@@ -1187,6 +1389,10 @@ export class WorldGen {
       // Keep the whole apron on one face. Same reason as `placeStructures`: a
       // forty-column disc folded over a seam loses cells, and unlike a canyon
       // wall a cone with holes in it reads as broken.
+      //
+      // Lazy generation leans on this a second time. Because the footprint
+      // cannot leave its face, "which regions does this volcano touch" is a
+      // rectangle in face coordinates rather than a walk over the column graph.
       if (parts.i < APRON || parts.i >= F - APRON
         || parts.j < APRON || parts.j >= F - APRON) continue;
 
@@ -1195,7 +1401,7 @@ export class WorldGen {
       for (let di = -CONE; di <= CONE && !bad; di += 3) {
         for (let dj = -CONE; dj <= CONE; dj += 3) {
           const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
-          const g = groundK(c);
+          const g = this.groundKOf(c);
           if (g < 0 || g > D - 3 - CONE_H) { bad = true; break; }
           if (colBiome[c] === BIOME.OCEAN || colBiome[c] === BIOME.BEACH) { bad = true; break; }
           if (canyonMask[c] || claim[c]) { bad = true; break; }
@@ -1205,8 +1411,54 @@ export class WorldGen {
       }
       if (bad || hi - lo > 4) continue;
 
-      const kBase = hi;                       // build off the high side, so no
-      const kSummit = kBase + CONE_H;         // part of the cone is left buried
+      // Claim the apron so the next candidate cannot stand in it. The stamp
+      // used to do this as it laid the ground; it has to happen here now,
+      // because the next candidate is chosen long before anything is built.
+      for (let di = -APRON; di <= APRON; di++) {
+        for (let dj = -APRON; dj <= APRON; dj++) {
+          if (Math.hypot(di, dj) > APRON) continue;
+          claim[patchColumn(parts.f, parts.i, parts.j, di, dj)] = 1;
+        }
+      }
+
+      sites.push({
+        f: parts.f, i: parts.i, j: parts.j,
+        kBase: hi,                            // build off the high side, so no
+        seed: (rng() * 0x7fffffff) | 0,       // part of the cone is left buried
+        stamped: false,
+      });
+    }
+
+    this.volcanoes = sites;
+    this.volcanoCount = sites.length;
+  }
+
+  /**
+   * Build one chosen site. Every column within APRON of it must already have
+   * had `terrainColumn` run, and none of them may have been decorated yet — the
+   * cone reads the ground layer out of the block array, and a tree standing on
+   * that ground would answer the question with its own canopy.
+   */
+  stampVolcano(blocks, site) {
+    if (site.stamped) return;
+    site.stamped = true;
+    const rng = makeRng(site.seed);
+    const parts = { f: site.f, i: site.i, j: site.j };
+
+    const groundK = (col) => {
+      const base = col * D;
+      for (let k = D - 1; k >= 0; k--) {
+        const b = blocks[base + k];
+        if (b !== ID.air && b !== ID.water) return k;
+      }
+      return -1;
+    };
+    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[col * D + k] = id; };
+    const get = (col, k) => (k >= 0 && k < D ? blocks[col * D + k] : ID.stone);
+
+    {
+      const kBase = site.kBase;
+      const kSummit = kBase + CONE_H;
       const kCrater = kSummit - 3;
 
       // --- apron: burnt ground, thinning outward ---
@@ -1215,7 +1467,6 @@ export class WorldGen {
           const d = Math.hypot(di, dj);
           if (d > APRON) continue;
           const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
-          claim[c] = 1;
           if (d <= CONE - 1) continue;        // the cone lays its own ground
           const g = groundK(c);
           if (g < 1 || g >= D - 1) continue;
@@ -1344,9 +1595,7 @@ export class WorldGen {
           if (cur === ID.air || cur === ID.water) set(s2, k, ID.obsidian);
         }
       }
-      placed++;
     }
-    this.volcanoCount = placed;
   }
 
   /** Highest solid layer in a column, or -1. */
@@ -1359,73 +1608,120 @@ export class WorldGen {
     return -1;
   }
 
-  placeTrees(blocks, colHeight, colBiome, colSlope, rng) {
-    for (let col = 0; col < COLUMNS; col++) {
-      const bi = colBiome[col];
-      if (colSlope[col] > 1.5) continue;
-      const k = this.surfaceK(blocks, col);
-      // need some headroom, but the land surface sits around k=30 of 44 — this
-      // bound has to be generous or it rejects the entire planet
-      if (k < 0 || k > D - 7) continue;
-      const surf = blocks[col * D + k];
+  /**
+   * One column's tree, if it has one, clipped to a region.
+   *
+   * `rid` is the region whose cells are allowed to be written; a caller running
+   * the decoration pass over a region's *margin* passes its own id, so a tree
+   * standing five columns outside still drops the half of its canopy that
+   * overhangs the region and nothing else. That is what makes a seam invisible
+   * without any region ever writing into another one — see `decorateRegion`.
+   */
+  treeAt(blocks, col, rid) {
+    const bi = this.colBiome[col];
+    if (this.colSlope[col] > 1.5) return;
+    // The gorge and its rim. See CANYON_TREE_THIN.
+    const thin = CANYON_TREE_THIN[this.canyonNear[col]];
+    if (thin <= 0) return;
+    /**
+     * The ground, from the height field — not `surfaceK`, and this is the one
+     * subtle thing in the whole lazy scheme.
+     *
+     * `surfaceK` scans down for the first block that is not air, so under a
+     * canopy it answers with the canopy. That was harmless when one global pass
+     * grew every tree before any of them could be looked at. It is not harmless
+     * now: a region's decoration pass runs over its neighbours' columns too, and
+     * whether those neighbours have already grown their own trees depends
+     * entirely on which region the player walked into first. Measured, it moved
+     * four hundred voxels per nine regions — a tree that exists from one
+     * approach and not from the other.
+     *
+     * The height field cannot disagree with itself. Nothing decoration places
+     * ever sits at or below the ground layer, so `blocks[col * D + k]` is still
+     * the real surface block, and the volcano — the one pass that does move the
+     * ground — is always stamped before any of this runs.
+     */
+    const k = this.groundKOf(col);
+    // need some headroom, but the land surface sits around k=40 of 66 — this
+    // bound has to be generous or it rejects the entire planet
+    if (k < 0 || k > D - 7) return;
+    const surf = blocks[col * D + k];
+    const rng = this.colRng(col, 0x7a11);
 
-      let kind = null, chance = 0;
-      // Podzol is a pine-forest floor block, so pines have to be allowed to
-      // stand on it or the biome would thin out wherever it appears.
-      if (surf === ID.grass || surf === ID.podzol) {
-        if (bi === BIOME.FOREST) { kind = rng() < 0.68 ? 'oak' : 'birch'; chance = 0.115; }
-        else if (bi === BIOME.PINE_FOREST) { kind = 'pine'; chance = 0.115; }
-        else if (bi === BIOME.PLAINS) { kind = rng() < 0.6 ? 'oak' : 'birch'; chance = 0.014; }
-        else if (bi === BIOME.MEADOW) { kind = 'birch'; chance = 0.03; }
-        else if (bi === BIOME.SAVANNA) { kind = 'savanna'; chance = 0.022; }
-        else if (bi === BIOME.MOUNTAIN) { kind = 'pine'; chance = 0.022; }
-      } else if (bi === BIOME.TUNDRA && (surf === ID.dirt || surf === ID.snow || surf === ID.gravel)) {
-        // Tundra is no longer a grass biome, so its pines have to be claimed by
-        // biome rather than by surface block or it would come out treeless.
-        // Sparse on purpose, and sparser than the number suggests: a pine's
-        // canopy covers many columns, so tree *chance* and canopy *coverage*
-        // are an order of magnitude apart. 0.026 closed the canopy over 55% of
-        // the biome and read as taiga; 0.006 still gave 23%, level with plains
-        // at less than half the chance. Tundra is where trees give up.
-        kind = 'pine'; chance = 0.0018;
-      } else if (surf === ID.snow) { kind = 'pine'; chance = 0.028; }
-      else if (surf === ID.sand && bi === BIOME.DESERT) { kind = 'cactus'; chance = 0.02; }
+    let kind = null, chance = 0;
+    // Podzol is a pine-forest floor block, so pines have to be allowed to
+    // stand on it or the biome would thin out wherever it appears.
+    if (surf === ID.grass || surf === ID.podzol) {
+      if (bi === BIOME.FOREST) { kind = rng() < 0.68 ? 'oak' : 'birch'; chance = 0.115; }
+      else if (bi === BIOME.PINE_FOREST) { kind = 'pine'; chance = 0.115; }
+      else if (bi === BIOME.PLAINS) { kind = rng() < 0.6 ? 'oak' : 'birch'; chance = 0.014; }
+      else if (bi === BIOME.MEADOW) { kind = 'birch'; chance = 0.03; }
+      else if (bi === BIOME.SAVANNA) { kind = 'savanna'; chance = 0.022; }
+      else if (bi === BIOME.MOUNTAIN) { kind = 'pine'; chance = 0.022; }
+    } else if (bi === BIOME.TUNDRA && (surf === ID.dirt || surf === ID.snow || surf === ID.gravel)) {
+      // Tundra is no longer a grass biome, so its pines have to be claimed by
+      // biome rather than by surface block or it would come out treeless.
+      // Sparse on purpose, and sparser than the number suggests: a pine's
+      // canopy covers many columns, so tree *chance* and canopy *coverage*
+      // are an order of magnitude apart. 0.026 closed the canopy over 55% of
+      // the biome and read as taiga; 0.006 still gave 23%, level with plains
+      // at less than half the chance. Tundra is where trees give up.
+      kind = 'pine'; chance = 0.0018;
+    } else if (surf === ID.snow) { kind = 'pine'; chance = 0.028; }
+    else if (surf === ID.sand && bi === BIOME.DESERT) { kind = 'cactus'; chance = 0.02; }
 
-      if (!kind || rng() > chance) continue;
-      this.stampTree(blocks, kind, col, k + 1, rng);
-    }
+    if (!kind || rng() > chance * thin) return;
+    this.stampTree(blocks, kind, col, k + 1, rng, rid);
+  }
 
-    // boulders
-    for (let col = 0; col < COLUMNS; col++) {
-      if (rng() > 0.0022) continue;
-      const k = this.surfaceK(blocks, col);
-      if (k < 0 || k > D - 5) continue;
-      const surf = blocks[col * D + k];
-      if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) continue;
-      const rad = 1 + Math.floor(rng() * 2);
-      const mossy = rng() < 0.4;
-      const bp = colParts(col);
-      for (let di = -rad; di <= rad; di++) {
-        for (let dj = -rad; dj <= rad; dj++) {
-          for (let dk = 0; dk <= rad; dk++) {
-            if (di * di + dj * dj + dk * dk > rad * rad + 0.5) continue;
-            // Same reason as the canopy below: a boulder is up to five columns
-            // across and must not fold over a seam.
-            const c = patchColumn(bp.f, bp.i, bp.j, di, dj);
-            const kk = k + 1 + dk;
-            if (kk >= D) continue;
-            if (blocks[c * D + kk] === ID.air) {
-              blocks[c * D + kk] = mossy && rng() < 0.5 ? ID.moss_stone : ID.stone;
-            }
-          }
+  /** One column's boulder, if it has one, clipped to a region. */
+  boulderAt(blocks, col, rid) {
+    const rng = this.colRng(col, 0xb0d1);
+    if (rng() > 0.0022) return;
+    // Same reason as `treeAt`: the ground, not whatever is standing on it.
+    const k = this.groundKOf(col);
+    if (k < 0 || k > D - 5) return;
+    const surf = blocks[col * D + k];
+    if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) return;
+    // A boulder is scenery, and a gorge floor already has rock lying about it.
+    if (this.canyonNear[col] === 0) return;
+    const rad = 1 + Math.floor(rng() * 2);
+    const mossy = rng() < 0.4;
+    const bp = colParts(col);
+    for (let di = -rad; di <= rad; di++) {
+      for (let dj = -rad; dj <= rad; dj++) {
+        for (let dk = 0; dk <= rad; dk++) {
+          if (di * di + dj * dj + dk * dk > rad * rad + 0.5) continue;
+          // Same reason as the canopy below: a boulder is up to five columns
+          // across and must not fold over a seam.
+          const c = patchColumn(bp.f, bp.i, bp.j, di, dj);
+          const kk = k + 1 + dk;
+          if (kk >= D) continue;
+          /**
+           * One draw per candidate cell, before either test.
+           *
+           * The original only drew when the cell was air, which made the
+           * stream's position depend on what was already standing there — and a
+           * boulder at the edge of a region reaches cells in the next one along,
+           * whose contents depend on whether that region has been decorated yet.
+           * So the same boulder came out mossy approached from one side and bare
+           * from the other. Drawing unconditionally makes the whole stream a
+           * function of the column alone, which is the property the region
+           * scheme needs and the only one it needs.
+           */
+          const id = mossy && rng() < 0.5 ? ID.moss_stone : ID.stone;
+          if (rid >= 0 && regionOfCol(c) !== rid) continue;
+          if (blocks[c * D + kk] !== ID.air) continue;
+          blocks[c * D + kk] = id;
         }
       }
     }
   }
 
-  stampTree(blocks, kind, col, k0, rng) {
+  stampTree(blocks, kind, col, k0, rng, rid = -1) {
     const set = (c, k, id, force = false) => {
       if (k < 0 || k >= D) return;
+      if (rid >= 0 && regionOfCol(c) !== rid) return;
       const cur = blocks[c * D + k];
       if (cur === ID.air || force) blocks[c * D + k] = id;
     };
@@ -1523,41 +1819,94 @@ export class WorldGen {
     }
   }
 
-  placeFlora(blocks, colHeight, colBiome, rng) {
+  /**
+   * Ground cover for one column. Writes only into this column, so unlike trees
+   * and boulders it needs no clipping — but it does have to run *after* every
+   * tree that can reach here, because `surfaceK` under a canopy is the canopy.
+   */
+  floraAt(blocks, col) {
+    const k = this.surfaceK(blocks, col);
+    if (k < 0 || k >= D - 2) return;
+    const base = col * D;
+    const surf = blocks[base + k];
+    if (blocks[base + k + 1] !== ID.air) return;
+
     const n = this.nBiome;
-    const dir = [0, 0, 0];
-    for (let col = 0; col < COLUMNS; col++) {
-      const k = this.surfaceK(blocks, col);
-      if (k < 0 || k >= D - 2) continue;
-      const base = col * D;
-      const surf = blocks[base + k];
-      if (blocks[base + k + 1] !== ID.air) continue;
+    const dir = _fillDir;
+    this._dirOf(col, dir);
+    const bi = this.colBiome[col];
+    const rng = this.colRng(col, 0xf10a);
+    const inCanyon = this.canyonNear[col] === 0;
 
-      const f = (col / (F * F)) | 0;
-      const rem = col - f * F * F;
-      centerDir(f, (rem / F) | 0, rem % F, dir);
-      const bi = colBiome[col];
-
-      if (surf === ID.grass) {
-        const dens = n.fbm3(dir[0] * 9, dir[1] * 9, dir[2] * 9, 3, 2, 0.5) * 0.5 + 0.5;
-        const p = 0.12 + dens * 0.55;
-        const h = rng();
-        if (h < p * 0.72) blocks[base + k + 1] = ID.tall_grass;
-        else if (h < p * 0.82) {
-          const c = rng();
-          blocks[base + k + 1] = c < 0.34 ? ID.flower_red : c < 0.67 ? ID.flower_gold : ID.flower_blue;
-        } else if (h < p * 0.84 && (bi === BIOME.FOREST || bi === BIOME.MEADOW)) {
-          blocks[base + k + 1] = ID.pumpkin;
-        }
+    if (surf === ID.grass) {
+      const dens = n.fbm3(dir[0] * 9, dir[1] * 9, dir[2] * 9, 3, 2, 0.5) * 0.5 + 0.5;
+      const p = 0.12 + dens * 0.55;
+      const h = rng();
+      if (h < p * 0.72) blocks[base + k + 1] = ID.tall_grass;
+      else if (h < p * 0.82) {
+        const c = rng();
+        blocks[base + k + 1] = c < 0.34 ? ID.flower_red : c < 0.67 ? ID.flower_gold : ID.flower_blue;
+      } else if (h < p * 0.84 && (bi === BIOME.FOREST || bi === BIOME.MEADOW)) {
+        blocks[base + k + 1] = ID.pumpkin;
       }
-
-      // cave mushrooms: look for open pockets under the surface
-      for (let kk = 2; kk < k - 2; kk++) {
-        if (blocks[base + kk] === ID.air && CARVEABLE[blocks[base + kk - 1]]
-          && rng() < 0.006) {
-          blocks[base + kk] = ID.mushroom;
-        }
+    } else if (inCanyon && (surf === ID.coarse_dirt || surf === ID.gravel || surf === ID.red_sand)) {
+      // The other half of the canyon rule. Taking the trees away and leaving
+      // it at that gives a bare stone trench, which reads as unfinished rather
+      // than as dry — so the floor keeps a thin scatter of grass and the odd
+      // flower on whatever the canyon re-surfaced it with. Sparse enough to see
+      // the ground through, which is the point: what makes a gorge legible is
+      // the strata in its walls and the shadow on its floor, and both survive
+      // scrub where neither survives a canopy.
+      const h = rng();
+      if (h < 0.11) blocks[base + k + 1] = ID.tall_grass;
+      else if (h < 0.125) {
+        blocks[base + k + 1] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
       }
     }
+
+    // cave mushrooms: look for open pockets under the surface
+    for (let kk = 2; kk < k - 2; kk++) {
+      if (blocks[base + kk] === ID.air && CARVEABLE[blocks[base + kk - 1]]
+        && rng() < 0.006) {
+        blocks[base + kk] = ID.mushroom;
+      }
+    }
+  }
+
+  /**
+   * Everything that stands *on* the ground, for one region.
+   *
+   * This is the only pass that cannot be done a column at a time, and the whole
+   * seam problem lives here. A canopy is up to four columns wide, so a tree in
+   * the next region along owns cells in this one, and a region that only grew
+   * its own trees would come out with a straight edge of missing leaves down
+   * every boundary.
+   *
+   * The fix is to grow the neighbours' trees too and throw away everything they
+   * put outside us. `margin` is this region's columns dilated by
+   * DECOR_MARGIN over the column graph — far enough that no tree outside it can
+   * reach in — walked in ascending column order, which is the order the old
+   * planet-wide loop walked in. So every cell inside the region sees exactly
+   * the set of trees, in exactly the order, that a single global pass would
+   * have given it. Nothing is written outside the region, no region depends on
+   * another having been decorated, and the result does not depend on which
+   * region was built first. It costs 2.6x the tree work for the overlap, which
+   * against the terrain pass is nothing.
+   *
+   * The alternative — let a tree write across the boundary and hope the
+   * neighbour has been filled — was the obvious approach and it is unsound in
+   * both directions: write into an ungenerated neighbour and the terrain pass
+   * overwrites the leaves when it eventually runs, write into a decorated one
+   * and the answer depends on who went first.
+   *
+   * Trees, then boulders, then flora, each as a complete sweep. That is the
+   * order the three passes ran in globally and they interact: a boulder is only
+   * laid in air, and flora reads the surface a canopy may have raised.
+   */
+  decorateRegion(blocks, cols, margin) {
+    const rid = regionOfCol(cols[0]);
+    for (let n = 0; n < margin.length; n++) this.treeAt(blocks, margin[n], rid);
+    for (let n = 0; n < margin.length; n++) this.boulderAt(blocks, margin[n], rid);
+    for (let n = 0; n < cols.length; n++) this.floraAt(blocks, cols[n]);
   }
 }

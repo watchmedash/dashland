@@ -15,7 +15,7 @@
 //
 // It held one `template` and one pool of `Group`s, one per torch, and that was
 // right for torches: there are as many of them as the player bothered to plant.
-// Flowers are generated, not placed. `WorldGen.placeFlora` puts one on roughly
+// Flowers are generated, not placed. `WorldGen.floraAt` puts one on roughly
 // four percent of grass columns, so a meadow inside the scan radius is a
 // hundred-odd of them and a tended garden is whatever the player felt like.
 // A `Mesh` each is a draw call each.

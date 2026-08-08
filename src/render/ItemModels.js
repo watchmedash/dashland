@@ -295,6 +295,26 @@ const POSE = {
   flower_red:  { file: 'wam/flower_red',  pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.10, -0.40, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.12, 0.34, -0.18] },
   flower_blue: { file: 'wam/flower_blue', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.02, -1.25, 0.26],  pos: [0.02, 0.12, -0.02], icon: [0.14, 1.32, -0.12] },
   flower_gold: { file: 'wam/flower_gold', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.24, -0.40, 0.22],  pos: [0.02, 0.12, -0.02], icon: [0.52, 0.32, -0.14] },
+
+  // The glowcap, on the flowers' pose with two departures.
+  //
+  // Both rotations are almost flat in pitch, where every other plant here takes
+  // a tilt. A mushroom's whole read is the overhang, and an overhang is only
+  // visible in profile: pitched forward like the daisy, the cap becomes a
+  // purple disc seen from above with the stalk hidden underneath it and there
+  // is nothing left to say what the object is. Side-on it is unmistakable at
+  // any size, so the yaw does the work and the pitch stays out of the way.
+  //
+  // `grip` is higher than the flowers' 0.28 — the fist closes above the veil
+  // ruff, which is where you would actually take hold of a mushroom, and low
+  // enough that it is still on the stalk and not in the gills.
+  //
+  // `glowMatch` rather than the torch's `glow`: see `glowPalette`. The colour
+  // is the block's own `lightColor` ([0.6, 0.85, 0.7] in `world/Blocks.js`)
+  // scaled back to about seven tenths, which is bright enough to read as lit in
+  // a dark cave without washing the mint out of the gills to white.
+  mushroom:    { file: 'wam/mushroom',    pack: 'wam', height: 0.26, grip: 0.38, rot: [0.02, -0.45, 0.22],  pos: [0.02, 0.10, -0.04], icon: [0.04, 0.42, -0.16],
+                 glowMatch: { hex: '#b6efd0', color: [0.42, 0.60, 0.49] } },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -349,6 +369,16 @@ const BY_NAME = {
   flower_red: 'flower_red',
   flower_blue: 'flower_blue',
   flower_gold: 'flower_gold',
+  // The glowcap is at the sapling's stage rather than the flowers': a model in
+  // the fist, in the icon grid and on the ground, but planted it is still the
+  // mesher's cross billboard. Finishing it is two edits that have to land
+  // together — `mushroom` added to `FLOWER_NAMES` in `main.js` (which builds
+  // the per-id scan that instances the model in the world) *and* to the
+  // `MODELLED_CROSS` list in `world/Mesher.js` (which stops the mesher drawing
+  // the billboard underneath it). Either one alone renders nothing: the model
+  // without the suppression is a model inside a billboard, and the suppression
+  // without the model is an empty cell.
+  mushroom: 'mushroom',
   // The one place this map is not an identity, and deliberately: raw and
   // steamed crab are one model. A claw is a claw cooked or not — the shell is
   // already the orange it turns — so the pair share `crab_claw` rather than
@@ -679,19 +709,71 @@ export function glowTop(material, loY, hiY) {
 }
 
 /**
- * A pack material with the top of *this* model lit, cached per pose key.
+ * Make one *colour* of a model glow, wherever on it that colour appears.
+ *
+ * `glowTop` above is a height ramp, which is exactly right for a torch — the
+ * fire is at the top and nowhere else — and useless for the glowcap, whose
+ * clump has three separate caps at three different heights. Every band a ramp
+ * could cover either misses the two buttons in the lower half or drags the
+ * leader's stalk in with them.
+ *
+ * What the glowing parts do have in common is that they are one palette entry.
+ * A WAM model carries its palette as vertex colours (see `PACKS.wam`), so the
+ * gills can be selected by asking how far each fragment's own colour is from
+ * the authored `Gill` hex. The palette is four flat fills with nothing between
+ * them, so this is a clean separation and not a threshold to tune: the nearest
+ * other entry sits 0.34 away in linear RGB and the tolerance is 0.22.
+ *
+ * `hex` goes through THREE.Color, which converts sRGB to the linear working
+ * space — the same conversion `scripts/export_items.py` bakes into COLOR_0, so
+ * the two land on the same numbers. Comparing the authored hex against a
+ * *linear* fragment without it puts the key colour a long way from anything on
+ * the model and nothing glows at all.
+ */
+export function glowPalette(material, { hex, color, tol = 0.22, lift = [0.10, 0.09, 0.11] }) {
+  const key = new THREE.Color(hex);
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlowKey = { value: new THREE.Vector3(key.r, key.g, key.b) };
+    shader.uniforms.uGlowTol = { value: tol };
+    shader.uniforms.uGlowColor = { value: new THREE.Vector3(color[0], color[1], color[2]) };
+    shader.uniforms.uBodyLift = { value: new THREE.Vector3(lift[0], lift[1], lift[2]) };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform vec3 uGlowKey;
+        uniform float uGlowTol;
+        uniform vec3 uGlowColor;
+        uniform vec3 uBodyLift;`)
+      .replace('#include <emissivemap_fragment>', `
+        float gT = 1.0 - smoothstep(uGlowTol * 0.4, uGlowTol, distance(diffuseColor.rgb, uGlowKey));
+        totalEmissiveRadiance += uBodyLift * diffuseColor.rgb + uGlowColor * gT;`);
+  };
+  // Not 'glowtop'. The two hooks emit different shader source, and a shared
+  // cache key hands the second material the first one's compiled program —
+  // which is a torch-shaped ramp reading uniforms that no longer exist.
+  material.customProgramCacheKey = () => 'glowpalette';
+  material.needsUpdate = true;
+  return material;
+}
+
+/**
+ * A pack material with *this* model's lit parts lit, cached per pose key.
  *
  * Per key and not per pack: the torch shares the `tools` atlas with the pickaxe
  * and the bucket, and neither of those has a burning end.
  */
-function glowMaterial(key, geo, src, range) {
+function glowMaterial(key, geo, src) {
   const id = `glow|${key}`;
   let m = matCache.get(id);
   if (m) return m;
-  geo.computeBoundingBox();
-  const bb = geo.boundingBox;
-  const h = Math.max(1e-3, bb.max.y - bb.min.y);
-  m = glowTop(src.clone(), bb.min.y + h * range[0], bb.min.y + h * range[1]);
+  const pose = POSE[key];
+  if (pose.glow) {
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const h = Math.max(1e-3, bb.max.y - bb.min.y);
+    m = glowTop(src.clone(), bb.min.y + h * pose.glow[0], bb.min.y + h * pose.glow[1]);
+  } else {
+    m = glowPalette(src.clone(), pose.glowMatch);
+  }
   matCache.set(id, m);
   return m;
 }
@@ -742,8 +824,8 @@ function buildMesh(spec, base, atlas) {
   let mesh = meshCache.get(id);
   if (mesh) return mesh;
   const pack = atlasMaterial(base.pack, atlas.texture);
-  const skin = POSE[spec.key].glow
-    ? glowMaterial(spec.key, base.geometry, pack, POSE[spec.key].glow)
+  const skin = POSE[spec.key].glow || POSE[spec.key].glowMatch
+    ? glowMaterial(spec.key, base.geometry, pack)
     : pack;
   const split = PACKS[base.pack].tint && spec.tier > 0;
   mesh = new THREE.Mesh(base.geometry, split ? [metalMaterial(spec.tier, spec.tint), skin] : skin);

@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
-import { Player, VIEW_FIRST, VIEW_COUNT, VIEW_LABELS } from './player/Player.js';
+import { Player, VIEW_FIRST, VIEW_COUNT } from './player/Player.js';
 import { ViewModel } from './player/ViewModel.js';
 import { PlayerCharacter, playerModelUrls, DEFAULT_CHARACTER } from './player/Character.js';
 import { Input } from './player/Input.js';
@@ -392,6 +392,10 @@ class Game {
     const savedView = this.settings.view | 0;
     this.viewMode = savedView >= 0 && savedView < VIEW_COUNT ? savedView : VIEW_FIRST;
     this.viewModel.enabled = this.viewMode === VIEW_FIRST;
+    // The sight follows the restored camera, not just the keypress — a player
+    // who left the game in third person should not be handed a crosshair back
+    // for the one frame before they touch V.
+    this.ui.showCrosshair(this.viewMode === VIEW_FIRST);
 
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
@@ -2247,7 +2251,15 @@ class Game {
     this.viewMode = (this.viewMode + 1) % VIEW_COUNT;
     this.viewModel.enabled = this.viewMode === VIEW_FIRST;
     if (this.viewMode === VIEW_FIRST) this.character.hide();
-    this.ui.toast(VIEW_LABELS[this.viewMode], 0, 1400);
+    // No toast. The screen has just changed camera — you can see which view you
+    // are in, and a caption naming it is the game telling you what you are
+    // looking at. It was there when the modes were new; it earns nothing now.
+    //
+    // The crosshair goes with it. Third person aims from a camera that is not
+    // where your hands are, so a dot in the middle of the screen is pointing at
+    // something you cannot necessarily reach — the sight is honest only in
+    // first person.
+    this.ui.showCrosshair(this.viewMode === VIEW_FIRST);
     // Written on the keypress rather than at shutdown: a browser tab is closed,
     // not quit, and there is no reliable moment later to catch.
     this.settings.view = this.viewMode;
@@ -2290,13 +2302,12 @@ class Game {
       return;
     }
     if (input.pressed('F3')) ui.toggleDebug();
-    // F5, the key every voxel game already uses for this, and the only spare
-    // one: Input already swallows the browser's reload on it while the pointer
-    // is locked, which is the reason it was in that list before anything used
-    // it. Cycles first → behind → facing, and is deliberately allowed while a
-    // screen is open — looking at your own character in your inventory is the
-    // main thing you would want it for.
-    if (input.pressed('F5')) this._cycleView();
+    // V. It was F5 — the key the other voxel game uses — but that is a function
+    // key you reach for, and this is a thing you flick between constantly.
+    // Cycles first → behind → facing, and is deliberately allowed while a
+    // screen is open: looking at your own character in your inventory is the
+    // main reason to want it there.
+    if (input.pressed('KeyV')) this._cycleView();
 
     // A container screen takes your hands, not the world. It used to return
     // early here, which froze breath, hunger, health, physics and every animal

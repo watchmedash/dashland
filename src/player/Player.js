@@ -80,8 +80,6 @@ export const VIEW_FIRST = 0;
 export const VIEW_BACK = 1;
 export const VIEW_FRONT = 2;
 export const VIEW_COUNT = 3;
-/** What each mode is called when the switch is announced. */
-export const VIEW_LABELS = ['First person', 'Third person', 'Third person, facing'];
 
 /**
  * How far the third-person camera sits from the eye, in cells.

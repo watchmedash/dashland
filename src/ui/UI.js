@@ -1368,6 +1368,15 @@ export class UI {
   }
 
   setCrosshairActive(on) { this.el.crosshair.classList.toggle('active', on); }
+
+  /**
+   * Show the sight only where it tells the truth — first person.
+   *
+   * Separate from `setCrosshairActive`, which is the highlight state for "there
+   * is something in range". One is what the sight is doing; this is whether
+   * there is a sight at all.
+   */
+  showCrosshair(on) { this.el.crosshair.classList.toggle('hidden', !on); }
   setDebug(text) { this.el.debug.textContent = text; }
   toggleDebug() { this.el.debug.classList.toggle('hidden'); }
   get debugOn() { return !this.el.debug.classList.contains('hidden'); }

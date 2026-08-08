@@ -140,8 +140,14 @@ const FLIER_PER_TICK = 6;
 // single shared budget let one habitat starve the other, and a combined ceiling
 // would bring that straight back. The two populations are never in the same
 // place anyway, which is the whole reason they need separate budgets.
-const MAX_HOSTILE_SURFACE = 5;
-const MAX_HOSTILE_CAVE = 3;
+//
+// Raised from 5 and 3 alongside the husk speed drop below, and the two changes
+// only make sense together: a husk that can no longer run you down has to
+// arrive in numbers or it stops being a threat at all. More of them, each one
+// individually escapable, is a night you can walk home through if you keep
+// moving — and cannot stand still in.
+const MAX_HOSTILE_SURFACE = 8;
+const MAX_HOSTILE_CAVE = 4;
 /**
  * How far a placed light keeps husks out, in columns and layers. Eight columns
  * is a little short of a torch's actual glow, deliberately: a corridor you have
@@ -313,6 +319,34 @@ const SPAWN_MIN_DIST = 20;    // world units — never pop in under the player's
  * the wildlife budget goes up with it rather than after it.
  */
 const DESPAWN_RADIUS = 145;
+
+/**
+ * What is left of the herds after dark, as a fraction of the daytime budget.
+ *
+ * Animals bed down at night; the planet should not carry the same meadow at
+ * midnight that it carried at noon, and a night that looks exactly like a day
+ * with the lights off is what makes the husks feel like a spawner rather than
+ * a change in the world. The number is a fraction rather than its own cap so
+ * the daytime budgets stay the single place population is set.
+ *
+ * Not zero, and not close to it. Something has to move out there or the night
+ * is empty rather than quiet, and the few that remain are what make a torchlit
+ * walk worth taking.
+ */
+const NIGHT_WILDLIFE = 0.4;
+
+/**
+ * How far off a sleeping animal has to be before it is quietly retired, and how
+ * many may go per spawn tick.
+ *
+ * Both exist to keep the thinning invisible. Culling on the cap alone would pop
+ * animals out of existence in front of a player watching them, and doing the
+ * whole surplus at once empties a field between two glances. Two a tick, only
+ * beyond the distance at which a body is a moving dot, is a herd that has
+ * wandered off to bed by the time you notice it has gone.
+ */
+const NIGHT_BED_DIST = 62;
+const NIGHT_BED_PER_TICK = 2;
 
 /**
  * The two numbers that turn "how far away, in world units" into "how many
@@ -988,7 +1022,13 @@ const SPECIES = {
   // --- the one thing that wants you dead ---
   husk: {
     label: 'Husk', urls: [CHAR('l'), CHAR('o')], clips: CHAR_CLIPS, height: 1.72,
-    health: 14, speed: 1.50, skittish: 0, turn: 3.2, accel: 6.0,
+    // 1.50 put a chasing husk at 1.50 x CHASE_SPEED = 4.5 cells/s against a
+    // player who walks at 4.4 — it matched your pace exactly, so walking away
+    // was not an option and the only answer to one was to turn and fight or
+    // burn stamina. At 1.28 the chase is 3.84, comfortably under a walk: you
+    // can always leave, but you cannot dawdle, and outrunning one still costs
+    // you the ground you were standing on. The cap went up to pay for it.
+    health: 14, speed: 1.28, skittish: 0, turn: 3.2, accel: 6.0,
     // Cinder is the whole reason to be outside after dark; roughly every other
     // husk carries one, so a good night funds part of a cinder tool.
     drops: [['flint', 0, 1], ['coal', 0, 1], ['cinder', 0, 1]],
@@ -1789,6 +1829,53 @@ export class Mobs {
       else land++;
     }
     return { land, water, air };
+  }
+
+  /**
+   * Send some of the herd to bed, out of sight.
+   *
+   * The same removal the despawn ring uses — `_release` and a splice, no death,
+   * no drops, no sound. An animal that walks off the edge of the simulation and
+   * one that has bedded down for the night are the same event to everything
+   * downstream, and giving the night its own kind of removal would mean a
+   * second path to keep in step with the first.
+   *
+   * Furthest first, and never inside NIGHT_BED_DIST. Taking the nearest would
+   * be cheaper and is exactly wrong: the animals a player can see are the ones
+   * whose disappearance they would notice, and "the deer I was walking towards
+   * blinked out" is a bug report, not a nightfall.
+   *
+   * Fish are exempt for the reason given at the call site, and so are anything
+   * hostile, the merchant, and — the one that matters — anything the player has
+   * bred or is chasing right now. A tamed or fleeing animal vanishing is the
+   * player's work being deleted.
+   *
+   * @param {object} player
+   * @param {number} surplus how many are over the night budget
+   */
+  _bedDown(player, surplus) {
+    if (surplus <= 0) return;
+    let want = Math.min(surplus, NIGHT_BED_PER_TICK);
+    let far = -1, farD = NIGHT_BED_DIST;
+    while (want > 0) {
+      far = -1; farD = NIGHT_BED_DIST;
+      for (let n = 0; n < this.list.length; n++) {
+        const m = this.list[n];
+        const s = m.spec;
+        if (s.hostile || s.trader || s.aquatic) continue;
+        // `state === 'flee'` and not a `fleeing` flag — there is no such flag,
+        // and a guard naming one would have read as protection while doing
+        // nothing at all.
+        if (m.dying > 0 || m.baby > 0) continue;
+        if (m.state === 'flee' || m.state === 'chase' || m.target) continue;
+        const d = m.pos.distanceTo(player.position);
+        if (d > farD) { farD = d; far = n; }
+      }
+      if (far < 0) return;         // nothing far enough; try again next tick
+      this._release(this.list[far]);
+      this.list.splice(far, 1);
+      want--;
+    }
   }
 
   /**
@@ -3619,8 +3706,15 @@ export class Mobs {
       this.spawnTimer = SPAWN_PERIOD;
       const playerCol = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
       const have = this._census();
+      // Night budgets. The daytime numbers stay the source of truth and this
+      // scales them, so raising a population is still a one-line change in one
+      // place. Fish keep theirs: they are under the surface, a player only
+      // meets them by going looking, and thinning a shoal nobody can see costs
+      // the night nothing and costs a swim its point.
+      const wildCap = night ? Math.round(MAX_WILDLIFE * NIGHT_WILDLIFE) : MAX_WILDLIFE;
+      const airCap = night ? Math.round(MAX_FLYING * NIGHT_WILDLIFE) : MAX_FLYING;
       let wild = have.land;
-      for (let n = 0; n < SPAWN_PER_TICK && wild < MAX_WILDLIFE; n++) {
+      for (let n = 0; n < SPAWN_PER_TICK && wild < wildCap; n++) {
         const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
         if (!spot) break;      // no ground going spare this tick; try the next
         if (this._spawnWild(spot.col, spot.k)) wild++;
@@ -3641,12 +3735,20 @@ export class Mobs {
       }
       // And the fliers, on the same terms.
       let air = have.air;
-      for (let n = 0; n < 2 && air < MAX_FLYING; n++) {
-        const room = Math.min(FLIER_PER_TICK - (air - have.air), MAX_FLYING - air);
+      for (let n = 0; n < 2 && air < airCap; n++) {
+        const room = Math.min(FLIER_PER_TICK - (air - have.air), airCap - air);
         const got = this._spawnDrift(playerCol, player.position, room);
         if (!got) break;
         air += got;
       }
+
+      // ...and the other half of the night budget: what is already alive when
+      // the sun goes down. Stopping the top-up alone would only thin the herd
+      // for a player who keeps walking, since the count falls by animals being
+      // left behind — someone who camps in one spot would watch the same
+      // daytime meadow graze around them all night. This retires the surplus
+      // instead, a couple at a time and only well out of sight.
+      if (night) this._bedDown(player, (wild - wildCap) + (air - airCap));
       // Husks come out of the dark: after sunset in the open, and at any hour
       // underground. That is what makes a cave dangerous rather than just dim,
       // and what makes a torch worth carrying.

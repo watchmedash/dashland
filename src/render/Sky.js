@@ -505,7 +505,11 @@ export class Sky {
   }
 
   /** @param {THREE.Camera} camera @param {THREE.Vector3} playerUp */
-  update(dt, camera, playerUp, focus) {
+  /**
+   * @param {number} shelter 0 with a roof overhead, 1 under open sky. Only the
+   *   entity fill uses it — see below for why a light needs to know.
+   */
+  update(dt, camera, playerUp, focus, shelter = 1) {
     // sunDir is set by setSolarTime from the wall clock
     this.up.copy(playerUp);
     const elev = this.sunDir.dot(playerUp);
@@ -581,7 +585,23 @@ export class Sky {
     // near black, so a husk at midnight was the brightest thing on screen and
     // read as *glowing*. At night it drops to a rim of skylight, which leaves a
     // silhouette — which is what a thing in the dark should be.
-    this.entityFill.intensity = 0.07 + p.sunIntensity * 0.93;
+    //
+    // And it has to know about roofs, because a scene light does not.
+    //
+    // Terrain reads its light out of the voxel grid, so it goes properly dark
+    // indoors; entities cannot, so a cow in a sealed room stayed as bright as
+    // the meadow outside and read as pasted on. There is no way to occlude a
+    // hemisphere light, so this borrows the player's own sky exposure — the
+    // same probe that decides whether rain reaches you — and dims the fill
+    // under a roof. It is the player's roof and not the animal's, which is
+    // wrong for the one shot where you stand in a dark room and look out of a
+    // window at a lit field; that is a cheap price for every cave and hut in
+    // the game being dark, and no per-mob light would be.
+    //
+    // It dims rather than switching off. Cutting entities loose from the sky
+    // entirely is how they became black cut-outs under trees in the first
+    // place, and a thick canopy reads as "roofed" to that same probe.
+    this.entityFill.intensity = (0.07 + p.sunIntensity * 0.93) * (0.25 + 0.75 * shelter);
   }
 
   setPixelRatio(r) { this.stars.material.uniforms.uPixelRatio.value = r; }

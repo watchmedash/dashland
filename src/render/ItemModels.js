@@ -259,6 +259,14 @@ const POSE = {
   // on purpose: you carry a seedling by its stem, so the fist closes under the
   // foliage rather than through it.
   sapling:    { file: 'wam/sapling',    pack: 'wam', height: 0.34, grip: 0.30, rot: [-0.12, -0.35, 0.30],  pos: [0.02, 0.14, -0.02], icon: [0.08, 0.30, -0.18] },
+  // The crab claw is modelled as an L — arm up, pincer reaching along +Z — and
+  // everything that makes it read as a claw lives in the plane of that reach.
+  // Both poses are therefore near a quarter turn in yaw, which is what puts the
+  // open jaws across the view instead of pointing them at the camera; it is the
+  // fish's problem and takes the fish's answer. `grip` is low because the fist
+  // closes on the arm, not on the claw: at 0.5 it would have gripped the palm
+  // and swung the whole thing around the pincer.
+  crab_claw:  { file: 'wam/crab_claw',  pack: 'wam', height: 0.30, grip: 0.24, rot: [0.06, -1.30, 0.24],  pos: [0.02, 0.07, -0.03], icon: [0.10, 1.45, 0.34] },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -306,6 +314,12 @@ const BY_NAME = {
   // cross billboard — that is the mesher's business and is untouched — but in
   // the fist, in the icon grid and lying on the ground it is now a real object.
   sapling: 'sapling',
+  // The one place this map is not an identity, and deliberately: raw and
+  // steamed crab are one model. A claw is a claw cooked or not — the shell is
+  // already the orange it turns — so the pair share `crab_claw` rather than
+  // carrying a second near-identical mesh for the sake of the naming.
+  crab_meat: 'crab_claw',
+  cooked_crab_meat: 'crab_claw',
   // Food kit. Identity again, and again written out so this stays the list of
   // what is modelled — the food line-up is the part most likely to grow.
   bread: 'bread',

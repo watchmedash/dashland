@@ -1613,7 +1613,10 @@ class Game {
     this._safeTick('flames', () => this._tickFlames(dt));
     this._safeTick('blockModels', () => this._syncBlockModels(dt));
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
-    this.sky.update(dt, this.camera, this.player.up, this.player.position);
+    // `shelter` doubles as the entity fill's occlusion — animals cannot read
+    // the voxel light, so a roof over the player is the best signal the sky has
+    // that the thing it is lighting is indoors.
+    this.sky.update(dt, this.camera, this.player.up, this.player.position, this.shelter);
     this.particles.update(dt, this.camera, this.player.up, this.sky);
     this._updateSharedUniforms();
     this._updateAudio();

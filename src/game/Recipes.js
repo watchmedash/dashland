@@ -225,6 +225,10 @@ export const SMELTING = [
   { in: 'pumpkin', out: 'roast', count: 1, time: 7 },
   { in: 'meat', out: 'cooked_meat', count: 1, time: 6 },
   { in: 'fish', out: 'cooked_fish', count: 1, time: 6 },
+  // Smaller animals cook faster, which is the only mechanical difference
+  // between the three meats — the rest is that you can tell what you shot.
+  { in: 'poultry', out: 'cooked_poultry', count: 1, time: 5 },
+  { in: 'crab_meat', out: 'cooked_crab_meat', count: 1, time: 4 },
   // An egg is the cheapest thing the trader sells and the fastest thing the kiln
   // cooks, which is the intended on-ramp: buy a dozen, walk away with breakfast.
   { in: 'egg', out: 'cooked_egg', count: 1, time: 4 },

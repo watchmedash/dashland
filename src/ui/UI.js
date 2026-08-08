@@ -185,12 +185,12 @@ export class UI {
   closePause() { this.el.pause.classList.add('hidden'); this.closeSettings(); this.closeControls(); }
   get pauseOpen() { return !this.el.pause.classList.contains('hidden'); }
 
-  showDeath(cause, dropped = 0) {
-    // Say plainly that the things are still there. A player who does not know
-    // their pack survived will assume it is gone and never go back for it.
-    this.el.deathCause.textContent = dropped
-      ? `${cause} Your pack is where you fell, and it will wait for you.`
-      : cause;
+  showDeath(cause) {
+    // Just what killed you. The screen used to add a sentence promising your
+    // pack was still where you fell and would wait for you — reassuring the
+    // first time and padding every time after, and the death marker already
+    // says it on the map without spending a line of the death screen on it.
+    this.el.deathCause.textContent = cause;
     this.el.death.classList.remove('hidden');
   }
   hideDeath() { this.el.death.classList.add('hidden'); }

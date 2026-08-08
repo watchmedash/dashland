@@ -30,6 +30,9 @@ const CROUCH_EYE = 1.32;
 const SKIN = 0.0001;   // keeps the box strictly outside the geometry it rests on
 const FOOT = 0.002;    // ground tolerance, so resting on a surface is stable
 /** Blocks of fall you walk away from, and half-hearts per block beyond it. */
+/** Stamina you need back before a spent sprint can start again — about 1.2s. */
+const SPRINT_RESUME = 0.15;
+
 const FALL_FREE = 3.0;
 const FALL_PER_BLOCK = 1.0;
 /** Seconds a blow keeps shoving you. Matches the shove husks take from you. */
@@ -433,8 +436,22 @@ export class Player {
     // No headroom to stand back up: stay crouched. Growing the box into a
     // ceiling and then shoving it out is how you end up on top of the ceiling.
     if (!this.crouching && this._blocked(c.ci, c.cj, c.ck, HEIGHT)) this.crouching = true;
-    this.sprinting =(input.down('ShiftLeft') || input.down('ShiftRight'))
-      && iz > 0 && !this.crouching && this.stamina > 0.02;
+    // Sprinting needs a reserve to *start* and only stops at empty.
+    //
+    // The gate used to be a single `stamina > 0.02` on both, and that is a
+    // flip-flop, not a threshold: run yourself down to 2%, and the frame you
+    // cross it you stop sprinting, which switches stamina from draining at
+    // 0.055/s to recovering at 0.12/s, which puts you back over 2% by the very
+    // next frame, which starts you sprinting again. It oscillated at frame
+    // rate, and since sprinting also pulls the view model's arm back by 5cm,
+    // what the player actually saw was the hand shaking at 2% stamina.
+    //
+    // Two different numbers break the loop, and they also read better: you jog
+    // to a stop when you are spent, and you have to get some wind back before
+    // you can go again rather than stuttering along at zero.
+    const wantsSprint = (input.down('ShiftLeft') || input.down('ShiftRight'))
+      && iz > 0 && !this.crouching;
+    this.sprinting = wantsSprint && this.stamina > (this.sprinting ? 0 : SPRINT_RESUME);
 
     // ---- environment ----
     const feet = p.cellAt(this.position.x, this.position.y, this.position.z);

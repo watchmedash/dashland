@@ -166,6 +166,7 @@ function makeArmTexture() {
 export class ViewModel {
   constructor(dropsFactory) {
     this.dropsFactory = dropsFactory;
+    this._sprintEase = 0;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.01, 12);
 
@@ -399,8 +400,15 @@ export class ViewModel {
     // Shoulder anchor sits low-right, just behind the near plane. Everything —
     // bob, swing, equip dip, sprint — is applied here and nowhere else; the fist
     // and the held item are along for the ride.
+    // Sprint pulls the arm back, eased rather than snapped. A hard 0/1 meant
+    // any frame that changed its mind about sprinting jumped the hand 5cm and
+    // back, and running yourself out of stamina used to change its mind every
+    // single frame — the hand shook. The oscillation itself is fixed in Player
+    // (you now have to recover before you can sprint again), but a term that
+    // teleports the hand on a boolean is worth easing whatever feeds it.
     const sprint = player.sprinting ? 1 : 0;
-    this.armPivot.position.set(px, py, pz - sprint * 0.05);
+    this._sprintEase += (sprint - this._sprintEase) * Math.min(1, dt * 9);
+    this.armPivot.position.set(px, py, pz - this._sprintEase * 0.05);
     this.armPivot.rotation.set(
       // Rest tilt plus this frame's swing offset. Negative pitch drops the far
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).

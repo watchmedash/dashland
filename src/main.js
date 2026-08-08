@@ -840,7 +840,7 @@ class Game {
     }
     this.deathSite = dropped ? { pos: _v1.clone(), at: this.playtime } : null;
     this.ui.refresh();
-    this.ui.showDeath(cause, dropped);
+    this.ui.showDeath(cause);
   }
 
   respawn() {
@@ -1667,10 +1667,28 @@ class Game {
     this.damageFlash = Math.min(1, 0.32 + damage * 0.1);
     this.audio.hurt();
     if (p.health <= 0) {
-      this._die(typeof cause === 'string' ? cause : 'Something in the dark got you.');
+      // Name the thing that killed you. "Something in the dark got you" was
+      // written when the only thing that could was a husk at night; a tiger
+      // mauling you at noon deserves to be told plainly, and a death you cannot
+      // attribute is a death you cannot learn from.
+      this._die(typeof cause === 'string' ? cause : this._killedBy(cause));
       return true;
     }
     return false;
+  }
+
+  /**
+   * How the death screen says who did it.
+   *
+   * `cause` is whatever was passed to `hurt` — a mob for a blow. Falls back to
+   * the old line only when the killer has no label to read, which is not a case
+   * that exists today but is one bad refactor away.
+   */
+  _killedBy(cause) {
+    const label = cause?.spec?.label;
+    if (!label) return 'Something in the dark got you.';
+    const article = /^[aeiou]/i.test(label) ? 'An' : 'A';
+    return `${article} ${label.toLowerCase()} got you.`;
   }
 
   /**

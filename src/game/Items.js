@@ -126,8 +126,26 @@ const MATERIALS = [
   { name: 'roast', label: 'Roast Pumpkin', art: 'roast', food: 6 },
   { name: 'hide', label: 'Hide', art: 'hide' },
   { name: 'feather', label: 'Feather', art: 'feather' },
+  // Meat is named after the animal it came off.
+  //
+  // One "Raw Meat" for the whole kingdom meant a crab dropped the same slab as
+  // a cow, and the model that slab is drawn with is a drumstick — so a crab
+  // dropped a chicken leg. Three kinds is the right number: it is enough that
+  // what you are holding matches what you killed, and few enough that the
+  // cooking recipes stay a short list rather than a chore per species.
+  //
+  // `meat` keeps its id and its name so every existing save, recipe, shop
+  // stock and drop table still resolves.
   { name: 'meat', label: 'Raw Meat', art: 'meat', food: 3 },
   { name: 'cooked_meat', label: 'Cooked Meat', art: 'meat', cooked: true, food: 8 },
+  // Birds. The drumstick model was always poultry — it is only now labelled as
+  // what it plainly is.
+  { name: 'poultry', label: 'Raw Poultry', art: 'meat', food: 3 },
+  { name: 'cooked_poultry', label: 'Roast Poultry', art: 'meat', cooked: true, food: 7 },
+  // Crab. Modelled as a claw rather than a fillet — a pincer is recognisable at
+  // toolbar size, and a fillet of anything is a brown rectangle.
+  { name: 'crab_meat', label: 'Raw Crab', food: 2, color: '#c4552f', shine: '#ef8d5e' },
+  { name: 'cooked_crab_meat', label: 'Steamed Crab', cooked: true, food: 6, color: '#e0603a', shine: '#ffa87a' },
   ...FOOD,
   // Carrying water is what turns farming from site-selection into engineering:
   // wet farmland grows 2.1x faster, and without a pail you can only ever farm

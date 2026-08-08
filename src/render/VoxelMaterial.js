@@ -13,10 +13,12 @@ export const voxelUniforms = {
   uSkyColor: { value: new THREE.Color(0.42, 0.56, 0.78) },
   uSkyIntensity: { value: 1.0 },
   /**
-   * How far the dark end of the picture slides toward colourless moonlight:
-   * 0 by day, ~1 at midnight. See NIGHT_SCOTOPIC.
+   * How deep the night is: 0 by day, 1 at midnight, on the same night-squared
+   * curve everything else nocturnal uses. Two things read it — the scotopic
+   * pass at the end of the fragment, and the hemisphere shaping of the sky
+   * fill — so it is stored raw and each applies its own strength.
    */
-  uNightDesat: { value: 0 },
+  uNight: { value: 0 },
   uBounceColor: { value: new THREE.Color(0.36, 0.30, 0.22) },
   uBlockIntensity: { value: 5.0 },
   uNormalScale: { value: 0.55 },
@@ -130,7 +132,7 @@ uniform sampler2DArray uArm;
 uniform sampler2DArray uCrack;
 uniform vec3 uSkyColor;
 uniform float uSkyIntensity;
-uniform float uNightDesat;
+uniform float uNight;
 /**
  * How much block light reached this fragment, written in LIGHTS_END and read by
  * NIGHT_SCOTOPIC at the very end. A plain mutable global, which in GLSL is
@@ -390,12 +392,17 @@ const METAL_FRAG = /* glsl */`
  * and a flat greyscale night reads as a black-and-white photograph of a day.
  */
 const NIGHT_SCOTOPIC = /* glsl */`
-  if (uNightDesat > 0.001) {
+  if (uNight > 0.001) {
     float sLum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
     // Gated on *what lit it*, not on how bright it came out. Anything a flame
     // reached stays photopic and keeps its colour; anything lit only by the
     // night sky drains. See the note where gBlockLum is written.
-    float scoto = uNightDesat * (1.0 - smoothstep(0.02, 0.35, gBlockLum));
+    //
+    // 0.82 rather than a full drain: taking the last of the colour reads as a
+    // monochrome filter rather than as darkness, and a little green left in the
+    // grass is what says the grass is still green, you simply cannot quite see
+    // it.
+    float scoto = uNight * 0.82 * (1.0 - smoothstep(0.02, 0.35, gBlockLum));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(sLum) * vec3(0.74, 0.86, 1.18), scoto);
   }
 `;
@@ -461,9 +468,24 @@ const LIGHTS_END = /* glsl */`
   vec3 upDir = normalize(vWorld - uPlanetCenter);
   float downFace = clamp(-dot(normal, upDir) * 0.5 + 0.5, 0.0, 1.0);
   vec3 bounce = uBounceColor * uSkyIntensity * sunAmt * downFace * 0.6;
-  // hemisphere shaping: sky light lands hardest on upward faces
+  // Hemisphere shaping: sky light lands hardest on upward faces.
+  //
+  // Deeper at night, and that is an answer to "does every leaf get hit by the
+  // moon from all angles?" — no, and it should not look as if it does. By day
+  // the sky is a bright dome scattering light from every direction at once, so
+  // a shallow 0.62 floor is right: an underside really is nearly as lit as a
+  // top. At night almost all of that scattering is gone and what is left
+  // arrives from one direction, so an underside should fall away much further.
+  // At 0.30 the canopy gets a lit top and a dark belly and reads as shaped
+  // rather than as uniformly glowing foliage.
+  //
+  // Done here rather than by raising the moon, which is the other obvious lever
+  // and the wrong one: moonLight is a directional with no shadow map, so
+  // every bit of extra intensity leaks straight into caves. This term is gated
+  // by sunAmt, which is voxel skylight — it cannot reach anywhere the sky
+  // does not.
   float skyFacing = clamp(dot(normal, upDir) * 0.5 + 0.5, 0.0, 1.0);
-  skyFill *= mix(0.62, 1.0, skyFacing);
+  skyFill *= mix(mix(0.62, 0.30, uNight), 1.0, skyFacing);
 
   reflectedLight.indirectDiffuse += diffuseColor.rgb * (skyFill + bounce) * aoTotal * RECIPROCAL_PI;
   reflectedLight.indirectDiffuse += diffuseColor.rgb * vBlock * uBlockIntensity * mix(0.65, 1.0, aoTotal) * RECIPROCAL_PI;

@@ -180,13 +180,26 @@ const HAND_LIGHT_RADIUS = 8;
 /**
  * How far a carried flame throws, in cells, and how hard.
  *
- * Deliberately shorter and softer than the light the same torch gives once it
- * is planted in a wall. A carried torch that lit as far as a placed one would
- * make placing them pointless, and the whole shape of mining — light the shaft
- * behind you or lose it — depends on that trade.
+ * These now match a *placed* torch rather than undercutting it. They were 9.5
+ * and 2.1, deliberately dimmer, on the theory that a carried torch as bright as
+ * a planted one makes planting pointless and takes the shape out of mining —
+ * light the shaft behind you or lose it. That reasoning is sound and it is
+ * overruled, because the same flame visibly changing brightness depending on
+ * whether it is in your fist or in the wall reads as a bug long before it reads
+ * as a rule.
+ *
+ * Both numbers are derived rather than picked, so they cannot drift: the reach
+ * is a torch's own light level (13), which is exactly how many cells its light
+ * carries through the grid, and the gain is `uBlockIntensity`, which is the
+ * multiplier the terrain applies to that same baked light. Anything that
+ * retunes one now retunes the other.
+ *
+ * What still separates carrying from placing: this is one light and it follows
+ * you, so a lit shaft stays lit behind you and a carried one does not. That was
+ * always the real difference.
  */
-const HAND_LIGHT_REACH = 9.5;
-const HAND_LIGHT_GAIN = 2.1;
+const HAND_LIGHT_REACH = 13.0;
+const HAND_LIGHT_GAIN = 5.0;
 
 /**
  * How long a new planet keeps the husks off, in seconds.
@@ -1968,7 +1981,7 @@ class Game {
   _breakBlock(hit) {
     const b = BLOCKS[hit.id];
     if (b.hardness < 0 || hit.id === ID.core) return;
-    const heldDef = ITEMS[this.inventory.held().item];
+    const heldDef = ITEMS[this.inventory.active().item];
     const center = this.planet.centerOf(hit.col, hit.k, new THREE.Vector3());
 
     const edits = [{ col: hit.col, k: hit.k, id: 0 }];
@@ -2032,7 +2045,7 @@ class Game {
   }
 
   _placeBlock(hit) {
-    const held = this.inventory.held();
+    const held = this.inventory.active();
     const def = ITEMS[held.item];
     if (!def || def.block === undefined) return false;
     if (hit.prevCol < 0) return false;
@@ -3332,7 +3345,11 @@ class Game {
     const lc = block.lightColor || WHITE_L;
     const strength = (emit / 15) * HAND_LIGHT_GAIN * flicker;
     u.uHandLightColor.value.set(lc[0] * strength, lc[1] * strength, lc[2] * strength);
-    const want = HAND_LIGHT_REACH * (0.6 + 0.4 * (emit / 15));
+    // The block's own light level in cells, which is what the grid gives a
+    // planted one. The old form scaled this by 0.6..1.0 as a second dimming on
+    // top of the strength; a torch now reaches its 13 cells in the hand exactly
+    // as it does in the wall.
+    const want = HAND_LIGHT_REACH * (emit / 13);
     u.uHandLightRadius.value += (want - u.uHandLightRadius.value) * Math.min(1, dt * 8);
     // Just in front of and below the eye, where the hand actually is — lighting
     // from the eye itself flattens everything into a torchlit photograph.
@@ -3347,7 +3364,7 @@ class Game {
     if (mob.spec.trader) return `<kbd>RMB</kbd> Trade`;
     if (mob.baby > 0) return 'Calf';
     if (mob.love > 0) return 'Ready to breed';
-    const held = this.inventory.held();
+    const held = this.inventory.active();
     if (!held.empty && this.mobs.canFeed(held.item) && mob.breedCooldown <= 0) {
       return `<kbd>RMB</kbd> Feed`;
     }
@@ -3404,7 +3421,7 @@ class Game {
       this.ui.setCrosshairActive(true);
       this.highlight.visible = false;
       if (input.clicked[0] && input.locked) {
-        const held = ITEMS[this.inventory.held().item];
+        const held = ITEMS[this.inventory.active().item];
         // Swings have a rhythm. Clicking is edge-triggered with no cooldown, so
         // once blows started knocking husks backwards a player could hold one
         // in the air indefinitely by clicking fast — free, skill-less immunity.
@@ -3439,7 +3456,7 @@ class Game {
       }
       // Right-click offers whatever you're holding. Feeding is how a herd
       // grows, and it's the only reason to keep an animal alive.
-      const heldSlot = this.inventory.held();
+      const heldSlot = this.inventory.active();
       if (input.clicked[2] && input.locked && this.useCooldown === 0) {
         this.useCooldown = 0.3;
         // The merchant answers the same button, empty-handed or not — it is the
@@ -3477,7 +3494,7 @@ class Game {
     // seconds to an iron vein reads as a broken game, so name the tool needed.
     // One chain, one winner. Setting a hint anywhere above this ran into the
     // unconditional clear at the end of it and lasted exactly zero frames.
-    const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.held().item]) : null;
+    const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.active().item]) : null;
     if (hit && IS_SIGN[hit.id]) {
       // Reading is looking: no key to press and nothing to open, so a row of
       // signs can be read by sweeping across them.
@@ -3490,7 +3507,7 @@ class Game {
     } else this.ui.setHint(null);
 
     const m = this.mining;
-    const heldDef = ITEMS[this.inventory.held().item];
+    const heldDef = ITEMS[this.inventory.active().item];
     if (input.buttons[0] && hit && input.locked) {
       const key = hit.col * D + hit.k;
       if (m.key !== key) { m.key = key; m.progress = 0; }
@@ -3524,7 +3541,7 @@ class Game {
     }
 
     // --- eating: hold RMB on any food ---
-    const heldSlot = this.inventory.held();
+    const heldSlot = this.inventory.active();
     const heldItem = ITEMS[heldSlot.item];
     if (heldItem?.food && input.buttons[2] && input.locked) {
       this.eating += dt;
@@ -3831,12 +3848,11 @@ class Game {
       .lerp(MOON_FILL, n2);
     voxelUniforms.uSkyIntensity.value =
       (0.34 - SKY_NIGHT_DROP * n2 + p.sunIntensity * 0.72) * (0.5 + w.sun * 0.5);
-    // Rod vision, on the same `night²` weighting as everything else here, so
-    // the day is untouched by construction. Not 1.0 at full night: draining the
-    // last of the colour reads as a monochrome filter rather than as darkness,
-    // and a little green left in the grass is what says the grass is still
-    // green — you simply cannot quite see it.
-    voxelUniforms.uNightDesat.value = 0.82 * n2;
+    // How deep the night is, raw. The scotopic drain and the hemisphere shaping
+    // both read it and each applies its own strength, so there is one curve for
+    // "it is night" and no second opinion about it. `night²` is what makes the
+    // day untouched by construction rather than by tuning.
+    voxelUniforms.uNight.value = n2;
     voxelUniforms.uBounceColor.value.copy(p.fog).lerp(WHITE, 0.2).multiplyScalar(0.7);
     voxelUniforms.uSunDir.value.copy(this.sky.sunDir);
     voxelUniforms.uSunColor.value.copy(p.sun).multiplyScalar(w.sun);

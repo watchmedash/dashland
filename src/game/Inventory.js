@@ -80,6 +80,33 @@ export class Inventory {
   heldDef() { return ITEMS[this.slots[this.selected].item] || null; }
 
   /**
+   * The slot that actually *does* things: the main hand, or the offhand when
+   * the main hand is empty.
+   *
+   * Until now the offhand only carried and displayed, which left it with no
+   * purpose at all for anyone who was not deliberately posing with a torch. An
+   * empty right hand is the one moment where deferring to the left is
+   * unambiguous — there is nothing to choose between, so nothing can be taken
+   * from you by surprise — and it means a torch in the offhand is placeable, a
+   * pickaxe there still mines, and food there still feeds you.
+   *
+   * Deliberately **not** what `held()` returns. Display, the hotbar highlight
+   * and the view model all ask that question and want the literal hand: if this
+   * were folded into `held()` the same torch would be drawn in both fists at
+   * once, because the right hand's model and the left hand's model would each
+   * be handed the same item.
+   *
+   * Consumption follows the actor, because this returns the slot itself — if
+   * the left hand placed the torch, the left hand's stack is the one that goes
+   * down by one.
+   */
+  active() {
+    const main = this.slots[this.selected];
+    return main.empty ? this.offhand : main;
+  }
+  activeDef() { return ITEMS[this.active().item] || null; }
+
+  /**
    * Trade the selected hotbar stack for the offhand stack — the F key.
    *
    * A straight swap rather than a merge, even when the two hold the same item.
@@ -153,7 +180,11 @@ export class Inventory {
 
   /** Consume one of the held stack (placing a block). */
   consumeHeld(n = 1) {
-    const s = this.held();
+    // `active()`, not `held()`: whichever hand did the thing pays for it. With
+    // `held()` an offhand placement would have taken a torch off an empty main
+    // hand — which is to say off nothing, giving infinite torches to anyone who
+    // emptied their hotbar slot.
+    const s = this.active();
     if (s.empty) return false;
     s.count -= n;
     if (s.count <= 0) s.clear();
@@ -163,7 +194,8 @@ export class Inventory {
 
   /** Apply tool wear; returns true if the tool broke. */
   damageHeld(amount = 1) {
-    const s = this.held();
+    // Same rule as consumeHeld: the tool that swung is the tool that wears.
+    const s = this.active();
     const def = ITEMS[s.item];
     if (!def?.tool) return false;
     s.wear += amount;

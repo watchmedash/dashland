@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { ITEMS } from '../game/Items.js';
-import { BLOCKS } from '../world/Blocks.js';
+import { BLOCKS, RENDER_TYPE, R_CROSS } from '../world/Blocks.js';
 import { createItemBlockMaterial } from '../render/VoxelMaterial.js';
 import { heldModel, hasModel } from '../render/ItemModels.js';
 
@@ -253,7 +253,20 @@ export class ViewModel {
     // world therefore took the model out of the player's hand and replaced it
     // with a cube, a change nobody would think to look for in a mesher commit.
     // Asking whether the model exists cannot come apart that way.
-    const isCube = def.block !== undefined && !hasModel(itemId);
+    //
+    // There are two questions here and they are not the same one. "Does this
+    // have 3D art of its own?" chooses between a model and generated art, and
+    // that is what hasModel answers. "Does its generated art have a cube form?"
+    // chooses between a cube and a flat sprite — and a cross block (flower,
+    // tall grass, sapling) has no cube form at all: Drops builds it as a plane.
+    //
+    // Asking only the first question meant a flower took the cube path, and the
+    // cube path hands the *voxel* material a sprite's plane. That material
+    // reads per-vertex layer, tint and tangent attributes that a plane has
+    // none of, so it sampled nothing and the flower came out as a black card
+    // in the fist.
+    const isCube = def.block !== undefined && !hasModel(itemId)
+      && RENDER_TYPE[def.block] !== R_CROSS;
     let mesh = null;
     if (isCube) {
       const src = this.dropsFactory(itemId);

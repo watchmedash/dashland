@@ -1831,7 +1831,12 @@ class Game {
     // your inventory, not sit frozen at whatever it was when you opened it.
     this.attackT = Math.min(ATTACK_PERIOD, this.attackT + dt);
 
+    // `_interact` is what names the thing under the crosshair, so with a screen
+    // up the label has to be cleared here — otherwise it freezes on whatever
+    // you happened to be looking at when you opened your inventory and sits
+    // there behind it.
     if (!busy) this._interact(dt, input);
+    else this.ui.setLookAt(null);
     // Each of these is isolated. The whole frame is already wrapped in a catch
     // so a throw cannot kill the render loop, but that catch aborts everything
     // *after* the throw as well — one bad kiln state silently stopped farming,
@@ -2511,6 +2516,17 @@ class Game {
 
     // a creature in front of the block takes the hit instead
     const mobHit = this.mobs.raycast(this.player.eye, this.player.lookDir, this.player.reach);
+
+    // Name whatever is under the crosshair.
+    //
+    // Done here rather than with its own raycast because the answer already
+    // exists: this is the one place that knows both what you are aiming at and
+    // which of the two won. A second cast would be the same work twice and
+    // could disagree with the highlight box on the frame they straddle a face.
+    // The creature takes precedence for the same reason it takes the hit.
+    this.ui.setLookAt(mobHit && (!hit || mobHit.dist < hit.dist)
+      ? (mobHit.mob.spec.label ?? null)
+      : (hit ? (BLOCKS[this.planet.at(hit.col, hit.k)]?.label ?? null) : null));
     if (mobHit && (!hit || mobHit.dist < hit.dist)) {
       this.ui.setCrosshairActive(true);
       this.highlight.visible = false;

@@ -21,6 +21,32 @@ import {
  */
 const LEVEL_SOURCE = 7;
 
+/**
+ * Quarter-turns of UV so a lying log's grain runs along its axis.
+ *
+ * `sideTile` already puts the rings on the two faces the trunk runs through and
+ * bark on the other four, which is the half of the job you notice first. The
+ * half you notice second is that the bark is *directional*: its grain runs up
+ * the texture, and up the texture is up the world on every face, so a log laid
+ * on its side kept vertical grain and read as an upright log wearing the wrong
+ * end caps. Rotating the bark faces a quarter turn is what actually lays it
+ * down.
+ *
+ * Which faces need it falls out of the UV conventions and is not symmetric.
+ * On a side face u runs tangentially and v runs along +k; on the top face u
+ * runs along i and v along j. So for a log along i the bark is on the j faces
+ * (grain currently along k, wants i) *and* on the caps of the cell (grain along
+ * j, wants i) — both turn. For a log along j the bark on the i faces turns, but
+ * the top and bottom already have their v along j and must be left alone.
+ *
+ * `dir` is 0:+i 1:-i 2:+j 3:-j 4:top 5:bottom.
+ */
+function grainRot(id, facing, dir) {
+  if (!IS_AXIS[id] || !facing) return 0;
+  if (facing === 1) return (dir === 2 || dir === 3 || dir >= 4) ? 1 : 0;
+  return (dir === 0 || dir === 1) ? 1 : 0;
+}
+
 export const GROUP_OPAQUE = 0;
 export const GROUP_CUTOUT = 1;
 export const GROUP_TRANSPARENT = 2;
@@ -362,7 +388,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
     }
   };
 
-  const emit = (g, id, layer, biomeId, p0, p1, p2, p3, uMax, vMax) => {
+  const emit = (g, id, layer, biomeId, p0, p1, p2, p3, uMax, vMax, uvRot = 0) => {
     // normal & tangent from the actual quad
     let ax = p1[0] - p0[0], ay = p1[1] - p0[1], az = p1[2] - p0[2];
     let bx = p3[0] - p0[0], by = p3[1] - p0[1], bz = p3[2] - p0[2];
@@ -383,7 +409,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
       g.pos.push3(pts[c][0], pts[c][1], pts[c][2]);
       g.nrm.push3(_n[0], _n[1], _n[2]);
       g.tan.push3(_t[0], _t[1], _t[2]);
-      g.uv.push2(uv[c][0], uv[c][1]);
+      g.uv.push2(uv[(c + uvRot) & 3][0], uv[(c + uvRot) & 3][1]);
       g.aux.push4(layer, AO_CURVE[aoData[c]], cornerData[c][0], wave === 0 ? 0 : wave + 0.99);
       g.blk.push3(cornerData[c][1], cornerData[c][2], cornerData[c][3]);
       if (useCornerDepth) g.tint.push3(liquidCorner[c], tint[1], 0);
@@ -565,7 +591,8 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
           }
           emit(grp, id, capTile(id, dirF, true), biomeId,
             cornerAt(f, i, j, k + cornerTop[0], _c0), cornerAt(f, i + 1, j, k + cornerTop[1], _c1),
-            cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c2), cornerAt(f, i, j + 1, k + cornerTop[3], _c3), 1, 1);
+            cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c2), cornerAt(f, i, j + 1, k + cornerTop[3], _c3),
+            1, 1, grainRot(id, dirF, 4));
         }
 
         // ---- inward (-k) ----
@@ -588,7 +615,8 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
           }
           emit(grp, id, capTile(id, dirF, false), biomeId,
             cornerAt(f, i, j, kk, _c0), cornerAt(f, i, j + 1, kk, _c1),
-            cornerAt(f, i + 1, j + 1, kk, _c2), cornerAt(f, i + 1, j, kk, _c3), 1, 1);
+            cornerAt(f, i + 1, j + 1, kk, _c2), cornerAt(f, i + 1, j, kk, _c3),
+            1, 1, grainRot(id, dirF, 5));
         }
 
         // ---- tangential faces ----
@@ -606,7 +634,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
           emit(grp, id, sideTile(id, 0, dirF), biomeId,
             cornerAt(f, i + 1, j, k + cellLo, _c0), cornerAt(f, i + 1, j + 1, k + cellLo, _c1),
             cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c2),
-            cornerAt(f, i + 1, j, k + cornerTop[1], _c3), 1, 1);
+            cornerAt(f, i + 1, j, k + cornerTop[1], _c3), 1, 1, grainRot(id, dirF, 0));
         }
         // -i
         if (faceVisible(id, at(nMi, k))) {
@@ -622,7 +650,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
           emit(grp, id, sideTile(id, 1, dirF), biomeId,
             cornerAt(f, i, j + 1, k + cellLo, _c0), cornerAt(f, i, j, k + cellLo, _c1),
             cornerAt(f, i, j, k + cornerTop[0], _c2),
-            cornerAt(f, i, j + 1, k + cornerTop[3], _c3), 1, 1);
+            cornerAt(f, i, j + 1, k + cornerTop[3], _c3), 1, 1, grainRot(id, dirF, 1));
         }
         // +j — corners ordered so UV.u stays tangential and UV.v runs along +k,
         // matching the other side faces (otherwise the texture is rotated 90°).
@@ -639,7 +667,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
           emit(grp, id, sideTile(id, 2, dirF), biomeId,
             cornerAt(f, i + 1, j + 1, k + cellLo, _c0), cornerAt(f, i, j + 1, k + cellLo, _c1),
             cornerAt(f, i, j + 1, k + cornerTop[3], _c2),
-            cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c3), 1, 1);
+            cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c3), 1, 1, grainRot(id, dirF, 2));
         }
         // -j
         if (faceVisible(id, at(nMj, k))) {
@@ -655,7 +683,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
           emit(grp, id, sideTile(id, 3, dirF), biomeId,
             cornerAt(f, i, j, k + cellLo, _c0), cornerAt(f, i + 1, j, k + cellLo, _c1),
             cornerAt(f, i + 1, j, k + cornerTop[1], _c2),
-            cornerAt(f, i, j, k + cornerTop[0], _c3), 1, 1);
+            cornerAt(f, i, j, k + cornerTop[0], _c3), 1, 1, grainRot(id, dirF, 3));
         }
       }
     }

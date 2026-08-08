@@ -1,4 +1,4 @@
-# Dash Craft
+# Mojazer
 
 A tiny-planet survival sandbox in Three.js. The world is a cubesphere of voxels
 — six faces of 208×208 columns, 44 layers deep — so there is no horizon and no

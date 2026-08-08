@@ -1,4 +1,4 @@
-// Dash Craft — a voxel tiny planet.
+// Mojazer — a voxel tiny planet.
 
 import * as THREE from 'three';
 import { Planet } from './world/Planet.js';

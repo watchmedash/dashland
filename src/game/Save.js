@@ -1,5 +1,12 @@
 // World persistence in IndexedDB — the voxel array is far too large for
 // localStorage, so only the small metadata summary lives there.
+//
+// The storage names still say `dashcraft` after the rename to Mojazer, and they
+// have to. A key is an address, not a label: renaming these does not move
+// anybody's planet, it just stops the game from finding it, and the planet is
+// the one thing here that cannot be regenerated from a seed. Nothing outside
+// this file reads them, so the cost is a stale word in three strings that no
+// player ever sees.
 
 const DB_NAME = 'dashcraft';
 const STORE = 'worlds';

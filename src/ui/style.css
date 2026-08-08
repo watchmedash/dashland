@@ -71,13 +71,7 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
 .menu-card h2 { color: var(--parchment); font-size: 22px; font-weight: 600; letter-spacing: .08em; text-align: center; }
 .menu-card .tagline { margin-bottom: 16px; }
 .menu-actions { display: flex; flex-direction: column; gap: 5px; margin-top: 14px; }
-.menu-foot { margin-top: 14px; font: 11px/1 var(--mono); letter-spacing: .12em; color: rgba(247, 238, 222, .35); text-transform: uppercase; }
 .death-title { color: #f0a08a !important; }
-.menu-credit {
-  margin-top: 6px; font-size: 10.5px; letter-spacing: .02em;
-  color: rgba(247, 238, 222, .32); line-height: 1.5;
-}
-.menu-credit strong { color: rgba(247, 238, 222, .5); font-weight: 600; }
 .note.credits { border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 10px; }
 
 button {
@@ -97,7 +91,6 @@ button.primary {
   box-shadow: 0 10px 22px -12px rgba(221, 124, 56, .95), 0 1px 0 rgba(255, 255, 255, .4) inset;
 }
 button.primary:hover { filter: brightness(1.06); }
-button small { display: block; font-size: 10.5px; font-weight: 500; opacity: .8; margin-top: 2px; letter-spacing: .04em; }
 .panel button { color: var(--ink-soft); background: rgba(0, 0, 0, .055); border-color: rgba(0, 0, 0, .07); }
 .panel button:hover { background: rgba(0, 0, 0, .1); }
 .panel button.ghost { padding: 5px 9px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
@@ -655,7 +648,12 @@ button.danger {
 
 .settings { display: flex; flex-direction: column; gap: 9px; }
 .settings label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; }
-.settings label.row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.settings label.row { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; flex-wrap: wrap; }
+.settings label.row input { margin-top: 2px; }
+.settings label.row small {
+  flex: 1 0 100%; padding-left: 22px; font-size: 11.5px;
+  color: rgba(60, 48, 34, .62); line-height: 1.45;
+}
 .settings .val { float: right; font: 600 11.5px var(--mono); color: var(--accent); }
 .settings input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; margin-top: 8px; border-radius: 99px; background: var(--edge); outline: none; }
 .settings input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: linear-gradient(170deg, var(--accent-2), var(--accent)); box-shadow: 0 2px 5px rgba(0, 0, 0, .3); cursor: pointer; }

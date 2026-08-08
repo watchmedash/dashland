@@ -34,9 +34,6 @@ const STAMINA_ICON = pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2
 
 const $ = (id) => document.getElementById(id);
 
-/** Zero means the planet follows the device clock rather than a game cycle. */
-const dayLengthLabel = (m) => (m > 0 ? `${m} min` : 'device clock');
-
 export class UI {
   constructor(game) {
     this.game = game;
@@ -50,8 +47,7 @@ export class UI {
 
     this.el = {
       loader: $('loader'), loadFill: $('load-fill'), loadStatus: $('load-status'),
-      menu: $('menu'), mmContinue: $('mm-continue'), mmSaveInfo: $('mm-save-info'),
-      mmClock: $('mm-clock'),
+      menu: $('menu'), mmContinue: $('mm-continue'),
       hud: $('hud'), crosshair: $('crosshair'), hotbar: $('hotbar'), offhand: $('offhand'),
       itemName: $('item-name'), lookAt: $('look-at'),
       vHealth: $('v-health'), vFood: $('v-food'),
@@ -81,8 +77,6 @@ export class UI {
 
     this._bind();
     this._buildSlots();
-    setInterval(() => this._tickMenuClock(), 1000);
-    this._tickMenuClock();
   }
 
   // --- wiring ---------------------------------------------------------------
@@ -122,20 +116,13 @@ export class UI {
 
     const s = g.settings;
     const bind = (id, ev, fn) => { $(id).addEventListener(ev, fn); };
-    bind('set-fov', 'input', (e) => { s.fov = +e.target.value; $('fov-val').textContent = e.target.value; g.persistSettings(); });
     bind('set-sens', 'input', (e) => { s.sensitivity = +e.target.value; $('sens-val').textContent = (+e.target.value).toFixed(2); g.persistSettings(); });
-    bind('set-scale', 'input', (e) => { s.renderScale = +e.target.value; g.setRenderScale(+e.target.value); $('scale-val').textContent = (+e.target.value).toFixed(2); g.persistSettings(); });
     bind('set-vol', 'input', (e) => { s.volume = +e.target.value / 100; $('vol-val').textContent = e.target.value; g.audio.setVolumes(s.volume, s.music); g.persistSettings(); });
     bind('set-mus', 'input', (e) => { s.music = +e.target.value / 100; $('mus-val').textContent = e.target.value; g.audio.setVolumes(s.volume, s.music); g.persistSettings(); });
     bind('set-post', 'change', (e) => { s.post = e.target.checked; g.postfx.enabled = e.target.checked; g.persistSettings(); });
     bind('set-bob', 'change', (e) => { s.bob = e.target.checked; g.persistSettings(); });
     bind('set-invert', 'change', (e) => { s.invertY = e.target.checked; g.input.invertY = e.target.checked; g.persistSettings(); });
     bind('set-autojump', 'change', (e) => { s.autoJump = e.target.checked; g.player.autoJump = e.target.checked; g.persistSettings(); });
-    bind('set-day', 'input', (e) => {
-      s.dayMinutes = +e.target.value;
-      $('day-val').textContent = dayLengthLabel(s.dayMinutes);
-      g.persistSettings();
-    });
 
     window.addEventListener('mousemove', (e) => {
       this._cursorXY = { x: e.clientX, y: e.clientY };
@@ -152,17 +139,13 @@ export class UI {
 
   syncSettings() {
     const s = this.game.settings;
-    $('set-fov').value = s.fov; $('fov-val').textContent = s.fov;
     $('set-sens').value = s.sensitivity; $('sens-val').textContent = s.sensitivity.toFixed(2);
-    $('set-scale').value = s.renderScale; $('scale-val').textContent = s.renderScale.toFixed(2);
     $('set-vol').value = Math.round(s.volume * 100); $('vol-val').textContent = Math.round(s.volume * 100);
     $('set-mus').value = Math.round(s.music * 100); $('mus-val').textContent = Math.round(s.music * 100);
     $('set-post').checked = s.post;
     $('set-bob').checked = s.bob;
     $('set-invert').checked = s.invertY;
     $('set-autojump').checked = !!s.autoJump;
-    $('set-day').value = s.dayMinutes ?? 24;
-    $('day-val').textContent = dayLengthLabel(s.dayMinutes ?? 24);
   }
 
   // --- loading + menu -------------------------------------------------------
@@ -180,17 +163,11 @@ export class UI {
   showMenu(meta) {
     this.el.menu.classList.remove('hidden');
     this.showHud(false);
-    const btn = this.el.mmContinue;
-    if (meta) {
-      btn.disabled = false;
-      const mins = Math.round((meta.playtime || 0) / 60);
-      const when = new Date(meta.savedAt);
-      btn.querySelector('small').textContent =
-        `${BIOME_NAMES[meta.biome] ?? 'Planet'} · ${mins}m played · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    } else {
-      btn.disabled = true;
-      btn.querySelector('small').textContent = 'No saved planet yet';
-    }
+    // Just "Continue". The button used to carry the biome, the minutes played
+    // and the date of the save, which is a paragraph answering a question
+    // nobody asked: there is one save, and pressing this returns you to it.
+    // The only part that was ever load-bearing is whether it works at all.
+    this.el.mmContinue.disabled = !meta;
   }
 
   hideMenu() { this.el.menu.classList.add('hidden'); }
@@ -294,11 +271,6 @@ export class UI {
     }
     e.preventDefault();
     e.stopPropagation();
-  }
-
-  _tickMenuClock() {
-    const d = new Date();
-    this.el.mmClock.textContent = `Planet time syncs to ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }
 
   openSettings() { this.syncSettings(); this.el.settings.classList.remove('hidden'); }

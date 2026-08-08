@@ -7,6 +7,7 @@ import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
 import { cellToWorld, worldToCell, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
 import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, ID, collisionBoxes, isPassable,
+  CONTACT_HURT,
 } from '../world/Blocks.js';
 
 /** The extent of an ordinary full block, so the shaped path stays branch-free. */
@@ -34,6 +35,12 @@ const HALF_W = 0.34;
 const CROUCH_EYE = 1.32;
 const SKIN = 0.0001;   // keeps the box strictly outside the geometry it rests on
 const FOOT = 0.002;    // ground tolerance, so resting on a surface is stable
+/**
+ * How close counts as touching, in cells, for contact damage. Two orders of
+ * magnitude above SKIN so a box resting against a wall is unambiguously in
+ * contact, and small enough that the cell next door is not. See contactHurt.
+ */
+const TOUCH = 0.015;
 /** Blocks of fall you walk away from, and half-hearts per block beyond it. */
 /** Stamina you need back before a spent sprint can start again — about 1.2s. */
 const SPRINT_RESUME = 0.15;
@@ -447,6 +454,73 @@ export class Player {
       }
     }
     return found;
+  }
+
+  /**
+   * The worst CONTACT_HURT among the blocks the body is actually pressed
+   * against, or 0 — which is what it is almost always.
+   *
+   * "Touching" has to mean touching. Collision leaves the box flush against
+   * whatever stopped it with only SKIN (1e-4 of a cell) to spare, so the test is
+   * the ordinary box overlap grown by TOUCH — a centimetre and a half, wide
+   * enough to survive the bisection in _contactI leaving you a hair short of the
+   * wall, far too narrow to reach a cactus you are merely standing near. A whole
+   * cell of slack was the other option and it is wrong: it charges you for
+   * walking down the aisle *between* two cacti without brushing either.
+   *
+   * Grown on all six sides, so standing on top of one counts. That is the
+   * Minecraft behaviour and it is the one that matches what you can see — your
+   * feet are in the spines.
+   *
+   * The caller decides how often to ask; this is a query about right now and it
+   * has no timer of its own. Mobs can use it the same way once something wants
+   * to: nothing here is about the player except the box it reads.
+   */
+  contactHurt(height = this.crouching ? HEIGHT - 0.35 : HEIGHT) {
+    const p = this.planet;
+    const c = this.cell;
+    let f = c.f, ai = c.ci, aj = c.cj;
+    if (ai < 0 || ai >= F || aj < 0 || aj >= F) {
+      _nc.f = f; _nc.ci = ai; _nc.cj = aj; _nc.ck = c.ck;
+      normalizeCell(_nc);
+      f = _nc.f; ai = _nc.ci; aj = _nc.cj;
+    }
+    const baseI = Math.floor(ai), baseJ = Math.floor(aj);
+    if (baseI < 0 || baseI >= F || baseJ < 0 || baseJ >= F) return 0;
+    const baseCol = cidx(f, baseI, baseJ);
+    const lo = ai - HALF_W - TOUCH, hi = ai + HALF_W + TOUCH;
+    const loJ = aj - HALF_W - TOUCH, hiJ = aj + HALF_W + TOUCH;
+    const loK = c.ck - TOUCH, hiK = c.ck + height + TOUCH;
+    let worst = 0;
+    for (let di = -1; di <= 1; di++) {
+      const cLo = baseI + di;
+      if (Math.min(hi, cLo + 1) - Math.max(lo, cLo) <= 0) continue;
+      for (let dj = -1; dj <= 1; dj++) {
+        const cLoJ = baseJ + dj;
+        if (Math.min(hiJ, cLoJ + 1) - Math.max(loJ, cLoJ) <= 0) continue;
+        const col = stepColumn(baseCol, di, dj);
+        // One layer below the feet and one above the head: the grown box can
+        // reach into either, and being stood on top of a cactus is the case
+        // that lives in the layer below.
+        for (let k = Math.floor(loK); k <= Math.floor(hiK); k++) {
+          const bid = p.at(col, k);
+          const hurt = CONTACT_HURT[bid];
+          if (hurt <= worst) continue;
+          const boxes = IS_SHAPED[bid]
+            ? collisionBoxes(bid, p.facingAt(col, k))
+            : FULL_BOX;
+          for (let b = 0; b < boxes.length; b++) {
+            const [bi0, bj0, bk0, bi1, bj1, bk1] = boxes[b];
+            if (Math.min(hi, cLo + bi1) - Math.max(lo, cLo + bi0) <= 0) continue;
+            if (Math.min(hiJ, cLoJ + bj1) - Math.max(loJ, cLoJ + bj0) <= 0) continue;
+            if (Math.min(hiK, k + bk1) - Math.max(loK, k + bk0) <= 0) continue;
+            worst = hurt;
+            break;
+          }
+        }
+      }
+    }
+    return worst;
   }
 
   /**

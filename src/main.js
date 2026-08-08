@@ -31,7 +31,7 @@ import { Skills, MARKS } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
-  IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT,
+  IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
 } from './world/Blocks.js';
 import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
@@ -253,6 +253,8 @@ const MAX_ENTITY_EMITTERS = 24;
 const FLAME_PERIOD = 0.14;
 /** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
 const HURT_IMMUNITY = 0.5;
+/** How often a body pressed against a hurting block is charged. See _tickContact. */
+const CONTACT_PERIOD = 0.5;
 
 for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID[n]);
 
@@ -1772,6 +1774,66 @@ class Game {
 
   // --- edits ----------------------------------------------------------------
 
+  /**
+   * Is any of the four tangential neighbours of this cell something that would
+   * crowd out a NEEDS_ROOM block standing in it?
+   *
+   * Reads the world, not the pending edit list, so callers have to run it at the
+   * right moment: `_placeBlock` before it commits, `_crushCrowded` after.
+   */
+  _crowdedAt(col, k) {
+    for (let d = 0; d < 4; d++) {
+      const nb = colNeighbor(col, d);
+      if (nb < 0) continue;
+      const id = this.planet.at(nb, k);
+      if (crowds(id, this.planet.facingAt(nb, k))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Break any cactus these edits have just walled in.
+   *
+   * Runs *after* the edits are in the world, so a cactus that lost its room to
+   * the very block that was placed sees that block. Only cells beside something
+   * newly solid are looked at — the whole check is four `at` calls per edit, and
+   * a normal edit is one block.
+   *
+   * It does not recurse: the removals it makes write air, and air crowds
+   * nothing. Worth stating because the obvious next hazard — one cactus falling
+   * onto another — would, and this would then need a work list rather than one
+   * pass. Nothing calls it on chunk load either, which is what keeps a desert
+   * that generated two cacti side by side from quietly demolishing itself the
+   * first time you walk into render range. Whether worldgen should be spacing
+   * them out at all is a question for WorldGen.
+   */
+  _crushCrowded(edits) {
+    let doomed = null;
+    for (const e of edits) {
+      if (!crowds(e.id, e.facing ?? 0)) continue;
+      for (let d = 0; d < 4; d++) {
+        const nb = colNeighbor(e.col, d);
+        if (nb < 0) continue;
+        if (!NEEDS_ROOM[this.planet.at(nb, e.k)]) continue;
+        const key = nb * D + e.k;
+        if (!doomed) doomed = new Map();
+        doomed.set(key, { col: nb, k: e.k, id: this.planet.at(nb, e.k) });
+      }
+    }
+    if (!doomed) return;
+    const removals = [];
+    const at = new THREE.Vector3();   // not a shared scratch: we are inside a caller's
+    for (const c of doomed.values()) {
+      // An ordinary break, minus the tool: it drops itself, it makes the noise,
+      // and the crack overlay never entered into it.
+      this.planet.centerOf(c.col, c.k, at);
+      for (const d of computeDrops(c.id, null)) this.drops.spawn(at.x, at.y, at.z, d.item, d.count);
+      this.audio.break_(BLOCKS[c.id].sound, at);
+      removals.push({ col: c.col, k: c.k, id: 0 });
+    }
+    this._applyEdits(removals);
+  }
+
   _applyEdits(edits) {
     for (const e of edits) {
       // any change can open a path for water or cut one off
@@ -1787,6 +1849,10 @@ class Game {
     this.worldWorker.postMessage({ type: 'edit', edits, id: ++this.editSeq });
     // Cheap, and only does anything at all once a hearth exists.
     if (this.hearths.size) this._refreshWards();
+    // Last, and as its own edit batch: the block that did the crowding has to be
+    // in the world and posted to the worker before the cactus beside it comes
+    // down, or the two changes race in the mesher over the same chunk.
+    this._crushCrowded(edits);
   }
 
   /**
@@ -2046,7 +2112,12 @@ class Game {
     }
 
     this._applyEdits(edits);
-    this.particles.blockBreak(center, hit.id, b.render === R_CROSS ? 10 : 26);
+    // No burst of little cubes here any more. The crack overlay already draws
+    // the whole break — it grows across the face for the entire dig and the
+    // block vanishing is its last frame — so the particles were a second
+    // announcement of a thing the player had just watched happen, and they were
+    // the noisier of the two. The Particles class keeps `blockBreak`; footsteps
+    // and embers still go through it.
     this.audio.break_(b.sound, center);
     this.stats.mined++;
     // Ripe wheat only. Breaking a green shoot is losing a crop, not harvesting
@@ -2089,6 +2160,16 @@ class Game {
           return false;
         }
       }
+    }
+
+    // A cactus will not stand beside anything. Refusing the placement is the
+    // half of the rule the player can see coming; the other half — a wall built
+    // up against one already in the ground — is in `_applyEdits`, because that
+    // is the funnel every block change goes through and a rule enforced in only
+    // one of the two places is a rule with a trivial workaround.
+    if (NEEDS_ROOM[id] && this._crowdedAt(col, k)) {
+      this.ui.setHint('No room for a ' + BLOCKS[id].label.toLowerCase());
+      return false;
     }
 
     // A door is two cells tall, so it needs the headroom before anything else.
@@ -2506,6 +2587,7 @@ class Game {
     }
 
     this._tickFire(dt);
+    this._tickContact(dt);
 
     // Four times a second is plenty: a sprint covers about 2 units in that time
     // and the load and keep radii are 28 apart.
@@ -2697,6 +2779,44 @@ class Game {
       }
     }
     this.damageFlash = Math.max(this.damageFlash, p.burning > 0 ? 0.14 : 0);
+  }
+
+  /**
+   * Blocks that hurt to lean on. One today: the cactus.
+   *
+   * `guarded` is false, for the same reason lava's and fire's are. The immunity
+   * window exists so a crowd of husks cannot land seven simultaneous blows on a
+   * 20-point bar; a cactus is one block that cannot move, cannot gang up, and is
+   * already paced by the timer below. Guarding it would also have meant a hit
+   * from a husk buying you a free second inside the spines, which is backwards.
+   *
+   * CONTACT_PERIOD is the cadence and the block table holds only the number, so
+   * a second hurting block does not get to invent its own rhythm — but it does
+   * mean a fire, when there is one, burns at the same 2Hz. That is the trade and
+   * it is the right way round: one predictable tempo the player learns once.
+   *
+   * 1 point every half second, against 20 health and a husk's 3, makes ten full
+   * seconds of unbroken contact fatal. That is deliberately survivable — you
+   * walk into a cactus by accident, in a biome you were crossing rather than
+   * fighting in, and the punishment should be "back off and you keep about
+   * everything", not a death. It is also exactly Minecraft's number, which is
+   * worth matching for a block this recognisable.
+   *
+   * `kind` is 'blow' — spines are a physical injury and tolerance should read
+   * against them the same way it reads against a husk's swing.
+   */
+  _tickContact(dt) {
+    const hurt = this.player.contactHurt();
+    if (hurt <= 0) { this._contactTimer = 0; return; }
+    // A countdown reset to zero the moment contact ends, so the first frame you
+    // touch one charges immediately and brushing past still costs you a point.
+    // Accumulating upward instead would make a glancing touch free or expensive
+    // depending on where in the cycle it happened to land, which is the sort of
+    // rule a player reads as the game being inconsistent.
+    this._contactTimer = (this._contactTimer || 0) - dt;
+    if (this._contactTimer > 0) return;
+    this._contactTimer = CONTACT_PERIOD;
+    this._takeHit(hurt, 'The desert was sharper than it looked.', false, 'blow');
   }
 
   /**

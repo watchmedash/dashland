@@ -182,6 +182,11 @@ function block(o) {
     sound: o.sound ?? 'stone',
     gravity: o.gravity ?? false,   // falls when unsupported
     fuel: o.fuel ?? 0,
+    // Damage a body takes per contact tick from being pressed against this
+    // block. 0 for everything that is merely in the way. See CONTACT_HURT.
+    hurt: o.hurt ?? 0,
+    // 1 for a block that cannot bear a solid neighbour beside it. See NEEDS_ROOM.
+    needsRoom: o.needsRoom ?? false,
   };
 }
 
@@ -265,7 +270,9 @@ export const BLOCKS = [
   block({ name: 'wheat_3', label: 'Ripe Wheat', render: R_CROSS, all: 'wheat_3', solid: false, opaque: false, hardness: 0.05, drop: 'wheat', dropCount: 2, particle: [0.85, 0.72, 0.3], sound: 'grass' }),
 
   block({ name: 'pumpkin', label: 'Pumpkin', top: 'pumpkin_top', side: 'pumpkin_side', hardness: 1, tool: 'axe', particle: [0.85, 0.5, 0.15], sound: 'wood' }),
-  block({ name: 'cactus', label: 'Cactus', top: 'cactus_top', side: 'cactus_side', hardness: 0.5, particle: [0.3, 0.55, 0.25], sound: 'grass' }),
+  // The spines are the whole point of the plant: it hurts to lean on, and it
+  // will not share a wall with anything. See CONTACT_HURT and NEEDS_ROOM.
+  block({ name: 'cactus', label: 'Cactus', top: 'cactus_top', side: 'cactus_side', hardness: 0.5, hurt: 1, needsRoom: true, particle: [0.3, 0.55, 0.25], sound: 'grass' }),
 
   // Gated to match the ore they are made of, so storing metal never launders it
   // past its own tool requirement.
@@ -553,6 +560,35 @@ export const IS_TORCH = new Uint8Array(N_BLOCKS);
  * removal, and it is a bigger change than the one being asked for.
  */
 export const DROWNS = new Uint8Array(N_BLOCKS);
+/**
+ * Damage per contact tick for a block that hurts to touch. 0 for everything
+ * else, which is everything but the cactus today.
+ *
+ * A table rather than a check for one id, because the second one of these is
+ * already easy to name — a brazier, a fire, a bed of embers — and the awkward
+ * part of adding it should be picking the number, not finding the four places
+ * that hard-coded `=== ID.cactus`. The *cadence* is not here on purpose: how
+ * often a body is charged is the toucher's business (see Game._tickContact),
+ * the same way lava's 0.45s lives with the lava tick and not with the block.
+ *
+ * Contact means the body's box is actually against the block, not merely in a
+ * neighbouring cell — see Player.contactHurt.
+ */
+export const CONTACT_HURT = new Float32Array(N_BLOCKS);
+/**
+ * 1 for a block that cannot survive a solid neighbour beside it.
+ *
+ * Minecraft's cactus rule, and the reason for it is that a cactus is spines on
+ * every side: something pressed flat against one has nowhere to be. It is two
+ * rules that have to agree — placement refuses it (see _placeBlock) and an
+ * existing one breaks when a block lands beside it (see _applyEdits) — so the
+ * membership lives here rather than being written out twice.
+ *
+ * Tangential neighbours only. What is under a cactus is the sand it grows out
+ * of and what is above it is the next segment of the same plant; a rule that
+ * counted those would leave no legal cactus anywhere.
+ */
+export const NEEDS_ROOM = new Uint8Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -646,6 +682,25 @@ export function isPassable(id, byte = 0) {
   return false;
 }
 
+/**
+ * Does a block standing in the next cell along deny a NEEDS_ROOM block its room?
+ *
+ * Anything a body would walk into, which is the same test collision uses — so
+ * grass, flowers, water and air leave a cactus alone and a wall, a chest or a
+ * second cactus do not. A torch is deliberately let off: it is a stick on a
+ * face, it is `solid` here only because the mesher and the ground scan want a
+ * box from it, and breaking a cactus by lighting the sand next to it would read
+ * as a bug rather than as a rule. Same for a ladder, a sign and an open door,
+ * which `isPassable` already calls walk-through.
+ *
+ * Rejected: `IS_OPAQUE`, which was the shorter test. It lets a glass pane, a
+ * fence or a slab sit flush against the spines, and those are exactly the
+ * blocks a player builds a wall out of when they are trying to box one in.
+ */
+export function crowds(id, byte = 0) {
+  return IS_SOLID[id] === 1 && !IS_TORCH[id] && !isPassable(id, byte);
+}
+
 for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
   IS_OPAQUE[i] = b.opaque ? 1 : 0;
@@ -670,6 +725,8 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_FENCE[i] = b.render === R_FENCE ? 1 : 0;
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
   DROWNS[i] = (b.render === R_TORCH || b.render === R_CROSS) ? 1 : 0;
+  CONTACT_HURT[i] = b.hurt;
+  NEEDS_ROOM[i] = b.needsRoom ? 1 : 0;
   IS_SHAPED[i] = (b.render === R_SLAB || b.render === R_STAIR
     || b.render === R_LADDER || b.render === R_DOOR || b.render === R_SIGN
     || b.render === R_FENCE || b.render === R_TORCH) ? 1 : 0;

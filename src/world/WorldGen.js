@@ -1668,7 +1668,35 @@ export class WorldGen {
       // at less than half the chance. Tundra is where trees give up.
       kind = 'pine'; chance = 0.0018;
     } else if (surf === ID.snow) { kind = 'pine'; chance = 0.028; }
-    else if (surf === ID.sand && bi === BIOME.DESERT) { kind = 'cactus'; chance = 0.02; }
+    else if (surf === ID.sand && bi === BIOME.DESERT) {
+      // Cacti grow only on a checkerboard, which is what keeps two of them from
+      // ever standing shoulder to shoulder.
+      //
+      // A cactus now refuses to be placed beside anything solid, and breaks if
+      // something is built against it, so a desert that *generated* a pair
+      // would be showing the player an arrangement they are not allowed to
+      // make. At an independent 0.02 per column, roughly 2% of cacti had a
+      // neighbour: rare enough never to be noticed in one desert, certain
+      // across a planet.
+      //
+      // Parity rather than "ask the neighbour", because columns are generated
+      // independently and in no guaranteed order — reading the neighbour's
+      // blocks answers differently depending on which of the two was built
+      // first, and re-deriving its roll means re-deriving its surface, biome
+      // and thinning as well. Tangential neighbours always differ in
+      // (i + j) parity, so a checkerboard cannot produce an adjacent pair and
+      // needs to know nothing about anybody. The chance doubles to keep the
+      // same number of cacti in the same desert, since half the columns are now
+      // ineligible.
+      //
+      // Not perfect at a cube seam, where the two faces have their own i and j
+      // and parity does not carry across: a pair can still meet exactly on a
+      // seam line. That is a handful of columns on the whole planet against
+      // 1.3 million, and the block rule handles them the moment anyone builds
+      // there.
+      const cp = colParts(col);
+      if (((cp.i + cp.j) & 1) === 0) { kind = 'cactus'; chance = 0.04; }
+    }
 
     if (!kind || rng() > chance * thin) return;
     this.stampTree(blocks, kind, col, k + 1, rng, rid);

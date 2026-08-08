@@ -27,7 +27,41 @@ import { rollStock, rollRequest } from './Trade.js';
 import { makeRng, clamp, lerp } from '../util/Noise.js';
 import * as MobModels from './MobModels.js';
 
-const MAX_MOBS = 26;
+/**
+ * Bodies alive at once, anywhere.
+ *
+ * This was 26 for a whole planet, and a player who walked in a straight line
+ * reported meeting almost nothing — rightly. 26 is a headcount over a disc of
+ * DESPAWN_RADIUS (110 units, ~38,000 square units of ground), i.e. one animal
+ * per 1,500 units of terrain, and a third of those slots go to husks, fish and
+ * whatever the player has already walked past but not yet outrun. What is left
+ * is a meadow with four cows in it.
+ *
+ * 64 puts roughly one wildlife body per 850 square units — about thirty units
+ * between neighbours, so crossing a biome meets animals steadily without the
+ * ground ever looking stocked. The cost this buys is bounded and known: the
+ * only per-frame O(n²) in this file is _separate, which at 64 is ~2,000 pair
+ * tests, and the prey search is one pass per hungry carnivore per PREY_PERIOD.
+ */
+const MAX_MOBS = 64;
+/**
+ * Of that, how many may be ordinary animals. Kept as its own budget rather than
+ * a fraction of MAX_MOBS for the same reason the two husk caps are separate: a
+ * shared ceiling lets one population starve another. The old top-up gate was
+ * `list.length < MAX_MOBS * 0.7`, which counted husks, fish and the merchant —
+ * so a busy night quietly stopped the wildlife from backfilling at all.
+ */
+const MAX_WILDLIFE = 44;
+/** Wildlife spawned per top-up tick, and how often a tick comes round.
+ *
+ * A player walks about five units a second, so the ring of terrain around them
+ * turns over completely in well under a minute. One animal every six seconds
+ * cannot refill that — the herd stayed behind at the world spawn and the road
+ * ahead was empty, which is exactly what was reported. Four every 2.5 seconds
+ * refills the ring a little faster than walking empties it, and does nothing at
+ * all once the budget is full. */
+const SPAWN_PERIOD = 2.5;
+const SPAWN_PER_TICK = 4;
 // Hostiles are capped well below the herd: a night should be tense, not a
 // siege. The cap is per habitat rather than global, and deliberately so — a
 // single shared budget let one habitat starve the other, and a combined ceiling
@@ -230,11 +264,26 @@ const SIZE_VAR = 0.12;
  * apparent size: the scale is derived from the measured rest pose, so a model
  * gets its bulk for free once its height is right.
  *
- * `hunts` makes a species dangerous unprovoked; `fights` makes it dangerous
- * only once you have hit it. Both are kept clear of `hostile`, which means
- * husk specifically: that flag drives the night spawn budgets and the
- * new-world grace wipe in main.js, and a tiger caught by either would either
- * starve the husk cap or vanish at dawn.
+ * `fights` makes a species dangerous once you have hit it, and that is now the
+ * only way any animal becomes dangerous to the player. There used to be a
+ * `hunts` flag as well, which let a lion or a tiger acquire the player on sight
+ * — and it was the first thing a player complained about, unprompted: "I didn't
+ * even attack the lions and tigers but they are attacking me". A world where
+ * walking across a savanna is a fight you did not pick is not a wilder world,
+ * it is a smaller one, because the answer to it is to stay indoors. Coming for
+ * you unasked is the husk's whole job and it should stay the husk's alone.
+ *
+ * Predation is untouched by this: `eats` is what a carnivore hunts, and it
+ * hunts that freely. A tiger pulling down a deer across the clearing is the
+ * ecology; a tiger deciding *you* are the deer is a different game.
+ *
+ * `stalks` is the one exception, and it is deliberately not the old behaviour
+ * under a new name: a hungry big cat, at night only, rarely, walks you down in
+ * the open with a long telegraph before it commits to anything. See _prowl.
+ *
+ * `fights` is kept clear of `hostile`, which means husk specifically: that flag
+ * drives the night spawn budgets and the new-world grace wipe in main.js, and a
+ * tiger caught by it would either starve the husk cap or vanish at dawn.
  */
 const pet = (file, o) => ({
   label: o.label,
@@ -256,19 +305,36 @@ const pet = (file, o) => ({
   // world, and a `if (spec.diet !== ...)` sprinkled through the state machine
   // is how that rule ends up applied in three places and forgotten in a fourth.
   diet: o.diet ?? 'herbivore',
+  // Exactly which species this one hunts, by name, as data.
+  //
+  // Prey used to be "anything at most PREY_SIZE times my own height", and the
+  // player's verdict on that was "why would a lion or a tiger eat a crab?".
+  // There is no size rule that answers that, because the question is not about
+  // size — it is about what a lion eats. A ceiling that lets a lion take a deer
+  // lets it take a crab, a bee and a caterpillar too, and every attempt to
+  // patch that with another dimension (is it aquatic? is it an insect?) is a
+  // taxonomy being rediscovered one conditional at a time. So the list is
+  // written out, on the spec where the rest of the species lives, and the size
+  // test stays only as a sanity check behind it — see _findPrey.
+  preyOn: o.eats ? new Set(o.eats) : null,
   grazeChance: o.diet === 'carnivore' ? 0 : (o.graze ?? 0.5),
   idleMin: o.idleMin ?? 2,
   idleMax: o.idleMax ?? 5,
   ...(o.hops ? { hops: true, hopImpulse: o.hopImpulse ?? 3.8 } : null),
   ...(o.cold ? { cold: true } : null),
   ...(o.aquatic ? { aquatic: true } : null),
+  // Aquatic is "water is the only place I will go"; amphibious is "water is not
+  // a wall". They are separate because they are not two ends of one axis: a
+  // fish drowns on the bank, a crab is perfectly happy there and simply wants
+  // to be able to get across the shallows. `shore` is the other half of a
+  // crab — a pull back toward the water line, so it lives on a beach rather
+  // than wandering off into the dunes.
+  ...(o.amphibious ? { amphibious: true } : null),
+  ...(o.shore ? { shore: true } : null),
+  ...(o.stalks ? { stalks: true } : null),
   ...(o.flies ? { flies: true, hover: o.hover ?? 1.5 } : null),
-  ...(o.hunts || o.fights ? {
+  ...(o.fights ? {
     predator: true,
-    // Only a hunter goes looking. A fighter has the identical chase, swing and
-    // give-up logic — the one difference is that nothing but hurt() may hand
-    // it a target, which is why this is a flag rather than a second code path.
-    unprovoked: !!o.hunts,
     damage: o.dmg ?? 2,
     reach: o.reach ?? 1.2,
     swing: o.swing ?? 1.2,
@@ -329,24 +395,35 @@ const SPECIES = {
     // Taller than the player, and the only thing on the ice that is.
     label: 'Polar Bear', h: 1.90, hp: 16, spd: 1.0, shy: 0.3, turn: 2.4, accel: 5.0,
     diet: 'carnivore', drops: [['hide', 2, 3], ['meat', 1, 2]], cold: true,
+    // It fishes, so it swims — and it has to, or half its prey list is on the
+    // wrong side of a wall and it spends every hunt padding along the ice
+    // looking stupid. Amphibious is exactly the flag for that.
+    amphibious: true, eats: ['fish', 'penguin'],
     fights: true, dmg: 4, reach: 1.4, swing: 1.3, aggro: 20,
   }),
 
   // --- big cats: these have teeth now ---
-  // Both are hunters, and both are held to a narrow size spread — a big cat
-  // that rolled small would read as a dog, and the point of one is that you can
-  // tell what it is across a clearing.
+  // Both are held to a narrow size spread — a big cat that rolled small would
+  // read as a dog, and the point of one is that you can tell what it is across
+  // a clearing. Neither comes for the player unasked; see the note on `fights`.
   lion: pet('lion', {
     label: 'Lion', h: 1.45, var: 0.10, hp: 14, spd: 1.4, shy: 0.25, turn: 3.4, accel: 8.0,
     diet: 'carnivore', drops: [['hide', 1, 2], ['meat', 1, 2]],
-    hunts: true, dmg: 3, reach: 1.3, swing: 1.25, aggro: 16,
+    // Land grazers, and nothing else. A cow is heavier than a lion and stays on
+    // the list on purpose — pulling down something bigger than yourself is what
+    // a pride is for, and the size check behind this allows it.
+    eats: ['deer', 'cow', 'bunny', 'chick', 'monkey'],
+    stalks: true,
+    fights: true, dmg: 3, reach: 1.3, swing: 1.25, aggro: 16,
   }),
   tiger: pet('tiger', {
     // The largest cat, and it should look it beside a lion, not merely beside a
     // fox. Longest reach and shortest swing of anything that is not a husk.
     label: 'Tiger', h: 1.60, var: 0.10, hp: 14, spd: 1.5, shy: 0.25, turn: 3.6, accel: 8.5,
     diet: 'carnivore', drops: [['hide', 1, 2], ['meat', 1, 2]],
-    hunts: true, dmg: 4, reach: 1.35, swing: 1.15, aggro: 22,
+    eats: ['deer', 'cow', 'bunny', 'chick', 'monkey'],
+    stalks: true,
+    fights: true, dmg: 4, reach: 1.35, swing: 1.15, aggro: 22,
   }),
 
   // --- middling ---
@@ -355,6 +432,7 @@ const SPECIES = {
     // nosing at the grass is a dog, not a broken lion.
     label: 'Dog', h: 0.78, hp: 8, spd: 1.5, shy: 0.4, turn: 4.5, accel: 9.0,
     diet: 'omnivore', graze: 0.2, idleMin: 1.2, idleMax: 3.5, drops: HIDE_MEAT,
+    eats: ['chick', 'bunny'],
     fights: true, dmg: 2, reach: 1.0, swing: 0.9, aggro: 16,
   }),
   fox: pet('fox', {
@@ -362,6 +440,7 @@ const SPECIES = {
     // and the pair were indistinguishable at any distance.
     label: 'Fox', h: 0.58, hp: 6, spd: 1.5, shy: 0.8, turn: 4.5, accel: 8.0,
     diet: 'carnivore', idleMin: 1.5, idleMax: 4, drops: HIDE_MEAT,
+    eats: ['bunny', 'chick', 'parrot'],
     fights: true, dmg: 2, reach: 0.95, swing: 0.85, aggro: 14,
   }),
   cat: pet('cat', {
@@ -370,6 +449,7 @@ const SPECIES = {
     // a diet but no `fights`.
     label: 'Cat', h: 0.46, hp: 6, spd: 1.6, shy: 0.9, turn: 5.5, accel: 10.0,
     diet: 'carnivore', idleMin: 1.2, idleMax: 4, drops: [['hide', 1, 1]],
+    eats: ['chick', 'bee', 'bunny'],
   }),
   koala: pet('koala', {
     label: 'Koala', h: 0.56, hp: 6, spd: 0.7, shy: 0.5, turn: 2.4, accel: 4.0,
@@ -387,10 +467,15 @@ const SPECIES = {
     // Knee-high on the player. Small, but the biggest thing standing upright on
     // the ice apart from the bear, so it is not down with the chicks.
     label: 'Penguin', h: 0.80, hp: 6, spd: 0.9, shy: 0.6, turn: 3.2, accel: 5.5,
-    drops: [['meat', 1, 1], ['feather', 1, 2]], cold: true,
+    drops: [['poultry', 1, 1], ['feather', 1, 2]], cold: true,
   }),
 
   // --- small and skittish ---
+  // Meat is named after the animal it came from, which sounds like a labelling
+  // detail and is not: a crab dropping "Raw Meat" was reported as a bug, and it
+  // reads as one because a stack of generic meat says the animals are skins on
+  // one loot table. `poultry` for anything feathered, `crab_meat` for the crab,
+  // `fish` for the fish, `meat` for the large land animals.
   // Everything here is ankle-height and gets a narrow spread: ±12% of a chick
   // is under three centimetres, so the default range buys nothing but noise in
   // the numbers.
@@ -400,11 +485,11 @@ const SPECIES = {
   }),
   chick: pet('chick', {
     label: 'Chick', h: 0.26, var: 0.06, hp: 4, spd: 1.15, shy: 0.85, turn: 6.0, accel: 11.0,
-    graze: 0.7, idleMin: 0.8, idleMax: 2.4, drops: [['feather', 1, 2], ['meat', 1, 1]],
+    graze: 0.7, idleMin: 0.8, idleMax: 2.4, drops: [['feather', 1, 2], ['poultry', 1, 1]],
   }),
   parrot: pet('parrot', {
     label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 1.35, shy: 1.0, turn: 6.5, accel: 12.0,
-    graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3]],
+    graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3], ['poultry', 1, 1]],
     hops: true, hopImpulse: 3.4,
   }),
   bee: pet('bee', {
@@ -412,8 +497,13 @@ const SPECIES = {
     graze: 0.5, idleMin: 0.6, idleMax: 1.8, flies: true, hover: 1.5,
   }),
   crab: pet('crab', {
+    // Amphibious and shore-bound. It used to be an ordinary land animal, which
+    // put crabs in the middle of deserts (the desert table listed them, because
+    // sand is sand) and made a puddle an impassable wall to the one animal on
+    // the planet that lives in the surf. Both flags are read by the movement
+    // code — see the water rule in _footprintCost and _shoreBearing.
     label: 'Crab', h: 0.30, var: 0.06, hp: 5, spd: 1.0, shy: 0.7, turn: 5.0, accel: 8.0,
-    graze: 0.4, drops: [['meat', 1, 1]],
+    graze: 0.4, drops: [['crab_meat', 1, 1]], amphibious: true, shore: true,
   }),
   caterpillar: pet('caterpillar', {
     label: 'Caterpillar', h: 0.22, var: 0.06, hp: 3, spd: 0.5, shy: 0.6, turn: 2.5, accel: 4.0,
@@ -421,7 +511,7 @@ const SPECIES = {
   }),
   fish: pet('fish', {
     label: 'Fish', h: 0.40, var: 0.10, hp: 4, spd: 1.4, shy: 0.9, turn: 4.5, accel: 8.0,
-    graze: 0.3, idleMin: 1, idleMax: 3, drops: [['meat', 1, 1]], aquatic: true,
+    graze: 0.3, idleMin: 1, idleMax: 3, drops: [['fish', 1, 1]], aquatic: true,
   }),
 
   // --- the one thing that wants you dead ---
@@ -489,7 +579,7 @@ const FOOT_OFF = [
 // dozen distance tests a second for the whole world.
 //
 // Nothing here can empty a biome: the spawn tick backfills wildlife towards
-// MAX_MOBS * 0.7 every six seconds from the biome table, so an eaten bunny is
+// MAX_WILDLIFE every SPAWN_PERIOD from the biome table, so an eaten bunny is
 // replaced by another of whatever lives there long before a predator is hungry
 // again.
 const PREY_PERIOD = 1.6;      // seconds between prey searches for one carnivore
@@ -498,11 +588,17 @@ const PREY_GIVE_UP = 12;      // seconds of chasing before it loses interest
 const PREY_REST_MIN = 34;     // seconds after a kill before it hunts again
 const PREY_REST_MAX = 70;
 /**
- * How tall prey may be as a fraction of the hunter's own height. Just over one,
- * on purpose: a lion pulls down a deer but not a cow, and a cat takes a chick
- * rather than an elephant.
+ * How tall prey may be as a fraction of the hunter's own height.
+ *
+ * This is the *second* filter now, not the first — `eats` on the spec says what
+ * a species hunts and this only says whether this particular individual is a
+ * plausible size for it. So it is loose rather than tight: a lion is on the
+ * list for a cow, and a cow is taller than a lion, because pulling down
+ * something bigger than yourself is what a big cat is for. What it still stops
+ * is a runt of one species taking a giant of another after both have rolled
+ * their size jitter and the hunter's prey has eaten its way up GROW_MAX.
  */
-const PREY_SIZE = 1.05;
+const PREY_SIZE = 1.5;
 /**
  * A kill makes a predator bigger, permanently. Five good ones take it to the
  * ceiling and no further — an old tiger should be a landmark, not a mountain —
@@ -515,6 +611,36 @@ const LOOT_MAX = 2.0;
 
 /** Seconds of the scale pop that stands in for a missing attack clip. */
 const LUNGE_TIME = 0.3;
+
+// --- the night stalk ---------------------------------------------------------
+// The one time an animal comes for the player unasked, and every number here
+// exists to keep it an event rather than a rule. It is night-only, hungry-only,
+// big-cats-only, and it announces itself for six seconds before it means
+// anything — the complaint that removed unprovoked aggression everywhere else
+// was not "a tiger attacked me", it was being attacked with no idea why.
+//
+// The tell has to be built out of movement and sound: Cube Pets ships no attack
+// clip and no growl pose, so there is nothing to play. What it does instead is
+// walk. A creeping approach at half speed, holding at a body-length or three
+// with its eyes on you and calling, is a completely different silhouette from
+// the flat-out run every other chase in this file uses, and it is legible at
+// night because it is slow. Six seconds is long enough to draw a weapon, put a
+// wall between you, or simply leave.
+const PROWL_PERIOD = 8;       // seconds between one cat's chances to start
+const PROWL_CHANCE = 0.05;    // per check, so a rough mean of 160s of exposure
+const PROWL_RANGE = 26;       // cells it will consider you from
+const PROWL_HOLD = 6.5;       // cells it closes to, then waits at
+const PROWL_TELL = 6;         // seconds of telegraph before it commits
+const PROWL_GROWL = 1.7;      // seconds between calls while telegraphing
+/** How much of its walk a creeping cat uses. Slow enough to read as stalking. */
+const PROWL_SPEED = 0.5;
+
+// --- shorelines ---------------------------------------------------------------
+/** The eight compass directions as column offsets, for the water search. */
+const RING8 = [1, 0, 1, 1, 0, 1, -1, 1, -1, 0, -1, -1, 0, -1, 1, -1];
+const SHORE_STEP = 2;    // columns between samples along a direction
+const SHORE_NEAR = 4;    // this close to water counts as being on the shore
+const SHORE_PULL = 16;   // and this far is as far as one will look for it
 
 const LOVE_SECONDS = 22;      // how long a fed animal stays willing
 const BREED_RANGE = 4.5;      // how close a willing pair must be
@@ -595,8 +721,12 @@ const SPAWN_BY_BIOME = {
   SNOW: ['penguin', 'penguin', 'polar', 'fox', 'deer'],
   TUNDRA: ['deer', 'deer', 'fox', 'fox', 'bunny', 'polar'],
   MOUNTAIN: ['deer', 'fox', 'bunny', 'bee', 'tiger'],
-  // Sparse on purpose: an empty-feeling desert is the point of a desert.
-  DESERT: ['lion', 'crab', 'caterpillar', 'bee'],
+  // Sparse on purpose: an empty-feeling desert is the point of a desert. The
+  // crab that used to be listed here has gone: it was here because sand is sand
+  // and the biome tables were written off the block underfoot, which put crabs
+  // twenty columns inland in a dune field. A crab belongs in the surf, and the
+  // shoreline test in the spawn tick now enforces that wherever it is listed.
+  DESERT: ['lion', 'caterpillar', 'bee'],
   BADLANDS: ['lion', 'tiger', 'caterpillar'],
   SAVANNA: ['giraffe', 'giraffe', 'elephant', 'lion', 'tiger', 'deer'],
   FOREST: ['deer', 'deer', 'fox', 'bunny', 'bunny', 'panda', 'koala', 'monkey',
@@ -743,11 +873,14 @@ export class Mobs {
   _findSpawnColumn(nearCol, radius, playerPos) {
     const p = this.planet;
     for (let tries = 0; tries < 40; tries++) {
-      // Without a player to keep clear of this is world start, and a herd
-      // scattered over fifty columns reads as an empty planet — stay close.
+      // Without a player to keep clear of this is world start. It still stays
+      // nearer than the travelling ring does — a herd you have to walk two
+      // minutes to find reads as an empty planet — but not as near as it was:
+      // 6..26 columns put every animal in the game inside one clearing, which
+      // is precisely the "they all concentrate near spawn" complaint.
       const steps = playerPos
         ? 24 + Math.floor(Math.random() * radius)
-        : 6 + Math.floor(Math.random() * 20);
+        : 10 + Math.floor(Math.random() * 34);
       const col = this._walkOut(nearCol, steps);
       const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
@@ -864,6 +997,12 @@ export class Mobs {
       hungerT: Math.random() * PREY_REST_MIN,
       preyT: Math.random() * PREY_PERIOD,
       prey: null,
+      // --- the night stalk, big cats only ---
+      prowl: 0,            // seconds of telegraph left; 0 means it is not
+      prowlT: Math.random() * PROWL_PERIOD,   // staggered, like the hunger clock
+      growlT: 0,
+      creep: false,        // moving at stalking pace rather than walking pace
+      stalked: false,      // it came for you off a night stalk, not a grudge
       preyChase: 0,
       kills: 0,
       grown: 1,            // permanent size gained from kills, 1..GROW_MAX
@@ -934,6 +1073,32 @@ export class Mobs {
     // desert, and the biome field already knows that.
     const list = SPAWN_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]] || COMMON;
     return list[(Math.random() * list.length) | 0];
+  }
+
+  /** Ordinary animals alive. Husks and the merchant have their own budgets. */
+  _countWildlife() {
+    let n = 0;
+    for (const m of this.list) if (!m.spec.hostile && !m.spec.trader) n++;
+    return n;
+  }
+
+  /**
+   * Spawn whatever belongs on this ground, if anything does.
+   *
+   * The shoreline test lives here rather than in the biome tables because it is
+   * about the *column*, not the biome: BEACH and OCEAN are both full of columns
+   * a crab has no business on, twenty in from the water line, and a river
+   * cutting through a forest is a shore that no biome name mentions. Refusing
+   * the spawn is better than picking again — the next tick is 2.5 seconds away
+   * and the budget is not tight enough for one wasted slot to show.
+   *
+   * @returns {boolean} true if something was actually placed
+   */
+  _spawnWild(col, k) {
+    const type = this._pickWildlife(col, k);
+    const spec = SPECIES[type];
+    if (spec?.shore && !this._nearWater(col, SHORE_NEAR)) return false;
+    return !!this.spawn(type, col, k);
   }
 
   /**
@@ -1132,6 +1297,53 @@ export class Mobs {
     return null;
   }
 
+  /** Is this column's surface under water? */
+  _isWater(col) {
+    const k = this.planet.surfaceK(col);
+    return k >= 0 && this.planet.liquidAt(col, k + 1);
+  }
+
+  /**
+   * Which way the water is, for an animal that wants to stay near it.
+   *
+   * Eight compass directions sampled outward until one of them hits water, and
+   * the answer is a heading because that is what the steering wants: `vel.i` is
+   * cos(heading) and `vel.j` is sin(heading), so a column offset of (di, dj) is
+   * simply atan2(dj, di) in the animal's own tangent frame — no world-space
+   * round trip and nothing to get wrong at a cube seam.
+   *
+   * Returns null both when there is no water within reach and when the animal
+   * is already at the water's edge. Those are the same answer to the only
+   * question being asked — should I be pulled anywhere? — and collapsing them
+   * keeps the caller from having to know the difference.
+   *
+   * At most 8 x 8 column reads, and only for `shore` species, and only when one
+   * of them picks a new wandering heading. That is a few dozen lookups every
+   * few seconds per crab.
+   */
+  _shoreBearing(mob) {
+    const col = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
+    for (let s = SHORE_STEP; s <= SHORE_PULL; s += SHORE_STEP) {
+      for (let n = 0; n < 8; n++) {
+        const di = RING8[n * 2] * s, dj = RING8[n * 2 + 1] * s;
+        if (!this._isWater(stepColumn(col, di, dj))) continue;
+        return s <= SHORE_NEAR ? null : Math.atan2(dj, di);
+      }
+    }
+    return null;
+  }
+
+  /** Is there water within `r` columns? Used to keep shore animals on a shore. */
+  _nearWater(col, r) {
+    if (this._isWater(col)) return true;
+    for (let s = SHORE_STEP; s <= r; s += SHORE_STEP) {
+      for (let n = 0; n < 8; n++) {
+        if (this._isWater(stepColumn(col, RING8[n * 2] * s, RING8[n * 2 + 1] * s))) return true;
+      }
+    }
+    return false;
+  }
+
   /** Layer of the water surface at or above k — where a fish must stop rising. */
   _waterTop(col, k) {
     let top = k;
@@ -1185,13 +1397,21 @@ export class Mobs {
     return false;
   }
 
-  /** Seed the world around the player at world start. */
-  populate(player, count = 16) {
+  /**
+   * Seed the world around the player at world start.
+   *
+   * Two thirds of the wildlife budget, not all of it: the top-up tick fills the
+   * rest in over the first minute, and it fills it in *around the player*, so
+   * the opening moments do not stack the whole planet's animals in the first
+   * clearing and leave the road out of it bare. That was half of what the
+   * "concentrated near spawn" report was actually seeing.
+   */
+  populate(player, count = Math.round(MAX_WILDLIFE * 0.65)) {
     const c = player.cell;
     const startCol = cidx(c.f, Math.floor(c.ci), Math.floor(c.cj));
     for (let n = 0; n < count; n++) {
       const spot = this._findSpawnColumn(startCol, SPAWN_RADIUS, null);
-      if (spot) this.spawn(this._pickWildlife(spot.col, spot.k), spot.col, spot.k);
+      if (spot) this._spawnWild(spot.col, spot.k);
     }
   }
 
@@ -1239,9 +1459,11 @@ export class Mobs {
       // Land animals treat water as a wall. _groundK only reports solid ground,
       // so a lake bed read as ordinary walkable terrain and a chicken would
       // stroll in and keep walking along the bottom. A fish has the opposite
-      // rule: water is the only place it will go.
+      // rule: water is the only place it will go. An amphibian — the crab, the
+      // polar bear — has no rule at all: both are fine, which is the whole
+      // meaning of the flag.
       const wet = p.liquidAt(col, gk + 1);
-      if (mob.spec.aquatic ? !wet : wet) { cost++; continue; }
+      if (mob.spec.aquatic ? !wet : (wet && !mob.spec.amphibious)) { cost++; continue; }
       // Headroom. _groundK scans *downward* from just above the animal's feet,
       // so it reports the BOTTOM block of a wall and every wall — however tall
       // — came back as a harmless one-block step. That is what let animals
@@ -1302,9 +1524,40 @@ export class Mobs {
    * either hovered half a block above it or stood with its feet inside. Asking
    * the block where its top is costs one lookup and works for any shape.
    *
+   * Only the centre sample counts unconditionally. The other eight count only
+   * if the animal could actually *stand* on what they found — i.e. if there is
+   * headroom for its whole height above that surface. That qualification is
+   * this file's second attempt at animals arriving on treetops, and this time
+   * the mechanism was measured rather than guessed at, so it is worth writing
+   * down. The first fix (see the floor comment in update) assumed the only way
+   * up was the scan starting too high, and started it from the animal's own
+   * feet instead. The escalator that survived it works like this:
+   *
+   *   1. An animal's footprint is oriented, and it *rotates* freely — nothing
+   *      gates turning on the terrain. A deer standing beside a trunk needs
+   *      only to turn to face it for its half-length-ahead sample to land in
+   *      the trunk's column.
+   *   2. That sample scans down from the deer's own feet layer and finds the
+   *      trunk block *at* that layer. Its top is one cell up, so `best` — a
+   *      max over the samples — comes back one higher than the ground the deer
+   *      is standing on.
+   *   3. The floor clamp's one-block cap is satisfied exactly: the rise is 1.0
+   *      against a limit of 1.05. It lifts.
+   *   4. Next frame the feet are a layer higher, so the scan starts a layer
+   *      higher, and finds the *next* trunk block. Repeat at sixty frames a
+   *      second.
+   *
+   * The cap was never the escalator's limit; it was its step size. What breaks
+   * it is asking whether the thing found is somewhere a body fits — a trunk, a
+   * cactus or a wall has itself stacked above it and fails, a genuine one-block
+   * step or a stair tread has open air and passes. Which is the same question
+   * _stepAhead already asks before it lets an animal hop, so the two now agree
+   * on what "a step" means.
+   *
    * @returns {number} surface height, or -1 if there is no ground below
    */
   _groundUnder(mob, f, ci, cj, fromK) {
+    const p = this.planet;
     const cw = Math.cos(mob.heading), sw = Math.sin(mob.heading);
     let best = -1;
     for (let n = 0; n < 9; n++) {
@@ -1313,6 +1566,16 @@ export class Mobs {
       const col = this._colOf(f, ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
       const gk = this._groundK(col, fromK);
       if (gk < 0) continue;
+      if (n > 0) {
+        // Not the centre, so this is ground the body merely overhangs. It only
+        // holds the animal up if the animal would fit standing on it.
+        let fits = true;
+        for (let h = 1; h <= mob.tall && fits; h++) {
+          const above = p.at(col, gk + h);
+          if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) fits = false;
+        }
+        if (!fits) continue;
+      }
       const surf = gk + this._topOf(col, gk);
       if (surf > best) best = surf;
     }
@@ -1385,9 +1648,11 @@ export class Mobs {
       if (_vox.lengthSq() < 1e-6) return;
       if (_vox.normalize().dot(look) < VOX_FACING) return;
     }
-    // One call per ~0.8-1.8s across the whole world, whatever the herd size.
-    // 16 animals on a 6-14s clock ask ~1.6 times a second between them, so this
-    // is the difference between a paddock and a wall of noise.
+    // One call per ~0.8-1.8s across the whole world, whatever the herd size —
+    // and it is the *whatever* that matters, because the herd has since grown
+    // from 16 to MAX_WILDLIFE. Forty animals on a 6-14s clock ask about four
+    // times a second between them; without this the population raise alone
+    // would have turned a paddock into a wall of noise.
     this.voxCooldown = 0.8 + Math.random();
     this.voxCount++;
     this.onSound('idle', mob);
@@ -1484,12 +1749,12 @@ export class Mobs {
     // Losing interest at a longer range than it gains it stops a husk on the
     // edge of the aggro ring flickering between hunting and milling about.
     //
-    // A hunter acquires on sight; a fighter is handed its target by hurt() and
-    // by nothing else, which is the whole difference between a tiger and a fox.
-    // Everything past this point is shared — the chase, the stall test, the
-    // swing — because a provoked fox and a husk want precisely the same thing
-    // once they have decided on you.
-    const acquires = spec.hostile || spec.unprovoked;
+    // Only the husk acquires on sight. Every animal is handed its target from
+    // somewhere else — hurt() when you swing at it, or _prowl at the end of a
+    // night stalk — and by nothing else. Everything past this point is shared:
+    // the chase, the stall test, the swing, because a provoked fox and a husk
+    // want precisely the same thing once they have decided on you.
+    const acquires = spec.hostile;
     if (acquires && dist < spec.aggroRange) {
       if (mob.target !== 'player') { mob.bestDist = dist; mob.stallT = 0; }
       mob.target = 'player';
@@ -1676,7 +1941,8 @@ export class Mobs {
     if (gk < 0) return -1;
     if (gk - fromK > 1) return -1;                 // too big a step up
     if (fromK - gk > PATH_MAX_DROP) return -1;     // too far to fall
-    if (mob.spec.aquatic ? !p.liquidAt(col, gk + 1) : p.liquidAt(col, gk + 1)) return -1;
+    const wet = p.liquidAt(col, gk + 1);
+    if (mob.spec.aquatic ? !wet : (wet && !mob.spec.amphibious)) return -1;
     for (let h = 1; h <= mob.tall; h++) {
       const above = p.at(col, gk + h);
       if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) return -1;
@@ -1780,30 +2046,135 @@ export class Mobs {
   }
 
   /**
-   * Something smaller than this animal, close by, that it would eat.
+   * Something on this animal's own prey list, close by, that it could reach.
+   *
+   * The species list is the rule and everything else is a sanity check behind
+   * it. That order matters: the old test was purely geometric — "anything at
+   * most PREY_SIZE times my height" — and geometry cannot tell a deer from a
+   * crab, so lions ate crabs, foxes ate bees and a cat would take a caterpillar
+   * off a leaf. No amount of tightening the ceiling fixes that, because the
+   * animals that are the wrong *kind* of prey are all over the size range.
    *
    * One pass over the whole list, which is bounded by MAX_MOBS and only run
    * every PREY_PERIOD per hungry carnivore — see the notes on those constants.
    */
   _findPrey(mob) {
+    const preyOn = mob.spec.preyOn;
+    if (!preyOn) return null;
     let best = null, bestD = PREY_RANGE * PREY_RANGE;
-    const ceiling = mob.spec.height * PREY_SIZE;
+    const ceiling = mob.spec.height * mob.grown * PREY_SIZE;
     for (const o of this.list) {
       if (o === mob || o.taken || o.released || o.dying > 0 || o.health <= 0) continue;
-      // Nothing eats its own kind; nothing eats the merchant, of whom there is
-      // exactly one and whose loss to a passing fox would read as a bug; and
-      // nothing eats a husk, which is not alive in any sense a tiger cares
-      // about and would turn every night into a wildlife documentary.
-      if (o.type === mob.type || o.spec.trader || o.spec.hostile) continue;
-      if (o.spec.height > ceiling) continue;
+      if (!preyOn.has(o.type)) continue;
+      // A calf of a listed species is still on the list; the checks below are
+      // about what this individual can actually manage and reach.
+      if (o.spec.height * o.grown > ceiling) continue;
       // Water is a wall to a land animal, so a fox that picks a fish spends the
       // whole PREY_GIVE_UP window padding along the shoreline looking stupid.
-      // Cheaper to never choose it than to detect the failure afterwards.
-      if (!!o.spec.aquatic !== !!mob.spec.aquatic) continue;
+      // Cheaper to never choose it than to detect the failure afterwards. A
+      // polar bear is on the fish's side of this because it swims — which is
+      // why it is amphibious rather than simply having fish on its list.
+      const wetPrey = !!(o.spec.aquatic);
+      const canSwim = !!(mob.spec.aquatic || mob.spec.amphibious);
+      if (wetPrey && !canSwim) continue;
+      if (!wetPrey && mob.spec.aquatic) continue;
       const d = mob.pos.distanceToSquared(o.pos);
       if (d < bestD) { bestD = d; best = o; }
     }
     return best;
+  }
+
+  /**
+   * The night stalk: a hungry big cat walks the player down, slowly, and says
+   * so for six seconds before it means it.
+   *
+   * Kept out of _hunt on purpose. _hunt is the committed chase — full speed,
+   * pathfinding, swinging — and the whole point of this is to be the opposite
+   * of that for as long as the telegraph lasts. It ends by handing _hunt a
+   * target, which is the same door hurt() uses, so there is exactly one chase
+   * implementation and this only decides when to open it.
+   *
+   * @returns {boolean} true if it is prowling, so everything else stands down
+   */
+  _prowl(mob, dt, dist, player, fr) {
+    const spec = mob.spec;
+    if (!spec.stalks) return false;
+    // Already committed — _hunt owns the chase from here, and this is only
+    // watching for the reasons to let go of it.
+    if (mob.stalked) {
+      // Daylight calls it off: the night is what made it brave, and a cat that
+      // keeps coming at sunrise is the unprovoked attack again with extra
+      // steps. Losing the target any other way — the stall test, or simply
+      // outrunning it — also ends the stalk, and the rest afterwards is what
+      // stops one cat trying the same thing twice in a minute.
+      if (this.daylight > 0.06 || mob.target !== 'player') {
+        mob.stalked = false;
+        mob.target = null;
+        mob.hungerT = PREY_REST_MIN + Math.random() * (PREY_REST_MAX - PREY_REST_MIN);
+      }
+      return false;
+    }
+
+    const eligible = this.daylight < 0.02      // night, where the player stands
+      && mob.hungerT <= 0                      // and hungry, on the hunting clock
+      && mob.baby <= 0 && mob.love <= 0
+      && !mob.prey && mob.target !== 'player'
+      && dist < PROWL_RANGE;
+    if (mob.prowl <= 0) {
+      if (!eligible) return false;
+      mob.prowlT -= dt;
+      if (mob.prowlT > 0) return false;
+      mob.prowlT = PROWL_PERIOD;
+      if (Math.random() >= PROWL_CHANCE) return false;
+      mob.prowl = PROWL_TELL;
+      mob.growlT = 0;
+    } else if (this.daylight > 0.06 || dist > PROWL_RANGE * 1.5
+      || mob.target === 'player') {
+      // The sun came up mid-telegraph, or you left, or — the third case, and
+      // the one worth spelling out — you shot first. A player who answers the
+      // tell with an axe has ended the telegraph by definition, and a cat that
+      // went on creeping politely through being hit would make the tell read as
+      // scenery. hurt() has already set the target; drop the stalk and let the
+      // ordinary provoked chase have it.
+      mob.prowl = 0;
+      mob.creep = false;
+      mob.hungerT = PREY_REST_MIN * 0.5;
+      return false;
+    }
+
+    mob.prowl -= dt;
+    // The audible half of the tell. 'hurt' is the aggressive call — the same
+    // one a lunge uses — and it is deliberately not rate-limited through
+    // _tryVocalise: this is the one noise in the game the player must not miss.
+    mob.growlT -= dt;
+    if (mob.growlT <= 0) {
+      mob.growlT = PROWL_GROWL;
+      if (this.onSound) this.onSound('hurt', mob);
+    }
+
+    if (mob.prowl <= 0) {
+      // Committed. From here it is an ordinary provoked predator, and _hunt
+      // takes it over on this very frame — hence the false.
+      mob.creep = false;
+      mob.stalked = true;
+      mob.target = 'player';
+      mob.bestDist = dist;
+      mob.stallT = 0;
+      mob.huntCooldown = 0;
+      return false;
+    }
+
+    // The visible half: face you, and close at half a walk rather than a run,
+    // stopping a few cells short. A charge at this range would be over before
+    // the telegraph meant anything.
+    _rel.copy(player.position).sub(mob.pos);
+    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
+    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    mob.want = Math.atan2(rb, ra);
+    mob.creep = true;
+    mob.state = dist > PROWL_HOLD ? 'walk' : 'idle';
+    mob.stateT = 0.4;
+    return true;
   }
 
   /**
@@ -1817,6 +2188,7 @@ export class Mobs {
    */
   _stalk(mob, dt) {
     const spec = mob.spec;
+    if (!spec.preyOn) return false;
     if (spec.diet !== 'carnivore' && spec.diet !== 'omnivore') return false;
     // A cub does not hunt, and a fed animal has other plans.
     if (mob.baby > 0 || mob.love > 0) return false;
@@ -1971,17 +2343,29 @@ export class Mobs {
     this.daylight = sky ? sky.sunDir.dot(player.up) : 1;
     const night = this.daylight < 0.02;
 
-    // top up the population near the player
+    // Top up the population *around the player*, wherever the player now is.
+    //
+    // The search was already anchored to the player's column rather than the
+    // world origin, so the "they all cluster near spawn" report is not a bad
+    // anchor — it is a rate. Everything within DESPAWN_RADIUS is kept and
+    // everything past it is released, so the herd genuinely does follow you;
+    // it just refilled at one animal every six seconds against a walking pace
+    // that empties the ring far quicker than that, and stopped refilling
+    // altogether at 18 bodies because the gate counted husks and fish too.
+    // What the player saw was the world-start herd, which populate() drops all
+    // at once, and then progressively less of anything the further they went.
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = 6;
+      this.spawnTimer = SPAWN_PERIOD;
       const playerCol = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
-      if (this.list.length < MAX_MOBS * 0.7) {
+      let wild = this._countWildlife();
+      for (let n = 0; n < SPAWN_PER_TICK && wild < MAX_WILDLIFE; n++) {
         const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
-        if (spot) this.spawn(this._pickWildlife(spot.col, spot.k), spot.col, spot.k);
+        if (!spot) break;      // no ground going spare this tick; try the next
+        if (this._spawnWild(spot.col, spot.k)) wild++;
       }
       // Fish come from the water, not the shore, so they get their own search.
-      if (this.list.length < MAX_MOBS * 0.85 && Math.random() < 0.4) {
+      if (wild < MAX_WILDLIFE && Math.random() < 0.5) {
         const wet = this._findWaterColumn(playerCol, player.position);
         if (wet) this.spawn('fish', wet.col, wet.k);
       }
@@ -2092,19 +2476,28 @@ export class Mobs {
       // because that flag also drives the night spawn budgets and main.js's
       // grace-period wipe. Conflating them either starves the husk cap or
       // deletes every big cat on the planet at first light.
-      const hunting = (spec.hostile || spec.predator)
+      // The night stalk runs *before* the chase, not instead of it, and it is
+      // asked every frame rather than only when nothing else is happening. It
+      // has two jobs: to decide when a hungry big cat commits to you, and to
+      // decide when it lets go again — and the letting-go half has to keep
+      // running while the cat is mid-chase, or sunrise never reaches it.
+      // Committing hands _hunt a target and returns false, so the chase starts
+      // on the same frame through the one code path that knows how to chase.
+      const prowling = this._prowl(mob, dt, dist, player, fr);
+      const hunting = !prowling && (spec.hostile || spec.predator)
         && this._hunt(mob, dt, dist, player, fr);
       // Then the herd. Hunting the player wins over hunting dinner: something
       // that has decided on you should not wander off after a rabbit mid-fight.
-      const stalking = !hunting && this._stalk(mob, dt);
+      const stalking = !hunting && !prowling && this._stalk(mob, dt);
       // Courtship steers the same way hunting does, and for the same reason:
       // wandering will not reliably bring two animals together inside the love
       // window. Fleeing still wins — a spooked animal has other priorities.
-      const courting = !hunting && !stalking && this._court(mob, fr);
+      const courting = !hunting && !prowling && !stalking && this._court(mob, fr);
+      if (!prowling) mob.creep = false;
 
       // --- behaviour: pick a *desired* heading, never assign the real one ---
       const wasFleeing = mob.state === 'flee';
-      if (!hunting && !stalking && !courting && mob.stateT <= 0) {
+      if (!hunting && !prowling && !stalking && !courting && mob.stateT <= 0) {
         if (wasFleeing) {
           mob.state = 'idle';
           mob.stateT = 1 + Math.random() * 2;
@@ -2117,6 +2510,17 @@ export class Mobs {
           // steer by a bounded turn from the current heading rather than
           // jumping to an arbitrary one — that snap read as a teleport
           mob.want = wrapAngle(mob.heading + (Math.random() - 0.5) * 2.6);
+          // ...unless it belongs on a shoreline and has drifted off one. The
+          // pull goes here, on the frame a new heading is chosen, rather than
+          // as a steady force every frame: a crab that is nudged waterward
+          // continuously walks a dead-straight line into the sea, which is a
+          // different kind of wrong from wandering into the dunes. Choosing
+          // the *direction of the next wander* keeps the crab meandering while
+          // its meander stays inside the surf.
+          if (spec.shore) {
+            const toWater = this._shoreBearing(mob);
+            if (toWater !== null) mob.want = toWater;
+          }
         }
       }
       // Deliberately not gated on `stalking`: a fox stays a fox, and one that
@@ -2134,7 +2538,12 @@ export class Mobs {
       const fleeing = mob.state === 'flee';
       const chasing = mob.state === 'chase';
       const moving = mob.state === 'walk' || fleeing || chasing;
-      const targetSpeed = moving ? spec.speed * (fleeing ? 2.0 : 1) : 0;
+      // A creeping cat moves at half its walk. That is the visible half of the
+      // night-stalk telegraph, and it has to be a speed rather than a state:
+      // 'walk' and 'chase' are the same speed here and differ only in turn
+      // rate, so a stalk built out of states would look exactly like a wander.
+      const targetSpeed = moving
+        ? spec.speed * (fleeing ? 2.0 : mob.creep ? PROWL_SPEED : 1) : 0;
 
       // --- steering: limited turn rate, smooth acceleration -----------------
       const turn = spec.turn * (fleeing ? 1.6 : chasing ? 1.35 : 1) * dt;
@@ -2168,7 +2577,11 @@ export class Mobs {
       // its way back down rather than hovering over the grass. Without this it
       // would sink and walk the lake bed, which is the one thing worse than
       // having no fish at all.
-      const swimming = spec.aquatic
+      // An amphibian swims by exactly the same rule, and only while it is
+      // actually in the water — which is the difference between the two flags
+      // in one line: a fish is buoyant wherever it is because it is never
+      // anywhere else, a crab is buoyant only once it has walked in.
+      const swimming = (spec.aquatic || spec.amphibious)
         && this.planet.liquidAt(this._colOf(c.f, c.ci, c.cj), Math.floor(c.ck));
       mob.swimming = swimming;
       // A bee was a walker with a hop, which is a bee doing an impression of a
@@ -2331,7 +2744,12 @@ export class Mobs {
         // It still may not sink through anything solid.
         if (floor >= 0 && c.ck < floor) { c.ck = floor; mob.vel.k = Math.max(0, mob.vel.k); }
         mob.grounded = false;
-      } else if (floor >= 0 && c.ck < floor && floor - c.ck <= 1.05) {
+      } else if (floor >= 0 && c.ck < floor && floor - c.ck <= 1.05 && mob.vel.k <= 0) {
+        // The `vel.k <= 0` is a second belt against the escalator described on
+        // _groundUnder: a body on its way *up* — mid-hop, or shoved by a blow —
+        // is never also stepping up onto something. On the ground vel.k is
+        // negative every frame before this runs, gravity having been applied
+        // just above, so ordinary walking is unaffected.
         // Climb a step by raising the real position at a bounded rate, not by
         // snapping it and then *drawing the animal lower* to hide the pop. That
         // is what the old stepLag did, and it rendered the body up to 2.5 cells

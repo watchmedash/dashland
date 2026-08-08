@@ -69,7 +69,22 @@ export class Drops {
       mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide });
       this.spriteCache.set(itemId, mat);
     }
-    return new THREE.Mesh(getPlaneGeo(), mat);
+    // Two crossed cards, not one.
+    //
+    // Everything without a model of its own — a sapling, an amethyst, the hide
+    // off a husk — fell out of the world as a single flat quad, and a drop
+    // spins on the spot, so once a second it turned edge-on and vanished into
+    // a line. That is the moment it reads as a cut-out rather than a thing.
+    // Crossing a second card through it costs one extra quad and there is
+    // always something facing you. It is the same trick the world already uses
+    // for flowers and grass, which is why a dropped sapling now matches the
+    // sapling it came from.
+    const g = new THREE.Group();
+    const a = new THREE.Mesh(getPlaneGeo(), mat);
+    const b = new THREE.Mesh(getPlaneGeo(), mat);
+    b.rotation.y = Math.PI / 2;
+    g.add(a, b);
+    return g;
   }
 
   /**

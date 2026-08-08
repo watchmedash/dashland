@@ -213,6 +213,13 @@ const DEFAULT_SETTINGS = {
   // needs a torch, and sees none of the night. The slider is still there for
   // anyone who would rather have a short game cycle.
   dayMinutes: 0,
+  // Which camera F5 last left you in.
+  //
+  // A setting rather than part of the save, because it is a preference about
+  // how you like to look at the game and not a fact about a planet: a player
+  // who plays in third person wants third person in the next world too, and
+  // storing it per world would ask them to press F5 again on every New Game.
+  view: VIEW_FIRST,
 };
 
 class Game {
@@ -352,8 +359,17 @@ class Game {
     // the drops use — what you carry and what you dropped are the same mesh.
     this.character = new PlayerCharacter(this.scene, (id) => this.drops.createItemMesh(id));
     this.viewModel.onPunch = () => this.character.punch();
-    /** Which camera the F5 cycle is on. First person is the default and always will be. */
-    this.viewMode = VIEW_FIRST;
+    /**
+     * Which camera the F5 cycle is on, restored from the last session.
+     *
+     * Validated rather than trusted: settings are JSON in localStorage, which
+     * anyone can hand-edit, and a stored 7 would put the game in a camera mode
+     * that does not exist — `viewModel.enabled` false and no body drawn, which
+     * is a black screen with a HUD on it and no obvious way back.
+     */
+    const savedView = this.settings.view | 0;
+    this.viewMode = savedView >= 0 && savedView < VIEW_COUNT ? savedView : VIEW_FIRST;
+    this.viewModel.enabled = this.viewMode === VIEW_FIRST;
 
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
@@ -2104,6 +2120,10 @@ class Game {
     this.viewModel.enabled = this.viewMode === VIEW_FIRST;
     if (this.viewMode === VIEW_FIRST) this.character.hide();
     this.ui.toast(VIEW_LABELS[this.viewMode], 0, 1400);
+    // Written on the keypress rather than at shutdown: a browser tab is closed,
+    // not quit, and there is no reliable moment later to catch.
+    this.settings.view = this.viewMode;
+    this.persistSettings();
   }
 
   _frozenUpdate(dt) {

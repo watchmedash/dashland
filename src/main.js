@@ -10,7 +10,10 @@ import { Sky, MOON_FILL } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
 import { Particles } from './render/Particles.js';
 import { BlockModels, CAP as BLOCK_MODEL_CAP } from './render/BlockModels.js';
-import { createVoxelMaterials, buildTileTextures, buildCrackTexture, voxelUniforms } from './render/VoxelMaterial.js';
+import {
+  createVoxelMaterials, buildTileTextures, buildCrackTexture, voxelUniforms,
+  occupancyTexture, occupancyData, OCC_NI, OCC_NJ, OCC_NK, OCC_ANG,
+} from './render/VoxelMaterial.js';
 import { loadTileAtlas } from './render/TileAtlas.js';
 import { Audio } from './audio/Audio.js';
 import { UI } from './ui/UI.js';
@@ -30,7 +33,7 @@ import {
 import { Skills, MARKS } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
-  BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
+  BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
 } from './world/Blocks.js';
 import {
@@ -41,6 +44,7 @@ import {
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
+  patchColumn, FACE_N, FACE_R, FACE_U,
 } from './world/Sphere.js';
 import { CROSS_LIGHT_ADDR_SHIFT } from './world/Mesher.js';
 import { makeRng } from './util/Noise.js';
@@ -207,6 +211,14 @@ const HAND_LIGHT_REACH = 13.0;
  */
 const DROP_LIGHT_RANGE = 18;
 const HAND_LIGHT_GAIN = 5.0;
+/**
+ * How far the player may walk out of the middle of the moving lights' shadow
+ * volume before it is rebuilt, in cells. See _updateLightOcclusion.
+ */
+const OCC_HYST = 3;
+/** Scratch for the volume's recentring test; not shared, it is read every frame. */
+const _occCell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
+const _occLocal = new THREE.Vector3();
 
 /**
  * How long a new planet keeps the husks off, in seconds.
@@ -730,6 +742,11 @@ class Game {
     // The mirror is reused rather than reallocated — it is 85MB, and two of
     // them alive at once while the old one is collected is a stall you can see.
     this.planet.resetWorld();
+    // The moving lights' shadow volume is a snapshot of blocks that no longer
+    // exist. Dropping it forces a refill rather than trusting the recentring
+    // test, which would happily keep a whole planet's worth of stale rock if
+    // you respawned near the cell you left.
+    this._occ = null;
     this.liveChunks.clear();
     this.crossLight.clear();
     // A new world has not failed to save yet. Carrying the count over would
@@ -2669,6 +2686,8 @@ class Game {
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     this._updateHandLight(dt);
     this._updateDropLight(dt);
+    // After both, because it converts the positions those two just wrote.
+    this._safeTick('lightOcclusion', () => this._updateLightOcclusion());
     this._safeTick('flames', () => this._tickFlames(dt));
     this._safeTick('blockModels', () => this._syncBlockModels());
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
@@ -3490,6 +3509,16 @@ class Game {
     u.uHandLightPos.value.copy(this.player.eye)
       .addScaledVector(this.player.lookDir, 0.45)
       .addScaledVector(this.player.up, -0.35);
+    // ...unless the hand is inside a wall, which happens the moment you put
+    // your face against one. That was harmless while the flame lit through
+    // rock; now that it is occluded, a light stuck in a block is shadowed by
+    // that block and the whole cave goes out for as long as you lean on it. The
+    // eye is never inside solid geometry, so it is the safe fallback.
+    const hp = u.uHandLightPos.value;
+    if (this.planet.blocks) {
+      const a = this.planet.cellAt(hp.x, hp.y, hp.z);
+      if (a && IS_OPAQUE[this.planet.blocks[a.col * D + a.k]]) hp.copy(this.player.eye);
+    }
   }
 
   /**
@@ -3549,6 +3578,152 @@ class Game {
     // floor level lights the floor and nothing else.
     u.uDropLightPos.value.copy(best.drop.pos).addScaledVector(
       _v1.copy(best.drop.pos).sub(this.planet.center).normalize(), 0.25);
+  }
+
+  /**
+   * Keep the two moving flames' shadow volume under the player.
+   *
+   * Keeping it is *all* this does. The shader works out both ends of every
+   * shadow ray itself, from the world-space light positions it already has, so
+   * nothing here feeds it a coordinate — see flameLight for why that division
+   * of labour is the only safe one.
+   *
+   * See the OCC_* block in VoxelMaterial.js for what the volume is and why a
+   * cubesphere can have an exact one. This is the cheap half: 2 304 columns
+   * resolved through patchColumn — which is the same extended-face mapping the
+   * shader inverts — and then 73 728 byte reads down them.
+   *
+   * ### When it rebuilds
+   *
+   * Only when the player walks OCC_HYST cells out of the middle, or steps onto
+   * another cube face. Rebuilding on every integer cell crossing was the first
+   * thought and it is needlessly often: a cell is 0.98 units and a sprinting
+   * player crosses several a second, while the volume reaches 24 cells and the
+   * furthest thing that can read it is 13 away. Three cells of slack costs three
+   * cells of margin out of eleven spare and cuts the rebuild rate by about six.
+   *
+   * It is also skipped entirely while neither flame is lit, which is most
+   * frames — and that is the same test that switches the shader's march off, so
+   * a torchless daytime frame pays nothing at either end.
+   *
+   * ### What it does not cover
+   *
+   * A block edited by the player does not invalidate the volume; the next
+   * recentre picks it up. Walling yourself in and expecting the wall to shadow
+   * your own torch before you have moved three cells is the one case that lags,
+   * and it lags by a few steps rather than forever. Refilling on every edit was
+   * rejected because an edit already triggers a relight and a remesh, and this
+   * would be a third pass over the same neighbourhood for a wall you are
+   * standing next to and can see is dark.
+   */
+  _updateLightOcclusion() {
+    const u = voxelUniforms;
+    const blocks = this.planet.blocks;
+    if (!blocks || (u.uHandLightRadius.value <= 0.01 && u.uDropLightRadius.value <= 0.01)) {
+      u.uOccActive.value = 0;
+      return;
+    }
+    const p = this.player.position;
+    if (!this._occ) {
+      this._occ = { f: 0, i: 0, j: 0, k: 0, ready: false, cols: new Int32Array(OCC_NI * OCC_NJ) };
+      this._rebuildOcclusion(this.planet.cellOf(p.x, p.y, p.z, _occCell));
+    } else {
+      // Asked in the volume's *own* frame rather than in the player's, and that
+      // is what makes cube seams a non-event here. patchColumn extends a face's
+      // coordinates correctly a long way past its edge, so a volume built on one
+      // face stays exactly valid while the player walks onto the next — and
+      // testing the player's face index instead would rebuild every few frames
+      // for as long as they walked along a seam, for no gain at all.
+      const l = this._worldToOccCell(p, _occLocal);
+      if (Math.abs(l.x - OCC_NI * 0.5) > OCC_HYST
+        || Math.abs(l.y - OCC_NJ * 0.5) > OCC_HYST
+        || Math.abs(l.z - OCC_NK * 0.5) > OCC_HYST) {
+        this._rebuildOcclusion(this.planet.cellOf(p.x, p.y, p.z, _occCell));
+      }
+    }
+    // Never on the strength of a build that did not finish: uOccActive is the
+    // shader's promise that the uniforms and the texture describe a real place.
+    u.uOccActive.value = this._occ.ready ? 1 : 0;
+  }
+
+  /**
+   * Refill the occupancy volume centred on continuous cell coordinates `c`.
+   *
+   * Nothing observable changes until the very last block. The origin is worked
+   * out into locals, the texels are filled, and only then are `this._occ`, the
+   * texture and the uniforms published together — because a half-applied
+   * rebuild is a volume whose contents, whose recorded origin and whose
+   * uniforms describe three different places, and the shader has no way to
+   * notice. Assigning the origin into `this._occ` up front and letting the fill
+   * follow was how this was first written, and it is one thrown exception away
+   * from exactly that state.
+   */
+  _rebuildOcclusion(c) {
+    const o = this._occ;
+    const f = c.f;
+    const oi = Math.round(c.ci) - (OCC_NI >> 1);
+    const oj = Math.round(c.cj) - (OCC_NJ >> 1);
+    // k is deliberately *not* clamped into the world. A slab that always sits
+    // exactly under the player is what makes the shader's origin arithmetic one
+    // subtraction; the two rows below cost less than the clamping would.
+    const ok = Math.round(c.ck) - (OCC_NK >> 1);
+
+    // Columns first, because they depend only on (i, j): 2 304 of these instead
+    // of one per texel, which is a 32x saving on the only expensive part.
+    const cols = o.cols;
+    for (let jj = 0; jj < OCC_NJ; jj++) {
+      const row = jj * OCC_NI;
+      for (let ii = 0; ii < OCC_NI; ii++) cols[row + ii] = patchColumn(f, oi + ii, oj + jj, 0, 0);
+    }
+
+    // Opaque exactly as the light grid means it — ATTEN 255 is IS_OPAQUE — so a
+    // moving flame and a planted one agree about what a wall is. Leaves and
+    // water dim the grid rather than stopping it and are left out of the volume
+    // for the same reason: a flame should shine through a canopy.
+    const blocks = this.planet.blocks;
+    const data = occupancyData;
+    const plane = OCC_NI * OCC_NJ;
+    let idx = 0;
+    for (let kk = 0; kk < OCC_NK; kk++) {
+      const k = ok + kk;
+      // Below layer 0 is the unbreakable core and above the shell is sky.
+      if (k < 0) { data.fill(255, idx, idx + plane); idx += plane; continue; }
+      if (k >= D) { data.fill(0, idx, idx + plane); idx += plane; continue; }
+      for (let n = 0; n < plane; n++) data[idx++] = IS_OPAQUE[blocks[cols[n] * D + k]] ? 255 : 0;
+    }
+
+    // --- commit ---
+    o.f = f; o.i = oi; o.j = oj; o.k = ok; o.ready = true;
+    occupancyTexture.needsUpdate = true;
+    const u = voxelUniforms;
+    u.uOccN.value.fromArray(FACE_N[f]);
+    u.uOccR.value.fromArray(FACE_R[f]);
+    u.uOccU.value.fromArray(FACE_U[f]);
+    u.uOccOrg.value.set(F * 0.5 - oi, F * 0.5 - oj, -(R_MIN + ok));
+  }
+
+  /**
+   * A world point in the volume's local cell space — the exact inverse of the
+   * fill above, and the same two lines the shader runs.
+   *
+   * Used for one thing only: asking how far the player has drifted from the
+   * middle. It used to convert the flames' positions for the shader as well,
+   * and that is precisely what it must not do — see flameLight. Being wrong
+   * here costs a mistimed rebuild; being wrong there put the lights out.
+   */
+  _worldToOccCell(pos, out) {
+    const o = this._occ;
+    const pc = this.planet.center;
+    const x = pos.x - pc.x, y = pos.y - pc.y, z = pos.z - pc.z;
+    const r = Math.hypot(x, y, z) || 1e-6;
+    const N = FACE_N[o.f], R = FACE_R[o.f], U = FACE_U[o.f];
+    const dn = (x * N[0] + y * N[1] + z * N[2]) / r;
+    const da = (x * R[0] + y * R[1] + z * R[2]) / r;
+    const db = (x * U[0] + y * U[1] + z * U[2]) / r;
+    return out.set(
+      OCC_ANG * Math.atan2(da, dn) + (F * 0.5 - o.i),
+      OCC_ANG * Math.atan2(db, dn) + (F * 0.5 - o.j),
+      r - (R_MIN + o.k));
   }
 
   /** Crosshair prompt when you're looking at an animal. */

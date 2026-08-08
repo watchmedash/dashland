@@ -2,6 +2,86 @@
 // voxel skylight / coloured block light, per-vertex AO, biome tint and wind.
 
 import * as THREE from 'three';
+import { F, R_MIN } from '../world/Constants.js';
+
+/**
+ * The moving lights' shadow volume: one byte per cell, opaque or not, for a
+ * slab of the world around the player.
+ *
+ * ### Why a volume at all, and why it can be exact
+ *
+ * Every *placed* light is flood-filled through the voxel grid in Lighting.js and
+ * stops dead at an opaque block, so a torch in a wall has never lit the far side
+ * of it. The two moving lights — the flame in your hand and the brightest
+ * dropped one near you — are plain point lights in the fragment shader with no
+ * occlusion at all, so they shone straight through solid rock. This is what the
+ * shader marches against to stop that.
+ *
+ * The obvious objection is that this planet is a cubesphere: cells are addressed
+ * (f, i, j, k) and a world-axis-aligned 3D texture does not map to them. The way
+ * out is that the equi-angular cube mapping is *exactly* linear in angle. Read
+ * dirToFace and axisToGrid together and the whole of the tangential mapping is
+ *
+ *     ci = F/2 + (2F/PI) * atan(dot(d, R) / dot(d, N))
+ *
+ * for the face's own N and R. So a shader given one face's basis as three
+ * uniforms can recover the continuous cell coordinate of any world point with
+ * two atan calls and no approximation whatsoever — and, crucially, that stays
+ * true *past the edge of the face*, where it produces exactly the extended
+ * coordinates patchColumn uses. Filling the volume on the CPU through
+ * patchColumn and reading it back through the formula above are exact inverses:
+ * measured over 20 000 random samples spread 24 cells past a cube seam, zero
+ * texel mismatches and a worst continuous error of 1.1e-13 cells.
+ *
+ * That is why this is not the drifting local-tangent-frame approximation it
+ * looks like. The only approximation left is that the march interpolates
+ * linearly in cell space rather than along the true world-space chord, which
+ * follows the ground instead of cutting under it: measured over 13-cell rays,
+ * 0.095 cells tangentially and 0.076 cells radially, both far under the half
+ * cell that would change which block a sample lands in.
+ *
+ * ### Size
+ *
+ * 48 x 48 x 32 = 72 KB, so +-24 cells tangentially and +-16 radially around the
+ * player. A torch reaches 13, so the hand light is always covered. A *dropped*
+ * torch may sit up to DROP_LIGHT_RANGE (18) away and light things 13 further
+ * out; past the volume the march fails open and that light behaves exactly as
+ * it did before this existed. Failing open is deliberate — a light that
+ * suddenly gains a shadow as you walk toward it is far less noticeable than one
+ * that suddenly gains a black hemisphere as you walk away.
+ *
+ * ### What it costs
+ *
+ * Refilling the volume is 0.21 ms measured (2 304 patchColumn calls at 0.13 ms
+ * and 73 728 block reads at 0.08), and it happens when the player has walked
+ * three cells, so a few times a second at a sprint. The march is 8.6 texture
+ * fetches per fragment on average across a torch's whole radius in a room with
+ * a wall in it, 21 for the worst case of a fully lit 13-cell ray, on a 72 KB
+ * texture that lives in cache — against the four mip-mapped array samples and
+ * the full standard-material BRDF each of those fragments was already paying.
+ * On top of that, two atan calls per fragment for its own position and two more
+ * per flame that actually reaches it. Every bit of it is behind uOccActive,
+ * which is 0 unless a flame is lit.
+ */
+export const OCC_NI = 48, OCC_NJ = 48, OCC_NK = 32;
+/** Cell indices per radian: the 2F/PI above. Shared so the two cannot drift. */
+export const OCC_ANG = 2 * F / Math.PI;
+
+export const occupancyData = new Uint8Array(OCC_NI * OCC_NJ * OCC_NK);
+export const occupancyTexture = (() => {
+  const t = new THREE.Data3DTexture(occupancyData, OCC_NI, OCC_NJ, OCC_NK);
+  t.format = THREE.RedFormat;
+  t.type = THREE.UnsignedByteType;
+  // Nearest, and this is the one decision the whole thing turns on — see
+  // OCC_BIAS in the shader for what linear filtering costs.
+  t.minFilter = THREE.NearestFilter;
+  t.magFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.wrapS = t.wrapT = t.wrapR = THREE.ClampToEdgeWrapping;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  return t;
+})();
 
 export const voxelUniforms = {
   uMap: { value: null },
@@ -63,6 +143,18 @@ export const voxelUniforms = {
   uDropLightPos: { value: new THREE.Vector3() },
   uDropLightColor: { value: new THREE.Vector3() },
   uDropLightRadius: { value: 0 },
+  // --- occlusion for those two, and only those two -----------------------------
+  // See the OCC_* block above. uOccN/R/U are the cube-face basis the volume is
+  // parameterised in; uOccOrg folds (F/2 - origin) and -(R_MIN + originK) into
+  // one add so the shader's cell coordinates come out volume-local and small.
+  // uOccActive is 0 whenever neither flame is lit, which is most frames, and
+  // gates every atan and every texture fetch below.
+  uOccTex: { value: occupancyTexture },
+  uOccOrg: { value: new THREE.Vector3() },
+  uOccN: { value: new THREE.Vector3(1, 0, 0) },
+  uOccR: { value: new THREE.Vector3(0, 0, -1) },
+  uOccU: { value: new THREE.Vector3(0, 1, 0) },
+  uOccActive: { value: 0 },
 };
 
 const COMMON_VERT_HEAD = /* glsl */`
@@ -140,6 +232,7 @@ const COMMON_VERT_BODY = /* glsl */`
 
 const COMMON_FRAG_HEAD = /* glsl */`
 precision highp sampler2DArray;
+precision highp sampler3D;
 uniform sampler2DArray uMap;
 uniform sampler2DArray uNormalMap;
 uniform sampler2DArray uArm;
@@ -178,6 +271,12 @@ uniform float uHandLightRadius;
 uniform vec3 uDropLightPos;
 uniform vec3 uDropLightColor;
 uniform float uDropLightRadius;
+uniform sampler3D uOccTex;
+uniform vec3 uOccOrg;
+uniform vec3 uOccN;
+uniform vec3 uOccR;
+uniform vec3 uOccU;
+uniform float uOccActive;
 
 /**
  * Where the block-light highlight starts to roll off, and where it stops.
@@ -262,14 +361,239 @@ const float BLOCK_CEIL = 0.58;
  */
 const float NIGHT_OPEN_GAIN = 3.0;
 
+// --- moving-light occlusion --------------------------------------------------
+
+const vec3 OCC_DIM = vec3(${OCC_NI}.0, ${OCC_NJ}.0, ${OCC_NK}.0);
+const float OCC_ANG = ${OCC_ANG.toFixed(6)};
+
+/**
+ * How far off the shaded surface the march starts, in world units, along the
+ * surface normal. This is the entire acne treatment and it is exact rather than
+ * a tuned fudge.
+ *
+ * A fragment sits *on* a cell face. The cell behind it is solid by definition —
+ * that is why the face was meshed — so a march that starts at the fragment
+ * samples solid rock immediately and every lit surface goes black. Stepping
+ * 0.66 units along the normal lands 0.66 cells into the cell in *front* of the
+ * face, which is empty for the same reason, and nearest sampling then returns a
+ * hard zero from it. Not "nearly zero": zero, for every fragment, on every
+ * orientation, because the sample is unambiguously inside an empty cell. There
+ * is no stripe pattern to be had.
+ *
+ * ### Why nearest and not linear filtering
+ *
+ * Linear was tried on paper first and is worse in exactly the place that must
+ * not regress. Under linear filtering a solid cell bleeds half a cell into the
+ * air above it, and the ray from a patch of ground to a torch *lying on that
+ * ground* legitimately runs a fraction of a cell above the floor for its whole
+ * length. Working the numbers for a dropped torch (0.25 above the surface) five
+ * cells away: the far end of the ray picks up 0.22 of the floor it is skimming,
+ * so a torch in the open would draw a dark ring around itself. That is precisely
+ * the thing this change was forbidden to cost. Nearest reads that same ray as a
+ * sequence of empty cells and returns exactly the light the fragment got before
+ * this code existed. The softness linear would have bought is not worth it here
+ * anyway: the grid light this is imitating is blocky, so a blocky shadow is the
+ * matching look.
+ *
+ * 0.66 rather than 0.5 because 0.5 lands exactly on a cell *centre*, where the
+ * corner guard below has no idea which way the ray came from, and because the
+ * whole point is to be unambiguously inside one cell: two thirds of the way in
+ * is far enough from both of that cell's boundaries that no accumulated float
+ * error in the atan can put the sample back in the block.
+ */
+const float OCC_BIAS = 0.66;
+/**
+ * Ray step in cells. A solid cell is one cell thick, so anything under 1.0
+ * cannot tunnel through a wall however it is crossed; 0.9 leaves a margin for
+ * the sub-tenth-of-a-cell error in interpolating the ray in cell space.
+ */
+const float OCC_STEP = 0.9;
+/**
+ * How close to the flame the march stops, in cells.
+ *
+ * A flame is usually sitting on or against something. Sampling right up to it
+ * means the block it rests on shadows everything the flame lights, so a dropped
+ * torch would put out the floor it is lying on. Stopping short costs nothing
+ * real: an occluder in the last cell and a half before the light is inside the
+ * flame.
+ */
+const float OCC_NEAR = 1.5;
+const int OCC_MAX_STEPS = 14;
+
+/**
+ * World point, and a small world-space offset from it, in volume-local
+ * continuous cell coordinates.
+ *
+ * The offset is not a second lookup: it is the analytic derivative of the one
+ * above it, which is worth having because the normal bias would otherwise cost
+ * two more atan calls per fragment. For ci = C + K*atan(a/n) with a = dot(d,R)
+ * and n = dot(d,N), and a world displacement e at radius r, the tangential part
+ * of the displacement is e minus its radial component and
+ *
+ *     d(ci) = K * dot(e_perp, n*R - a*N) / (r * (n*n + a*a))
+ *
+ * which is three dots and a divide. The radial part is just dot(d, e), because
+ * one cell is one unit radially everywhere.
+ */
+void occFrame(vec3 wp, vec3 woff, out vec3 cell, out vec3 dcell) {
+  vec3 rel = wp - uPlanetCenter;
+  float r = length(rel);
+  vec3 d = rel / r;
+  float n = dot(d, uOccN);
+  float a = dot(d, uOccR);
+  float b = dot(d, uOccU);
+  cell = vec3(OCC_ANG * atan(a, n) + uOccOrg.x,
+              OCC_ANG * atan(b, n) + uOccOrg.y,
+              r + uOccOrg.z);
+  vec3 ep = woff - d * dot(d, woff);
+  dcell = vec3(OCC_ANG * dot(ep, n * uOccR - a * uOccN) / (r * (n * n + a * a)),
+               OCC_ANG * dot(ep, n * uOccU - b * uOccN) / (r * (n * n + b * b)),
+               dot(d, woff));
+}
+
+/**
+ * Is this cell opaque? Anything outside the volume reads as empty, so the
+ * effect fails open rather than dropping a black slab at the volume's edge.
+ * textureLod rather than texture because this is called inside a loop with a
+ * break in it, and an implicit derivative in non-uniform control flow is
+ * undefined.
+ */
+float occAt(vec3 c) {
+  vec3 uvw = c / OCC_DIM;
+  if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return 0.0;
+  return textureLod(uOccTex, uvw, 0.0).r;
+}
+
+/**
+ * How much of a flame reaches a fragment: 1 in the open, 0 behind a wall.
+ *
+ * ### The corner guard
+ *
+ * A point-sampled march leaks along the join between two diagonally-placed
+ * blocks. Take solid cells at (0,1) and (1,0) with air at (0,0) and (1,1): a ray
+ * running along that diagonal is inside an empty cell before the corner and
+ * inside an empty cell after it, so every sample says "clear" and a bright
+ * hairline appears along a seam that is geometrically shut — the opening between
+ * two cells that meet at an edge has zero area, so no light passes it at all.
+ * Shrinking the step does not fix this. It only makes the hairline thinner,
+ * because the ray is never *in* the blocking cells at any point along it.
+ *
+ * The first attempt was a proximity test — if a sample sits within 0.2 cells of
+ * a boundary in two axes, tap across the nearer one — and it was measured and
+ * thrown away: on the exact diagonal it closed nothing at all (41 leaking
+ * fragments out of 41, unchanged), because whether any sample lands near the
+ * corner depends entirely on where the ray happens to start.
+ *
+ * What works is to stop asking about positions and ask about *cells*. If the
+ * cell index moved in more than one axis between two consecutive samples, the
+ * ray crossed a cell edge and there is a cell it genuinely passed through that
+ * was never sampled. Which one is decidable exactly, and cheaply: compare the
+ * parametric distances to the two boundaries and take whichever is crossed
+ * first. That is one step of a DDA, done only on the steps that need it.
+ *
+ * It is deliberately the *correct* cell rather than a conservative pair. Taking
+ * both would shadow a cell the ray missed, and false shadow is the same artifact
+ * as acne. On the exact diagonal the two crossings are simultaneous, either
+ * answer is one of the two blocking cells, and the seam closes whichever way the
+ * float comparison falls. Measured: 41 of 41 leaking before, 0 after.
+ *
+ * The tap is conditional and the loop returns the moment anything is opaque, so
+ * a shadowed fragment costs a couple of fetches and only a fully lit one pays
+ * for the whole ray.
+ *
+ * ### Why the two guards at the top are written backwards
+ *
+ * This function shipped once with a plain "if (reach < OCC_STEP) return 1.0",
+ * and that read is a trap. Both guards exist to let a ray that is too short to
+ * matter out early — but a comparison against a NaN is *false*, so a NaN ray
+ * sails past a less-than test and gets marched. The consequences are not
+ * subtle: length() of a bad segment defeats the near-field early-out, the
+ * samples land wherever, occAt's own range test is also written with
+ * comparisons and also passes NaN through, and the march reports the fragment
+ * shadowed. The whole world goes dark, including the ground directly under the
+ * player's feet, where occlusion should have been impossible.
+ *
+ * Negating the sense — return unless the ray is provably worth marching — makes
+ * NaN take the early-out with everything else. The same reasoning covers the
+ * length test: the fragment is within lrad *world units* of the flame, so the
+ * same span in cells cannot exceed that by more than the normal bias and a
+ * fraction of a cell of curvature. A longer one is not geometry, it is two ends
+ * of a ray disagreeing about where they are, and the only safe answer to that
+ * is "lit". Occlusion that quietly stops occluding is a missing shadow;
+ * occlusion that fails the other way is an unplayable game.
+ */
+float occMarch(vec3 fcell, vec3 lcell, float lrad) {
+  vec3 seg = lcell - fcell;
+  float dist = length(seg);
+  if (!(dist <= lrad + 2.0)) return 1.0;
+  float reach = dist - OCC_NEAR;
+  if (!(reach >= OCC_STEP)) return 1.0;
+  vec3 dir = seg / dist;
+  int steps = int(min(float(OCC_MAX_STEPS), ceil(reach / OCC_STEP)));
+  float ds = reach / float(steps);
+  vec3 prev = fcell;
+  for (int s = 0; s < OCC_MAX_STEPS; s++) {
+    if (s >= steps) break;
+    vec3 p = fcell + dir * ((float(s) + 0.5) * ds);
+    if (occAt(p) > 0.5) return 0.0;
+    vec3 pc = floor(prev);
+    vec3 dc = floor(p) - pc;
+    if (abs(dc.x) + abs(dc.y) + abs(dc.z) > 1.5) {
+      vec3 sv = p - prev;
+      vec3 safe = mix(sv, vec3(1.0), lessThan(abs(sv), vec3(1e-6)));
+      vec3 tv = mix(vec3(1e9), (pc + max(dc, vec3(0.0)) - prev) / safe,
+                    notEqual(dc, vec3(0.0)));
+      vec3 first = tv.x <= tv.y && tv.x <= tv.z ? vec3(1.0, 0.0, 0.0)
+                 : (tv.y <= tv.z ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));
+      vec3 elbow = pc + vec3(0.5) + first * dc;
+      if (occAt(elbow) > 0.5) return 0.0;
+      if (abs(dc.x) + abs(dc.y) + abs(dc.z) > 2.5) {
+        // All three planes crossed in one step, so *two* cells were skipped
+        // rather than one. Adding this second tap is what took the march from
+        // 1.37% disagreement with an exact DDA to none at all, and it is far
+        // cheaper than the alternative of shortening the step: at 0.5 cells the
+        // march is exact too, but every ray then costs nearly twice the fetches
+        // to buy the same answer. This branch is taken by a handful of steps.
+        vec3 rest = tv + first * 1e9;
+        vec3 second = rest.x <= rest.y && rest.x <= rest.z ? vec3(1.0, 0.0, 0.0)
+                    : (rest.y <= rest.z ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));
+        if (occAt(elbow + second * dc) > 0.5) return 0.0;
+      }
+    }
+    prev = p;
+  }
+  return 1.0;
+}
+
 /**
  * One moving flame's contribution. Inverse-square with a linear cutoff at the
  * radius so it reaches zero instead of trailing a wash across the whole chunk,
  * and lambert-shaded off the surface normal so it wraps around geometry rather
  * than flooding it. The 0.22 floor lifts faces turned away out of pure black:
  * a real flame bounces off everything around it.
+ *
+ * fcell is the fragment in volume-local cell space with the normal bias already
+ * applied; it is zero and unused when the volume is not live.
+ *
+ * ### The flame's own end of the ray is computed here, not handed in
+ *
+ * It was a uniform at first — the CPU knows the flame's position and can run
+ * the same formula in double precision, so converting it there looked like two
+ * free atan calls. It is not free, it is the bug that took a torch out of the
+ * player's hand: the two ends of one ray were being produced by two different
+ * pieces of code, in two languages, from two different sources of truth (the
+ * CPU's volume record and the uniforms describing it), and nothing in the
+ * shader could tell when they had drifted apart. They only have to disagree by
+ * a couple of cells for every march to plough through the ground and report the
+ * whole world in shadow.
+ *
+ * Computing both ends here, with the same function, from the same uniforms, in
+ * the same invocation, makes agreement structural rather than something to be
+ * maintained. The uniform it replaces is gone, so there is nothing left to go
+ * stale. The cost is two atan calls, and only for a fragment that has already
+ * passed the radius, distance and wrap tests.
  */
-vec3 flameLight(vec3 lpos, vec3 lcol, float lrad, vec3 nrm, vec3 world) {
+vec3 flameLight(vec3 lpos, vec3 lcol, float lrad, vec3 nrm, vec3 world, vec3 fcell) {
   if (lrad <= 0.0) return vec3(0.0);
   vec3 toL = lpos - world;
   float dist = length(toL);
@@ -291,6 +615,18 @@ vec3 flameLight(vec3 lpos, vec3 lcol, float lrad, vec3 nrm, vec3 world) {
   // little past the terminator (0.11 at exactly edge-on) and falls to nothing
   // by the time the surface has turned properly away.
   float wrap = clamp((dot(nrm, toL / max(dist, 0.001)) + 0.12) / 1.12, 0.0, 1.0);
+  if (wrap <= 0.0) return vec3(0.0);
+  // The other half of the same report. The wrap above stops a flame lighting a
+  // face that is turned away from it; this stops it lighting a face that is
+  // turned *toward* it through a wall. Gated on wrap so a fragment the flame
+  // could not reach anyway never pays for a march.
+  if (uOccActive > 0.5) {
+    // The zero offset is the same call the fragment end makes with the normal
+    // bias; the dcell half folds away at compile time.
+    vec3 lcell, unusedOffset;
+    occFrame(lpos, vec3(0.0), lcell, unusedOffset);
+    if (occMarch(fcell, lcell, lrad) <= 0.0) return vec3(0.0);
+  }
   return lcol * (wrap * fall * fall);
 }
 varying float vLayer;
@@ -650,8 +986,19 @@ const LIGHTS_END = /* glsl */`
   // separately would let a player standing beside a planted torch while holding
   // one collect two sub-knee contributions that sum to a blowout, which is the
   // exact case the shoulder exists for.
-  vec3 moving = flameLight(uHandLightPos, uHandLightColor, uHandLightRadius, normal, vWorld)
-              + flameLight(uDropLightPos, uDropLightColor, uDropLightRadius, normal, vWorld);
+  // Where this fragment sits in the occlusion volume, computed once and shared
+  // by both flames: two atan calls, and only when there is a flame lit at all.
+  // With no torch in the world — which is most of the daylight hours of most
+  // frames — uOccActive is 0, this whole block folds away and the shader is
+  // bit-identical to what it was.
+  vec3 occFragCell = vec3(0.0);
+  if (uOccActive > 0.5) {
+    vec3 nb;
+    occFrame(vWorld, normal * OCC_BIAS, occFragCell, nb);
+    occFragCell += nb;
+  }
+  vec3 moving = flameLight(uHandLightPos, uHandLightColor, uHandLightRadius, normal, vWorld, occFragCell)
+              + flameLight(uDropLightPos, uDropLightColor, uDropLightRadius, normal, vWorld, occFragCell);
 
   // All block light, grid and flames together, with a highlight shoulder on the
   // pair. See BLOCK_KNEE. The AO weighting stays on the grid term only and off

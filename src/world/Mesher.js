@@ -50,6 +50,25 @@ for (let i = 0; i < N_BLOCKS; i++) {
   else if (b.name.startsWith('leaves')) WAVE[i] = 4;
 }
 
+/**
+ * Cross blocks that are drawn as real geometry instead, and so must not also be
+ * drawn as a billboard here.
+ *
+ * The flowers are modelled — `render/BlockModels.js` instances a WAM model at
+ * every one near the player — and a cross quad is a full cell wide, so no model
+ * small enough to be a flower can hide one. It is this or two of everything.
+ *
+ * Grass, saplings, mushrooms and wheat are *not* in this set and should stay
+ * out of it: the billboard is the right answer for anything whose read is a
+ * texture rather than a silhouette, and it is the only one that carries the
+ * chunk's baked voxel light and the wind sway.
+ */
+const MODELLED_CROSS = new Uint8Array(N_BLOCKS);
+for (const n of ['flower_red', 'flower_blue', 'flower_gold']) {
+  const i = BLOCKS.findIndex((b) => b.name === n);
+  if (i > 0) MODELLED_CROSS[i] = 1;
+}
+
 const AO_CURVE = [0.36, 0.60, 0.80, 1.0];
 
 // --- growable buffers -------------------------------------------------------
@@ -391,7 +410,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
         if (id === 0) continue;
         const rt = RENDER_TYPE[id];
         if (rt === R_CROSS) {
-          emitCross(groups[GROUP_CUTOUT], f, i, j, k, col, id, biomeId, light);
+          if (!MODELLED_CROSS[id]) emitCross(groups[GROUP_CUTOUT], f, i, j, k, col, id, biomeId, light);
           continue;
         }
         const grp = groups[GROUP[id]];

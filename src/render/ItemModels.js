@@ -267,6 +267,34 @@ const POSE = {
   // closes on the arm, not on the claw: at 0.5 it would have gripped the palm
   // and swung the whole thing around the pincer.
   crab_claw:  { file: 'wam/crab_claw',  pack: 'wam', height: 0.30, grip: 0.24, rot: [0.06, -1.30, 0.24],  pos: [0.02, 0.07, -0.03], icon: [0.10, 1.45, 0.34] },
+
+  // The three flowers, on the sapling's pose — they are the same object, a stem
+  // with something on top, and `grip` is low for the same reason: you carry a
+  // picked flower by the stalk, so the fist closes under the head rather than
+  // through it. Held smaller than the sapling because a bloom that fills as much
+  // of the frame as a seedling reads as a cabbage.
+  //
+  // These three are also the only entries in this table that are *world*
+  // geometry as well: `render/BlockModels.js` instances the same meshes where
+  // the blocks are planted. Nothing here changes for that — `worldModel()`
+  // strips the pose — but it does mean these numbers only ever decide the fist
+  // and the icon, and the world size lives over there.
+  //
+  // Each icon rotation is the one that shows what makes that flower itself:
+  //
+  //  - crimson is an upright teardrop and is the same from every yaw, so it
+  //    takes the drawn diagonal unchanged;
+  //  - azure nods along its own +Z, which is straight at the icon camera — the
+  //    fish's problem exactly, so it takes the fish's near-quarter-turn and the
+  //    nod goes across the frame instead of pointing out of it;
+  //  - gold is a flat plate of petals facing up. At the family's shallow pitch
+  //    the icon saw it edge-on and the daisy was a gold line; pitching it most
+  //    of the way over — the `flat` treatment the food kit's plates and pizzas
+  //    need — brings the face round. Not all the way: past about 0.6 the stalk
+  //    disappears behind the head and it stops reading as a flower at all.
+  flower_red:  { file: 'wam/flower_red',  pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.10, -0.40, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.12, 0.34, -0.18] },
+  flower_blue: { file: 'wam/flower_blue', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.02, -1.25, 0.26],  pos: [0.02, 0.12, -0.02], icon: [0.14, 1.32, -0.12] },
+  flower_gold: { file: 'wam/flower_gold', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.24, -0.40, 0.22],  pos: [0.02, 0.12, -0.02], icon: [0.52, 0.32, -0.14] },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -314,6 +342,13 @@ const BY_NAME = {
   // cross billboard — that is the mesher's business and is untouched — but in
   // the fist, in the icon grid and lying on the ground it is now a real object.
   sapling: 'sapling',
+  // The flowers went further than the sapling did. They are cross blocks too,
+  // but unlike the sapling they are also modelled *planted* — see
+  // `render/BlockModels.js` — so for these three the fist, the icon, the drop
+  // and the ground are one object with nothing left over.
+  flower_red: 'flower_red',
+  flower_blue: 'flower_blue',
+  flower_gold: 'flower_gold',
   // The one place this map is not an identity, and deliberately: raw and
   // steamed crab are one model. A claw is a claw cooked or not — the shell is
   // already the orange it turns — so the pair share `crab_claw` rather than

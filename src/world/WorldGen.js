@@ -46,6 +46,31 @@ const CRUST = R_SEA - R_MANTLE;
  * as it was tuned, which re-deriving each band by eye would not.
  */
 const band = (r108) => R_MANTLE + (r108 - 108) * (CRUST / 22);
+
+/**
+ * Two-octave fbm against a threshold, with an exact early-out.
+ *
+ * The ore pass is the single most expensive thing worldgen does, and almost all
+ * of that work is thrown away: a vein threshold sits at 0.52–0.66, so the
+ * overwhelming majority of voxels evaluate the whole thing only to fall short.
+ *
+ * A two-octave fbm at gain 0.5 is `(s1 + 0.5 * s2) / 1.5`, and simplex output
+ * cannot exceed 1 — so once the first octave is known, the largest value the
+ * second could possibly produce is `(s1 + 0.5) / 1.5`. If that is already under
+ * the threshold, the second octave cannot change the answer and is not worth
+ * computing. This is a bound, not an approximation: the ore that generates is
+ * bit-for-bit the ore that generated before.
+ *
+ * @returns the fbm value, or -1 when it provably cannot reach `thr`.
+ */
+function veinNoise(no, x, y, z, thr) {
+  const s1 = no.simplex3(x, y, z);
+  if (s1 + 0.5 <= thr * 1.5) return -1;
+  // Exactly what `fbm3(x, y, z, 2, 2, 0.5)` does with its second octave: the
+  // caller's coordinates, times the lacunarity. Deriving them any other way
+  // risks a different float and therefore a different planet.
+  return (s1 + 0.5 * no.simplex3(x * 2, y * 2, z * 2)) / 1.5;
+}
 const BAND_STONE = R_MANTLE + CRUST * 0.818;      // was 126
 const BAND_LIMESTONE = R_MANTLE + CRUST * 0.545;  // was 120
 const BAND_GRANITE = R_MANTLE + CRUST * 0.273;    // was 114
@@ -647,7 +672,16 @@ export class WorldGen {
         // whose answer could not change the outcome. Evaluating `cav` first and
         // returning on it makes the blob-carved voxels free of the tunnel cost.
         // This is the second most expensive loop in worldgen at 13s of 63.
-        const cav = nc.fbm3(px * 0.035 + 11.1, py * 0.035, pz * 0.035, 3, 2, 0.5);
+        // Same exact early-out as the ore veins, one octave deeper: a
+        // three-octave fbm at gain 0.5 normalises by 1.75, so after the first
+        // octave the most the remaining two can add is 0.75/1.75. If that
+        // cannot reach 0.58 the chamber is ruled out and the other two octaves
+        // are never computed.
+        const cx = px * 0.035 + 11.1, cy = py * 0.035, cz = pz * 0.035;
+        const c1 = nc.simplex3(cx, cy, cz);
+        const cav = c1 + 0.75 <= 0.58 * 1.75 ? -1
+          : (c1 + 0.5 * nc.simplex3(cx * 2, cy * 2, cz * 2)
+            + 0.25 * nc.simplex3(cx * 4, cy * 4, cz * 4)) / 1.75;
         let open = cav > 0.58;
         if (!open) {
           const a = nc.ridged3(px * 0.062, py * 0.062, pz * 0.062, 3, 2.1, 0.5);
@@ -743,8 +777,10 @@ export class WorldGen {
           // Two octaves, not three. A vein is a blob — the third octave was
           // adding detail an order of magnitude smaller than one block, which
           // no player can ever see, at a third of the cost of the single most
-          // expensive loop in worldgen.
-          const n = no.fbm3(px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, 2, 2, 0.5);
+          // expensive loop in worldgen. `veinNoise` then skips the second
+          // octave whenever the first already rules the threshold out, which is
+          // most of the time.
+          const n = veinNoise(no, px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, o.thr);
           if (n > o.thr) { blocks[base + k] = o.id; break; }
         }
       }

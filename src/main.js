@@ -8,7 +8,7 @@ import { Input } from './player/Input.js';
 import { Sky } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
 import { Particles } from './render/Particles.js';
-import { BlockModels } from './render/BlockModels.js';
+import { BlockModels, CAP as BLOCK_MODEL_CAP } from './render/BlockModels.js';
 import { createVoxelMaterials, buildTileTextures, buildCrackTexture, voxelUniforms } from './render/VoxelMaterial.js';
 import { loadTileAtlas } from './render/TileAtlas.js';
 import { Audio } from './audio/Audio.js';
@@ -32,7 +32,7 @@ import {
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT,
 } from './world/Blocks.js';
 import {
-  F, D, R_MIN, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
+  F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
 } from './world/Constants.js';
@@ -169,6 +169,27 @@ const FLAME_PERIOD = 0.14;
 const HURT_IMMUNITY = 0.5;
 
 for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID[n]);
+
+/**
+ * The flowers, and how tall each one stands in a cell.
+ *
+ * A dense array indexed by block id, so the scan below asks `FLOWER_KIND[id]`
+ * once per cell instead of consulting a Set — this runs over tens of thousands
+ * of cells and every one of them is not a flower.
+ *
+ * 0.62 of a cell: the models are a clump on a stalk and the block they replace
+ * is a full-cell billboard, so anything near 1.0 is waist-high and looks like a
+ * shrub. Ankle height on a 1.8-cell player is what the tile always drew.
+ *
+ * `tall_grass` and `mushroom` are cross blocks too and are deliberately not
+ * here. Grass is a texture more than an object — it is the thing that carpets
+ * every meadow, so it is by far the worst candidate for a model — and the
+ * request was about flowers.
+ */
+const FLOWER_NAMES = ['flower_red', 'flower_blue', 'flower_gold'];
+const FLOWER_KIND = [];
+const FLOWER_HEIGHT = 0.62;
+for (const n of FLOWER_NAMES) if (ID[n]) FLOWER_KIND[ID[n]] = n;
 
 const DEFAULT_SETTINGS = {
   fov: 75, sensitivity: 1.0, renderScale: 1,
@@ -380,10 +401,16 @@ class Game {
 
     this.scene = new THREE.Scene();
     // Far plane is deliberately tight. Nothing depth-tested lives beyond the
-    // cloud shell (~95 units); the sky dome, stars and sun all draw with
-    // depthTest off. A huge far plane wrecks depth precision, which shows up as
-    // GTAO haze over the sky and softer shadows.
-    this.camera = new THREE.PerspectiveCamera(this.settings.fov, this.width / this.height, 0.06, 420);
+    // cloud shell; the sky dome, stars and sun all draw with depthTest off. A
+    // huge far plane wrecks depth precision, which shows up as GTAO haze over
+    // the sky and softer shadows.
+    //
+    // Derived from the planet rather than written down, because it was a bare
+    // 420 tuned against a sea-level radius of 130 and there is nothing in the
+    // number to say so. 3.2x the outer radius keeps the same generous margin
+    // over the cloud shell that 420 had, and moves when the planet does.
+    this.camera = new THREE.PerspectiveCamera(
+      this.settings.fov, this.width / this.height, 0.06, Math.round(R_MAX * 3.2));
     this.camera.position.set(0, R_TERRAIN_MAX + 10, 0);
     this.scene.add(this.camera);
   }
@@ -1659,7 +1686,7 @@ class Game {
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     this._updateHandLight(dt);
     this._safeTick('flames', () => this._tickFlames(dt));
-    this._safeTick('blockModels', () => this._syncBlockModels(dt));
+    this._safeTick('blockModels', () => this._syncBlockModels());
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     // `shelter` doubles as the entity fill's occlusion — animals cannot read
     // the voxel light, so a roof over the player is the best signal the sky has
@@ -2085,7 +2112,7 @@ class Game {
   }
 
   /**
-   * Put a real torch where every nearby torch block is.
+   * Put a real torch, and a real flower, where every nearby one of those is.
    *
    * The voxel form of a torch is a thin post with a slightly wider post on top,
    * and the tile meant to be its flame is a picture of a whole torch — brown,
@@ -2093,43 +2120,85 @@ class Game {
    * you could actually stand at. The art for a torch already exists and is
    * already in your hand. This is the same object, in the ground.
    *
+   * Flowers had the same complaint and a worse version of it. Two crossed
+   * quads is a fine grass blade — grass has no shape of its own to lose — but a
+   * bloom is exactly the thing whose silhouette *is* the object, and from
+   * directly above, which is where the player looks at ankle height, a cross is
+   * a plus sign. `Mesher.emitCross` no longer emits them; this is what stands
+   * in its place.
+   *
    * Scanned rather than tracked. A registry would have to survive saves,
    * chunk eviction and every path that writes a block; a scan bounded to what
    * is near you cannot go stale, and only reruns when you cross a cell or edit
    * the world — the same cache the hand light uses, for the same reason.
+   *
+   * ### How far this reaches, and why that number
+   *
+   * A torch is hand-placed and sparse, so one appearing at the rim is a thing
+   * you might catch; a *meadow* appearing at the rim is unmissable, and unlike
+   * the torch there is no billboard left behind to cover the gap. The bound
+   * that matters is therefore the horizon, not legibility: on a planet of
+   * R_SEA 290 the flat ground falls away about 34 cells from an eye two blocks
+   * up (`sqrt(2*R*h)`, the same arithmetic `CHUNK_LOAD_DIST` is derived from),
+   * so a 34-cell scan covers every flower on level ground the player can see at
+   * all. What is lost past it is flowers on high terrain 60+ cells out, at
+   * seven pixels and behind aerial fog.
+   *
+   * That costs 69 x 69 x 15 = 71 000 array reads per rescan, about three times
+   * the old torch scan, and `planet.at` is a flat typed-array index. Torches
+   * keep their own 20 — widening theirs was not asked for and every extra cell
+   * is instances that have to be matrix-written every rescan.
    */
-  _syncBlockModels(dt) {
+  _syncBlockModels() {
     const bm = this.blockModels;
-    bm.prime(itemIdOf('torch'));
+    bm.prime('torch', itemIdOf('torch'), { height: 0.95, lean: true });
+    for (const n of FLOWER_NAMES) bm.prime(n, itemIdOf(n), { height: FLOWER_HEIGHT });
+
     const c = this.player.cell;
     const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
     const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
+    const lists = this._modelLists || (this._modelLists = { torch: [] });
+    for (const n of FLOWER_NAMES) lists[n] = lists[n] || [];
+
     if (this._tmCol !== baseCol || this._tmK !== ck || this._tmSeq !== this.editSeq) {
       this._tmCol = baseCol; this._tmK = ck; this._tmSeq = this.editSeq;
-      const out = this._torchList || (this._torchList = []);
-      out.length = 0;
-      // Wider than the hand-light scan: that one only has to reach as far as
-      // the light carries, but a torch stays legible as an object well past
-      // the point where its glow has faded, and popping one into existence at
-      // eight cells is worse than not having the model at all.
-      const RAD = 20;
+      for (const key in lists) lists[key].length = 0;
+      const RAD = 34;
+      const TORCH_RAD = 20;
       for (let di = -RAD; di <= RAD; di++) {
         for (let dj = -RAD; dj <= RAD; dj++) {
           const col = stepColumn(baseCol, di, dj);
+          const d2 = di * di + dj * dj;
+          const torchable = d2 <= TORCH_RAD * TORCH_RAD;
           for (let dk = -7; dk <= 7; dk++) {
             const k = ck + dk;
             if (k < 0 || k >= D) continue;
-            if (!IS_TORCH[this.planet.at(col, k)]) continue;
-            const byte = this.planet.facingAt(col, k) & 7;
+            const id = this.planet.at(col, k);
+            const flower = FLOWER_KIND[id];
+            // The one test every one of those 71 000 cells pays for. Both
+            // lookups are dense arrays indexed by block id, so a cell that is
+            // neither costs two loads and a branch.
+            if (!flower && !(torchable && IS_TORCH[id])) continue;
             const p = colParts(col);
             tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
-            const e = {
-              pos: this.planet.centerOf(col, k, new THREE.Vector3()),
-              up: new THREE.Vector3(_frame.up[0], _frame.up[1], _frame.up[2]),
-              out: null,
-              head: this._flameHead({ col, k, id: ID.torch, byte }, new THREE.Vector3()),
-              seed: (col * 31 + k) % 1000,
-            };
+            const pos = this.planet.centerOf(col, k, new THREE.Vector3());
+            const up = new THREE.Vector3(_frame.up[0], _frame.up[1], _frame.up[2]);
+
+            if (flower) {
+              // A turn derived from the cell, not from a counter or `Math.random`:
+              // it has to be the same every rescan or the whole meadow twitches
+              // each time you cross a cell line. Without it a hillside of these
+              // is a grid of identical stamps, which is the one way a model can
+              // look worse than the billboard it replaced.
+              lists[flower].push({
+                pos, up, out: null, d2,
+                spin: ((col * 37 + k * 101) % 628) / 100,
+              });
+              continue;
+            }
+
+            const byte = this.planet.facingAt(col, k) & 7;
+            const e = { pos, up, out: null, d2 };
             if (byte !== 0) {
               const [wi, wj] = TORCH_WALL_STEP[(byte - 1) & 3];
               const ea = _frame.ea, eb = _frame.eb;
@@ -2137,12 +2206,21 @@ class Game {
                 -(ea[0] * wi + eb[0] * wj), -(ea[1] * wi + eb[1] * wj),
                 -(ea[2] * wi + eb[2] * wj));
             }
-            out.push(e);
+            lists.torch.push(e);
           }
         }
       }
+      // `BlockModels` truncates a list that overruns its instance cap, and the
+      // scan walks in row order — so an untouched list would lose one whole
+      // side of the player rather than the far edge all round. Ordering by
+      // distance first makes the cap mean "the nearest N", which is the only
+      // reading of it that degrades gracefully. Only pays when it overruns,
+      // which for generated flora it never does (~190 across three kinds).
+      for (const key in lists) {
+        if (lists[key].length > BLOCK_MODEL_CAP) lists[key].sort((a, b) => a.d2 - b.d2);
+      }
     }
-    bm.sync(this._torchList || [], dt);
+    bm.sync(lists);
   }
 
   /** Where the fire actually is in a burning cell, in world space. */

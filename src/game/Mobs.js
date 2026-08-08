@@ -20,7 +20,7 @@ import {
 } from '../world/Sphere.js';
 import {
   ID, IS_SHAPED, IS_LEAF, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
-  isPassable,
+  isPassable, CONTACT_HURT,
 } from '../world/Blocks.js';
 import { itemIdOf } from './Items.js';
 import { rollStock, rollRequest } from './Trade.js';
@@ -231,6 +231,23 @@ const MOB_MAX_RISE = 1.05;
  */
 const LAVA_DPS = 6;
 const LAVA_PERIOD = 0.5;
+/**
+ * How often a body pressed against something spiky takes a point, in seconds.
+ *
+ * The player's cadence, deliberately — a cactus does not care what walked into
+ * it. What differs is the reach: an animal is a cylinder of `mob.radius`, not a
+ * player-sized box, so a cow brushes a cactus from further out than you do.
+ */
+const CONTACT_PERIOD = 0.5;
+/**
+ * How far past its own radius a body has to be for the spines to reach it.
+ *
+ * Bigger than the player's 0.015 because a mob is never resolved flush against
+ * a wall the way the player's collision solver leaves it — the footprint test
+ * refuses the move a whole cell earlier, so a body that has been *shoved* into
+ * a cactus is the realistic case and it stops a little short.
+ */
+const CONTACT_TOUCH = 0.12;
 
 // --- pathfinding -------------------------------------------------------------
 /** Seconds between route searches for one hunting mob. */
@@ -1770,6 +1787,7 @@ export class Mobs {
       /** Highest layer reached since leaving the ground, or null if it has not. */
       fallFrom: null,
       lavaT: 0,            // seconds until the next instalment of the lava toll
+      contactT: 0,         // ...and the same for anything spiky it is leaning on
       swimming: false,     // in water, and at home in it
       wading: false,       // in water, and very much not
       swimT: 0,            // when to look for the bank again
@@ -3714,6 +3732,67 @@ export class Mobs {
   }
 
   /**
+   * The worst spiky thing this body is actually touching, or 0.
+   *
+   * The player's `contactHurt` grows its collision box and tests every cell it
+   * overlaps. A mob has no box — it has a radius and a footprint test that
+   * already refuses to walk into solid ground — so this asks the simpler
+   * question that fits the shape: is there a hurting block in one of the five
+   * columns under and around the body, at a layer the body spans, close enough
+   * horizontally that the spines reach.
+   *
+   * Distance is measured to the *cell*, not to its centre: a cactus fills its
+   * column, so the nearest point of it is the column edge, and measuring to the
+   * middle would let a cow stand half inside one unharmed.
+   *
+   * @returns {number} damage per instalment
+   */
+  _contactHurtAt(mob) {
+    const c = mob.cell;
+    const col = this._colOf(c.f, c.ci, c.cj);
+    if (col < 0) return 0;
+    const reach = mob.radius + CONTACT_TOUCH;
+    const k0 = Math.floor(c.ck);
+    // Height in cells. Two traps here, both of which fail *quietly* rather than
+    // loudly, which is why they are written down:
+    //
+    // `height` lives on the spec, not on the mob record — `mob.height` is
+    // undefined and would have collapsed to a default, testing the same one
+    // layer for a bear and for a caterpillar.
+    //
+    // And it is `sizeJitter`, not `scale`. `scale` is
+    // `spec.height / modelHeight * sizeJitter` — a model-units-to-cells
+    // conversion — so multiplying the spec height by it again divides the
+    // answer by the rig's own rest height and collapses every animal to about
+    // half a layer. The individual variation is the jitter; the growth from
+    // kills is `grown`.
+    const bodyH = (mob.spec.height ?? 1) * (mob.sizeJitter ?? 1) * (mob.grown ?? 1);
+    const k1 = Math.floor(c.ck + Math.max(0.5, bodyH));
+    let worst = 0;
+    for (let di = -1; di <= 1; di++) {
+      for (let dj = -1; dj <= 1; dj++) {
+        // Gap to the nearest *edge* of that column, in cells. Zero for the
+        // column the body is standing in; for a neighbour it is however far
+        // the body is from the shared boundary. Measuring to the column's
+        // centre instead would let an animal stand half inside a cactus
+        // unharmed, since a cactus fills its column rather than sitting at a
+        // point in it.
+        const fi = c.ci - Math.floor(c.ci);
+        const fj = c.cj - Math.floor(c.cj);
+        const dx = di === 0 ? 0 : (di > 0 ? 1 - fi : fi);
+        const dy = dj === 0 ? 0 : (dj > 0 ? 1 - fj : fj);
+        if (Math.hypot(dx, dy) > reach) continue;
+        const nc = stepColumn(col, di, dj);
+        for (let k = k0; k <= k1; k++) {
+          const hurt = CONTACT_HURT[this.planet.at(nc, k)];
+          if (hurt > worst) worst = hurt;
+        }
+      }
+    }
+    return worst;
+  }
+
+  /**
    * Damage with nobody behind it — a fall, or lava.
    *
    * Deliberately not hurt(). Every line of that function is about the thing
@@ -4453,6 +4532,24 @@ export class Mobs {
           if (this._damage(mob, LAVA_DPS * LAVA_PERIOD)) continue;
         }
       } else mob.lavaT = 0;
+
+      // Spines. The same rule that hurts the player, applied to everything else
+      // that can walk into one — asked for in the same breath ("it should hurt
+      // me and the mobs"), and the half of it that would have been strange to
+      // leave out: a cactus that pricks you and not the cow standing in it is a
+      // cactus that knows who the player is.
+      //
+      // Cheap on purpose. This runs for every animal every frame, so it tests
+      // the mob's own column and its four tangential neighbours at the two
+      // layers a body actually occupies, and only when the timer is due —
+      // `_contactHurtAt` returns 0 immediately for the overwhelming majority of
+      // animals, which are standing on grass.
+      mob.contactT -= dt;
+      if (mob.contactT <= 0) {
+        mob.contactT = CONTACT_PERIOD;
+        const spike = this._contactHurtAt(mob);
+        if (spike > 0 && this._damage(mob, spike)) continue;
+      }
 
       // Carry the heading through a cube seam in world space, exactly as the
       // player does with its velocity — otherwise the tangent basis flips and

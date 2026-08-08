@@ -204,7 +204,16 @@ class Heap {
 /** How far past its own body a probe looks. */
 const PROBE_AHEAD = 0.9;
 
-/** Seconds of chasing without closing any ground before a husk gives up. */
+/**
+ * Seconds of chasing without closing any ground before a husk gives up.
+ *
+ * Written as an anti-stuck measure — a hunter clawing at the far side of a wall
+ * — and it is now also the player's guaranteed way out. Nothing on the planet
+ * chases faster than a sprint, so a sprinting player never lets a hunter improve
+ * its best distance and the chase ends here after nine seconds. Nine is the
+ * number that makes escaping cost roughly half the stamina bar at the 0.055/s
+ * sprint drain, which is the point: you get away, but you spend something.
+ */
 const HUNT_STALL = 9;
 /** And how long it then ignores the player, so it doesn't re-latch instantly. */
 const HUNT_COOLDOWN = 14;
@@ -304,8 +313,12 @@ const SIZE_VAR = 0.12;
  * One animal. Only what differs is written out; everything else takes a sane
  * default, which is what keeps a 22-species table readable.
  *   h    target height in cells      shy  0 never flees .. 1 bolts on sight
- *   hp   health                      spd  cells/second at a walk
+ *   hp   health                      spd  cells/second at a *wander*
  *   var  ± height spread per head    dmg  half-hearts a blow costs the player
+ *
+ * `spd` is the amble, not the top speed — a chase multiplies it by CHASE_SPEED
+ * and a bolt by FLEE_SPEED. See the speed ladder below the damage ladder for
+ * why the burst lives in the multiplier rather than in this number.
  *
  * Heights are the *drawn* height of the whole animal — ears, antlers, raised
  * head and all — against a player who stands 1.8. They are the only lever on
@@ -422,11 +435,16 @@ const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 // Three facts set the scale, and all three are worth stating because they make
 // the big numbers below far less brutal than they look:
 //
-//   1. Nothing on this planet can catch the player. Mob speeds top out at 1.8
-//      cells/s against a walk of 4.4 and a sprint of 6.8, so every one of these
-//      fights is one the player chose to stand in. Damage is the price of
-//      engaging, not a tax on being outdoors — which is the same principle that
-//      removed unprovoked aggression in the first place.
+//   1. Nothing on this planet acquires the player on its own except the husk
+//      and the night stalk. Every one of these fights is one the player picked,
+//      and every one of them can still be left — a sprint outruns the fastest
+//      chase on the planet. Damage is the price of engaging, not a tax on being
+//      outdoors, which is the same principle that removed unprovoked aggression.
+//      This used to read "nothing on this planet can catch the player", and that
+//      was the flaw the whole ladder was resting on: at a top speed of 1.8
+//      against a walk of 4.4 no fight could start unless the player stood still,
+//      so every number below was theoretical. Leaving now costs stamina rather
+//      than costing nothing — see the speed ladder.
 //   2. main.js grants HURT_IMMUNITY (0.5s) after every guarded blow, so a pack
 //      cannot burst you down and a species' threat really is its own DPS.
 //   3. Worn armour soaks up to 80% of a blow. The top of this ladder is
@@ -449,23 +467,84 @@ const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 // attrition — losing forty percent of the bar for standing in front of one is
 // the lesson. A tiger has the opposite shape: less per blow, but it keeps
 // landing them.
+//
+// --- the speed ladder --------------------------------------------------------
+// The damage ladder above was built on the assumption that nothing could reach
+// you, and the speeds made that literally true: the fastest land animal walked
+// at 1.5 against a player who *strolls* at 4.4 and sprints at 6.8. You outran a
+// tiger by three times without pressing anything. A tiger that cannot close is
+// not a tiger, and a lion that cannot run down a cow is not an ecology either —
+// prey fled at 2× its walk and predators chased at 1×, so a cow at 1.7 was
+// genuinely faster than the tiger at 1.5 chasing it, and kills happened only
+// because the flee state times out.
+//
+// Two ways to fix that, and the choice matters:
+//
+//   a) raise `spd` until a tiger walks at 5.7. Rejected. `spd` is the wander
+//      pace, and an animal that *mills about a meadow* at 5.7 cells/s is not
+//      dangerous, it is frantic — a cow at 3 looks like a cow being electrified.
+//      Worse, `spd` is also the animation's reference gait: the walk clip is
+//      played at speedNow/spec.speed, so it runs at exactly 1.0 whatever the
+//      base is. Doubling `spd` doubles the ground covered per footfall and every
+//      animal on the planet skates at its own amble.
+//   b) give chasing and fleeing their own multipliers on top of the wander, so
+//      the burst is a *state* and the amble stays an amble. Chosen.
+//
+// (b) also lands the fast movement on the run clip, where it is paid for: the
+// clip swaps to `run` above spec.speed * 1.25 and its rate is speedNow divided
+// by spec.speed * 2, so a multiplier of M plays the run at M/2. That is why the
+// old flee multiplier was exactly 2.0 — it hit a rate of 1.0 on the nose. The
+// setEffectiveTimeScale clamp is 0.45..2.2, i.e. multipliers from 0.9 to 4.4;
+// both numbers below sit comfortably inside it and nothing here can skate.
+//
+// The three speeds every number is set against, walk 4.4 / sprint 6.8:
+//
+//   fox        4.35   just under a walk — you *can* stroll away from a fox, and
+//                     its damage note says exactly that, so now it is true
+//   husk       4.50   reels in a walking player slowly; a sprint sheds it
+//   dog        4.65   as the fox, but it keeps up
+//   polar/cat  4.80
+//   lion       5.40
+//   tiger      5.70   the fastest thing with teeth. Walking away no longer works
+//   bee        6.30   the fastest thing full stop, and it has 3hp
+//   elephant   3.00   deliberately below a walk: its whole lesson is the single
+//                     blow, and "walking away always works" is what makes that
+//                     lesson survivable. Left slow on purpose.
+//
+// Nothing reaches 6.8. A sprint always opens ground, and HUNT_STALL then ends
+// the chase after nine seconds of not closing — so escape is guaranteed but it
+// costs about half the stamina bar (0.055/s drain) rather than costing nothing.
+// That is the whole design: getting away should be something you do, not the
+// default state of walking forwards.
+//
+// On the prey side FLEE is deliberately well under CHASE, so a committed hunter
+// genuinely runs its dinner down instead of relying on the flee timer lapsing.
+// Every flee speed also stays under the player's sprint, and every one of them
+// bar the bee's 4.62 stays under the player's *walk* — the fastest bolt on four
+// legs is the bunny at 4.07 and a strolling player still gains on it. A cow you
+// cannot reach is a cow you cannot farm.
+/** A committed chase, as a multiple of the wander pace. */
+const CHASE_SPEED = 3.0;
+/** A bolt. Lower than a chase on purpose — see the ladder above. */
+const FLEE_SPEED = 2.2;
+
 const SPECIES = {
   // --- large grazers ---
   cow: pet('cow', {
     // Head-high on the player and twice the width of a deer. The one animal a
     // player meets in the first minute, so it sets the scale for the rest.
-    label: 'Cow', h: 1.62, var: 0.18, hp: 10, spd: 0.85, shy: 0.35, turn: 2.0, accel: 4.5,
+    label: 'Cow', h: 1.62, var: 0.18, hp: 10, spd: 1.10, shy: 0.35, turn: 2.0, accel: 4.5,
     graze: 0.6, idleMin: 3, idleMax: 7, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   deer: pet('deer', {
     // Slightly shorter than the cow and far slighter. It stands tall for its
     // mass rather than being large, which the model already says — the job here
     // is only to stop it matching the cow number for number.
-    label: 'Deer', h: 1.50, var: 0.14, hp: 10, spd: 1.25, shy: 0.9, turn: 3.0, accel: 6.0,
+    label: 'Deer', h: 1.50, var: 0.14, hp: 10, spd: 1.70, shy: 0.9, turn: 3.0, accel: 6.0,
     idleMin: 2.5, idleMax: 6, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   elephant: pet('elephant', {
-    label: 'Elephant', h: 3.05, var: 0.14, hp: 20, spd: 0.75, shy: 0.2, turn: 1.6, accel: 3.5,
+    label: 'Elephant', h: 3.05, var: 0.14, hp: 20, spd: 1.00, shy: 0.2, turn: 1.6, accel: 3.5,
     graze: 0.6, idleMin: 3, idleMax: 8, drops: [['hide', 2, 3], ['meat', 2, 3]],
     // It does not hunt, but standing in front of one is a mistake. Slow, so
     // walking away works — which is exactly why the lesson has to be in the
@@ -476,16 +555,16 @@ const SPECIES = {
   giraffe: pet('giraffe', {
     // The tallest thing that walks. 3.9 and not 4.0 on purpose: see the note
     // above about `tall`.
-    label: 'Giraffe', h: 3.90, var: 0.15, hp: 14, spd: 1.0, shy: 0.5, turn: 1.8, accel: 4.0,
+    label: 'Giraffe', h: 3.90, var: 0.15, hp: 14, spd: 1.20, shy: 0.5, turn: 1.8, accel: 4.0,
     graze: 0.55, idleMin: 3, idleMax: 7, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   panda: pet('panda', {
-    label: 'Panda', h: 1.32, hp: 14, spd: 0.7, shy: 0.3, turn: 2.2, accel: 4.0,
+    label: 'Panda', h: 1.32, hp: 14, spd: 0.80, shy: 0.3, turn: 2.2, accel: 4.0,
     graze: 0.7, idleMin: 3, idleMax: 8, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   polar: pet('polar', {
     // Taller than the player, and the only thing on the ice that is.
-    label: 'Polar Bear', h: 1.90, hp: 16, spd: 1.0, shy: 0.3, turn: 2.4, accel: 5.0,
+    label: 'Polar Bear', h: 1.90, hp: 16, spd: 1.60, shy: 0.3, turn: 2.4, accel: 5.0,
     diet: 'carnivore', drops: [['hide', 2, 3], ['meat', 1, 2]], cold: true,
     // It fishes, so it swims — and it has to, or half its prey list is on the
     // wrong side of a wall and it spends every hunt padding along the ice
@@ -499,7 +578,7 @@ const SPECIES = {
   // read as a dog, and the point of one is that you can tell what it is across
   // a clearing. Neither comes for the player unasked; see the note on `fights`.
   lion: pet('lion', {
-    label: 'Lion', h: 1.45, var: 0.10, hp: 14, spd: 1.4, shy: 0.25, turn: 3.4, accel: 8.0,
+    label: 'Lion', h: 1.45, var: 0.10, hp: 14, spd: 1.80, shy: 0.25, turn: 3.4, accel: 8.0,
     diet: 'carnivore', drops: [['hide', 1, 2], ['meat', 1, 2]],
     // Land grazers, and nothing else. A cow is heavier than a lion and stays on
     // the list on purpose — pulling down something bigger than yourself is what
@@ -511,7 +590,7 @@ const SPECIES = {
   tiger: pet('tiger', {
     // The largest cat, and it should look it beside a lion, not merely beside a
     // fox. Longest reach and shortest swing of anything that is not a husk.
-    label: 'Tiger', h: 1.60, var: 0.10, hp: 14, spd: 1.5, shy: 0.25, turn: 3.6, accel: 8.5,
+    label: 'Tiger', h: 1.60, var: 0.10, hp: 14, spd: 1.90, shy: 0.25, turn: 3.6, accel: 8.5,
     diet: 'carnivore', drops: [['hide', 1, 2], ['meat', 1, 2]],
     eats: ['deer', 'cow', 'bunny', 'chick', 'monkey'],
     stalks: true,
@@ -522,7 +601,7 @@ const SPECIES = {
   dog: pet('dog', {
     // Omnivore rather than carnivore: a dog will chase a chick, but a dog
     // nosing at the grass is a dog, not a broken lion.
-    label: 'Dog', h: 0.78, hp: 8, spd: 1.5, shy: 0.4, turn: 4.5, accel: 9.0,
+    label: 'Dog', h: 0.78, hp: 8, spd: 1.55, shy: 0.4, turn: 4.5, accel: 9.0,
     diet: 'omnivore', graze: 0.2, idleMin: 1.2, idleMax: 3.5, drops: HIDE_MEAT,
     eats: ['chick', 'bunny'],
     fights: true, dmg: 2, reach: 1.0, swing: 1.0, aggro: 16,
@@ -530,7 +609,7 @@ const SPECIES = {
   fox: pet('fox', {
     // Smaller than the dog, which it never was before — both sat at 0.66/0.68
     // and the pair were indistinguishable at any distance.
-    label: 'Fox', h: 0.58, hp: 6, spd: 1.5, shy: 0.8, turn: 4.5, accel: 8.0,
+    label: 'Fox', h: 0.58, hp: 6, spd: 1.45, shy: 0.8, turn: 4.5, accel: 8.0,
     diet: 'carnivore', idleMin: 1.5, idleMax: 4, drops: HIDE_MEAT,
     eats: ['bunny', 'chick', 'parrot'],
     // The bottom of the ladder, and it has to actually be the bottom. At 2 per
@@ -544,26 +623,26 @@ const SPECIES = {
     // A hunter of chicks and nothing else, and no threat to the player — a cat
     // that fought back would be comedy rather than danger, which is why it gets
     // a diet but no `fights`.
-    label: 'Cat', h: 0.46, hp: 6, spd: 1.6, shy: 0.9, turn: 5.5, accel: 10.0,
+    label: 'Cat', h: 0.46, hp: 6, spd: 1.60, shy: 0.9, turn: 5.5, accel: 10.0,
     diet: 'carnivore', idleMin: 1.2, idleMax: 4, drops: [['hide', 1, 1]],
     eats: ['chick', 'bee', 'bunny'],
   }),
   koala: pet('koala', {
-    label: 'Koala', h: 0.56, hp: 6, spd: 0.7, shy: 0.5, turn: 2.4, accel: 4.0,
+    label: 'Koala', h: 0.56, hp: 6, spd: 0.80, shy: 0.5, turn: 2.4, accel: 4.0,
     graze: 0.65, idleMin: 3, idleMax: 8, drops: [['hide', 1, 1]],
   }),
   monkey: pet('monkey', {
-    label: 'Monkey', h: 0.68, hp: 6, spd: 1.5, shy: 0.8, turn: 5.0, accel: 9.0,
+    label: 'Monkey', h: 0.68, hp: 6, spd: 1.60, shy: 0.8, turn: 5.0, accel: 9.0,
     graze: 0.35, idleMin: 1, idleMax: 3, drops: [['hide', 1, 1]], hops: true, hopImpulse: 3.6,
   }),
   beaver: pet('beaver', {
-    label: 'Beaver', h: 0.5, hp: 6, spd: 1.1, shy: 0.7, turn: 4.0, accel: 7.0,
+    label: 'Beaver', h: 0.5, hp: 6, spd: 1.25, shy: 0.7, turn: 4.0, accel: 7.0,
     graze: 0.45, drops: HIDE_MEAT,
   }),
   penguin: pet('penguin', {
     // Knee-high on the player. Small, but the biggest thing standing upright on
     // the ice apart from the bear, so it is not down with the chicks.
-    label: 'Penguin', h: 0.80, hp: 6, spd: 0.9, shy: 0.6, turn: 3.2, accel: 5.5,
+    label: 'Penguin', h: 0.80, hp: 6, spd: 1.10, shy: 0.6, turn: 3.2, accel: 5.5,
     drops: [['poultry', 1, 1], ['feather', 1, 2]], cold: true,
   }),
 
@@ -577,15 +656,15 @@ const SPECIES = {
   // is under three centimetres, so the default range buys nothing but noise in
   // the numbers.
   bunny: pet('bunny', {
-    label: 'Bunny', h: 0.36, var: 0.06, hp: 4, spd: 1.7, shy: 1.0, turn: 5.0, accel: 9.0,
+    label: 'Bunny', h: 0.36, var: 0.06, hp: 4, spd: 1.85, shy: 1.0, turn: 5.0, accel: 9.0,
     graze: 0.35, idleMin: 1, idleMax: 3, drops: HIDE_MEAT, hops: true, hopImpulse: 4.2,
   }),
   chick: pet('chick', {
-    label: 'Chick', h: 0.26, var: 0.06, hp: 4, spd: 1.15, shy: 0.85, turn: 6.0, accel: 11.0,
+    label: 'Chick', h: 0.26, var: 0.06, hp: 4, spd: 1.30, shy: 0.85, turn: 6.0, accel: 11.0,
     graze: 0.7, idleMin: 0.8, idleMax: 2.4, drops: [['feather', 1, 2], ['poultry', 1, 1]],
   }),
   parrot: pet('parrot', {
-    label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 1.35, shy: 1.0, turn: 6.5, accel: 12.0,
+    label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 1.50, shy: 1.0, turn: 6.5, accel: 12.0,
     graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3], ['poultry', 1, 1]],
     hops: true, hopImpulse: 3.4,
   }),
@@ -607,7 +686,14 @@ const SPECIES = {
     //
     // Faster than it was, too. At 1.8 it could never close on a player who
     // simply walked (4.4), so the retaliation would have been a threat on paper
-    // exactly the way the husk's aggro range once was.
+    // exactly the way the husk's aggro range once was. That reasoning still
+    // holds and the fix has simply moved: it was answered by pushing the wander
+    // to 2.6, which made a bee going nowhere in particular the fastest thing on
+    // the planet, and is now answered by the chase multiplier. 2.1 × 3.0 = 6.3
+    // is the quickest chase in the table and still under a sprint — a bee that
+    // you can only shake by running flat out, on 3hp, is exactly the trade the
+    // sting is priced at. A wandering bee has slowed down and reads better for
+    // it; the darting comes from the 7.0 turn rate, not from the ground speed.
     //
     // The reach looks generous for an insect and is not, because it is the only
     // one in the table measured against a body that is not standing on the
@@ -616,7 +702,7 @@ const SPECIES = {
     // even touching the player's face it reads as 1.5 away before any horizontal
     // gap is counted. At a ground animal's reach it could hover inside your head
     // and never once be close enough to swing.
-    label: 'Bee', h: 0.26, var: 0.06, hp: 3, spd: 2.6, shy: 1.0, turn: 7.0, accel: 14.0,
+    label: 'Bee', h: 0.26, var: 0.06, hp: 3, spd: 2.10, shy: 1.0, turn: 7.0, accel: 14.0,
     graze: 0.5, idleMin: 0.6, idleMax: 1.8, flies: true, hover: 1.5,
     fights: true, dmg: 4, reach: 2.0, swing: 1.6, aggro: 12,
   }),
@@ -626,22 +712,22 @@ const SPECIES = {
     // sand is sand) and made a puddle an impassable wall to the one animal on
     // the planet that lives in the surf. Both flags are read by the movement
     // code — see the water rule in _footprintCost and _shoreBearing.
-    label: 'Crab', h: 0.30, var: 0.06, hp: 5, spd: 1.0, shy: 0.7, turn: 5.0, accel: 8.0,
+    label: 'Crab', h: 0.30, var: 0.06, hp: 5, spd: 1.15, shy: 0.7, turn: 5.0, accel: 8.0,
     graze: 0.4, drops: [['crab_meat', 1, 1]], amphibious: true, shore: true,
   }),
   caterpillar: pet('caterpillar', {
-    label: 'Caterpillar', h: 0.22, var: 0.06, hp: 3, spd: 0.5, shy: 0.6, turn: 2.5, accel: 4.0,
+    label: 'Caterpillar', h: 0.22, var: 0.06, hp: 3, spd: 0.55, shy: 0.6, turn: 2.5, accel: 4.0,
     graze: 0.8, idleMin: 2, idleMax: 6,
   }),
   fish: pet('fish', {
-    label: 'Fish', h: 0.40, var: 0.10, hp: 4, spd: 1.4, shy: 0.9, turn: 4.5, accel: 8.0,
+    label: 'Fish', h: 0.40, var: 0.10, hp: 4, spd: 1.50, shy: 0.9, turn: 4.5, accel: 8.0,
     graze: 0.3, idleMin: 1, idleMax: 3, drops: [['fish', 1, 1]], aquatic: true,
   }),
 
   // --- the one thing that wants you dead ---
   husk: {
     label: 'Husk', urls: [CHAR('l'), CHAR('o')], clips: CHAR_CLIPS, height: 1.72,
-    health: 14, speed: 1.30, skittish: 0, turn: 3.2, accel: 6.0,
+    health: 14, speed: 1.50, skittish: 0, turn: 3.2, accel: 6.0,
     // Cinder is the whole reason to be outside after dark; roughly every other
     // husk carries one, so a good night funds part of a cinder tool.
     drops: [['flint', 0, 1], ['coal', 0, 1], ['cinder', 0, 1]],
@@ -671,7 +757,7 @@ const SPECIES = {
     // Not a fight anyone should win by accident. It is also the only mob a
     // player has a reason to keep alive, so it is built to survive a stray
     // swing rather than to be farmed.
-    health: 60, speed: 0.95, skittish: 0, turn: 2.6, accel: 5.0,
+    health: 60, speed: 1.10, skittish: 0, turn: 2.6, accel: 5.0,
     drops: [['coin', 2, 6]],
     // Short pauses and a long walk phase: it should always be going somewhere,
     // because a merchant standing still is a shop, and this is a chance meeting.
@@ -706,6 +792,12 @@ const FOOT_OFF = [
 // MAX_WILDLIFE every SPAWN_PERIOD from the biome table, so an eaten bunny is
 // replaced by another of whatever lives there long before a predator is hungry
 // again.
+// Hunts also succeed far more often than they used to, and that is on purpose:
+// a chase at CHASE_SPEED genuinely runs down a bolt at FLEE_SPEED, where before
+// a cow fleeing at 1.7 was faster than the tiger chasing it at 1.5 and kills
+// landed only when the flee state happened to lapse. Nothing needed rebalancing
+// for it, because the rest below — not the chase — is what caps the kill rate:
+// a carnivore eats at most once per PREY_REST, however good it is at catching.
 const PREY_PERIOD = 1.6;      // seconds between prey searches for one carnivore
 const PREY_RANGE = 20;        // cells it will notice something to eat from
 const PREY_GIVE_UP = 12;      // seconds of chasing before it loses interest
@@ -2949,12 +3041,20 @@ export class Mobs {
       const fleeing = mob.state === 'flee';
       const chasing = mob.state === 'chase';
       const moving = mob.state === 'walk' || fleeing || chasing;
-      // A creeping cat moves at half its walk. That is the visible half of the
-      // night-stalk telegraph, and it has to be a speed rather than a state:
-      // 'walk' and 'chase' are the same speed here and differ only in turn
-      // rate, so a stalk built out of states would look exactly like a wander.
+      // The three gaits, all built out of the one wander pace. `spec.speed` is
+      // the amble and nothing moves at it except an animal with nowhere to be;
+      // a chase and a bolt are bursts on top of it. See the speed ladder.
+      //
+      // Chase used to be the bare wander — 'walk' and 'chase' were the same
+      // speed and differed only in the turn rate below, which is why the night
+      // stalk needed a multiplier of its own to look like anything: with one
+      // speed for every state, a creep built out of states was indistinguishable
+      // from a wander. Now there are three speeds and PROWL_SPEED is simply the
+      // fourth, still a fraction rather than a multiple.
       const targetSpeed = moving
-        ? spec.speed * (fleeing ? 2.0 : mob.creep ? PROWL_SPEED : 1) : 0;
+        ? spec.speed * (fleeing ? FLEE_SPEED
+          : mob.creep ? PROWL_SPEED
+          : chasing ? CHASE_SPEED : 1) : 0;
 
       // --- steering: limited turn rate, smooth acceleration -----------------
       const turn = spec.turn * (fleeing ? 1.6 : chasing ? 1.35 : 1) * dt;
@@ -3023,6 +3123,13 @@ export class Mobs {
         mob.vel.k -= GRAVITY * dt;
       }
 
+      // One step per frame, no substepping, and the footprint test below checks
+      // the destination rather than sweeping the line to it — so the step has to
+      // stay under a block or a fast body could straddle a wall. main.js clamps
+      // dt at 0.1, and the quickest gait in the file is the bee's chase at 6.3
+      // cells/s, which is 0.63 of a cell on the worst frame the engine allows.
+      // That is the tightest margin here and it is the thing to check first if
+      // any multiplier in the speed ladder is ever pushed past about 4.
       const ni = c.ci + mob.vel.i * dt;
       const nj = c.cj + mob.vel.j * dt;
 
@@ -3269,6 +3376,17 @@ export class Mobs {
 
     // Play the walk faster the quicker it moves, so feet do not skate. The
     // clips are authored at roughly one unit per second.
+    //
+    // Both bases are the species' *wander* pace, which is what makes the chase
+    // and flee multipliers safe: a gait of M times the wander lands on the run
+    // clip (the swap above is at 1.25×) and plays it at M/2, so FLEE_SPEED 2.2
+    // reads as 1.1 and CHASE_SPEED 3.0 as 1.5. The clamp bites at 0.45 and 2.2,
+    // i.e. at multipliers of 0.9 and 4.4, and every multiplier in this file sits
+    // between them — nothing skates, and nothing is running on a pinned clip.
+    // That headroom is the reason the speed ladder puts the burst in the
+    // multiplier and leaves `spec.speed` alone: raising the base raises the
+    // divisor with it, so a faster amble covers more ground at an unchanged 1.0
+    // and the animal skates while standing still in the numbers.
     const walking = clip === spec.clips.walk || clip === spec.clips.run;
     const act = model.actions[clip];
     if (act && walking) {
@@ -3422,7 +3540,11 @@ export class Mobs {
       mob.state = 'flee';
       mob.stateT = 2.5;
       mob.want = Math.atan2(rb, ra);      // bolt away from whatever hit it
-      mob.speedNow = mob.spec.speed * 1.4;
+      // Straight to the full bolt rather than accelerating into it. This was
+      // speed * 1.4, which was a genuine burst back when fleeing was 2× the
+      // wander and is now *below* the flee target — so the one frame that is
+      // supposed to read as a start would have quietly braked the animal.
+      mob.speedNow = mob.spec.speed * FLEE_SPEED;
       mob.vel.k = 3.0;
     }
     // Pain and death are never rate-limited — they are always the player's

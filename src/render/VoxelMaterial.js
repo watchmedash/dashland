@@ -49,6 +49,20 @@ export const voxelUniforms = {
   uHandLightPos: { value: new THREE.Vector3() },
   uHandLightColor: { value: new THREE.Vector3() },
   uHandLightRadius: { value: 0 },
+  /**
+   * The second moving flame: the brightest light-emitting item lying on the
+   * ground near you. Same shape as the hand light and the same shader path —
+   * a dropped torch is a torch, and a torch that stops giving light the instant
+   * it leaves your fingers is the sort of detail that quietly tells a player
+   * the world is a set.
+   *
+   * One, not many. The grid handles every *placed* light; this exists for the
+   * handful of seconds between dropping something and picking it up again, and
+   * a second uniform triple is a great deal cheaper than a light manager.
+   */
+  uDropLightPos: { value: new THREE.Vector3() },
+  uDropLightColor: { value: new THREE.Vector3() },
+  uDropLightRadius: { value: 0 },
 };
 
 const COMMON_VERT_HEAD = /* glsl */`
@@ -161,6 +175,26 @@ uniform float uSeasonStrength;
 uniform vec3 uHandLightPos;
 uniform vec3 uHandLightColor;
 uniform float uHandLightRadius;
+uniform vec3 uDropLightPos;
+uniform vec3 uDropLightColor;
+uniform float uDropLightRadius;
+
+/**
+ * One moving flame's contribution. Inverse-square with a linear cutoff at the
+ * radius so it reaches zero instead of trailing a wash across the whole chunk,
+ * and lambert-shaded off the surface normal so it wraps around geometry rather
+ * than flooding it. The 0.22 floor lifts faces turned away out of pure black:
+ * a real flame bounces off everything around it.
+ */
+vec3 flameLight(vec3 lpos, vec3 lcol, float lrad, vec3 nrm, vec3 world) {
+  if (lrad <= 0.0) return vec3(0.0);
+  vec3 toL = lpos - world;
+  float dist = length(toL);
+  if (dist >= lrad) return vec3(0.0);
+  float fall = 1.0 - dist / lrad;
+  float lambert = clamp(dot(nrm, toL / max(dist, 0.001)), 0.0, 1.0);
+  return lcol * (mix(0.22, 1.0, lambert) * fall * fall);
+}
 varying float vLayer;
 varying float vAO;
 varying float vSun;
@@ -511,18 +545,14 @@ const LIGHTS_END = /* glsl */`
   // Inverse-square with a linear cutoff at the radius, so it reaches zero
   // instead of trailing a faint wash across the whole chunk, and lambert-shaded
   // off the surface normal so it wraps around geometry rather than flooding it.
-  if (uHandLightRadius > 0.0) {
-    vec3 toHand = uHandLightPos - vWorld;
-    float dist = length(toHand);
-    if (dist < uHandLightRadius) {
-      float fall = 1.0 - dist / uHandLightRadius;
-      float lambert = clamp(dot(normal, toHand / max(dist, 0.001)), 0.0, 1.0);
-      // A little ambient term so faces turned away are lifted out of pure black
-      // rather than vanishing; a real flame bounces off everything around it.
-      float shaped = mix(0.22, 1.0, lambert) * fall * fall;
-      reflectedLight.indirectDiffuse += diffuseColor.rgb * uHandLightColor * shaped * RECIPROCAL_PI;
-    }
-  }
+  vec3 moving = flameLight(uHandLightPos, uHandLightColor, uHandLightRadius, normal, vWorld)
+              + flameLight(uDropLightPos, uDropLightColor, uDropLightRadius, normal, vWorld);
+  reflectedLight.indirectDiffuse += diffuseColor.rgb * moving * RECIPROCAL_PI;
+  // Both moving flames count as block light for the scotopic pass, or the
+  // ground your own torch is lighting would drain of colour while the identical
+  // patch beside a planted torch kept it. Firelight is firelight wherever it is
+  // standing.
+  gBlockLum += dot(moving, vec3(0.2126, 0.7152, 0.0722));
   reflectedLight.indirectSpecular *= aoTotal;
 
   float shadowGate = smoothstep(0.0, 0.30, vSun);

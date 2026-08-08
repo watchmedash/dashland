@@ -199,6 +199,13 @@ const HAND_LIGHT_RADIUS = 8;
  * always the real difference.
  */
 const HAND_LIGHT_REACH = 13.0;
+/**
+ * How far from the player a dropped flame is looked for, in world units.
+ *
+ * A little past the reach of the light itself, so one walks into view already
+ * lit rather than igniting as you cross a line.
+ */
+const DROP_LIGHT_RANGE = 18;
 const HAND_LIGHT_GAIN = 5.0;
 
 /**
@@ -2579,6 +2586,7 @@ class Game {
     this.viewModel.setOffhand(this.inventory.offhand.item, this.ui.icons);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     this._updateHandLight(dt);
+    this._updateDropLight(dt);
     this._safeTick('flames', () => this._tickFlames(dt));
     this._safeTick('blockModels', () => this._syncBlockModels());
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
@@ -3362,6 +3370,65 @@ class Game {
     u.uHandLightPos.value.copy(this.player.eye)
       .addScaledVector(this.player.lookDir, 0.45)
       .addScaledVector(this.player.up, -0.35);
+  }
+
+  /**
+   * The brightest burning thing lying on the ground near you.
+   *
+   * A torch that goes dark the instant it leaves your fingers, and lights up
+   * again the instant you pick it up, is the sort of detail that quietly tells
+   * a player the world is a set. Dropping one should light where it lands —
+   * and it is genuinely useful: a torch tossed down a shaft you are digging
+   * lights the bottom while both hands are busy.
+   *
+   * **One flame, the brightest, nearest-wins on a tie.** The alternative is a
+   * light manager, and this exists to cover the seconds between dropping
+   * something and picking it up again; every *placed* light in the world is
+   * already baked into the grid, far more cheaply than any of this. A pile of
+   * ten dropped torches lighting as one torch is the right failure: they are
+   * within a metre of each other, so summing them would only blow out the
+   * ground they are lying on.
+   *
+   * Scanned every frame rather than cached, because a drop moves — it is thrown,
+   * it falls, it slides down a slope, and a light that lagged its own object by
+   * a cell would look like the flame had come loose. The list is bounded and the
+   * test is a distance compare against a radius, so this is a few dozen
+   * comparisons.
+   */
+  _updateDropLight(dt) {
+    const u = voxelUniforms;
+    let best = null, bestEmit = 0, bestD2 = Infinity;
+    for (const d of this.drops.list) {
+      const def = ITEMS[d.item];
+      const bl = def?.block !== undefined ? BLOCKS[def.block] : null;
+      const emit = bl?.light ?? 0;
+      if (!emit) continue;
+      const d2 = d.pos.distanceToSquared(this.player.position);
+      if (d2 > DROP_LIGHT_RANGE * DROP_LIGHT_RANGE) continue;
+      if (emit > bestEmit || (emit === bestEmit && d2 < bestD2)) {
+        best = { drop: d, block: bl }; bestEmit = emit; bestD2 = d2;
+      }
+    }
+    if (!best) {
+      // Eased out rather than cut, for the same reason the hand light is: a
+      // torch picked up should not snap the cave to black in one frame.
+      u.uDropLightRadius.value = Math.max(0, u.uDropLightRadius.value - dt * 26);
+      if (u.uDropLightRadius.value <= 0.01) u.uDropLightColor.value.set(0, 0, 0);
+      return;
+    }
+    // The same flicker the hand light uses, on its own phase so two flames in
+    // one room do not pulse in lockstep, which reads as a framerate problem.
+    const flicker = 0.92 + Math.sin(this._flameT * 9.7 + 1.9) * 0.05
+      + Math.sin(this._flameT * 3.4 + 0.7) * 0.03;
+    const lc = best.block.lightColor || WHITE_L;
+    const strength = (bestEmit / 15) * HAND_LIGHT_GAIN * flicker;
+    u.uDropLightColor.value.set(lc[0] * strength, lc[1] * strength, lc[2] * strength);
+    const want = HAND_LIGHT_REACH * (bestEmit / 13);
+    u.uDropLightRadius.value += (want - u.uDropLightRadius.value) * Math.min(1, dt * 8);
+    // A little above the item, which sits on the ground: a light exactly at
+    // floor level lights the floor and nothing else.
+    u.uDropLightPos.value.copy(best.drop.pos).addScaledVector(
+      _v1.copy(best.drop.pos).sub(this.planet.center).normalize(), 0.25);
   }
 
   /** Crosshair prompt when you're looking at an animal. */

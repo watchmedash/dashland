@@ -221,6 +221,15 @@ export class ViewModel {
     this.bob = 0;
     this.equipT = 1;      // 0 = just swapped, 1 = settled
     this.enabled = true;
+    /**
+     * Told whenever the arm swings, so the third-person body can swing too.
+     *
+     * A hook rather than a second call at every site that mines, places, eats,
+     * casts or hits: there are eight of them in main, and the ninth one someone
+     * adds next month would silently animate one body and not the other. There
+     * is exactly one definition of "the player swung", and it is `punch`.
+     */
+    this.onPunch = null;
   }
 
   setSize(w, h) {
@@ -361,7 +370,7 @@ export class ViewModel {
   }
 
   /** Kick off the mining / placing swing. */
-  punch() { this.swing = 0; }
+  punch() { this.swing = 0; this.onPunch?.(); }
 
   /**
    * @param {{r:number,g:number,b:number}} [handLight] local block light at the

@@ -13,7 +13,12 @@ import {
 const FULL_BOX = [[0, 0, 0, 1, 1, 1]];
 
 const EYE = 1.62;
-const HEIGHT = 1.8;
+/**
+ * Standing height of the collision box, in cells. Exported because the player's
+ * body model is scaled to it — a rig measured at its own rest height and then
+ * fitted to this number stands exactly as tall as the thing that collides.
+ */
+export const HEIGHT = 1.8;
 /**
  * Half-width of the collision box, in CELL units.
  *
@@ -57,6 +62,42 @@ const LADDER_GRIP = 0.62;
  * doesn't. A current you cannot leave is not a river, it is a wall.
  */
 const FLOW_PUSH = 11;
+
+/**
+ * Camera modes, in the order the cycle key walks them.
+ *
+ * First person is index 0 and is the default because it is the finished one —
+ * the viewmodel, the swing tracks, the hand light are all built for it. The
+ * other two exist so you can see the body: one over the shoulder, one facing
+ * you, which is the only way to look at your own character.
+ */
+export const VIEW_FIRST = 0;
+export const VIEW_BACK = 1;
+export const VIEW_FRONT = 2;
+export const VIEW_COUNT = 3;
+/** What each mode is called when the switch is announced. */
+export const VIEW_LABELS = ['First person', 'Third person', 'Third person, facing'];
+
+/**
+ * How far the third-person camera sits from the eye, in cells.
+ *
+ * Far enough that a 1.8-cell body fits the frame with room around it, close
+ * enough that it is still your character and not a diorama. The same distance
+ * both ways: a selfie view that sat closer than the over-the-shoulder one made
+ * the two feel like different games.
+ */
+const THIRD_DIST = 3.6;
+/**
+ * Clearance kept between the camera and whatever the ray hit.
+ *
+ * Not a taste value — the camera has a frustum, and stopping the *point* at the
+ * wall puts the near plane inside it, which renders as the wall's interior
+ * filling half the screen. 0.32 against a 0.06 near plane covers the corners of
+ * the near rectangle at the default fov with room to spare.
+ */
+const CAM_PAD = 0.32;
+/** Nearer than this and there is no third person left to have; fall back. */
+const THIRD_MIN = 0.55;
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -119,6 +160,14 @@ export class Player {
     this.onLand = null;
     this.onHurt = null;
     this.moveAmount = 0;
+    /**
+     * How far the camera ended up behind (or in front of) the eye this frame,
+     * after the terrain pull-in. 0 means first person — or a third-person view
+     * that had to give up because there was nowhere to put the camera. The body
+     * model reads this to decide whether it can be drawn without the camera
+     * ending up inside its head.
+     */
+    this.cameraDist = 0;
     /** Set by main once Mobs exists, so the box can be kept out of bodies. */
     this.mobs = null;
   }
@@ -856,7 +905,13 @@ export class Player {
 
   // --- camera ---------------------------------------------------------------
 
-  updateCamera(camera, dt, baseFov, allowBob = true) {
+  /**
+   * @param {number} view VIEW_FIRST / VIEW_BACK / VIEW_FRONT. Only the camera
+   *   moves: `eye`, `lookDir` and therefore reach, mining and the crosshair are
+   *   unchanged in every mode — you interact from the body, not from wherever
+   *   the camera happens to have been pushed to.
+   */
+  updateCamera(camera, dt, baseFov, allowBob = true, view = VIEW_FIRST) {
     const targetEye = this.crouching ? CROUCH_EYE : EYE;
     this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, 12 * dt);
 
@@ -865,15 +920,42 @@ export class Player {
       .addScaledVector(this.up, Math.sin(this.pitch)).normalize();
 
     this.eye.copy(this.position).addScaledVector(this.up, this.eyeHeight - this.stepOffset);
-    const b = allowBob ? this.bobAmount : 0;
+    // Head bob is a first-person effect and only a first-person effect. Applied
+    // to a camera three and a half cells out it stops reading as footfalls and
+    // starts reading as a handheld shot of someone else walking.
+    const b = allowBob && view === VIEW_FIRST ? this.bobAmount : 0;
     if (b > 0.001) {
       this.eye.addScaledVector(this.up, Math.sin(this.bob * 2) * 0.042 * b);
       this.eye.addScaledVector(right, Math.cos(this.bob) * 0.05 * b);
     }
 
     const camPos = _a.copy(this.eye);
+    this.cameraDist = 0;
+    if (view !== VIEW_FIRST) {
+      // Out along the view axis: behind for the over-the-shoulder view, ahead
+      // for the one that looks back at you.
+      _v4.copy(this.lookDir).multiplyScalar(view === VIEW_BACK ? -1 : 1);
+      // March the world and stop short of the first solid thing. Without this
+      // the camera happily sits inside the hillside you are standing against
+      // and you are looking at the inside of the terrain — the standard failure
+      // of a fixed-offset third-person camera, and `planet.raycast` is exactly
+      // the tool for it. Liquids are deliberately not hit: swimming would
+      // otherwise slam the camera to the surface every stroke, and the
+      // underwater post pass already sells being submerged.
+      let dist = THIRD_DIST;
+      const hit = this.planet.raycast(this.eye, _v4, dist + CAM_PAD);
+      if (hit) dist = hit.dist - CAM_PAD;
+      if (dist >= THIRD_MIN) {
+        camPos.addScaledVector(_v4, dist);
+        this.cameraDist = dist;
+      }
+    }
     camera.position.copy(camPos);
-    _m.lookAt(camPos, _b.copy(camPos).add(this.lookDir), this.up);
+    // Both third-person modes aim at the eye, which for the rear view is the
+    // same thing as aiming along lookDir and for the front view is the reverse
+    // of it — one line instead of a branch, and the two can never drift apart.
+    if (this.cameraDist > 0) _m.lookAt(camPos, this.eye, this.up);
+    else _m.lookAt(camPos, _b.copy(camPos).add(this.lookDir), this.up);
     camera.quaternion.setFromRotationMatrix(_m);
     if (b > 0.001) camera.rotateZ(Math.cos(this.bob) * 0.011 * b);
 

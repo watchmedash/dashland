@@ -2,8 +2,9 @@
 
 import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
-import { Player } from './player/Player.js';
+import { Player, VIEW_FIRST, VIEW_COUNT, VIEW_LABELS } from './player/Player.js';
 import { ViewModel } from './player/ViewModel.js';
+import { PlayerCharacter, playerModelUrls } from './player/Character.js';
 import { Input } from './player/Input.js';
 import { Sky } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
@@ -323,6 +324,13 @@ class Game {
       this.ui.toast(`Bells, somewhere close by.${wants}`, itemIdOf('coin'), 5200);
       this.audio.mob(mob.type, 'idle', mob.pos);
     };
+    // The player's body. Built after Drops because it borrows the same factory
+    // the drops use — what you carry and what you dropped are the same mesh.
+    this.character = new PlayerCharacter(this.scene, (id) => this.drops.createItemMesh(id));
+    this.viewModel.onPunch = () => this.character.punch();
+    /** Which camera the F5 cycle is on. First person is the default and always will be. */
+    this.viewMode = VIEW_FIRST;
+
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
     // A current carries what is in it. Both are built before the sim is, so
@@ -525,7 +533,10 @@ class Game {
     // load, so it has to stay synchronous — an animal that appears two frames
     // after the terrain it stands on is worse than a slightly longer load.
     this.ui.progress(0.95, 'Waking the wildlife');
-    await MobModels.prepare(MOB_MODEL_URLS);
+    // The player's own body goes through the same cache as the mobs' — one
+    // prototype per file, so a player wearing a face a husk also wears costs
+    // nothing extra. Only the chosen character is fetched, not all fifteen.
+    await MobModels.prepare([...MOB_MODEL_URLS, ...playerModelUrls(this.character.id)]);
 
     this.ui.progress(1, 'Ready');
     this.ui.loaded();
@@ -1722,6 +1733,8 @@ class Game {
   }
 
   _idleUpdate(dt) {
+    // The menu's orbit camera flies right past where the body is standing.
+    this.character.hide();
     const t = performance.now() * 0.00005;
     const r = R_TERRAIN_MAX + 34;
     this.camera.position.set(Math.cos(t) * r, Math.sin(t * 0.53) * r * 0.38, Math.sin(t) * r);
@@ -1741,8 +1754,23 @@ class Game {
    */
   static NO_INPUT = { down: () => false };
 
+  /**
+   * Step the camera round the player. The viewmodel and the body are opposite
+   * sides of one switch — exactly one of them is ever drawn, so first person
+   * keeps the finished hand and third person never shows a fist floating in
+   * front of your own face.
+   */
+  _cycleView() {
+    this.viewMode = (this.viewMode + 1) % VIEW_COUNT;
+    this.viewModel.enabled = this.viewMode === VIEW_FIRST;
+    if (this.viewMode === VIEW_FIRST) this.character.hide();
+    this.ui.toast(VIEW_LABELS[this.viewMode], 0, 1400);
+  }
+
   _frozenUpdate(dt) {
-    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob);
+    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob, this.viewMode);
+    this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
+      this.inventory.held().item);
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     this.sky.update(dt, this.camera, this.player.up, this.player.position);
     this._updateSharedUniforms();
@@ -1760,6 +1788,13 @@ class Game {
       return;
     }
     if (input.pressed('F3')) ui.toggleDebug();
+    // F5, the key every voxel game already uses for this, and the only spare
+    // one: Input already swallows the browser's reload on it while the pointer
+    // is locked, which is the reason it was in that list before anything used
+    // it. Cycles first → behind → facing, and is deliberately allowed while a
+    // screen is open — looking at your own character in your inventory is the
+    // main thing you would want it for.
+    if (input.pressed('F5')) this._cycleView();
 
     // A container screen takes your hands, not the world. It used to return
     // early here, which froze breath, hunger, health, physics and every animal
@@ -1905,7 +1940,11 @@ class Game {
     this.shelter += (this._skyExposure() - this.shelter) * Math.min(1, dt * 3.5);
     this.particles.setWeather(this.weather.type, this.weather.precip * this.shelter, this.player.headInWater);
 
-    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob);
+    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob, this.viewMode);
+    // After the camera, because the body hides itself when the camera has been
+    // pulled in on top of it and it needs this frame's distance to know.
+    this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
+      this.inventory.held().item);
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     this._updateHandLight(dt);

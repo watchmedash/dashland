@@ -280,7 +280,25 @@ const LIQUID_MAP_FRAG = /* glsl */`
 `;
 
 const LIQUID_NORMAL_FRAG = /* glsl */`
+  // Liquid is DoubleSide, so half the quads you ever see are back faces: the
+  // surface of a lake from underwater, the underside of a flow running off a
+  // ledge. The mesher emits one quad per surface with its normal pointing out
+  // of the water, so on those views the shading normal points away from the
+  // eye — and the fresnel block after <opaque_fragment> reads a normal pointing
+  // away as a perfectly grazing view. cosT clamps to 0, fres goes to 1, and the
+  // shaded water is replaced wholesale by 88% flat sky at 0.97 alpha: swimming
+  // up to the surface and looking at it showed no water texture at all, just a
+  // pale sheet the colour of the sky.
+  //
+  // NORMAL_FRAG solves the same problem with three's faceDirection, but that
+  // reads the triangle's winding, and a liquid top quad is wound from its own
+  // cell rather than from the side you happen to be on — measured +1 on
+  // fragments whose geometric normal faced away, so the winding cannot be
+  // trusted to say which side is being looked at. Ask the view vector instead,
+  // which is true whatever the winding. It is a no-op on front faces, so
+  // everything seen from above renders exactly as before.
   vec3 gN = normalize(vNormal);
+  gN *= dot(gN, uCamPos - vWorld) < 0.0 ? -1.0 : 1.0;
   vec3 Tv = normalize(vTangent - gN * dot(gN, vTangent));
   vec3 Bv = cross(gN, Tv);
   vec3 nA = texture(uNormalMap, vec3(vTexUv * 1.25 + vec2(uTime * 0.020, uTime * 0.016), vLayer)).xyz * 2.0 - 1.0;

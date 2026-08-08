@@ -8,7 +8,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
-import { createCutoutNormalMaterial } from './VoxelMaterial.js';
+import { createCutoutNormalMaterial, createMappedNormalMaterial } from './VoxelMaterial.js';
 
 const GradeShader = {
   uniforms: {
@@ -119,7 +119,7 @@ export class PostFX {
   }
 
   /**
-   * Teach the GTAO G-buffer prepass about cutout foliage.
+   * Teach the GTAO G-buffer prepass what the real materials know.
    *
    * GTAOPass draws its depth/normal buffer through `scene.overrideMaterial`,
    * which replaces *every* material with one plain MeshNormalMaterial. That
@@ -127,13 +127,52 @@ export class PostFX {
    * crosses and leaf blocks wrote solid full-quad depth into the AO buffer.
    * The result was a world full of ghostly block-shaped shadow panels, most
    * obvious over grass. `overrideMaterial` is all-or-nothing, so instead of
-   * using it we swap each mesh's material for the frame and give the cutout
-   * meshes a normal material that performs the same discard.
+   * using it we swap each mesh's material for the frame and give the meshes
+   * that need one a stand-in that performs the same discard.
+   *
+   * Three cases, in the order the swap tests them:
+   *
+   * 1. **Voxel cutout** — chunk geometry (it carries `aux`) whose material has
+   *    an alphaTest: grass, flowers, leaves, ladders. `createCutoutNormalMaterial`
+   *    repeats the array-texture discard *and* the mesher's wind, so the AO
+   *    geometry is where the drawn geometry is.
+   * 2. **Mapped cutout** — anything else hole-punched: a dropped item with no 3D
+   *    model (two crossed icon cards, alphaTest 0.35, ~0.46 cells across and
+   *    spinning) and any glTF MASK material a mob or the player might wear. Same
+   *    bug, no `aux` to read, so `createMappedNormalMaterial` samples the source
+   *    material's own `map`. One per source material, kept in a WeakMap so the
+   *    stand-in dies with the material it stands in for.
+   * 3. **Everything else** — the pass's own MeshNormalMaterial. This is already
+   *    right for more than it looks: three compiles that material per object
+   *    type, so `<project_vertex>` picks up `instanceMatrix` for the modelled
+   *    flowers and `<skinning_vertex>` picks up the skeleton for the mobs and the
+   *    player character. They land in the G-buffer where they are drawn.
+   *
+   * ### What is deliberately *not* corrected here
+   *
+   * **Vertex sway on the instanced flower models.** `applyInstancedSway` bends a
+   * modelled flower and the stand-in does not, so its G-buffer silhouette is the
+   * rest pose. Measured rather than assumed: the bend is `0.13 * |sway|` in the
+   * model's unit-height space with `|sway| <= 0.85`, scaled by the kind's 0.62,
+   * and weighted by a squared height ramp — so ~0.07 cells at the very tip of
+   * the stem and near zero over most of it, against a GTAO radius of 0.9 cells.
+   * Under a twelfth of the sample radius, on an object 0.6 cells tall. Fixing it
+   * would need a second sway-patched normal material per swaying kind, carrying
+   * the geometry's root and head heights as uniforms — which live in
+   * `BlockModels`, not here. The rest pose is also the conservative error: the
+   * flower still occludes, roughly where it is, instead of not at all.
+   *
+   * **The liquid swell**, for the same reason: `up * h * 0.075` peak, and water
+   * is a large visible surface, so dropping it out of the G-buffer entirely
+   * would change the AO along every shoreline. Wrong by 7cm beats absent.
    */
   _patchGtaoCutout() {
     const cutoutNormal = createCutoutNormalMaterial(0.42);
     this.cutoutNormalMaterial = cutoutNormal;
+    /** @type {WeakMap<THREE.Material, THREE.Material>} case 2, built on demand */
+    const mappedNormals = new WeakMap();
     const swapped = [];
+    const hidden = [];
 
     // The swap visits every mesh in the scene each frame — several hundred chunk
     // meshes plus ~22 part meshes per animal — so it has to be allocation-free.
@@ -144,8 +183,58 @@ export class PostFX {
     // memoised on the mesh and only recomputed when either is swapped out (chunk
     // meshes keep their material and replace their geometry on every remesh).
     let overrideMat = null;
+
+    /** The stand-in this mesh needs, or null for the pass's plain material. */
+    const proxyFor = (mat, geo) => {
+      // The voxel proxy reads the tile array through the `aux` attribute, so it
+      // only stands in for voxel geometry that actually carries one.
+      if (geo && geo.attributes.aux !== undefined) {
+        if (Array.isArray(mat)) {
+          for (let i = 0; i < mat.length; i++) {
+            if (mat[i] && mat[i].alphaTest > 0) return cutoutNormal;
+          }
+          return null;
+        }
+        return mat.alphaTest > 0 ? cutoutNormal : null;
+      }
+      // A multi-material mesh would need an array of stand-ins matching its draw
+      // groups; nothing cut out in this game is one (the split-group models are
+      // tools and ores, all solid), so it is not worth carrying that array.
+      if (Array.isArray(mat) || !(mat.alphaTest > 0) || !mat.map) return null;
+      let p = mappedNormals.get(mat);
+      if (p === undefined) {
+        p = createMappedNormalMaterial(mat);
+        mappedNormals.set(mat, p);
+      }
+      return p;
+    };
+
     const swap = (o) => {
-      if (!o.isMesh) return;
+      if (!o.isMesh) {
+        // Points, lines and sprites, hidden for the prepass rather than stood
+        // in for.
+        //
+        // The material swap only reaches meshes, and this replacement of
+        // `_renderOverride` never sets `scene.overrideMaterial` — so everything
+        // else drawable rendered into the normal target *with its own material*,
+        // painting raw colour over the packed normals. Weather is the loud case:
+        // rain and snow are a `Points` field around the camera with
+        // `depthWrite: false` and ordinary blending, so a storm smeared thousands
+        // of grey dots across the whole G-buffer and the AO read a garbage normal
+        // at every one of them. The spark puffs, the stars and the block
+        // highlight are the same thing on a smaller scale.
+        //
+        // Hiding them is correct and not a hole: none of them writes depth in the
+        // beauty pass either (the highlight's LineSegments does, but it is a
+        // one-pixel wireframe), so what you actually see through a raindrop is the
+        // terrain behind it — which is precisely the geometry the G-buffer is now
+        // left describing.
+        if (o.visible && (o.isPoints || o.isLine || o.isSprite)) {
+          o.visible = false;
+          hidden.push(o);
+        }
+        return;
+      }
       const mat = o.material;
       if (!mat) return;
       swapped.push(o, mat);
@@ -153,19 +242,9 @@ export class PostFX {
       if (o._gtaoMat !== mat || o._gtaoGeo !== geo) {
         o._gtaoMat = mat;
         o._gtaoGeo = geo;
-        // The proxy reads the tile array through the voxel `aux` attribute, so
-        // it only stands in for voxel geometry that actually carries one.
-        let cut = false;
-        if (geo && geo.attributes.aux !== undefined) {
-          if (Array.isArray(mat)) {
-            for (let i = 0; i < mat.length; i++) {
-              if (mat[i] && mat[i].alphaTest > 0) { cut = true; break; }
-            }
-          } else cut = mat.alphaTest > 0;
-        }
-        o._gtaoCutout = cut;
+        o._gtaoProxy = proxyFor(mat, geo);
       }
-      o.material = o._gtaoCutout ? cutoutNormal : overrideMat;
+      o.material = o._gtaoProxy || overrideMat;
     };
 
     this.gtao._renderOverride = function (renderer, overrideMaterial, renderTarget, clearColor, clearAlpha) {
@@ -187,6 +266,7 @@ export class PostFX {
       }
 
       swapped.length = 0;
+      hidden.length = 0;
       this.scene.traverse(swap);
 
       // This prepass fills a depth/normal G-buffer with unlit materials, none of
@@ -209,7 +289,9 @@ export class PostFX {
         renderer.shadowMap.autoUpdate = shadowAuto;
         renderer.shadowMap.needsUpdate = shadowNeeds;
         for (let i = 0; i < swapped.length; i += 2) swapped[i].material = swapped[i + 1];
+        for (let i = 0; i < hidden.length; i++) hidden[i].visible = true;
         swapped.length = 0;
+        hidden.length = 0;
       }
 
       renderer.autoClear = originalAutoClear;

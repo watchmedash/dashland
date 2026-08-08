@@ -666,6 +666,63 @@ export function createCutoutNormalMaterial(alphaTest = 0.42) {
 }
 
 /**
+ * The same stand-in for cutout art that is *not* voxel geometry.
+ *
+ * `createCutoutNormalMaterial` above only covers meshes carrying the voxel
+ * `aux` attribute, because it reads its alpha out of the tile array by layer.
+ * That leaves everything else in the scene that is a hole-punched quad, and the
+ * scene has more of those than it looks: a dropped item with no 3D model falls
+ * out of the world as two crossed cards wearing its inventory icon (see
+ * `game/Drops.js`), and any glTF material authored with alphaMode MASK — which
+ * is how a mob or the player character would carry a fringe, a feather or a
+ * leaf — arrives as a MeshStandardMaterial with `alphaTest` set. All of those
+ * were writing their *whole quad* into the AO G-buffer: exactly the block-shaped
+ * shadow panel that the voxel version was written to kill, on a 0.46-cell card
+ * that spins, against an AO radius of 0.9 cells.
+ *
+ * One of these per source material, cached by the caller. `map`'s alpha is the
+ * cutout — `alphaMap` is not consulted, because nothing in this project uses one
+ * and reading both would cost a second sampler on every fragment of the prepass.
+ * The texture is sampled with the raw `uv` attribute rather than through
+ * `<uv_vertex>`: MeshNormalMaterial has no map slot at all, so USE_UV is never
+ * defined for it and `vUv` does not exist. That also means a source map with a
+ * non-identity `repeat`/`offset` would be sampled untransformed; nothing here
+ * has one, and a wrong *alpha* lookup only costs a hole in the AO buffer rather
+ * than a visible artifact in the frame.
+ *
+ * @param {THREE.Material} src the material being stood in for
+ */
+export function createMappedNormalMaterial(src) {
+  // glTF's alphaCutoff defaults to 0.5 and GLTFLoader copies it through, so a
+  // MASK material always brings its own number; the fallback is only for a
+  // material that somehow set `transparent` without one.
+  const alphaTest = src.alphaTest > 0 ? src.alphaTest : 0.5;
+  const mat = new THREE.MeshNormalMaterial({ side: src.side });
+  mat.blending = THREE.NoBlending;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uCutMap = { value: src.map };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vCutUv;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCutUv = uv;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <packing>', /* glsl */`
+        #include <packing>
+        uniform sampler2D uCutMap;
+        varying vec2 vCutUv;
+      `)
+      .replace('#include <clipping_planes_fragment>', /* glsl */`
+        #include <clipping_planes_fragment>
+        if (texture2D(uCutMap, vCutUv).a < ${alphaTest.toFixed(3)}) discard;
+      `);
+  };
+  // Keyed on the cutoff because it is baked into the source string above, not
+  // passed as a uniform — two materials with different cutoffs are two programs.
+  // Everything sharing a cutoff shares one.
+  mat.customProgramCacheKey = () => 'mapCutoutNormal|' + alphaTest.toFixed(3);
+  return mat;
+}
+
+/**
  * Give an *instanced* model the wind a cross billboard gets for free.
  *
  * A plant drawn as a billboard sways because the mesher stamps a wave code into

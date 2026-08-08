@@ -192,8 +192,23 @@ vec3 flameLight(vec3 lpos, vec3 lcol, float lrad, vec3 nrm, vec3 world) {
   float dist = length(toL);
   if (dist >= lrad) return vec3(0.0);
   float fall = 1.0 - dist / lrad;
-  float lambert = clamp(dot(nrm, toL / max(dist, 0.001)), 0.0, 1.0);
-  return lcol * (mix(0.22, 1.0, lambert) * fall * fall);
+  // Wrapped lambert that reaches *zero* on a face turned away from the flame.
+  //
+  // This was mix(0.22, 1.0, lambert) with lambert clamped at zero, so a surface
+  // pointing directly away from the light still collected 22% of it. That is
+  // the "I put a torch on the ground, towered up four blocks, and the top of the
+  // tower is lit" report: the top face points at the sky, the flame is beneath
+  // it, and the floor term lit it through the whole column of stone. Raising the
+  // hand light's gain from 2.1 to 5.0 to match a planted torch more than doubled
+  // how obvious that was.
+  //
+  // The floor existed for a real reason — a face at a grazing angle should not
+  // snap to black, because a real flame bounces off everything around it — so
+  // this keeps a soft shoulder instead of deleting it: the wrap is still lit a
+  // little past the terminator (0.11 at exactly edge-on) and falls to nothing
+  // by the time the surface has turned properly away.
+  float wrap = clamp((dot(nrm, toL / max(dist, 0.001)) + 0.12) / 1.12, 0.0, 1.0);
+  return lcol * (wrap * fall * fall);
 }
 varying float vLayer;
 varying float vAO;

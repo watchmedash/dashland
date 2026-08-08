@@ -119,6 +119,8 @@ export class Player {
     this.onLand = null;
     this.onHurt = null;
     this.moveAmount = 0;
+    /** Set by main once Mobs exists, so the box can be kept out of bodies. */
+    this.mobs = null;
   }
 
   // --- placement ------------------------------------------------------------
@@ -177,6 +179,62 @@ export class Player {
       }
     }
     return false;
+  }
+
+  /**
+   * Keep the player's box out of animal bodies.
+   *
+   * Until now the player collided with blocks and nothing else, and the only
+   * body-vs-body resolution in the game was the animals' own sidestep — which
+   * is deliberately one-sided, because being shoved around by livestock is
+   * worse than walking through it. That worked while every animal was about
+   * player-sized. It stopped working when a giraffe arrived: an animal backed
+   * against a wall has nowhere to yield to, so you walked straight in, your eye
+   * ended up inside the barrel, and because the art is double-sided you got a
+   * clear view of the far flank from the inside.
+   *
+   * A circle and not the oriented footprint. The footprint is a rectangle
+   * turned to face the animal's heading, and resolving a box against a rotated
+   * box for something this small is a lot of maths to make a cow feel very
+   * slightly more cow-shaped. `radius` is the longer half-axis, so this is the
+   * footprint's circumscribed circle — generous by up to the difference between
+   * halfW and halfL, which for everything but the two giants is under 0.35 of a
+   * cell.
+   *
+   * The wall wins. The push is only taken if the destination is legal, so an
+   * animal cannot press you into geometry — you simply stay put and it is the
+   * animal's own separation that has to give.
+   */
+  _pushOutOfMobs(height) {
+    const mobs = this.mobs;
+    if (!mobs) return;
+    const c = this.cell;
+    for (const m of mobs.list) {
+      // Cell coordinates on two different cube faces are not comparable, and a
+      // player and an animal within a metre of each other are on the same face
+      // everywhere except exactly on a seam. Not worth the frame conversion.
+      if (m.cell.f !== c.f) continue;
+      if (c.ck >= m.cell.ck + m.tall || c.ck + height <= m.cell.ck) continue;
+      const di = c.ci - m.cell.ci, dj = c.cj - m.cell.cj;
+      const need = m.radius + HALF_W;
+      const d2 = di * di + dj * dj;
+      if (d2 >= need * need) continue;
+      let ux, uj;
+      if (d2 > 1e-6) {
+        const d = Math.sqrt(d2);
+        ux = di / d; uj = dj / d;
+      } else {
+        // Dead centre — a body that spawned on top of us. Any direction will
+        // do; forward is the one the player is already looking at.
+        const fwd = this._toCellVelocity(this.forward.x, this.forward.y, this.forward.z);
+        const l = Math.hypot(fwd.i, fwd.j) || 1;
+        ux = fwd.i / l; uj = fwd.j / l;
+      }
+      const ni = m.cell.ci + ux * need, nj = m.cell.cj + uj * need;
+      if (ni < 0 || ni >= F || nj < 0 || nj >= F) continue;
+      if (this._blocked(ni, nj, c.ck, height)) continue;
+      c.ci = ni; c.cj = nj;
+    }
   }
 
   /**
@@ -668,6 +726,9 @@ export class Player {
 
     // Safety net: never end a frame with the box inside geometry.
     this._escape(height);
+
+    // ...nor inside an animal.
+    this._pushOutOfMobs(height);
 
     this._sync();
 

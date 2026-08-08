@@ -302,6 +302,9 @@ class Game {
     // they take the reference here rather than through their constructors.
     this.player.water = this.water;
     this.drops.water = this.water;
+    // Same shape, same reason: the player is built before the animals are, and
+    // its box has to stay out of their bodies.
+    this.player.mobs = this.mobs;
     this.weather = new Weather();
     this.weather.onThunder = () => this.audio.thunder(0.85 + Math.random() * 0.35);
     this.seasons = new Seasons();

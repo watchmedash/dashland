@@ -263,13 +263,17 @@ export class ViewModel {
       let mat = this.blockMaterial;
       if (emit > 0) {
         const lc = BLOCKS[def.block].lightColor || [1, 1, 1];
-        // Barely anything, and that is the finding rather than a fudge. The
-        // viewmodel already lights the item with a 1.9 key and a 1.1 fill, so
-        // an emissive on top of a tile whose hot seams are already near white
-        // clips: at full strength the hearth was a plain white cube, at a third
-        // it was cream. What a glowing block needs in the hand is a warm tint,
-        // not more light — it is being *held*, not lighting the scene.
-        const s = 0.04 + (emit / 15) * 0.07;
+        // A glowing block is mostly dark rock with hot seams, and the two need
+        // to stay far apart. The key and fill here are strong enough to lift
+        // the rock to the same tone as the seams, so hold the albedo down
+        // against them — a thing that makes its own light is not also a thing
+        // that takes the room's light well.
+        this.glowMaterial.color.setScalar(0.52);
+        // Now the emissive can be worth having. It rides the tile's own
+        // luminance (see the emissivemap override in createItemBlockMaterial),
+        // so this lands on the seams and leaves the rock alone; the earlier
+        // attempt had to be kept near zero only because it hit both equally.
+        const s = 0.30 + (emit / 15) * 0.55;
         this.glowMaterial.emissive.setRGB(lc[0] * s, lc[1] * s, lc[2] * s);
         mat = this.glowMaterial;
       }

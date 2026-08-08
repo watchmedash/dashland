@@ -600,13 +600,33 @@ export function createItemBlockMaterial() {
         uniform vec3 uSeasonColor;
         uniform float uSeasonStrength;
         vec3 armS;
+        vec4 texelS;
       `)
       // A held or dropped block turns with the year too, or an autumn player
       // carries a piece of summer around in front of them.
       .replace('#include <map_fragment>', /* glsl */`
-        vec4 texel = texture(uMap, vec3(vTexUv, vLayer));
+        texelS = texture(uMap, vec3(vTexUv, vLayer));
+        vec4 texel = texelS;
         diffuseColor *= texel;
 ${SEASON_FRAG}
+      `)
+      // Emissive that follows the texture instead of flooding the whole cube.
+      //
+      // A block that gives off light has an albedo that is nearly black with
+      // bright seams in it — that contrast *is* the look. In the world it
+      // survives because the ambient reaching it is modest. In the hand there
+      // is no voxel light at all, just a key and a fill, and those wash the
+      // dark rock up to the same tan as the seams: the planet hearth came out
+      // looking like sandstone. Raising the material emissive did not help,
+      // because emissive is one colour across the whole surface, so it lifted
+      // the dark parts by exactly as much and clipped the seams to white.
+      //
+      // The tile already knows which texels are hot. Gate the emissive on its
+      // luminance and only the seams light up, so the contrast comes back
+      // instead of being averaged away.
+      .replace('#include <emissivemap_fragment>', /* glsl */`
+        float hotL = dot(texelS.rgb, vec3(0.2126, 0.7152, 0.0722));
+        totalEmissiveRadiance *= smoothstep(0.34, 0.92, hotL);
       `)
       .replace('#include <normal_fragment_maps>', /* glsl */`
         vec3 nT = texture(uNormalMap, vec3(vTexUv, vLayer)).xyz * 2.0 - 1.0;

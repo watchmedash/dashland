@@ -102,7 +102,13 @@ const MAX_WILDLIFE = 84;
  * have bees in them rather than the thing rationing them.
  */
 const MAX_AQUATIC = 18;
-const MAX_FLYING = 14;
+/**
+ * Raised from 14 when the parrot started flying rather than hopping. The two
+ * fliers now share this budget, and leaving it alone would have bought parrots
+ * by taking bees away — which is the exact trade the paragraph above is about,
+ * one level further down again.
+ */
+const MAX_FLYING = 18;
 /** Wildlife spawned per top-up tick, and how often a tick comes round.
  *
  * A player walks 4.4 units a second and sprints at 6.8, so the ring of terrain
@@ -906,10 +912,22 @@ const SPECIES = {
     label: 'Chick', h: 0.26, var: 0.06, hp: 4, spd: 1.30, shy: 0.85, turn: 6.0, accel: 11.0,
     graze: 0.7, idleMin: 0.8, idleMax: 2.4, drops: [['feather', 1, 2], ['poultry', 1, 1]],
   }),
+  // The parrot flies. It hopped, like a bunny, which is a strange thing for the
+  // only other bird on the planet with wings to do — the flight branch already
+  // existed for the bee and this is one flag.
+  //
+  // `hover` 2.0 is chosen against a hard ceiling rather than by eye: a flier's
+  // moves are still judged by the walking rules, so once its hover puts it more
+  // than MOB_FALL_FREE (3) layers over the ground every heading costs the
+  // refusal value and it stops moving horizontally altogether. Anything at or
+  // above 3 would silently hover in place. Two clears the tall grass and a
+  // fence and leaves margin under that limit; the bee sits at 1.5 for the same
+  // reason. See the note on _walkStep — that coupling is worth removing, and
+  // until it is, this number cannot be raised.
   parrot: pet('parrot', {
     label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 1.50, shy: 1.0, turn: 6.5, accel: 12.0,
     graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3], ['poultry', 1, 1]],
-    hops: true, hopImpulse: 3.4,
+    flies: true, hover: 2.0,
   }),
   bee: pet('bee', {
     // "Bees should sting harder" was reported, and the honest answer was that a
@@ -1338,16 +1356,24 @@ const SPAWN_BY_BIOME = {
   // shoreline test in the spawn tick now enforces that wherever it is listed.
   DESERT: ['lion', 'caterpillar', 'bee'],
   BADLANDS: ['lion', 'tiger', 'caterpillar'],
-  SAVANNA: ['giraffe', 'giraffe', 'elephant', 'lion', 'tiger', 'deer'],
+  SAVANNA: ['giraffe', 'giraffe', 'elephant', 'lion', 'tiger', 'deer', 'parrot'],
+  // Parrots are listed in more than one place now, and that is not decoration.
+  // The parrot used to hop, so it came off the *land* budget and its single
+  // entry here was enough to see one occasionally. Giving it wings moved it onto
+  // the flier budget, where it draws against the bee — and the bee is in eight
+  // of these lists to the parrot's one, and is smaller, so the size weighting
+  // favours it too. Measured after the change and before this line: eighteen
+  // bees and zero parrots. Wings made the bird rarer, which is the opposite of
+  // the point.
   FOREST: ['deer', 'deer', 'fox', 'bunny', 'bunny', 'panda', 'koala', 'monkey',
-    'parrot', 'bee', 'caterpillar'],
+    'parrot', 'parrot', 'bee', 'caterpillar'],
   PINE_FOREST: ['deer', 'deer', 'fox', 'fox', 'bunny', 'beaver', 'bee'],
   MEADOW: ['cow', 'cow', 'cow', 'bunny', 'bunny', 'chick', 'chick', 'dog', 'cat',
     'bee', 'bee', 'deer'],
   PLAINS: ['cow', 'cow', 'bunny', 'bunny', 'chick', 'chick', 'chick', 'dog',
     'cat', 'deer', 'fox', 'bee'],
   OCEAN: ['crab', 'crab', 'beaver'],
-  BEACH: ['crab', 'crab', 'crab', 'bunny', 'bee'],
+  BEACH: ['crab', 'crab', 'crab', 'bunny', 'bee', 'parrot'],
 };
 
 // --- the merchant's own spawn path -------------------------------------------

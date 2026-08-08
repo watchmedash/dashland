@@ -265,13 +265,18 @@ export class IconFactory {
   item(id) {
     const def = ITEMS[id];
     if (!def) return '';
-    // Blocks keep their isometric icon even when they have a held model. The
-    // torch is the case that decides it: its model is an unlit stick, which in
-    // a 46px slot is indistinguishable from the stick item, while the block
-    // tile carries the flame that makes a torch a torch at a glance.
-    if (def.block !== undefined) return this.block(def.block);
+    // A block with a model of its own is drawn as that model, not as a cube.
+    //
+    // This used to go the other way, and the torch was the case that decided
+    // it: the model was an unlit stick, indistinguishable from the stick item
+    // at 46px, while the block tile at least carried a flame. Both halves of
+    // that have since stopped being true — the model's head glows now, and the
+    // "flame" tile turned out to be a picture of a whole torch — so the cube
+    // was winning on a comparison that no longer holds. A torch in the hotbar
+    // should be the thing you are about to plant.
     const modelled = this._modelIcon(id);
     if (modelled) return modelled;
+    if (def.block !== undefined) return this.block(def.block);
     const key = `i${id}`;
     if (this.cache.has(key)) return this.cache.get(key);
     const c = document.createElement('canvas');

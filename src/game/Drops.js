@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
 import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID } from '../world/Blocks.js';
 import { ITEMS } from './Items.js';
+import { hasModel, worldModel } from '../render/ItemModels.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -42,6 +43,16 @@ export class Drops {
   _mesh(itemId) {
     const def = ITEMS[itemId];
     if (!def) return null;
+    // Anything with a model of its own falls out of the world as that model.
+    // A torch on the ground was a little cube with torch tiles on its faces,
+    // which is the one thing a torch is not. Held, planted and dropped are now
+    // the same object.
+    if (hasModel(itemId)) {
+      const m = worldModel(itemId);
+      if (m) { m.userData.modelled = true; return m; }
+      // Not loaded yet — the sprite below stands in, and the next drop picks
+      // up the model. Never block, never throw: this runs inside a break.
+    }
     // Cross-shaped blocks (flowers, grass, saplings) have no cube form — built
     // as a cube their transparent pixels render as a black box.
     if (def.block !== undefined && RENDER_TYPE[def.block] !== R_CROSS) {
@@ -180,7 +191,9 @@ export class Drops {
       _q.setFromAxisAngle(up, d.spin);
       const bid = ITEMS[d.item]?.block;
       const isCube = bid !== undefined && RENDER_TYPE[bid] !== R_CROSS;
-      const scale = isCube ? 0.30 : 0.46;
+      // A model is authored at its own size and only needs bringing down to
+      // pick-up scale; a cube is a unit cube and a sprite is a unit quad.
+      const scale = d.mesh.userData.modelled ? 0.34 : (isCube ? 0.30 : 0.46);
       const pop = Math.min(1, d.age * 5);
       _s.setScalar(scale * pop * (1 - d.magnet * 0.5));
       _m.compose(_hover, _q, _s);

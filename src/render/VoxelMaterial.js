@@ -248,12 +248,20 @@ const LIQUID_MAP_FRAG = /* glsl */`
   // flat pale sheet laid over the terrain — a sheet of paper with a hard edge.
   // Shallows are now nearly clear and only faintly tinted; depth is what brings
   // in colour and opacity.
-  vec3 shallow = vec3(0.30, 0.68, 0.72);
+  // Real water *absorbs* the light coming back off the bed — it multiplies it.
+  // Alpha blending can only average, so a pale cyan at low alpha over bright
+  // sand lands on a desaturated grey rather than on turquoise, and a shelf a
+  // single block deep came out looking like faintly hazy sand with no water in
+  // it at all. Compensating means carrying more of the water's own colour in
+  // the shallows and making that colour strong enough to survive the average.
+  // The shallow end stays see-through — the bed's ripples still read through
+  // it, which is the thing worth keeping — it is simply water-coloured now.
+  vec3 shallow = vec3(0.13, 0.55, 0.60);
   vec3 deep    = vec3(0.02, 0.16, 0.34);
   float dRamp = smoothstep(0.0, 0.42, wDepth);
   vec3 body = mix(shallow, deep, dRamp);
   diffuseColor.rgb = surf * body * 1.12;
-  diffuseColor.a = mix(0.20, 0.90, dRamp);
+  diffuseColor.a = mix(0.46, 0.90, dRamp);
 
   // Foam where the water actually touches land. Tight and bright: a hard rim
   // is what tells the eye the surface has an edge in the world rather than

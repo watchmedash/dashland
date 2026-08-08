@@ -31,6 +31,18 @@ export class Inventory {
     // walks the carried inventory — crafting costs, the recipe sidebar, a
     // merchant's buy list — can quietly consume the boots off your feet.
     this.armour = Array.from({ length: ARMOUR_SLOT_ORDER.length }, () => new Slot());
+    /**
+     * The left hand — one stack you carry but are not holding.
+     *
+     * Kept out of `slots` for the same reason `armour` is, and the reason is
+     * sharper here: a torch in the offhand is exactly the sort of thing a
+     * recipe wants (a torch is fuel, a stick is in half the tree), and anything
+     * that walks the carried inventory would spend it. Crafting costs, the
+     * "Can Craft" sidebar, the merchant's sell list and `remove` all iterate
+     * `slots`, so staying out of that array is what makes the offhand a place
+     * you can put something and expect to find it there.
+     */
+    this.offhand = new Slot();
     this.cursor = new Slot();
     this.selected = 0;
     this.onChange = null;
@@ -67,6 +79,27 @@ export class Inventory {
 
   held() { return this.slots[this.selected]; }
   heldDef() { return ITEMS[this.slots[this.selected].item] || null; }
+
+  /**
+   * Trade the selected hotbar stack for the offhand stack — the F key.
+   *
+   * A straight swap rather than a merge, even when the two hold the same item.
+   * Merging is what a slot click does and it is right there; a swap key that
+   * sometimes swapped and sometimes silently stacked would be a key you could
+   * not predict, and the one case it would fire on — two half stacks of torches
+   * — is the case where you wanted the torch to stay in the left hand.
+   */
+  swapOffhand() {
+    const held = this.held();
+    const t = held.copy();
+    held.set(this.offhand.item, this.offhand.count, this.offhand.wear);
+    this.offhand.set(t.item, t.count, t.wear);
+    // `set` will happily write (0, 0) from an empty source; normalise both ends
+    // so `empty` is true for the reason it is meant to be true.
+    if (held.count <= 0) held.clear();
+    if (this.offhand.count <= 0) this.offhand.clear();
+    this.changed();
+  }
 
   /** @returns {number} how many were actually taken in */
   add(itemId, count = 1) {
@@ -181,9 +214,28 @@ export class Inventory {
     };
   }
 
+  /**
+   * The offhand's saved form, and its restore.
+   *
+   * Deliberately not inside `toJSON`/`fromJSON`: it rides in the save's
+   * `player` object beside the chosen character, because it is a fact about the
+   * person rather than about their bags — see `_savePayload`. Two small methods
+   * rather than reaching into `inv.offhand` from the save code, so `Slot`'s
+   * encoding stays this module's business.
+   */
+  offhandJSON() { return this.offhand.toJSON(); }
+  loadOffhand(v) { this.offhand = Slot.fromJSON(v); this.changed(); }
+
   fromJSON(data) {
     if (!data) return;
     this.slots = Array.from({ length: TOTAL }, (_, i) => Slot.fromJSON(data.slots?.[i]));
+    // Emptied here even though it is not in `data` — precisely because it is
+    // not in `data`. `fromJSON` is the line that means "this inventory is now
+    // that save's inventory", and a field it silently left alone would be a
+    // field that survived the change of world. `_resetWorld` happens to build a
+    // fresh Inventory today, so nothing is currently relying on this; that is a
+    // property of the caller, not of this method. `loadOffhand` runs after.
+    this.offhand.clear();
     // Saves written before armour existed have no `armour` key at all, and
     // fromJSON(undefined) is already an empty slot — so they load bare-headed
     // rather than failing.

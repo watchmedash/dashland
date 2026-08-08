@@ -263,7 +263,13 @@ button small { display: block; font-size: 10.5px; font-weight: 500; opacity: .8;
 #v-health.critical .v-track b { animation: vital-pulse 1s ease-in-out infinite; }
 @keyframes vital-pulse { 0%, 100% { filter: none; } 50% { filter: brightness(1.7); } }
 
-#hotbar { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: blur(9px); pointer-events: auto; }
+#hotbar, #offhand-bar { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: blur(9px); pointer-events: auto; }
+/* The offhand hangs off the row rather than sitting inside it. Laid out in
+   flow it would have widened the row by 46px and pushed the hotbar half that
+   far right of the crosshair — a bar that has been centred on the middle of the
+   screen since the first build, moved by an addition that is not part of it. */
+#bar-row { position: relative; display: flex; }
+#offhand-bar { position: absolute; right: 100%; bottom: 0; margin-right: 5px; }
 .slot {
   position: relative; width: 38px; height: 38px; border-radius: 4px;
   background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .08);
@@ -499,6 +505,26 @@ button small { display: block; font-size: 10.5px; font-weight: 500; opacity: .8;
 }
 /* Once something is in it the label would show through the icon. */
 .armour-slot.filled::after { content: none; }
+
+/* The offhand, next along. Borrows the worn slots' language — a tinted cell
+   with a faint label in it — rather than inventing a third kind of slot, but
+   keeps its own column so it does not read as a fifth piece of armour. */
+.offhand-col {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  margin-right: 14px;
+}
+.offhand-slot { background: rgba(120, 132, 158, .16); border-color: rgba(60, 74, 104, .18); }
+.offhand-slot::after {
+  content: '✋';
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 15px; opacity: .18; pointer-events: none;
+}
+.offhand-slot.filled::after { content: none; }
+.slot-cap {
+  font: 700 7px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  color: rgba(40, 52, 78, .5); display: flex; align-items: center; gap: 3px;
+}
+.slot-cap kbd { font-size: 8px; padding: 1px 3px; }
 
 .crate-area { display: flex; justify-content: center; }
 .crate-grid {

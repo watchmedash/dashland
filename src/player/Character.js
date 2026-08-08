@@ -75,9 +75,22 @@ const CLIP = {
   walk: 'walk',
   run: 'sprint',
   attack: 'attack-melee-right',
-  /** Not played — read, for its one keyframe. See `_readHoldPose`. */
-  hold: 'holding-right',
+  /**
+   * Not played — read, for their one keyframe each. See `_readHoldPose`.
+   *
+   * `holding-both` is in the pack too and is not used: it keys both arms in one
+   * clip, which would only help if both hands always held or always did not.
+   * They don't — the right arm drops its pose for every swing while the left
+   * keeps hold — so the two one-armed clips are the ones that compose.
+   */
+  hold: { right: 'holding-right', left: 'holding-left' },
 };
+
+/** The two hands, in the order everything here iterates them. */
+const HANDS = ['right', 'left'];
+
+/** The rig node behind each hand. */
+const ARM_NODE = { right: 'arm-right', left: 'arm-left' };
 
 /**
  * Where an item sits in the hand, in arm-local model units.
@@ -86,8 +99,17 @@ const CLIP = {
  * y -1..0.1, z ±0.2 in the space of the `arm-right` node, so the limb's centre
  * line is x = -0.2 and its far end — the fist — is y = -1. An item centred a
  * little past that reads as held rather than skewered.
+ *
+ * The left is not the same vector. `arm-left`'s mesh spans x 0..0.4 in its own
+ * node space — the pack mirrors the geometry rather than mirroring the node —
+ * so its centre line is x = +0.2. Reusing the right hand's offset put the
+ * offhand item outside the limb, floating a fifth of a unit off the knuckles,
+ * which reads as a bug rather than as a torch.
  */
-const HAND_LOCAL = new THREE.Vector3(-0.2, -1.02, 0);
+const HAND_LOCAL = {
+  right: new THREE.Vector3(-0.2, -1.02, 0),
+  left: new THREE.Vector3(0.2, -1.02, 0),
+};
 
 /**
  * Longest axis of a held item, in model units. One model unit is
@@ -150,13 +172,22 @@ export class PlayerCharacter {
     this.url = characterUrl(this.id);
 
     this.model = null;          // { root, mixer, actions, current }
-    this.arm = null;            // the `arm-right` node — the hand
-    this.holdQ = null;          // the holding-right pose, or null if absent
-    this._holdW = 0;            // eased 0..1
+    this.arms = { right: null, left: null };    // the `arm-*` nodes
+    this.holdQ = { right: null, left: null };   // holding-* poses, null if absent
+    this._holdW = { right: 0, left: 0 };        // eased 0..1, per arm
     this.swingT = 0;
 
     /**
-     * Item meshes by id, built once and kept.
+     * Item meshes by id, built once and kept — one cache per hand.
+     *
+     * Per hand rather than one shared map, because a cached holder is a single
+     * Object3D and an Object3D has one parent: putting the cached torch in the
+     * left hand while the right already held it would *move* it there, and the
+     * right hand would go empty without anything having been told. Two torches,
+     * one in each hand, is an ordinary thing to want. Splitting the cache costs
+     * at most one extra small mesh per item the offhand has ever held, and it
+     * keeps the disposal rule below — a transient belongs to exactly one hand —
+     * true by construction.
      *
      * Not rebuilt per equip: the sprite path in `createItemMesh` allocates a
      * fresh PlaneGeometry every call, and a player flicking through the hotbar
@@ -165,14 +196,16 @@ export class PlayerCharacter {
      * meshes sharing geometry and materials with the drops already in the
      * world.
      */
-    this._itemCache = new Map();
-    /** The one holder that is not cached, because its art had not loaded yet. */
-    this._transient = null;
+    this._itemCache = { right: new Map(), left: new Map() };
     /**
-     * Anchors by hand, keyed rather than a single field because the offhand is
-     * coming. `left` is unused today; adding it is a second entry here and a
-     * second `setHeld` call, and nothing else.
+     * The holder in each hand that is not cached, because its art had not
+     * loaded yet. Per hand, and it has to be: one field was enough while there
+     * was one hand, but a stand-in in the left hand would have overwritten the
+     * right's and the right's geometry would then never be released — or worse,
+     * the left's would be disposed while the right was still drawing it.
      */
+    this._transient = { right: null, left: null };
+    /** Anchors by hand: an empty Group parented into each `arm-*` node. */
     this.hands = { right: null, left: null };
     this.heldItem = { right: -1, left: -1 };
 
@@ -190,11 +223,16 @@ export class PlayerCharacter {
     if (this.model) {
       this.scene.remove(this.model.root);
       this.model = null;
-      this.arm = null;
-      this.hands.right = null;
-      this.hands.left = null;
-      this.heldItem.right = -1;
-      this.heldItem.left = -1;
+      for (const h of HANDS) {
+        this.arms[h] = null;
+        this.hands[h] = null;
+        this.holdQ[h] = null;
+        this._holdW[h] = 0;
+        // The anchors went with the old body, so the new one's are empty and
+        // must not be told they already hold what the last one did.
+        this.heldItem[h] = -1;
+        this._transient[h] = null;
+      }
     }
   }
 
@@ -215,26 +253,37 @@ export class PlayerCharacter {
     this.scene.add(model.root);
 
     this.model = model;
-    this.arm = model.root.getObjectByName('arm-right') || null;
-    this.holdQ = this._readHoldPose(model);
-    if (this.arm) {
+    for (const h of HANDS) {
+      const arm = model.root.getObjectByName(ARM_NODE[h]) || null;
+      this.arms[h] = arm;
+      this.holdQ[h] = this._readHoldPose(model, CLIP.hold[h]);
+      if (!arm) continue;
       const anchor = new THREE.Group();
-      anchor.position.copy(HAND_LOCAL);
-      this.arm.add(anchor);
-      this.hands.right = anchor;
+      anchor.position.copy(HAND_LOCAL[h]);
+      arm.add(anchor);
+      this.hands[h] = anchor;
     }
     MobModels.play(model, CLIP.idle, 0);
   }
 
   /**
-   * The one keyframe of `holding-right`, as a quaternion, or null.
+   * The one keyframe of a `holding-*` clip, as a quaternion, or null.
    *
    * Track names come out of GLTFLoader as `<node>.<property>`, so the arm's is
-   * `arm-right.quaternion`. Reading the action's clip rather than reaching into
-   * MobModels' private prototype map keeps this to the module's public surface.
+   * `arm-right.quaternion`. Each of these clips keys exactly one arm, which is
+   * why finding the first quaternion track is enough — the clip name has
+   * already picked the node. Reading the action's clip rather than reaching
+   * into MobModels' private prototype map keeps this to the module's public
+   * surface.
+   *
+   * The two poses are the same quaternion in this pack, so one read would do
+   * today. It is done twice anyway: they are the same by coincidence of how the
+   * pack was authored, not by any rule, and a pack that raised one arm higher
+   * than the other would otherwise put the offhand item somewhere no comment
+   * would explain.
    */
-  _readHoldPose(model) {
-    const clip = model.actions[CLIP.hold]?.getClip();
+  _readHoldPose(model, name) {
+    const clip = model.actions[name]?.getClip();
     const track = clip?.tracks.find((t) => t.name.endsWith('.quaternion'));
     if (!track || track.values.length < 4) return null;
     const v = track.values;
@@ -265,8 +314,8 @@ export class PlayerCharacter {
    * Put an item in a hand.
    *
    * @param {number} itemId 0 or -1 for empty
-   * @param {'right'|'left'} which the offhand seam: `left` works the moment
-   *   there is an anchor for it.
+   * @param {'right'|'left'} which `right` is the selected hotbar slot, `left`
+   *   the offhand.
    */
   setHeld(itemId, which = 'right') {
     const anchor = this.hands[which];
@@ -281,14 +330,15 @@ export class PlayerCharacter {
     for (let i = anchor.children.length - 1; i >= 0; i--) {
       const child = anchor.children[i];
       anchor.remove(child);
-      if (child === this._transient) {
+      if (child === this._transient[which]) {
         child.traverse((n) => { if (n.isMesh) n.geometry.dispose(); });
-        this._transient = null;
+        this._transient[which] = null;
       }
     }
     if (!id) return;
 
-    let holder = this._itemCache.get(id);
+    const cache = this._itemCache[which];
+    let holder = cache.get(id);
     if (holder === undefined) {
       holder = this._buildItem(id);
       // An item whose art is still in flight gets the factory's stand-in and is
@@ -297,9 +347,9 @@ export class PlayerCharacter {
       // flat sprite for the rest of the session. `null` — an id with no
       // definition at all — is cached, because that never resolves.
       if (holder === null || !hasModel(id) || holder.userData.modelled) {
-        this._itemCache.set(id, holder);
+        cache.set(id, holder);
       } else {
-        this._transient = holder;
+        this._transient[which] = holder;
       }
     }
     if (holder) anchor.add(holder);
@@ -349,8 +399,9 @@ export class PlayerCharacter {
    *   flag test in the culler, removing costs a scene-graph edit every time the
    *   camera changes mode.
    * @param {number} heldItem what is in the hotbar's selected slot
+   * @param {number} offhandItem what is in the offhand slot, 0 for empty
    */
-  update(dt, player, shown, heldItem) {
+  update(dt, player, shown, heldItem, offhandItem = 0) {
     this._instantiate();
     const model = this.model;
     if (!model) return;
@@ -366,6 +417,7 @@ export class PlayerCharacter {
     if (!show) { model.mixer.update(dt); return; }
 
     this.setHeld(heldItem, 'right');
+    this.setHeld(offhandItem, 'left');
 
     // --- orientation ---
     // Stand on the local up, face where the player faces. The head is at local
@@ -409,15 +461,25 @@ export class PlayerCharacter {
     model.mixer.update(dt);
 
     // --- the carrying pose, layered by hand ---
-    // Strictly after mixer.update: the mixer rewrites arm-right's rotation from
+    // Strictly after mixer.update: the mixer rewrites the arms' rotations from
     // the clip every frame, so anything written before it is gone. That is also
     // what keeps this from compounding — each frame slerps from a freshly
     // animated value, not from last frame's result.
+    //
+    // Both arms, and the swing is only the right one's business: `attack-
+    // melee-right` keys `arm-right` alone, so a left arm that dropped its pose
+    // during a swing would be letting go of the torch for no reason the mixer
+    // ever asked it to.
     if (this.swingT > 0) this.swingT = Math.max(0, this.swingT - dt);
-    const wantHold = this.heldItem.right > 0 && this.swingT <= 0 ? 1 : 0;
-    this._holdW += (wantHold - this._holdW) * Math.min(1, dt * 9);
-    if (this.arm && this.holdQ && this._holdW > 0.002) {
-      this.arm.quaternion.slerp(this.holdQ, this._holdW * HOLD_BLEND);
+    for (const h of HANDS) {
+      const swinging = h === 'right' && this.swingT > 0;
+      const want = this.heldItem[h] > 0 && !swinging ? 1 : 0;
+      this._holdW[h] += (want - this._holdW[h]) * Math.min(1, dt * 9);
+      const arm = this.arms[h];
+      const q = this.holdQ[h];
+      if (arm && q && this._holdW[h] > 0.002) {
+        arm.quaternion.slerp(q, this._holdW[h] * HOLD_BLEND);
+      }
     }
   }
 

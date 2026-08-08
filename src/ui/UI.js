@@ -51,7 +51,7 @@ export class UI {
       loader: $('loader'), loadFill: $('load-fill'), loadStatus: $('load-status'),
       menu: $('menu'), mmContinue: $('mm-continue'), mmSaveInfo: $('mm-save-info'),
       mmClock: $('mm-clock'),
-      hud: $('hud'), crosshair: $('crosshair'), hotbar: $('hotbar'),
+      hud: $('hud'), crosshair: $('crosshair'), hotbar: $('hotbar'), offhand: $('offhand'),
       itemName: $('item-name'), lookAt: $('look-at'),
       vHealth: $('v-health'), vFood: $('v-food'),
       vStamina: $('v-stamina'), vBreath: $('v-breath'),
@@ -340,6 +340,14 @@ export class UI {
       this.el.hotbar.appendChild(d);
       this.hudSlots.push(d);
     }
+    // The offhand cell beside it. Clicking swaps rather than selects, which is
+    // the only thing a hotbar click could mean here — you cannot "select" the
+    // offhand, there is nothing that would then act on it. It is the mouse's
+    // copy of F, so it goes through the same method and gets the same sound.
+    this.el.offhand.onclick = () => {
+      this.game.swapOffhand();
+      this.game.input.requestLock();
+    };
     // inventory grids
     this.invSlots = [];
     const mk = (parent, index) => {
@@ -530,6 +538,10 @@ export class UI {
       this._paint(el, inv.slots[i]);
       el.classList.toggle('active', i === inv.selected);
     }
+    // `F` where a hotbar slot has its number — same corner, same type, and it
+    // is the same kind of fact: the key that puts this slot in your hand.
+    this.el.offhand.dataset.num = 'F';
+    this._paint(this.el.offhand, inv.offhand);
     for (let i = 0; i < TOTAL; i++) {
       const el = this.invSlots[i];
       if (!el) continue;
@@ -544,6 +556,7 @@ export class UI {
     if (this.kilnSlots) this._refreshKiln();
     if (this.crateSlots) this._refreshCrate();
     if (this.armourSlots) this._refreshArmour();
+    if (this.offhandEl) this._paint(this.offhandEl, inv.offhand);
     if (this.screen === 'shop') this._refreshShop();
     else if (this.screenOpen) this._refreshRecipes();
     this._paintCursor();
@@ -649,7 +662,7 @@ export class UI {
         : kind === 'shop' ? 'Wandering Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
     this.el.screenTop.innerHTML = '';
     this.craftSlots = null; this.craftMap = null; this.kilnSlots = null;
-    this.crateSlots = null; this.armourSlots = null;
+    this.crateSlots = null; this.armourSlots = null; this.offhandEl = null;
     this.shopEls = null;
 
     if (kind === 'kiln') this._buildKilnUI();
@@ -707,8 +720,38 @@ export class UI {
     this.craftOutSlot = new Slot();
     this._wireSlot(this.craftOut, () => this.craftOutSlot, { output: true });
     outWrap.appendChild(this.craftOut);
-    wrap.append(this._buildArmourUI(), grid, arrow, outWrap);
+    wrap.append(this._buildArmourUI(), this._buildOffhandUI(), grid, arrow, outWrap);
     this.el.screenTop.appendChild(wrap);
+  }
+
+  /**
+   * The offhand slot, beside the worn column on every inventory screen.
+   *
+   * Its own column rather than a fifth cell in `_buildArmourUI`, deliberately:
+   * the armour array is on its way out, and an offhand built inside the thing
+   * that is being removed would have to be rescued out of it. This shares the
+   * left edge with it and nothing else.
+   *
+   * No `accepts` filter — see the class of decision in the report. Anything you
+   * can carry can go in the left hand, including a pickaxe, because barring an
+   * item from a slot that only carries and displays would be a rule with no
+   * consequence behind it. It accepts a full stack for the same reason.
+   */
+  _buildOffhandUI() {
+    const col = document.createElement('div');
+    col.className = 'offhand-col';
+    const d = document.createElement('div');
+    d.className = 'islot offhand-slot';
+    // Read through `this.game.inventory` rather than the `inv` captured above:
+    // the slot object itself is replaced wholesale by `loadOffhand`, so a
+    // captured reference would go on editing the previous world's stack.
+    this._wireSlot(d, () => this.game.inventory.offhand);
+    const cap = document.createElement('span');
+    cap.className = 'slot-cap';
+    cap.innerHTML = 'Off <kbd>F</kbd>';
+    col.append(d, cap);
+    this.offhandEl = d;
+    return col;
   }
 
   /**

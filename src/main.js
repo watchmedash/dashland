@@ -928,6 +928,9 @@ class Game {
       this.player.health = save.player.health;
       this.breath = save.player.breath ?? 1;
       this.inventory.fromJSON(save.inventory);
+      // Strictly after `fromJSON`, which clears the offhand precisely so that
+      // this line is the only thing that can fill it.
+      this.inventory.loadOffhand(save.player?.offhand);
       this.drops.fromJSON(save.drops);
       this.mobs.fromJSON(save.mobs);
       if (save.crops) this.farming.fromJSON(save.crops); else this.farming.rescan();
@@ -1127,7 +1130,11 @@ class Game {
     // you back for it with nothing on is how a setback becomes a spiral.
     _v1.copy(this.player.position).addScaledVector(this.player.up, 0.6);
     let dropped = 0;
-    for (const s of this.inventory.slots) {
+    // The offhand goes with the rest. It is carried, not worn — a torch in your
+    // left hand is your torch in the same sense the one in your right is, and a
+    // slot that quietly kept its contents through a death would be the one
+    // place on the character worth stuffing your diamonds into.
+    for (const s of [...this.inventory.slots, this.inventory.offhand]) {
       if (s.empty) continue;
       this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count, s.wear, null, true);
       s.clear();
@@ -1263,6 +1270,12 @@ class Game {
         breath: this.breath,
         energy: this.energy,
         character: this.character.id,
+        // The left hand — one of the two things the block above was written
+        // in anticipation of. It is a fact about the person, not about their
+        // bags: `inventory` is what you are carrying, and the offhand is what
+        // you are holding. A save from before this existed has no key at all,
+        // and `loadOffhand` turns `undefined` into an empty slot.
+        offhand: this.inventory.offhandJSON(),
       },
       inventory: this.inventory.toJSON(),
       drops: this.drops.toJSON(),
@@ -1863,7 +1876,7 @@ class Game {
   _frozenUpdate(dt) {
     this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob, this.viewMode);
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
-      this.inventory.held().item);
+      this.inventory.held().item, this.inventory.offhand.item);
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     this.sky.update(dt, this.camera, this.player.up, this.player.position);
     this._updateSharedUniforms();
@@ -1911,6 +1924,11 @@ class Game {
         this._announceHeld();
       }
       if (input.pressed('KeyQ')) this._dropHeld();
+      // F, which is where every player's hand already goes for this. It was
+      // free: E, Q, F3 and F5 are the only letters and function keys spoken
+      // for, and F is not one of the codes Input has to swallow a browser
+      // default for while the pointer is locked.
+      if (input.pressed('KeyF')) this.swapOffhand();
 
       if (input.locked && (input.mouseDX || input.mouseDY)) {
         this.player.look(input.mouseDX, input.mouseDY, input.sensitivity * this.settings.sensitivity, input.invertY);
@@ -2037,8 +2055,9 @@ class Game {
     // After the camera, because the body hides itself when the camera has been
     // pulled in on top of it and it needs this frame's distance to know.
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
-      this.inventory.held().item);
+      this.inventory.held().item, this.inventory.offhand.item);
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
+    this.viewModel.setOffhand(this.inventory.offhand.item, this.ui.icons);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     this._updateHandLight(dt);
     this._safeTick('flames', () => this._tickFlames(dt));
@@ -2606,8 +2625,21 @@ class Game {
    * direction: the thing in your hand lighting everything else.
    */
   _updateHandLight(dt) {
-    const held = ITEMS[this.inventory.held().item];
-    const block = held?.block ? BLOCKS[held.block] : null;
+    // Both hands, and the brighter wins.
+    //
+    // This is the one thing the offhand does on its own, and it is not "using"
+    // the item: the torch is drawn burning in the left fist in both first and
+    // third person, so a torch that lit the cave from the right hand and went
+    // dark in the left would not read as a rule, it would read as a bug. Max
+    // rather than sum because there is exactly one hand light in the shader and
+    // two torches are not twice the lamp.
+    const lightOf = (slot) => {
+      const def = ITEMS[slot.item];
+      return def?.block ? BLOCKS[def.block] : null;
+    };
+    const a = lightOf(this.inventory.held());
+    const b = lightOf(this.inventory.offhand);
+    const block = (b?.light ?? 0) > (a?.light ?? 0) ? b : a;
     const emit = block?.light ?? 0;
     const u = voxelUniforms;
     if (!emit) {
@@ -2650,6 +2682,19 @@ class Game {
     const s = this.inventory.held();
     this.ui.showItemName(s.empty ? '' : ITEMS[s.item].label);
     this.ui.refresh();
+  }
+
+  /**
+   * F: trade hands.
+   *
+   * Announced through `_announceHeld` like a hotbar key, and for the same
+   * reason — what changed is what you are holding, and the item name over the
+   * bar is where the player already looks to see it.
+   */
+  swapOffhand() {
+    this.inventory.swapOffhand();
+    this.audio.ui(520);
+    this._announceHeld();
   }
 
   _dropHeld() {

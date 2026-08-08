@@ -85,7 +85,15 @@
     </div>
 
     <div id="bottom">
-      <div id="hotbar"></div>
+      <!-- Offhand to the left of the hotbar, in its own frame: the same cell in
+           the same glass, but it is not the tenth hotbar slot and a shared
+           frame would claim it was. It hangs off the row rather than sitting in
+           it — see the stylesheet — because the hotbar is centred on the
+           crosshair and must stay there. -->
+      <div id="bar-row">
+        <div id="offhand-bar"><div id="offhand" class="slot" title="Offhand — F to swap"></div></div>
+        <div id="hotbar"></div>
+      </div>
       <!-- Pinned to the top edge of the bottom cluster rather than to the
            viewport, so they can never land on top of the meter rows. -->
       <div id="above-bar">
@@ -203,6 +211,7 @@
         <div><kbd>Wheel</kbd><span>Cycle hotbar</span></div>
         <div><kbd>E</kbd><span>Inventory</span></div>
         <div><kbd>Q</kbd><span>Drop held item</span></div>
+        <div><kbd>F</kbd><span>Swap hands — held ⇄ offhand</span></div>
         <div><kbd>RMB</kbd><span>Hold to eat food</span></div>
         <div><kbd>RMB</kbd><span>Trade with a merchant</span></div>
         <div><kbd>RMB</kbd><span>Open a crate</span></div>
@@ -213,7 +222,11 @@
         <div><kbd>F3</kbd><span>Debug overlay</span></div>
         <div><kbd>Esc</kbd><span>Pause</span></div>
       </div>
-      <p class="note">Dig soil with a <strong>shovel</strong> to make farmland, sow <strong>seeds</strong> on it, and harvest the wheat once it ripens — farmland near water grows twice as fast.<br />
+      <p class="note">Your <strong>left hand</strong> is the slot beside the hotbar. Drag anything into it
+        in the inventory, or press <kbd>F</kbd> to trade it for whatever you are holding. It carries and
+        it shows — a torch in it burns and lights your way — but everything is <em>used</em> from the
+        right hand, so <kbd>F</kbd> is how you use what is in it.<br />
+        Dig soil with a <strong>shovel</strong> to make farmland, sow <strong>seeds</strong> on it, and harvest the wheat once it ripens — farmland near water grows twice as fast.<br />
         Items on the ground are picked up automatically when you walk near them.
         A <strong>fishing rod</strong> is three sticks and two hides. Aim at open water and click to cast, then watch
         the float: when it dips, click again. Strike too early or too late and it is gone. Fish grill on a kiln.<br />

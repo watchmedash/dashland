@@ -27,6 +27,15 @@ const REST_EMPTY = new THREE.Vector3(0.54, -0.62, -0.15);
 const HAND_LOCAL = new THREE.Vector3(0, 0.01, -0.52);
 const ARM_REST_ROT = new THREE.Euler(0.30, 0.16, 0.12);
 
+// The offhand arm, mirrored across the view's centre line: the shoulder moves
+// to the left of the screen and the two rotations that lean the limb inward —
+// yaw and roll — change sign. Pitch does not: both arms hang at the same angle
+// below the eye, and negating it would have the left arm reaching up out of
+// frame. There is no separate REST_EMPTY here because an empty offhand draws
+// nothing at all; see `setOffhand`.
+const OFF_REST = new THREE.Vector3(-0.48, -0.56, -0.23);
+const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
+
 // --- swing animations -------------------------------------------------------
 // Every tool used to play the same forward-and-down jab, so a pickaxe, a sword
 // and a bare fist all read as punching. Each kind now gets its own track.
@@ -202,24 +211,63 @@ export class ViewModel {
     // reversed order + negated angles is the exact inverse of the XYZ rest tilt
     this.hand.rotation.set(-ARM_REST_ROT.x, -ARM_REST_ROT.y, -ARM_REST_ROT.z, 'ZYX');
     this.armPivot.add(this.hand);
-    this.heldMesh = null;
-    this.heldItem = -1;
-    this.ownsGeometry = false;
+
+    // --- offhand arm ---
+    // Built once, hidden by default, and posed only on the frames it is shown.
+    // First person with an empty offhand — which is every frame of a new game,
+    // and the state this view was tuned in — therefore renders exactly what it
+    // rendered before this existed: one arm, in the same place, with the same
+    // swing. That is not a hope, it is the `visible` flag and the early return
+    // in `update` below.
+    //
+    // Same geometry and same material as the right arm, placed rather than
+    // mirrored with a negative scale: a negatively scaled mesh has its winding
+    // reversed, so it renders inside out under backface culling and its normals
+    // face away from the key light. The limb box is symmetric, so there is
+    // nothing a mirror would buy.
+    this.offArmPivot = new THREE.Group();
+    this.offArmPivot.add(new THREE.Mesh(armGeo, armMat));
+    this.offHand = new THREE.Group();
+    this.offHand.position.set(-HAND_LOCAL.x, HAND_LOCAL.y, HAND_LOCAL.z);
+    this.offHand.rotation.set(
+      -OFF_ARM_REST_ROT.x, -OFF_ARM_REST_ROT.y, -OFF_ARM_REST_ROT.z, 'ZYX');
+    this.offArmPivot.add(this.offHand);
+    this.offArmPivot.visible = false;
+    this.root.add(this.offArmPivot);
 
     this.blockMaterial = createItemBlockMaterial();
-    // A second copy for blocks that are themselves alight. The viewmodel has
-    // no voxel light in it — that is baked into the world mesh — so a block
-    // that glows in your hand renders from its raw albedo, and the albedo of a
-    // thing that emits light is nearly black with bright cracks in it. Held,
-    // the planet hearth came out as dark mud with holes. Only one item is in
-    // the hand at a time, so one spare material covers every case.
-    this.glowMaterial = createItemBlockMaterial();
     this.spriteCache = new Map();
+
+    /**
+     * What each hand is holding, and the mesh showing it.
+     *
+     * One record per hand rather than the three loose fields this used to be
+     * (`heldItem`, `heldMesh`, `ownsGeometry`), because every one of them has to
+     * exist twice and a `heldMeshLeft` beside a `heldMesh` is how the two
+     * quietly drift apart. `heldItem` survives as a getter — the swing clock,
+     * the equip dip and `update`'s rest-point choice are all the right hand's
+     * alone and still read it by name.
+     *
+     * `glow` is a per-hand spare of the block material, for blocks that are
+     * themselves alight. The viewmodel has no voxel light in it — that is baked
+     * into the world mesh — so a block that glows in your hand renders from its
+     * raw albedo, and the albedo of a thing that emits light is nearly black
+     * with bright cracks in it. Held, the planet hearth came out as dark mud
+     * with holes. There used to be one spare, on the reasoning that only one
+     * item is in the hand at a time; that reasoning is what the offhand
+     * repeals. Sharing it meant a hearth in the left hand rewrote the emissive
+     * a torch in the right had set, and whichever was equipped last lit both.
+     */
+    this.hands = {
+      right: { anchor: this.hand, item: -1, mesh: null, owns: false, glow: createItemBlockMaterial() },
+      left: { anchor: this.offHand, item: -1, mesh: null, owns: false, glow: createItemBlockMaterial() },
+    };
 
     this.swing = 1;
     this.swingTrack = SWINGS.default;
     this.bob = 0;
     this.equipT = 1;      // 0 = just swapped, 1 = settled
+    this.offEquipT = 1;   // the offhand arm's own dip clock
     this.enabled = true;
     /**
      * Told whenever the arm swings, so the third-person body can swing too.
@@ -237,15 +285,46 @@ export class ViewModel {
     this.camera.updateProjectionMatrix();
   }
 
+  /** What the right hand is holding. Read by the swing and the rest point. */
+  get heldItem() { return this.hands.right.item; }
+
   setHeld(itemId, iconFactory) {
-    if (itemId === this.heldItem) return;
-    this.heldItem = itemId;
+    if (itemId === this.hands.right.item) return;
     this.equipT = 0;
     // Which swing plays is a property of what's in the fist, so it's resolved
     // on equip rather than looked up every frame. Everything without a tool
     // kind — blocks, torches, food, empty hands — falls back to the jab.
     this.swingTrack = SWINGS[ITEMS[itemId]?.tool?.kind] || SWINGS.default;
-    this._clearMesh();
+    this._equip(this.hands.right, itemId, iconFactory);
+  }
+
+  /**
+   * What the left hand is holding.
+   *
+   * No swing track, because nothing is used from the offhand — it carries and
+   * it shows, and the key that matters is the one that brings the item round to
+   * the right hand. It has its own equip clock so that swapping dips both arms
+   * on their own schedules, which is what makes the swap read as one gesture.
+   */
+  setOffhand(itemId, iconFactory) {
+    const h = this.hands.left;
+    if (itemId === h.item) return;
+    this.offEquipT = 0;
+    this._equip(h, itemId, iconFactory);
+    // The whole arm goes, not just the item. A bare left forearm hanging in
+    // frame with nothing in it is what the right arm's REST_EMPTY exists to
+    // handle, and an offhand that is empty far more often than not does not
+    // earn that screen space.
+    this.offArmPivot.visible = h.item > 0;
+  }
+
+  /**
+   * @param {{anchor:THREE.Group, item:number, mesh:THREE.Mesh, owns:boolean,
+   *   glow:THREE.Material}} h the hand being filled
+   */
+  _equip(h, itemId, iconFactory) {
+    h.item = itemId;
+    this._clearMesh(h);
     if (!itemId) return;
 
     // An id with no definition (a save written by an older build, a renamed
@@ -253,7 +332,7 @@ export class ViewModel {
     // and the whole game freezes on a black-box frame. Drops guards this the
     // same way — show empty hands and carry on.
     const def = ITEMS[itemId];
-    if (!def) { this.heldItem = null; return; }
+    if (!def) { h.item = null; return; }
     // Show authored art whenever there is any, and fall back to a textured cube
     // for the ordinary blocks that have none.
     //
@@ -291,14 +370,14 @@ export class ViewModel {
         // the rock to the same tone as the seams, so hold the albedo down
         // against them — a thing that makes its own light is not also a thing
         // that takes the room's light well.
-        this.glowMaterial.color.setScalar(0.52);
+        h.glow.color.setScalar(0.52);
         // Now the emissive can be worth having. It rides the tile's own
         // luminance (see the emissivemap override in createItemBlockMaterial),
         // so this lands on the seams and leaves the rock alone; the earlier
         // attempt had to be kept near zero only because it hit both equally.
         const s = 0.30 + (emit / 15) * 0.55;
-        this.glowMaterial.emissive.setRGB(lc[0] * s, lc[1] * s, lc[2] * s);
-        mat = this.glowMaterial;
+        h.glow.emissive.setRGB(lc[0] * s, lc[1] * s, lc[2] * s);
+        mat = h.glow;
       }
       if (src) mesh = new THREE.Mesh(src.geometry, mat);
     } else {
@@ -306,8 +385,8 @@ export class ViewModel {
       // first equip of a given model still shows the sprite for a frame or two
       // and swaps itself in when the geometry lands — and if the models aren't
       // there at all, the sprite is simply what you keep.
-      const model = heldModel(itemId, (m) => this._adoptModel(itemId, m));
-      if (model) { this._setMesh(model, false); return; }
+      const model = heldModel(itemId, (m) => this._adoptModel(h, itemId, m));
+      if (model) { this._setMesh(h, model, false); return; }
     }
     if (!isCube) {
       let mat = this.spriteCache.get(itemId);
@@ -338,35 +417,42 @@ export class ViewModel {
       mesh.rotation.set(0, -1.10, 0.46);
       mesh.position.set(0.02, 0.06, -0.11);
     }
-    this._setMesh(mesh, !isCube);
+    this._setMesh(h, mesh, !isCube);
   }
 
   /**
+   * @param {object} h the hand record
    * @param {THREE.Mesh} mesh
    * @param {boolean} owned true when this view model made the geometry and is
    *   the only thing holding it — sprite planes are per-equip and have to be
    *   released. Block and model geometry is shared out of a cache and must not
    *   be disposed here.
    */
-  _setMesh(mesh, owned) {
-    this._clearMesh();
-    this.hand.add(mesh);
-    this.heldMesh = mesh;
-    this.ownsGeometry = owned;
+  _setMesh(h, mesh, owned) {
+    this._clearMesh(h);
+    h.anchor.add(mesh);
+    h.mesh = mesh;
+    h.owns = owned;
   }
 
-  _clearMesh() {
-    if (!this.heldMesh) return;
-    this.hand.remove(this.heldMesh);
-    if (this.ownsGeometry) this.heldMesh.geometry.dispose();
-    this.heldMesh = null;
-    this.ownsGeometry = false;
+  _clearMesh(h) {
+    if (!h.mesh) return;
+    h.anchor.remove(h.mesh);
+    if (h.owns) h.mesh.geometry.dispose();
+    h.mesh = null;
+    h.owns = false;
   }
 
-  /** Late arrival of a lazily loaded model: only swap if it's still in hand. */
-  _adoptModel(itemId, mesh) {
-    if (itemId !== this.heldItem) return;
-    this._setMesh(mesh, false);
+  /**
+   * Late arrival of a lazily loaded model: only swap if it's still in that
+   * hand. The hand is captured with the request rather than looked up, because
+   * between the request and the callback the same item may have moved from one
+   * hand to the other — checking `heldItem` alone would drop the model into the
+   * right hand when it was the left that asked.
+   */
+  _adoptModel(h, itemId, mesh) {
+    if (itemId !== h.item) return;
+    this._setMesh(h, mesh, false);
   }
 
   /** Kick off the mining / placing swing. */
@@ -427,6 +513,30 @@ export class ViewModel {
       ARM_REST_ROT.y + _swingR.y,
       ARM_REST_ROT.z + _swingR.z,
     );
+
+    // The offhand arm, on the frames there is one. Everything above has already
+    // run and is untouched by this — the two arms share the bob phase and the
+    // sprint ease and nothing else, which is the whole reason the offhand can
+    // be added without re-tuning a single number of the finished hand.
+    //
+    // No swing term: the swing is what the right hand does to the world, and
+    // the left hand is not doing it. `bx` is negated so the two arms sway apart
+    // and together as you walk rather than sliding across the screen in step,
+    // which is what a shared sign looked like — one arm chasing the other.
+    if (this.offArmPivot.visible) {
+      if (this.offEquipT < 1) this.offEquipT = Math.min(1, this.offEquipT + dt * 5.0);
+      const oeq = 1 - this.offEquipT;
+      this.offArmPivot.position.set(
+        OFF_REST.x - bx,
+        OFF_REST.y + by - oeq * 0.42,
+        OFF_REST.z - this._sprintEase * 0.05,
+      );
+      this.offArmPivot.rotation.set(
+        OFF_ARM_REST_ROT.x + oeq * 0.55,
+        OFF_ARM_REST_ROT.y,
+        OFF_ARM_REST_ROT.z,
+      );
+    }
 
     if (sky) {
       const p = sky.palette;

@@ -667,6 +667,26 @@ function requestMesh(itemId, onReady, wrap = (m) => m) {
   return null;
 }
 
+/**
+ * The model as a *thing standing in the world*: a fresh clone, upright along
+ * +Y, unrotated and unscaled, for a caller that will place it itself.
+ *
+ * The held and icon poses both bake in a rotation chosen to flatter a camera
+ * that is a fixed distance away. A torch planted in the ground is seen from
+ * every side and from above, so it wants none of that — just the model, the
+ * right way up.
+ */
+export function worldModel(itemId, onReady) {
+  const pose = (tmpl) => {
+    const m = tmpl.clone();
+    m.position.set(0, 0, 0);
+    m.rotation.set(0, 0, 0);
+    m.scale.setScalar(1);
+    return m;
+  };
+  return requestMesh(itemId, onReady ? (tmpl) => onReady(pose(tmpl)) : null, pose);
+}
+
 /** True when this item has (or is expected to have) a 3D model at all. */
 export function hasModel(itemId) {
   const spec = modelSpecFor(itemId);

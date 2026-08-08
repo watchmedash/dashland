@@ -421,6 +421,12 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
         // instead of going through the six-face path below. They occupy part of
         // their cell, so no neighbour can hide any of their faces and the only
         // ones to drop are the seams where their own boxes meet.
+        // A torch is drawn as its own model, close to the player, by
+        // BlockModels — see _syncBlockModels. Emitting the boxes as well would
+        // put a brown post inside the flame. Everything else about a torch
+        // still comes from the voxel: it lights, it collides, it is mined and
+        // saved exactly as before, and only the picture changes.
+        if (rt === R_TORCH) continue;
         if (IS_SHAPED[id]) {
           const byte = (facing?.get(col * D + k) ?? 0) & 7;
           // A fence has no stored orientation: its shape is its neighbours, and

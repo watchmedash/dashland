@@ -8,6 +8,7 @@ import { Input } from './player/Input.js';
 import { Sky } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
 import { Particles } from './render/Particles.js';
+import { BlockModels } from './render/BlockModels.js';
 import { createVoxelMaterials, buildTileTextures, buildCrackTexture, voxelUniforms } from './render/VoxelMaterial.js';
 import { loadTileAtlas } from './render/TileAtlas.js';
 import { Audio } from './audio/Audio.js';
@@ -261,6 +262,7 @@ class Game {
     this.viewModel = new ViewModel((id) => this.drops.createItemMesh(id));
     this.sky = new Sky(this.scene, this.renderer);
     this.particles = new Particles(this.scene, this.planet);
+    this.blockModels = new BlockModels(this.scene);
     this.drops = new Drops(this.scene, this.planet, this.materials);
     this.mobs = new Mobs(this.scene, this.planet, this.drops);
     // Creatures speak for themselves — idle calls, pain and death, all anchored
@@ -1609,6 +1611,7 @@ class Game {
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     this._updateHandLight(dt);
     this._safeTick('flames', () => this._tickFlames(dt));
+    this._safeTick('blockModels', () => this._syncBlockModels(dt));
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     this.sky.update(dt, this.camera, this.player.up, this.player.position);
     this.particles.update(dt, this.camera, this.player.up, this.sky);
@@ -2010,6 +2013,67 @@ class Game {
     tangentFrame(p.f, p.i + 0.5, p.j + 0.5, f.k + 0.5, _frame);
     _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
     this.particles.embers(_v1, _v2, 1, 0.10);
+  }
+
+  /**
+   * Put a real torch where every nearby torch block is.
+   *
+   * The voxel form of a torch is a thin post with a slightly wider post on top,
+   * and the tile meant to be its flame is a picture of a whole torch — brown,
+   * stick and all — so a planted torch read as a plain rod from every angle
+   * you could actually stand at. The art for a torch already exists and is
+   * already in your hand. This is the same object, in the ground.
+   *
+   * Scanned rather than tracked. A registry would have to survive saves,
+   * chunk eviction and every path that writes a block; a scan bounded to what
+   * is near you cannot go stale, and only reruns when you cross a cell or edit
+   * the world — the same cache the hand light uses, for the same reason.
+   */
+  _syncBlockModels(dt) {
+    const bm = this.blockModels;
+    bm.prime(itemIdOf('torch'));
+    const c = this.player.cell;
+    const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
+    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
+    if (this._tmCol !== baseCol || this._tmK !== ck || this._tmSeq !== this.editSeq) {
+      this._tmCol = baseCol; this._tmK = ck; this._tmSeq = this.editSeq;
+      const out = this._torchList || (this._torchList = []);
+      out.length = 0;
+      // Wider than the hand-light scan: that one only has to reach as far as
+      // the light carries, but a torch stays legible as an object well past
+      // the point where its glow has faded, and popping one into existence at
+      // eight cells is worse than not having the model at all.
+      const RAD = 20;
+      for (let di = -RAD; di <= RAD; di++) {
+        for (let dj = -RAD; dj <= RAD; dj++) {
+          const col = stepColumn(baseCol, di, dj);
+          for (let dk = -7; dk <= 7; dk++) {
+            const k = ck + dk;
+            if (k < 0 || k >= D) continue;
+            if (!IS_TORCH[this.planet.at(col, k)]) continue;
+            const byte = this.planet.facingAt(col, k) & 7;
+            const p = colParts(col);
+            tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
+            const e = {
+              pos: this.planet.centerOf(col, k, new THREE.Vector3()),
+              up: new THREE.Vector3(_frame.up[0], _frame.up[1], _frame.up[2]),
+              out: null,
+              head: this._flameHead({ col, k, id: ID.torch, byte }, new THREE.Vector3()),
+              seed: (col * 31 + k) % 1000,
+            };
+            if (byte !== 0) {
+              const [wi, wj] = TORCH_WALL_STEP[(byte - 1) & 3];
+              const ea = _frame.ea, eb = _frame.eb;
+              e.out = new THREE.Vector3(
+                -(ea[0] * wi + eb[0] * wj), -(ea[1] * wi + eb[1] * wj),
+                -(ea[2] * wi + eb[2] * wj));
+            }
+            out.push(e);
+          }
+        }
+      }
+    }
+    bm.sync(this._torchList || [], dt);
   }
 
   /** Where the fire actually is in a burning cell, in world space. */

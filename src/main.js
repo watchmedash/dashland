@@ -2361,7 +2361,38 @@ class Game {
         BOBBER_FLOAT + Math.sin(f.bob * 2.2) * 0.05 - (f.bite > 0 ? 0.22 : 0));
       this.bobber.position.copy(_v1);
       this.bobber.visible = true;
+      this._updateFishLine(_v1);
     }
+  }
+
+  /**
+   * The line from the rod to the float.
+   *
+   * Without it the cast reads as a red ball someone left on the water: the rod
+   * is in your hand, the float is ten feet out, and nothing says the two are
+   * connected. The catch is that the rod lives in the view model's own scene
+   * and has no position in the world at all, so there is nothing to anchor to.
+   * Hanging the near end off the camera by the same offsets the rod is drawn at
+   * puts it where the tip *looks*, which is all the eye is asking for.
+   */
+  _updateFishLine(bobberPos) {
+    if (!this.fishLine) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      this.fishLine = new THREE.Line(geo, new THREE.LineBasicMaterial({
+        color: 0xe8e4d8, transparent: true, opacity: 0.5,
+      }));
+      this.fishLine.frustumCulled = false;
+      this.fishLine.renderOrder = 6;
+      this.scene.add(this.fishLine);
+    }
+    const cam = this.camera;
+    _v2.set(0.30, -0.24, -0.55).applyQuaternion(cam.quaternion).add(cam.position);
+    const arr = this.fishLine.geometry.attributes.position.array;
+    arr[0] = _v2.x; arr[1] = _v2.y; arr[2] = _v2.z;
+    arr[3] = bobberPos.x; arr[4] = bobberPos.y; arr[5] = bobberPos.z;
+    this.fishLine.geometry.attributes.position.needsUpdate = true;
+    this.fishLine.visible = true;
   }
 
   _landCatch() {
@@ -2401,6 +2432,7 @@ class Game {
   _stopFishing() {
     this.fishing = null;
     if (this.bobber) this.bobber.visible = false;
+    if (this.fishLine) this.fishLine.visible = false;
     this.ui.setHint('');
   }
 

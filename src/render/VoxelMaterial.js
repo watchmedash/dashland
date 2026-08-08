@@ -12,6 +12,11 @@ export const voxelUniforms = {
   uWind: { value: 1 },
   uSkyColor: { value: new THREE.Color(0.42, 0.56, 0.78) },
   uSkyIntensity: { value: 1.0 },
+  /**
+   * How far the dark end of the picture slides toward colourless moonlight:
+   * 0 by day, ~1 at midnight. See NIGHT_SCOTOPIC.
+   */
+  uNightDesat: { value: 0 },
   uBounceColor: { value: new THREE.Color(0.36, 0.30, 0.22) },
   uBlockIntensity: { value: 5.0 },
   uNormalScale: { value: 0.55 },
@@ -125,6 +130,14 @@ uniform sampler2DArray uArm;
 uniform sampler2DArray uCrack;
 uniform vec3 uSkyColor;
 uniform float uSkyIntensity;
+uniform float uNightDesat;
+/**
+ * How much block light reached this fragment, written in LIGHTS_END and read by
+ * NIGHT_SCOTOPIC at the very end. A plain mutable global, which in GLSL is
+ * per-invocation and therefore safe; a varying could not carry it because the
+ * value is only known after the lighting has run.
+ */
+float gBlockLum = 0.0;
 uniform vec3 uBounceColor;
 uniform float uBlockIntensity;
 uniform float uNormalScale;
@@ -350,6 +363,43 @@ const METAL_FRAG = /* glsl */`
   float metalnessFactor = metalness * armSample.b;
 `;
 
+/**
+ * The Purkinje shift: colour drains out of a scene as it gets dark.
+ *
+ * This is the answer to "the tree leaves are visible at night like it's
+ * morning", and it is not a brightness problem — which is exactly why two
+ * passes at the light levels failed to fix it. Measured on a torch-free
+ * midnight frame, the canopy came out around (50, 123, 69): *correctly* dim in
+ * absolute terms, since the sky ambient at that moment is 0.28, but at full
+ * daylight saturation. A saturated green at a tenth of daylight brightness
+ * still reads as a green leaf, and a canopy of them reads as a lit one.
+ *
+ * Two knobs were ruled out by experiment before arriving here. Taking a further
+ * 34% off the night sky ambient moved the foliage median by 9%; setting the
+ * moon to zero moved it by nothing at all. The level was never the problem.
+ * The eye's own answer is that rod vision carries no colour, so a moonlit
+ * forest is grey-blue whatever colour it is at noon.
+ *
+ * **Gated on how dark the pixel already is**, which is the whole reason this
+ * does not flatten the game: a torchlit face, a lava sheet or a lit doorway is
+ * photopic and keeps every bit of its colour, while the unlit canopy behind it
+ * drains. Without that gate, lighting a torch at midnight would light a grey
+ * world — worse than the complaint it set out to fix.
+ *
+ * The residual tint is cool rather than neutral grey. Rods peak toward blue,
+ * and a flat greyscale night reads as a black-and-white photograph of a day.
+ */
+const NIGHT_SCOTOPIC = /* glsl */`
+  if (uNightDesat > 0.001) {
+    float sLum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+    // Gated on *what lit it*, not on how bright it came out. Anything a flame
+    // reached stays photopic and keeps its colour; anything lit only by the
+    // night sky drains. See the note where gBlockLum is written.
+    float scoto = uNightDesat * (1.0 - smoothstep(0.02, 0.35, gBlockLum));
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(sLum) * vec3(0.74, 0.86, 1.18), scoto);
+  }
+`;
+
 const LIGHTS_END = /* glsl */`
   // The ground is lit by the voxel grid and by nothing else.
   //
@@ -417,6 +467,15 @@ const LIGHTS_END = /* glsl */`
 
   reflectedLight.indirectDiffuse += diffuseColor.rgb * (skyFill + bounce) * aoTotal * RECIPROCAL_PI;
   reflectedLight.indirectDiffuse += diffuseColor.rgb * vBlock * uBlockIntensity * mix(0.65, 1.0, aoTotal) * RECIPROCAL_PI;
+  // Remember how much of this surface a *flame* is responsible for, for the
+  // scotopic pass at the end of the shader. It has to be captured here because
+  // this is the only place the two are still separate — by the time anything
+  // downstream sees the fragment they are one colour, and a moonlit leaf and a
+  // torchlit plank are indistinguishable by brightness alone. That is not a
+  // guess: the first version of NIGHT_SCOTOPIC gated on final luminance and
+  // left the canopy exactly as green as before, because at midnight a leaf
+  // under open sky *is* as bright as ground beside a torch.
+  gBlockLum = dot(vBlock * uBlockIntensity, vec3(0.2126, 0.7152, 0.0722));
 
   // What you are carrying.
   //
@@ -539,7 +598,11 @@ function patch(material, opts = {}) {
       .replace('#include <roughnessmap_fragment>', ROUGH_FRAG)
       .replace('#include <metalnessmap_fragment>', METAL_FRAG)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + LAVA_EMISSIVE)
-      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + LIGHTS_END);
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + LIGHTS_END)
+      // Last thing before the frame leaves the material, so it also catches the
+      // liquid path's reflection and glint below: a lake has to lose its colour
+      // along with the land, or it becomes the one blue thing in a grey night.
+      .replace('#include <dithering_fragment>', NIGHT_SCOTOPIC + '\n#include <dithering_fragment>');
 
     if (opts.liquid) {
       fs = fs.replace('#include <opaque_fragment>', /* glsl */`

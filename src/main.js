@@ -3831,6 +3831,12 @@ class Game {
       .lerp(MOON_FILL, n2);
     voxelUniforms.uSkyIntensity.value =
       (0.34 - SKY_NIGHT_DROP * n2 + p.sunIntensity * 0.72) * (0.5 + w.sun * 0.5);
+    // Rod vision, on the same `night²` weighting as everything else here, so
+    // the day is untouched by construction. Not 1.0 at full night: draining the
+    // last of the colour reads as a monochrome filter rather than as darkness,
+    // and a little green left in the grass is what says the grass is still
+    // green — you simply cannot quite see it.
+    voxelUniforms.uNightDesat.value = 0.82 * n2;
     voxelUniforms.uBounceColor.value.copy(p.fog).lerp(WHITE, 0.2).multiplyScalar(0.7);
     voxelUniforms.uSunDir.value.copy(this.sky.sunDir);
     voxelUniforms.uSunColor.value.copy(p.sun).multiplyScalar(w.sun);

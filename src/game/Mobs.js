@@ -223,6 +223,7 @@ const pet = (file, o) => ({
   ...(o.hops ? { hops: true, hopImpulse: o.hopImpulse ?? 3.8 } : null),
   ...(o.cold ? { cold: true } : null),
   ...(o.aquatic ? { aquatic: true } : null),
+  ...(o.flies ? { flies: true, hover: o.hover ?? 1.5 } : null),
 });
 
 const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
@@ -310,7 +311,7 @@ const SPECIES = {
   }),
   bee: pet('bee', {
     label: 'Bee', h: 0.42, hp: 3, spd: 1.8, shy: 1.0, turn: 7.0, accel: 14.0,
-    graze: 0.5, idleMin: 0.6, idleMax: 1.8, hops: true, hopImpulse: 3.0,
+    graze: 0.5, idleMin: 0.6, idleMax: 1.8, flies: true, hover: 1.5,
   }),
   crab: pet('crab', {
     label: 'Crab', h: 0.45, hp: 5, spd: 1.0, shy: 0.7, turn: 5.0, accel: 8.0,
@@ -1808,12 +1809,30 @@ export class Mobs {
       const swimming = spec.aquatic
         && this.planet.liquidAt(this._colOf(c.f, c.ci, c.cj), Math.floor(c.ck));
       mob.swimming = swimming;
+      // A bee was a walker with a hop, which is a bee doing an impression of a
+      // rabbit. Flight is the same shape as the fish's buoyancy above: hold a
+      // height rather than fall, and never be grounded. It steers by the same
+      // walking rules — footprints, water as a wall — so a flier still keeps to
+      // the ground it belongs over instead of drifting out to sea; it simply
+      // does it at hover height.
+      const flying = !!spec.flies;
+      mob.flying = flying;
       if (swimming) {
         // gentle rise and fall on its own clock, and it never leaves the water
         const ceilK = this._waterTop(this._colOf(c.f, c.ci, c.cj), Math.floor(c.ck));
         const want = Math.sin(mob.idleT * 0.6 + mob.seed) * 0.45;
         mob.vel.k += (want - mob.vel.k) * Math.min(1, dt * 3);
         if (c.ck > ceilK - 0.6) mob.vel.k = Math.min(mob.vel.k, -0.2);
+      } else if (flying) {
+        // Seek hover height above whatever is underneath, with a slow wander so
+        // it never holds a dead-flat line. Chase the *gap* rather than setting a
+        // velocity outright, so it eases in and out instead of snapping.
+        const under = this._groundUnder(mob, c.f, c.ci, c.cj, Math.floor(c.ck + 0.02));
+        const bob = Math.sin(mob.idleT * 1.9 + mob.seed) * 0.22
+          + Math.sin(mob.idleT * 0.7 + mob.seed * 1.7) * 0.30;
+        const want = (under >= 0 ? under + spec.hover : c.ck) + bob;
+        const climb = Math.max(-2.2, Math.min(2.2, (want - c.ck) * 2.4));
+        mob.vel.k += (climb - mob.vel.k) * Math.min(1, dt * 4);
       } else {
         mob.vel.k -= GRAVITY * dt;
       }
@@ -1944,7 +1963,10 @@ export class Mobs {
 
       // A swimmer never snaps to the lake bed — that ground clamp is exactly
       // what would make a fish walk along the bottom.
-      if (swimming) {
+      if (swimming || flying) {
+        // Never snap to the floor and never count as grounded — the same reason
+        // a fish must not: the ground clamp is what would put it back on foot.
+        // It still may not sink through anything solid.
         if (floor >= 0 && c.ck < floor) { c.ck = floor; mob.vel.k = Math.max(0, mob.vel.k); }
         mob.grounded = false;
       } else if (floor >= 0 && c.ck < floor && floor - c.ck <= 1.05) {

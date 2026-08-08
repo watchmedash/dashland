@@ -1464,6 +1464,8 @@ export function applyInstancedSway(material, loY, hiY) {
       .replace('#include <common>', /* glsl */`
         #include <common>
         uniform float uBlockIntensity;
+        const float BLOCK_KNEE = 0.28;
+        const float BLOCK_CEIL = 0.58;
         varying vec3 vInstBlock;
       `)
       // After three has finished with the light loop, alongside where the
@@ -1472,8 +1474,24 @@ export function applyInstancedSway(material, loY, hiY) {
       // times brighter than the torch-lit dirt underneath it.
       .replace('#include <lights_fragment_end>', /* glsl */`
         #include <lights_fragment_end>
-        reflectedLight.indirectDiffuse += diffuseColor.rgb * vInstBlock
-          * uBlockIntensity * RECIPROCAL_PI;
+        // The same highlight shoulder the terrain applies, for the same reason
+        // and with the same constants — see BLOCK_KNEE in the voxel material.
+        // Without it a flower beside a torch was lit on a different curve from
+        // the dirt it is planted in: below the knee they agreed exactly, and
+        // above it the flower kept climbing while the ground rolled off, so the
+        // brightest thing in a torchlit meadow was the petals. A sun daisy's
+        // albedo peaks at 0.291, so this only ever binds on a flower with a
+        // flame right beside it, which is precisely the case that looked wrong.
+        //
+        // Scaled by the max channel, again like the terrain, so only the value
+        // moves and firelight keeps its hue.
+        vec3 instRad = diffuseColor.rgb * vInstBlock * uBlockIntensity * RECIPROCAL_PI;
+        float instPeak = max(instRad.r, max(instRad.g, instRad.b));
+        if (instPeak > BLOCK_KNEE) {
+          float instOver = (instPeak - BLOCK_KNEE) / (BLOCK_CEIL - BLOCK_KNEE);
+          instRad *= (BLOCK_KNEE + (BLOCK_CEIL - BLOCK_KNEE) * (1.0 - exp(-instOver))) / instPeak;
+        }
+        reflectedLight.indirectDiffuse += instRad;
       `);
   };
   material.customProgramCacheKey = () => 'sway|' + prevKey.call(material);

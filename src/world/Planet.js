@@ -9,12 +9,50 @@ import {
 } from './Constants.js';
 import { worldToCell, cellToWorld, stepColumn, centerDir, tangentFrame, cellArc } from './Sphere.js';
 import {
-  IS_SOLID, RENDER_TYPE, R_LIQUID, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
+  IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID } from './Mesher.js';
 
 const _cell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
 const _p = [0, 0, 0];
+
+/**
+ * Half-thickness, in cells, given to a cross plant's quads by the raycast.
+ *
+ * `emitCross` builds two flat quads through the middle of the cell: one
+ * spanning the i axis and standing at the middle of j, the other spanning j and
+ * standing at the middle of i, both the full height of the cell. In continuous
+ * cell coordinates that is exactly the two planes `frac(ci) = 0.5` and
+ * `frac(cj) = 0.5` — which is the whole reason this test lives in cell space
+ * rather than world space. The planet is a cubesphere: those "planes" are
+ * curved sheets in world space and no world-axis-aligned box describes them,
+ * but `worldToCell` has already done that mapping for the marcher, so the test
+ * is two subtractions on numbers we are holding anyway.
+ *
+ * A true ray/quad intersection was considered and rejected. The marcher is a
+ * sampler, not a DDA — it has no entry and exit point for the cell to solve
+ * between, and cell space along the ray is not linear, so an "exact" solve
+ * would need its own root-find per plant. This is cast every frame for the
+ * crosshair label, so instead the zero-thickness quads are given a thickness
+ * and the existing samples are asked whether any of them land in it. At a step
+ * of 0.045 and a cell arc near 0.95 world units, 0.15 cells is about six
+ * samples deep at the worst (perpendicular) incidence, so a plant is never
+ * missed; a grazing ray only spends longer inside.
+ *
+ * What it gets wrong: the plant is 0.15 cells fatter than it looks in every
+ * direction, so the crosshair grabs it from a hair outside its silhouette; and
+ * the *texture* is ignored, so the transparent gaps within a flower's own quad
+ * — the space either side of the stem — still count as the flower. Matching
+ * those would mean sampling the atlas per ray step, which is far past what a
+ * per-frame label is worth. Both errors are in the forgiving direction: they
+ * make a plant slightly easier to hit, never harder.
+ */
+const CROSS_HALF = 0.15;
+
+/** Is this sample point within a cross plant's quads? See `CROSS_HALF`. */
+function insideCross(c, i, j) {
+  return Math.abs(c.ci - i - 0.5) <= CROSS_HALF || Math.abs(c.cj - j - 0.5) <= CROSS_HALF;
+}
 
 export class Planet {
   constructor(materials) {
@@ -306,29 +344,41 @@ export class Planet {
    * March a ray through the sphere. Steps are small enough that no cell is
    * skipped, and the previous cell is remembered so blocks can be placed
    * against the face that was hit.
+   *
+   * Cross plants (tall grass, flowers, wheat) are the one block that is *not*
+   * treated as a full cell: see `CROSS_HALF` below.
    * @returns {{col,k,prevCol,prevK,id,dist,point:THREE.Vector3,normal:THREE.Vector3}|null}
    */
   raycast(origin, dir, maxDist = 6, opts = {}) {
     const step = 0.045;
     let prevCol = -1, prevK = -1;
     let curCol = -1, curK = -1;
+    let curCross = false;
     const hitLiquid = !!opts.hitLiquid;
 
     for (let t = 0; t <= maxDist; t += step) {
       const x = origin.x + dir.x * t, y = origin.y + dir.y * t, z = origin.z + dir.z * t;
       const c = worldToCell(x, y, z, _cell);
       const k = Math.floor(c.ck);
-      if (k < 0 || k >= D) { prevCol = -1; prevK = -1; continue; }
+      if (k < 0 || k >= D) { prevCol = -1; prevK = -1; curCross = false; continue; }
       const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
       const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
       const col = cidx(c.f, i, j);
-      if (col === curCol && k === curK) continue;
-      prevCol = curCol; prevK = curK;
-      curCol = col; curK = k;
-
       const id = this.blocks[col * D + k];
+      if (col === curCol && k === curK) {
+        // Every other block fills its cell, so entering it once is enough to
+        // decide. A cross plant does not, so keep sampling it — the test below
+        // is per-point, not per-cell.
+        if (!curCross) continue;
+      } else {
+        prevCol = curCol; prevK = curK;
+        curCol = col; curK = k;
+        curCross = RENDER_TYPE[id] === R_CROSS;
+      }
+
       if (id === 0) continue;
       if (RENDER_TYPE[id] === R_LIQUID && !hitLiquid) continue;
+      if (curCross && !insideCross(c, i, j)) continue;
 
       const point = new THREE.Vector3(x, y, z);
       const normal = new THREE.Vector3();

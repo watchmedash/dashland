@@ -126,7 +126,11 @@ const POSE = {
   // is simply below the screen.
   shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [0.50, -0.55, 0.20],  pos: [-0.04, 0.28, -0.14], icon: [0.18, 0.52, -0.26] },
   sword:  { file: 'sword_B',      pack: 'weapons', height: 0.50, grip: 0.16, rot: [-0.25, -0.60, 1.00], pos: [0.04, 0.04, -0.03],  icon: [0.05, 0.30, -0.42] },
-  torch:  { file: 'torch',        pack: 'tools',   height: 0.50, grip: 0.24, rot: [-0.20, -0.35, 0.22], pos: [0.02, 0.06, -0.02],  icon: [0.08, 0.55, -0.26] },
+  // `glow`: the fraction of the model's own height over which the head lights
+  // up. On this art the last fifth is the wrapped, burning end and nothing else.
+  // A torch you are holding is lit — it was only ever lit once planted, which
+  // made carrying one through a cave look like carrying a stick.
+  torch:  { file: 'torch',        pack: 'tools',   height: 0.50, grip: 0.24, rot: [-0.20, -0.35, 0.22], pos: [0.02, 0.06, -0.02],  icon: [0.08, 0.55, -0.26], glow: [0.78, 0.94] },
   bucket: { file: 'bucket_metal', pack: 'tools',   height: 0.36, grip: 0.55, rot: [0, -0.55, 0.14],     pos: [0.03, 0.05, -0.03],  icon: [0.16, 0.60, 0] },
 
   // Food. Held small and close — an apple filling as much of the frame as a
@@ -577,6 +581,72 @@ function tintColor(hex, tier) {
   return c.setHSL(_hsl.h, Math.min(1, _hsl.s * look.sat), look.light, THREE.SRGBColorSpace);
 }
 
+/**
+ * Make the burning end of a model glow, and leave the rest of it alone.
+ *
+ * The first version bolted a flame quad on and lifted the whole mesh with a
+ * flat emissive so it would not be black at night. Both were wrong. The flat
+ * lift raised the texture's darks along with its lights, which is exactly what
+ * flattening a texture means — the shaft stopped reading as carved wood and
+ * started reading as a plain shape, and the model looked untextured when in
+ * fact it was the emissive drowning it. And a torch does not need a separate
+ * fire: its head *is* the fire. Ramp the glow in over the top of the model and
+ * the same mesh does both jobs.
+ *
+ * The shaft still gets a whisper of lift, because nothing in the world scene
+ * shines on these — the voxel light is baked into chunk vertices and a model is
+ * not a chunk — so with none at all it goes black the moment the sun leaves.
+ *
+ * `loY`/`hiY` are in the geometry's own space, so this survives whatever scale
+ * the pose applies and one material serves the held torch, the icon, the drop
+ * and the planted one alike.
+ */
+export function glowTop(material, loY, hiY) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlowLo = { value: loY };
+    shader.uniforms.uGlowHi = { value: hiY };
+    shader.uniforms.uGlowColor = { value: new THREE.Vector3(1.30, 0.54, 0.15) };
+    shader.uniforms.uBodyLift = { value: new THREE.Vector3(0.13, 0.10, 0.07) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vLocalY;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocalY = position.y;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying float vLocalY;
+        uniform float uGlowLo;
+        uniform float uGlowHi;
+        uniform vec3 uGlowColor;
+        uniform vec3 uBodyLift;`)
+      .replace('#include <emissivemap_fragment>', `
+        float gT = smoothstep(uGlowLo, uGlowHi, vLocalY);
+        // Multiplied by the texel, not added over it, so the head keeps the
+        // shape the art gave it instead of becoming a bright blob.
+        totalEmissiveRadiance += uBodyLift * diffuseColor.rgb
+          + uGlowColor * gT * (0.35 + 0.65 * diffuseColor.r);`);
+  };
+  material.customProgramCacheKey = () => 'glowtop';
+  material.needsUpdate = true;
+  return material;
+}
+
+/**
+ * A pack material with the top of *this* model lit, cached per pose key.
+ *
+ * Per key and not per pack: the torch shares the `tools` atlas with the pickaxe
+ * and the bucket, and neither of those has a burning end.
+ */
+function glowMaterial(key, geo, src, range) {
+  const id = `glow|${key}`;
+  let m = matCache.get(id);
+  if (m) return m;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const h = Math.max(1e-3, bb.max.y - bb.min.y);
+  m = glowTop(src.clone(), bb.min.y + h * range[0], bb.min.y + h * range[1]);
+  matCache.set(id, m);
+  return m;
+}
+
 /** The atlas-textured half: handles, leather, rope, flame. One per pack. */
 function atlasMaterial(pack, texture) {
   const id = `atlas|${pack}`;
@@ -622,7 +692,10 @@ function buildMesh(spec, base, atlas) {
   const id = meshKey(spec);
   let mesh = meshCache.get(id);
   if (mesh) return mesh;
-  const skin = atlasMaterial(base.pack, atlas.texture);
+  const pack = atlasMaterial(base.pack, atlas.texture);
+  const skin = POSE[spec.key].glow
+    ? glowMaterial(spec.key, base.geometry, pack, POSE[spec.key].glow)
+    : pack;
   const split = PACKS[base.pack].tint && spec.tier > 0;
   mesh = new THREE.Mesh(base.geometry, split ? [metalMaterial(spec.tier, spec.tint), skin] : skin);
   if (spec.fill) mesh.add(fillDisc(base.geometry, spec.fill));

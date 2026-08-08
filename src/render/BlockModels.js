@@ -27,50 +27,6 @@ const _lean = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _Y = new THREE.Vector3(0, 1, 0);
 
-/**
- * Make the burning end of a model glow, and leave the rest of it alone.
- *
- * The first version bolted a flame quad on and lifted the whole mesh with a
- * flat emissive so it would not be black at night. Both were wrong. The flat
- * lift raised the texture's darks along with its lights, which is exactly what
- * flattening a texture means — the shaft stopped reading as carved wood and
- * started reading as a plain shape, and the model looked untextured when in
- * fact it was the emissive drowning it. And a torch does not need a separate
- * fire: its head *is* the fire. Ramp the glow in over the top of the model and
- * the same mesh does both jobs.
- *
- * The shaft still gets a whisper of lift, because nothing in the world scene
- * shines on these — the voxel light is baked into chunk vertices and a model is
- * not a chunk — so with none at all it goes black the moment the sun leaves.
- */
-function glowTop(material, loY, hiY) {
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uGlowLo = { value: loY };
-    shader.uniforms.uGlowHi = { value: hiY };
-    shader.uniforms.uGlowColor = { value: new THREE.Vector3(1.30, 0.54, 0.15) };
-    shader.uniforms.uBodyLift = { value: new THREE.Vector3(0.13, 0.10, 0.07) };
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying float vLocalY;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocalY = position.y;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>
-        varying float vLocalY;
-        uniform float uGlowLo;
-        uniform float uGlowHi;
-        uniform vec3 uGlowColor;
-        uniform vec3 uBodyLift;`)
-      .replace('#include <emissivemap_fragment>', `
-        float gT = smoothstep(uGlowLo, uGlowHi, vLocalY);
-        // Multiplied by the texel, not added over it, so the head keeps the
-        // shape the art gave it instead of becoming a bright blob.
-        totalEmissiveRadiance += uBodyLift * diffuseColor.rgb
-          + uGlowColor * gT * (0.35 + 0.65 * diffuseColor.r);`);
-  };
-  material.customProgramCacheKey = () => 'glowtop';
-  material.needsUpdate = true;
-  return material;
-}
-
 export class BlockModels {
   constructor(scene) {
     this.group = new THREE.Group();
@@ -81,7 +37,6 @@ export class BlockModels {
     this.pool = [];
     this.used = 0;
     this.scale = 1;
-    this.glowMat = null;
   }
 
   /** Ask for the torch art. Safe to call every frame; loads once. */
@@ -96,29 +51,18 @@ export class BlockModels {
       const bb = new THREE.Box3().setFromObject(mesh);
       const h = Math.max(1e-3, bb.max.y - bb.min.y);
       this.scale = TORCH_HEIGHT / h;
-      // The burning end is the top of the model. Ramp the glow across the last
-      // fifth of it, which on this art is the wrapped head and nothing else.
-      this.glowLo = bb.min.y + h * 0.78;
-      this.glowHi = bb.min.y + h * 0.94;
     };
     const m = worldModel(torchItemId, take);
     if (m) take(m);
   }
 
-  _material() {
-    if (this.glowMat) return this.glowMat;
-    // One material for every torch in the world: same texture, same glow, and
-    // three-hundred of them still compile one program.
-    const src = this.template.material;
-    const m = src.clone();
-    m.toneMapped = true;
-    this.glowMat = glowTop(m, this.glowLo, this.glowHi);
-    return this.glowMat;
-  }
-
   _grow() {
     const root = new THREE.Group();
-    const body = new THREE.Mesh(this.template.geometry, this._material());
+    // The template's material already glows at the head — `ItemModels` builds
+    // it that way for every torch there is, so the one in your hand, the one in
+    // the toolbar and the three hundred on these walls are literally the same
+    // material and compile one program between them.
+    const body = new THREE.Mesh(this.template.geometry, this.template.material);
     root.add(body);
     this.group.add(root);
     const entry = { root, body };

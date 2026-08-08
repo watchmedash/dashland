@@ -25,6 +25,47 @@ const protos = new Map();
 /** True once `url` is loaded and `instantiate` will succeed. */
 export const isReady = (url) => protos.has(url);
 
+const unlitFixed = new WeakMap();
+
+/**
+ * Give a model back its shadows.
+ *
+ * The Blocky Characters exports — the husk and the wandering merchant, every
+ * `character-*.glb` — declare `KHR_materials_unlit`, and GLTFLoader honours
+ * that by building a `MeshBasicMaterial`. An unlit material ignores every light
+ * in the scene and draws its texture at full brightness always, which is why
+ * those two stayed exactly as bright at midnight in a cave as at noon while the
+ * animals (plain PBR materials, from the Cube Pets pack) darkened correctly.
+ * That is the "zombies are glowing" bug, and it was never an emissive: it was
+ * the absence of lighting entirely.
+ *
+ * Rebuilding as a standard material rather than editing in place, and reusing
+ * the `map` object *untouched*, is the same rule the damage tint follows: these
+ * textures come from an ImageBitmap that has already been consumed, so writing
+ * any property that forces a re-upload renders the mob flat white. Reading one
+ * across to a new material does not.
+ */
+function lit(mat) {
+  if (!mat || !mat.isMeshBasicMaterial) return mat;
+  const done = unlitFixed.get(mat);
+  if (done) return done;
+  const m = new THREE.MeshStandardMaterial({
+    map: mat.map,
+    color: mat.color,
+    // Matches the Cube Pets materials, so a husk and a cow sit in the same
+    // light rather than one looking waxier than the other.
+    roughness: 0.92,
+    metalness: 0,
+    side: mat.side,
+    transparent: mat.transparent,
+    alphaTest: mat.alphaTest,
+    vertexColors: mat.vertexColors,
+  });
+  m.name = mat.name;
+  unlitFixed.set(mat, m);
+  return m;
+}
+
 /**
  * Load and measure every model in `urls`. Called once at world start so that
  * `spawn` can stay synchronous — it runs from the frame loop and from world
@@ -48,11 +89,13 @@ export async function prepare(urls) {
     // sRGB and picks sane filtering; every extra adjustment tried here — point
     // filtering for the palette atlas, forcing roughness, clamping metalness —
     // ended with the animals rendering flat white, while the untouched loader
-    // output rendered correctly. Shadow flags are the only safe thing to set.
+    // output rendered correctly. Shadow flags and `lit` (which builds a new
+    // material rather than editing this one) are the only safe things here.
     gltf.scene.traverse((n) => {
       if (!n.isMesh) return;
       n.castShadow = true;
       n.receiveShadow = true;
+      n.material = Array.isArray(n.material) ? n.material.map(lit) : lit(n.material);
     });
 
     // Measure the rest pose. Clips move the parts around, but the rest pose is

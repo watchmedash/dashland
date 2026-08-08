@@ -122,9 +122,35 @@ export class Drops {
       (Math.random() - 0.5) * 1.7, (Math.random() - 0.5) * 1.7, (Math.random() - 0.5) * 1.7,
     ).addScaledVector(up, 2.1 + Math.random());
     if (impulse) vel.add(impulse);
-    this.list.push({
+    const drop = {
       item: itemId, count, wear, pos, vel, mesh, keep,
       age: 0, spin: Math.random() * 6.28, collected: false, grounded: false, magnet: 0,
+    };
+    this.list.push(drop);
+    if (!mesh.userData.modelled) this._upgrade(drop);
+  }
+
+  /**
+   * Swap a stand-in sprite for the real model once it finishes loading.
+   *
+   * Models load over the network, so the *first* hide off the first deer — the
+   * first of anything, before anyone has held one — spawned while its GLTF was
+   * still in flight and got the flat card instead. Every later one looked
+   * right, which is exactly the shape of the bug that was reported: the first
+   * drop is 2D and nothing after it is. Waiting for the load is not an option
+   * (this runs inside a break, from the frame loop) so the drop takes the card
+   * and trades up when the model lands.
+   */
+  _upgrade(drop) {
+    if (!hasModel(drop.item)) return;
+    worldModel(drop.item, (model) => {
+      // It may have been picked up, burned or evicted in the meantime.
+      if (drop.collected || !this.list.includes(drop)) return;
+      model.userData.modelled = true;
+      model.layers.enable(1);
+      this.group.remove(drop.mesh);
+      this.group.add(model);
+      drop.mesh = model;
     });
   }
 

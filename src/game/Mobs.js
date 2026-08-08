@@ -1214,8 +1214,52 @@ const LUNGE_TIME = 0.3;
 // the flat-out run every other chase in this file uses, and it is legible at
 // night because it is slow. Six seconds is long enough to draw a weapon, put a
 // wall between you, or simply leave.
-const PROWL_PERIOD = 8;       // seconds between one cat's chances to start
-const PROWL_CHANCE = 0.05;    // per check, so a rough mean of 160s of exposure
+const PROWL_PERIOD = 8;       // seconds between the *planet's* chances to start one
+// Per check, world-wide. It was 0.05 and it was rolled by each cat on its own
+// clock, and both halves of that were wrong. This is the "a lion just attacked
+// me unprovoked" report, and it is the same complaint the `fights` note above
+// records — the stalk was not the old behaviour under a new name when it was
+// written, but at this rate it had become it.
+//
+// The first half is arithmetic that was started and not finished. 0.05 per 8s
+// is a mean of 8 / 0.05 = 160 seconds of exposure, which is what the old
+// comment said, and it stopped there as though 160 seconds were a long time.
+// It is not, because night here is not a compressed cycle: `dayMinutes`
+// defaults to 0, which puts the planet on the device clock and makes a night
+// twelve real hours long. A player who sits down after dark is eligible for the
+// whole session, and half an hour of that is 1800 / 160 = eleven stalks off a
+// single lion.
+//
+// The second half is that N cats ran N independent clocks, so the rate the
+// *player* met was 160 / N, and the biome tables make N routine rather than
+// exceptional — BADLANDS is ['lion', 'tiger', 'caterpillar'], two thirds big
+// cat, and SAVANNA carries two of seven. Four in the ring is one stalk every
+// forty seconds. No telegraph rescues that: a tell you see twenty times an hour
+// is not a tell, it is the weather, and the player stops reading it as "this
+// one has decided about me" long before it commits.
+//
+// So the roll moved off the animal and onto the planet (see the clocks in the
+// constructor, the tick in update, and _prowl), which makes the rate
+// independent of how many cats happen to be standing about, and the chance was
+// rescaled against real exposure instead of an imagined short night:
+// 8 / 0.005 = 1600 seconds, about twenty-seven minutes of eligible night, and
+// PROWL_REST on top of each one. One or two in a long evening, which is what
+// "rare" was always meant to mean.
+//
+// Rejected: capping the number of big cats a biome may spawn. It fixes the
+// arithmetic by emptying the savanna, and the population is the ecology.
+// Rejected: only letting the *nearest* cat roll. Still one roll per period per
+// player, but it silently makes the rate depend on the herd geometry again the
+// moment two cats are equidistant, and it is a longer way round to the same
+// place this took.
+const PROWL_CHANCE = 0.005;
+/** Seconds before the planet will consider another stalk.
+ *
+ *  Also what stops two cats converging on you at once, which the per-animal
+ *  roll allowed and which no telegraph can carry: one cat walking you down is
+ *  an event, two is an ambush, and an ambush is the unprovoked-aggression
+ *  complaint again with better staging. */
+const PROWL_REST = 240;
 const PROWL_RANGE = 26;       // cells it will consider you from
 const PROWL_HOLD = 6.5;       // cells it closes to, then waits at
 const PROWL_TELL = 6;         // seconds of telegraph before it commits
@@ -1491,6 +1535,15 @@ export class Mobs {
     this._kills = [];
     /** sun elevation at the player, refreshed each update */
     this.daylight = 1;
+    // --- the night stalk's clocks, and why they are here and not on the cat ---
+    // One roll for the whole planet per PROWL_PERIOD, taken by the first
+    // eligible big cat the tick reaches, then PROWL_REST during which nothing
+    // may start another. They are ticked once per frame in update() rather than
+    // inside _prowl, because _prowl runs once per cat and a clock decremented
+    // there would run N times faster with N cats on the meadow — which is
+    // precisely the bug the per-animal version had. See PROWL_CHANCE.
+    this.prowlT = PROWL_PERIOD;
+    this.prowlRest = 0;
     this.voxCooldown = 0;
     /** The merchant's bell runs on its own clock, clear of the herd limiter. */
     this.bellT = 0;
@@ -1740,7 +1793,11 @@ export class Mobs {
       prey: null,
       // --- the night stalk, big cats only ---
       prowl: 0,            // seconds of telegraph left; 0 means it is not
-      prowlT: Math.random() * PROWL_PERIOD,   // staggered, like the hunger clock
+      // There is deliberately no per-animal prowl clock here any more. It was
+      // `prowlT: Math.random() * PROWL_PERIOD`, staggered like the hunger clock
+      // — and staggering *when* each cat rolled did nothing about how often the
+      // player was rolled at, which was the whole trouble. The clock is on the
+      // planet now; see PROWL_CHANCE.
       growlT: 0,
       creep: false,        // moving at stalking pace rather than walking pace
       stalked: false,      // it came for you off a night stalk, not a grudge
@@ -3482,10 +3539,17 @@ export class Mobs {
       && dist < PROWL_RANGE;
     if (mob.prowl <= 0) {
       if (!eligible) return false;
-      mob.prowlT -= dt;
-      if (mob.prowlT > 0) return false;
-      mob.prowlT = PROWL_PERIOD;
+      // The roll belongs to the planet, not to this animal: one per
+      // PROWL_PERIOD however many cats are eligible, and none at all while the
+      // last stalk is still resting off. Resetting the period *here*, on the
+      // frame the roll is actually taken rather than in update(), is what keeps
+      // it one roll per period instead of one per cat per period — the first
+      // eligible cat the loop reaches spends it, and every other cat this frame
+      // finds the clock already restarted.
+      if (this.prowlRest > 0 || this.prowlT > 0) return false;
+      this.prowlT = PROWL_PERIOD;
       if (Math.random() >= PROWL_CHANCE) return false;
+      this.prowlRest = PROWL_REST;
       mob.prowl = PROWL_TELL;
       mob.growlT = 0;
     } else if (this.daylight > 0.06 || dist > PROWL_RANGE * 1.5
@@ -3731,6 +3795,14 @@ export class Mobs {
     // not global — the far side is in night at the same moment.
     this.daylight = sky ? sky.sunDir.dot(player.up) : 1;
     const night = this.daylight < 0.02;
+
+    // The night stalk's two clocks, ticked once for the planet rather than once
+    // per cat — see the note where they are declared. They are allowed to run in
+    // daylight too, which costs nothing and means the first cat to become
+    // eligible after dark takes its roll on that frame instead of waiting out a
+    // period it spent asleep.
+    this.prowlT -= dt;
+    if (this.prowlRest > 0) this.prowlRest -= dt;
 
     // Top up the population *around the player*, wherever the player now is.
     //

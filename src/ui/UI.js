@@ -14,6 +14,8 @@ const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 
 // Scratch for the pack bearing, which runs once a frame.
 const _dir = new THREE.Vector3();
 const _right = new THREE.Vector3();
+const _here = new THREE.Vector3();
+const _there = new THREE.Vector3();
 
 // Colours go in as plain `#rrggbb` — pre-encoding them as %23 then running
 // encodeURIComponent double-escapes the %, which yields an invalid fill and
@@ -970,7 +972,17 @@ export class UI {
     if (!el) return;
     if (!site) { el.classList.add('hidden'); return; }
     const p = g.player;
-    const d = p.position.distanceTo(site.pos);
+    // How far you have to *walk*, not how far it is through the planet. The
+    // bearing below was already rebuilt on the sphere; the distance was a
+    // straight line, which on a ball of radius ~132 quietly understates the
+    // trip — by a tenth for a death over the hill, and by better than a third
+    // for one on the far side, where the chord cuts through the core.
+    const c = g.planet.center;
+    _here.copy(p.position).sub(c);
+    _there.copy(site.pos).sub(c);
+    const radius = _here.length();
+    const cosA = _here.normalize().dot(_there.normalize());
+    const d = Math.acos(Math.max(-1, Math.min(1, cosA))) * radius;
     el.classList.remove('hidden');
     this.el.packDist.textContent = `${Math.round(d)}m`;
 

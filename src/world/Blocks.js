@@ -187,6 +187,10 @@ function block(o) {
     hurt: o.hurt ?? 0,
     // 1 for a block that cannot bear a solid neighbour beside it. See NEEDS_ROOM.
     needsRoom: o.needsRoom ?? false,
+    // 1 for a block that breaks when the cell under it stops holding it up.
+    // Distinct from `gravity` above, which nothing reads yet and which means the
+    // sand rule — keep the block, move it down until it lands. See NEEDS_FLOOR.
+    needsFloor: o.needsFloor ?? false,
   };
 }
 
@@ -271,8 +275,10 @@ export const BLOCKS = [
 
   block({ name: 'pumpkin', label: 'Pumpkin', top: 'pumpkin_top', side: 'pumpkin_side', hardness: 1, tool: 'axe', particle: [0.85, 0.5, 0.15], sound: 'wood' }),
   // The spines are the whole point of the plant: it hurts to lean on, and it
-  // will not share a wall with anything. See CONTACT_HURT and NEEDS_ROOM.
-  block({ name: 'cactus', label: 'Cactus', top: 'cactus_top', side: 'cactus_side', hardness: 0.5, hurt: 1, needsRoom: true, particle: [0.3, 0.55, 0.25], sound: 'grass' }),
+  // will not share a wall with anything. It is also a plant rather than masonry,
+  // so a segment with nothing under it is not a thing that can stand there.
+  // See CONTACT_HURT, NEEDS_ROOM and NEEDS_FLOOR.
+  block({ name: 'cactus', label: 'Cactus', top: 'cactus_top', side: 'cactus_side', hardness: 0.5, hurt: 1, needsRoom: true, needsFloor: true, particle: [0.3, 0.55, 0.25], sound: 'grass' }),
 
   // Gated to match the ore they are made of, so storing metal never launders it
   // past its own tool requirement.
@@ -589,6 +595,31 @@ export const CONTACT_HURT = new Float32Array(N_BLOCKS);
  * counted those would leave no legal cactus anywhere.
  */
 export const NEEDS_ROOM = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for a block that cannot stand on nothing: take away what is under it and it
+ * breaks where it is, dropping itself as an ordinary break.
+ *
+ * A cactus today, and the reason is the same reason NEEDS_ROOM exists — it is a
+ * plant, not masonry. Mine the sand out from under a three-tall one and the two
+ * segments above used to hang in the air, which is the single most obvious way
+ * this world can look unfinished.
+ *
+ * A table rather than a check for one id, for the same reason as the two above:
+ * a sapling, a torch on a post, a crop, a snow layer all want this eventually,
+ * and the awkward part of adding one should be deciding what holds it up, not
+ * finding the places that hard-coded the cactus.
+ *
+ * *Not* `gravity`. That field (sand, gravel, red sand) means the other rule —
+ * the block survives and moves down until it lands — and nothing implements it
+ * yet. A cactus does not slide down a cliff face; it comes apart. Two rules,
+ * two flags, so that whoever writes the falling-sand entity does not inherit
+ * a cactus that tries to use it.
+ *
+ * What counts as holding one up is `supports()` below, and it is one cell: the
+ * one directly underneath. There is no sideways support, so an L of cactus
+ * cannot hang off a wall.
+ */
+export const NEEDS_FLOOR = new Uint8Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -701,6 +732,40 @@ export function crowds(id, byte = 0) {
   return IS_SOLID[id] === 1 && !IS_TORCH[id] && !isPassable(id, byte);
 }
 
+/**
+ * Does the block in the cell below hold up a NEEDS_FLOOR block standing on it?
+ *
+ * Deliberately built out of `crowds` rather than beside it, because the two
+ * questions have almost the same answer and the parts that agree should not be
+ * written down twice. Everything `crowds` rejects is rejected here for the same
+ * reason it was rejected there: air, water, lava, grass, flowers and saplings
+ * are not surfaces, and a torch, a ladder, a sign or an open door is a fitting
+ * on a wall rather than a floor — you would not stand on one, and a cactus
+ * growing out of a torch is the same joke as a cactus broken by one.
+ *
+ * The one thing added on top is that the surface has to be at the *top* of its
+ * cell, which is what `blockTop` answers. A lower slab's face is half a cell
+ * down, so a cactus sat on one would float over a visible gap — which is the
+ * bug this rule exists to remove, in miniature. An upper slab is flush and
+ * counts. Stairs count: the riser reaches the top of the cell, so the plant is
+ * at least touching something, and refusing them would mean a cactus cannot
+ * grow on a step it is plainly resting against.
+ *
+ * Rejected: "opaque, or sand and cactus only". The first lets a cactus stand on
+ * a pane of glass but not on the sandstone beside it, which is a rule nobody
+ * could guess. The second is the check for one id that NEEDS_FLOOR exists to
+ * avoid, and it also refuses the perfectly reasonable cactus in a planter.
+ *
+ * A fence is accepted, which is the one arguable case: it reports a full-height
+ * cell and it is genuinely load-bearing, but it is a 0.25-wide post and the
+ * plant on it will look like it is balancing. Left in because you cannot get
+ * there by accident — the cell is already occupied, so the only way to make one
+ * is to build the fence first and plant on it deliberately.
+ */
+export function supports(id, byte = 0) {
+  return crowds(id, byte) && blockTop(id, byte) === 1;
+}
+
 for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
   IS_OPAQUE[i] = b.opaque ? 1 : 0;
@@ -727,6 +792,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   DROWNS[i] = (b.render === R_TORCH || b.render === R_CROSS) ? 1 : 0;
   CONTACT_HURT[i] = b.hurt;
   NEEDS_ROOM[i] = b.needsRoom ? 1 : 0;
+  NEEDS_FLOOR[i] = b.needsFloor ? 1 : 0;
   IS_SHAPED[i] = (b.render === R_SLAB || b.render === R_STAIR
     || b.render === R_LADDER || b.render === R_DOOR || b.render === R_SIGN
     || b.render === R_FENCE || b.render === R_TORCH) ? 1 : 0;

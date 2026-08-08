@@ -35,6 +35,7 @@ import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
+  NEEDS_FLOOR, supports,
 } from './world/Blocks.js';
 import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
@@ -1838,17 +1839,91 @@ class Game {
       }
     }
     if (!doomed) return;
+    this._breakWhereItStands(doomed.values());
+  }
+
+  /**
+   * Break a set of cells the world itself condemned, as one edit batch.
+   *
+   * An ordinary break, minus the tool: each one drops itself, it makes the
+   * noise, and the crack overlay never entered into it. Shared by the two rules
+   * that condemn blocks — `_crushCrowded` and `_dropUnsupported` — so that a
+   * cactus walled in and a cactus with the sand mined out from under it come
+   * apart in exactly the same way.
+   *
+   * @param {Iterable<{col: number, k: number, id: number}>} cells
+   */
+  _breakWhereItStands(cells) {
     const removals = [];
     const at = new THREE.Vector3();   // not a shared scratch: we are inside a caller's
-    for (const c of doomed.values()) {
-      // An ordinary break, minus the tool: it drops itself, it makes the noise,
-      // and the crack overlay never entered into it.
+    for (const c of cells) {
       this.planet.centerOf(c.col, c.k, at);
       for (const d of computeDrops(c.id, null)) this.drops.spawn(at.x, at.y, at.z, d.item, d.count);
       this.audio.break_(BLOCKS[c.id].sound, at);
       removals.push({ col: c.col, k: c.k, id: 0 });
     }
-    this._applyEdits(removals);
+    if (removals.length) this._applyEdits(removals);
+  }
+
+  /**
+   * Break any NEEDS_FLOOR block these edits have just left standing on nothing,
+   * and everything of the same kind stacked on top of it.
+   *
+   * Runs *after* the whole batch is in the world, like `_crushCrowded` and for a
+   * sharper reason: a batch can remove several cells of one column at once (the
+   * harness clears five cells over every column of an arena, water floods a
+   * trench, a door is two cells). Reading the world mid-batch would make a stack
+   * cut in the middle behave differently depending on which order the edits
+   * happened to be listed in. Reading it once at the end, the answer is a
+   * function of the world, not of the list.
+   *
+   * Only the cell directly above each edit can have lost its floor, so this is
+   * one `at` call for an ordinary edit and a walk up the column only when there
+   * really is a plant sitting on what just changed.
+   *
+   * ---- why it terminates ----
+   *
+   * `_crushCrowded` argues that it does not recurse at all — its removals write
+   * air, and air crowds nothing. This one *does* recurse, so the argument has to
+   * be different, and it is a bounded one rather than a hand-wave:
+   *
+   *  - This pass only ever writes air, and it only ever condemns a cell that
+   *    currently holds a NEEDS_FLOOR block. Nothing here writes a NEEDS_FLOOR
+   *    block. So every non-empty pass strictly reduces the number of them in a
+   *    finite world: the chain cannot be infinite.
+   *  - Tighter than that, the depth is at most one. The batch this pass emits is
+   *    a contiguous run of air over one column. Re-entering `_applyEdits` with
+   *    it, `_crushCrowded` finds nothing (air crowds nothing) and this pass
+   *    finds nothing either: for every removed cell the block above is either
+   *    another cell of the same run — now air, and air is not NEEDS_FLOOR — or
+   *    the block that ended the run, which was not NEEDS_FLOOR to begin with.
+   *  - Composed with crushing, the whole thing bottoms out at depth three. A
+   *    crush writes air, which can pull a stack down (depth two), whose removals
+   *    are the terminating case above (depth three). That bound holds no matter
+   *    how many cacti are involved, because a column's run is taken in one go
+   *    rather than a segment at a time.
+   *
+   * Not called on chunk load or save restore, and cannot be: neither goes
+   * through `_applyEdits` — a streamed region arrives at `planet.applyRegions`
+   * and a save writes `planet.blocks` directly. That is what keeps a generated
+   * stack from demolishing itself the first time it comes into range.
+   */
+  _dropUnsupported(edits) {
+    let doomed = null;
+    for (const e of edits) {
+      if (!NEEDS_FLOOR[this.planet.at(e.col, e.k + 1)]) continue;
+      if (supports(this.planet.at(e.col, e.k), this.planet.facingAt(e.col, e.k))) continue;
+      // The floor is gone, so the whole run resting on it goes: the second
+      // segment is held up by nothing but the first. The run ends at the first
+      // block that is not NEEDS_FLOOR, which is a block with its own rules about
+      // what holds it up (today: none).
+      for (let k = e.k + 1; k < D && NEEDS_FLOOR[this.planet.at(e.col, k)]; k++) {
+        if (!doomed) doomed = new Map();
+        doomed.set(e.col * D + k, { col: e.col, k, id: this.planet.at(e.col, k) });
+      }
+    }
+    if (!doomed) return;
+    this._breakWhereItStands(doomed.values());
   }
 
   _applyEdits(edits) {
@@ -1870,6 +1945,13 @@ class Game {
     // in the world and posted to the worker before the cactus beside it comes
     // down, or the two changes race in the mesher over the same chunk.
     this._crushCrowded(edits);
+    // Then whatever those edits left standing on nothing. After crushing rather
+    // than before, so that a segment crushed out of the middle of a stack takes
+    // the rest of the column with it — the crush re-enters here with its own
+    // removals, and the column comes down on that pass. By the time this line
+    // runs for the original batch those cells are already air, so nothing is
+    // dropped twice.
+    this._dropUnsupported(edits);
   }
 
   /**
@@ -2186,6 +2268,19 @@ class Game {
     // one of the two places is a rule with a trivial workaround.
     if (NEEDS_ROOM[id] && this._crowdedAt(col, k)) {
       this.ui.setHint('No room for a ' + BLOCKS[id].label.toLowerCase());
+      return false;
+    }
+
+    // And it will not stand on nothing. Same two-halves shape as the rule above:
+    // placement refuses it here, and `_dropUnsupported` breaks one whose floor
+    // is taken away later. Without this half you can hang a cactus in mid-air by
+    // placing it against the side of a block, and the only rule that would ever
+    // look at it again is the one that fires when a *neighbouring* cell changes
+    // — so it would stay there for good. Refusing is better than letting it land
+    // and immediately fall: a placement that undoes itself reads as a dropped
+    // input rather than as a rule.
+    if (NEEDS_FLOOR[id] && !supports(this.planet.at(col, k - 1), this.planet.facingAt(col, k - 1))) {
+      this.ui.setHint('Nothing for a ' + BLOCKS[id].label.toLowerCase() + ' to grow on');
       return false;
     }
 

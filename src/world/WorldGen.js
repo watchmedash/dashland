@@ -1646,6 +1646,21 @@ export class WorldGen {
     // bound has to be generous or it rejects the entire planet
     if (k < 0 || k > D - 7) return;
     const surf = blocks[col * D + k];
+    // Nothing grows out of a flooded cell.
+    //
+    // `stampTree` writes with `set()`, which skips a cell that is not air — so
+    // on a desert shore whose sand top sits exactly one cell under the water
+    // line, a cactus lost its *base* segment to the water and the rest landed
+    // from k+2 upward: a cactus standing on the sea. It needs the 4% roll, the
+    // parity, and precisely one cell of depth, so it is a handful of columns on
+    // a planet — but a cactus is now a block that falls when nothing holds it
+    // up, and generating one that is already unsupported is generating a lie
+    // the physics will not agree with.
+    //
+    // Tested here rather than in `stampTree` because this is where a tree is
+    // *decided*: a trunk has the same problem for the same reason, and one
+    // guard covers every kind rather than one per stamp.
+    if (blocks[col * D + k + 1] !== ID.air) return;
     const rng = this.colRng(col, 0x7a11);
 
     let kind = null, chance = 0;

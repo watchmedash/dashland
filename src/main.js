@@ -1229,8 +1229,28 @@ class Game {
    * 2 along j. A log laid against a wall should lie down, showing its cut ends
    * on the two faces the trunk runs through — placing one sideways and getting
    * an upright block is the thing that reads as the game ignoring you.
+   *
+   * Crouching overrides the face and lays the log along the way you are facing.
+   *
+   * The face rule on its own is correct and is the one Minecraft uses, but on a
+   * planet it is close to unusable: you are almost always standing on flat
+   * ground clicking the *top* of something, which is the one face that means
+   * upright. The reported symptom was "the log always points up and I can't
+   * make it face sideways", and that is exactly right — with nothing tall
+   * nearby there is no vertical face to click, so you have to build a pillar
+   * just to lay one log down. Holding crouch is the standard modifier for
+   * "I mean this literally", it costs no new binding, and it leaves the face
+   * rule intact for everyone already using it.
    */
   _axisFromFace(hit, col, k) {
+    if (this.player.crouching) {
+      const p = colParts(col);
+      tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
+      const d = this.player.lookDir;
+      const a = Math.abs(d.x * _frame.ea[0] + d.y * _frame.ea[1] + d.z * _frame.ea[2]);
+      const b = Math.abs(d.x * _frame.eb[0] + d.y * _frame.eb[1] + d.z * _frame.eb[2]);
+      return a >= b ? 1 : 2;
+    }
     // The face normal is the step from the block hit to the cell being filled.
     if (hit.col === col) return 0;                 // stacked above or below
     const p = colParts(col);

@@ -1,14 +1,38 @@
-// First-person viewmodel: the player's hand and whatever it is holding.
+// First-person viewmodel: the player's hands and whatever they are holding.
 // Rendered in its own scene on top of the composited frame so it can never
 // clip into geometry.
+//
+// The arms are the chosen character's own — the `arm-left` and `arm-right`
+// subtrees lifted out of a clone of the same GLB the third-person body uses, so
+// what you see down the front of the screen and what somebody else would see of
+// you are the same limbs wearing the same skin. They used to be a pair of
+// procedurally textured boxes, which meant every one of the fifteen characters
+// had the same teal sleeves in first person and the choice stopped meaning
+// anything the moment you looked forward. Those boxes are still here as the
+// fallback for a character model that has not arrived or never will; see
+// `_tryArms`.
 
 import * as THREE from 'three';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, RENDER_TYPE, R_CROSS } from '../world/Blocks.js';
 import { createItemBlockMaterial } from '../render/VoxelMaterial.js';
 import { heldModel, hasModel } from '../render/ItemModels.js';
+import * as MobModels from '../game/MobModels.js';
+import { characterUrl, DEFAULT_CHARACTER } from './Character.js';
 
 const _lampColor = new THREE.Color();
+const _box = new THREE.Box3();
+
+/** The two hands, in the order everything here iterates them. */
+const HANDS = ['right', 'left'];
+
+/**
+ * The rig node whose subtree is one arm. Same names `Character.js` uses, and
+ * deliberately not imported from it: that module keeps its copy private, and a
+ * shared constant between the body and the viewmodel would tie two rigs
+ * together that only happen to be the same rig.
+ */
+const ARM_NODE = { right: 'arm-right', left: 'arm-left' };
 
 // Where the shoulder sits in view space. The hand hangs off the far end of the
 // limb, so these are the old hand rest points pushed back down the arm: hand ≈
@@ -146,6 +170,15 @@ function sampleSwing(track, s, outP, outR) {
 const _swingP = new THREE.Vector3();
 const _swingR = new THREE.Vector3();
 
+/**
+ * The stand-in arm's skin: a teal sleeve with a cuff and a bare hand.
+ *
+ * Kept, now that the real arm is the chosen character's own limb, because the
+ * character model may not be there — a cold load, a slow network, a missing
+ * file. See `_tryArms`. It is what first person looked like before this and it
+ * is what it falls back to, so the mode is never empty-handed in the literal
+ * sense of having no arm at all.
+ */
 function makeArmTexture() {
   const S = 64;
   const c = document.createElement('canvas');
@@ -194,6 +227,11 @@ export class ViewModel {
     // Pivot sits at the shoulder; the limb extends forward, away from the
     // camera. Kept slim and short — anything nearer than ~0.4 units balloons
     // under perspective and swallows the corner of the screen.
+    //
+    // This box is the stand-in. The character's arm replaces the *mesh* and
+    // nothing else: the pivot, the item anchor and every number in the swing
+    // tracks belong to this group, which is why a real arm can be swapped in
+    // without retuning any of them.
     const armGeo = new THREE.BoxGeometry(0.14, 0.14, 0.62);
     armGeo.translate(0, 0, -0.28);
     this.arm = new THREE.Mesh(armGeo, armMat);
@@ -226,7 +264,8 @@ export class ViewModel {
     // face away from the key light. The limb box is symmetric, so there is
     // nothing a mirror would buy.
     this.offArmPivot = new THREE.Group();
-    this.offArmPivot.add(new THREE.Mesh(armGeo, armMat));
+    this.offArm = new THREE.Mesh(armGeo, armMat);
+    this.offArmPivot.add(this.offArm);
     this.offHand = new THREE.Group();
     this.offHand.position.set(-HAND_LOCAL.x, HAND_LOCAL.y, HAND_LOCAL.z);
     this.offHand.rotation.set(
@@ -259,11 +298,29 @@ export class ViewModel {
      * a torch in the right had set, and whichever was equipped last lit both.
      */
     this.hands = {
-      right: { anchor: this.hand, item: -1, mesh: null, owns: false, glow: createItemBlockMaterial() },
-      left: { anchor: this.offHand, item: -1, mesh: null, owns: false, glow: createItemBlockMaterial() },
+      right: {
+        anchor: this.hand, pivot: this.armPivot, stub: this.arm, arm: null,
+        item: -1, mesh: null, owns: false, track: SWINGS.default,
+        glow: createItemBlockMaterial(),
+      },
+      left: {
+        anchor: this.offHand, pivot: this.offArmPivot, stub: this.offArm, arm: null,
+        item: -1, mesh: null, owns: false, track: SWINGS.default,
+        glow: createItemBlockMaterial(),
+      },
     };
 
+    /**
+     * Whose arms these are. Defaulted rather than left null so that the common
+     * case — a player who never touches the picker — needs no wiring at all,
+     * and so that `setCharacter` with the default id is correctly a no-op.
+     */
+    this.charUrl = characterUrl(DEFAULT_CHARACTER);
+    this._armsBuilt = false;
+
     this.swing = 1;
+    /** Which arm the current swing belongs to. See `punch`. */
+    this.swingHand = 'right';
     this.swingTrack = SWINGS.default;
     this.bob = 0;
     this.equipT = 1;      // 0 = just swapped, 1 = settled
@@ -276,6 +333,10 @@ export class ViewModel {
      * casts or hits: there are eight of them in main, and the ninth one someone
      * adds next month would silently animate one body and not the other. There
      * is exactly one definition of "the player swung", and it is `punch`.
+     *
+     * Called with the hand that swung, so the body swings the same arm the view
+     * model does. A listener that ignores the argument gets the old behaviour.
+     * @type {?(hand:'right'|'left')=>void}
      */
     this.onPunch = null;
   }
@@ -285,26 +346,151 @@ export class ViewModel {
     this.camera.updateProjectionMatrix();
   }
 
+  // --- the chosen character's arms -------------------------------------------
+
+  /**
+   * Wear a character's arms in first person.
+   *
+   * Safe before its GLB exists and safe to call repeatedly: all this records is
+   * a URL, and `update` builds the arms on the first frame `MobModels` can hand
+   * them over. Until then — and forever, if the file never arrives — first
+   * person draws the stand-in limb it always drew.
+   *
+   * @param {string} id a `CHARACTER_IDS` letter
+   */
+  setCharacter(id) {
+    const url = characterUrl(id);
+    if (url === this.charUrl) return;
+    this.charUrl = url;
+    for (const h of HANDS) this._dropArm(this.hands[h]);
+    this._armsBuilt = false;
+    this._tryArms();
+  }
+
+  /**
+   * Take the `arm-*` subtrees out of a clone of the character and hang them off
+   * the two shoulders. Does nothing until the GLB is loaded, and gives up for
+   * good once it has run — a second attempt could only produce the same arms.
+   *
+   * **Why a subtree and not a bone.** The rig is not skinned: `character-a.glb`
+   * is eight plain nodes and every clip keys their rotations directly, so an arm
+   * is a node with a mesh on it and `getObjectByName` is the whole of "find the
+   * arm". `MobModels.instantiate` is used rather than reaching for the
+   * prototype because the prototype must never be reparented — it is what every
+   * husk in the world is cloned from — and instantiate already hands back a
+   * private clone. Its mixer and its other six nodes are dropped on the floor:
+   * this arm is posed by the swing tracks below, not by any clip, so there is
+   * nothing here for a mixer to drive.
+   *
+   * **No material work at all, on purpose.** The clone's materials are the
+   * prototype's, which `MobModels.lit()` has already rebuilt as standard
+   * materials around the file's own `map` — so the arm arrives lit by this
+   * scene's key and fill, warms to `handLight` with everything else, and wears
+   * the chosen character's own skin because that skin is the texture its GLB
+   * points at. Touching those materials is how these models render flat white
+   * (see the note on `lit`), and the viewmodel needs nothing from them that the
+   * body has not already got.
+   *
+   * **Fitted by measurement rather than by a constant.** The limb hangs down its
+   * node's -Y from a shoulder at the node origin; the fist is the far end of
+   * that. Scaling so the far end lands exactly on `HAND_LOCAL` is what keeps the
+   * held item where it was tuned — the item anchor does not move, the arm is
+   * built to reach it, and no swing amplitude, bob term or item offset changed
+   * for any of this.
+   *
+   * **The mirror is free.** `arm-left`'s mesh sits at x 0..0.4 in its own node
+   * space and `arm-right`'s at -0.4..0 — the pack mirrors the geometry, not the
+   * node — so centring each measured limb on its own shoulder is all the
+   * mirroring there is. Nothing is scaled by -1, which would reverse the winding
+   * and turn the arm inside out under backface culling.
+   */
+  _tryArms() {
+    if (this._armsBuilt || !MobModels.isReady(this.charUrl)) return;
+    const model = MobModels.instantiate(this.charUrl);
+    if (!model) return;
+    this._armsBuilt = true;
+
+    for (const key of HANDS) {
+      const h = this.hands[key];
+      const node = model.root.getObjectByName(ARM_NODE[key]);
+      if (!node) continue;
+      // Off the torso and onto our own shoulder: the node carries the rig's
+      // shoulder offset in its position, and here the shoulder is the origin.
+      node.parent?.remove(node);
+      node.position.set(0, 0, 0);
+      node.quaternion.identity();
+      node.traverse((n) => {
+        if (!n.isMesh) return;
+        // `prepare` turns these on for the world body. Nothing in this scene
+        // casts or receives, and a shadow-casting arm in a scene with no shadow
+        // map is a per-frame cost for no pixels.
+        n.castShadow = false;
+        n.receiveShadow = false;
+      });
+
+      _box.setFromObject(node);
+      const len = -_box.min.y || 1;              // shoulder at 0, fist at min.y
+      const s = -HAND_LOCAL.z / len;             // fist lands on the item anchor
+      const holder = new THREE.Group();
+      // Two turns, and the second one is not cosmetic. X swings a limb that
+      // hangs down -Y out along -Z, in front of the eye. Y turns the rig round
+      // to face the camera's forward: the pack builds its characters looking
+      // along +Z and a three camera looks along -Z, so first person is standing
+      // *inside* a body that faces the other way. Without it the arm is
+      // laterally flipped on its own long axis — the back of the forearm on top
+      // where the front belongs, and the outer sleeve turned in toward the
+      // middle of the screen. Both are the sort of wrong that reads as "the
+      // texture looks a bit off" rather than as a transform bug, which is why
+      // the mapping was checked axis by axis: with the Y turn the arm's front
+      // face points up (as your own does when you reach forward) and each arm's
+      // outward side faces its own side of the screen.
+      holder.rotation.set(Math.PI / 2, Math.PI, 0);   // XYZ order: Rx then Ry
+      holder.scale.setScalar(s);
+      // Centre the limb on the shoulder line. Positive, not negative: the Y
+      // turn has already flipped the measured centre to the far side.
+      holder.position.x = (_box.min.x + _box.max.x) * 0.5 * s;
+      holder.add(node);
+
+      h.pivot.add(holder);
+      h.arm = holder;
+      h.stub.visible = false;
+    }
+  }
+
+  /**
+   * Put a hand back on the stand-in limb. Nothing is disposed: the geometry and
+   * the materials under here are the loaded prototype's, shared with every other
+   * instance of that character, and freeing them would take the body and the
+   * husks with them. Detaching is the whole of the release.
+   */
+  _dropArm(h) {
+    if (!h.arm) return;
+    h.pivot.remove(h.arm);
+    h.arm = null;
+    h.stub.visible = true;
+  }
+
   /** What the right hand is holding. Read by the swing and the rest point. */
   get heldItem() { return this.hands.right.item; }
 
   setHeld(itemId, iconFactory) {
     if (itemId === this.hands.right.item) return;
     this.equipT = 0;
-    // Which swing plays is a property of what's in the fist, so it's resolved
-    // on equip rather than looked up every frame. Everything without a tool
-    // kind — blocks, torches, food, empty hands — falls back to the jab.
-    this.swingTrack = SWINGS[ITEMS[itemId]?.tool?.kind] || SWINGS.default;
     this._equip(this.hands.right, itemId, iconFactory);
   }
 
   /**
    * What the left hand is holding.
    *
-   * No swing track, because nothing is used from the offhand — it carries and
-   * it shows, and the key that matters is the one that brings the item round to
-   * the right hand. It has its own equip clock so that swapping dips both arms
-   * on their own schedules, which is what makes the swap read as one gesture.
+   * It used to have no swing track, on the reasoning that nothing is ever used
+   * from the offhand — it carried and it showed. `Inventory.active()` repealed
+   * that: with the main hand empty the offhand is the hand that mines, places
+   * and eats, so a pickaxe there has to swing like a pickaxe. The track is
+   * resolved per hand in `_equip` and `punch` picks the one belonging to the
+   * hand that acted.
+   *
+   * It has its own equip clock so that swapping dips both arms on their own
+   * schedules, which is what makes the swap read as one gesture.
    */
   setOffhand(itemId, iconFactory) {
     const h = this.hands.left;
@@ -324,6 +510,10 @@ export class ViewModel {
    */
   _equip(h, itemId, iconFactory) {
     h.item = itemId;
+    // Which swing plays is a property of what's in the fist, so it's resolved
+    // on equip rather than looked up every frame. Everything without a tool
+    // kind — blocks, torches, food, empty hands — falls back to the jab.
+    h.track = SWINGS[ITEMS[itemId]?.tool?.kind] || SWINGS.default;
     this._clearMesh(h);
     if (!itemId) return;
 
@@ -455,8 +645,38 @@ export class ViewModel {
     this._setMesh(h, mesh, false);
   }
 
-  /** Kick off the mining / placing swing. */
-  punch() { this.swing = 0; this.onPunch?.(); }
+  /**
+   * The hand that would act if nobody says otherwise.
+   *
+   * This is `Inventory.active()`'s rule read off the fists instead of off the
+   * slots: the offhand acts only when the main hand is empty and it is not. The
+   * rule is duplicated rather than plumbed through because the viewmodel is
+   * handed both slots' contents every frame — it already knows the answer — and
+   * a hand argument at all nine `punch` sites in main is nine chances for one of
+   * them to disagree with the inventory about who just mined.
+   *
+   * The `left.item > 0` half matters: with both hands empty `active()` returns
+   * the empty offhand, but the offhand *arm* is not even drawn then, so a bare
+   * punch is the right arm's — which is also the arm you can see.
+   */
+  actingHand() {
+    return this.hands.right.item > 0 || this.hands.left.item <= 0 ? 'right' : 'left';
+  }
+
+  /**
+   * Kick off the mining / placing swing.
+   *
+   * @param {'right'|'left'} [hand] which arm did it. Omitted — as every caller
+   *   omits it — the acting hand is derived from what is in the two fists.
+   *   Pass it explicitly for a swing that is not about what you are holding.
+   */
+  punch(hand = this.actingHand()) {
+    const h = this.hands[hand] ? hand : 'right';
+    this.swingHand = h;
+    this.swingTrack = this.hands[h].track || SWINGS.default;
+    this.swing = 0;
+    this.onPunch?.(h);
+  }
 
   /**
    * @param {{r:number,g:number,b:number}} [handLight] local block light at the
@@ -466,6 +686,13 @@ export class ViewModel {
    *   hands in the dark.
    */
   update(dt, player, sky, handLight) {
+    // The character's GLB is fetched by the world loader and lands whenever it
+    // lands, which is after this view model was built and may be after the
+    // player is already walking around. Polled here rather than pushed from the
+    // loader because the poll is a `Map.has` and the push would be a fourth
+    // party to a handshake between main, the loader and two rigs.
+    if (!this._armsBuilt) this._tryArms();
+
     const holding = this.heldItem > 0;
     const rest = holding ? REST : REST_EMPTY;
 
@@ -483,14 +710,20 @@ export class ViewModel {
 
     // Swing pose, sampled from this item's own track.
     sampleSwing(track, this.swing, _swingP, _swingR);
+    // Whose swing it is. The tracks are authored for the right arm, so the arm
+    // that is not swinging simply takes none of them — one multiplier rather
+    // than a second sample, and with `sw` at 1 every number below is the number
+    // that was tuned.
+    const sw = this.swingHand === 'right' ? 1 : 0;
+    const osw = 1 - sw;
 
     // equip dip when the held item changes
     const eq = 1 - this.equipT;
     const equipY = -eq * 0.42;
 
-    const px = rest.x + bx + _swingP.x;
-    const py = rest.y + by + _swingP.y + equipY;
-    const pz = rest.z + _swingP.z;
+    const px = rest.x + bx + _swingP.x * sw;
+    const py = rest.y + by + _swingP.y * sw + equipY;
+    const pz = rest.z + _swingP.z * sw;
 
     // Shoulder anchor sits low-right, just behind the near plane. Everything —
     // bob, swing, equip dip, sprint — is applied here and nowhere else; the fist
@@ -509,9 +742,9 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x + eq * 0.55,
-      ARM_REST_ROT.y + _swingR.y,
-      ARM_REST_ROT.z + _swingR.z,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55,
+      ARM_REST_ROT.y + _swingR.y * sw,
+      ARM_REST_ROT.z + _swingR.z * sw,
     );
 
     // The offhand arm, on the frames there is one. Everything above has already
@@ -519,22 +752,31 @@ export class ViewModel {
     // sprint ease and nothing else, which is the whole reason the offhand can
     // be added without re-tuning a single number of the finished hand.
     //
-    // No swing term: the swing is what the right hand does to the world, and
-    // the left hand is not doing it. `bx` is negated so the two arms sway apart
-    // and together as you walk rather than sliding across the screen in step,
-    // which is what a shared sign looked like — one arm chasing the other.
+    // The swing term is here now, and `osw` is zero on every frame it used to
+    // be absent — an offhand that is only carrying still does not swing. It is
+    // non-zero exactly when the offhand is the hand that acted, which is when
+    // the main hand is empty; see `actingHand`.
+    //
+    // Mirrored on the same rule as `OFF_ARM_REST_ROT`: the sideways offset and
+    // the two rotations that lean the limb inward — yaw and roll — change sign,
+    // pitch does not. A track's forward-and-down is forward-and-down for either
+    // arm; only its across-the-body component belongs to a side.
+    //
+    // `bx` is negated so the two arms sway apart and together as you walk rather
+    // than sliding across the screen in step, which is what a shared sign looked
+    // like — one arm chasing the other.
     if (this.offArmPivot.visible) {
       if (this.offEquipT < 1) this.offEquipT = Math.min(1, this.offEquipT + dt * 5.0);
       const oeq = 1 - this.offEquipT;
       this.offArmPivot.position.set(
-        OFF_REST.x - bx,
-        OFF_REST.y + by - oeq * 0.42,
-        OFF_REST.z - this._sprintEase * 0.05,
+        OFF_REST.x - bx - _swingP.x * osw,
+        OFF_REST.y + by + _swingP.y * osw - oeq * 0.42,
+        OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05,
       );
       this.offArmPivot.rotation.set(
-        OFF_ARM_REST_ROT.x + oeq * 0.55,
-        OFF_ARM_REST_ROT.y,
-        OFF_ARM_REST_ROT.z,
+        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55,
+        OFF_ARM_REST_ROT.y - _swingR.y * osw,
+        OFF_ARM_REST_ROT.z - _swingR.z * osw,
       );
     }
 

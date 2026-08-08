@@ -464,7 +464,13 @@ class Game {
     // The player's body. Built after Drops because it borrows the same factory
     // the drops use — what you carry and what you dropped are the same mesh.
     this.character = new PlayerCharacter(this.scene, (id) => this.drops.createItemMesh(id));
-    this.viewModel.onPunch = () => this.character.punch();
+    this.viewModel.onPunch = (hand) => this.character.punch(hand);
+    // First person wears the same character's arms as third person. One hook
+    // rather than a call at each of the three `setCharacter` sites (boot, New
+    // Game, load) — the fourth site added later would have been the one that
+    // forgot, and both classes default to the same character so the
+    // early-return on an unchanged id keeps them in step.
+    this.character.onCharacter = (id) => this.viewModel.setCharacter(id);
     /**
      * Which camera the F5 cycle is on, restored from the last session.
      *

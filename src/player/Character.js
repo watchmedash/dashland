@@ -74,7 +74,14 @@ const CLIP = {
   idle: 'idle',
   walk: 'walk',
   run: 'sprint',
-  attack: 'attack-melee-right',
+  /**
+   * One per hand: the pack ships `attack-melee-left` as well, and now that an
+   * empty main hand lets the offhand mine and place, a left-handed swing is a
+   * thing the body has to be able to do. Both clips key every node — legs,
+   * torso, head and *both* arms — so this is a whole-body strike either way;
+   * what differs is which arm leads.
+   */
+  attack: { right: 'attack-melee-right', left: 'attack-melee-left' },
   /**
    * Not played — read, for their one keyframe each. See `_readHoldPose`.
    *
@@ -345,6 +352,21 @@ export class PlayerCharacter {
     this.holdQ = { right: null, left: null };   // holding-* poses, null if absent
     this._holdW = { right: 0, left: 0 };        // eased 0..1, per arm
     this.swingT = 0;
+    /** Which arm is mid-strike, and so is not holding its carrying pose. */
+    this.swingHand = 'right';
+
+    /**
+     * Told whenever the body changes character, so first person can wear the
+     * same arms.
+     *
+     * A hook rather than a second call beside each of the three places that
+     * choose a character (new game, load, the save's own metadata): those three
+     * agree today and a fourth would be one more chance for the hands and the
+     * body to be different people. There is one definition of "who the player
+     * is" and it is `setCharacter`.
+     * @type {?(id:string)=>void}
+     */
+    this.onCharacter = null;
 
     /**
      * The layered pose: which one, how strongly, and the kick's phase.
@@ -409,6 +431,7 @@ export class PlayerCharacter {
     if (id === this.id) return;
     this.id = id;
     this.url = characterUrl(id);
+    this.onCharacter?.(id);
     if (this.model) {
       this.scene.remove(this.model.root);
       this.model = null;
@@ -576,12 +599,18 @@ export class PlayerCharacter {
    * so every swing while walking snapped the feet back to frame zero. The
    * one-shot disables itself when it finishes (`clampWhenFinished` is false),
    * so there is nothing to clean up.
+   *
+   * @param {'right'|'left'} [hand] which arm struck. The view model works this
+   *   out from what is in the two fists and passes it through `onPunch`; the
+   *   default keeps every other caller — and any that forgets — on the old
+   *   right-handed swing.
    */
-  punch() {
+  punch(hand = 'right') {
+    this.swingHand = CLIP.attack[hand] ? hand : 'right';
     this.swingT = SWING_TIME;
     if (!this.model) return;
     const base = this.model.current;
-    MobModels.playOnce(this.model, CLIP.attack);
+    MobModels.playOnce(this.model, CLIP.attack[this.swingHand]);
     this.model.current = base;
   }
 
@@ -774,10 +803,11 @@ export class PlayerCharacter {
     // what keeps this from compounding — each frame slerps from a freshly
     // animated value, not from last frame's result.
     //
-    // Both arms, and the swing is only the right one's business: `attack-
-    // melee-right` keys `arm-right` alone, so a left arm that dropped its pose
-    // during a swing would be letting go of the torch for no reason the mixer
-    // ever asked it to.
+    // Both arms, and only the arm that struck lets go of what it is carrying.
+    // The other keeps its hold pose right through the swing — the attack clips
+    // key both arms, so without that it would be the mixer's counter-swing that
+    // decided where the offhand torch went, which is a wind-up nobody asked the
+    // left arm to perform.
     // --- falling, swimming, sneaking ---
     // Before the carrying pose, not after, and that order is the whole design:
     // the hold slerp runs at 0.85 and so leaves a trace of whatever it found,
@@ -800,7 +830,7 @@ export class PlayerCharacter {
 
     if (this.swingT > 0) this.swingT = Math.max(0, this.swingT - dt);
     for (const h of HANDS) {
-      const swinging = h === 'right' && this.swingT > 0;
+      const swinging = h === this.swingHand && this.swingT > 0;
       const want = this.heldItem[h] > 0 && !swinging ? 1 : 0;
       this._holdW[h] += (want - this._holdW[h]) * Math.min(1, dt * 9);
       const arm = this.arms[h];

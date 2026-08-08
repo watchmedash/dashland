@@ -164,7 +164,21 @@ const WHITE_L = [1, 1, 1];
  * terrain. A real water surface at night still carries the sky glow, the stars
  * and the moon, none of which the zenith colour accounts for.
  */
-const MOON_REFLECT = new THREE.Color(0.010, 0.018, 0.035);
+//
+// Tripled after measuring a real lake rather than modelling one. A dug lake
+// seen across its length at midnight came out at (1, 5, 15) against (24, 62,
+// 101) for the same water at noon: no longer the hole the report described —
+// 83% of the surface carries visible blue — but dark. At 3x it measures
+// (4, 8, 18), which is a 58% lift on the surface and still an order of
+// magnitude under noon.
+//
+// Worth writing down for whoever tunes this next: **this is not the lever it
+// looks like.** Tripling it moved the surface by 2.8 luminance and did not
+// change the fraction of it that reads as pure black at all, because the
+// fresnel term only hands the reflection most of the fragment at a grazing
+// angle. Anything much brighter has to come from the water body itself, and
+// that is the change that risks a lake glowing in a cave.
+const MOON_REFLECT = new THREE.Color(0.030, 0.052, 0.100);
 /**
  * How much of the sky ambient's night floor to take away, at full night.
  *

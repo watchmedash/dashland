@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
 import { Player, VIEW_FIRST, VIEW_COUNT, VIEW_LABELS } from './player/Player.js';
 import { ViewModel } from './player/ViewModel.js';
-import { PlayerCharacter, playerModelUrls } from './player/Character.js';
+import { PlayerCharacter, playerModelUrls, DEFAULT_CHARACTER } from './player/Character.js';
 import { Input } from './player/Input.js';
 import { Sky } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
@@ -256,6 +256,10 @@ class Game {
     this._flameCells = [];
     this.seed = 0;
     this.worldReady = false;
+    /** The character picker is up and the world behind it must wait. */
+    this._choosing = false;
+    /** The world finished while it was up, and `_onWorldReady` still owes a run. */
+    this._readyHeld = false;
     this.autosaveTimer = 0;
     /** chunk ids that currently have (or have been asked for) a mesh */
     this.liveChunks = new Set();
@@ -536,6 +540,14 @@ class Game {
     // The player's own body goes through the same cache as the mobs' — one
     // prototype per file, so a player wearing a face a husk also wears costs
     // nothing extra. Only the chosen character is fetched, not all fifteen.
+    //
+    // Which one that is comes from the menu summary rather than from the save
+    // itself: the summary is a synchronous localStorage read and the save is
+    // four megabytes out of IndexedDB, and this has to be decided before either
+    // Continue or New Game is pressed. Getting it right means Continue never
+    // fetches a body, and getting it wrong costs one 113KB file — so the cheap
+    // read is the right one.
+    this.character.setCharacter(Save.meta()?.character || DEFAULT_CHARACTER);
     await MobModels.prepare([...MOB_MODEL_URLS, ...playerModelUrls(this.character.id)]);
 
     this.ui.progress(1, 'Ready');
@@ -610,6 +622,18 @@ class Game {
     this.inventory.add(itemIdOf('torch'), 6);
   }
 
+  /**
+   * Start a planet, and ask who is going to live on it.
+   *
+   * The order here is the point. Generation is kicked off *first* and the
+   * picker goes up over the loading screen while it runs, so the thirty seconds
+   * a player might spend looking at fifteen faces are thirty seconds of the
+   * five that worldgen was going to take anyway. Asking first and generating
+   * after would have made New Game strictly slower, which is the one thing this
+   * screen was not allowed to do.
+   *
+   * The cost of that is `_onWorldReady` having to wait — see the guard there.
+   */
   newGame() {
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
@@ -619,6 +643,48 @@ class Game {
     this._pendingSave = null;
     this._startWorker();
     this.worldWorker.postMessage({ type: 'init', seed: this.seed });
+    this._choosing = true;
+    this._readyHeld = false;
+    this.ui.openCharacterPicker(this.character.id);
+  }
+
+  /**
+   * Take the choice and go — or, if the planet is not finished, go back to
+   * watching the bar, which is where a player who picked instantly would have
+   * been the whole time.
+   */
+  beginWorld(id) {
+    if (!this._choosing) return;
+    this._choosing = false;
+    this.ui.closeCharacterPicker();
+    this.character.setCharacter(id || DEFAULT_CHARACTER);
+    // Not awaited. A character that is not the one preloaded at boot is a
+    // single 113KB file, and `PlayerCharacter` draws nothing until its model
+    // lands — so the worst case is a body that appears a moment into a world
+    // whose default view is first person anyway. Awaiting it here would put
+    // that fetch on the critical path for no visible gain.
+    MobModels.prepare(playerModelUrls(this.character.id));
+    if (this._readyHeld) { this._readyHeld = false; this._onWorldReady(); }
+  }
+
+  /**
+   * Back out of a new planet that has already started generating.
+   *
+   * Nothing is written on this path, so the save on disk is untouched — which
+   * matters, because `_placeEntities` may already have run and armed the
+   * first-autosave flag by the time the player changes their mind.
+   */
+  abandonNewGame() {
+    if (!this._choosing) return;
+    this._choosing = false;
+    this._readyHeld = false;
+    this._saveOnReady = false;
+    this.ui.closeCharacterPicker();
+    if (this.worldWorker) { this.worldWorker.terminate(); this.worldWorker = null; }
+    this._resetWorld();
+    document.getElementById('loader')?.remove();
+    this.state = 'menu';
+    this.ui.showMenu(Save.meta());
   }
 
   async continueGame() {
@@ -635,6 +701,14 @@ class Game {
     this._resetWorld();
     this.seed = data.seed;
     this._pendingSave = data;
+    // Who you were on this planet, set here rather than with the rest of
+    // `save.player` in `_placeEntities` — that runs when the first terrain
+    // lands, and the point of doing it now is that any fetch it needs overlaps
+    // the world load instead of following it. Saves written before the picker
+    // existed have no character at all and get the default, which is the body
+    // they have been walking around in all along.
+    this.character.setCharacter(data.player?.character || DEFAULT_CHARACTER);
+    MobModels.prepare(playerModelUrls(this.character.id));
     this._startWorker();
 
     // Put the saved regions straight into the mirror rather than waiting for
@@ -703,7 +777,7 @@ class Game {
     el.id = 'loader';
     el.innerHTML = `<div class="loader-inner">
       <div class="planet-mark"><span></span><span></span><span></span></div>
-      <h1>DASH<em>CRAFT</em></h1>
+      <h1>MOJA<em>ZER</em></h1>
       <p class="tagline">A tiny planet, entirely yours.</p>
       <div class="bar"><div class="bar-fill" id="load-fill"></div></div>
       <p class="status" id="load-status">Working…</p></div>`;
@@ -912,6 +986,15 @@ class Game {
 
   /** The first batch of terrain is up — hand control to the player. */
   _onWorldReady() {
+    // The planet beat the player to it. Hold the hand-over — dropping someone
+    // into a world while they are still deciding who they are would both throw
+    // the picker away unanswered and hand the body to whoever happened to be
+    // highlighted. `beginWorld` calls this again.
+    if (this._choosing) {
+      this._readyHeld = true;
+      this.ui.characterPickerReady(true);
+      return;
+    }
     this.worldReady = true;
     if (this._saveOnReady) { this._saveOnReady = false; this.saveGame(false); }
 
@@ -1163,6 +1246,15 @@ class Game {
       ...this._saveBlocks(),
       colBiome: this.planet.colBiome.slice(),
       facing: this.planet.facingPairs(),
+      // Everything about the person rather than the planet, in one place.
+      //
+      // `character` goes in here and not at the top level on purpose: the
+      // offhand slot and the skill tree are both coming, and both are facts
+      // about the player rather than about the world. Grouped, each of them is
+      // one line here and one line in `_placeEntities`; scattered across the
+      // root, each is another top-level key for the loader to remember to
+      // default. Every field is read with a fallback, so a save written before
+      // any of them existed loads unchanged.
       player: {
         cell: [c.f, c.ci, c.cj, c.ck],
         forward: this.player.forward.toArray(),
@@ -1170,6 +1262,7 @@ class Game {
         health: this.player.health,
         breath: this.breath,
         energy: this.energy,
+        character: this.character.id,
       },
       inventory: this.inventory.toJSON(),
       drops: this.drops.toJSON(),

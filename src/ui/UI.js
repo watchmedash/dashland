@@ -8,6 +8,9 @@ import { findRecipe, availableRecipes, craftFromInventory } from '../game/Recipe
 import {
   COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest,
 } from '../game/Trade.js';
+import {
+  CharacterPicker, CHARACTER_IDS, GRID_COLS, GRID_ROWS, characterUrl,
+} from '../player/Character.js';
 
 const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands'];
 
@@ -63,7 +66,14 @@ export class UI {
       recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeEmpty: $('recipe-empty'),
       pause: $('pause'), settings: $('settings'), controls: $('controls'), death: $('death'),
       deathCause: $('death-cause'),
+      chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgGrid: $('cg-grid'),
+      cgStatus: $('cg-status'),
     };
+
+    /** Built the first time New Game is pressed, and kept — see `CharacterPicker.close`. */
+    this._picker = null;
+    this._chosen = null;
+    this._cgKey = (e) => this._characterKey(e);
 
     this._bind();
     this._buildSlots();
@@ -79,6 +89,9 @@ export class UI {
     $('mm-new').onclick = () => g.newGame();
     $('mm-settings').onclick = () => this.openSettings();
     $('mm-controls').onclick = () => this.openControls();
+
+    $('cg-begin').onclick = () => g.beginWorld(this._chosen);
+    $('cg-back').onclick = () => g.abandonNewGame();
 
     $('pz-resume').onclick = () => g.resume();
     $('pz-settings').onclick = () => this.openSettings();
@@ -167,6 +180,107 @@ export class UI {
   }
 
   hideMenu() { this.el.menu.classList.add('hidden'); }
+
+  // --- the New Game character picker ----------------------------------------
+
+  /**
+   * Put the wall of characters up. The planet is already generating behind it,
+   * so this screen is time the player was going to spend waiting anyway — which
+   * is the whole reason it is allowed to exist at all.
+   *
+   * @param {string} selected who to start on — the body the player is currently
+   *   wearing, which on a fresh device is `DEFAULT_CHARACTER` and otherwise is
+   *   whoever they last woke up as. Pressing Begin without touching anything is
+   *   therefore always a valid, sensible answer.
+   */
+  openCharacterPicker(selected) {
+    if (!this._picker) {
+      this._picker = new CharacterPicker(this.el.cgCanvas);
+      this._buildCharacterCells();
+    }
+    this._chosen = selected;
+    this.el.chargen.classList.remove('hidden');
+    this.characterPickerReady(false);
+    this._syncCharacterCells();
+    // After the overlay is visible, never before: the canvas has no measurable
+    // size while its parent is `display: none`.
+    this._picker.open(selected, characterUrl(selected));
+    // Capture, so the picker's Escape and arrows never reach `Input`, which
+    // listens on the same window and would bank them for the next frame.
+    window.addEventListener('keydown', this._cgKey, true);
+    $('cg-begin').focus();
+  }
+
+  closeCharacterPicker() {
+    this.el.chargen.classList.add('hidden');
+    this._picker?.close();
+    window.removeEventListener('keydown', this._cgKey, true);
+  }
+
+  get characterPickerOpen() { return !this.el.chargen.classList.contains('hidden'); }
+
+  /** The line under the wall: worldgen's progress, told as a sentence. */
+  characterPickerReady(ready) {
+    this.el.cgStatus.textContent = ready ? 'Your planet is ready' : 'Shaping your planet…';
+    this.el.cgStatus.classList.toggle('ready', !!ready);
+  }
+
+  _buildCharacterCells() {
+    const grid = this.el.cgGrid;
+    // Both the buttons and the 3D layout come from the same two numbers, so the
+    // hit target is always over the figure it belongs to.
+    grid.style.gridTemplateColumns = `repeat(${GRID_COLS}, 1fr)`;
+    grid.style.gridTemplateRows = `repeat(${GRID_ROWS}, 1fr)`;
+    this.el.cgCanvas.style.aspectRatio = `${GRID_COLS} / ${GRID_ROWS}`;
+    for (const id of CHARACTER_IDS) {
+      const b = document.createElement('button');
+      b.className = 'cg-cell';
+      b.dataset.id = id;
+      // There is nothing to read in these cells, so the label is all a screen
+      // reader has. The letter is the character's actual name in the pack.
+      b.setAttribute('aria-label', `Character ${id.toUpperCase()}`);
+      b.onclick = () => this.chooseCharacter(id);
+      // Double-click is "this one, go" — the same shortcut a file list gives you.
+      b.ondblclick = () => this.game.beginWorld(id);
+      grid.appendChild(b);
+    }
+  }
+
+  chooseCharacter(id) {
+    if (id === this._chosen) return;
+    this._chosen = id;
+    this._picker?.setSelected(id);
+    this._syncCharacterCells();
+    this.game.audio.ui(560);
+  }
+
+  _syncCharacterCells() {
+    for (const b of this.el.cgGrid.children) b.classList.toggle('on', b.dataset.id === this._chosen);
+  }
+
+  /**
+   * Keyboard on the wall: arrows walk it, Enter starts, Escape backs out.
+   *
+   * Escape is deliberately not "accept" — the picker is skippable by pressing
+   * the button that is already focused, and a key that both dismisses a screen
+   * and commits a world would be the one way to start a planet by accident.
+   */
+  _characterKey(e) {
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -GRID_COLS, ArrowDown: GRID_COLS }[e.key];
+    if (step !== undefined) {
+      const n = CHARACTER_IDS.indexOf(this._chosen);
+      const next = Math.max(0, Math.min(CHARACTER_IDS.length - 1, (n < 0 ? 0 : n) + step));
+      this.chooseCharacter(CHARACTER_IDS[next]);
+    } else if (e.key === 'Enter') {
+      this.game.beginWorld(this._chosen);
+    } else if (e.key === 'Escape') {
+      this.game.abandonNewGame();
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  }
 
   _tickMenuClock() {
     const d = new Date();

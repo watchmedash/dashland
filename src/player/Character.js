@@ -53,6 +53,16 @@ export const DEFAULT_CHARACTER = 'a';
 export const characterUrl = (id) => `models/characters/character-${id}.glb`;
 
 /**
+ * Where a character's skin lives, which is not inside its model.
+ *
+ * Every `character-*.glb` references `Textures/texture-<id>.png` rather than
+ * embedding it, and that one fact is what the picker is built on — see
+ * `CharacterPicker`. Nothing else needs this; the GLB's own loader resolves the
+ * reference on its own.
+ */
+export const characterTextureUrl = (id) => `models/characters/Textures/texture-${id}.png`;
+
+/**
  * What the loader has to fetch before a body can appear. `prepare` is awaited
  * at world start beside the mob models; a character the player has not chosen
  * is never downloaded.
@@ -416,4 +426,318 @@ export class PlayerCharacter {
     if (this.model) this.model.root.visible = false;
     this.visible = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The New Game picker's preview
+// ---------------------------------------------------------------------------
+
+/**
+ * Fifteen characters, five across and three down.
+ *
+ * Exported because the DOM grid the player actually clicks is laid over this
+ * one and has to agree with it cell for cell — UI.js writes these into the
+ * grid's `grid-template-*` and the canvas's `aspect-ratio` rather than keeping
+ * a second copy of the numbers in the stylesheet.
+ */
+export const GRID_COLS = 5;
+export const GRID_ROWS = 3;
+
+/**
+ * A figure's height as a fraction of its cell.
+ *
+ * Small, and it has to be. This rig carries its head as a child of `torso`,
+ * hanging two model units above the torso's pivot and occupying the top thirty
+ * per cent of the body — and every clip, `idle` included, animates that pivot's
+ * rotation. So a tilt of a few degrees swings the top of the head further than
+ * any margin measured off the rest pose would predict. The first version fitted
+ * the rest pose to 0.72 of the cell and grew the selected figure from its feet,
+ * which left four hundredths of a cell above the head and the animation ate all
+ * of it: the top row was decapitated by the edge of the frustum.
+ */
+const PREVIEW_HEIGHT = 0.6;
+
+/** How much bigger the chosen one stands. Grows about the cell centre. */
+const SELECT_SCALE = 1.1;
+
+/**
+ * Skins, kept for the session. Not disposed with the rest of the picker: they
+ * are a quarter of a megabyte in total and a player who backs out of New Game
+ * and comes straight back should not watch fifteen grey mannequins fill in
+ * twice.
+ */
+const _skins = new Map();
+const _texLoader = new THREE.TextureLoader();
+
+/**
+ * The wall of characters shown when a new planet is started.
+ *
+ * The choice is only meaningful if you can see it — these fifteen differ in
+ * face, hair and clothing and in nothing else, so a list of names would be a
+ * list of names. Three ways to show them were on the table:
+ *
+ *  - Fifteen GLBs, one per cell. Honest, and 1.7MB fetched at the exact moment
+ *    the player has asked to start playing. Rejected on that alone.
+ *  - Thumbnails baked at build time. Free at runtime, but it adds a build step
+ *    and a folder of images that silently go stale the day the pack changes.
+ *  - One model, fifteen skins — what this is.
+ *
+ * The third works because of an accident of the pack that is worth stating
+ * plainly, since it is load-bearing: every `character-*.glb` is byte-for-byte
+ * the same geometry and the same twenty-seven clips, and differs only in which
+ * PNG it points at. So the picker clones the one model the game already loaded
+ * at boot and assigns each cell that character's texture. Fifteen live, moving
+ * figures for fifteen small PNGs and no extra model bytes at all.
+ *
+ * The risk that buys: if the pack ever ships a character with different
+ * geometry, the preview would quietly show the wrong body while the game showed
+ * the right one. That is a real hazard and the reason it is written down here —
+ * the fix, if it ever happens, is to fetch each cell's own GLB.
+ */
+export class CharacterPicker {
+  /** @param {HTMLCanvasElement} canvas */
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.renderer = null;
+    this.scene = null;
+    this.camera = null;
+    /** @type {{id:string, model:object, holder:THREE.Group, mat:THREE.Material}[]} */
+    this.figures = [];
+    this.selected = DEFAULT_CHARACTER;
+    this._raf = 0;
+    this._last = 0;
+    this._w = 0;
+    this._h = 0;
+  }
+
+  /**
+   * Show the wall. `baseUrl` is a character whose GLB is already through
+   * `MobModels.prepare` — normally the one the player is currently wearing,
+   * which the boot loader has fetched.
+   */
+  open(selected, baseUrl) {
+    if (!this.renderer) this._init();
+    if (!this.figures.length) this._build(baseUrl);
+    this.setSelected(selected);
+    this._last = performance.now();
+    if (!this._raf) this._raf = requestAnimationFrame(this._loop);
+  }
+
+  /**
+   * Stop drawing. Deliberately keeps the renderer, the scene and the figures.
+   *
+   * Disposing the renderer is the obvious thing and it is a trap: a canvas
+   * hands out exactly one WebGL context in its lifetime, so a second
+   * `WebGLRenderer` built on this same canvas would be handed the first one
+   * back — and if the first was torn down properly, a dead one. Reopening the
+   * picker would then draw nothing. An idle context on a 15-cell canvas is a
+   * couple of megabytes; that is the cheaper mistake.
+   */
+  close() {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this._raf = 0;
+    this.renderer?.renderLists.dispose();
+  }
+
+  setSelected(id) { this.selected = id; }
+
+  _init() {
+    // `alpha` so the card's own background shows through and the cells the
+    // player clicks — plain DOM buttons laid over this canvas — can tint
+    // themselves without a matching rectangle in the scene.
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, alpha: true, antialias: true });
+    this.renderer.setClearColor(0x000000, 0);
+    this.scene = new THREE.Scene();
+    // Orthographic, so every cell is framed identically. Under perspective the
+    // characters at the edges lean away from the middle and the one in the
+    // centre looks like the recommended choice.
+    this.camera = new THREE.OrthographicCamera(
+      -GRID_COLS / 2, GRID_COLS / 2, GRID_ROWS / 2, -GRID_ROWS / 2, 0.1, 20);
+    this.camera.position.z = 8;
+
+    // Lifted wholesale from `Icons.js`, which paints item thumbnails through a
+    // renderer with no ACES pass on it — exactly the situation here. Its comment
+    // is the reason not to reach for the view model's brighter rig instead:
+    // without the tone-mapping pass those intensities come out blown and
+    // chalky, which on a character reads as a face with no features on it.
+    const key = new THREE.DirectionalLight(0xfff4e2, 1.15);
+    key.position.set(-0.35, 0.85, 1.0);
+    const rim = new THREE.DirectionalLight(0xbcd6f5, 0.35);
+    rim.position.set(0.8, 0.1, -0.7);
+    const fill = new THREE.HemisphereLight(0xf0f6ff, 0x9aa0aa, 1.1);
+    this.scene.add(key, rim, fill);
+  }
+
+  _build(baseUrl) {
+    // Any loaded character will do as the body — see the class comment. The
+    // fallback matters on the path where a save's character failed to fetch:
+    // better a wall of the wrong-but-present body than an empty picker.
+    const url = MobModels.isReady(baseUrl)
+      ? baseUrl
+      : CHARACTER_IDS.map(characterUrl).find((u) => MobModels.isReady(u));
+    if (!url) return;
+
+    CHARACTER_IDS.forEach((id, n) => {
+      const model = MobModels.instantiate(url);
+      if (!model) return;
+
+      // The prototype's own material, read before it is replaced. Cloning it
+      // rather than writing a fresh MeshStandardMaterial here is not tidiness:
+      // it carries `lit()`'s roughness and metalness, the side and alpha flags
+      // the export asked for, and — through its `map` — the sampler settings
+      // that `_skin` copies. Every one of those is a question GLTFLoader has
+      // already answered correctly for this exact file.
+      let template = null;
+      model.root.traverse((o) => { if (o.isMesh && !template) template = o.material; });
+
+      const mat = template
+        ? template.clone()
+        : new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
+      // Grey until the skin lands. The tempting placeholder — leaving the
+      // prototype's texture on — would show fifteen copies of one character's
+      // clothes for the first second, which is a picker actively lying about
+      // the choice.
+      mat.map = null;
+      mat.color.setHex(0x39405a);
+      model.root.traverse((o) => { if (o.isMesh) { o.material = mat; o.castShadow = false; o.receiveShadow = false; } });
+
+      // Fit measured off this clone rather than taken from
+      // `MobModels.modelHeight`. Same number today — 2.7 — but this also yields
+      // the box's *centre*, and centring is what keeps the head off the top of
+      // the cell.
+      //
+      // The rig's origin is between its feet, so the first version anchored
+      // there and the selected figure's 14% grew entirely upward: the top of
+      // the head landed about five pixels under the top of the frustum, with
+      // the selected cell's inset glow bleeding down over that same band. It
+      // read as decapitation. Centred, the growth is split between headroom and
+      // floor and neither runs out.
+      _box.setFromObject(model.root);
+      _box.getSize(_size);
+      _box.getCenter(_centre);
+      const scale = PREVIEW_HEIGHT / (_size.y || 1);
+      model.root.scale.setScalar(scale);
+      model.root.position.copy(_centre).multiplyScalar(-scale);
+
+      const col = n % GRID_COLS;
+      const row = (n / GRID_COLS) | 0;
+      // The holder sits at the middle of its cell and the figure is centred on
+      // it, so both the spin and the selection scale happen about the figure's
+      // own middle.
+      const holder = new THREE.Group();
+      holder.position.set(col - (GRID_COLS - 1) / 2, (GRID_ROWS - 1) / 2 - row, 0);
+      holder.add(model.root);
+      this.scene.add(holder);
+
+      const fig = {
+        id, model, holder, mat,
+        ref: template?.map || null,
+        // What the colour goes back to once the map lands — white for these,
+        // but read off the export rather than assumed.
+        tint: template ? template.color.clone() : new THREE.Color(0xffffff),
+      };
+      this.figures.push(fig);
+      MobModels.play(model, CLIP.idle, 0);
+      // Offset each one into the clip so the wall breathes rather than pulsing
+      // in unison, which reads as fifteen copies of one person.
+      model.mixer.update(n * 0.37);
+      this._skin(fig);
+    });
+  }
+
+  _skin(fig) {
+    const url = characterTextureUrl(fig.id);
+    const cached = _skins.get(url);
+    if (cached) { this._apply(fig, cached); return; }
+    _texLoader.load(url, (tex) => {
+      this._configure(tex, fig.ref);
+      _skins.set(url, tex);
+      this._apply(fig, tex);
+    }, undefined, () => { /* one missing skin leaves one grey figure, not a broken picker */ });
+  }
+
+  /**
+   * Make a hand-loaded PNG sample exactly the way the loader's own copy does.
+   *
+   * This is the bug that made the first version of the picker useless, and it
+   * did not look like a texture bug: every figure came out as flat blocks of
+   * colour with no face, which reads as fifteen characters standing with their
+   * backs turned. They were facing front the whole time. The head's UVs run to
+   * v = 1.37 — this pack addresses its atlas by letting the coordinates leave
+   * the unit square — and glTF's default wrap is REPEAT, which GLTFLoader
+   * applies. `TextureLoader` defaults to clamp instead, so every coordinate
+   * past 1 collapsed onto the atlas's last row and each quad was painted in one
+   * smeared edge pixel.
+   *
+   * Hence copying the settings off the loader's texture rather than listing
+   * them here: the next property this pack depends on comes across for free,
+   * and there is no second opinion to drift out of date. The literals are only
+   * the fallback for a prototype with no map at all.
+   */
+  _configure(tex, ref) {
+    if (ref) {
+      tex.flipY = ref.flipY;
+      tex.wrapS = ref.wrapS;
+      tex.wrapT = ref.wrapT;
+      tex.magFilter = ref.magFilter;
+      tex.minFilter = ref.minFilter;
+      tex.generateMipmaps = ref.generateMipmaps;
+      tex.colorSpace = ref.colorSpace;
+      return;
+    }
+    tex.flipY = false;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  _apply(fig, tex) {
+    if (fig.mat.map === tex) return;
+    fig.mat.map = tex;
+    fig.mat.color.copy(fig.tint);
+    // The map arriving where there was none changes the shader program, so this
+    // is a recompile and not just a uniform write.
+    fig.mat.needsUpdate = true;
+  }
+
+  _resize() {
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    // Zero while the overlay is still `display: none` — a renderer sized to
+    // 0×0 there stays 0×0 forever, which is why this is checked every frame
+    // rather than once on open.
+    if (!w || !h || (w === this._w && h === this._h)) return;
+    this._w = w;
+    this._h = h;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(w, h, false);
+  }
+
+  _loop = () => {
+    this._raf = requestAnimationFrame(this._loop);
+    const now = performance.now();
+    const dt = Math.min((now - this._last) / 1000, 0.1);
+    this._last = now;
+    this._resize();
+
+    for (const fig of this.figures) {
+      fig.model.mixer.update(dt);
+      const on = fig.id === this.selected;
+      // The chosen one turns, because half of what distinguishes these is the
+      // back of the coat and the hair. The others ease back to facing you —
+      // wrapped into ±π first, or a figure that had spun three times would take
+      // three times as long to come back round.
+      let r = fig.holder.rotation.y;
+      if (on) {
+        r += dt * 0.8;
+      } else {
+        r = ((r + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+        r *= Math.max(0, 1 - dt * 6);
+      }
+      fig.holder.rotation.y = r;
+      const s = THREE.MathUtils.lerp(fig.holder.scale.x, on ? SELECT_SCALE : 1, Math.min(1, dt * 12));
+      fig.holder.scale.setScalar(s);
+    }
+    this.renderer.render(this.scene, this.camera);
+  };
 }

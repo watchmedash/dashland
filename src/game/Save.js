@@ -69,6 +69,11 @@ export const Save = {
       seed: payload.seed,
       playtime: payload.playtime | 0,
       biome: payload.biome ?? 2,
+      // Not for the menu to show — for the boot loader, which has to decide
+      // which single character model to fetch before anything has been clicked
+      // and cannot afford to open IndexedDB to find out. `null` for a planet
+      // saved before the picker existed; the caller supplies the default.
+      character: payload.player?.character ?? null,
       blocksPlaced: payload.stats?.placed | 0,
       blocksMined: payload.stats?.mined | 0,
     }));

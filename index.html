@@ -37,6 +37,29 @@
     </div>
   </div>
 
+  <!-- ── who wakes up here (new game) ────────────────────────
+       Sits above the loading screen, not instead of it: the planet is already
+       being generated behind this, so choosing costs no time at all. The grid
+       is fifteen transparent buttons laid over one canvas — UI.js builds them
+       and sizes both from the same two numbers. -->
+  <div id="chargen" class="hidden">
+    <div class="chargen-card">
+      <h2>Who Wakes Up Here</h2>
+      <p class="tagline">This one is yours for this planet. Or just begin.</p>
+      <div class="chargen-stage">
+        <canvas id="cg-canvas"></canvas>
+        <div id="cg-grid"></div>
+      </div>
+      <div class="chargen-foot">
+        <p class="status" id="cg-status">Shaping your planet…</p>
+        <div class="chargen-actions">
+          <button id="cg-back">Back</button>
+          <button id="cg-begin" class="primary">Begin</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── HUD ─────────────────────────────────────────────── -->
   <div id="hud" class="hidden">
     <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>

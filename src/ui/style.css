@@ -125,6 +125,61 @@ button small { display: block; font-size: 10.5px; font-weight: 500; opacity: .8;
 .bar-fill { height: 100%; width: 0%; border-radius: 99px; background: linear-gradient(90deg, var(--teal), var(--accent-2)); box-shadow: 0 0 12px rgba(242, 180, 92, .55); transition: width .3s cubic-bezier(.3, .9, .3, 1); }
 .status { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: rgba(247, 238, 222, .45); }
 
+/* ── character picker ──────────────────────────────────── */
+
+/* Above the loader, which is z-index 100 and is running underneath this the
+   whole time the picker is up. */
+#chargen {
+  position: fixed; inset: 0; z-index: 110; display: grid; place-items: center;
+  background: radial-gradient(78% 60% at 50% 38%, rgba(22, 32, 60, .72), rgba(4, 6, 13, .93));
+  backdrop-filter: blur(10px) saturate(115%);
+  animation: fade .22s ease;
+}
+.chargen-card {
+  width: min(760px, 94vw); padding: 22px 22px 16px; border-radius: 12px;
+  background: linear-gradient(170deg, rgba(28, 34, 54, .8), rgba(12, 15, 26, .88));
+  border: 1px solid rgba(255, 255, 255, .11);
+  box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .9), 0 1px 0 rgba(255, 255, 255, .1) inset;
+  animation: rise .32s cubic-bezier(.2, .8, .25, 1);
+}
+.chargen-card h2 { color: var(--parchment); font-size: 20px; font-weight: 600; letter-spacing: .08em; text-align: center; }
+/* A pale backdrop, and it goes *behind* the canvas rather than on the cells.
+   These characters are mostly dark hair and dark clothing, and against the
+   card's own near-black panel the top third of every figure simply vanished —
+   the first read of that was "the characters have no heads". Tinting the cell
+   buttons instead would have put the light over the figures, which veils them;
+   the canvas is transparent, so a lit panel underneath lights them from behind
+   and dark-on-pale does the rest. */
+.chargen-stage {
+  position: relative; margin-top: 16px; border-radius: 10px; overflow: hidden;
+  background:
+    radial-gradient(115% 95% at 50% 0%, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 62%),
+    linear-gradient(180deg, #808ba6, #5c6684);
+  background-color: #6b7590;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), inset 0 -16px 30px -18px rgba(0, 0, 0, .65);
+}
+/* The canvas keeps the grid's own aspect ratio — set inline from GRID_COLS and
+   GRID_ROWS — so a cell is square in the orthographic frustum and the buttons
+   above line up with the figures below. */
+#cg-canvas { display: block; width: 100%; }
+#cg-grid { position: absolute; inset: 0; display: grid; gap: 4px; }
+.cg-cell {
+  padding: 0; border-radius: 8px; background: transparent;
+  border: 1px solid transparent; transition: background .16s ease, border-color .16s ease;
+}
+.cg-cell:hover { background: rgba(255, 255, 255, .16); border-color: rgba(255, 255, 255, .3); transform: none; }
+.cg-cell.on {
+  background: rgba(242, 180, 92, .2);
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 1px rgba(242, 180, 92, .45), 0 8px 22px -12px rgba(0, 0, 0, .8);
+}
+.cg-cell:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.chargen-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.chargen-foot .status { flex: 1; text-align: left; }
+.chargen-foot .status.ready { color: rgba(242, 180, 92, .8); }
+.chargen-actions { display: flex; gap: 6px; }
+.chargen-actions button { min-width: 92px; }
+
 /* ── HUD ───────────────────────────────────────────────── */
 
 #hud { position: fixed; inset: 0; z-index: 20; pointer-events: none; }

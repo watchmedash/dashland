@@ -174,7 +174,7 @@ wrongly. Those are modelled from scratch instead — see the next section.
 
 ## Raw materials and food — original models, authored in WAM
 
-Not third-party art: sixteen models written for this project as `.wam` source in
+Not third-party art: twenty-nine models written for this project as `.wam` source in
 `wam/items/` and compiled by the WAM toolchain in `wam/`. They are ours, under
 the same licence as the rest of the game.
 
@@ -189,6 +189,13 @@ the same licence as the rest of the game.
 | Bread | `bread.wam` |
 | Raw Meat, Cooked Meat | `meat.wam`, `cooked_meat.wam` |
 | Hide, Feather | `hide.wam`, `feather.wam` |
+| Raw Copper, Raw Silver | `raw_copper.wam`, `raw_silver.wam` |
+| Copper Ingot, Silver Ingot | `copper_ingot.wam`, `silver_ingot.wam` |
+| Sulfur | `sulfur.wam` |
+| Amethyst, Void Shard | `amethyst.wam`, `void_shard.wam` |
+| Ruby, Sapphire, Emerald | `ruby.wam`, `sapphire.wam`, `emerald.wam` |
+| Husk Cinder | `cinder.wam` |
+| Coin, Sapling | `coin.wam`, `sapling.wam` |
 
 WAM describes a model as named, relative decisions — bone directions, ring
 widths, palette entries — and generates every vertex, so the source is a text

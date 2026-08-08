@@ -15,7 +15,11 @@ dist/
 # submodule pointer and clone as an empty folder. The game does not need it to
 # run: the compiled models it loads are in `public/models/wam/`, which ARE
 # committed.
-wam
+# Anchored, and it has to be. Bare `wam` matches a directory of that name at
+# *any* depth, so it also swallowed `public/models/wam/` — the one thing this
+# comment says is committed. The models already in there were force-added
+# before anyone noticed; every new one was silently invisible to `git add`.
+/wam/
 
 # The Lynocs texture pack is not redistributed here — see CREDITS.md. The bake
 # script reads it from a path outside this tree, and the baked atlases it

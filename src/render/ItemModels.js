@@ -212,6 +212,49 @@ const POSE = {
   seeds:      { file: 'wam/seeds',      pack: 'wam', height: 0.17, grip: 0.50, rot: [0.30, -0.55, 0.10],   pos: [0.02, 0.05, -0.05], icon: [0.42, 0.60, 0] },
   hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.50, 1.30],   pos: [0.02, 0.11, -0.05], icon: [0.24, 0.92, 1.32] },
   feather:    { file: 'wam/feather',    pack: 'wam', height: 0.32, grip: 0.38, rot: [-0.16, -0.40, 0.36],  pos: [0.02, 0.18, -0.02], icon: [0.06, 0.30, -0.38] },
+
+  // The rest of the ladder, on the same three family poses. Ores and the
+  // sulfur crust take the lump pose; the cast bars take the ingot pose, which
+  // is the one with the quarter turn in `rot.z` because those models are
+  // authored along their long axis and stood up on export.
+  raw_copper:   { file: 'wam/raw_copper',   pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.45, 0.12], pos: [0.02, 0.11, -0.05], icon: [0.22, 0.52, 0] },
+  raw_silver:   { file: 'wam/raw_silver',   pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.60, 0.12], pos: [0.02, 0.11, -0.05], icon: [0.22, 0.66, 0] },
+  sulfur:       { file: 'wam/sulfur',       pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.50, 0.12], pos: [0.02, 0.11, -0.05], icon: [0.22, 0.40, 0] },
+  copper_ingot: { file: 'wam/copper_ingot', pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.55, 1.30], pos: [0.02, 0.11, -0.05], icon: [0.50, 0.60, 1.30] },
+  silver_ingot: { file: 'wam/silver_ingot', pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.55, 1.30], pos: [0.02, 0.11, -0.05], icon: [0.50, 0.60, 1.30] },
+
+  // Gems, on the crystal's pose: held a touch higher than a lump and turned
+  // less far off the camera, because what a gem has that a lump does not is
+  // facets, and at three-quarters the front facet turns away from the key
+  // light and the whole stone flattens to one tone.
+  //
+  // The cut stones (ruby, sapphire, emerald) are shorter in the frame than the
+  // grown crystals: they are one compact object rather than a cluster, so at
+  // the cluster's height they filled the slot edge to edge.
+  amethyst:   { file: 'wam/amethyst',   pack: 'wam', height: 0.24, grip: 0.45, rot: [0.06, -0.55, 0.24],   pos: [0.02, 0.16, -0.05], icon: [0.10, 0.50, -0.18] },
+  ruby:       { file: 'wam/ruby',       pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.02, 0.14, -0.05], icon: [0.14, 0.40, -0.12] },
+  sapphire:   { file: 'wam/sapphire',   pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.02, 0.14, -0.05], icon: [0.14, 0.40, -0.12] },
+  emerald:    { file: 'wam/emerald',    pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.02, 0.14, -0.05], icon: [0.14, 0.40, -0.12] },
+  // The shard is a wafer with its broken face on +Z, so it takes the flint
+  // treatment: turned to show the flat of the blade, not its edge, where it
+  // would be a two-pixel line.
+  void_shard: { file: 'wam/void_shard', pack: 'wam', height: 0.23, grip: 0.45, rot: [0.06, -0.34, 0.30],   pos: [0.02, 0.15, -0.05], icon: [0.08, 0.24, -0.20] },
+  // Cinder is a lump, but its whole read is the hot seam, and the seam is a 22°
+  // stripe on the model's +Z face. Both poses are therefore nearly square to
+  // the camera: at the lump family's usual three-quarter turn the crack went
+  // round the side and the icon was a plain black pebble.
+  cinder:     { file: 'wam/cinder',     pack: 'wam', height: 0.19, grip: 0.50, rot: [0.16, -0.22, 0.12],   pos: [0.02, 0.11, -0.05], icon: [0.22, 0.14, 0] },
+
+  // The coin is modelled standing on its rim with the struck device on both
+  // faces, so both poses are shallow yaws: the whole object is that face, and
+  // anything approaching three-quarters turns it into a sliver. Held small —
+  // it is a coin, and at lump size it read as a dinner plate.
+  coin:       { file: 'wam/coin',       pack: 'wam', height: 0.15, grip: 0.50, rot: [0.10, -0.30, 0.10],   pos: [0.02, 0.12, -0.05], icon: [0.12, 0.26, 0] },
+  // The sapling takes the shaft pose — it is a stem with a crown on top, and
+  // the drawn diagonal is what the other tall, thin items use. `grip` is low
+  // on purpose: you carry a seedling by its stem, so the fist closes under the
+  // foliage rather than through it.
+  sapling:    { file: 'wam/sapling',    pack: 'wam', height: 0.34, grip: 0.30, rot: [-0.12, -0.35, 0.30],  pos: [0.02, 0.14, -0.02], icon: [0.08, 0.30, -0.18] },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -240,6 +283,25 @@ const BY_NAME = {
   seeds: 'seeds',
   hide: 'hide',
   feather: 'feather',
+  raw_copper: 'raw_copper',
+  raw_silver: 'raw_silver',
+  sulfur: 'sulfur',
+  copper_ingot: 'copper_ingot',
+  silver_ingot: 'silver_ingot',
+  amethyst: 'amethyst',
+  ruby: 'ruby',
+  sapphire: 'sapphire',
+  emerald: 'emerald',
+  void_shard: 'void_shard',
+  cinder: 'cinder',
+  coin: 'coin',
+  // The sapling is the only *block* in this table. Everything else here is an
+  // item with no cube form because it never was a block; the sapling has a
+  // block id but renders as a cross, so `ViewModel` and `Drops` had nothing to
+  // build for it but a pair of sprite cards. Planted, it stays the world's
+  // cross billboard — that is the mesher's business and is untouched — but in
+  // the fist, in the icon grid and lying on the ground it is now a real object.
+  sapling: 'sapling',
   // Food kit. Identity again, and again written out so this stays the list of
   // what is modelled — the food line-up is the part most likely to grow.
   bread: 'bread',

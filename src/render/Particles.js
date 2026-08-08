@@ -1,7 +1,7 @@
 // Block debris, footstep dust, splashes, ambient motes and weather.
 
 import * as THREE from 'three';
-import { GRAVITY } from '../world/Constants.js';
+import { GRAVITY, R_MIN } from '../world/Constants.js';
 import { BLOCKS } from '../world/Blocks.js';
 
 const _v = new THREE.Vector3();
@@ -9,6 +9,7 @@ const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3(1, 1, 1);
 const _m = new THREE.Matrix4();
 const _c = new THREE.Color();
+const _probe = new THREE.Vector3();
 
 const MAX_DEBRIS = 900;
 
@@ -69,6 +70,7 @@ export class Particles {
     this.weather = this._buildWeather(scene);
     this.weatherMode = 'clear';
     this.weatherIntensity = 0;
+    this.submerged = false;
   }
 
   _buildMotes(scene) {
@@ -143,11 +145,13 @@ export class Particles {
         uTime: { value: 0 }, uCam: { value: new THREE.Vector3() },
         uUp: { value: new THREE.Vector3(0, 1, 0) }, uIntensity: { value: 0 },
         uSnow: { value: 0 }, uPixelRatio: { value: 1 }, uColor: { value: new THREE.Color(0xbcd2e8) },
+        uWaterR: { value: 0 },
       },
       vertexShader: /* glsl */`
         attribute vec3 aSeed;
         uniform float uTime; uniform vec3 uCam; uniform vec3 uUp;
         uniform float uIntensity; uniform float uSnow; uniform float uPixelRatio;
+        uniform float uWaterR;
         varying float vA;
         void main() {
           vec3 ref = abs(uUp.y) > 0.9 ? vec3(1.0,0.0,0.0) : vec3(0.0,1.0,0.0);
@@ -166,6 +170,15 @@ export class Particles {
             p += t2 * cos(uTime * 1.1 + aSeed.y * 30.0) * 0.9;
           }
           vA = step(aSeed.z, uIntensity);
+          // Precipitation has no collision at all — it is a box of points
+          // sliding down past the camera, and every drop keeps going straight
+          // through the terrain under it. Below opaque ground nobody can tell;
+          // the sea is transparent, so over water you could watch the whole
+          // storm carry on falling under the surface. Kill each drop at the
+          // waterline instead. uWaterR is the radius of the water surface in
+          // the camera's own column (0 when there is none in reach), which on
+          // a sphere is all a horizontal surface is.
+          if (uWaterR > 0.0 && length(p) < uWaterR) vA = 0.0;
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           // Rain used to be drawn at 1.6px scaled by distance, which is about
@@ -335,9 +348,33 @@ export class Particles {
     }
   }
 
-  setWeather(mode, intensity) {
+  /**
+   * @param {boolean} submerged the player's own `headInWater` — the same flag
+   *   that drives the underwater tint and the breath meter. Weather does not
+   *   get to decide this for itself; one source of truth or the rain and the
+   *   blue screen disagree at the waterline.
+   */
+  setWeather(mode, intensity, submerged = false) {
     this.weatherMode = mode;
     this.weatherIntensity = intensity;
+    this.submerged = submerged;
+  }
+
+  /**
+   * Radius of the top of the water in the camera's column, or 0 if there is
+   * none within the height the rain box covers. Sampled every half unit so a
+   * one-unit cell can't be stepped over, and resolved back to the exact top of
+   * the cell that hit rather than to the sample point — a half-unit error puts
+   * the cut visibly under the surface.
+   */
+  _waterSurfaceRadius(camera, up) {
+    for (let d = 15; d >= -15; d -= 0.5) {
+      _probe.copy(camera.position).addScaledVector(up, d);
+      if (!this.planet.isLiquidWorld(_probe.x, _probe.y, _probe.z)) continue;
+      const a = this.planet.cellAt(_probe.x, _probe.y, _probe.z);
+      return a ? R_MIN + a.k + 1 : 0;
+    }
+    return 0;
   }
 
   update(dt, camera, up, sky) {
@@ -420,7 +457,14 @@ export class Particles {
       this.weatherMode === 'snow' ? 1.0 : 0.78,
       this.weatherMode === 'snow' ? 1.0 : 0.92,
     );
-    this.weather.visible = this.weatherIntensity > 0.01;
+    // Head under the surface: no rain at all. Streaks falling past your face
+    // while you are submerged is the worse half of the bug — cutting them at
+    // the waterline alone still leaves the whole box drawn in front of you
+    // whenever the camera sits below it.
+    this.weather.visible = this.weatherIntensity > 0.01 && !this.submerged;
+    // The probe costs ~60 block lookups, so only pay for it while something is
+    // actually falling and visible.
+    wu.uWaterR.value = this.weather.visible ? this._waterSurfaceRadius(camera, up) : 0;
   }
 
   setPixelRatio(r) {

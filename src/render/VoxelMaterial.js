@@ -331,19 +331,47 @@ const METAL_FRAG = /* glsl */`
 `;
 
 const LIGHTS_END = /* glsl */`
+  // The ground is lit by the voxel grid and by nothing else.
+  //
+  // Everything below builds a complete indirect model out of the baked voxel
+  // light: sky fill shaped by skylight, ground bounce, block light, and the
+  // flame in your hand. Meanwhile the scene also carries an ambient light and
+  // a hemisphere fill, which exist for the *entities* — a cow is a loose model
+  // and cannot read the voxel grid, so without them it goes black the moment
+  // the sun does. Those two were landing on the terrain as well, and a scene
+  // light has no idea there is a roof: wall yourself into a stone box at noon
+  // and the hemisphere lit the inside of it as brightly as the meadow outside,
+  // so a sealed room needed no torch and a cave was never dark. Dropping the
+  // accumulated indirect here — after three has finished with it, before the
+  // voxel model starts — is the whole fix, and it also stops the sky being
+  // counted twice on every lit surface.
+  //
+  // Direct light is deliberately kept: that is the sun, and it is gated by
+  // shadowGate on the voxel skylight further down, which does know about roofs.
+  reflectedLight.indirectDiffuse = vec3(0.0);
+
   float texAO = armSample.r;
   float aoTotal = clamp(vAO * texAO, 0.0, 1.0);
-  // Skylight shapes ambient, but never all the way to black — deep shade still
-  // catches bounced light.
+  // Skylight shapes ambient — and where no skylight reaches, it really does go
+  // out.
   //
-  // The floor was 0.16, and a face with no light on it at all sat that far off
-  // black while everything around it was lit: the shaded side of a boulder, the
-  // wall of a cutting, anything indoors by day. That is not how shade looks —
-  // a surface facing away from the sun is still under the whole sky, and on an
-  // overcast day the sky *is* the light. Lifting the floor keeps unlit faces
-  // legible as the material they are made of; the sun term below is untouched,
-  // so lit-versus-unlit still reads as strongly as it did.
-  float sunAmt = 0.34 + 0.66 * (vSun * (0.45 + 0.55 * vSun));
+  // This floor has been wrong in both directions. At 0.16 shaded faces sat too
+  // far off black and the complaint was "shadows are too dark"; the answer was
+  // to raise it to 0.34, and that was treating the wrong patient. vSun is
+  // *voxel skylight*, not surface orientation: the shaded side of a boulder is
+  // still under the open sky and still has vSun near one, so it was never this
+  // term that made it dark. What the raised floor actually did was light the
+  // inside of sealed rooms — brick yourself into a box at noon and you could
+  // read the cracks in the stone with no light source at all, which quietly
+  // deletes the entire point of carrying a torch. (The animals-black-under-
+  // trees half of that same report had a different cause again, in Sky: the
+  // entity fill was on a layer no camera tested, so it was never a light.)
+  //
+  // So the floor goes below where it started. Not to zero — a hair of bounce
+  // keeps a cave from being a black rectangle you navigate by memory, and lets
+  // you make out the shape of a passage a moment before your torch reaches it.
+  // Everything past that hair you have to bring yourself.
+  float sunAmt = 0.10 + 0.90 * (vSun * (0.45 + 0.55 * vSun));
 
   // Sky dome fill, occluded by voxel skylight. Irradiance goes through the
   // same 1/PI Lambert factor as direct light, otherwise ambient overwhelms the

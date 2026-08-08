@@ -192,7 +192,17 @@ const wrapAngle = (a) => {
 const PET = (n) => `models/pets/animal-${n}.glb`;
 const CHAR = (n) => `models/characters/character-${n}.glb`;
 
-/** Clip names shipped by the Cube Pets rig. */
+/**
+ * Clip names shipped by the Cube Pets rig.
+ *
+ * There is no attack clip, and no fifth clip hiding in the pack either — every
+ * animal in Cube Pets ships idle/walk/run/eat and that is the whole export. So
+ * `attack` is deliberately absent rather than pointed at a clip that does not
+ * exist: playOnce returns 0 for a name it cannot find, which is silent, and a
+ * silent swing is exactly how a tiger came to hit you with nothing on screen.
+ * _hunt builds a lunge out of the run clip and a scale pop instead — see the
+ * comment on the swing there.
+ */
 const PET_CLIPS = { idle: 'idle', walk: 'walk', run: 'run', graze: 'eat' };
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
@@ -201,128 +211,216 @@ const CHAR_CLIPS = {
 };
 
 /**
+ * How much one individual may differ from its species' height, as a fraction
+ * either way. The old range was a flat 0.90..1.10 for everything, which reads
+ * on a giraffe (±0.39 cells) and is invisible on a chick (±0.026 cells — three
+ * millimetres). Species that want it wider or narrower say so with `var`.
+ */
+const SIZE_VAR = 0.12;
+
+/**
  * One animal. Only what differs is written out; everything else takes a sane
  * default, which is what keeps a 22-species table readable.
  *   h    target height in cells      shy  0 never flees .. 1 bolts on sight
  *   hp   health                      spd  cells/second at a walk
+ *   var  ± height spread per head    dmg  half-hearts a blow costs the player
+ *
+ * Heights are the *drawn* height of the whole animal — ears, antlers, raised
+ * head and all — against a player who stands 1.8. They are the only lever on
+ * apparent size: the scale is derived from the measured rest pose, so a model
+ * gets its bulk for free once its height is right.
+ *
+ * `hunts` makes a species dangerous unprovoked; `fights` makes it dangerous
+ * only once you have hit it. Both are kept clear of `hostile`, which means
+ * husk specifically: that flag drives the night spawn budgets and the
+ * new-world grace wipe in main.js, and a tiger caught by either would either
+ * starve the husk cap or vanish at dawn.
  */
 const pet = (file, o) => ({
   label: o.label,
   urls: [PET(file)],
   clips: PET_CLIPS,
   height: o.h,
+  sizeVar: o.var ?? SIZE_VAR,
   health: o.hp,
   speed: o.spd,
   skittish: o.shy,
   turn: o.turn ?? 3.5,
   accel: o.accel ?? 7,
   drops: o.drops ?? [],
-  grazeChance: o.graze ?? 0.5,
+  // What it eats: 'herbivore' | 'carnivore' | 'omnivore'. A carnivore never
+  // grazes, and that is enforced here rather than at the call site — the
+  // behaviour state machine goes on asking the one question it always asked
+  // ("graze or idle?"), and a lion simply never answers grass. A player
+  // watching a lion chew a meadow is the kind of detail that unpicks a whole
+  // world, and a `if (spec.diet !== ...)` sprinkled through the state machine
+  // is how that rule ends up applied in three places and forgotten in a fourth.
+  diet: o.diet ?? 'herbivore',
+  grazeChance: o.diet === 'carnivore' ? 0 : (o.graze ?? 0.5),
   idleMin: o.idleMin ?? 2,
   idleMax: o.idleMax ?? 5,
   ...(o.hops ? { hops: true, hopImpulse: o.hopImpulse ?? 3.8 } : null),
   ...(o.cold ? { cold: true } : null),
   ...(o.aquatic ? { aquatic: true } : null),
   ...(o.flies ? { flies: true, hover: o.hover ?? 1.5 } : null),
+  ...(o.hunts || o.fights ? {
+    predator: true,
+    // Only a hunter goes looking. A fighter has the identical chase, swing and
+    // give-up logic — the one difference is that nothing but hurt() may hand
+    // it a target, which is why this is a flag rather than a second code path.
+    unprovoked: !!o.hunts,
+    damage: o.dmg ?? 2,
+    reach: o.reach ?? 1.2,
+    swing: o.swing ?? 1.2,
+    // A retaliating animal still needs a range, or `dist > range * 1.6` can
+    // never be true and it holds its grudge across the whole planet.
+    aggroRange: o.aggro ?? 16,
+  } : null),
 });
 
 const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 
+// Everything below is sized against the player's 1.8. The table used to sit in
+// a band from 0.4 to 1.55 for everything short of an elephant, and at that
+// spacing a cow, a deer, a fox and a tiger all read as the same animal in
+// different colours — which is exactly what a player reported. Sizes are now
+// spread over an order of magnitude instead: a caterpillar at 0.22 against a
+// giraffe at 3.9, with the player sitting a little above halfway.
+//
+// Two ceilings are worth knowing about before pushing anything higher.
+// modelExtents rounds the drawn height up into `tall`, the headroom a body
+// needs to walk, so 3.9 costs a giraffe four clear blocks and 4.1 would cost it
+// five — enough to wall it out of most of the terrain it lives on. And halfW /
+// halfL are clamped at 0.47 / 0.80, so past roughly three cells an animal grows
+// visually without growing its footprint.
 const SPECIES = {
   // --- large grazers ---
   cow: pet('cow', {
-    label: 'Cow', h: 1.30, hp: 10, spd: 0.85, shy: 0.35, turn: 2.0, accel: 4.5,
+    // Head-high on the player and twice the width of a deer. The one animal a
+    // player meets in the first minute, so it sets the scale for the rest.
+    label: 'Cow', h: 1.62, var: 0.18, hp: 10, spd: 0.85, shy: 0.35, turn: 2.0, accel: 4.5,
     graze: 0.6, idleMin: 3, idleMax: 7, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   deer: pet('deer', {
-    label: 'Deer', h: 1.40, hp: 10, spd: 1.25, shy: 0.9, turn: 3.0, accel: 6.0,
+    // Slightly shorter than the cow and far slighter. It stands tall for its
+    // mass rather than being large, which the model already says — the job here
+    // is only to stop it matching the cow number for number.
+    label: 'Deer', h: 1.50, var: 0.14, hp: 10, spd: 1.25, shy: 0.9, turn: 3.0, accel: 6.0,
     idleMin: 2.5, idleMax: 6, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   elephant: pet('elephant', {
-    label: 'Elephant', h: 2.60, hp: 20, spd: 0.75, shy: 0.2, turn: 1.6, accel: 3.5,
+    label: 'Elephant', h: 3.05, var: 0.14, hp: 20, spd: 0.75, shy: 0.2, turn: 1.6, accel: 3.5,
     graze: 0.6, idleMin: 3, idleMax: 8, drops: [['hide', 2, 3], ['meat', 2, 3]],
+    // It does not hunt, but standing in front of one is a mistake. Slow, so
+    // walking away works — that is the lesson, not the damage.
+    fights: true, dmg: 5, reach: 1.9, swing: 1.8, aggro: 14,
   }),
   giraffe: pet('giraffe', {
-    label: 'Giraffe', h: 3.10, hp: 14, spd: 1.0, shy: 0.5, turn: 1.8, accel: 4.0,
+    // The tallest thing that walks. 3.9 and not 4.0 on purpose: see the note
+    // above about `tall`.
+    label: 'Giraffe', h: 3.90, var: 0.15, hp: 14, spd: 1.0, shy: 0.5, turn: 1.8, accel: 4.0,
     graze: 0.55, idleMin: 3, idleMax: 7, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   panda: pet('panda', {
-    label: 'Panda', h: 1.20, hp: 14, spd: 0.7, shy: 0.3, turn: 2.2, accel: 4.0,
+    label: 'Panda', h: 1.32, hp: 14, spd: 0.7, shy: 0.3, turn: 2.2, accel: 4.0,
     graze: 0.7, idleMin: 3, idleMax: 8, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   polar: pet('polar', {
-    label: 'Polar Bear', h: 1.55, hp: 16, spd: 1.0, shy: 0.3, turn: 2.4, accel: 5.0,
-    graze: 0.35, drops: [['hide', 2, 3], ['meat', 1, 2]], cold: true,
+    // Taller than the player, and the only thing on the ice that is.
+    label: 'Polar Bear', h: 1.90, hp: 16, spd: 1.0, shy: 0.3, turn: 2.4, accel: 5.0,
+    diet: 'carnivore', drops: [['hide', 2, 3], ['meat', 1, 2]], cold: true,
+    fights: true, dmg: 4, reach: 1.4, swing: 1.3, aggro: 20,
   }),
 
-  // --- big cats: no teeth yet, but they read as dangerous ---
+  // --- big cats: these have teeth now ---
+  // Both are hunters, and both are held to a narrow size spread — a big cat
+  // that rolled small would read as a dog, and the point of one is that you can
+  // tell what it is across a clearing.
   lion: pet('lion', {
-    label: 'Lion', h: 1.15, hp: 14, spd: 1.4, shy: 0.25, turn: 3.4, accel: 8.0,
-    graze: 0.3, drops: [['hide', 1, 2], ['meat', 1, 2]],
+    label: 'Lion', h: 1.45, var: 0.10, hp: 14, spd: 1.4, shy: 0.25, turn: 3.4, accel: 8.0,
+    diet: 'carnivore', drops: [['hide', 1, 2], ['meat', 1, 2]],
+    hunts: true, dmg: 3, reach: 1.3, swing: 1.25, aggro: 16,
   }),
   tiger: pet('tiger', {
-    label: 'Tiger', h: 1.20, hp: 14, spd: 1.5, shy: 0.25, turn: 3.6, accel: 8.5,
-    graze: 0.3, drops: [['hide', 1, 2], ['meat', 1, 2]],
+    // The largest cat, and it should look it beside a lion, not merely beside a
+    // fox. Longest reach and shortest swing of anything that is not a husk.
+    label: 'Tiger', h: 1.60, var: 0.10, hp: 14, spd: 1.5, shy: 0.25, turn: 3.6, accel: 8.5,
+    diet: 'carnivore', drops: [['hide', 1, 2], ['meat', 1, 2]],
+    hunts: true, dmg: 4, reach: 1.35, swing: 1.15, aggro: 22,
   }),
 
   // --- middling ---
   dog: pet('dog', {
-    label: 'Dog', h: 0.66, hp: 8, spd: 1.5, shy: 0.4, turn: 4.5, accel: 9.0,
-    graze: 0.35, idleMin: 1.2, idleMax: 3.5, drops: HIDE_MEAT,
+    // Omnivore rather than carnivore: a dog will chase a chick, but a dog
+    // nosing at the grass is a dog, not a broken lion.
+    label: 'Dog', h: 0.78, hp: 8, spd: 1.5, shy: 0.4, turn: 4.5, accel: 9.0,
+    diet: 'omnivore', graze: 0.2, idleMin: 1.2, idleMax: 3.5, drops: HIDE_MEAT,
+    fights: true, dmg: 2, reach: 1.0, swing: 0.9, aggro: 16,
   }),
   fox: pet('fox', {
-    label: 'Fox', h: 0.68, hp: 6, spd: 1.5, shy: 0.8, turn: 4.5, accel: 8.0,
-    graze: 0.3, idleMin: 1.5, idleMax: 4, drops: HIDE_MEAT,
+    // Smaller than the dog, which it never was before — both sat at 0.66/0.68
+    // and the pair were indistinguishable at any distance.
+    label: 'Fox', h: 0.58, hp: 6, spd: 1.5, shy: 0.8, turn: 4.5, accel: 8.0,
+    diet: 'carnivore', idleMin: 1.5, idleMax: 4, drops: HIDE_MEAT,
+    fights: true, dmg: 2, reach: 0.95, swing: 0.85, aggro: 14,
   }),
   cat: pet('cat', {
-    label: 'Cat', h: 0.55, hp: 6, spd: 1.6, shy: 0.9, turn: 5.5, accel: 10.0,
-    graze: 0.3, idleMin: 1.2, idleMax: 4, drops: [['hide', 1, 1]],
+    // A hunter of chicks and nothing else, and no threat to the player — a cat
+    // that fought back would be comedy rather than danger, which is why it gets
+    // a diet but no `fights`.
+    label: 'Cat', h: 0.46, hp: 6, spd: 1.6, shy: 0.9, turn: 5.5, accel: 10.0,
+    diet: 'carnivore', idleMin: 1.2, idleMax: 4, drops: [['hide', 1, 1]],
   }),
   koala: pet('koala', {
-    label: 'Koala', h: 0.66, hp: 6, spd: 0.7, shy: 0.5, turn: 2.4, accel: 4.0,
+    label: 'Koala', h: 0.56, hp: 6, spd: 0.7, shy: 0.5, turn: 2.4, accel: 4.0,
     graze: 0.65, idleMin: 3, idleMax: 8, drops: [['hide', 1, 1]],
   }),
   monkey: pet('monkey', {
-    label: 'Monkey', h: 0.72, hp: 6, spd: 1.5, shy: 0.8, turn: 5.0, accel: 9.0,
+    label: 'Monkey', h: 0.68, hp: 6, spd: 1.5, shy: 0.8, turn: 5.0, accel: 9.0,
     graze: 0.35, idleMin: 1, idleMax: 3, drops: [['hide', 1, 1]], hops: true, hopImpulse: 3.6,
   }),
   beaver: pet('beaver', {
-    label: 'Beaver', h: 0.6, hp: 6, spd: 1.1, shy: 0.7, turn: 4.0, accel: 7.0,
+    label: 'Beaver', h: 0.5, hp: 6, spd: 1.1, shy: 0.7, turn: 4.0, accel: 7.0,
     graze: 0.45, drops: HIDE_MEAT,
   }),
   penguin: pet('penguin', {
-    label: 'Penguin', h: 0.62, hp: 6, spd: 0.9, shy: 0.6, turn: 3.2, accel: 5.5,
+    // Knee-high on the player. Small, but the biggest thing standing upright on
+    // the ice apart from the bear, so it is not down with the chicks.
+    label: 'Penguin', h: 0.80, hp: 6, spd: 0.9, shy: 0.6, turn: 3.2, accel: 5.5,
     drops: [['meat', 1, 1], ['feather', 1, 2]], cold: true,
   }),
 
   // --- small and skittish ---
+  // Everything here is ankle-height and gets a narrow spread: ±12% of a chick
+  // is under three centimetres, so the default range buys nothing but noise in
+  // the numbers.
   bunny: pet('bunny', {
-    label: 'Bunny', h: 0.52, hp: 4, spd: 1.7, shy: 1.0, turn: 5.0, accel: 9.0,
+    label: 'Bunny', h: 0.36, var: 0.06, hp: 4, spd: 1.7, shy: 1.0, turn: 5.0, accel: 9.0,
     graze: 0.35, idleMin: 1, idleMax: 3, drops: HIDE_MEAT, hops: true, hopImpulse: 4.2,
   }),
   chick: pet('chick', {
-    label: 'Chick', h: 0.5, hp: 4, spd: 1.15, shy: 0.85, turn: 6.0, accel: 11.0,
+    label: 'Chick', h: 0.26, var: 0.06, hp: 4, spd: 1.15, shy: 0.85, turn: 6.0, accel: 11.0,
     graze: 0.7, idleMin: 0.8, idleMax: 2.4, drops: [['feather', 1, 2], ['meat', 1, 1]],
   }),
   parrot: pet('parrot', {
-    label: 'Parrot', h: 0.5, hp: 4, spd: 1.35, shy: 1.0, turn: 6.5, accel: 12.0,
+    label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 1.35, shy: 1.0, turn: 6.5, accel: 12.0,
     graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3]],
     hops: true, hopImpulse: 3.4,
   }),
   bee: pet('bee', {
-    label: 'Bee', h: 0.42, hp: 3, spd: 1.8, shy: 1.0, turn: 7.0, accel: 14.0,
+    label: 'Bee', h: 0.26, var: 0.06, hp: 3, spd: 1.8, shy: 1.0, turn: 7.0, accel: 14.0,
     graze: 0.5, idleMin: 0.6, idleMax: 1.8, flies: true, hover: 1.5,
   }),
   crab: pet('crab', {
-    label: 'Crab', h: 0.45, hp: 5, spd: 1.0, shy: 0.7, turn: 5.0, accel: 8.0,
+    label: 'Crab', h: 0.30, var: 0.06, hp: 5, spd: 1.0, shy: 0.7, turn: 5.0, accel: 8.0,
     graze: 0.4, drops: [['meat', 1, 1]],
   }),
   caterpillar: pet('caterpillar', {
-    label: 'Caterpillar', h: 0.4, hp: 3, spd: 0.5, shy: 0.6, turn: 2.5, accel: 4.0,
+    label: 'Caterpillar', h: 0.22, var: 0.06, hp: 3, spd: 0.5, shy: 0.6, turn: 2.5, accel: 4.0,
     graze: 0.8, idleMin: 2, idleMax: 6,
   }),
   fish: pet('fish', {
-    label: 'Fish', h: 0.5, hp: 4, spd: 1.4, shy: 0.9, turn: 4.5, accel: 8.0,
+    label: 'Fish', h: 0.40, var: 0.10, hp: 4, spd: 1.4, shy: 0.9, turn: 4.5, accel: 8.0,
     graze: 0.3, idleMin: 1, idleMax: 3, drops: [['meat', 1, 1]], aquatic: true,
   }),
 
@@ -381,6 +479,42 @@ const FOOT_OFF = [
   0, 0,  1, 0,  -1, 0,  0, 1,  0, -1,
   D8, D8,  D8, -D8,  -D8, D8,  -D8, -D8,
 ];
+
+// --- predation ---------------------------------------------------------------
+// Carnivores hunt the herd, not just the player. Every number here exists to
+// stop that eating the planet: a carnivore only looks while it is hungry, rests
+// for the best part of a minute after each kill *and* after each failed chase,
+// and its prey search is one pass over this.list — which the manager caps at
+// MAX_MOBS — on a timer rather than every frame. At the caps that is a few
+// dozen distance tests a second for the whole world.
+//
+// Nothing here can empty a biome: the spawn tick backfills wildlife towards
+// MAX_MOBS * 0.7 every six seconds from the biome table, so an eaten bunny is
+// replaced by another of whatever lives there long before a predator is hungry
+// again.
+const PREY_PERIOD = 1.6;      // seconds between prey searches for one carnivore
+const PREY_RANGE = 20;        // cells it will notice something to eat from
+const PREY_GIVE_UP = 12;      // seconds of chasing before it loses interest
+const PREY_REST_MIN = 34;     // seconds after a kill before it hunts again
+const PREY_REST_MAX = 70;
+/**
+ * How tall prey may be as a fraction of the hunter's own height. Just over one,
+ * on purpose: a lion pulls down a deer but not a cow, and a cat takes a chick
+ * rather than an elephant.
+ */
+const PREY_SIZE = 1.05;
+/**
+ * A kill makes a predator bigger, permanently. Five good ones take it to the
+ * ceiling and no further — an old tiger should be a landmark, not a mountain —
+ * and its drops scale on exactly the same curve, so a fully grown one is worth
+ * twice what a fresh one is.
+ */
+const GROW_PER_KILL = 0.06;
+const GROW_MAX = 1.30;
+const LOOT_MAX = 2.0;
+
+/** Seconds of the scale pop that stands in for a missing attack clip. */
+const LUNGE_TIME = 0.3;
 
 const LOVE_SECONDS = 22;      // how long a fed animal stays willing
 const BREED_RANGE = 4.5;      // how close a willing pair must be
@@ -517,6 +651,8 @@ export class Mobs {
     this.onBurn = null;
     /** Swings in flight, so the hit lands on contact rather than on the decision. */
     this._pendingHits = [];
+    /** Animals taken by a predator this frame, removed once the tick is over. */
+    this._kills = [];
     /** sun elevation at the player, refreshed each update */
     this.daylight = 1;
     this.voxCooldown = 0;
@@ -547,6 +683,11 @@ export class Mobs {
   }
 
   _release(mob) {
+    // Anything holding a reference to this body — a carnivore mid-chase — has
+    // to be able to tell that it is gone. It is off the list by the time the
+    // predator next looks, but its `pos` stops updating, so without this flag a
+    // tiger spends a second and a half walking at a ghost.
+    mob.released = true;
     this.group.remove(mob.model.root);
     mob.model.mixer.stopAllAction();
     mob.model.mixer.uncacheRoot(mob.model.root);
@@ -638,7 +779,12 @@ export class Mobs {
     const s = (seed === undefined || seed === null) ? ((Math.random() * 0x7fffffff) | 0) : (seed | 0);
     const rng = makeRng(s || 1);
     const variant = Math.floor(rng() * spec.urls.length) % spec.urls.length;
-    const sizeJitter = 0.90 + rng() * 0.20;        // stable per individual
+    // Stable per individual, and per species: ±12% by default, wider on the
+    // herd animals where it reads and narrow on the ankle-high ones where it
+    // cannot. Still exactly one draw from the stream, so old seeds keep the
+    // model variant they were saved with.
+    const spread = spec.sizeVar ?? SIZE_VAR;
+    const sizeJitter = 1 + (rng() * 2 - 1) * spread;
 
     const url = spec.urls[variant];
     const model = MobModels.instantiate(url);
@@ -677,6 +823,7 @@ export class Mobs {
     });
     this.group.add(model.root);
 
+    const ext = modelExtents(model.root, scale);
     const mob = {
       id: this._nextId++, type, spec, model, seed: s, variant,
       scale, sizeJitter,
@@ -706,13 +853,36 @@ export class Mobs {
       huntCooldown: 0,
       fromCave: false,     // which spawn budget it belongs to
       swingT: 0,           // hostiles: cooldown left before the next blow
+      lungeT: 0,           // seconds left of the pounce pop — see _lunge
       burnT: 0,            // hostiles: seconds alight in daylight
+      // --- predation ---
+      // The hunger clock is seeded from Math.random rather than from `rng` on
+      // purpose: `rng` is the per-individual stream that decides the model
+      // variant and the size, and drawing from it here would move every saved
+      // animal's appearance. Staggered so a pride that spawned together does
+      // not all set off at the same instant.
+      hungerT: Math.random() * PREY_REST_MIN,
+      preyT: Math.random() * PREY_PERIOD,
+      prey: null,
+      preyChase: 0,
+      kills: 0,
+      grown: 1,            // permanent size gained from kills, 1..GROW_MAX
+      taken: false,        // eaten this frame, awaiting collection
+      released: false,     // detached from the world; never chase one of these
       dying: 0,            // seconds left of the death animation
       target: null,        // 'player' once a hostile has noticed you
       // Collision footprint in cells, measured from the built model rather than
       // guessed from the spec, and kept as a length and a width rather than one
       // radius — see modelExtents.
-      ...modelExtents(model.root, scale),
+      ...ext,
+      // The same numbers again, kept so a predator that eats its way larger can
+      // scale its body without re-measuring. Re-measuring is not an option once
+      // the animal is in the world: modelExtents reads a *world-space* box, and
+      // it is only ever the truth while the root still sits unrotated at the
+      // origin, which is exactly here and nowhere else.
+      baseHalfW: ext.halfW,
+      baseHalfL: ext.halfL,
+      baseHeight: spec.height * sizeJitter,
       get radius() { return Math.max(this.halfW, this.halfL); },
       love: 0,             // seconds left willing to breed
       breedCooldown: 0,    // rest before breeding again
@@ -1313,7 +1483,14 @@ export class Mobs {
     }
     // Losing interest at a longer range than it gains it stops a husk on the
     // edge of the aggro ring flickering between hunting and milling about.
-    if (dist < spec.aggroRange) {
+    //
+    // A hunter acquires on sight; a fighter is handed its target by hurt() and
+    // by nothing else, which is the whole difference between a tiger and a fox.
+    // Everything past this point is shared — the chase, the stall test, the
+    // swing — because a provoked fox and a husk want precisely the same thing
+    // once they have decided on you.
+    const acquires = spec.hostile || spec.unprovoked;
+    if (acquires && dist < spec.aggroRange) {
       if (mob.target !== 'player') { mob.bestDist = dist; mob.stallT = 0; }
       mob.target = 'player';
     } else if (dist > spec.aggroRange * 1.6) mob.target = null;
@@ -1375,7 +1552,7 @@ export class Mobs {
       mob.state = 'idle';
       if (mob.swingT <= 0) {
         mob.swingT = spec.swing;
-        MobModels.playOnce(mob.model, spec.clips.attack, 1.35);
+        this._lunge(mob);
         if (this.onSound) this.onSound('hurt', mob);
         // The hit lands on the swing, not on the decision to swing, so there is
         // a moment to back out of range.
@@ -1558,6 +1735,173 @@ export class Mobs {
     return true;
   }
 
+  /**
+   * The visible half of a blow.
+   *
+   * The Blocky Characters rig has a real swing; the Cube Pets pack does not
+   * ship an attack clip for any of its twenty-odd animals, and there is nothing
+   * to substitute that reads as a strike on its own. Left as it was — playOnce
+   * against `spec.clips.attack`, which is undefined for a pet — the call is a
+   * silent no-op, so a tiger's blow arrived with no animation, no pose change
+   * and nothing on screen but the player's health going down.
+   *
+   * So a pet's lunge is built here out of what the pack does have: the run clip
+   * fired once at nearly double speed for the pounce, plus a short scale pop in
+   * _animate for the weight behind it. It is not an attack animation and does
+   * not pretend to be one, but it is a tell, and a hit you cannot see coming is
+   * worse than an approximate one.
+   */
+  _lunge(mob) {
+    const clips = mob.spec.clips;
+    const named = clips.attack && mob.model.actions[clips.attack];
+    MobModels.playOnce(mob.model, named ? clips.attack : clips.run, named ? 1.35 : 2.1);
+    mob.lungeT = LUNGE_TIME;
+  }
+
+  /**
+   * Apply a predator's accumulated growth to the drawn model *and* to the body.
+   *
+   * Scale alone gives a grown tiger the silhouette of a big cat and the hitbox
+   * of the kitten it started as — hittable only through the middle, and walking
+   * through gaps its shoulders no longer fit.
+   *
+   * The footprint is scaled from the numbers measured at spawn rather than read
+   * off the model again: modelExtents takes a world-space box, so once the
+   * animal is out on the sphere — rotated, and a planet radius from the origin
+   * — re-measuring returns the animal's *position*, not its size. The caps are
+   * the same ones modelExtents applies, so growth cannot walk a body past the
+   * footprint the collision code is willing to carry.
+   */
+  _setGrowth(mob, grown) {
+    mob.grown = Math.min(GROW_MAX, Math.max(1, grown));
+    mob.halfW = Math.min(0.47, mob.baseHalfW * mob.grown);
+    mob.halfL = Math.min(0.80, mob.baseHalfL * mob.grown);
+    mob.tall = Math.max(1, Math.ceil(mob.baseHeight * mob.grown - 0.001));
+  }
+
+  /**
+   * Something smaller than this animal, close by, that it would eat.
+   *
+   * One pass over the whole list, which is bounded by MAX_MOBS and only run
+   * every PREY_PERIOD per hungry carnivore — see the notes on those constants.
+   */
+  _findPrey(mob) {
+    let best = null, bestD = PREY_RANGE * PREY_RANGE;
+    const ceiling = mob.spec.height * PREY_SIZE;
+    for (const o of this.list) {
+      if (o === mob || o.taken || o.released || o.dying > 0 || o.health <= 0) continue;
+      // Nothing eats its own kind; nothing eats the merchant, of whom there is
+      // exactly one and whose loss to a passing fox would read as a bug; and
+      // nothing eats a husk, which is not alive in any sense a tiger cares
+      // about and would turn every night into a wildlife documentary.
+      if (o.type === mob.type || o.spec.trader || o.spec.hostile) continue;
+      if (o.spec.height > ceiling) continue;
+      // Water is a wall to a land animal, so a fox that picks a fish spends the
+      // whole PREY_GIVE_UP window padding along the shoreline looking stupid.
+      // Cheaper to never choose it than to detect the failure afterwards.
+      if (!!o.spec.aquatic !== !!mob.spec.aquatic) continue;
+      const d = mob.pos.distanceToSquared(o.pos);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    return best;
+  }
+
+  /**
+   * A carnivore stalks the herd.
+   *
+   * Steering is the same code the player-hunt and the courtship use — point
+   * `want` at something and set state to 'chase' — because the movement in this
+   * file is the hard-won part and a second copy of it would rot immediately.
+   *
+   * @returns {boolean} true if it is stalking, so wandering stands down
+   */
+  _stalk(mob, dt) {
+    const spec = mob.spec;
+    if (spec.diet !== 'carnivore' && spec.diet !== 'omnivore') return false;
+    // A cub does not hunt, and a fed animal has other plans.
+    if (mob.baby > 0 || mob.love > 0) return false;
+    if (mob.hungerT > 0) { mob.hungerT -= dt; mob.prey = null; return false; }
+
+    if (mob.prey && (mob.prey.taken || mob.prey.released
+      || mob.prey.dying > 0 || mob.prey.health <= 0)) mob.prey = null;
+    mob.preyT -= dt;
+    if (mob.preyT <= 0) {
+      mob.preyT = PREY_PERIOD;
+      if (!mob.prey) { mob.prey = this._findPrey(mob); mob.preyChase = 0; }
+    }
+    const prey = mob.prey;
+    if (!prey) return false;
+
+    const d = mob.pos.distanceTo(prey.pos);
+    if (d > PREY_RANGE * 1.6) { mob.prey = null; return false; }
+    mob.preyChase += dt;
+    if (mob.preyChase > PREY_GIVE_UP) {
+      // Some hunts fail. Resting after a failure as well as after a kill is
+      // what stops a carnivore latching straight onto the next animal in the
+      // same second and towing the whole herd across the map behind it.
+      mob.prey = null;
+      mob.hungerT = PREY_REST_MIN * 0.4;
+      return false;
+    }
+
+    // Being hunted is the prey's business too — a herd that grazes on while it
+    // is eaten looks worse than no ecology at all. It is told directly rather
+    // than left to find out with a scan of its own: the hunter already knows
+    // who it is chasing, so this costs nothing, and the flee state it sets is
+    // the same one a swung axe sets.
+    const pf = prey.frame;
+    if (d < PREY_RANGE * 0.55 && prey.state !== 'flee' && !prey.spec.trader) {
+      _rel.copy(prey.pos).sub(mob.pos);
+      prey.state = 'flee';
+      prey.stateT = 1.4 + Math.random();
+      prey.want = Math.atan2(
+        _rel.x * pf.eb[0] + _rel.y * pf.eb[1] + _rel.z * pf.eb[2],
+        _rel.x * pf.ea[0] + _rel.y * pf.ea[1] + _rel.z * pf.ea[2],
+      );
+    }
+
+    const fr = mob.frame;
+    const reach = (spec.reach ?? 1.0) + mob.radius + prey.radius;
+    if (d > reach) {
+      _rel.copy(prey.pos).sub(mob.pos);
+      mob.want = Math.atan2(
+        _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2],
+        _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2],
+      );
+      mob.state = 'chase';
+      mob.stateT = 0.5;
+      return true;
+    }
+
+    // Contact. The body is *not* removed here: this runs from inside the update
+    // loop's reverse walk over this.list, and splicing an entry below the
+    // cursor shifts everything under it, so a mob gets ticked twice or skipped.
+    // It is marked and collected after the loop instead.
+    this._lunge(mob);
+    prey.taken = true;
+    this._kills.push(prey);
+    mob.prey = null;
+    // Nothing drops. It ate the animal — a rabbit bursting into hide and meat
+    // for the player to walk over would make every predator a free larder and
+    // hunting them the fastest way to farm.
+    this._feed(mob);
+    if (this.onSound) this.onSound('hurt', prey);
+    mob.state = 'idle';
+    mob.stateT = 0.6 + Math.random();
+    // A carnivore that has just eaten stops caring about you as well. Being
+    // chased by a tiger that has visibly stopped to eat something else is the
+    // moment the ecology reads as an ecology rather than as two systems.
+    if (!spec.hostile) mob.target = null;
+    return true;
+  }
+
+  /** A kill: grow a little, and be full for a while. */
+  _feed(mob) {
+    mob.kills++;
+    this._setGrowth(mob, mob.grown + GROW_PER_KILL);
+    mob.hungerT = PREY_REST_MIN + Math.random() * (PREY_REST_MAX - PREY_REST_MIN);
+  }
+
   /** Resolve attack swings whose contact frame has arrived. */
   _resolveHits(dt, player) {
     for (let n = this._pendingHits.length - 1; n >= 0; n--) {
@@ -1582,10 +1926,15 @@ export class Mobs {
     // Killing the merchant costs you the merchant. The body is removed by one
     // of two paths below, so the wait is started here where both pass through.
     if (mob.spec.trader) this.merchantT = MERCHANT_COOLDOWN;
+    // A predator that has been eating is worth more. Linear from one to LOOT_MAX
+    // across the same growth range the body uses, so the ceiling on size is also
+    // the ceiling on the payout — there is no way to farm one of these past
+    // double, however long it lives.
+    const boon = 1 + (LOOT_MAX - 1) * ((mob.grown - 1) / (GROW_MAX - 1));
     for (const [name, min, max] of drops) {
       const id = itemIdOf(name);
       if (!id) continue;
-      const count = min + Math.floor(Math.random() * (max - min + 1));
+      const count = Math.round((min + Math.floor(Math.random() * (max - min + 1))) * boon);
       // Lift the drop along the mob's own up, not world +Y. On a sphere those
       // only agree at the north pole; everywhere else `+0.3` in Y was a sideways
       // nudge, and at the equator it pushed loot straight into the hillside.
@@ -1691,6 +2040,7 @@ export class Mobs {
       }
 
       mob.hurtT = Math.max(0, mob.hurtT - dt);
+      mob.lungeT = Math.max(0, mob.lungeT - dt);
       mob.slideT = Math.max(0, mob.slideT - dt);
       mob.stateT -= dt;
       mob.idleT += dt;
@@ -1737,15 +2087,24 @@ export class Mobs {
       // A hostile only decides *where it wants to go* differently; everything
       // below — steering, the footprint test, hopping a step, the seam handling
       // — is the same hard-won movement code the animals use.
-      const hunting = spec.hostile && this._hunt(mob, dt, dist, player, fr);
+      // `predator` covers both the tiger that comes for you unasked and the fox
+      // that only does so once you have hit it; `hostile` is the husk alone,
+      // because that flag also drives the night spawn budgets and main.js's
+      // grace-period wipe. Conflating them either starves the husk cap or
+      // deletes every big cat on the planet at first light.
+      const hunting = (spec.hostile || spec.predator)
+        && this._hunt(mob, dt, dist, player, fr);
+      // Then the herd. Hunting the player wins over hunting dinner: something
+      // that has decided on you should not wander off after a rabbit mid-fight.
+      const stalking = !hunting && this._stalk(mob, dt);
       // Courtship steers the same way hunting does, and for the same reason:
       // wandering will not reliably bring two animals together inside the love
       // window. Fleeing still wins — a spooked animal has other priorities.
-      const courting = !hunting && this._court(mob, fr);
+      const courting = !hunting && !stalking && this._court(mob, fr);
 
       // --- behaviour: pick a *desired* heading, never assign the real one ---
       const wasFleeing = mob.state === 'flee';
-      if (!hunting && !courting && mob.stateT <= 0) {
+      if (!hunting && !stalking && !courting && mob.stateT <= 0) {
         if (wasFleeing) {
           mob.state = 'idle';
           mob.stateT = 1 + Math.random() * 2;
@@ -1760,6 +2119,9 @@ export class Mobs {
           mob.want = wrapAngle(mob.heading + (Math.random() - 0.5) * 2.6);
         }
       }
+      // Deliberately not gated on `stalking`: a fox stays a fox, and one that
+      // ignored an approaching player because it had its eye on a rabbit would
+      // be less believable than one that abandons the chase and bolts.
       if (!hunting && !wasFleeing && dist < 3.4 * spec.skittish && spec.skittish > 0.5) {
         mob.state = 'flee';
         mob.stateT = 1.6 + Math.random();
@@ -2016,6 +2378,13 @@ export class Mobs {
       this._animate(mob, dt, sky);
     }
 
+    // Anything eaten this frame is removed here, outside the walk over the list
+    // — see the note in _stalk on why a kill cannot splice from inside it.
+    if (this._kills.length) {
+      for (const prey of this._kills) if (!prey.released) this._die(prey, []);
+      this._kills.length = 0;
+    }
+
     // Bodies last: shove anything overlapping apart, then re-place the models
     // so the nudge shows this frame rather than the next.
     this._separate(dt, player);
@@ -2049,7 +2418,14 @@ export class Mobs {
 
     _rpos.copy(mob.pos);
     root.position.copy(_rpos);
-    root.scale.setScalar(mob.scale * growthScale(mob) * (mob.hurtT > 0 ? 1.09 : 1));
+    // `grown` is the permanent size a predator has eaten its way to; `lungeT`
+    // is the momentary pounce, easing out over LUNGE_TIME so a pet with no
+    // attack clip still has weight behind its blow. Both go through here for
+    // the reason growthScale documents: this line owns root.scale, and anything
+    // written to it elsewhere is gone on the next frame.
+    const lunge = mob.lungeT > 0 ? 1 + 0.16 * (mob.lungeT / LUNGE_TIME) : 1;
+    root.scale.setScalar(mob.scale * mob.grown * growthScale(mob) * lunge
+      * (mob.hurtT > 0 ? 1.09 : 1));
 
     // --- animation ---
     // The clips carry the whole performance — gait, idle sway, the eating dip.
@@ -2185,7 +2561,7 @@ export class Mobs {
     // mob's own tangent frame, so normalising them gives the push direction on
     // the curved surface without any further trigonometry.
     const rl = Math.hypot(ra, rb) || 1;
-    const push = (mob.spec.hostile ? KNOCK_HOSTILE
+    const push = (mob.spec.hostile || mob.spec.predator ? KNOCK_HOSTILE
       : mob.spec.trader ? KNOCK_HOSTILE * 0.5 : KNOCK_WILDLIFE) * knock;
     if (push > 0) {
       mob.knockA = (ra / rl) * push;
@@ -2193,10 +2569,21 @@ export class Mobs {
       mob.knockT = KNOCK_TIME;
     }
 
-    if (mob.spec.hostile) {
+    if (mob.spec.hostile || mob.spec.predator) {
       // Hitting a husk makes it angry, not skittish: it takes the knock but
       // keeps coming, and it now knows exactly where you are.
+      //
+      // Predators go through the same door, and this is the whole of the
+      // retaliation fix. A tiger was ordinary wildlife with a big-cat model:
+      // it had no damage, no reach and no swing, `_hunt` was gated on `hostile`
+      // so it was never even asked, and this branch sent it to 'flee'. Swinging
+      // at one made it run away — the single most confusing thing on the
+      // planet, since everything about it says predator. Now it drops whatever
+      // it was doing, forgets the meal it was stalking, and comes for you.
       mob.target = 'player';
+      mob.prey = null;
+      mob.state = 'chase';
+      mob.stateT = 0.5;
       mob.vel.k = 1.4;
     } else if (mob.spec.trader) {
       // It has seen worse. Bolting would also strand its stock somewhere you
@@ -2232,6 +2619,9 @@ export class Mobs {
           t: m.type, c: [m.cell.f, m.cell.ci, m.cell.cj, m.cell.ck], h: m.health, s: m.seed,
           b: +m.baby.toFixed(1), l: +m.love.toFixed(1), d: +m.breedCooldown.toFixed(1),
         };
+        // Size eaten for is earned, and it is also worth double loot — losing
+        // it on a reload would make the reload the mistake.
+        if (m.grown > 1) d.g = +m.grown.toFixed(3);
         // A trader's stock and remaining life are state, not decoration.
         // Re-rolling them on load would make quit-and-reload the cheapest way
         // to shop: reload until the wares are the ones you wanted, and buy the
@@ -2267,6 +2657,7 @@ export class Mobs {
         mob.baby = d.b ?? 0;
         mob.love = d.l ?? 0;
         mob.breedCooldown = d.d ?? 0;
+        if (d.g > 1) this._setGrowth(mob, d.g);
         if (mob.spec.trader) {
           if (d.st) mob.stock = d.st.map(([item, count]) => ({ item, count }));
           if (d.lf !== undefined) mob.life = d.lf;

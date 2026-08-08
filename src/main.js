@@ -1604,7 +1604,7 @@ class Game {
     // roof as it does in the open. Fade it out by how much sky is overhead,
     // eased so stepping under a tree dims the rain rather than cutting it.
     this.shelter += (this._skyExposure() - this.shelter) * Math.min(1, dt * 3.5);
-    this.particles.setWeather(this.weather.type, this.weather.precip * this.shelter);
+    this.particles.setWeather(this.weather.type, this.weather.precip * this.shelter, this.player.headInWater);
 
     this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob);
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);

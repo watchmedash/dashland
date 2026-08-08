@@ -12,6 +12,11 @@ import { makeRng } from '../util/Noise.js';
  * terrain the generator can raise; 30 covers everything that reads as shadowed
  * on screen while being far tighter than the ±46 box it replaces.
  */
+// How far out the moon billboard is anchored. It has to stay inside the
+// camera's far plane (420) or it is clipped and never drawn — which is exactly
+// what used to happen at 700.
+const DISC_DIST = 360;
+
 const SHADOW_DIST = 30;
 /** Ceiling on that radius: the fixed extent this fitting replaced. */
 const SHADOW_DIST_MAX = 46;
@@ -233,10 +238,13 @@ export class Sky {
     this.stars = this._buildStars();
     scene.add(this.stars);
 
-    // --- sun & moon billboards ---
-    this.sunSprite = this._buildDisc(this._sunTexture(), 1);
+    // --- moon billboard ---
+    // The sun is drawn by the dome shader (the pow(sd, 900.0) term), so it
+    // needs no billboard; there used to be one here and it was clipped away
+    // unseen every frame. The moon has no analytic counterpart, so this is the
+    // only moon there is.
     this.moonSprite = this._buildDisc(this._moonTexture(), 1);
-    scene.add(this.sunSprite, this.moonSprite);
+    scene.add(this.moonSprite);
 
     // --- clouds ---
     this.cloudUniforms = {
@@ -348,7 +356,15 @@ export class Sky {
       `,
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      // Stars have to be *tested* against the world even though they never
+      // write depth. The vertex shader already pins them to the far plane so
+      // they lose to everything, but with the test off that did nothing: a
+      // transparent object draws after the whole opaque pass, so 4200 additive
+      // points were painted straight over the terrain. At night the ground was
+      // full of white specks that slid around as you turned — stars, indoors.
+      // The sky dome writes no depth and does not test either, so turning this
+      // on costs nothing above the horizon.
+      depthTest: true,
       blending: THREE.AdditiveBlending,
       vertexColors: true,
     });
@@ -356,23 +372,6 @@ export class Sky {
     pts.renderOrder = -999;
     pts.frustumCulled = false;
     return pts;
-  }
-
-  _sunTexture() {
-    const S = 256;
-    const c = document.createElement('canvas'); c.width = c.height = S;
-    const g = c.getContext('2d');
-    const grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    grad.addColorStop(0.00, 'rgba(255,255,250,1)');
-    grad.addColorStop(0.16, 'rgba(255,248,224,1)');
-    grad.addColorStop(0.24, 'rgba(255,226,160,0.85)');
-    grad.addColorStop(0.42, 'rgba(255,190,110,0.28)');
-    grad.addColorStop(0.70, 'rgba(255,170,90,0.07)');
-    grad.addColorStop(1.00, 'rgba(255,160,80,0)');
-    g.fillStyle = grad; g.fillRect(0, 0, S, S);
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    return t;
   }
 
   _moonTexture() {
@@ -408,7 +407,11 @@ export class Sky {
 
   _buildDisc(tex, scale) {
     const mat = new THREE.MeshBasicMaterial({
-      map: tex, transparent: true, depthWrite: false, depthTest: false,
+      // Same reasoning as the stars: additive and transparent means these draw
+      // after the opaque pass, so without a depth test the sun burns through
+      // whatever is between you and it. They sit 700 out, well inside the far
+      // plane, so testing does not clip them out of the sky.
+      map: tex, transparent: true, depthWrite: false, depthTest: true,
       blending: THREE.AdditiveBlending, fog: false,
     });
     const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
@@ -513,15 +516,21 @@ export class Sky {
     this.stars.rotation.y += dt * 0.0016;
     this.stars.visible = night > 0.01;
 
-    // sun & moon discs
+    // Sun & moon discs.
+    //
+    // These sat 700 out against a 420 far plane, so every frame they were
+    // built, oriented, scaled and then clipped away without ever drawing a
+    // pixel. The sun went unnoticed because the dome shader paints its own
+    // disc analytically; the moon had no such stand-in, so the night sky
+    // simply never had one. Anchor them inside the frustum and scale by the
+    // same factor, which leaves their angular size exactly as tuned.
     const place = (m, dir, size, opacity) => {
-      m.position.copy(camera.position).addScaledVector(dir, 700);
+      m.position.copy(camera.position).addScaledVector(dir, DISC_DIST);
       m.lookAt(camera.position);
-      m.scale.setScalar(size);
+      m.scale.setScalar(size * (DISC_DIST / 700));
       m.material.opacity = opacity;
       m.visible = opacity > 0.01;
     };
-    place(this.sunSprite, this.sunDir, 210, THREE.MathUtils.clamp(elev * 6 + 1.0, 0, 1));
     place(this.moonSprite, this.moonDir, 150, THREE.MathUtils.clamp(-elev * 6 + 1.0, 0, 1) * 0.95);
 
     // clouds

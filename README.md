@@ -120,6 +120,18 @@ it *says*.
   and is always false. Under a tree it is the canopy. This has caused a shipped
   bug and two measurements that reported a planet with no water, on a planet
   that is a fifth water.
+- **`depthTest: false` on a transparent object means "draw over the world".**
+  It is tempting to reach for on anything that belongs to the sky, but a
+  transparent object renders *after* the whole opaque pass, so switching the
+  test off lets it paint over terrain rather than sitting behind it. The stars
+  did exactly that: 4200 additive points over the ground, sliding as you turned.
+  The sky dome is the case where it *is* right — it is opaque, has
+  `renderOrder: -1000` and writes no depth, so it lays down a background and
+  everything else covers it.
+- **Anything anchored to the sky must clear the far plane, which is 420.**
+  The sun and moon billboards sat at 700 and were clipped away unseen every
+  frame. Nobody noticed the sun because the dome shader draws its own disc; the
+  moon had no stand-in, so the game simply had no moon.
 - **`uSkyColor` is a light, not a colour.** It is the ambient fill: desaturated
   and pulled a third of the way to white so shaded faces don't render as blue
   cards. Reflect it in water and you get a white lake under a blue sky. Anything

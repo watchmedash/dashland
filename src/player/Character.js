@@ -112,10 +112,20 @@ const HAND_LOCAL = {
 };
 
 /**
- * Longest axis of a held item, in model units. One model unit is
- * PLAYER_HEIGHT / 2.3 ≈ 0.78 cells (2.3 is the rig's rest height), so this is
- * about two thirds of a block — a pickaxe you can see from behind without it
- * becoming the whole silhouette.
+ * Longest axis of a held item, in model units.
+ *
+ * The holder hangs off the arm node, inside the root's fit scale, so this is
+ * not a length in cells: one model unit is PLAYER_HEIGHT / 2.7 = 0.67 cells,
+ * 2.7 being the rig's measured rest height — the same number the picker reads
+ * off its own clone. 0.9 model units is therefore **0.6 cells**, a bit over
+ * half a block: a pickaxe you can see from behind without it becoming the whole
+ * silhouette.
+ *
+ * This comment said 2.3 until it was checked against `modelHeight`, which put
+ * the stated size 15% above the drawn one. Nothing moved on screen — the divisor
+ * was only ever in the prose, never in the arithmetic — but a constant whose
+ * comment misreports its own scale is one nobody can tune without measuring
+ * first, which is the whole point of writing the scale down.
  */
 const HAND_ITEM_SIZE = 0.9;
 
@@ -139,6 +149,146 @@ const HOLD_BLEND = 0.85;
 const SWING_TIME = 0.42;
 
 /**
+ * Falling, swimming and sneaking, as poses rather than clips.
+ *
+ * The pack ships 27 clips and not one of them is any of these. There is no
+ * crouch, no jump, no fall and no swim; `sit` and `drive` are the only clips
+ * that leave the standing silhouette and both are vehicle poses, legs folded
+ * dead ahead at exactly -π/2. Playing `sit` for a crouch was tried first and is
+ * unmistakably a man sitting on an invisible chair.
+ *
+ * So these are authored here, in the rig's own units, and layered after the
+ * mixer exactly the way the carrying pose is. Three facts make that cheap:
+ * the rig is eight nodes, every clip keys rotation only, and the rest rotation
+ * of every node is identity — so a pose is just a handful of Euler angles and
+ * the blend weight is a slerp from whatever the gait produced.
+ *
+ * **Sign, read off the file rather than guessed:** `holding-right` is a single
+ * keyframe of `arm-right` at x = -1.571, and that pose points the arm forward.
+ * Negative x swings a limb *forward*, positive swings it back. `die` flings both
+ * arms to -2.279, which is forward and over the head — the value the falling
+ * pose is built around, since a body in the air and a body giving up have the
+ * same arms.
+ *
+ * **And that rule inverts for the torso and the head.** It is a fact about the
+ * geometry, not about the convention: an arm and a leg hang *down* their node's
+ * -Y, so an x rotation carries them forward; the torso and the head stand *up*
+ * along +Y, so the identical rotation carries them back. The first crouch here
+ * used the limb sign throughout and produced a figure arching *backwards* while
+ * its legs bent forward — which in a still photograph, from behind, looks
+ * enough like a crouch to pass. It was caught by measuring the head: 0.4 of a
+ * cell behind the feet when a sneak should put it in front.
+ *
+ * Z is the splay. The limbs hang parallel to the body and a fall that only
+ * rotates in x reads as a diagram; a tenth of a radian outward on each side is
+ * the difference between falling and being a plank.
+ */
+const POSE = {
+  /**
+   * Airborne: arms up and out, legs trailing and parted, torso arched back.
+   *
+   * Deliberately not symmetric — the left leg leads. A symmetric pose plus the
+   * gait underneath averages out to the same thing on both sides and reads as a
+   * mannequin dropped down a well.
+   */
+  air: {
+    // Negative arches the chest back and lifts the chin — see the sign note.
+    torso: [-0.16, 0, 0],
+    head: [0.18, 0, 0],
+    'arm-right': [-2.25, 0, 0.30],
+    'arm-left': [-2.25, 0, -0.30],
+    'leg-right': [0.34, 0, 0.10],
+    'leg-left': [-0.22, 0, -0.10],
+  },
+
+  /**
+   * Swimming: the limbs only. The part that sells it — the body going
+   * horizontal — is a rotation of the whole model, not of any node, and lives in
+   * `_swim` below, because no amount of shoulder angle makes an upright body
+   * look like it is swimming.
+   */
+  swim: {
+    torso: [-0.10, 0, 0],
+    // Chin up. The body is face-down and the head is a separate node, so
+    // without this the character swims looking at the seabed.
+    head: [0.55, 0, 0],
+    'arm-right': [-1.15, 0, 0.34],
+    'arm-left': [-1.15, 0, -0.34],
+    'leg-right': [0.30, 0, 0.12],
+    'leg-left': [0.30, 0, -0.12],
+  },
+
+  /**
+   * Sneaking: torso down over the knees, head up to keep looking ahead, arms
+   * tucked behind, legs bent under.
+   *
+   * The rig has no knee, so a crouch cannot be built the way a skinned one is.
+   * What it has is a hip: rotating both legs forward swings the feet out in
+   * front and leaves the hips where they were, so on its own that is a bigger
+   * sitting pose. It works only paired with `CROUCH_SINK`, which drops the body
+   * by roughly what the bent legs would have taken out of it — together they
+   * read as a squat, and neither does alone.
+   */
+  crouch: {
+    // Positive folds the chest down over the knees; the head takes most of it
+    // back so a sneaking player is still looking where they are going.
+    torso: [0.52, 0, 0],
+    head: [-0.40, 0, 0],
+    'arm-right': [0.30, 0, 0.16],
+    'arm-left': [0.30, 0, -0.16],
+    'leg-right': [-0.34, 0, 0.10],
+    'leg-left': [-0.34, 0, -0.10],
+  },
+};
+
+/**
+ * How far the body drops when sneaking, in cells.
+ *
+ * The collision box loses 0.35 and the eye 0.30, and matching either exactly is
+ * wrong: the feet are modelled where they stand, so the whole 0.35 puts them a
+ * third of a block into the floor. The legs' hip bend accounts for some of the
+ * lost height on its own; this covers the visible remainder without burying the
+ * boots.
+ */
+const CROUCH_SINK = 0.16;
+
+/** How fast a pose fades in and out, in weight per second. */
+const POSE_RATE = 5.5;
+
+/**
+ * How far forward the body tips when swimming, in radians, and how fast the
+ * legs kick.
+ *
+ * The tip scales with how hard you are actually swimming: treading water is
+ * nearly upright, crawling is near flat. A fixed value makes someone bobbing in
+ * place look like they are drowning face-down.
+ */
+/**
+ * What separates a fall from a hop: still in the air after a jump would have
+ * landed, or coming down faster than a jump can.
+ *
+ * Both numbers are derived from the jump rather than picked. Player.js leaves
+ * the ground at 8.4 cells/s against a gravity of 26, which is an apex at 0.32s,
+ * an airtime of 0.65s, and a landing at exactly -8.4. So a threshold anywhere
+ * under those fires on *every* jump — the first draft used 0.34s and -5.0 and
+ * would have thrown the arms overhead each time the player cleared a fence,
+ * which is precisely what this gate exists to prevent.
+ *
+ * Above them, the speed clause is what actually fires when you walk off a
+ * ledge: 9 cells/s is 0.35s and about a block and a half of falling, well
+ * before the timer, and stepping off a cliff is the case where a body that
+ * keeps strolling looks broken. The timer only catches the rarer one — a long
+ * hang with little vertical speed, such as sliding out over a drop.
+ */
+const AIR_DELAY = 0.72;
+const AIR_SPEED = 9.0;
+
+const SWIM_PITCH_MIN = 0.22;
+const SWIM_PITCH_MAX = 1.20;
+const KICK_RATE = 3.4;
+const KICK_SWING = 0.30;
+
+/**
  * Below this camera distance the body is not drawn.
  *
  * The third-person camera pulls in to avoid terrain and can end up against the
@@ -148,8 +298,27 @@ const SWING_TIME = 0.42;
  */
 const HIDE_DIST = 0.9;
 
+/**
+ * `POSE`, compiled once to quaternions.
+ *
+ * Euler is what a human can edit and quaternion is what a slerp needs, and the
+ * conversion is the same three trig calls every frame for every node otherwise.
+ * Node names are resolved to nodes per instance, not here — the table outlives
+ * any one character and the picker builds and throws away fifteen of them.
+ */
+const POSE_Q = {};
+for (const [name, nodes] of Object.entries(POSE)) {
+  POSE_Q[name] = Object.entries(nodes).map(([node, [x, y, z]]) => [
+    node, new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z)),
+  ]);
+}
+
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
+const _qp = new THREE.Quaternion();
+const _pivot = new THREE.Vector3();
+/** Scratch for `_clearPose`, reused so a per-frame reset allocates nothing. */
+const _keyed = new Set();
 const _side = new THREE.Vector3();
 const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
@@ -176,6 +345,26 @@ export class PlayerCharacter {
     this.holdQ = { right: null, left: null };   // holding-* poses, null if absent
     this._holdW = { right: 0, left: 0 };        // eased 0..1, per arm
     this.swingT = 0;
+
+    /**
+     * The layered pose: which one, how strongly, and the kick's phase.
+     *
+     * One weight rather than one per pose. The three are mutually exclusive —
+     * you cannot sneak while airborne — so a switch eases the old one out
+     * through zero before the new one comes in, and passing through the neutral
+     * standing pose on the way is not a compromise but the truth: the frame
+     * between crouching and airborne is the frame you pushed off the ground.
+     */
+    this.pose = null;
+    this._poseW = 0;
+    this._kick = 0;
+    this._airT = 0;
+    /** Resolved per instance, since the model arrives long after construction. */
+    this._poseNodes = null;
+    this._poseAll = null;
+    this._actions = null;
+    this._clipKeys = null;
+    this._legs = { left: null, right: null };
 
     /**
      * Item meshes by id, built once and kept — one cache per hand.
@@ -223,6 +412,12 @@ export class PlayerCharacter {
     if (this.model) {
       this.scene.remove(this.model.root);
       this.model = null;
+      // Nodes of a body that is no longer in the scene. Left behind, the pose
+      // would go on writing rotations into a discarded rig every frame — no
+      // visible symptom, which is exactly why it would have survived.
+      this._poseNodes = null;
+      this._poseAll = null;
+      this._actions = null;
       for (const h of HANDS) {
         this.arms[h] = null;
         this.hands[h] = null;
@@ -263,6 +458,41 @@ export class PlayerCharacter {
       arm.add(anchor);
       this.hands[h] = anchor;
     }
+
+    // Resolve the pose tables' node names once. `getObjectByName` walks the
+    // subtree, and doing that for six nodes across three tables every frame is
+    // a tree search per limb per pose for names that cannot change.
+    this._poseNodes = {};
+    this._legs = {
+      left: model.root.getObjectByName('leg-left') || null,
+      right: model.root.getObjectByName('leg-right') || null,
+    };
+    for (const [name, entries] of Object.entries(POSE_Q)) {
+      this._poseNodes[name] = entries
+        .map(([node, q]) => [model.root.getObjectByName(node), q])
+        .filter(([n]) => n);
+    }
+
+    // Every node any pose writes to, and which clip keys which node. Both exist
+    // for `_clearPose` — see the comment there. Read off the clips themselves
+    // rather than hard-coded, because "does `idle` key the legs?" is a fact
+    // about the pack, and a list of node names copied into this file is a fact
+    // about what the pack looked like the day it was copied.
+    const all = new Map();
+    for (const entries of Object.values(this._poseNodes)) {
+      for (const [node] of entries) all.set(node.name, node);
+    }
+    this._poseAll = [...all.values()];
+    this._clipKeys = {};
+    this._actions = Object.entries(model.actions);
+    for (const [name, action] of this._actions) {
+      this._clipKeys[name] = new Set(
+        action.getClip().tracks
+          .filter((t) => t.name.endsWith('.quaternion'))
+          .map((t) => t.name.slice(0, -'.quaternion'.length)),
+      );
+    }
+
     MobModels.play(model, CLIP.idle, 0);
   }
 
@@ -433,11 +663,44 @@ export class PlayerCharacter {
     // lags the camera by a few frames reads as input latency.
     model.root.quaternion.copy(_q);
 
+    // --- which pose, and how much of it ---
+    // Read off state the physics already publishes, so the body cannot claim to
+    // be doing something the collision box is not. Order is a priority: a
+    // swimmer is not airborne even though both feet are off the ground, and
+    // holding crouch under water swims rather than sneaks.
+    const swimming = player.inWater && !player.grounded;
+    this._airT = player.grounded || swimming ? 0 : this._airT + dt;
+    // A hop is not a fall. Every jump leaves the ground, and posing on that
+    // alone throws the arms overhead each time the player clears a fence —
+    // ridiculous at the rate people jump in this game. It takes either real
+    // airtime or real downward speed, which between them mean "this is not
+    // going to end in a step".
+    const falling = this._airT > AIR_DELAY || player.vel.k < -AIR_SPEED;
+    const wantPose = swimming ? 'swim'
+      : !player.grounded && falling ? 'air'
+      : player.crouching ? 'crouch'
+      : null;
+    if (wantPose !== this.pose) {
+      // Fade the old one out first and only then adopt the new name, so the two
+      // never mix. Mixing them would need a weight each and a rule for what a
+      // half-crouched half-falling body is, for a transition that lasts under a
+      // fifth of a second.
+      this._poseW = Math.max(0, this._poseW - dt * POSE_RATE);
+      if (this._poseW <= 0.001) this.pose = wantPose;
+    } else if (this.pose) {
+      this._poseW = Math.min(1, this._poseW + dt * POSE_RATE);
+    }
+
     // The rig's origin is between the feet, which is exactly where
     // `player.position` is. `stepOffset` is the same smoothing the camera
     // applies over a one-block step-up — without it the body would pop a block
     // while the view eased.
     model.root.position.copy(player.position).addScaledVector(player.up, -player.stepOffset);
+    if (this.pose === 'crouch') {
+      model.root.position.addScaledVector(player.up, -CROUCH_SINK * this._poseW);
+    } else if (this.pose === 'swim') {
+      this._swim(player);
+    }
 
     // --- clips ---
     // Driven off the same numbers the physics already publishes: `moveAmount`
@@ -470,6 +733,26 @@ export class PlayerCharacter {
     // melee-right` keys `arm-right` alone, so a left arm that dropped its pose
     // during a swing would be letting go of the torch for no reason the mixer
     // ever asked it to.
+    // --- falling, swimming, sneaking ---
+    // Before the carrying pose, not after, and that order is the whole design:
+    // the hold slerp runs at 0.85 and so leaves a trace of whatever it found,
+    // which means a swimmer holding a torch reaches with that arm and paddles
+    // with the empty one, from one rule rather than from a table of exceptions.
+    this._clearPose();
+    if (this._poseW > 0.002 && this.pose && this._poseNodes) {
+      const w = this._poseW;
+      for (const [node, q] of this._poseNodes[this.pose]) node.quaternion.slerp(q, w);
+      if (this.pose === 'swim') {
+        // The kick, added on top of the posed legs. Advanced only while
+        // swimming, so surfacing and diving again resumes mid-stroke rather
+        // than snapping to the phase the clock happens to be at.
+        this._kick += dt * KICK_RATE;
+        const s = Math.sin(this._kick) * KICK_SWING * w;
+        if (this._legs.left) this._legs.left.rotateX(s);
+        if (this._legs.right) this._legs.right.rotateX(-s);
+      }
+    }
+
     if (this.swingT > 0) this.swingT = Math.max(0, this.swingT - dt);
     for (const h of HANDS) {
       const swinging = h === 'right' && this.swingT > 0;
@@ -481,6 +764,78 @@ export class PlayerCharacter {
         arm.quaternion.slerp(q, this._holdW[h] * HOLD_BLEND);
       }
     }
+  }
+
+  /**
+   * Undo a pose on any node the running clips will not overwrite themselves.
+   *
+   * **The mixer does not clear what it does not key.** `idle` has four tracks —
+   * torso, both arms, head — and no legs, because a standing figure's legs do
+   * not move. So a pose that bent the legs and then faded to nothing left them
+   * bent *permanently*: weight 0, `pose` null, and both legs still sitting at
+   * the crouch's -0.34 until the player happened to walk, at which point `walk`
+   * — which does key legs — quietly fixed it.
+   *
+   * That is why it survived a screenshot. Standing and crouching looked
+   * identical in a still, and both looked plausible; only measuring the node
+   * rotations with the pose provably off showed the legs had never come back.
+   *
+   * The rule is therefore: a pose owns a node only for as long as something
+   * else will take it back. Every frame, any pose-owned node that no *running*
+   * action keys is returned to its rest rotation — identity for this rig, for
+   * every node, which is also what makes `holding-right`'s single keyframe
+   * usable as an absolute pose. Running actions rather than just the current
+   * one, because a crossfade has two, and forcing identity through a walk→idle
+   * fade would fight the very clip that is on its way to fixing the legs.
+   */
+  _clearPose() {
+    if (!this._poseAll) return;
+    // Gathered once per frame rather than per node: the pack has 27 actions and
+    // asking each of them about each of six nodes is 162 questions a frame to
+    // answer one, and `Object.entries` would allocate on every one of them.
+    const keyed = _keyed;
+    keyed.clear();
+    for (const [name, action] of this._actions) {
+      if (!action.isRunning() || action.getEffectiveWeight() <= 0.001) continue;
+      const set = this._clipKeys[name];
+      if (set) for (const n of set) keyed.add(n);
+    }
+    for (const node of this._poseAll) {
+      if (!keyed.has(node.name)) node.quaternion.identity();
+    }
+  }
+
+  /**
+   * Tip the whole body face-down, about its own middle.
+   *
+   * The limbs are posed by the table; this is the rotation no node can do,
+   * because every node of this rig hangs off a `root` whose job is to stand the
+   * body up. Pitching is therefore done to the model's own transform, after the
+   * basis has been written.
+   *
+   * **About its middle, not its feet.** Rotating in place — the one-line version
+   * — pivots at the origin between the boots, which is where `player.position`
+   * is, and 70° of that swings the head a metre forward and straight through
+   * whatever is in front, while the feet stay pinned at a point no swimmer's
+   * feet are. Keeping the mid-height fixed instead costs one vector: the point
+   * `up * h/2` moves to `R * (up * h/2)` under the pitch, so translating back by
+   * the difference nails it in place and the body rotates about its own waist.
+   *
+   * The pitch itself scales with tangential speed, and `_poseW` scales the whole
+   * thing so entering and leaving the water tips rather than snaps.
+   */
+  _swim(player) {
+    const drive = THREE.MathUtils.clamp(player.moveAmount / 4.4, 0, 1);
+    const pitch = (SWIM_PITCH_MIN + (SWIM_PITCH_MAX - SWIM_PITCH_MIN) * drive) * this._poseW;
+    if (pitch < 0.002) return;
+
+    // About the side axis — the body's own left-right — which the orientation
+    // block has already worked out and normalised for the basis.
+    _qp.setFromAxisAngle(_side, pitch);
+    this.model.root.quaternion.premultiply(_qp);
+
+    _pivot.copy(player.up).multiplyScalar(PLAYER_HEIGHT * 0.5);
+    this.model.root.position.add(_pivot).sub(_pivot.applyQuaternion(_qp));
   }
 
   /** Menus and the loading screen: no body anywhere near the orbit camera. */

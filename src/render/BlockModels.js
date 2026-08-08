@@ -28,9 +28,36 @@
 //
 // The instance ceiling is per kind and it is a real ceiling: past it the
 // furthest entries in the list are simply dropped. See `CAP`.
+//
+// --- what a model gives up, and what is bought back here ---------------------
+//
+// A meshed block gets two things from the chunk it lives in that a loose model
+// does not: the wind, stamped into the vertex data as a wave code, and the
+// baked voxel light, stamped in as skylight and coloured block light. Turning
+// the flowers into models cost both, and a meadow of statues lit as though the
+// roof over it were not there is a worse picture than the billboards were.
+//
+// The wind comes back in full: `applyInstancedSway` is the mesher's own sway
+// branch ported to instances, phased off the instance matrix so neighbours are
+// out of step. See `_skin`.
+//
+// The light comes back only in part, and the missing part is not the render
+// layer's to fetch. The light field lives in the world worker — the main thread
+// holds `blocks` and nothing else — so there is no cell to sample when the
+// instance list is built, and a per-instance light attribute has nothing to put
+// in it. What is available is the treatment every other loose model in the game
+// gets: the scene's entity fill, which `Sky` already dims by the player's own
+// sky exposure, plus the sun's shadow map, which does know there is a roof.
+// `receiveShadow` is therefore on. That is the mobs' answer, applied to
+// flowers, and it fixes the loudest half — a flower under a roof at noon is no
+// longer in direct sunlight. What it still cannot do is block light: a flower
+// beside a torch stays unlit by it. See the note on `_fit`.
 
 import * as THREE from 'three';
 import { worldModel } from './ItemModels.js';
+import { applyInstancedSway } from './VoxelMaterial.js';
+import { ITEMS } from '../game/Items.js';
+import { BLOCKS, R_CROSS } from '../world/Blocks.js';
 
 /**
  * Instances per kind, hard.
@@ -86,7 +113,15 @@ export class BlockModels {
     if (!k) {
       k = {
         height: opts.height, lean: !!opts.lean,
-        template: null, mesh: null, cap: 0, scale: 1, asked: false,
+        // Which kinds sway is read off the block, not passed in: a kind that is
+        // a cross block is a plant, and plants are exactly what the mesher's
+        // wave table already marks as swaying (`WAVE[i] = 1` for `R_CROSS`).
+        // Deriving it keeps the two in step — a plant modelled tomorrow gets
+        // the wind without anyone remembering to ask for it — and a torch,
+        // which is `R_TORCH` and is a stick driven into a wall, stays still.
+        sway: !!(BLOCKS[ITEMS[itemId]?.block]?.render === R_CROSS),
+        template: null, material: null,
+        mesh: null, cap: 0, scale: 1, asked: false,
       };
       this.kinds.set(key, k);
     }
@@ -99,6 +134,7 @@ export class BlockModels {
       // one. Measure what we were given.
       const bb = new THREE.Box3().setFromObject(mesh);
       k.scale = k.height / Math.max(1e-3, bb.max.y - bb.min.y);
+      k.material = this._skin(k, bb);
     };
     const m = worldModel(itemId, take);
     if (m) take(m);
@@ -161,6 +197,42 @@ export class BlockModels {
   }
 
   /**
+   * The material this kind's instances draw with.
+   *
+   * For anything that does not sway this is the template's own, untouched, and
+   * that is the point of routing through `ItemModels`: the torch in your hand,
+   * the one in the toolbar and the three hundred on these walls are literally
+   * the same material and compile one program between them.
+   *
+   * A swaying kind cannot have that. The wind is a vertex-shader patch, and the
+   * material the flowers arrive with is the shared WAM one — every stick, ingot
+   * and gemstone in the game draws with it. Patching it in place would put a
+   * gust through the coal in your fist. So a swaying kind takes a clone, and
+   * pays one extra material per kind for it. Not one extra *program* per kind:
+   * the clones differ only in two uniforms, so they share a cache key and the
+   * whole swaying set compiles once between them.
+   *
+   * Per kind rather than one clone shared by all three flowers, because the
+   * sway needs the geometry's own root and head heights as uniforms and a
+   * uniform belongs to a material. The three are near enough identical today
+   * that sharing would look right; it would stop looking right the first time a
+   * modelled plant is a different shape, and finding that out from a stem that
+   * bends from halfway up is not worth saving two programs.
+   *
+   * Draw calls are untouched either way: still one per kind.
+   */
+  _skin(k, bb) {
+    if (!k.sway) return k.template.material;
+    const clone = (m) => applyInstancedSway(m.clone(), bb.min.y, bb.max.y);
+    // A tinted pack model carries two materials, one per draw group. Flowers
+    // are single-material WAM art and take the first branch, but a modelled
+    // plant out of a split pack would silently lose its sway without this.
+    return Array.isArray(k.template.material)
+      ? k.template.material.map(clone)
+      : clone(k.template.material);
+  }
+
+  /**
    * The kind's mesh, grown if `n` will not fit.
    *
    * Capacity doubles rather than tracking the count, because the count moves
@@ -174,12 +246,34 @@ export class BlockModels {
       this.group.remove(k.mesh);
       k.mesh.dispose();          // the instance buffers only — geometry is shared
     }
-    // The geometry and the material are the template's own, untouched. That is
-    // the point of routing through `ItemModels`: the torch in your hand, the one
-    // in the toolbar and the three hundred on these walls are literally the same
-    // material and compile one program between them.
-    const mesh = new THREE.InstancedMesh(k.template.geometry, k.template.material, cap);
+    // The geometry is the template's own, untouched; the material is too unless
+    // this kind sways. See `_skin`.
+    const mesh = new THREE.InstancedMesh(k.template.geometry, k.material, cap);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // The only piece of the baked voxel light a loose model can still be given.
+    //
+    // A meshed block carries its chunk's skylight and block light in its vertex
+    // data. An instance has neither, so it is lit by the scene — sun, moon,
+    // ambient and the entity fill — and a scene light has no idea there is a
+    // roof. That is how a flower in a cave came to be lit like a meadow.
+    //
+    // The sun is the loud half of that, and the sun alone *does* know about
+    // roofs, because it casts a shadow map and the terrain writes into it. So
+    // receiving is on: a flower under stone at noon is now in shadow, which
+    // leaves it on the ambient and the entity fill, and `Sky` already dims that
+    // fill by the player's own sky exposure. It is the same deal every mob in
+    // the game gets, for the same reason, and it is as far as this layer can
+    // reach — block light would need the worker's light field, which never
+    // crosses to the main thread.
+    //
+    // Casting stays off. The shadow camera spans ~92 cells across a 2048 map,
+    // so a flower is about ten texels and its cast shadow is a grey smudge on
+    // the grass; and two hundred and fifty of them is a second pass over every
+    // instance for that smudge. (Layers are not an option for splitting this —
+    // three tests a light's layers against the camera, not per object. The full
+    // story is in `Sky.js`, above `entityFill`.)
+    mesh.receiveShadow = true;
+    mesh.castShadow = false;
     // One bounding sphere for instances spread over forty cells is a sphere
     // containing the player, so culling it can only ever be wrong — and three.js
     // computes that sphere from the matrices as they were when it last looked.

@@ -636,6 +636,109 @@ export function createCutoutNormalMaterial(alphaTest = 0.42) {
 }
 
 /**
+ * Give an *instanced* model the wind a cross billboard gets for free.
+ *
+ * A plant drawn as a billboard sways because the mesher stamps a wave code into
+ * `aux.w` and the `wType == 1` branch of COMMON_VERT_BODY bends it. A modelled
+ * flower never goes through that shader at all — it is an `InstancedMesh` of
+ * item art — so the day the flowers became models a meadow stopped moving while
+ * the grass around it kept rippling. This is that branch again, ported to
+ * instances, and the constants are deliberately copied rather than re-tuned:
+ * the two frequencies, the 0.6/0.25 mix and the phase vector are what make a
+ * modelled flower and the tall grass beside it read as the same gust.
+ *
+ * ### Where the phase comes from
+ *
+ * From the *instance's* world position, which is the whole trick. Phase from
+ * anything shared — a counter, the uniform time alone — moves every plant in
+ * lockstep and a field then reads as one rigid object being waggled. The
+ * billboard reads it off `wp`, its own vertex world position; an instance has
+ * no such thing in its geometry, because the geometry is one flower reused two
+ * hundred times and every copy of it sits at the same local coordinates. The
+ * position lives in `instanceMatrix` instead, and its translation column is
+ * exactly the per-instance world origin: `mi[3].xyz`. Neighbours are then out
+ * of step for free, and stay out of step in the same way every frame.
+ *
+ * ### Why the displacement is rotated back into local space
+ *
+ * `<begin_vertex>` runs *before* `<project_vertex>` applies `instanceMatrix`,
+ * so `transformed` is still in the model's own space and anything added to it
+ * gets rotated and scaled afterwards. Bending along a local axis instead would
+ * have been simpler and is wrong: each flower carries a random spin about its
+ * own up (see `BlockModels.sync`), so a fixed local axis makes every plant lean
+ * a different way and the result is a field of nervous tics rather than wind.
+ * The bend is therefore built in world space against the planet tangent, like
+ * the billboard's, then carried back through the inverse of the instance's
+ * rotation. Scale is uniform, so that inverse is `transpose(rot) / s` — which
+ * is `dW * rot / sqrt(s2)` in GLSL, `s2` being any column's squared length.
+ *
+ * Amplitude is left in the model's own unit-height space rather than divided
+ * out to world units: a flower that stands 0.62 of a cell should sway 0.62 of
+ * what a full-cell billboard sways, or the short ones thrash.
+ *
+ * @param {THREE.Material} material patched in place; clone first if it is shared
+ * @param {number} loY  geometry-space Y where the stem is rooted — no movement
+ * @param {number} hiY  geometry-space Y of the head — full movement
+ */
+export function applyInstancedSway(material, loY, hiY) {
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prevCompile.call(material, shader, renderer);
+    // The live uniform objects, not copies: uTime and uWind are already written
+    // every frame by the main loop for the terrain's sake, so an instanced
+    // flower gusts with the grass at no plumbing cost and with no chance of the
+    // two drifting apart.
+    shader.uniforms.uTime = voxelUniforms.uTime;
+    shader.uniforms.uWind = voxelUniforms.uWind;
+    shader.uniforms.uPlanetCenter = voxelUniforms.uPlanetCenter;
+    shader.uniforms.uSwayLo = { value: loY };
+    shader.uniforms.uSwayHi = { value: hiY };
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        uniform float uTime;
+        uniform float uWind;
+        uniform vec3 uPlanetCenter;
+        uniform float uSwayLo;
+        uniform float uSwayHi;
+      `)
+      // Guarded, because a material with no instancing has no `instanceMatrix`
+      // and this would not compile at all — cheaper to keep the guard than to
+      // find that out the day someone reuses this on a plain Mesh.
+      .replace('#include <begin_vertex>', /* glsl */`
+        #include <begin_vertex>
+        #ifdef USE_INSTANCING
+        {
+          mat4 mi = modelMatrix * instanceMatrix;
+          mat3 rot = mat3(mi);
+          float s2 = max(1e-8, dot(rot[0], rot[0]));
+          vec3 iw = mi[3].xyz;
+          vec3 up = normalize(iw - uPlanetCenter);
+          vec3 ref = abs(up.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+          vec3 tang = normalize(cross(up, ref));
+          float ph = dot(iw, vec3(0.62, 0.41, 0.77));
+          float sway = sin(uTime * 1.9 + ph) * 0.6 + sin(uTime * 3.9 + ph * 1.7) * 0.25;
+          // Squared, so the bend is a stem bending and not the whole plant
+          // sliding sideways: the root is pinned and the head takes it all. The
+          // billboard gets this from a per-vertex amount the mesher bakes in;
+          // a shared geometry has to derive it, and its own height is the only
+          // thing that survives being instanced two hundred times.
+          float w = clamp((position.y - uSwayLo) / max(1e-4, uSwayHi - uSwayLo), 0.0, 1.0);
+          w *= w;
+          vec3 dW = (tang * (sway * 0.13) - up * (abs(sway) * 0.02)) * (w * uWind);
+          transformed += (dW * rot) / sqrt(s2);
+        }
+        #endif
+      `);
+  };
+  material.customProgramCacheKey = () => 'sway|' + prevKey.call(material);
+  material.needsUpdate = true;
+  return material;
+}
+
+/**
  * Stripped-down voxel material for objects rendered outside world space — the
  * first-person viewmodel. Same texture arrays, no fog and no voxel skylight.
  */

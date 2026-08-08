@@ -41,6 +41,22 @@ const KNOCK_TIME = 0.34;
 const CLIMB_SPEED = 3.2;
 /** How close to the shared wall you must be for a neighbouring ladder to hold. */
 const LADDER_GRIP = 0.62;
+/**
+ * How hard a current shoves you, in cells/s² at full strength.
+ *
+ * The number that matters is not this one but the speed it settles at, and
+ * that depends on what is damping you. Adrift and not steering, water damps at
+ * 4/s, so 11 settles at 2.75 cells/s — a shade above the 2.73 you make swimming
+ * — and you are unmistakably being carried. Standing in a shallow stream,
+ * ground friction of 14/s holds it to 0.79, a slow slide rather than a shove.
+ *
+ * Swimming against it, steering lerps at 11/s toward your intended velocity and
+ * the current only offsets that equilibrium by about 1 cell/s, so you still make
+ * 1.7 cells/s straight upstream and rather more across the channel. That
+ * asymmetry is the whole design: let go and the river has you, swim and it
+ * doesn't. A current you cannot leave is not a river, it is a wall.
+ */
+const FLOW_PUSH = 11;
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -71,6 +87,12 @@ export class Player {
     this.grounded = false;
     this.inWater = false;
     this.inLava = false;
+    /**
+     * The flow simulation, if there is one. Optional on purpose — the player is
+     * built before it is, and a world loaded without it should still walk.
+     * @type {import('../game/Water.js').Water|null}
+     */
+    this.water = null;
     this.headInWater = false;
     /** seconds still alight after leaving the lava */
     this.burning = 0;
@@ -496,6 +518,33 @@ export class Player {
       this.vel.i += (this.knockI - this.vel.i) * d;
       this.vel.j += (this.knockJ - this.vel.j) * d;
       this.knockT = Math.max(0, this.knockT - dt);
+    }
+
+    // Being carried by a current.
+    //
+    // Water.flowAt answers in the *feet column's own* (i, j) frame, which is
+    // the same frame vel.i/vel.j are already in — the player's cell address and
+    // the cell being asked about are the same column. So there is deliberately
+    // no conversion here, and therefore nothing to get wrong on a cube seam.
+    // (Drops have to go the long way round through tangentFrame, because they
+    // live in world space.)
+    //
+    // Added to the velocity rather than blended over it, unlike a blow: a blow
+    // is a moment and should override you, a river is a condition you swim
+    // against. Blending would have pinned you to the current's speed and made
+    // swimming upstream impossible, which is the exact failure this is trying
+    // to avoid.
+    if (this.inWater && this.water && feet) {
+      const fl = this.water.flowAt(feet.col, feet.k);
+      if (fl) {
+        const push = FLOW_PUSH * fl.s * dt;
+        this.vel.i += fl.i * push;
+        this.vel.j += fl.j * push;
+        // fl.k — the plunge of a waterfall — is deliberately ignored. Dragging
+        // the player down inside a falling column fights the swim-up key at the
+        // bottom of the shaft, and gravity is already taking you over the lip
+        // with all the tangential speed the run-up gave you.
+      }
     }
 
     // ---- radial velocity ----

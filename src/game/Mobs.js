@@ -37,31 +37,79 @@ import * as MobModels from './MobModels.js';
  * whatever the player has already walked past but not yet outrun. What is left
  * is a meadow with four cows in it.
  *
- * 64 puts roughly one wildlife body per 850 square units — about thirty units
- * between neighbours, so crossing a biome meets animals steadily without the
- * ground ever looking stocked. The cost this buys is bounded and known: the
- * only per-frame O(n²) in this file is _separate, which at 64 is ~2,000 pair
- * tests, and the prey search is one pass per hungry carnivore per PREY_PERIOD.
+ * 64 was the next attempt and it was still reported thin, for a reason a single
+ * headcount hides: it is a *global* ceiling, and the populations under it were
+ * not sharing it evenly. This is a sum of budgets now rather than one dial —
+ * 62 land, 18 aquatic, 14 flying, 8 husks, one merchant, plus a little headroom
+ * — so raising one population can never be the thing that quietly starves
+ * another. 62 land bodies is about one per 600 square units, roughly
+ * twenty-four units between neighbours.
+ *
+ * The cost this buys is bounded and known. The only per-frame O(n²) in this
+ * file is _separate: at 110 that is 5,995 pair tests a frame, ~360,000 a
+ * second, and every pair that is not actually overlapping now costs one squared
+ * distance and a compare — see the early-out there. What costs real work is
+ * _nudge (three footprint tests, nine column samples each) and that fires only
+ * on genuine overlaps, so it scales with how crowded one spot is rather than
+ * with the headcount. The prey search is still one pass per hungry carnivore
+ * per PREY_PERIOD. None of that is the limiting factor at this ceiling; the
+ * mixer update in _animate, which is per body per frame, is the larger bill.
  */
-const MAX_MOBS = 64;
+const MAX_MOBS = 110;
 /**
- * Of that, how many may be ordinary animals. Kept as its own budget rather than
- * a fraction of MAX_MOBS for the same reason the two husk caps are separate: a
- * shared ceiling lets one population starve another. The old top-up gate was
- * `list.length < MAX_MOBS * 0.7`, which counted husks, fish and the merchant —
- * so a busy night quietly stopped the wildlife from backfilling at all.
+ * Of that, how many may be ordinary land animals. Kept as its own budget rather
+ * than a fraction of MAX_MOBS for the same reason the two husk caps are
+ * separate: a shared ceiling lets one population starve another. The old
+ * top-up gate was `list.length < MAX_MOBS * 0.7`, which counted husks, fish and
+ * the merchant — so a busy night quietly stopped the wildlife from backfilling
+ * at all.
  */
-const MAX_WILDLIFE = 44;
+const MAX_WILDLIFE = 62;
+/**
+ * The two populations that were still inside the land budget, which is the very
+ * failure the comment above describes, happening one level further down.
+ *
+ * Fish were counted as wildlife, and the land top-up runs first in the tick. So
+ * on any tick with room for a fish there was also room for a cow, the cows were
+ * placed first, and the fish line was reached with the budget already spent. On
+ * the ticks that did get past it, it was gated behind a coin flip and placed at
+ * most one body — one fish, somewhere inside a hundred and ten units of ocean.
+ * A lake with nothing in it was not bad luck, it was the arithmetic.
+ *
+ * Bees were the same story with a second squeeze on top: a bee is one entry in
+ * a biome list of up to twelve, so it had to win the land budget and then win a
+ * one-in-twelve draw for the slot. Both now come off their own budget in their
+ * own pass, and the biome tables go back to being the record of which biomes
+ * have bees in them rather than the thing rationing them.
+ */
+const MAX_AQUATIC = 18;
+const MAX_FLYING = 14;
 /** Wildlife spawned per top-up tick, and how often a tick comes round.
  *
- * A player walks about five units a second, so the ring of terrain around them
- * turns over completely in well under a minute. One animal every six seconds
- * cannot refill that — the herd stayed behind at the world spawn and the road
- * ahead was empty, which is exactly what was reported. Four every 2.5 seconds
- * refills the ring a little faster than walking empties it, and does nothing at
- * all once the budget is full. */
-const SPAWN_PERIOD = 2.5;
-const SPAWN_PER_TICK = 4;
+ * A player walks 4.4 units a second and sprints at 6.8, so the ring of terrain
+ * around them turns over completely in well under a minute. One animal every
+ * six seconds cannot refill that — the herd stayed behind at the world spawn
+ * and the road ahead was empty, which is exactly what was reported. Six every
+ * two seconds refills the ring faster than sprinting empties it, and does
+ * nothing at all once the budget is full. */
+const SPAWN_PERIOD = 2.0;
+const SPAWN_PER_TICK = 6;
+/**
+ * Fish and bees arrive in groups, not one at a time, and that is not decoration
+ * — it is what the report is about. Eighteen fish scattered evenly over every
+ * body of water inside the despawn ring is still an empty-looking lake, because
+ * you are only ever looking at a fraction of that water. The same eighteen in
+ * four shoals means the water you *are* looking at either has a shoal in it or
+ * does not, and a shoal reads as populated the moment you see one.
+ */
+const SHOAL_MIN = 3;
+const SHOAL_SPAN = 4;         // so 3..6 fish per placed shoal
+const SHOAL_SPREAD = 3;       // columns either way the rest of the shoal sits
+const FISH_PER_TICK = 8;      // ceiling on bodies one tick may add
+const DRIFT_MIN = 2;
+const DRIFT_SPAN = 3;         // 2..4 bees per placed drift
+const DRIFT_SPREAD = 2;
+const FLIER_PER_TICK = 6;
 // Hostiles are capped well below the herd: a night should be tense, not a
 // siege. The cap is per habitat rather than global, and deliberately so — a
 // single shared budget let one habitat starve the other, and a combined ceiling
@@ -356,9 +404,51 @@ const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 // Two ceilings are worth knowing about before pushing anything higher.
 // modelExtents rounds the drawn height up into `tall`, the headroom a body
 // needs to walk, so 3.9 costs a giraffe four clear blocks and 4.1 would cost it
-// five — enough to wall it out of most of the terrain it lives on. And halfW /
-// halfL are clamped at 0.47 / 0.80, so past roughly three cells an animal grows
-// visually without growing its footprint.
+// five — enough to wall it out of most of the terrain it lives on. The halfW /
+// halfL clamp used to be the second, and is no longer a flat number — see
+// modelExtents for what replaced it and why.
+//
+// --- the damage ladder -------------------------------------------------------
+// `dmg` is points off a twenty-point bar, i.e. half-hearts. It was set one
+// species at a time and the result was not a ladder at all: work the numbers
+// into damage per second and a fox did 2.35, a husk 2.6, an elephant 2.8 and a
+// tiger 3.5. Four animals that are meant to read as four completely different
+// kinds of trouble were inside fifty percent of each other, and the two ends of
+// the range — the thing you shoo away and the thing that can kill you — were
+// almost indistinguishable in play. That is the "damage scaling is wrong"
+// report, and no single number fixes it; the whole set has to be laid out at
+// once.
+//
+// Three facts set the scale, and all three are worth stating because they make
+// the big numbers below far less brutal than they look:
+//
+//   1. Nothing on this planet can catch the player. Mob speeds top out at 1.8
+//      cells/s against a walk of 4.4 and a sprint of 6.8, so every one of these
+//      fights is one the player chose to stand in. Damage is the price of
+//      engaging, not a tax on being outdoors — which is the same principle that
+//      removed unprovoked aggression in the first place.
+//   2. main.js grants HURT_IMMUNITY (0.5s) after every guarded blow, so a pack
+//      cannot burst you down and a species' threat really is its own DPS.
+//   3. Worn armour soaks up to 80% of a blow. The top of this ladder is
+//      therefore also the argument for a chestplate.
+//
+// Read as seconds to kill a standing, unarmoured player from full:
+//
+//   fox        1 / 1.00s   1.0 dps   20s   a nuisance; you can ignore it
+//   dog        2 / 1.00s   2.0 dps   10s
+//   bee        4 / 1.60s   2.5 dps    8s   burst, not pressure — see below
+//   husk       3 / 1.15s   2.6 dps  7.7s   unchanged: the night's baseline
+//   polar      6 / 1.35s   4.4 dps  4.5s
+//   lion       5 / 1.25s   4.0 dps  5.0s
+//   tiger      6 / 1.15s   5.2 dps  3.8s   the most dangerous thing that hunts
+//   elephant   8 / 2.00s   4.0 dps  5.0s   but three blows and you are dead
+//
+// The elephant is deliberately the odd one out: mid-table on DPS and top of the
+// table per blow. It is slow, it telegraphs, and walking away always works, so
+// the lesson it teaches has to be carried by the single hit rather than by
+// attrition — losing forty percent of the bar for standing in front of one is
+// the lesson. A tiger has the opposite shape: less per blow, but it keeps
+// landing them.
 const SPECIES = {
   // --- large grazers ---
   cow: pet('cow', {
@@ -378,8 +468,10 @@ const SPECIES = {
     label: 'Elephant', h: 3.05, var: 0.14, hp: 20, spd: 0.75, shy: 0.2, turn: 1.6, accel: 3.5,
     graze: 0.6, idleMin: 3, idleMax: 8, drops: [['hide', 2, 3], ['meat', 2, 3]],
     // It does not hunt, but standing in front of one is a mistake. Slow, so
-    // walking away works — that is the lesson, not the damage.
-    fights: true, dmg: 5, reach: 1.9, swing: 1.8, aggro: 14,
+    // walking away works — which is exactly why the lesson has to be in the
+    // single blow rather than in the DPS. Eight is the heaviest hit anything
+    // lands: three of them kill from full, and one of them is unmistakable.
+    fights: true, dmg: 8, reach: 1.9, swing: 2.0, aggro: 14,
   }),
   giraffe: pet('giraffe', {
     // The tallest thing that walks. 3.9 and not 4.0 on purpose: see the note
@@ -399,7 +491,7 @@ const SPECIES = {
     // wrong side of a wall and it spends every hunt padding along the ice
     // looking stupid. Amphibious is exactly the flag for that.
     amphibious: true, eats: ['fish', 'penguin'],
-    fights: true, dmg: 4, reach: 1.4, swing: 1.3, aggro: 20,
+    fights: true, dmg: 6, reach: 1.4, swing: 1.35, aggro: 20,
   }),
 
   // --- big cats: these have teeth now ---
@@ -414,7 +506,7 @@ const SPECIES = {
     // a pride is for, and the size check behind this allows it.
     eats: ['deer', 'cow', 'bunny', 'chick', 'monkey'],
     stalks: true,
-    fights: true, dmg: 3, reach: 1.3, swing: 1.25, aggro: 16,
+    fights: true, dmg: 5, reach: 1.3, swing: 1.25, aggro: 16,
   }),
   tiger: pet('tiger', {
     // The largest cat, and it should look it beside a lion, not merely beside a
@@ -423,7 +515,7 @@ const SPECIES = {
     diet: 'carnivore', drops: [['hide', 1, 2], ['meat', 1, 2]],
     eats: ['deer', 'cow', 'bunny', 'chick', 'monkey'],
     stalks: true,
-    fights: true, dmg: 4, reach: 1.35, swing: 1.15, aggro: 22,
+    fights: true, dmg: 6, reach: 1.35, swing: 1.15, aggro: 22,
   }),
 
   // --- middling ---
@@ -433,7 +525,7 @@ const SPECIES = {
     label: 'Dog', h: 0.78, hp: 8, spd: 1.5, shy: 0.4, turn: 4.5, accel: 9.0,
     diet: 'omnivore', graze: 0.2, idleMin: 1.2, idleMax: 3.5, drops: HIDE_MEAT,
     eats: ['chick', 'bunny'],
-    fights: true, dmg: 2, reach: 1.0, swing: 0.9, aggro: 16,
+    fights: true, dmg: 2, reach: 1.0, swing: 1.0, aggro: 16,
   }),
   fox: pet('fox', {
     // Smaller than the dog, which it never was before — both sat at 0.66/0.68
@@ -441,7 +533,12 @@ const SPECIES = {
     label: 'Fox', h: 0.58, hp: 6, spd: 1.5, shy: 0.8, turn: 4.5, accel: 8.0,
     diet: 'carnivore', idleMin: 1.5, idleMax: 4, drops: HIDE_MEAT,
     eats: ['bunny', 'chick', 'parrot'],
-    fights: true, dmg: 2, reach: 0.95, swing: 0.85, aggro: 14,
+    // The bottom of the ladder, and it has to actually be the bottom. At 2 per
+    // blow on a 0.85s swing a fox was doing 90% of a husk's damage, which makes
+    // the smallest thing that fights you and the thing that hunts you at night
+    // the same fight. One point a second is a nuisance you can walk away from
+    // mid-bite, which is what a fox is.
+    fights: true, dmg: 1, reach: 0.95, swing: 1.0, aggro: 14,
   }),
   cat: pet('cat', {
     // A hunter of chicks and nothing else, and no threat to the player — a cat
@@ -493,8 +590,35 @@ const SPECIES = {
     hops: true, hopImpulse: 3.4,
   }),
   bee: pet('bee', {
-    label: 'Bee', h: 0.26, var: 0.06, hp: 3, spd: 1.8, shy: 1.0, turn: 7.0, accel: 14.0,
+    // "Bees should sting harder" was reported, and the honest answer was that a
+    // bee could not sting at all: it had no `fights`, so no damage, no reach and
+    // no swing, and swatting one was free. It fights now, and only on the same
+    // terms as every other animal here — provoked, never on sight. Coming for
+    // you unasked stays the husk's job.
+    //
+    // Four per sting on a small, fast, 3hp body is deliberately the sharpest
+    // damage-to-size ratio in the table. A bee is a burst, not a war of
+    // attrition: one connected swing kills it outright, so the only way it hurts
+    // you is by landing a sting first, and a sting that cost the same as a fox
+    // bite would make the whole exchange beneath notice. Losing a fifth of the
+    // bar to something you can barely see is the point. The 1.6s swing and the
+    // short reach are what keep it from being a second fight — it gets one good
+    // hit in and then it is your turn.
+    //
+    // Faster than it was, too. At 1.8 it could never close on a player who
+    // simply walked (4.4), so the retaliation would have been a threat on paper
+    // exactly the way the husk's aggro range once was.
+    //
+    // The reach looks generous for an insect and is not, because it is the only
+    // one in the table measured against a body that is not standing on the
+    // ground. `dist` in _hunt runs from the mob's centre to the player's *feet*,
+    // and a bee holds station `hover` (1.5) above whatever is underneath it — so
+    // even touching the player's face it reads as 1.5 away before any horizontal
+    // gap is counted. At a ground animal's reach it could hover inside your head
+    // and never once be close enough to swing.
+    label: 'Bee', h: 0.26, var: 0.06, hp: 3, spd: 2.6, shy: 1.0, turn: 7.0, accel: 14.0,
     graze: 0.5, idleMin: 0.6, idleMax: 1.8, flies: true, hover: 1.5,
+    fights: true, dmg: 4, reach: 2.0, swing: 1.6, aggro: 12,
   }),
   crab: pet('crab', {
     // Amphibious and shore-bound. It used to be an ordinary land animal, which
@@ -651,6 +775,54 @@ const BREED_COOLDOWN = 90;    // rest between litters, so a herd can't runaway
 const BABY_SECONDS = 210;     // calf → adult
 
 /**
+ * The footprint an animal is allowed, whatever it is drawn as.
+ *
+ * These used to be flat: halfW never past 0.47, halfL never past 0.80. Both
+ * numbers were chosen for an animal around the player's size and they are right
+ * for one — 0.47 is just under half a cell, which is what lets a fox or a deer
+ * take a one-block gap or a doorway at all, and 0.80 is a cow's length. Neither
+ * had anything to say about a giraffe, because when they were written nothing
+ * was drawn past about 1.9 cells.
+ *
+ * The consequence is the "I can see inside animals when they are big" report.
+ * `radius` is max(halfW, halfL), and _separate uses radius + PLAYER_RADIUS as
+ * the distance it keeps the player from a body — so an elephant drawn a full
+ * three cells across carried a 1.14-unit exclusion ring, well inside its own
+ * silhouette. The player walks to the ring, the ring is inside the mesh, the
+ * camera eye sits at 1.62 which is the middle of the barrel, and the Cube Pets
+ * materials are double-sided so what you get is the inside of the far flank.
+ *
+ * So the clamp scales with the drawn height now, and does it in a way that
+ * cannot disturb anything already tuned: the old numbers are the *floor*. A cow
+ * (1.62), a deer, a polar bear (1.90) all resolve to exactly 0.47 / 0.80 as
+ * before; only the elephant and the giraffe are past the point where the height
+ * term wins, and they are the two the report is about. The hard ceiling stops a
+ * fully grown predator from ever needing a corridor wider than three cells.
+ *
+ * The cost is real and worth stating. A footprint is nine samples spread over
+ * halfW × halfL, so a wider one means _footprintCost refuses more moves: an
+ * elephant now genuinely cannot fit down a two-block gap, and a giraffe in
+ * dense forest will refuse a lot of headings. That is the correct answer to
+ * "can this body go there" and it was previously answering wrongly, but it does
+ * mean the giants lean harder on the strict-improvement rule in update() to
+ * walk themselves out of tight ground. Spawn placement is unaffected — the
+ * spawn searches only ever tested the centre column, so a giant could always
+ * arrive somewhere it did not fit, and always relied on walking out. Pathing
+ * costs nothing extra: _stepTo is per column and never reads the footprint.
+ */
+const FOOT_HALF_W_MIN = 0.47;
+const FOOT_HALF_L_MIN = 0.80;
+const FOOT_HALF_MAX = 1.55;
+/** Drawn height a body is allowed to be, across and along, before the caps bind. */
+const FOOT_W_PER_H = 0.26;
+const FOOT_L_PER_H = 0.42;
+
+const footCaps = (drawnHeight) => ({
+  capW: Math.min(FOOT_HALF_MAX, Math.max(FOOT_HALF_W_MIN, drawnHeight * FOOT_W_PER_H)),
+  capL: Math.min(FOOT_HALF_MAX, Math.max(FOOT_HALF_L_MIN, drawnHeight * FOOT_L_PER_H)),
+});
+
+/**
  * Horizontal half-extents of a built model, in cells, along its own axes.
  *
  * A single radius cannot describe these animals: a woolly is drawn 0.70 long
@@ -665,9 +837,11 @@ function modelExtents(root, scale) {
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   if (box.isEmpty() || !Number.isFinite(box.min.x)) return { halfW: 0.3, halfL: 0.3, tall: 1 };
+  const drawn = Math.max(0, box.max.y - box.min.y);
+  const { capW, capL } = footCaps(drawn);
   return {
-    halfW: Math.min(0.47, Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) + 0.03),
-    halfL: Math.min(0.80, Math.max(Math.abs(box.min.z), Math.abs(box.max.z)) + 0.03),
+    halfW: Math.min(capW, Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) + 0.03),
+    halfL: Math.min(capL, Math.max(Math.abs(box.min.z), Math.abs(box.max.z)) + 0.03),
     // Cells of headroom needed, from the drawn height rather than a guess — a
     // browser's neck reaches well past what its body dimensions suggest, and
     // guessing left its head free to pass through leaves.
@@ -715,6 +889,16 @@ function growthScale(mob) {
 /** Biome id → name, so the table above can be keyed by something readable. */
 const BIOME_NAME = [];
 for (const [name, id] of Object.entries(BIOME)) BIOME_NAME[id] = name;
+
+/**
+ * What counts as forage for a bee. Blooms and the things that grow beside them;
+ * leaves are checked separately through IS_LEAF, so a tree counts without every
+ * species of leaf having to be listed here.
+ */
+const BLOOM = new Set(
+  ['flower_red', 'flower_blue', 'flower_gold', 'tall_grass', 'sapling']
+    .map((n) => ID[n]).filter(Boolean),
+);
 
 const COMMON = ['bunny', 'bunny', 'bee', 'caterpillar', 'fox'];
 const SPAWN_BY_BIOME = {
@@ -1067,19 +1251,62 @@ export class Mobs {
    * a full biome table would be a lot of bookkeeping for little gain.
    */
   _pickWildlife(col, k) {
-    // The biome, not the block underfoot. Asking the block was enough while the
-    // only rule was "penguins on ice", and gets steadily wronger as the rules
-    // get more specific: a patch of sand inside a forest is a riverbank, not a
-    // desert, and the biome field already knows that.
-    const list = SPAWN_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]] || COMMON;
-    return list[(Math.random() * list.length) | 0];
+    return this._drawFrom(col, false);
   }
 
-  /** Ordinary animals alive. Husks and the merchant have their own budgets. */
-  _countWildlife() {
-    let n = 0;
-    for (const m of this.list) if (!m.spec.hostile && !m.spec.trader) n++;
-    return n;
+  /** Which flier belongs on this ground, or null if none does. */
+  _pickFlier(col) {
+    return this._drawFrom(col, true);
+  }
+
+  /**
+   * The biome's list, and one species drawn from the half of it that flies or
+   * the half that does not.
+   *
+   * The biome, not the block underfoot. Asking the block was enough while the
+   * only rule was "penguins on ice", and gets steadily wronger as the rules get
+   * more specific: a patch of sand inside a forest is a riverbank, not a desert,
+   * and the biome field already knows that.
+   *
+   * Splitting the draw is what gives bees their own budget without a second
+   * table to keep in step with the first. SPAWN_BY_BIOME stays the single
+   * statement of which biomes have bees in them; it simply stops being the thing
+   * that rations them, because a bee that has to win a one-in-twelve draw
+   * against eleven land animals for a slot in the land budget is a bee you see
+   * about once a session. Reservoir-sampled so the draw is uniform over the
+   * matching entries in one pass and without allocating a filtered list — the
+   * same trick _findDarkColumn uses on its pockets.
+   */
+  _drawFrom(col, wantFlier) {
+    const list = SPAWN_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]] || COMMON;
+    let pick = null, seen = 0;
+    for (let n = 0; n < list.length; n++) {
+      const spec = SPECIES[list[n]];
+      if (!spec || !!spec.flies !== wantFlier) continue;
+      seen++;
+      if (Math.random() < 1 / seen) pick = list[n];
+    }
+    return pick;
+  }
+
+  /**
+   * How many of each population is alive, in one pass.
+   *
+   * Three counters rather than three loops, and three budgets rather than one:
+   * a fish and a bee are not competing with a cow for anywhere to stand, so
+   * making them compete for the same number was only ever arithmetic. Husks and
+   * the merchant are counted by _countHostile and merchant() against their own
+   * caps and are excluded here.
+   */
+  _census() {
+    let land = 0, water = 0, air = 0;
+    for (const m of this.list) {
+      if (m.spec.hostile || m.spec.trader) continue;
+      if (m.spec.aquatic) water++;
+      else if (m.spec.flies) air++;
+      else land++;
+    }
+    return { land, water, air };
   }
 
   /**
@@ -1096,6 +1323,11 @@ export class Mobs {
    */
   _spawnWild(col, k) {
     const type = this._pickWildlife(col, k);
+    // Null means this biome's whole list flies — nothing does today, but the
+    // draw can return it and a silent SPECIES[null] would spawn nothing while
+    // reporting success, which is the kind of thing that shows up later as a
+    // budget that never fills.
+    if (!type) return false;
     const spec = SPECIES[type];
     if (spec?.shore && !this._nearWater(col, SHORE_NEAR)) return false;
     return !!this.spawn(type, col, k);
@@ -1351,18 +1583,34 @@ export class Mobs {
     return top;
   }
 
-  /** Open water at least three deep, for the fish. */
-  _findWaterColumn(nearCol, playerPos) {
+  /**
+   * A layer in this column a fish could hold station in, or -1.
+   *
+   * Two deep, not three. Three was written for the open sea and it quietly
+   * excluded almost every inland lake and every river on the planet — which is
+   * the other half of "a lake with nothing in it", since the lake was never a
+   * candidate in the first place. Two layers is still enough water for the
+   * buoyancy in update() to work with: the fish sits at bed + ~1.0 and the
+   * ceiling test holds it under bed + 1.4, so it swims rather than skimming the
+   * surface or scraping the bed.
+   */
+  _waterLayer(col) {
     const p = this.planet;
-    for (let tries = 0; tries < 30; tries++) {
+    let bed = -1;
+    for (let k = D - 1; k > 1; k--) if (p.solidAt(col, k)) { bed = k; break; }
+    if (bed < 1) return -1;
+    let depth = 0;
+    while (bed + 1 + depth < D && p.liquidAt(col, bed + 1 + depth)) depth++;
+    if (depth < 2) return -1;
+    return bed + Math.floor(depth * 0.4);
+  }
+
+  /** Open water deep enough for the fish. */
+  _findWaterColumn(nearCol, playerPos) {
+    for (let tries = 0; tries < 44; tries++) {
       const col = this._walkOut(nearCol, 24 + Math.floor(Math.random() * SPAWN_RADIUS));
-      let bed = -1;
-      for (let k = D - 1; k > 1; k--) if (p.solidAt(col, k)) { bed = k; break; }
-      if (bed < 1) continue;
-      let depth = 0;
-      while (bed + 1 + depth < D && p.liquidAt(col, bed + 1 + depth)) depth++;
-      if (depth < 3) continue;
-      const k = bed + Math.floor(depth * 0.4);
+      const k = this._waterLayer(col);
+      if (k < 0) continue;
       if (playerPos) {
         const { f, i, j } = colParts(col);
         cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
@@ -1372,6 +1620,102 @@ export class Mobs {
       return { col, k };
     }
     return null;
+  }
+
+  /**
+   * Put a shoal of fish in one stretch of water.
+   *
+   * The search is the expensive half — a random walk repeated until it lands in
+   * water — so finding one column and filling the columns around it is both
+   * cheaper than finding five and the thing the player actually asked for.
+   * Neighbours are re-tested rather than assumed wet: a found column is often on
+   * the edge of a lake, and half the ring around it is bank.
+   *
+   * @returns {number} bodies actually placed
+   */
+  _spawnShoal(nearCol, playerPos, budget) {
+    if (budget <= 0) return 0;
+    const seed = this._findWaterColumn(nearCol, playerPos);
+    if (!seed) return 0;
+    let placed = this.spawn('fish', seed.col, seed.k) ? 1 : 0;
+    const want = Math.min(budget, SHOAL_MIN + Math.floor(Math.random() * SHOAL_SPAN));
+    // Twice the attempts of the target count, so a shoal on a lake edge still
+    // fills out rather than coming back as the one fish this was meant to end.
+    for (let t = 0; t < want * 2 && placed < want; t++) {
+      const di = Math.round((Math.random() * 2 - 1) * SHOAL_SPREAD);
+      const dj = Math.round((Math.random() * 2 - 1) * SHOAL_SPREAD);
+      const col = stepColumn(seed.col, di, dj);
+      const k = this._waterLayer(col);
+      if (k < 0) continue;
+      if (this.spawn('fish', col, k)) placed++;
+    }
+    return placed;
+  }
+
+  /**
+   * Is there anything a bee has a reason to be near?
+   *
+   * Nothing gated bee spawning before except the biome draw, and a bee hovering
+   * over bare dirt is the same animal as a bee over a meadow as far as the
+   * spawn code was concerned. Blooms, tall grass, saplings and any leaf will do
+   * — five columns either way and a few layers up, because a bee flying at
+   * `hover` above the ground is level with the canopy of nothing and the middle
+   * of a flower bed.
+   *
+   * Twenty-five columns by four layers is a hundred lookups, run a handful of
+   * times per spawn tick. Cheap enough to be a preference rather than a filter,
+   * which matters — see _spawnDrift, which stops asking rather than give up.
+   */
+  _flowery(col, k) {
+    const p = this.planet;
+    for (let di = -2; di <= 2; di++) {
+      for (let dj = -2; dj <= 2; dj++) {
+        const c = stepColumn(col, di, dj);
+        for (let dk = -1; dk <= 2; dk++) {
+          const id = p.at(c, Math.max(0, k + dk));
+          if (!id) continue;
+          if (BLOOM.has(id) || IS_LEAF[id]) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Put a drift of bees over one patch of ground.
+   *
+   * The flowery test is a preference and not a requirement, and the last attempt
+   * takes whatever it is given. A hard requirement would hand the desert and the
+   * mountains — both of which list bees — a budget they could never spend, and a
+   * budget that cannot be spent is exactly the bug this whole pass is about.
+   *
+   * @returns {number} bodies actually placed
+   */
+  _spawnDrift(nearCol, playerPos, budget) {
+    if (budget <= 0) return 0;
+    let seed = null;
+    for (let t = 0; t < 3 && !seed; t++) {
+      const spot = this._findSpawnColumn(nearCol, SPAWN_RADIUS, playerPos);
+      if (!spot) break;
+      if (t === 2 || this._flowery(spot.col, spot.k)) seed = spot;
+    }
+    if (!seed) return 0;
+    const type = this._pickFlier(seed.col);
+    if (!type) return 0;
+    let placed = 0;
+    const want = Math.min(budget, DRIFT_MIN + Math.floor(Math.random() * DRIFT_SPAN));
+    for (let t = 0; t < want * 2 && placed < want; t++) {
+      const di = Math.round((Math.random() * 2 - 1) * DRIFT_SPREAD);
+      const dj = Math.round((Math.random() * 2 - 1) * DRIFT_SPREAD);
+      const col = t === 0 ? seed.col : stepColumn(seed.col, di, dj);
+      const k = this.planet.surfaceK(col);
+      if (k < 0 || k > D - 6) continue;
+      // A flier does not need standing room, but it does need not to start
+      // inside a block, and it must not start under water.
+      if (this.planet.solidAt(col, k + 1) || this.planet.liquidAt(col, k + 1)) continue;
+      if (this.spawn(type, col, k)) placed++;
+    }
+    return placed;
   }
 
   /** Is anything solid between (col, k) and the sky? */
@@ -1412,6 +1756,23 @@ export class Mobs {
     for (let n = 0; n < count; n++) {
       const spot = this._findSpawnColumn(startCol, SPAWN_RADIUS, null);
       if (spot) this._spawnWild(spot.col, spot.k);
+    }
+    // Water and air get seeded too, and to the same two thirds. Left to the
+    // top-up tick alone a new world starts with no fish and no bees at all and
+    // takes the better part of a minute to grow any — and the first minute is
+    // precisely when a player forms their opinion of whether the planet is
+    // alive. `null` for the player position here for the same reason the land
+    // pass passes it: at world start there is nothing to keep clear of yet.
+    let wet = 0, air = 0;
+    for (let n = 0; n < 6 && wet < MAX_AQUATIC * 0.65; n++) {
+      const got = this._spawnShoal(startCol, null, MAX_AQUATIC - wet);
+      if (!got) break;
+      wet += got;
+    }
+    for (let n = 0; n < 6 && air < MAX_FLYING * 0.65; n++) {
+      const got = this._spawnDrift(startCol, null, MAX_FLYING - air);
+      if (!got) break;
+      air += got;
     }
   }
 
@@ -1667,6 +2028,24 @@ export class Mobs {
    * A soft positional push rather than a hard stop, resolved in the tangent
    * plane. Hard collision between wandering animals gets them wedged; a nudge
    * proportional to how deep they overlap settles the herd apart on its own.
+   *
+   * This is also, and only, what keeps the camera out of an animal: Player.js
+   * has no notion of mobs at all — it collides against blocks and nothing else
+   * — so there is no two-way collision anywhere in the game and a player who
+   * walks at a cow is never stopped. The cow is moved instead. That works,
+   * because the push is proportional to penetration and at k ≈ 0.15 a frame it
+   * clears a full body-radius in well under a second, i.e. faster than a sprint
+   * closes it. Where it stops working is when _nudge refuses the move — an
+   * animal backed against a wall has nowhere to yield to, and then the player
+   * simply walks in. Fixing *that* means the player colliding with bodies, which
+   * is not in this file.
+   *
+   * The pair loop is O(n²) and MAX_MOBS is now 110, so it is 5,995 tests a
+   * frame. The squared-distance reject below is what keeps that free: a pair
+   * that is not overlapping costs one distanceToSquared and a compare, and the
+   * world distance is a sound bound because flattening into the tangent plane
+   * can only ever shorten the separation vector — so nothing that would have
+   * been pushed is skipped.
    */
   _separate(dt, player) {
     const list = this.list;
@@ -1689,17 +2068,18 @@ export class Mobs {
       // --- against each other ---
       for (let b = a + 1; b < list.length; b++) {
         const o = list[b];
+        const reach = m.radius + o.radius;
+        if (m.pos.distanceToSquared(o.pos) >= reach * reach) continue;
         _rel.copy(m.pos).sub(o.pos);
         _rel.addScaledVector(up, -_rel.dot(up));
-        const w2 = m.radius + o.radius;
         let d2 = _rel.length();
-        if (d2 >= w2) continue;
+        if (d2 >= reach) continue;
         if (d2 < 1e-4) {
           _rel.set(Math.cos(m.id * 2.4), 0, Math.sin(m.id * 2.4));
           _rel.addScaledVector(up, -_rel.dot(up)).normalize();
           d2 = 1e-4;
         } else _rel.multiplyScalar(1 / d2);
-        const push = (w2 - d2) * k * 0.5;
+        const push = (reach - d2) * k * 0.5;
         this._nudge(m, _rel, push);
         this._nudge(o, _rel, -push);
       }
@@ -2034,14 +2414,20 @@ export class Mobs {
    * The footprint is scaled from the numbers measured at spawn rather than read
    * off the model again: modelExtents takes a world-space box, so once the
    * animal is out on the sphere — rotated, and a planet radius from the origin
-   * — re-measuring returns the animal's *position*, not its size. The caps are
-   * the same ones modelExtents applies, so growth cannot walk a body past the
-   * footprint the collision code is willing to carry.
+   * — re-measuring returns the animal's *position*, not its size.
+   *
+   * The caps come from footCaps against the height this animal is *now* drawn
+   * at, which is the same call modelExtents makes at spawn — `baseHeight` is
+   * exactly the drawn height the box was measured from, so the two agree by
+   * construction rather than by two copies of the same numbers staying in step.
+   * A tiger that has eaten its way to GROW_MAX is drawn 30% larger and gets a
+   * footprint 30% larger to match, which is the whole point of this function.
    */
   _setGrowth(mob, grown) {
     mob.grown = Math.min(GROW_MAX, Math.max(1, grown));
-    mob.halfW = Math.min(0.47, mob.baseHalfW * mob.grown);
-    mob.halfL = Math.min(0.80, mob.baseHalfL * mob.grown);
+    const { capW, capL } = footCaps(mob.baseHeight * mob.grown);
+    mob.halfW = Math.min(capW, mob.baseHalfW * mob.grown);
+    mob.halfL = Math.min(capL, mob.baseHalfL * mob.grown);
     mob.tall = Math.max(1, Math.ceil(mob.baseHeight * mob.grown - 0.001));
   }
 
@@ -2078,6 +2464,13 @@ export class Mobs {
       const canSwim = !!(mob.spec.aquatic || mob.spec.amphibious);
       if (wetPrey && !canSwim) continue;
       if (!wetPrey && mob.spec.aquatic) continue;
+      // Height is a wall in exactly the same way water is. A cat has bees on
+      // its list, and a bee holds station `hover` (1.5) above the ground, which
+      // is further than a cat's reach plus both radii — so the cat could pick
+      // one, chase it for the full PREY_GIVE_UP window and never once be close
+      // enough to take it. It never showed while bees were rare; with fliers on
+      // their own budget there are fourteen of them and it would.
+      if (o.spec.flies && !mob.spec.flies) continue;
       const d = mob.pos.distanceToSquared(o.pos);
       if (d < bestD) { bestD = d; best = o; }
     }
@@ -2358,16 +2751,34 @@ export class Mobs {
     if (this.spawnTimer <= 0) {
       this.spawnTimer = SPAWN_PERIOD;
       const playerCol = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
-      let wild = this._countWildlife();
+      const have = this._census();
+      let wild = have.land;
       for (let n = 0; n < SPAWN_PER_TICK && wild < MAX_WILDLIFE; n++) {
         const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
         if (!spot) break;      // no ground going spare this tick; try the next
         if (this._spawnWild(spot.col, spot.k)) wild++;
       }
-      // Fish come from the water, not the shore, so they get their own search.
-      if (wild < MAX_WILDLIFE && Math.random() < 0.5) {
-        const wet = this._findWaterColumn(playerCol, player.position);
-        if (wet) this.spawn('fish', wet.col, wet.k);
+      // Fish come from the water, not the shore, so they get their own search —
+      // and their own budget, which is the part that was missing. Placed after
+      // the land pass but no longer *behind* it: nothing above can spend a slot
+      // out of MAX_AQUATIC, so the order stopped mattering the moment the
+      // budgets were split. In shoals, and up to FISH_PER_TICK a tick, because
+      // one fish every other tick could not fill eighteen slots inside the
+      // time a player spends near any one body of water.
+      let wet = have.water;
+      for (let n = 0; n < 2 && wet < MAX_AQUATIC; n++) {
+        const room = Math.min(FISH_PER_TICK - (wet - have.water), MAX_AQUATIC - wet);
+        const got = this._spawnShoal(playerCol, player.position, room);
+        if (!got) break;       // no water in reach this tick
+        wet += got;
+      }
+      // And the fliers, on the same terms.
+      let air = have.air;
+      for (let n = 0; n < 2 && air < MAX_FLYING; n++) {
+        const room = Math.min(FLIER_PER_TICK - (air - have.air), MAX_FLYING - air);
+        const got = this._spawnDrift(playerCol, player.position, room);
+        if (!got) break;
+        air += got;
       }
       // Husks come out of the dark: after sunset in the open, and at any hour
       // underground. That is what makes a cave dangerous rather than just dim,

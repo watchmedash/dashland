@@ -792,79 +792,225 @@ export function generateTileArrays(onProgress, sizeOverride) {
 /**
  * Block-breaking crack overlay, `stages` frames of progressive fracture.
  *
- * Drawn as tapering line *segments*, not as a blob stamped at every path point
- * — that earlier approach laid down overlapping 2px discs and read as a spray
- * of bullet holes rather than a cracking surface. Each fracture starts wide at
- * its root and thins to a hairline at the tip, and throws off finer branches.
+ * The look this is chasing is *stone splitting*, and there are three things it
+ * gets wrong the moment you stop thinking about it. All three were in the
+ * previous version and together they made it read, in the words of the report,
+ * like a brush in MS Paint.
+ *
+ * **Cracks are not brush strokes.** The old path wandered by a small random
+ * angle every single step, which is the recipe for a smooth curve — a stroke.
+ * A real fracture runs dead straight until something deflects it and then kinks
+ * hard, so this holds a heading for a few steps at a time and turns it sharply
+ * when it does turn. The path is the same cost and reads as a completely
+ * different material.
+ *
+ * **A crack is a hole, and a hole has a lit edge.** This is the big one. The
+ * overlay mixes its own RGB into the block, so it can write light as easily as
+ * dark: every fracture now lays a pale rim on one consistent side and a dark
+ * core down the middle. That single asymmetry is what makes the eye read depth
+ * instead of ink — with a symmetric dark line there is nothing to say the
+ * surface is broken rather than drawn on.
+ *
+ * **Edges are crisp.** The old falloff faded over most of a pixel on a line
+ * barely two wide, so every crack was mostly antialiasing. The core is solid
+ * now and the fade is a third of a pixel.
+ *
+ * The last thing is spall: past the halfway point, chips of the surface break
+ * away near the impact, which is what sells the final stages. Without them the
+ * late frames are just the early frames with thicker lines.
  */
 export function generateCrackAtlas(stages = 10, size = 64) {
   const data = new Uint8Array(size * size * 4 * stages);
   const rng = makeRng(9001);
+
+  // Dark of the fracture, and the pale of the freshly exposed edge beside it.
+  // The rim is deliberately not white: a bright outline on dark stone reads as
+  // a cartoon stroke, which is the failure this whole rewrite is about.
+  const CORE = [11, 10, 13];
+  const RIM = [196, 190, 178];
+  /** Which way the rim falls, so every crack is lit from the same direction. */
+  const LIGHT = [-0.55, -0.84];
 
   // --- build the fracture network -------------------------------------------
   // A fracture is a chain of points plus the progress at which it starts to
   // open; branches inherit their parent's timing so the network spreads
   // outward rather than appearing all at once.
   const cracks = [];
-  const grow = (x, y, a, len, step, wide, start, depth) => {
+  const ox = 0.5 + (rng() - 0.5) * 0.1, oy = 0.5 + (rng() - 0.5) * 0.1;
+
+  /**
+   * @param {number} bias how hard the fracture is steered back toward `outA`.
+   *   Zero lets it wander, and wandering is what turned the first attempt into
+   *   a root system growing out of the middle of the block with all four
+   *   corners untouched. A fracture in a slab runs *away* from the blow, so the
+   *   heading is pulled back after every kink: the kinks give it its angular
+   *   character, the bias gives it somewhere to be going.
+   * @param {number} outA the direction to be pulled back toward. It is the
+   *   fracture's own launch angle and NOT the live bearing from the impact —
+   *   that was the first version of this and it made the whole network lean to
+   *   one side, because at the origin the bearing is atan2(0, 0), so every arm
+   *   was yanked toward the same heading on its very first kink.
+   */
+  const grow = (x, y, a, len, step, wide, start, depth, bias, outA) => {
     const pts = [[x, y]];
+    let hold = 0;
     for (let i = 0; i < len; i++) {
-      a += (rng() - 0.5) * 0.55;          // wander, but keep a clear direction
+      // Run straight, then kink. `hold` is how many steps this heading has left.
+      if (hold <= 0) {
+        a += (rng() < 0.5 ? -1 : 1) * (0.26 + rng() * 0.42);
+        hold = 2 + Math.floor(rng() * 3);
+        if (bias > 0) {
+          a += (((outA - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * bias;
+        }
+      }
+      hold--;
       x += Math.cos(a) * step;
       y += Math.sin(a) * step;
-      if (x < -0.05 || x > 1.05 || y < -0.05 || y > 1.05) break;
+      if (x < -0.06 || x > 1.06 || y < -0.06 || y > 1.06) break;
       pts.push([x, y]);
       // throw a finer branch off the side
-      if (depth < 2 && i > 2 && rng() < 0.16) {
-        grow(x, y, a + (rng() < 0.5 ? 1 : -1) * (0.5 + rng() * 0.6),
-          Math.max(3, (len - i) * 0.55), step * 0.85, wide * 0.55,
-          start + (i / len) * (1 - start) * 0.6, depth + 1);
+      if (depth < 2 && i > 1 && rng() < 0.22) {
+        const ba = a + (rng() < 0.5 ? 1 : -1) * (0.6 + rng() * 0.7);
+        grow(x, y, ba, Math.max(3, (len - i) * 0.6), step * 0.82, wide * 0.58,
+          start + (i / len) * (1 - start) * 0.6, depth + 1, bias * 0.4, ba);
       }
     }
     if (pts.length > 1) cracks.push({ pts, start, wide });
   };
-  // main fractures radiate from a slightly off-centre origin
-  const ox = 0.5 + (rng() - 0.5) * 0.1, oy = 0.5 + (rng() - 0.5) * 0.1;
-  const arms = 5;
+
+  // Main fractures radiate from a slightly off-centre impact, and are long
+  // enough to reach the edges: a break that stops short of the block's own
+  // boundary reads as a decal sitting on the face rather than the face itself
+  // coming apart.
+  const arms = 7;
   for (let k = 0; k < arms; k++) {
-    const a = (k / arms) * Math.PI * 2 + rng() * 0.7;
-    grow(ox, oy, a, 16 + rng() * 8, 0.042, 1.5, rng() * 0.18, 0);
+    const a = (k / arms) * Math.PI * 2 + (rng() - 0.5) * 0.5;
+    grow(ox, oy, a, 26 + rng() * 10, 0.055, 1.5, rng() * 0.16, 0, 0.5, a);
+  }
+  // Chords: fractures that run *between* the arms rather than out from the
+  // centre, and start off-origin. Without them the middle distance is a fan of
+  // near-parallel lines with nothing crossing it, which is the other half of
+  // why the first attempt read as drawn rather than shattered.
+  for (let k = 0; k < 5; k++) {
+    const a = rng() * Math.PI * 2;
+    const r = 0.16 + rng() * 0.22;
+    const ca = a + Math.PI * 0.5 + (rng() - 0.5) * 0.8;
+    grow(ox + Math.cos(a) * r, oy + Math.sin(a) * r, ca,
+      14 + rng() * 10, 0.05, 1.0, 0.32 + rng() * 0.30, 1, 0.12, ca);
   }
   // a couple of late fractures so the last stages still change
   for (let k = 0; k < 3; k++) {
     const a = rng() * Math.PI * 2;
-    grow(ox, oy, a, 12 + rng() * 6, 0.04, 1.1, 0.45 + rng() * 0.25, 1);
+    grow(ox, oy, a, 18 + rng() * 8, 0.05, 1.1, 0.5 + rng() * 0.22, 1, 0.45, a);
+  }
+
+  // Chips that break clean out of the surface near the impact, each an angular
+  // little polygon rather than a disc — a round hole in stone looks drilled.
+  const chips = [];
+  for (let k = 0; k < 7; k++) {
+    const a = rng() * Math.PI * 2;
+    const r = 0.03 + rng() * 0.20;
+    const cx = ox + Math.cos(a) * r, cy = oy + Math.sin(a) * r;
+    const n = 5 + Math.floor(rng() * 3);
+    const rad = 0.028 + rng() * 0.030;
+    const poly = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2 + rng() * 0.35;
+      const rr = rad * (0.62 + rng() * 0.55);
+      poly.push([cx + Math.cos(t) * rr, cy + Math.sin(t) * rr]);
+    }
+    chips.push({ poly, start: 0.5 + rng() * 0.38 });
   }
 
   // --- rasterise -------------------------------------------------------------
+  // Core and rim accumulate into their own coverage buffers and are composited
+  // once at the end. Painting them straight into the pixels in path order does
+  // not work: a later crack's rim would wipe out an earlier crack's core where
+  // the two touch, and the network crosses itself constantly.
+  const coreA = new Float32Array(size * size);
+  const rimA = new Float32Array(size * size);
+
   /** Anti-aliased segment with a width that tapers from w0 to w1. */
-  const seg = (off, x0, y0, x1, y1, w0, w1) => {
+  const seg = (x0, y0, x1, y1, w0, w1) => {
     const dx = x1 - x0, dy = y1 - y0;
     const len2 = dx * dx + dy * dy;
-    const wMax = Math.max(w0, w1);
-    const minX = Math.max(0, Math.floor(Math.min(x0, x1) - wMax - 1));
-    const maxX = Math.min(size - 1, Math.ceil(Math.max(x0, x1) + wMax + 1));
-    const minY = Math.max(0, Math.floor(Math.min(y0, y1) - wMax - 1));
-    const maxY = Math.min(size - 1, Math.ceil(Math.max(y0, y1) + wMax + 1));
+    const wMax = Math.max(w0, w1) + 2.2;
+    const minX = Math.max(0, Math.floor(Math.min(x0, x1) - wMax));
+    const maxX = Math.min(size - 1, Math.ceil(Math.max(x0, x1) + wMax));
+    const minY = Math.max(0, Math.floor(Math.min(y0, y1) - wMax));
+    const maxY = Math.min(size - 1, Math.ceil(Math.max(y0, y1) + wMax));
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         let t = len2 > 0 ? ((x - x0) * dx + (y - y0) * dy) / len2 : 0;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const px = x0 + dx * t, py = y0 + dy * t;
-        const d = Math.hypot(x - px, y - py);
+        const ex = x - px, ey = y - py;
+        const d = Math.hypot(ex, ey);
         const w = w0 + (w1 - w0) * t;
-        const a = clamp(1 - (d - w * 0.35) / 0.85, 0, 1);
-        if (a <= 0) continue;
-        const o = (off + y * size + x) * 4;
-        const v = Math.max(data[o + 3], a * 232);
-        data[o] = 10; data[o + 1] = 10; data[o + 2] = 12; data[o + 3] = v;
+        const i = y * size + x;
+        // Solid to the half-width, gone a third of a pixel later.
+        const c = clamp((w - d) / 0.34 + 0.5, 0, 1);
+        if (c > coreA[i]) coreA[i] = c;
+        // The rim sits outside the core, and only on the lit side.
+        //
+        // It has to start *clear* of the core, not adjacent to it. The first
+        // version began the band at the half-width, which is inside the core's
+        // own antialiased falloff, so almost every rim texel also carried
+        // partial core and the composite averaged the two into a mid grey — the
+        // pale edge was in the data and invisible on screen. The gap below is
+        // wider than the core's fade for exactly that reason.
+        const side = (ex * LIGHT[0] + ey * LIGHT[1]) / Math.max(d, 1e-4);
+        if (side > 0) {
+          const band = clamp((d - w - 0.30) / 0.45, 0, 1) * clamp((w + 1.7 - d) / 0.8, 0, 1);
+          const r = band * side * clamp(w * 0.9, 0.35, 1);
+          if (r > rimA[i]) rimA[i] = r;
+        }
+      }
+    }
+  };
+
+  /** Convex-ish chip: dark inside, pale along its lit edge. */
+  const chip = (poly, open) => {
+    let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+    for (const [x, y] of poly) {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
+    const x0 = Math.max(0, Math.floor(minX * size) - 2);
+    const x1 = Math.min(size - 1, Math.ceil(maxX * size) + 2);
+    const y0 = Math.max(0, Math.floor(minY * size) - 2);
+    const y1 = Math.min(size - 1, Math.ceil(maxY * size) + 2);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const u = (x + 0.5) / size, v = (y + 0.5) / size;
+        // Grow the chip out from its centre as the break progresses, so it
+        // opens rather than popping in at full size.
+        const pu = cx + (u - cx) / open, pv = cy + (v - cy) / open;
+        let inside = false;
+        for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
+          const [ax, ay] = poly[a], [bx, by] = poly[b];
+          if ((ay > pv) !== (by > pv)
+            && pu < ((bx - ax) * (pv - ay)) / (by - ay) + ax) inside = !inside;
+        }
+        const i = y * size + x;
+        if (inside) { if (coreA[i] < 0.94) coreA[i] = 0.94; continue; }
+        // A hair of pale on the lit side of the hole's edge.
+        const dx = u - cx, dy = v - cy;
+        const dd = Math.hypot(dx, dy);
+        const side = dd > 1e-5 ? -(dx * LIGHT[0] + dy * LIGHT[1]) / dd : 0;
+        if (side > 0.25) {
+          const near = clamp(1 - (dd * size) / (0.055 * size + 2.2), 0, 1);
+          const r = near * side * 0.85;
+          if (r > rimA[i]) rimA[i] = r;
+        }
       }
     }
   };
 
   for (let st = 0; st < stages; st++) {
     const prog = (st + 1) / stages;
-    const off = st * size * size;
+    coreA.fill(0); rimA.fill(0);
     for (const cr of cracks) {
       if (prog < cr.start) continue;
       const reach = clamp((prog - cr.start) / (1 - cr.start), 0, 1);
@@ -874,11 +1020,30 @@ export function generateCrackAtlas(stages = 10, size = 64) {
         const [bx, by] = cr.pts[i];
         // widen as the break progresses, taper toward the tip
         const t0 = (i - 1) / cr.pts.length, t1 = i / cr.pts.length;
-        const grow2 = 0.45 + prog * 0.75;
-        seg(off, ax * size, ay * size, bx * size, by * size,
-          cr.wide * (1 - t0 * 0.75) * grow2,
-          cr.wide * (1 - t1 * 0.75) * grow2);
+        const open = 0.38 + prog * 0.70;
+        seg(ax * size, ay * size, bx * size, by * size,
+          cr.wide * (1 - t0 * 0.75) * open,
+          cr.wide * (1 - t1 * 0.75) * open);
       }
+    }
+    for (const ch of chips) {
+      if (prog < ch.start) continue;
+      chip(ch.poly, 0.35 + 0.65 * clamp((prog - ch.start) / (1 - ch.start), 0, 1));
+    }
+
+    // composite
+    const off = st * size * size;
+    for (let i = 0; i < size * size; i++) {
+      const c = coreA[i];
+      const r = rimA[i] * (1 - c);          // rim never lightens the fracture itself
+      const a = c + r;
+      if (a <= 0.004) continue;
+      const t = c / a;
+      const o = (off + i) * 4;
+      data[o] = Math.round(RIM[0] + (CORE[0] - RIM[0]) * t);
+      data[o + 1] = Math.round(RIM[1] + (CORE[1] - RIM[1]) * t);
+      data[o + 2] = Math.round(RIM[2] + (CORE[2] - RIM[2]) * t);
+      data[o + 3] = Math.round(Math.min(1, a) * 238);
     }
   }
   return { data, size, layers: stages };

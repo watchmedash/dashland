@@ -298,6 +298,10 @@ class Game {
     };
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
+    // A current carries what is in it. Both are built before the sim is, so
+    // they take the reference here rather than through their constructors.
+    this.player.water = this.water;
+    this.drops.water = this.water;
     this.weather = new Weather();
     this.weather.onThunder = () => this.audio.thunder(0.85 + Math.random() * 0.35);
     this.seasons = new Seasons();

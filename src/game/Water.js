@@ -24,6 +24,11 @@ const LEVEL_MAX = 7;
 const TICK = 0.22;
 /** Ceiling on cells processed per tick, so a huge breach can't stall a frame. */
 const MAX_PER_TICK = 900;
+/** Tangential offsets for `colNeighbor`'s four directions, in the cell's frame. */
+const DIR_I = [1, -1, 0, 0];
+const DIR_J = [0, 0, 1, -1];
+/** Scratch for flowAt — it is asked every frame and answers nothing worth keeping. */
+const _flow = { i: 0, j: 0, k: 0, s: 0 };
 
 export class Water {
   /**
@@ -81,6 +86,85 @@ export class Water {
     if (RENDER_TYPE[id] !== R_LIQUID) return false;
     if (id !== self) return false;
     return this.levelAt(col, k) < level - 1;
+  }
+
+  /**
+   * Which way the liquid in a cell is running, or null if it is going nowhere.
+   *
+   * No direction is stored anywhere — the sim only ever knew a cell's *level* —
+   * and it stays that way. A vector per cell would be eleven million of them
+   * for a planet that is almost entirely still ocean, all to answer a question
+   * asked about the two or three cells that happen to have a player or a drop
+   * in them. It is derived here instead, from the same level gradient the tick
+   * itself flows down, so what pushes you is by construction the direction the
+   * water is actually going.
+   *
+   * The result is in the cell's OWN (i, j) frame — d 0..3 are that column's
+   * +i/-i/+j/-j — plus a radial part. That matters: `colNeighbor` will happily
+   * hand back a column on another cube face, but the *direction index* is
+   * always in the asking column's frame, so nothing has to be rotated and
+   * nothing folds at a seam. Callers working in world space must take it
+   * through that column's tangentFrame.
+   *
+   * Only cells with a level entry answer — that is, only water that is
+   * genuinely flowing. Sources deliberately do not, and the ocean is all
+   * sources, so the sea is not a treadmill. This is also why an air neighbour
+   * can safely count as "downhill": a still lake never reaches this code, so
+   * the only thing an open side means here is somewhere the flow is headed.
+   *
+   * @returns {{i:number,j:number,k:number,s:number}|null} unit tangential
+   *   direction, radial k of 0 or -1, and strength s in 0..1.
+   */
+  flowAt(col, k, out = _flow) {
+    const mine = this.level.get(this.key(col, k));
+    if (mine === undefined) return null;
+    const self = this.planet.at(col, k);
+    if (RENDER_TYPE[self] !== R_LIQUID) return null;
+
+    out.i = 0; out.j = 0; out.k = 0; out.s = 0;
+
+    // Falling beats spreading, exactly as the tick below does it — a liquid
+    // over a hole is going down, whatever its neighbours say.
+    if (k > 0 && this._canEnter(col, k - 1, LEVEL_MAX + 1, self)) {
+      out.k = -1; out.s = 1;
+      return out;
+    }
+
+    let gi = 0, gj = 0;
+    for (let d = 0; d < 4; d++) {
+      const n = colNeighbor(col, d);
+      if (n < 0) continue;
+      const id = this.planet.at(n, k);
+      let fall;
+      if (id === 0) fall = mine;                        // open side: all of it
+      else if (RENDER_TYPE[id] !== R_LIQUID) continue;  // a wall diverts, it doesn't pull
+      else if (id !== self) continue;                   // water does not chase lava
+      else {
+        const nl = this.levelAt(n, k);
+        if (nl >= mine) continue;
+        fall = mine - nl;
+      }
+      gi += DIR_I[d] * fall;
+      gj += DIR_J[d] * fall;
+    }
+    // A cell with the same drop on opposite sides — the middle of a narrow
+    // stream, both banks open — cancels to nothing, which is right: it is the
+    // *difference* along the channel that moves you, not the fact of being wet.
+    const m = Math.hypot(gi, gj);
+    if (m < 1e-6) return null;
+    out.i = gi / m; out.j = gj / m;
+    // The gradient decides the direction and whether there is one at all; it
+    // does NOT set the strength, and the first attempt here that used it was
+    // badly wrong. A channel loses exactly one level per cell all the way down
+    // its length, so every interior cell of every river measured a gradient of
+    // 1 — a seventh of the 7 a cell beside a source scores — and the whole
+    // planet's rivers pushed at a seventh strength while the one puddle next to
+    // a breach shoved like a firehose. Depth is the honest scale: how much
+    // water is going past you, not how fast the level happens to be falling.
+    // Nothing drops below 0.6, because the far end of a long run is still a
+    // moving river and should feel like one.
+    out.s = 0.6 + 0.4 * (mine / LEVEL_MAX);
+    return out;
   }
 
   /** Mark a cell and everything touching it for re-examination. */

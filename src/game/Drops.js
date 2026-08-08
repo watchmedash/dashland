@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
+import { tangentFrame } from '../world/Sphere.js';
 import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID } from '../world/Blocks.js';
 import { ITEMS } from './Items.js';
 import { hasModel, worldModel } from '../render/ItemModels.js';
@@ -12,11 +13,23 @@ const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _hover = new THREE.Vector3();
 const _m = new THREE.Matrix4();
+const _flow = new THREE.Vector3();
+const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
 
 const MAX = 260;
 const PICKUP_RADIUS = 1.85;      // start drifting toward the player
 const COLLECT_RADIUS = 0.55;
 const MERGE_RADIUS = 0.7;
+/**
+ * How hard a current carries a drop, in world units/s².
+ *
+ * Water damps a drop at 3.4/s, so this settles at about 2.6 units/s — a little
+ * faster than a walk, which is what a thing with no weight to it should look
+ * like on a stream. Resting on the bed, friction of 8/s holds it to 1.1 and it
+ * creeps instead. Both are well under the 5-22/s the pick-up magnet pulls at,
+ * so a drop caught in a river still comes to you when you get near it.
+ */
+const FLOW_PUSH = 9;
 
 export class Drops {
   constructor(scene, planet, materials) {
@@ -33,6 +46,12 @@ export class Drops {
     this.materials = materials;
     this.spriteCache = new Map();
     this.iconFactory = null;
+    /**
+     * The flow simulation, if there is one. Optional: drops predate it and a
+     * world without one should still have them fall and float correctly.
+     * @type {import('./Water.js').Water|null}
+     */
+    this.water = null;
   }
 
   setIcons(icons) { this.iconFactory = icons; }
@@ -154,6 +173,49 @@ export class Drops {
     });
   }
 
+  /**
+   * Add one frame of the local current to a drop's velocity.
+   *
+   * Water.flowAt answers in the cell's own (i, j) axes, and a drop lives in
+   * world space, so the answer has to be read through that cell's tangent
+   * frame — the same route the mobs take to turn a heading into a step. Doing
+   * it any other way across a cube seam means the six faces disagree about
+   * which way "+i" points and a river changes direction as it crosses one.
+   *
+   * arcA/arcB are how many world units a cell step covers, and they differ
+   * across a face, so they belong here: without them a flow diagonal to the
+   * grid comes out skewed off the channel.
+   */
+  _flowPush(d, cell, dt) {
+    const fl = this.water.flowAt(cell.col, cell.k);
+    if (!fl) return;
+    tangentFrame(cell.f, cell.i + 0.5, cell.j + 0.5, cell.k + 0.5, _frame);
+    const a = fl.i * _frame.arcA, b = fl.j * _frame.arcB;
+    _flow.set(
+      _frame.ea[0] * a + _frame.eb[0] * b,
+      _frame.ea[1] * a + _frame.eb[1] * b,
+      _frame.ea[2] * a + _frame.eb[2] * b,
+    );
+    const len = _flow.length();
+    if (len > 1e-6) _flow.multiplyScalar(1 / len);
+    // Unlike the player, a drop *does* take the radial part. It is the only
+    // thing that gets a drop over the lip of a waterfall: buoyancy is holding
+    // it at the surface, and the surface at the lip is the top of the fall.
+    //
+    // Component-wise, and it has to be: `tangentFrame` hands back `up` as a
+    // plain three-element array, not a Vector3, so `addScaledVector(_frame.up)`
+    // multiplied `undefined` and quietly turned the drop's position into NaN —
+    // which only bit in cells the water is *falling* through, since `fl.k` is
+    // zero everywhere else and the line never ran. The ea/eb reads above were
+    // already indexed by hand for the same reason.
+    if (fl.k) {
+      _flow.x += _frame.up[0] * fl.k;
+      _flow.y += _frame.up[1] * fl.k;
+      _flow.z += _frame.up[2] * fl.k;
+    }
+    d.vel.addScaledVector(_flow, FLOW_PUSH * fl.s * dt);
+  }
+
   update(dt, player, { collect, hasRoom }) {
     const g = GRAVITY * 0.85;
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -182,7 +244,10 @@ export class Drops {
           d.magnet = 0;
         }
       } else {
-        const here = this.planet.blockAtWorld(d.pos.x, d.pos.y, d.pos.z);
+        // The cell address, not just the block id: the flow lookup below needs
+        // the column to ask about and the face frame to read its answer in.
+        const cell = this.planet.cellAt(d.pos.x, d.pos.y, d.pos.z);
+        const here = cell ? this.planet.at(cell.col, cell.k) : 0;
 
         // Lava eats what falls into it. Without this a stack of logs sits
         // glowing in a lava lake indefinitely, and swimming out to grab it is
@@ -207,6 +272,10 @@ export class Drops {
           // Buoyancy, not just drag: a drop that sinks to the bed of a lake is
           // effectively gone, since you have to find it by touch.
           d.vel.addScaledVector(up, (inWater ? 1.1 : -g) * dt);
+          // Carried by the current. A drop sitting perfectly still in a stream
+          // it is visibly *in* is the most obviously broken thing about water,
+          // more so than the player, because you are looking straight at it.
+          if (inWater && this.water) this._flowPush(d, cell, dt);
           d.vel.multiplyScalar(Math.max(0, 1 - (d.grounded ? 8 : inWater ? 3.4 : 0.3) * dt));
           const next = _s.copy(d.pos).addScaledVector(d.vel, dt);
           if (this.planet.isSolidWorld(next.x, next.y, next.z)) {

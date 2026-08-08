@@ -8,13 +8,24 @@
 // Scale note: a cell must stay about one block across, and its width is
 // (R * pi/2) / F — so the face resolution and the radius have to move together.
 // F 64 -> 208 with R_SEA 40 -> 130 keeps the cell at 0.98 units while giving
-// 10.6x the surface area. Everything radial (shell thickness, digging depth) is
-// measured in blocks and is deliberately *not* scaled.
+// 10.6x the surface area.
+//
+// Second enlargement, F 208 -> 464 with R_SEA 130 -> 290: 4.98x the surface
+// area at a cell width of 0.982, near enough identical to the 0.98 before it.
+// 464 and not the 465 that would land exactly on sqrt(5), because CT = F /
+// CHUNK_T has to come out whole and 464/16 = 29.
+//
+// The shell got thicker too, which the first enlargement deliberately did not
+// do — and every landform the planet was missing wanted thickness rather than
+// width. D 44 -> 66 (still whole against CHUNK_K = 11) buys 22 more layers, and
+// they are spent on both ends: 24 blocks of terrain above sea instead of 12,
+// and 32 layers of crust between the mantle and the waterline instead of 22, so
+// an ocean trench and a canyon can both exist without meeting in the middle.
 export const FACES = 6;
-export const F = 208;                // cells per face axis
-export const D = 44;                 // radial layers
-export const R_MIN = 100;            // radius of layer 0
-export const R_MAX = R_MIN + D;      // 144
+export const F = 464;                // cells per face axis
+export const D = 66;                 // radial layers
+export const R_MIN = 250;            // radius of layer 0
+export const R_MAX = R_MIN + D;      // 316
 
 export const COLUMNS = FACES * F * F;        // 259 584
 export const NUM_VOXELS = COLUMNS * D;       // 11 421 696
@@ -30,13 +41,19 @@ export const NUM_CHUNKS = FACES * CT * CT * CK;   // 4 056
  * before being freed. Meshing the whole planet was fine at 384 chunks; at 4 056
  * it would be about half a gigabyte of geometry resident at all times.
  *
- * The horizon does the work here. On a sphere of this radius an eye two blocks
- * up sees the ground fall away at ~23 units, and the tallest terrain stays
- * visible to about 79 — so 100 is already past anything that can be seen, and
- * the gap up to 128 is hysteresis so walking a boundary doesn't thrash.
+ * The horizon does the work here, and it grows with the square root of the
+ * radius rather than with the radius — sqrt(2*R*h). At R_SEA 130 an eye two
+ * blocks up saw the ground fall away at ~23 units and the tallest terrain stay
+ * visible to ~79, so 100 covered everything. At 290 those become ~34 and ~132.
+ *
+ * 150 is that 132 with a little margin, and it is deliberately *not* the 223
+ * that scaling the old number by the radius would have given: chunk count grows
+ * with the square of this distance, so guessing high here is what turns a
+ * bigger planet into a slideshow. The gap up to 190 is hysteresis, so walking a
+ * boundary doesn't thrash.
  */
-export const CHUNK_LOAD_DIST = 100;
-export const CHUNK_KEEP_DIST = 128;
+export const CHUNK_LOAD_DIST = 150;
+export const CHUNK_KEEP_DIST = 190;
 
 /** voxel index from (face, i, j, k) */
 export const vidx = (f, i, j, k) => (((f * F + i) * F + j) * D + k);
@@ -45,31 +62,37 @@ export const cidx = (f, i, j) => ((f * F + i) * F + j);
 
 export const chunkIdx = (f, ci, cj, ck) => (((f * CT + ci) * CT + cj) * CK + ck);
 
-export const R_CORE = 103;           // unbreakable core shell
-export const R_MANTLE = 108;
-export const R_SEA = 130;            // ocean surface radius
-export const R_SURFACE = 130.9;      // mean land radius
-export const R_TERRAIN_MAX = 142;
+// All five keep their distance from R_MIN, so the crust reads the same from
+// below: core three layers up, mantle eight. What changed is the room above
+// them — sea level sits 40 layers over layer 0 instead of 30, and the terrain
+// ceiling 24 over the waterline instead of 12.
+export const R_CORE = 253;           // unbreakable core shell
+export const R_MANTLE = 258;
+export const R_SEA = 290;            // ocean surface radius
+export const R_SURFACE = 290.9;      // mean land radius
+export const R_TERRAIN_MAX = 314;
 
 /**
  * How far down the two subtractive surface passes are allowed to reach.
  *
- * The shell is thin and everything has to share it. Sea level is layer 30 and
- * the mantle starts at layer 8, so an ocean basin and a canyon are competing
- * for the same twenty-odd layers of crust, and whatever is left under them is
- * all the rock a cave, an ore vein or a deep structure has to live in.
+ * Everything has to share the crust. Sea level is layer 40 and the mantle
+ * starts at layer 8, so an ocean basin and a canyon are competing for the same
+ * thirty-two layers, and whatever is left under them is all the rock a cave, an
+ * ore vein or a deep structure has to live in.
  *
- * R_SEABED_MIN 115 buys a 15-block ocean — deep enough to dive and to lose
- * sight of the surface — while leaving seven layers of crust over the mantle,
- * which is more than the cave pass's own floor at R_MANTLE + 1.5 needs.
+ * R_SEABED_MIN buys a 25-block ocean — comfortably past losing sight of the
+ * surface — while still leaving seven layers of crust over the mantle, which is
+ * more than the cave pass's own floor at R_MANTLE + 1.5 needs. That seven-layer
+ * margin is what the number is actually pinned to, not the depth; the extra
+ * ocean is what the thicker shell bought.
  *
- * R_CANYON_MIN 116 is one higher on purpose. A canyon floor is walkable ground
- * with soil laid on it and things spawning on it, so it wants to stay above the
- * pre-mantle band at 110.5 where the rock starts glowing: a gorge whose floor
- * was cut into magma stone would read as a rift, not as a canyon.
+ * R_CANYON_MIN is one higher on purpose. A canyon floor is walkable ground with
+ * soil laid on it and things spawning on it, so it wants to stay above the
+ * pre-mantle band where the rock starts glowing: a gorge whose floor was cut
+ * into magma stone would read as a rift, not as a canyon.
  */
-export const R_SEABED_MIN = 115;
-export const R_CANYON_MIN = 116;
+export const R_SEABED_MIN = 265;
+export const R_CANYON_MIN = 266;
 
 export const GRAVITY = 26;
 

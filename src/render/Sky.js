@@ -13,9 +13,14 @@ import { makeRng } from '../util/Noise.js';
  * on screen while being far tighter than the ±46 box it replaces.
  */
 // How far out the moon billboard is anchored. It has to stay inside the
-// camera's far plane (420) or it is clipped and never drawn — which is exactly
-// what used to happen at 700.
-const DISC_DIST = 360;
+// camera's far plane or it is clipped and never drawn — which is exactly what
+// used to happen when this was 700 against a far plane of 420.
+//
+// Both ends of that constraint now move with the planet, so this does too: the
+// far plane is 3.2x the outer radius, and anchoring the moon at 2.75x keeps it
+// comfortably inside while staying far enough out to read as sky rather than as
+// an object hanging over the terrain.
+const DISC_DIST = Math.round(R_MAX * 2.75);
 
 const SHADOW_DIST = 30;
 /** Ceiling on that radius: the fixed extent this fitting replaced. */

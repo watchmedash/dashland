@@ -3,7 +3,7 @@
 
 import { Noise, makeRng, hash3, clamp, lerp, smoothstep } from '../util/Noise.js';
 import {
-  F, D, FACES, R_MIN, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX,
+  F, D, FACES, R_MIN, R_MAX, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX,
   R_SEABED_MIN, R_CANYON_MIN,
   COLUMNS, NUM_VOXELS, vidx, cidx, BIOME,
 } from './Constants.js';
@@ -26,6 +26,31 @@ import { placeStructures } from './Structures.js';
  * or a geode, but a vein may not overwrite one — those are the landmarks that
  * tell a player how deep they are, and burying them under coal wastes them.
  */
+/**
+ * Where one rock stops and the next begins, as a fraction of the crust.
+ *
+ * The crust is R_MANTLE up to R_SEA — everything above the waterline shares the
+ * topmost band, which is what the old absolute thresholds did too. The four
+ * fractions are the old edges (126, 120, 114, 110.5) re-expressed against the
+ * old crust of 108..130, so the proportions of every stratum are preserved
+ * exactly while the thicknesses grow with the shell.
+ */
+const CRUST = R_SEA - R_MANTLE;
+/**
+ * A radius from the old 108-mantle/130-sea crust, placed in the current one.
+ *
+ * The ore ladder was tuned by hand against those numbers over a long time, and
+ * the depths are meaningful relative to each other — the deep seam sits under
+ * the shallow one, gold under silver, moss just below the surface. Rescaling
+ * them all through one function keeps every one of those relationships exactly
+ * as it was tuned, which re-deriving each band by eye would not.
+ */
+const band = (r108) => R_MANTLE + (r108 - 108) * (CRUST / 22);
+const BAND_STONE = R_MANTLE + CRUST * 0.818;      // was 126
+const BAND_LIMESTONE = R_MANTLE + CRUST * 0.545;  // was 120
+const BAND_GRANITE = R_MANTLE + CRUST * 0.273;    // was 114
+const BAND_SLATE = R_MANTLE + CRUST * 0.114;      // was 110.5
+
 const CARVEABLE = new Uint8Array(N_BLOCKS);
 const ORE_HOST = new Uint8Array(N_BLOCKS);
 const STRATA = ['stone', 'limestone', 'marble', 'granite', 'andesite', 'slate', 'tuff', 'azurite'];
@@ -142,10 +167,20 @@ export class WorldGen {
     const detail = this.nDetail.fbm3(x * 8, y * 8, z * 8, 3, 2, 0.5);
     const mask = smoothstep(0.25, 0.75, this.n.fbm3(x * 1.9 + 9.1, y * 1.9, z * 1.9, 3, 2, 0.5) * 0.5 + 0.5);
 
+    // Amplitudes in blocks. These were tuned against a ceiling only 12 blocks
+    // over the waterline, and the enlarged shell gives 24 — so the mountains
+    // are let out rather than left tuned for a roof that has moved. Peaks carry
+    // most of the increase because they are the ridged term and the only one
+    // that makes a summit; raising `continent` instead would just lift whole
+    // landmasses and read as nothing at all from the ground.
+    //
+    // Their sum still has to clear R_TERRAIN_MAX with room to spare: at the
+    // extreme this reaches R_SURFACE + 7.5 + 12 = 310.4 against a clamp of 314,
+    // and a clamp that bites is a plateau where a peak should be.
     let h = R_SURFACE;
     h += continent * 7.5;
     h += Math.min(0, continent) * 3.0;              // carve real ocean basins
-    h += land * peaks * 7.5 * (0.35 + mask * 0.65);
+    h += land * peaks * 12.0 * (0.35 + mask * 0.65);
     h += land * hills * 1.6;
     h += detail * 0.18;
     if (h < R_SEA + 1.2 && h > R_SEA - 3) h = lerp(h, R_SEA - 0.4, 0.4);
@@ -154,6 +189,13 @@ export class WorldGen {
 
   /**
    * Which rock sits at radius `r` under a given direction.
+   *
+   * The band edges are fractions of the crust — the mantle to the waterline —
+   * and not the absolute radii they used to be. Those were written when sea
+   * level was 130 and the mantle 108, and they said so nowhere: enlarging the
+   * planet moved every radius past all four thresholds at once, so the entire
+   * crust came out as the topmost band and the strata simply vanished. A
+   * fraction survives the next enlargement too.
    *
    * Bands are ordered by depth and their edges are pushed around by a
    * low-frequency field, so the limestone/andesite line crosses one shaft
@@ -169,10 +211,10 @@ export class WorldGen {
     const px = dx * r, py = dy * r, pz = dz * r;
     const rr = r + this.nDetail.fbm3(px * 0.045, py * 0.045, pz * 0.045, 2, 2, 0.5) * 3.4;
     const p = this.nOre.simplex3(px * 0.13 + 3.7, py * 0.13, pz * 0.13);
-    if (rr >= 126) return p > 0.52 ? ID.andesite : ID.stone;
-    if (rr >= 120) return p > 0.50 ? ID.marble : ID.limestone;
-    if (rr >= 114) return p > 0.48 ? ID.granite : (p < -0.50 ? ID.tuff : ID.andesite);
-    if (rr >= 110.5) return p > 0.54 ? ID.azurite : (p < -0.62 ? ID.geode_stone : ID.slate);
+    if (rr >= BAND_STONE) return p > 0.52 ? ID.andesite : ID.stone;
+    if (rr >= BAND_LIMESTONE) return p > 0.50 ? ID.marble : ID.limestone;
+    if (rr >= BAND_GRANITE) return p > 0.48 ? ID.granite : (p < -0.50 ? ID.tuff : ID.andesite);
+    if (rr >= BAND_SLATE) return p > 0.54 ? ID.azurite : (p < -0.62 ? ID.geode_stone : ID.slate);
     // The last two blocks before the mantle. Magma stone and crystalline rock
     // both emit, so this band is the only lit stratum — reaching it should look
     // like arriving somewhere rather than like more of the same grey.
@@ -486,7 +528,23 @@ export class WorldGen {
 
           let top, sub;
           switch (bi) {
-            case BIOME.OCEAN: top = patch > 0.16 ? ID.mud : ID.gravel; sub = ID.stone; break;
+            // The seabed changes with depth, not just with noise.
+            //
+            // It was mud-or-gravel everywhere, which was invisible while the
+            // ocean was a puddle: the only water you could see the bottom of
+            // was the beach shelf, so the seabed read as "sand" and the two
+            // blocks it actually uses never got a look in. Now that there is a
+            // real water column, the floor is worth reading — so it goes sandy
+            // in the shallows where a beach would naturally continue under the
+            // water, silt and gravel over the slope, and clay and bare stone in
+            // the deep where nothing settles.
+            case BIOME.OCEAN: {
+              const depth = R_SEA - h;
+              if (depth < 4) { top = patch > 0.10 ? ID.sand : ID.gravel; sub = ID.sand; }
+              else if (depth < 11) { top = patch > 0.16 ? ID.mud : ID.gravel; sub = ID.dirt; }
+              else { top = patch > 0.22 ? ID.clay : (patch < -0.30 ? ID.stone : ID.gravel); sub = ID.stone; }
+              break;
+            }
             case BIOME.BEACH: top = ID.sand; sub = ID.sand; break;
             case BIOME.DESERT: top = ID.sand; sub = ID.sandstone; break;
             // Badlands is the only red ground on the planet. It used to be plain
@@ -581,10 +639,24 @@ export class WorldGen {
         const r = R_MIN + k + 0.5;
         if (r < R_MANTLE + 1.5 || r > h - skin) continue;
         const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
-        const a = nc.ridged3(px * 0.062, py * 0.062, pz * 0.062, 3, 2.1, 0.5);
-        const b = nc.ridged3(px * 0.062 + 40.5, py * 0.062, pz * 0.062 - 22.3, 3, 2.1, 0.5);
+        // Cheapest term first, and short-circuit on it.
+        //
+        // The condition is `min(a, b) > 0.86 || cav > 0.58`, and the two ridged
+        // fields cost three octaves each against `cav`'s one field — so every
+        // voxel that a chamber already claims was paying for two tunnel samples
+        // whose answer could not change the outcome. Evaluating `cav` first and
+        // returning on it makes the blob-carved voxels free of the tunnel cost.
+        // This is the second most expensive loop in worldgen at 13s of 63.
         const cav = nc.fbm3(px * 0.035 + 11.1, py * 0.035, pz * 0.035, 3, 2, 0.5);
-        if (Math.min(a, b) > 0.86 || cav > 0.58) {
+        let open = cav > 0.58;
+        if (!open) {
+          const a = nc.ridged3(px * 0.062, py * 0.062, pz * 0.062, 3, 2.1, 0.5);
+          // `b` only matters if `a` already cleared the bar — `min(a, b)` can
+          // never exceed 0.86 when `a` does not.
+          open = a > 0.86
+            && nc.ridged3(px * 0.062 + 40.5, py * 0.062, pz * 0.062 - 22.3, 3, 2.1, 0.5) > 0.86;
+        }
+        if (open) {
           blocks[base + k] = (r < R_MANTLE + 4 && cav > 0.7) ? ID.lava : ID.air;
         }
       }
@@ -610,25 +682,25 @@ export class WorldGen {
     //   108-116  the deep seam, in slate          slate / azurite
     //   108-112  emerald, sapphire, ruby, void    slate
     const ores = [
-      { id: ID.voidstone_ore, scale: 0.62, thr: 0.60, lo: R_MANTLE, hi: 111, seed: 907 },
-      { id: ID.ruby_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: 112.5, seed: 719 },
-      { id: ID.sapphire_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: 113, seed: 733 },
-      { id: ID.emerald_ore, scale: 0.48, thr: 0.57, lo: R_MANTLE, hi: 114, seed: 641 },
-      { id: ID.deep_crystal_ore, scale: 0.46, thr: 0.60, lo: R_MANTLE, hi: 113, seed: 811 },
-      { id: ID.deep_gold_ore, scale: 0.38, thr: 0.58, lo: R_MANTLE, hi: 114, seed: 557 },
-      { id: ID.deep_silver_ore, scale: 0.36, thr: 0.57, lo: R_MANTLE, hi: 113.5, seed: 463 },
-      { id: ID.deep_iron_ore, scale: 0.30, thr: 0.55, lo: R_MANTLE, hi: 116, seed: 389 },
-      { id: ID.deep_copper_ore, scale: 0.28, thr: 0.55, lo: R_MANTLE, hi: 115, seed: 293 },
-      { id: ID.deep_coal_ore, scale: 0.24, thr: 0.53, lo: R_MANTLE, hi: 116, seed: 197 },
+      { id: ID.voidstone_ore, scale: 0.62, thr: 0.60, lo: R_MANTLE, hi: band(111), seed: 907 },
+      { id: ID.ruby_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(112.5), seed: 719 },
+      { id: ID.sapphire_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(113), seed: 733 },
+      { id: ID.emerald_ore, scale: 0.48, thr: 0.57, lo: R_MANTLE, hi: band(114), seed: 641 },
+      { id: ID.deep_crystal_ore, scale: 0.46, thr: 0.60, lo: R_MANTLE, hi: band(113), seed: 811 },
+      { id: ID.deep_gold_ore, scale: 0.38, thr: 0.58, lo: R_MANTLE, hi: band(114), seed: 557 },
+      { id: ID.deep_silver_ore, scale: 0.36, thr: 0.57, lo: R_MANTLE, hi: band(113.5), seed: 463 },
+      { id: ID.deep_iron_ore, scale: 0.30, thr: 0.55, lo: R_MANTLE, hi: band(116), seed: 389 },
+      { id: ID.deep_copper_ore, scale: 0.28, thr: 0.55, lo: R_MANTLE, hi: band(115), seed: 293 },
+      { id: ID.deep_coal_ore, scale: 0.24, thr: 0.53, lo: R_MANTLE, hi: band(116), seed: 197 },
 
-      { id: ID.sulfur_ore, scale: 0.34, thr: 0.57, lo: R_MANTLE, hi: 118, seed: 101 },
-      { id: ID.amethyst_ore, scale: 0.42, thr: 0.60, lo: R_MANTLE + 2, hi: 120, seed: 149 },
-      { id: ID.crystal_ore, scale: 0.40, thr: 0.62, lo: 112, hi: 121, seed: 219 },
-      { id: ID.gold_ore, scale: 0.34, thr: 0.60, lo: 114, hi: 125, seed: 143 },
-      { id: ID.silver_ore, scale: 0.32, thr: 0.58, lo: 113, hi: 124, seed: 89 },
-      { id: ID.iron_ore, scale: 0.26, thr: 0.56, lo: 116, hi: R_SURFACE - 2, seed: 71 },
-      { id: ID.copper_ore, scale: 0.24, thr: 0.55, lo: 120, hi: R_TERRAIN_MAX, seed: 37 },
-      { id: ID.coal_ore, scale: 0.20, thr: 0.52, lo: 118, hi: R_TERRAIN_MAX, seed: 0 },
+      { id: ID.sulfur_ore, scale: 0.34, thr: 0.57, lo: R_MANTLE, hi: band(118), seed: 101 },
+      { id: ID.amethyst_ore, scale: 0.42, thr: 0.60, lo: R_MANTLE + 2, hi: band(120), seed: 149 },
+      { id: ID.crystal_ore, scale: 0.40, thr: 0.62, lo: band(112), hi: band(121), seed: 219 },
+      { id: ID.gold_ore, scale: 0.34, thr: 0.60, lo: band(114), hi: band(125), seed: 143 },
+      { id: ID.silver_ore, scale: 0.32, thr: 0.58, lo: band(113), hi: band(124), seed: 89 },
+      { id: ID.iron_ore, scale: 0.26, thr: 0.56, lo: band(116), hi: R_SURFACE - 2, seed: 71 },
+      { id: ID.copper_ore, scale: 0.24, thr: 0.55, lo: band(120), hi: R_TERRAIN_MAX, seed: 37 },
+      { id: ID.coal_ore, scale: 0.20, thr: 0.52, lo: band(118), hi: R_TERRAIN_MAX, seed: 0 },
 
       { id: ID.gravel, scale: 0.14, thr: 0.58, lo: R_MANTLE + 4, hi: R_TERRAIN_MAX, seed: 311 },
       // Clay and moss keep the bands they always had — clay's `lo` was 32, i.e.
@@ -638,9 +710,23 @@ export class WorldGen {
       { id: ID.moss_stone, scale: 0.18, thr: 0.60, lo: R_MANTLE, hi: R_SURFACE, seed: 503 },
       // Moss is the only way to get a soft green block underground, and it is
       // shallow on purpose: it belongs to the cave mouth, not to the deep.
-      { id: ID.moss_block, scale: 0.20, thr: 0.66, lo: 124, hi: R_SURFACE, seed: 601 },
+      { id: ID.moss_block, scale: 0.20, thr: 0.66, lo: band(124), hi: R_SURFACE, seed: 601 },
     ];
     const no = this.nOre;
+    // Which ores can possibly appear at each layer, worked out once.
+    //
+    // A band test is `r < o.lo || r > o.hi`, and `r` is a function of `k` alone
+    // — so the answer is the same for every one of the 1.3M columns and was
+    // being recomputed for all of them. On the enlarged planet this loop is by
+    // far the most expensive thing worldgen does (39s of 63s measured), so the
+    // 22 comparisons per voxel it removes are worth having, and more usefully
+    // the bucket is *short*: the deep layers carry ten candidates and the bulk
+    // of the crust six or seven, rather than the whole table every time.
+    const byLayer = [];
+    for (let k = 0; k < D; k++) {
+      const r = R_MIN + k + 0.5;
+      byLayer.push(ores.filter((o) => r >= o.lo && r <= o.hi));
+    }
     for (let col = 0; col < COLUMNS; col++) {
       const base = col * D;
       const f = (col / (F * F)) | 0;
@@ -648,11 +734,17 @@ export class WorldGen {
       centerDir(f, (rem / F) | 0, rem % F, dir);
       for (let k = 0; k < D; k++) {
         if (!ORE_HOST[blocks[base + k]]) continue;
+        const bucket = byLayer[k];
+        if (bucket.length === 0) continue;
         const r = R_MIN + k + 0.5;
         const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
-        for (const o of ores) {
-          if (r < o.lo || r > o.hi) continue;
-          const n = no.fbm3(px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, 3, 2, 0.5);
+        for (let oi = 0; oi < bucket.length; oi++) {
+          const o = bucket[oi];
+          // Two octaves, not three. A vein is a blob — the third octave was
+          // adding detail an order of magnitude smaller than one block, which
+          // no player can ever see, at a third of the cost of the single most
+          // expensive loop in worldgen.
+          const n = no.fbm3(px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, 2, 2, 0.5);
           if (n > o.thr) { blocks[base + k] = o.id; break; }
         }
       }
@@ -1049,10 +1141,11 @@ export class WorldGen {
       const h = colHeight[col];
       // The height window is narrow and both edges are load-bearing. Below
       // R_SEA + 2.5 the crater floor is at or under the waterline and one
-      // player tunnel from the coast turns the vent into a pool. Above 135.5
-      // there is no longer room over the ground for a six-block cone plus the
-      // two clear layers the shell keeps at the top.
-      if (h < R_SEA + 2.5 || h > 135.5) continue;
+      // player tunnel from the coast turns the vent into a pool. The upper edge
+      // is where a six-block cone stops fitting under the two clear layers the
+      // shell keeps at the top — expressed against R_MAX rather than as the
+      // bare 135.5 it was, which was that same ceiling on the old 144 shell.
+      if (h < R_SEA + 2.5 || h > R_MAX - 8.5) continue;
       if (colSlope[col] > 0.85) continue;
       colParts(col, parts);
       // Keep the whole apron on one face. Same reason as `placeStructures`: a

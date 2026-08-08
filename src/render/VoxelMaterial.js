@@ -96,6 +96,17 @@ const COMMON_VERT_BODY = /* glsl */`
             + sin(uTime * 1.63 - wp.z * 0.71 + wp.y * 0.39) * 0.35
             + sin(uTime * 2.31 + wp.x * 0.29 - wp.y * 0.55) * 0.2;
     transformed += up * h * 0.075;
+  } else if (wType > 2.5 && wType < 3.5) {
+    // lava: a slow, heavy swell.
+    //
+    // There was no branch here at all, so lava was the one liquid whose surface
+    // never moved a millimetre — perfectly flat, perfectly still and fully
+    // opaque, which is a description of a block. It is a liquid and has to read
+    // as one. Molten rock is viscous, so this is a longer wavelength at a third
+    // of water's speed and half its amplitude: not a ripple, a heave.
+    float h = sin(uTime * 0.40 + wp.x * 0.30 + wp.z * 0.23) * 0.6
+            + sin(uTime * 0.58 - wp.z * 0.36 + wp.y * 0.18) * 0.4;
+    transformed += up * h * 0.042;
   } else if (wType > 3.5) {
     // leaves: subtle whole-canopy sway
     float ph = dot(wp, vec3(0.33, 0.51, 0.27));
@@ -225,12 +236,21 @@ const LIQUID_MAP_FRAG = /* glsl */`
   float wShore = vTint.y;
 
   if (vWave > 2.5) {
-    // lava shares the liquid pass but wants none of the water treatment: keep
-    // the painted crust, crawl it slowly, stay opaque
-    vec2 lu = vTexUv * 0.85 + vec2(uTime * 0.006, uTime * 0.0045);
-    vec2 lu2 = vTexUv * 1.4 - vec2(uTime * 0.004, uTime * 0.007);
+    // Lava shares the liquid pass but wants none of the water treatment: keep
+    // the painted crust and stay opaque. What it does want is to look molten,
+    // and the crawl was so slow (a fifth of a texel a second) that it read as
+    // static — nearly three times faster is still a viscous ooze but is
+    // actually perceptible.
+    vec2 lu = vTexUv * 0.85 + vec2(uTime * 0.017, uTime * 0.013);
+    vec2 lu2 = vTexUv * 1.4 - vec2(uTime * 0.011, uTime * 0.019);
     vec3 lc = mix(texture(uMap, vec3(lu, vLayer)).rgb, texture(uMap, vec3(lu2, vLayer)).rgb, 0.4);
-    diffuseColor.rgb = lc * 1.2;
+    // The crust is cooler than the cracks between it, and the tile already says
+    // which is which — hot is where red runs far ahead of blue. Beating only
+    // that part makes the surface look alive instead of like a painting of
+    // lava, and leaves the dark crust alone so the contrast survives.
+    float hot = smoothstep(0.30, 0.75, lc.r - lc.b);
+    float beat = 0.86 + 0.14 * sin(uTime * 1.25 + vWorld.x * 0.42 + vWorld.z * 0.31);
+    diffuseColor.rgb = lc * (1.05 + 0.55 * hot * beat);
     diffuseColor.a = 1.0;
   } else {
 

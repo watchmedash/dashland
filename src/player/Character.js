@@ -431,6 +431,29 @@ export class PlayerCharacter {
     }
   }
 
+  /**
+   * The block light falling on the body, as the terrain's emissive units.
+   *
+   * Third person only in practice — in first person the body is hidden and the
+   * viewmodel has its own rig, which already warms to nearby flame through
+   * `handLight` — but it is written unconditionally because the shadow the body
+   * casts is drawn either way, and because a mode switch must not need a frame
+   * to catch up.
+   *
+   * @param {{r:number,g:number,b:number}} l
+   */
+  setBlockLight(l) {
+    const m0 = this.model;
+    if (!m0 || !m0.owned) return;
+    const prev = this._blockL;
+    // The same 1/255 deadband the mobs use: standing still in the dark should
+    // not write a uniform on every part of the body every frame.
+    if (Math.abs(l.r - prev.r) < 0.004 && Math.abs(l.g - prev.g) < 0.004
+      && Math.abs(l.b - prev.b) < 0.004) return;
+    prev.r = l.r; prev.g = l.g; prev.b = l.b;
+    for (const m of m0.owned) if (m.emissive) m.emissive.setRGB(l.r, l.g, l.b);
+  }
+
   /** Build the body once its GLB has landed. Silently does nothing until then. */
   _instantiate() {
     if (this.model || !MobModels.isReady(this.url)) return;
@@ -442,8 +465,30 @@ export class PlayerCharacter {
     // Mobs uses, and the reason a different character is a one-line change.
     const scale = PLAYER_HEIGHT / MobModels.modelHeight(this.url);
     model.root.scale.setScalar(scale);
-    // Materials are the prototype's, shared and already lit — no per-instance
-    // clone, because unlike a mob the player never flashes red or burns.
+    // Materials are cloned per body, which they did not used to be.
+    //
+    // The old note here said the player never flashes red or burns and so needs
+    // nothing of its own. It now needs one thing: block light. The body is an
+    // entity — it reads no voxel light — so a torch at the player's feet lit
+    // the ground and left the player on it black, exactly as it did the mobs.
+    // The fix is `emissive * emissiveMap`, and an emissive written on the
+    // prototype would be written on the shared material every husk and merchant
+    // is cloned from. Cloning is the same rule Mobs follows, for the same
+    // reason, and `map` is carried across untouched — writing to that texture
+    // is what renders these models flat white.
+    model.owned = [];
+    model.root.traverse((n) => {
+      if (!n.isMesh || !n.material) return;
+      const cloned = Array.isArray(n.material)
+        ? n.material.map((m) => m.clone())
+        : n.material.clone();
+      n.material = cloned;
+      for (const m of (Array.isArray(cloned) ? cloned : [cloned])) {
+        model.owned.push(m);
+        if (m.map && m.emissive) { m.emissiveMap = m.map; m.needsUpdate = true; }
+      }
+    });
+    this._blockL = { r: -1, g: -1, b: -1 };
     model.root.visible = false;
     this.scene.add(model.root);
 

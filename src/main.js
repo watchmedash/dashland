@@ -6,7 +6,7 @@ import { Player, VIEW_FIRST, VIEW_COUNT } from './player/Player.js';
 import { ViewModel } from './player/ViewModel.js';
 import { PlayerCharacter, playerModelUrls, DEFAULT_CHARACTER } from './player/Character.js';
 import { Input } from './player/Input.js';
-import { Sky } from './render/Sky.js';
+import { Sky, MOON_FILL } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
 import { Particles } from './render/Particles.js';
 import { BlockModels, CAP as BLOCK_MODEL_CAP } from './render/BlockModels.js';
@@ -30,7 +30,7 @@ import {
 import { Skills, MARKS } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
-  BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
+  BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT,
 } from './world/Blocks.js';
 import {
@@ -124,8 +124,57 @@ const FREEZE_RADIUS = 24;
 const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
 /** Scratch for `_crossLightAt`, which runs once per modelled instance per frame. */
 const _clParts = { f: 0, i: 0, j: 0 };
+/** Scratch for the player body's own block-light probe. */
+const _entityL = { r: 0, g: 0, b: 0 };
 const WHITE = new THREE.Color(1, 1, 1);
 const WHITE_L = [1, 1, 1];
+
+/**
+ * What the sky fills the world with once the sun is gone, and what the water
+ * reflects while it does.
+ *
+ * Both are in the working (linear) colour space, so they are written as floats
+ * rather than as hex — `new THREE.Color(0x...)` would be decoded from sRGB and
+ * these are not sRGB values, they are radiances.
+ *
+ * `MOON_FILL` is the fix for "the leaves look like it is morning". The palette's
+ * own night sky is very nearly black, so the ambient that actually lights the
+ * ground after dark was coming almost entirely from the `lerp(WHITE, 0.34)` that
+ * follows it — i.e. the night fill was *neutral*, and a neutral fill leaves a
+ * green leaf exactly as green as it is at noon, only dimmer. Measured on the
+ * shipped grade: a midnight leaf came out (0, 7, 0) on screen, pure daylight
+ * hue with no blue in it at all, which is precisely the "morning" read. This
+ * replaces that white with a moon blue of nearly the same luminance, so the
+ * change is a hue rotation rather than a dimming — the dimming lives in
+ * `SKY_NIGHT_DROP`, where it can be tuned separately.
+ *
+ * MOON_FILL itself lives in Sky.js, because the entity fill has to use the same
+ * value — see the note there.
+ *
+ * `MOON_REFLECT` is the floor under the sky a lake reflects. uSkyReflect keeps
+ * the palette's real hue (deliberately — see the uniform's own comment) and the
+ * palette's real hue at midnight is 0x03050f, so the fresnel term that makes
+ * water read as water was mixing in something indistinguishable from black:
+ * across its length a lake stopped being a surface and became a hole in the
+ * terrain. A real water surface at night still carries the sky glow, the stars
+ * and the moon, none of which the zenith colour accounts for.
+ */
+const MOON_REFLECT = new THREE.Color(0.010, 0.018, 0.035);
+/**
+ * How much of the sky ambient's night floor to take away, at full night.
+ *
+ * The floor is 0.34 and this brings it to 0.29 — a sixth.
+ *
+ * **This is not what makes a night canopy too bright, and neither is the moon.**
+ * Measured on rendered frames rather than modelled: a midnight leaf sits around
+ * (48, 91, 41) against forest floor at (2, 8, 1). Taking a further 34% off this
+ * ambient moved the foliage median by 9%, and setting `moonLight.intensity` to
+ * zero outright moved it by nothing at all. Whatever dominates a lit leaf after
+ * dark is a third thing, still unidentified — do not spend another pass on
+ * these two knobs without first finding it.
+ */
+const SKY_NIGHT_DROP = 0.05;
+
 /** Cells the hand-light scan reaches; must cover the brightest block light. */
 const HAND_LIGHT_RADIUS = 8;
 /**
@@ -170,6 +219,17 @@ const TORCH_WALL_STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const FLAME_BLOCKS = new Set();
 /** How many flames are animated at once, and how often one throws an ember. */
 const MAX_FLAMES = 14;
+/**
+ * How many nearby emitters the entity light probe keeps.
+ *
+ * The probe is a linear walk of this list per entity per frame, so it is a
+ * direct multiplier on the only per-frame cost this feature has. Twenty-four is
+ * far more than a lit room ever holds (a torch every four blocks over a 17x17
+ * footprint is nine) and is only ever reached by lava, which comes in sheets —
+ * and a sheet of lava is well approximated by the two dozen cells of it nearest
+ * to you, which is what the eviction below keeps.
+ */
+const MAX_ENTITY_EMITTERS = 24;
 const FLAME_PERIOD = 0.14;
 /** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
 const HURT_IMMUNITY = 0.5;
@@ -268,6 +328,18 @@ class Game {
     this.coreFound = false;
     /** Burning cells near the player, refilled by the hand-light scan. */
     this._flameCells = [];
+    /**
+     * Every *light-emitting* cell near the player — torches, lanterns, lit
+     * kilns, glowstone, crystal, lava — in world space, refilled by the same
+     * scan. `_flameCells` above is the subset of these that is actually on fire
+     * and wants embers thrown off it; this is the whole set, because a thing
+     * does not have to burn to light an animal standing next to it.
+     *
+     * See `_entityLight` for what reads it. The records are pooled and reused
+     * across rescans, so a rescan allocates nothing.
+     */
+    this._emitters = [];
+    this._emitPool = [];
     this.seed = 0;
     this.worldReady = false;
     /** The character picker is up and the world behind it must wait. */
@@ -351,30 +423,29 @@ class Game {
     this.mobs.onSound = (kind, mob) => this.audio.mob(mob.type, kind, mob.pos);
     this.mobs.onAttack = (dmg, mob) => this._takeHit(dmg, mob);
     this.mobs.onBurn = (mob) => this.particles.embers(mob.pos, mob.up, 2, 0.55);
+    // A torch on the ground has to light the animal standing next to it, and
+    // nothing in the scene graph can tell it so — see `_entityLight`. Handed
+    // over as a probe rather than as a per-mob light so that Mobs owns *when*
+    // to ask (it already walks the herd once a frame) and the world owns the
+    // answer.
+    this.mobs.blockLightAt = (pos, out) => this._entityLight(pos, out);
     this.drops.onBurn = (pos) => {
       _burnUp.copy(pos).normalize();
       this.particles.embers(pos, _burnUp, 5, 0.7);
     };
-    // A merchant is rare enough that missing one because you were facing the
-    // other way would be a genuine loss. Say so once, and let the bells do the
-    // rest of the work.
+    // A merchant arrives with a bell and nothing else.
     //
-    // Measured: over 150 seconds a trader never came within talking range of a
-    // player who stayed put — closest 11 cells, median 28 — while ringing 15
-    // times. He is found by walking towards the sound, never by waiting, so
-    // this line has to be a reason to set off rather than a description of a
-    // noise. Naming what he wants does that; it does not say where he is,
-    // which is the bell's job.
+    // There was a toast here — "Bells, somewhere close by", plus what he wanted
+    // — and the measurement behind it still stands: over 150 seconds a trader
+    // never came within talking range of a player who stayed put, closest 11
+    // cells and median 28, while ringing 15 times. He is found by walking
+    // towards the sound and never by waiting.
+    //
+    // But a caption is the game telling you a rare thing has happened, which
+    // makes it feel scheduled rather than met. The bell says the same thing and
+    // says it from a direction. If merchants now go unmet, the honest fix is to
+    // let him walk toward the player rather than to put the caption back.
     this.mobs.onMerchant = (mob) => {
-      // Quoted with its count rather than lowercased into a sentence: item
-      // labels are singular nouns, and "after ruby" or "after glass" reads
-      // wrong however you bend it. A quantity dodges the grammar and tells the
-      // player whether they can already fill it.
-      const req = mob.request;
-      const wants = req && !req.done
-        ? ` Someone wants ${req.count} × ${ITEMS[req.item]?.label ?? 'something'}.`
-        : '';
-      this.ui.toast(`Bells, somewhere close by.${wants}`, itemIdOf('coin'), 5200);
       this.audio.mob(mob.type, 'idle', mob.pos);
     };
     // The player's body. Built after Drops because it borrows the same factory
@@ -1970,6 +2041,12 @@ class Game {
     if (k < 0 || k >= D) return false;
     const existing = this.planet.at(col, k);
     if (existing !== 0 && RENDER_TYPE[existing] !== R_LIQUID && RENDER_TYPE[existing] !== R_CROSS) return false;
+    // A liquid cell counts as free space above — which is right for a wall, and
+    // is how you dam a river — but not for a flame or a stem. See `DROWNS`.
+    if (DROWNS[id] && RENDER_TYPE[existing] === R_LIQUID) {
+      this.ui.setHint(IS_TORCH[id] ? 'It would go out' : 'It would wash away');
+      return false;
+    }
     if (IS_SOLID[id] && this._intersectsPlayer(col, k)) return false;
     if (RENDER_TYPE[id] === R_CROSS && !this.planet.solidAt(col, k - 1)) return false;
     // A torch needs something to stand on or hang from, and which of those it
@@ -2474,6 +2551,11 @@ class Game {
     // pulled in on top of it and it needs this frame's distance to know.
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
       this.inventory.held().item, this.inventory.offhand.item);
+    // The body is an entity like any other and takes its torchlight the same
+    // way the mobs do — probed at chest height rather than at the feet, so a
+    // wall torch lights you as it lights the husk standing beside you.
+    this.character.setBlockLight(this._entityLight(
+      _v1.copy(this.player.position).addScaledVector(this.player.up, 0.9), _entityL));
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
     this.viewModel.setOffhand(this.inventory.offhand.item, this.ui.icons);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
@@ -2843,6 +2925,12 @@ class Game {
     // per frame for the same answer.
     const flames = this._flameCells;
     flames.length = 0;
+    // Same argument as the flames, one step further: this scan is the only
+    // thing in the game that already knows where the nearby lights are, and
+    // entities need that too — see `_entityLight`. Collecting them costs a
+    // push and a `centerOf` on a cache miss.
+    const emitters = this._emitters;
+    emitters.length = 0;
     // The scan has to reach at least as far as the brightest light carries, or
     // the contribution clips at the boundary instead of fading — walking away
     // from a torch would step the hand light from 0.21 straight to 0.
@@ -2867,10 +2955,44 @@ class Game {
           // exactly zero at the edge rather than being cut off mid-curve.
           const d2 = di * di + dj * dj + dk * dk;
           const reach = Math.min(emit * 0.55 + 1, RAD);
+          const lc = bl.lightColor || WHITE_L;
+
+          // The same emitter, kept in world space for anything that is not the
+          // player. Full when a lava sheet is in range, and then the *farthest*
+          // record is the one that goes: the scan walks in row order, so an
+          // untouched list would keep one corner of the sheet and drop the cells
+          // you are standing next to. Only ever runs on a cache miss.
+          //
+          // Recorded *before* the falloff test below, and that ordering is the
+          // point: a torch eight cells away throws nothing on you and is still
+          // the only thing lighting the deer standing next to it. The player's
+          // own answer may drop an emitter for being out of its reach; the
+          // list must not, because the list is asked about other places.
+          let slot = emitters.length;
+          if (slot >= MAX_ENTITY_EMITTERS) {
+            // Full: displace the farthest record, or nothing if this cell is
+            // farther than all of them.
+            slot = -1;
+            let worstD2 = d2;
+            for (let n = 0; n < emitters.length; n++) {
+              if (emitters[n].d2 > worstD2) { worstD2 = emitters[n].d2; slot = n; }
+            }
+          } else {
+            emitters.push(this._emitPool[slot]
+              || (this._emitPool[slot] = { pos: new THREE.Vector3(), r: 0, g: 0, b: 0, reach: 1, d2: 0 }));
+          }
+          if (slot >= 0) {
+            const rec = emitters[slot];
+            this.planet.centerOf(col, k, rec.pos);
+            const s = emit / 15;
+            rec.r = lc[0] * s; rec.g = lc[1] * s; rec.b = lc[2] * s;
+            rec.reach = reach;
+            rec.d2 = d2;
+          }
+
           const fall = Math.max(0, 1 - Math.sqrt(d2) / reach);
           if (fall <= 0) continue;
           const w = (emit / 15) * fall * fall;
-          const lc = bl.lightColor || WHITE_L;
           r = Math.max(r, lc[0] * w); g = Math.max(g, lc[1] * w); b = Math.max(b, lc[2] * w);
         }
       }
@@ -2878,6 +3000,82 @@ class Game {
     if (sawLava) this._mark('abyss');
     this._hlValue = { r, g, b };
     return this._hlValue;
+  }
+
+  /**
+   * Block light reaching an *entity*, in the units its emissive wants.
+   *
+   * ### Why entities needed one at all
+   *
+   * Every light in this world except the one in your hand is baked into the
+   * voxel grid, and an animal is not a chunk. Terrain reads its torchlight out
+   * of `blockLight`; a cow, a husk, the merchant, the player's own body and a
+   * dropped model have no such attribute and no way to fill one, so a torch
+   * planted at their feet did *nothing* to them. That is why a mob at night
+   * looked black next to ground the same torch had lit to orange, and it is the
+   * half of the report that no amount of tuning the sky fill could have fixed.
+   *
+   * ### Why a scan and not the flower route
+   *
+   * Instanced flowers get their block light from a per-instance attribute the
+   * mesher ships in the chunk payload (see `applyInstancedSway`). That works
+   * because a flower is static and chunk-resident: its cell is known at mesh
+   * time and never moves. A mob moves continuously and belongs to no chunk, so
+   * it would need the sample re-fetched every frame anyway — and `crossLight`
+   * only covers cells that *contain* a cross, which is not where mobs stand. So
+   * the attribute route buys nothing here and the emitter scan buys everything:
+   * it is already running, already cached, and answers for an arbitrary point.
+   *
+   * ### What it costs
+   *
+   * Nothing on a miss — `_handLight` is cached on the player's cell and
+   * `editSeq`, exactly as before — and one pass over at most
+   * MAX_ENTITY_EMITTERS records per entity per frame otherwise, which for a
+   * full herd is a few hundred distance tests. The early return means the
+   * common case (no light source anywhere near you) is a single length check.
+   *
+   * ### What it cannot see
+   *
+   * The scan is centred on the *player* and reaches HAND_LIGHT_RADIUS, so a mob
+   * lit by a torch twenty cells away gets nothing. That is the right trade: no
+   * block light carries further than the scan does, so the only thing missed is
+   * a torch that is near the mob and far from you — i.e. one you are looking at
+   * from across a valley, at which range the mob is a few pixels. It also does
+   * not know about walls, so a torch on the far side of one still reaches; the
+   * baked field does know, and the cost of matching it is a raycast per emitter
+   * per entity per frame.
+   *
+   * @param {THREE.Vector3} pos world point to sample
+   * @param {{r:number,g:number,b:number}} out written in place and returned
+   */
+  _entityLight(pos, out) {
+    out.r = 0; out.g = 0; out.b = 0;
+    // Cached; this is what keeps the emitter list in step with the world.
+    this._handLight();
+    const emitters = this._emitters;
+    // The gain the terrain applies to its own block light, read live off the
+    // uniform rather than copied — a torch-lit mob and the torch-lit dirt under
+    // it answer by the same amount and can never drift apart. RECIPROCAL_PI
+    // because the terrain's term carries the same Lambert factor; without it a
+    // lit mob would come out pi times brighter than the ground it stands on.
+    const gain = voxelUniforms.uBlockIntensity.value / Math.PI;
+    for (let n = 0; n < emitters.length; n++) {
+      const e = emitters[n];
+      const d = pos.distanceTo(e.pos);
+      if (d >= e.reach) continue;
+      // Same curve as the hand light's, in world units rather than cells — the
+      // two differ by the cell's arc length, which on this planet is within a
+      // few percent of one.
+      const fall = 1 - d / e.reach;
+      const w = fall * fall * gain;
+      // Max rather than sum, again matching `_handLight`: two torches in a room
+      // are not twice the lamp, and a lava sheet summed over two dozen cells
+      // would render anything near it pure white.
+      if (e.r * w > out.r) out.r = e.r * w;
+      if (e.g * w > out.g) out.g = e.g * w;
+      if (e.b * w > out.b) out.b = e.b * w;
+    }
+    return out;
   }
 
   /**
@@ -3618,16 +3816,42 @@ class Game {
   _updateSharedUniforms() {
     const p = this.sky.palette;
     const w = this.weather;
-    voxelUniforms.uSkyColor.value.copy(p.zenith).lerp(p.horizon, 0.55).lerp(WHITE, 0.34);
-    voxelUniforms.uSkyIntensity.value = (0.34 + p.sunIntensity * 0.72) * (0.5 + w.sun * 0.5);
+    // Everything below that is night-only is weighted by `night` *squared*, and
+    // that is the whole guarantee that this is a night pass and not a re-grade
+    // of the game. `night` is already zero for any sun more than about 6°
+    // above the horizon, so squaring it costs nothing at the deep end — it is
+    // exactly 1 at midnight — while pushing the shoulder out far enough that
+    // the last of daylight is untouched. Measured across the sky curve: with
+    // the sun 11° up every channel of every surface is bit-identical to what
+    // it was, at 3° the change is under 1%, and it only reaches a fifth once
+    // the sun is genuinely below the horizon.
+    const night = this.sky.night ?? 0;
+    const n2 = night * night;
+    voxelUniforms.uSkyColor.value.copy(p.zenith).lerp(p.horizon, 0.55).lerp(WHITE, 0.34)
+      .lerp(MOON_FILL, n2);
+    voxelUniforms.uSkyIntensity.value =
+      (0.34 - SKY_NIGHT_DROP * n2 + p.sunIntensity * 0.72) * (0.5 + w.sun * 0.5);
     voxelUniforms.uBounceColor.value.copy(p.fog).lerp(WHITE, 0.2).multiplyScalar(0.7);
     voxelUniforms.uSunDir.value.copy(this.sky.sunDir);
     voxelUniforms.uSunColor.value.copy(p.sun).multiplyScalar(w.sun);
     // Reflection sky: the palette's own hue, untouched by the whitening that
     // makes uSkyColor usable as ambient fill. Overcast drags it toward the fog
     // colour, so a grey day gives a grey sea.
+    //
+    // With a floor under it after dark. The palette's night zenith is 0x03050f
+    // and the fresnel term replaces up to 88% of a grazing water fragment with
+    // it, so a lake seen across its length was very nearly pure black — a hole
+    // cut in the terrain rather than a surface. This lifts it to a dim blue
+    // that reads as water and stays far below the same lake at noon (which
+    // measures around (0, 67, 127) on screen against roughly (0, 0, 30) here).
+    // It is a *reflection*, not an emissive: water under a roof reflects the
+    // cave ceiling and this never reaches it, because the fresnel mix is
+    // multiplied by nothing that a cave changes — which is a genuine limitation
+    // and the reason the lift is small enough to pass for scattered moonlight
+    // if you do see it underground.
     voxelUniforms.uSkyReflect.value.copy(p.zenith).lerp(p.horizon, 0.5)
-      .lerp(p.fog, 1 - w.sun);
+      .lerp(p.fog, 1 - w.sun)
+      .lerp(MOON_REFLECT, n2);
     voxelUniforms.uFogColor.value.copy(p.fog);
     voxelUniforms.uFogDensity.value = this.player.headInWater ? 0 : 0.0013 * Math.min(1.9, w.fog);
     voxelUniforms.uCamPos.value.copy(this.camera.position);
@@ -3639,6 +3863,15 @@ class Game {
       voxelUniforms.uWaterTint.value.setRGB(0.30 * lit, 0.66 * lit, 0.72 * lit);
     }
     voxelUniforms.uWind.value = w.wind;
+    // Item drops with no 3D art fall out of the world as two crossed cards
+    // wearing an inventory icon, and those cards are MeshBasicMaterial — they
+    // ignore every light in the scene and draw their texture at full brightness
+    // always. That was already wrong at midnight and this pass would have made
+    // it glaring, because everything around them is now darker: a dropped
+    // feather would have been the brightest thing in a moonlit field. There is
+    // no light to dim, so the albedo is dimmed instead. Squared night again, so
+    // by day the multiplier is exactly one and the card is untouched.
+    this.drops.setSkyLevel(1 - 0.84 * n2);
 
     this.sky.cloudUniforms.uCoverage.value = w.coverage;
     this.sky.cloudUniforms.uOpacity.value = w.opacity;

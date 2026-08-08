@@ -45,6 +45,8 @@ export class Drops {
     scene.add(this.group);
     this.materials = materials;
     this.spriteCache = new Map();
+    /** Last value handed to setSkyLevel; 1 is "as the texture was authored". */
+    this._skyLevel = 1;
     this.iconFactory = null;
     /**
      * The flow simulation, if there is one. Optional: drops predate it and a
@@ -55,6 +57,35 @@ export class Drops {
   }
 
   setIcons(icons) { this.iconFactory = icons; }
+
+  /**
+   * How lit the world is, 0..1, so the sprite drops can pretend to care.
+   *
+   * A drop with 3D art is a MeshStandardMaterial and takes the scene's lights
+   * like any other entity. A drop without any is two crossed cards wearing an
+   * inventory icon, and those are MeshBasicMaterial: unlit by construction,
+   * drawn at full texture brightness at noon, at midnight and at the bottom of
+   * a cave alike. Nobody noticed while the night was bright; darkening the
+   * night would have left a dropped feather glowing in a black field.
+   *
+   * There is no light to turn down, so this turns down the albedo instead —
+   * which is not physics, but is indistinguishable from it on a flat card with
+   * no normal to shade. One `Color.setScalar` per *item type* that has ever been
+   * dropped, not per drop, because the materials are cached and shared.
+   *
+   * Deliberately not routed through the block light the mobs get: a drop is
+   * 0.46 of a cell and spins, and the machinery would cost a probe per drop per
+   * frame against 260 of them for a few pixels. The consequence is honest and
+   * visible — a stack of sticks lying beside a torch stays as dark as the field
+   * — and is written down here rather than fixed.
+   *
+   * @param {number} level 1 leaves the card exactly as it renders today
+   */
+  setSkyLevel(level) {
+    if (this._skyLevel === level) return;
+    this._skyLevel = level;
+    for (const mat of this.spriteCache.values()) mat.color.setScalar(level);
+  }
 
   /** Public builder so the player model can hold the same meshes. */
   createItemMesh(itemId) { return this._mesh(itemId); }
@@ -86,6 +117,10 @@ export class Drops {
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.magFilter = THREE.LinearFilter;
       mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide });
+      // Born at whatever time of day it is: setSkyLevel only walks the cache it
+      // can see, so the first bone dropped at midnight would otherwise be the
+      // one card in the game rendering at full brightness until dawn.
+      mat.color.setScalar(this._skyLevel);
       this.spriteCache.set(itemId, mat);
     }
     // Two crossed cards, not one.

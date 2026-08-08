@@ -533,6 +533,26 @@ export const IS_DOOR = new Uint8Array(N_BLOCKS);
 export const IS_SIGN = new Uint8Array(N_BLOCKS);
 export const IS_FENCE = new Uint8Array(N_BLOCKS);
 export const IS_TORCH = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for anything that cannot be placed into a cell that already holds liquid.
+ *
+ * Two kinds of block, one reason each, and both are about what the water would
+ * do to the thing rather than about what fits: a torch underwater is a flame
+ * burning in a lake, and a flower planted in a river is a stem that would be
+ * gone with the current. Placing either was possible because `_placeBlock`
+ * treats a liquid cell as free space — which is right for a wall, and is how
+ * you dam a river, but is wrong for these.
+ *
+ * Deliberately *not* everything else. A ladder, a door, a sign, a fence, a
+ * crate or a workbench under water is merely wet, and a submerged doorway is a
+ * thing players build on purpose. Refusing those would be a rule about tidiness
+ * dressed up as physics.
+ *
+ * This is a placement rule only. Water that later flows *into* a torch does not
+ * put it out — that would need the liquid simulation to know about block
+ * removal, and it is a bigger change than the one being asked for.
+ */
+export const DROWNS = new Uint8Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -649,6 +669,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_SIGN[i] = b.render === R_SIGN ? 1 : 0;
   IS_FENCE[i] = b.render === R_FENCE ? 1 : 0;
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
+  DROWNS[i] = (b.render === R_TORCH || b.render === R_CROSS) ? 1 : 0;
   IS_SHAPED[i] = (b.render === R_SLAB || b.render === R_STAIR
     || b.render === R_LADDER || b.render === R_DOOR || b.render === R_SIGN
     || b.render === R_FENCE || b.render === R_TORCH) ? 1 : 0;

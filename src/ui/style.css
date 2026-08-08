@@ -72,7 +72,11 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
 .menu-card .tagline { margin-bottom: 16px; }
 .menu-actions { display: flex; flex-direction: column; gap: 5px; margin-top: 14px; }
 .death-title { color: #f0a08a !important; }
-.note.credits { border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 10px; }
+.note.credits { border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 10px; margin-bottom: 4px; }
+/* One line per source, so no one is a clause inside somebody else's sentence. */
+.credit-list { list-style: none; font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
+.credit-list li { padding-left: 10px; text-indent: -10px; margin-bottom: 3px; }
+.credit-list strong { color: var(--ink); font-weight: 650; }
 
 button {
   font: inherit; cursor: pointer; border: none; border-radius: 7px;

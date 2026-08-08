@@ -33,6 +33,24 @@ const _lx = new THREE.Vector3();
 const _ly = new THREE.Vector3();
 const _lz = new THREE.Vector3();
 
+const _white = new THREE.Color(1, 1, 1);
+
+/**
+ * The colour of a clear night, as light rather than as sky.
+ *
+ * Exported because two systems have to agree on it exactly: the entity fill
+ * below, and the terrain's own sky ambient in `main._updateSharedUniforms`.
+ * They light different halves of the same picture and a night that was blue on
+ * the animals and neutral on the grass would be worse than either.
+ *
+ * In the working (linear) space, so it is written as floats — a hex literal
+ * would be decoded from sRGB, and this is a radiance, not a swatch. Its
+ * luminance is ~0.33, deliberately close to the ~0.34 white it displaces: it is
+ * a hue rotation first and a dimming second. See MOON_FILL's fuller note in
+ * main.js for what it fixes.
+ */
+export const MOON_FILL = new THREE.Color(0.22, 0.32, 0.80);
+
 const _refX = new THREE.Vector3(1, 0, 0);
 const _refY = new THREE.Vector3(0, 1, 0);
 const _east = new THREE.Vector3();
@@ -573,7 +591,25 @@ export class Sky {
     this.sunLight.visible = p.sunIntensity > 0.01;
     this._fitShadow(camera, target);
 
-    this.moonLight.intensity = night * 0.16;
+    // The moon, trimmed from 0.16.
+    //
+    // This is a directional with no shadow map, and it is the *only* scene
+    // light the terrain still listens to (the voxel material throws away all
+    // indirect — see LIGHTS_END — so ambient and the entity fill never reach
+    // the ground). That made it the single biggest contributor to night
+    // terrain, ahead of the baked skylight, and unlike the skylight it is not
+    // gated by anything the world knows: it is what leaked into every cave and
+    // lit the animals in them. It stays, because a clear night should have a
+    // direction and hills should have a moonlit side; it is simply no longer
+    // most of the night.
+    //
+    // Not shelter-dimmed the way the entity fill below is. That was tried and
+    // is wrong for this light: shelter is the *player's* roof, and dimming a
+    // directional by it would darken the whole moonlit valley the moment you
+    // stepped under a tree. Terrain is protected instead by the shadowGate on
+    // voxel skylight, which knows about the roof over each fragment; what is
+    // left over is entities in caves, and that is what the trim is for.
+    this.moonLight.intensity = night * 0.13;
     this.moonLight.visible = night > 0.02;
     this.moonLight.position.copy(target).addScaledVector(this.moonDir, 90);
     this.moonLight.target.position.copy(target);
@@ -582,7 +618,14 @@ export class Sky {
     this.ambient.color.copy(p.ambient);
     this.ambient.intensity = 0.16 + night * 0.04;
 
-    this.entityFill.color.copy(p.zenith).lerp(p.horizon, 0.5).lerp(new THREE.Color(1, 1, 1), 0.35);
+    // The same moon blue the terrain's sky fill takes after dark, for the same
+    // reason and by the same weight — see MOON_FILL in main.js. If the two
+    // disagreed a cow would be lit by a different night than the field it is
+    // standing in, which is the whole failure this pass is about, only in
+    // colour instead of in level.
+    const n2 = night * night;
+    this.entityFill.color.copy(p.zenith).lerp(p.horizon, 0.5).lerp(_white, 0.35)
+      .lerp(MOON_FILL, n2);
     this.entityFill.groundColor.copy(p.fog).multiplyScalar(0.5);
     // Mobs are lit by scene lights; the terrain is lit by its own baked voxel
     // light. That is fine by day, when both are bright, and wrong after dark:
@@ -606,7 +649,25 @@ export class Sky {
     // It dims rather than switching off. Cutting entities loose from the sky
     // entirely is how they became black cut-outs under trees in the first
     // place, and a thick canopy reads as "roofed" to that same probe.
-    this.entityFill.intensity = (0.07 + p.sunIntensity * 0.93) * (0.25 + 0.75 * shelter);
+    //
+    // The night floor was 0.07 and is now 0.17, added through the squared night
+    // weight so that by day the expression is *arithmetically unchanged* — at
+    // noon night is 0 and this is the same 0.07 constant it always was.
+    //
+    // 0.07 was the answer to a real problem (a husk at midnight glowing as the
+    // brightest thing on screen) and it overshot in the other direction: with
+    // the terrain still carrying its baked skylight, the ground under an animal
+    // was several times brighter than the animal, so the animal read as a hole.
+    //
+    // 0.17 is not eyeballed. It was solved for by running both halves of the
+    // picture — this hemisphere plus the moon and ambient on one side, the
+    // voxel material's sky fill plus the moon on the other — through the
+    // shipped ACES pass, exposure and grade, and looking for the floor at which
+    // a midnight husk lands on the same screen value as the stone and grass
+    // around it. Below 0.17 it is a silhouette with nothing in it; above, it
+    // starts glowing again, which is the bug this constant was born to fix.
+    this.entityFill.intensity =
+      (0.07 + 0.10 * n2 + p.sunIntensity * 0.93) * (0.25 + 0.75 * shelter);
   }
 
   setPixelRatio(r) { this.stars.material.uniforms.uPixelRatio.value = r; }

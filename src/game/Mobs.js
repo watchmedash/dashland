@@ -545,6 +545,9 @@ const _rel = new THREE.Vector3();
 const _ray = new THREE.Vector3();
 const _rpos = new THREE.Vector3();
 const _vox = new THREE.Vector3();
+/** Where a mob's block light is sampled, and what comes back. */
+const _lit = new THREE.Vector3();
+const _blockL = { r: 0, g: 0, b: 0 };
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _p = [0, 0, 0];
@@ -1423,8 +1426,23 @@ const SPAWN_BY_BIOME = {
 // one you met is gone by the time you come back for it and the next turns up
 // wherever you happen to be standing.
 const MERCHANT_FIRST = 120;      // seconds of grace after a world starts
-const MERCHANT_COOLDOWN = 300;   // seconds between one leaving and the next
-const MERCHANT_CHANCE = 0.18;    // per spawn tick (6s) once the wait is over
+// Seconds between one leaving and the next.
+//
+// Raised from 300 because the spawn roll is only half of how often a merchant
+// is *present*. He lives for MERCHANT_LIFE, so with a 300s gap and a ~33s roll
+// the planet had a trader standing on it about 56% of the time — better than
+// even odds at any given moment, which is a resident, not an event. At 900 it
+// is nearer a fifth, and since he now only arrives in daylight, a night is
+// always his absence. You are alone here; that has to be the default state and
+// meeting someone has to be the exception.
+const MERCHANT_COOLDOWN = 900;
+// Per spawn tick once the wait is over. The comment used to say "(6s)" and the
+// number was chosen against that, but SPAWN_PERIOD was shortened to 2.0 when
+// the wildlife top-up rate was fixed and this was never rescaled — so a
+// merchant arrived roughly three times as often as intended, about 11 seconds
+// after the cooldown instead of 33. A thing that turns up that reliably is not
+// an event. 0.06 against a 2s tick is the 0.18-per-6s this always meant.
+const MERCHANT_CHANCE = 0.06;
 const MERCHANT_LIFE = 420;       // seconds before it moves on for good
 /** Coins one trader can pay out before it has nothing left to buy with. */
 const MERCHANT_PURSE_MIN = 140;
@@ -1460,6 +1478,13 @@ export class Mobs {
     this.onAttack = null;
     /** (mob) => void — a hostile is alight, for smoke and embers. */
     this.onBurn = null;
+    /**
+     * (worldPos, out) => out — coloured block light reaching a point, already
+     * scaled into the units a material's `emissive` wants. Supplied by main;
+     * null means no torchlight on mobs, which is how they rendered before this
+     * existed and is a safe thing for a test harness to leave unset.
+     */
+    this.blockLightAt = null;
     /** Swings in flight, so the hit lands on contact rather than on the decision. */
     this._pendingHits = [];
     /** Animals taken by a predator this frame, removed once the tick is over. */
@@ -1634,7 +1659,24 @@ export class Mobs {
         ? n.material.map((m) => m.clone())
         : n.material.clone();
       n.material = cloned;
-      for (const m of (Array.isArray(cloned) ? cloned : [cloned])) model.owned.push(m);
+      for (const m of (Array.isArray(cloned) ? cloned : [cloned])) {
+        model.owned.push(m);
+        // Block light, wired here and driven in _animate.
+        //
+        // `emissive` alone is one flat colour over the whole body, which on a
+        // textured animal reads as a coat of paint. `emissive * emissiveMap`
+        // is `texel * light` — arithmetically the same shape as the term the
+        // terrain adds for its own baked block light, so a torch-lit cow and
+        // the torch-lit dirt under it are shaded by the same expression, and
+        // it needs no shader patch on a glTF material we do not own.
+        //
+        // Reusing `map` as the emissive map is the same rule as the damage
+        // tint and `MobModels.lit`: the texture object is passed across
+        // untouched. Nothing here writes to it — assigning it to a second
+        // slot binds the WebGLTexture that is already uploaded — and it is
+        // writing to it that renders the mob flat white.
+        if (m.map && m.emissive) { m.emissiveMap = m.map; m.needsUpdate = true; }
+      }
       // (No layer juggling here. Putting a mesh on layer 1 to "reach" the
       // entity fill was tried and does nothing: three tests a light's layers
       // against the camera, not against each object, so object layers cannot
@@ -3778,7 +3820,11 @@ export class Mobs {
       // The merchant. Same surface search as the wildlife — it has to arrive on
       // ground it can walk on — but gated on its own clock rather than on the
       // headcount, so it is never crowded out by a full paddock.
-      if (this.merchantT <= 0 && !this.merchant() && Math.random() < MERCHANT_CHANCE) {
+      // Daylight only. There was no time condition here at all, so a trader was
+      // as likely to come out of the dark as a husk was — which reads as one
+      // more thing the night spawns, and undercuts both. He is the one mob on
+      // the planet that will talk to you; he keeps daytime hours.
+      if (!night && this.merchantT <= 0 && !this.merchant() && Math.random() < MERCHANT_CHANCE) {
         const spot = this._findMerchantColumn(playerCol, player.position);
         const mob = spot ? this.spawn('merchant', spot.col, spot.k) : null;
         if (mob) this.onMerchant?.(mob);
@@ -4483,6 +4529,36 @@ export class Mobs {
     if (mob.tintR !== tr || mob.tintG !== tg || mob.tintB !== tb) {
       mob.tintR = tr; mob.tintG = tg; mob.tintB = tb;
       for (const m of model.owned) if (m.color) m.color.setRGB(tr, tg, tb);
+    }
+
+    // --- block light ---
+    // What a torch, a lantern, a lit kiln or a lake of lava does to a body
+    // standing next to it. Every one of those is baked into the voxel grid and
+    // a mob is not a chunk, so until this existed a mob got nothing from any of
+    // them: the animals were lit by the sky alone, and a cave with a torch in it
+    // lit the walls and left the cow in front of them black. See
+    // `main._entityLight` for where the answer comes from and what it costs.
+    //
+    // Probed at half height rather than at the feet, so a wall torch — which is
+    // bracketed a block up — lights the body and not just the ground it stands
+    // on.
+    //
+    // Multiplied by the same tint the albedo takes, so a struck animal beside a
+    // fire still reddens: the tint darkens green and blue in the diffuse, and
+    // without this the emissive would have gone on adding untinted firelight
+    // over the top and washed the flash out at exactly the moment it matters.
+    if (this.blockLightAt) {
+      _lit.copy(mob.pos).addScaledVector(mob.up, mob.spec.height * 0.5);
+      const bl = this.blockLightAt(_lit, _blockL);
+      const er = bl.r * tr, eg = bl.g * tg, eb = bl.b * tb;
+      // A 1/255 deadband. A mob walking past a torch changes this every frame
+      // and a herd is ~22 part materials each; the guard means a still animal
+      // in an unlit field costs one comparison rather than a write per part.
+      if (Math.abs(er - (mob.emR || 0)) > 0.004 || Math.abs(eg - (mob.emG || 0)) > 0.004
+        || Math.abs(eb - (mob.emB || 0)) > 0.004) {
+        mob.emR = er; mob.emG = eg; mob.emB = eb;
+        for (const m of model.owned) if (m.emissive) m.emissive.setRGB(er, eg, eb);
+      }
     }
   }
 

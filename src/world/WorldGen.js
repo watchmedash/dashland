@@ -4,9 +4,12 @@
 import { Noise, makeRng, hash3, clamp, lerp, smoothstep } from '../util/Noise.js';
 import {
   F, D, FACES, R_MIN, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX,
+  R_SEABED_MIN, R_CANYON_MIN,
   COLUMNS, NUM_VOXELS, vidx, cidx, BIOME,
 } from './Constants.js';
-import { centerDir, colNeighbor, colParts, patchColumn } from './Sphere.js';
+import {
+  centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
+} from './Sphere.js';
 import { ID, N_BLOCKS } from './Blocks.js';
 import { placeStructures } from './Structures.js';
 
@@ -37,6 +40,79 @@ for (const n of ['dirt', 'sandstone', 'red_sandstone', 'coarse_dirt', 'peat', 'm
  * percent of the whole surface. One is a shore; two already reads as a desert.
  */
 const BEACH_REACH = 1;
+
+/**
+ * The ocean's depth profile, in blocks below sea level, as a function of how
+ * many columns a cell sits from the nearest land.
+ *
+ * The sea used to bottom out at six blocks and sit at one for half its area,
+ * because the height field flattens everything within three units of sea level
+ * toward R_SEA - 0.4 — the same line that stops the coast fraying into a
+ * fractal also drowns the basins. Deepening the *noise* to compensate was tried
+ * and it does not work: the flattening runs afterwards and eats it, and turning
+ * the flattening down brings back a shoreline with a thousand islands in it.
+ *
+ * So depth is imposed after the fact, from distance offshore rather than from
+ * altitude. That is what makes a shelf possible at all — an altitude rule
+ * cannot tell "one block under water beside a beach" from "one block under
+ * water two hundred columns out", and those want opposite treatment.
+ *
+ * Three regimes, and the first one is the load-bearing one: the shelf keeps the
+ * first three columns under 2.5 blocks so a beach is still something you wade
+ * into rather than a ledge you fall off. The slope is deliberately steep, near
+ * 45 degrees — you swim down it, you do not walk it, and a gentle one would eat
+ * the entire width of every small sea before reaching any depth worth diving.
+ */
+const SHELF_COLS = 3;          // wadeable, 0.8 blocks per column
+const SLOPE_COLS = 11;         // continental slope, 0.95 blocks per column
+const OCEAN_MAX_DEPTH = R_SEA - R_SEABED_MIN;   // 15
+
+function oceanDepthAt(d) {
+  if (d <= SHELF_COLS) return d * 0.8;
+  const shelf = SHELF_COLS * 0.8;
+  if (d <= SHELF_COLS + SLOPE_COLS) return shelf + (d - SHELF_COLS) * 0.95;
+  return shelf + SLOPE_COLS * 0.95 + (d - SHELF_COLS - SLOPE_COLS) * 0.18;
+}
+
+/**
+ * Canyon sizing, in columns and blocks. A cell is about 0.92 units across and a
+ * great circle is roughly 823 columns, so these are all fractions of a planet
+ * rather than fractions of a continent.
+ *
+ * Length 130-220 columns is a quarter of the way round the planet at most: far
+ * enough that walking one end to the other is a trip with a middle to it, short
+ * enough that it is a place rather than a feature of the globe. Anything Earth
+ * would call a canyon — the Grand Canyon is 446 km, six times the circumference
+ * of this planet — is not a size this world has.
+ *
+ * Depth 10-18 blocks against a total planetary relief of 18 is the point. The
+ * highest ground is only eighteen blocks above the lowest, so the only way to
+ * get somewhere with real vertical scale is to cut down rather than build up,
+ * and a canyon is the one landform that can do that without a mountain range.
+ * At 18 deep the rim is out of jump reach from the floor and the strata bands
+ * the crust already has — limestone at 120, granite at 114 — come out in the
+ * wall as visible courses.
+ *
+ * Width 4-11 columns at the rim. Narrower than the depth almost everywhere, so
+ * the thing reads as a slot you are down inside rather than as a valley.
+ */
+const CANYON_COUNT = 6;
+const CANYON_MAX_DEPTH = 20;
+const CANYON_BENCH = 3;        // wall terrace height, in blocks
+
+// Scratch for dirToColumn — this is called a million times in the canyon walk.
+const _dtf = { f: 0, a: 0, b: 0 };
+const _dtc = { f: 0, i: 0, j: 0, col: 0 };
+
+/** World direction → the column containing it. */
+function dirToColumn(x, y, z, out = _dtc) {
+  dirToFace(x, y, z, _dtf);
+  const i = Math.min(F - 1, Math.max(0, Math.floor(axisToGrid(_dtf.a))));
+  const j = Math.min(F - 1, Math.max(0, Math.floor(axisToGrid(_dtf.b))));
+  out.f = _dtf.f; out.i = i; out.j = j;
+  out.col = cidx(_dtf.f, i, j);
+  return out;
+}
 
 export class WorldGen {
   constructor(seed = 20260805) {
@@ -258,6 +334,130 @@ export class WorldGen {
       }
     }
 
+    // ---- ocean basins ------------------------------------------------------
+    // Distance offshore, in columns, by a flood fill outward from the coast.
+    // Seeded from the *land* side so the first ocean column comes out at 1 and
+    // the profile in `oceanDepthAt` can be written in the units a player feels:
+    // "three columns out you are still standing up".
+    //
+    // This runs after the biome pass and only ever lowers ground that is
+    // already ocean, so nothing is reclassified — a column that was Ocean stays
+    // Ocean, and land is untouched. Doing it before the biome pass instead
+    // moved the coastline, which moved the beaches, which moved the shore
+    // distance field the beaches were grown from.
+    onProgress(0.205, 'Flooding the basins');
+    {
+      const oceanDist = new Int16Array(COLUMNS).fill(-1);
+      const queue = new Int32Array(COLUMNS);
+      let qn = 0;
+      for (let col = 0; col < COLUMNS; col++) {
+        if (colBiome[col] === BIOME.OCEAN) continue;
+        for (let d = 0; d < 4; d++) {
+          if (colBiome[colNeighbor(col, d)] === BIOME.OCEAN) {
+            oceanDist[col] = 0; queue[qn++] = col; break;
+          }
+        }
+      }
+      for (let qi = 0; qi < qn; qi++) {
+        const col = queue[qi];
+        const dd = oceanDist[col] + 1;
+        for (let n = 0; n < 4; n++) {
+          const nb = colNeighbor(col, n);
+          if (nb < 0 || oceanDist[nb] >= 0 || colBiome[nb] !== BIOME.OCEAN) continue;
+          oceanDist[nb] = dd;
+          queue[qn++] = nb;
+        }
+      }
+
+      for (let f = 0; f < FACES; f++) {
+        for (let i = 0; i < F; i++) {
+          for (let j = 0; j < F; j++) {
+            const col = cidx(f, i, j);
+            const d = oceanDist[col];
+            if (d <= 0) continue;
+            centerDir(f, i, j, dir);
+            // A flat plate at the bottom of the profile reads as a swimming
+            // pool. This is the same field the crust uses for its band edges,
+            // at low frequency and small amplitude: seamounts and hollows of a
+            // couple of blocks, enough to give the deep somewhere to swim over.
+            const bump = this.n.fbm3(dir[0] * 3.4 + 61.7, dir[1] * 3.4, dir[2] * 3.4, 3, 2, 0.5) * 1.9;
+            const want = R_SEA - oceanDepthAt(d) + bump;
+            // `min` so an existing basin that was already deeper keeps its
+            // floor, and the clamp so no amount of noise can put the seabed
+            // into the rock the mantle and the cave pass need.
+            colHeight[col] = Math.max(R_SEABED_MIN, Math.min(colHeight[col], want));
+          }
+        }
+      }
+    }
+
+    // ---- canyons -----------------------------------------------------------
+    onProgress(0.21, 'Cutting the gorges');
+    const canyonMask = this.carveCanyons(colHeight, colBiome, rng);
+
+    // ---- what the sea can actually reach -----------------------------------
+    /**
+     * Which sub-sea-level columns are connected to the ocean.
+     *
+     * The fill pass has always decided water by altitude alone — anything
+     * below R_SEA and above the ground is water — and until there were canyons
+     * that was exactly equivalent, because the only ground below sea level was
+     * ocean floor by definition. It stopped being equivalent the moment a
+     * gorge was cut fourteen blocks into land that stands two blocks out of the
+     * water: an altitude rule fills every canyon on the planet to the brim,
+     * including the ones nowhere near a coast.
+     *
+     * So connectivity is settled here instead, as a flood fill outward from the
+     * ocean over columns whose ground is under sea level. What it reaches is
+     * sea, what it does not is a dry depression. It also quietly removes the
+     * one-block puddles that used to appear in any inland dip that happened to
+     * land in the half-block band between the ocean cutoff and sea level.
+     */
+    const submerged = new Uint8Array(COLUMNS);
+    {
+      const queue = new Int32Array(COLUMNS);
+      let qn = 0;
+      for (let col = 0; col < COLUMNS; col++) {
+        if (colBiome[col] === BIOME.OCEAN) { submerged[col] = 1; queue[qn++] = col; }
+      }
+      // The cutoff is R_SEA - 0.5, not R_SEA, and the half block matters. The
+      // topmost cell the fill can put water in has its centre at 129.5, so a
+      // column standing at 129.7 holds no water — but there is a lot of such
+      // ground, because the height field deliberately flattens everything near
+      // sea level toward R_SEA - 0.4 and that pile lands just above the line.
+      // Letting it conduct made a continuous wet web out of every coastal
+      // plain on the planet, and four of the six canyons filled through it
+      // from a shore they never actually reached.
+      const WET = R_SEA - 0.5;
+      for (let qi = 0; qi < qn; qi++) {
+        const col = queue[qi];
+        for (let n = 0; n < 4; n++) {
+          const nb = colNeighbor(col, n);
+          if (nb < 0 || submerged[nb] || colHeight[nb] >= WET) continue;
+          /**
+           * A gorge marked dry gets a sill instead of a flood.
+           *
+           * The two designated sea canyons breach the coast on purpose; the
+           * other four are supposed to stay dry, and steering them away from
+           * the water is not enough on its own. A canyon is up to eleven
+           * columns wide and the walk only knows about the ground under the
+           * path — so a trunk running along a headland at rim 134 can put the
+           * far edge of its own footprint into a bay it never went near, and
+           * one such cell floods the entire system through the fill.
+           *
+           * Raising the frontier column back to just over the waterline seals
+           * it in one column, which is all the fill and all the voxel geometry
+           * need. It reads as a bar of ground across the gorge mouth, and it
+           * is a good thing to find: the canyon behind it is fourteen blocks
+           * below sea level, and the bar is diggable.
+           */
+          if (canyonMask[nb] === 2) { colHeight[nb] = R_SEA + 0.2; continue; }
+          submerged[nb] = 1;
+          queue[qn++] = nb;
+        }
+      }
+    }
+
     // slope from the finished height field — exact, unlike sampling the noise
     for (let col = 0; col < COLUMNS; col++) {
       const h = colHeight[col];
@@ -311,6 +511,19 @@ export class WorldGen {
             default: top = ID.grass; sub = ID.dirt; break;
           }
           if (rocky && bi !== BIOME.DESERT && bi !== BIOME.BADLANDS) { top = ID.stone; sub = ID.stone; }
+          // A canyon is cut in the height field, so without this the floor and
+          // the terraces inherit whatever the rim wears and a fourteen-block
+          // gorge comes out lined with meadow turf — a green ditch. The walls
+          // already handle themselves: they are steep, so the `rocky` test
+          // above turns them to stone, and everything below four blocks of
+          // depth is `stratum` and shows the bands the carve exposed.
+          if (canyonMask[col]) {
+            if (bi === BIOME.DESERT || bi === BIOME.BADLANDS) {
+              top = patch > 0.1 ? ID.red_sand : ID.gravel; sub = ID.red_sandstone;
+            } else {
+              top = patch > 0.22 ? ID.coarse_dirt : ID.gravel; sub = ID.stone;
+            }
+          }
           // Sandy shallows, but only just off the shore. This used to be a flat
           // "anything under sea level + 0.4 is sand" rule running independently
           // of the biome, which is the other half of why the planet looked like
@@ -330,7 +543,7 @@ export class WorldGen {
                 : m > 0.16 ? ID.ash_stone
                   : (m < -0.5 ? ID.lava : ID.basalt);
             } else if (r > h) {
-              id = r <= R_SEA ? ID.water : ID.air;
+              id = (r <= R_SEA && submerged[col]) ? ID.water : ID.air;
             } else {
               const depth = h - r;
               if (depth < 1.0) id = top;
@@ -353,10 +566,20 @@ export class WorldGen {
       const f = (col / (F * F)) | 0;
       const rem = col - f * F * F;
       centerDir(f, (rem / F) | 0, rem % F, dir);
+      // How much rock a cave has to leave under the surface. 2.2 everywhere
+      // else, because a cave that breaks daylight at random leaves the planet
+      // pocked with holes nobody dug — but in a canyon that is exactly the
+      // thing worth having. A gorge floor fourteen blocks down is already
+      // halfway to the cave band, and a mouth in the wall is how the two
+      // systems become one place instead of two. At 1.0 the cave still has to
+      // genuinely reach the floor to open; it does so where a passage runs
+      // close underneath, which is a handful of openings per canyon rather
+      // than a sieve.
+      const skin = canyonMask[col] ? 1.0 : 2.2;
       for (let k = 0; k < D; k++) {
         if (!CARVEABLE[blocks[base + k]]) continue;
         const r = R_MIN + k + 0.5;
-        if (r < R_MANTLE + 1.5 || r > h - 2.2) continue;
+        if (r < R_MANTLE + 1.5 || r > h - skin) continue;
         const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
         const a = nc.ridged3(px * 0.062, py * 0.062, pz * 0.062, 3, 2.1, 0.5);
         const b = nc.ridged3(px * 0.062 + 40.5, py * 0.062, pz * 0.062 - 22.3, 3, 2.1, 0.5);
@@ -435,13 +658,24 @@ export class WorldGen {
       }
     }
 
-    // ---- 5. trees + scatter ------------------------------------------------
+    // ---- 5. volcanic fields ------------------------------------------------
+    // After caves and ore, before trees. After caves because a caldera is built
+    // out of ash stone and basalt and both are `CARVEABLE` — carving afterwards
+    // would drill passages through the cone and, worse, out from under the vent
+    // pool. After ore for the same reason on `ORE_HOST`. Before trees because
+    // trees and flora key off the surface *block*, and ash stone is not one
+    // they grow on, so the scorched ground stays bare for free rather than
+    // needing a mask.
+    onProgress(0.68, 'Lighting the vents');
+    this.placeVolcanoes(blocks, colHeight, colBiome, colSlope, canyonMask, rng);
+
+    // ---- 6. trees + scatter ------------------------------------------------
     onProgress(0.7, 'Growing forests');
     this.placeTrees(blocks, colHeight, colBiome, colSlope, rng);
     onProgress(0.86, 'Scattering flora');
     this.placeFlora(blocks, colHeight, colBiome, rng);
 
-    // ---- 6. structures -----------------------------------------------------
+    // ---- 7. structures -----------------------------------------------------
     // No ruins, crypts or vaults. A planet you can walk around in four minutes
     // reads as *yours*; salting it with somebody else's architecture makes it
     // read as a level someone built, which is the opposite of the point. The
@@ -452,6 +686,538 @@ export class WorldGen {
 
     onProgress(0.95, 'Ready');
     return { blocks, colBiome, colHeight, structures: this.structureCounts };
+  }
+
+  /**
+   * Cut a canyon system into the height field.
+   *
+   * This is a height-field pass, not a voxel pass, and that is the whole design
+   * decision. Carving the voxel array directly was the obvious approach and it
+   * costs more than it buys: the canyon then has to lay its own floor soil, mix
+   * its own water below sea level, and keep `colHeight` in sync anyway or every
+   * later pass — caves, ore, trees, the slope test — is reasoning about a
+   * surface that is no longer there. Lowering the height field instead means
+   * the fill pass builds the gorge as ordinary terrain. The floor gets soil
+   * over `stratum` like anywhere else, a floor below R_SEA fills with water
+   * because the fill loop already does that, and the walls come out showing the
+   * limestone and granite courses for nothing, because a wall column is just a
+   * column whose neighbour is fourteen blocks lower.
+   *
+   * The cost is that a height field cannot make an overhang or an arch. On a
+   * planet where the total relief is eighteen blocks that is a fair trade.
+   *
+   * Each canyon is walked one column at a time as a path on the sphere, and the
+   * walk is steered downhill: five candidate headings are sampled six columns
+   * ahead and the lowest wins, blended with a smooth wander so the result bends
+   * rather than beelines. Downhill steering is what makes the ends terminate
+   * sensibly without any special case — water runs to the sea, so a canyon that
+   * follows the ground finds the coast on its own, and the ones that do not
+   * shallow out into a dry wash instead of stopping at a wall.
+   *
+   * @returns {Uint8Array} per-column mask: 1 where the ground was cut by more
+   *   than a block and a half, which the fill and cave passes both read.
+   */
+  carveCanyons(colHeight, colBiome, rng) {
+    const mask = new Uint8Array(COLUMNS);
+    const target = new Float32Array(COLUMNS).fill(Infinity);
+    // Which columns a sea-going gorge touched at all — not which one cut them
+    // deepest. Ownership by depth is the wrong test where two systems cross:
+    // the dry one is usually the deeper, and letting it claim the crossing
+    // puts a dam across the middle of a river.
+    const wetOwn = new Uint8Array(COLUMNS);
+    const cell = { f: 0, i: 0, j: 0, col: 0 };
+    const nW = this.nWarp;
+    const nD = this.nDetail;
+    // One step is one column: a canyon has to be able to bend on the scale of
+    // the blocks it is cut into, and a column subtends 1/R at the surface.
+    const STEP = 1 / R_SURFACE;
+    const AHEAD = Math.cos(STEP * 6), AHEAD_S = Math.sin(STEP * 6);
+    const CS = Math.cos(STEP), SN = Math.sin(STEP);
+
+    /**
+     * Walk one watercourse and stamp it.
+     *
+     * `o.steer` is -1 downhill, +1 uphill, 0 along the contour, and all three
+     * are in use for a reason.
+     *
+     * Downhill is what a watercourse does and it is what the two drowned
+     * gorges want. It is wrong for everything else here: the planet stands two
+     * blocks out of the water on average, so a path that always takes the
+     * lower of five headings is at the coast within thirty columns, and the
+     * first version of this closed out four of six canyons before they were a
+     * third grown. Contour steering — take the heading closest to the height
+     * you are already at — keeps a canyon out on the plateau it started on,
+     * which is where a slot canyon belongs and where there is room for one.
+     *
+     * Uphill is for tributaries. A tributary is walked *outward from the
+     * confluence*, which means climbing, because that is the direction it has
+     * to taper in. Walking it downhill from its head instead needs the head
+     * chosen first, and a head chosen at random lands in the wrong basin about
+     * half the time and the tributary runs away from its trunk.
+     *
+     * @returns {Array<number[]>} sampled points along the path, for branching
+     */
+    const walk = (p0, t0, o) => {
+      let px = p0[0], py = p0[1], pz = p0[2];
+      let tx = t0[0], ty = t0[1], tz = t0[2];
+      // orthonormalise the tangent against the position once; the advance step
+      // keeps them orthogonal from then on
+      let d = px * tx + py * ty + pz * tz;
+      tx -= px * d; ty -= py * d; tz -= pz * d;
+      let l = Math.hypot(tx, ty, tz) || 1;
+      tx /= l; ty /= l; tz /= l;
+
+      const trail = [];
+      let floorR = Infinity;
+      let wet = -1;                       // step at which the path went under water
+      // Contour steering is anchored to the height the canyon *started* at,
+      // not to the height of the column it is currently standing on. Chasing
+      // the current height is a random walk in altitude: each step's error is
+      // small, two hundred of them are not, and the canyon slides two or three
+      // blocks downhill over its length and finds the coast anyway — which is
+      // the whole thing contour steering exists to avoid.
+      let anchor = 0;
+
+      for (let s = 0; s < o.len; s++) {
+        dirToColumn(px, py, pz, cell);
+        const col = cell.col;
+        const hRim = colHeight[col];
+        if (s === 0) anchor = hRim;
+
+        const sFrac = s / o.len;
+        const head = smoothstep(0, 0.10, sFrac);
+        let tail = smoothstep(1.0, 0.84, sFrac);
+
+        /**
+         * What happens at the coast, and it is the single most important
+         * decision in this pass.
+         *
+         * Sea level is 130 and median land is 132.3 — the whole planet stands
+         * two and a bit blocks out of the water. So *every* canyon worth
+         * cutting has its floor below sea level along almost its entire
+         * length; measured on the first working version, 84% of canyon floor
+         * columns were under the waterline, and the fill pass drowned all of
+         * them. Six flooded trenches is not what was asked for and is not
+         * worth having: you cannot climb into a fjord.
+         *
+         * So most canyons are closed off short of the coast, tapering to
+         * nothing over sixteen columns so the gorge dies out in the coastal
+         * plain rather than ending in a wall of seawater. Whether they end up
+         * wet is then settled properly, by the connectivity fill further down
+         * — a floor below sea level that has no path to the sea stays dry, the
+         * way a rift basin does.
+         *
+         * `o.sea` opts two of the six out of that and lets them run straight
+         * into the water at full depth. A drowned gorge is worth having as
+         * well: it is the one place a fifteen-block dive starts from dry land,
+         * and it is the only reason the shelf and the deep are reachable
+         * without swimming out of sight of the shore.
+         */
+        if (o.sea) {
+          if (wet < 0 && hRim < R_SEA - 0.5) wet = s;
+          if (wet >= 0) { tail = 1; if (s - wet > 12) break; }
+        } else {
+          if (wet < 0 && hRim < R_SEA + 1.5) wet = s;
+          if (wet >= 0) {
+            const ct = 1 - (s - wet) / 16;
+            if (ct <= 0) break;
+            if (ct < tail) tail = ct;
+          }
+        }
+
+        const dn = nD.simplex3(px * 3.1 + o.dseed, py * 3.1, pz * 3.1);
+        const wn = nD.simplex3(px * 4.3 + o.wseed, py * 4.3, pz * 4.3);
+        const dep = o.dep * head * tail * (0.76 + 0.42 * (dn * 0.5 + 0.5));
+        const W = o.wid * (0.70 + 0.58 * (wn * 0.5 + 0.5));
+
+        if (dep >= 0.8) {
+          let fr = hRim - dep;
+          // Only the watercourses hold their floor monotone downhill; that is
+          // what makes one read as somewhere water went rather than as a
+          // trench. A contoured slot canyon deliberately does not — its floor
+          // follows the plateau, which is what a slot canyon does. It is also
+          // released the moment either taper starts biting: otherwise it wins
+          // the `min` and pins the floor at full depth right through the
+          // close-out, turning a gorge that was supposed to die out into one
+          // that stops at a cliff.
+          if (floorR < Infinity && o.steer < 0 && head * tail > 0.98) {
+            fr = Math.min(fr, floorR + 0.05);
+          }
+          fr = Math.max(fr, hRim - CANYON_MAX_DEPTH, R_CANYON_MIN);
+          floorR = fr;
+
+          const ri = Math.ceil(W) + 1;
+          for (let di = -ri; di <= ri; di++) {
+            for (let dj = -ri; dj <= ri; dj++) {
+              const dist = Math.hypot(di, dj);
+              if (dist > W) continue;
+              // Flat floor, near-vertical wall: full depth out to 0.58 of the
+              // half-width, then the whole drop is spent in the last 0.42.
+              const w = smoothstep(1.0, 0.58, dist / W);
+              if (w <= 0.001) continue;
+              // The footprint is stamped in the path column's own face frame.
+              // Across a cube seam that mapping stops being exactly 1:1 and
+              // loses a handful of cells out of a disc this size — in a
+              // building that is a hole in a wall, here it is one column of
+              // canyon wall that came out a block wider. Refusing seam
+              // crossings the way `placeStructures` does is not an option: a
+              // canyon two hundred columns long crosses seams by definition.
+              const c = patchColumn(cell.f, cell.i, cell.j, di, dj);
+              const cRim = colHeight[c];
+              let hh = cRim + (fr - cRim) * w;
+              // Terrace the wall. Free scenery: the crust's bands sit at fixed
+              // radii, so a wall that steps in three-block courses puts a
+              // walkable ledge at the limestone line and again at the granite
+              // one, and the gorge shows its own stratigraphy instead of being
+              // a smooth ramp of whatever rock the rim happened to be made of.
+              if (w < 0.92) hh = fr + Math.ceil((hh - fr) / CANYON_BENCH) * CANYON_BENCH;
+              if (o.sea) wetOwn[c] = 1;
+              if (hh < target[c]) target[c] = hh;
+            }
+          }
+        }
+
+        if ((s & 7) === 0) trail.push([px, py, pz, tx, ty, tz]);
+
+        // --- steer ---
+        const ux = py * tz - pz * ty, uy = pz * tx - px * tz, uz = px * ty - py * tx;
+        let bestA = 0, bestScore = Infinity;
+        for (let c = -2; c <= 2; c++) {
+          const a = c * 0.34;
+          const ca = Math.cos(a), sa = Math.sin(a);
+          const qx = tx * ca + ux * sa, qy = ty * ca + uy * sa, qz = tz * ca + uz * sa;
+          const hh = colHeight[dirToColumn(
+            px * AHEAD + qx * AHEAD_S, py * AHEAD + qy * AHEAD_S, pz * AHEAD + qz * AHEAD_S, cell,
+          ).col];
+          const score = o.steer < 0 ? hh : o.steer > 0 ? -hh : Math.abs(hh - anchor);
+          if (score < bestScore) { bestScore = score; bestA = a; }
+        }
+        const wander = nW.simplex3(px * 5.7 + o.wseed, py * 5.7, pz * 5.7) * 0.19;
+        let turn = wander + bestA * 0.40;
+        // Cap the turn per column. Uncapped, the downhill term wins on a slope
+        // and the path spirals round the contour until it eats its own tail.
+        if (turn > 0.22) turn = 0.22; else if (turn < -0.22) turn = -0.22;
+        const ct = Math.cos(turn), st = Math.sin(turn);
+        tx = tx * ct + ux * st; ty = ty * ct + uy * st; tz = tz * ct + uz * st;
+
+        // --- advance along the great circle in the tangent's direction ---
+        const nx = px * CS + tx * SN, ny = py * CS + ty * SN, nz = pz * CS + tz * SN;
+        tx = tx * CS - px * SN; ty = ty * CS - py * SN; tz = tz * CS - pz * SN;
+        px = nx; py = ny; pz = nz;
+        const pl = Math.hypot(px, py, pz) || 1;
+        px /= pl; py /= pl; pz /= pl;
+      }
+      return trail;
+    };
+
+    // --- pick well-separated highland sources ---
+    const dir = [0, 0, 0];
+    const starts = [];
+    for (let t = 0; t < 200000 && starts.length < CANYON_COUNT; t++) {
+      const col = (rng() * COLUMNS) | 0;
+      const bi = colBiome[col];
+      if (bi === BIOME.OCEAN || bi === BIOME.BEACH) continue;
+      // Start on high ground. A canyon head at sea level has nowhere to run to,
+      // and the depth budget is measured down from the rim — a head three
+      // blocks above the water gets a three-block ditch.
+      if (colHeight[col] < R_SURFACE + 3.0) continue;
+      const p = colParts(col);
+      centerDir(p.f, p.i, p.j, dir);
+      let clash = false;
+      for (const s of starts) {
+        if (s[0] * dir[0] + s[1] * dir[1] + s[2] * dir[2] > 0.70) { clash = true; break; }
+      }
+      if (clash) continue;
+      starts.push([dir[0], dir[1], dir[2]]);
+    }
+
+    for (let n = 0; n < starts.length; n++) {
+      const p = starts[n];
+      // any direction in the tangent plane will do — the steering takes over
+      // within a dozen columns
+      const ax = Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+      const bx = [p[1] * ax[2] - p[2] * ax[1], p[2] * ax[0] - p[0] * ax[2], p[0] * ax[1] - p[1] * ax[0]];
+      const cx = [p[1] * bx[2] - p[2] * bx[1], p[2] * bx[0] - p[0] * bx[2], p[0] * bx[1] - p[1] * bx[0]];
+      const a0 = rng() * Math.PI * 2;
+      const t0 = [
+        bx[0] * Math.cos(a0) + cx[0] * Math.sin(a0),
+        bx[1] * Math.cos(a0) + cx[1] * Math.sin(a0),
+        bx[2] * Math.cos(a0) + cx[2] * Math.sin(a0),
+      ];
+
+      const len = 130 + ((rng() * 91) | 0);
+      // The first two run to the sea and drown; the rest stop short of it. See
+      // the coast note in `walk` for why the split exists at all.
+      const sea = n < 2;
+      const trail = walk(p, t0, {
+        len, dep: 10 + rng() * 8, wid: 4 + rng() * 7,
+        dseed: rng() * 100, wseed: rng() * 100, steer: sea ? -1 : 0, sea,
+      });
+
+      // One or two tributaries per trunk, joining somewhere in the middle
+      // third. Shallower and narrower than the trunk, because a tributary that
+      // matches its trunk turns a canyon into a crossroads.
+      const branches = 1 + (rng() < 0.55 ? 1 : 0);
+      for (let b = 0; b < branches && trail.length > 6; b++) {
+        const idx = Math.min(trail.length - 2,
+          Math.max(1, ((0.25 + rng() * 0.45) * trail.length) | 0));
+        const q = trail[idx];
+        // leave the trunk at roughly a right angle, either side
+        const sgn = rng() < 0.5 ? -1 : 1;
+        const ux = q[1] * q[5] - q[2] * q[4];
+        const uy = q[2] * q[3] - q[0] * q[5];
+        const uz = q[0] * q[4] - q[1] * q[3];
+        const sk = 0.55 + rng() * 0.35;   // a little downstream lean, not a T
+        walk([q[0], q[1], q[2]],
+          [q[3] * (1 - sk) + ux * sgn * sk, q[4] * (1 - sk) + uy * sgn * sk,
+            q[5] * (1 - sk) + uz * sgn * sk],
+          {
+            len: (len * (0.30 + rng() * 0.25)) | 0,
+            dep: 7 + rng() * 5, wid: 3 + rng() * 4,
+            dseed: rng() * 100, wseed: rng() * 100, steer: 1, sea,
+          });
+      }
+    }
+
+    for (let col = 0; col < COLUMNS; col++) {
+      const t = target[col];
+      if (t === Infinity) continue;
+      const h = colHeight[col];
+      if (t >= h - 1.5) continue;
+      colHeight[col] = Math.max(R_CANYON_MIN, t);
+      // 1 for a gorge that is allowed to drown, 2 for one that must not.
+      mask[col] = wetOwn[col] ? 1 : 2;
+    }
+    return mask;
+  }
+
+  /**
+   * Volcanic fields: a low shield cone with a lava vent in its crater, a ring
+   * of radiating fissures, and a scorched apron around the lot.
+   *
+   * Two constraints shape all of this and both are recorded elsewhere in the
+   * tree. The first is `buildCrater`'s note that paving a bowl in lava-cracked
+   * rock "read as a lava lake, not as a scar" — so the molten *area* here is
+   * tiny and the region is made to glow by other means. Ash stone and basalt do
+   * the bulk of the ground, magma stone is scattered through the apron as a
+   * solid emissive block, and actual `ID.lava` appears only at the bottom of
+   * the vent and in the last layer of a fissure four blocks down. From standing
+   * height a fissure is a glowing crack, which is what a scar looks like.
+   *
+   * The second is `buildLavaChamber`'s note on the water sim: worldgen liquid
+   * is registered as a source by `Water.seedSources` and `Water._place` writes
+   * `ID.water` whatever the liquid was, so a large lava pool becomes a large
+   * water pool the first time a player mines its rim. Every lava cell placed
+   * here therefore has obsidian directly under it and obsidian or untouched
+   * rock on all four sides at its own layer — the pool cannot drain, and there
+   * is nothing near enough for it to drain *into*, which is the other half of
+   * why the vent sits on top of a cone rather than in a pit.
+   *
+   * The cone is only six blocks tall, and that is the shell talking, not
+   * taste. Mean land is layer 30 of 44 and the top two layers have to stay
+   * clear, so a landmark you build *up* has about eight layers to work with
+   * before it runs out of planet. The apron is what actually makes the region
+   * legible from a distance: forty columns of grey burnt ground with orange in
+   * it, against grass.
+   */
+  placeVolcanoes(blocks, colHeight, colBiome, colSlope, canyonMask, rng) {
+    const APRON = 20;          // columns of scorched ground
+    const CONE = 11;           // columns of raised cone
+    const CONE_H = 6;          // blocks at the summit
+    const VENT = 4;            // columns of crater
+    const TARGET = 4;
+    const HOSTS = [BIOME.BADLANDS, BIOME.DESERT, BIOME.SAVANNA, BIOME.MOUNTAIN, BIOME.PLAINS];
+
+    const groundK = (col) => {
+      const base = col * D;
+      for (let k = D - 1; k >= 0; k--) {
+        const b = blocks[base + k];
+        if (b !== ID.air && b !== ID.water) return k;
+      }
+      return -1;
+    };
+    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[col * D + k] = id; };
+    const get = (col, k) => (k >= 0 && k < D ? blocks[col * D + k] : ID.stone);
+
+    const claim = new Uint8Array(COLUMNS);
+    const parts = { f: 0, i: 0, j: 0 };
+    let placed = 0;
+
+    for (let t = 0; t < 300000 && placed < TARGET; t++) {
+      const col = (rng() * COLUMNS) | 0;
+      if (!HOSTS.includes(colBiome[col]) || claim[col] || canyonMask[col]) continue;
+      const h = colHeight[col];
+      // The height window is narrow and both edges are load-bearing. Below
+      // R_SEA + 2.5 the crater floor is at or under the waterline and one
+      // player tunnel from the coast turns the vent into a pool. Above 135.5
+      // there is no longer room over the ground for a six-block cone plus the
+      // two clear layers the shell keeps at the top.
+      if (h < R_SEA + 2.5 || h > 135.5) continue;
+      if (colSlope[col] > 0.85) continue;
+      colParts(col, parts);
+      // Keep the whole apron on one face. Same reason as `placeStructures`: a
+      // forty-column disc folded over a seam loses cells, and unlike a canyon
+      // wall a cone with holes in it reads as broken.
+      if (parts.i < APRON || parts.i >= F - APRON
+        || parts.j < APRON || parts.j >= F - APRON) continue;
+
+      // Flat enough, dry enough, and nobody else's ground.
+      let lo = 99, hi = -99, bad = false;
+      for (let di = -CONE; di <= CONE && !bad; di += 3) {
+        for (let dj = -CONE; dj <= CONE; dj += 3) {
+          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          const g = groundK(c);
+          if (g < 0 || g > D - 3 - CONE_H) { bad = true; break; }
+          if (colBiome[c] === BIOME.OCEAN || colBiome[c] === BIOME.BEACH) { bad = true; break; }
+          if (canyonMask[c] || claim[c]) { bad = true; break; }
+          if (g < lo) lo = g;
+          if (g > hi) hi = g;
+        }
+      }
+      if (bad || hi - lo > 4) continue;
+
+      const kBase = hi;                       // build off the high side, so no
+      const kSummit = kBase + CONE_H;         // part of the cone is left buried
+      const kCrater = kSummit - 3;
+
+      // --- apron: burnt ground, thinning outward ---
+      for (let di = -APRON; di <= APRON; di++) {
+        for (let dj = -APRON; dj <= APRON; dj++) {
+          const d = Math.hypot(di, dj);
+          if (d > APRON) continue;
+          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          claim[c] = 1;
+          if (d <= CONE - 1) continue;        // the cone lays its own ground
+          const g = groundK(c);
+          if (g < 1 || g >= D - 1) continue;
+          // Fade the scorch out rather than ending it at a circle. A hard edge
+          // makes the whole thing read as a decal somebody stuck on the grass.
+          const fade = 1 - (d - CONE + 1) / (APRON - CONE + 2);
+          if (rng() > 0.15 + fade * 0.85) continue;
+          const q = rng();
+          let id;
+          if (q < 0.035 + fade * 0.05) id = ID.magma_stone;   // the glow, solid
+          else if (q < 0.10) id = ID.sulfur_ore;
+          else if (q < 0.34) id = ID.basalt;
+          else if (q < 0.74) id = ID.ash_stone;
+          else id = rng() < 0.5 ? ID.gravel : ID.coarse_dirt;
+          set(c, g, id);
+          if (get(c, g + 1) !== ID.air) set(c, g + 1, ID.air);
+        }
+      }
+
+      // --- the cone ---
+      for (let di = -CONE; di <= CONE; di++) {
+        for (let dj = -CONE; dj <= CONE; dj++) {
+          const d = Math.hypot(di, dj);
+          if (d > CONE) continue;
+          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          const g = groundK(c);
+          if (g < 1 || g >= D - 1) continue;
+          // A summit plateau out to the crater lip, then flanks. The obvious
+          // profile — full height only at the centre — does not work here: the
+          // crater has to be cut *into* something, and a peak that is already
+          // down to three blocks by the time it reaches the crater wall has no
+          // wall left to cut, so the bowl came out as a dent in the slope. The
+          // 1.5 power on the flank is what keeps it a shield rather than a
+          // spoil heap.
+          const ft = Math.max(0, (d - VENT - 1) / (CONE - VENT - 1));
+          const kTop = kBase + Math.round(CONE_H * Math.pow(1 - ft, 1.5));
+          for (let k = Math.min(g, kBase - 1) + 1; k <= kTop; k++) {
+            const q = rng();
+            set(c, k, q < 0.20 ? ID.basalt : q < 0.26 ? ID.magma_stone : ID.ash_stone);
+          }
+          for (let k = kTop + 1; k < D; k++) {
+            if (get(c, k) === ID.air) break;
+            set(c, k, ID.air);
+          }
+        }
+      }
+
+      // --- crater, vent pool, and the obsidian that keeps it there ---
+      for (let di = -VENT; di <= VENT; di++) {
+        for (let dj = -VENT; dj <= VENT; dj++) {
+          const d = Math.hypot(di, dj);
+          if (d > VENT) continue;
+          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          for (let k = kCrater + 1; k < D; k++) {
+            if (get(c, k) === ID.air) break;
+            set(c, k, ID.air);
+          }
+          // Bowl floor and its liner. The liner matters: the cave pass has
+          // already run and may have opened a passage a few blocks under this
+          // exact spot, and a vent pool with a hole under it drains the first
+          // time anybody disturbs it.
+          set(c, kCrater - 1, ID.obsidian);
+          set(c, kCrater, d < 2.4 ? ID.lava : ID.obsidian);
+        }
+      }
+
+      // --- radiating fissures ---
+      // The lava is one layer at the bottom of a four-block slot. Standing on
+      // the rim you see a glowing line in the ground; you have to climb down to
+      // it to be burnt by it, which is the difference between a hazard and a
+      // wall of the stuff.
+      const molten = [];
+      const fissures = 3 + ((rng() * 3) | 0);
+      for (let n = 0; n < fissures; n++) {
+        let ang = rng() * Math.PI * 2;
+        const len = 10 + ((rng() * 13) | 0);
+        let fi = Math.cos(ang) * (CONE - 3), fj = Math.sin(ang) * (CONE - 3);
+        for (let s = 0; s < len; s++) {
+          ang += (rng() - 0.5) * 0.34;
+          fi += Math.cos(ang); fj += Math.sin(ang);
+          const wide = rng() < 0.35 ? 1 : 0;
+          for (let w = 0; w <= wide; w++) {
+            const di = Math.round(fi) + (w ? Math.round(-Math.sin(ang)) : 0);
+            const dj = Math.round(fj) + (w ? Math.round(Math.cos(ang)) : 0);
+            if (Math.hypot(di, dj) > APRON - 1) continue;
+            const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+            const g = groundK(c);
+            if (g < 6 || g >= D - 1) continue;
+            const kF = g - 4;
+            for (let k = kF; k < D; k++) {
+              if (k > g && get(c, k) === ID.air) break;
+              set(c, k, ID.air);
+            }
+            set(c, kF - 1, ID.obsidian);
+            set(c, kF, ID.lava);
+            molten.push(c, kF);
+          }
+        }
+      }
+
+      /**
+       * Seal every fissure's sides, once all of them are cut.
+       *
+       * Doing it inline as each column was filled left leaks and the reason is
+       * worth writing down: a fissure is cut four blocks below whatever the
+       * *local* ground is, so two neighbouring columns of the same crack sit at
+       * different layers wherever the ground steps by one. The lower of the two
+       * then clears its slot straight through the higher one's lava layer,
+       * after that layer has already been sealed and filled. Ordering cannot
+       * fix it — either neighbour can be the lower one. Sweeping afterwards can.
+       *
+       * The other thing this catches is the cave pass, which ran two passes ago
+       * and is allowed within 2.2 blocks of the surface: a passage can already
+       * be sitting beside a slot cut four blocks down. Lava with an open side
+       * does not stay a scar — it becomes a flow the first time the player
+       * edits near it, and `Water._place` writes `ID.water` whatever the liquid
+       * was, so what comes back is not even lava.
+       */
+      for (let m = 0; m < molten.length; m += 2) {
+        const c = molten[m], k = molten[m + 1];
+        if (get(c, k) !== ID.lava) continue;      // a later cut took this one
+        if (get(c, k - 1) === ID.air || get(c, k - 1) === ID.water) set(c, k - 1, ID.obsidian);
+        for (let nb = 0; nb < 4; nb++) {
+          const s2 = colNeighbor(c, nb);
+          const cur = get(s2, k);
+          if (cur === ID.air || cur === ID.water) set(s2, k, ID.obsidian);
+        }
+      }
+      placed++;
+    }
+    this.volcanoCount = placed;
   }
 
   /** Highest solid layer in a column, or -1. */

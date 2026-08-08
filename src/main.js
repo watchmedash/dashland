@@ -578,6 +578,11 @@ class Game {
   async continueGame() {
     const data = await Save.read();
     if (!data) { this.ui.showMenu(null); return; }
+    if (!this._saveFitsWorld(data)) {
+      this.ui.showMenu(Save.meta());
+      this.ui.toast('That planet was made by an older version and cannot be opened', 0, 5200);
+      return;
+    }
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
     this.ui.progress(0, 'Recalling your planet');
@@ -590,6 +595,32 @@ class Game {
     this.worldWorker.postMessage({
       type: 'load', blocks: data.blocks, colBiome: data.colBiome, facing: data.facing || null,
     });
+  }
+
+  /**
+   * Can this save be opened by the world we are currently built for?
+   *
+   * Two checks, because they fail differently. The geometry stamp catches a
+   * save written for a different planet shape and is exact. The array length is
+   * the belt: saves written before the stamp existed carry no `geom` at all,
+   * and for those the block count is the only evidence there is — it is also
+   * the thing that actually breaks, since every index in the file is computed
+   * from F and D.
+   *
+   * Refusing is the kind thing to do. A mismatched save does not throw; it
+   * loads, indexes past the end of a short array, reads air, and hands back a
+   * planet with holes in it that looks almost right — which is much harder to
+   * understand than being told plainly that it cannot be opened.
+   */
+  _saveFitsWorld(data) {
+    if (!data?.blocks) return false;
+    if (data.blocks.length !== COLUMNS * D) return false;
+    if (data.colBiome && data.colBiome.length !== COLUMNS) return false;
+    if (Array.isArray(data.geom)) {
+      const [f, d, rmin] = data.geom;
+      if (f !== F || d !== D || rmin !== R_MIN) return false;
+    }
+    return true;
   }
 
   _makeLoaderShell() {
@@ -905,6 +936,16 @@ class Game {
   _savePayload() {
     const c = this.player.cell;
     return {
+      // The shape of the planet this save was written for.
+      //
+      // Everything below indexes into a flat array whose size is F*F*6*D, and
+      // the loader used to take that array on trust. Change the face resolution
+      // or the shell depth and every index in an old save points somewhere
+      // else: the block array is silently the wrong length, reads past its end
+      // come back as air, and what you get is not an error but a corrupt planet
+      // that looks almost plausible. Stamping the geometry in is what lets the
+      // loader say no.
+      geom: [F, D, R_MIN],
       seed: this.seed,
       blocks: this.planet.blocks.slice(),
       colBiome: this.planet.colBiome.slice(),

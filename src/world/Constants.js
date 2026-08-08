@@ -51,6 +51,26 @@ export const R_SEA = 130;            // ocean surface radius
 export const R_SURFACE = 130.9;      // mean land radius
 export const R_TERRAIN_MAX = 142;
 
+/**
+ * How far down the two subtractive surface passes are allowed to reach.
+ *
+ * The shell is thin and everything has to share it. Sea level is layer 30 and
+ * the mantle starts at layer 8, so an ocean basin and a canyon are competing
+ * for the same twenty-odd layers of crust, and whatever is left under them is
+ * all the rock a cave, an ore vein or a deep structure has to live in.
+ *
+ * R_SEABED_MIN 115 buys a 15-block ocean — deep enough to dive and to lose
+ * sight of the surface — while leaving seven layers of crust over the mantle,
+ * which is more than the cave pass's own floor at R_MANTLE + 1.5 needs.
+ *
+ * R_CANYON_MIN 116 is one higher on purpose. A canyon floor is walkable ground
+ * with soil laid on it and things spawning on it, so it wants to stay above the
+ * pre-mantle band at 110.5 where the rock starts glowing: a gorge whose floor
+ * was cut into magma stone would read as a rift, not as a canyon.
+ */
+export const R_SEABED_MIN = 115;
+export const R_CANYON_MIN = 116;
+
 export const GRAVITY = 26;
 
 // Biome ids

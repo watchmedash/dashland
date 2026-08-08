@@ -196,6 +196,18 @@ const MOB_FALL_PER_BLOCK = 1;
  */
 const MOB_STEP_DOWN = MOB_FALL_FREE;
 /**
+ * The furthest the floor clamp will lift a body in one frame, in layers.
+ *
+ * A per-frame cap and not a rate, which looks like a bug and is not: it is
+ * there to break the escalators described on _groundUnder, and an escalator is
+ * counted in frames. One block plus slack, because a slab or a stair tread
+ * tops out at k + 0.5 and a genuine step onto one has to stay legal.
+ *
+ * Shared by both floor branches in update(). The swimming/flying one used to
+ * set the height outright with no cap at all — see the note there.
+ */
+const MOB_MAX_RISE = 1.05;
+/**
  * Standing in lava, in half-hearts, and how often the toll is taken.
  *
  * Charged in instalments rather than per frame because every hit is a cry:
@@ -337,6 +349,60 @@ const SPAWN_RADIUS = stepsFor(DESPAWN_RADIUS - 25) - SPAWN_STEPS_MIN;
  */
 const SEED_STEPS_MIN = stepsFor(8);
 const SEED_STEPS_SPAN = stepsFor(DESPAWN_RADIUS - 25) - SEED_STEPS_MIN;
+
+/**
+ * The opening clearing: how far around the world spawn point nothing large and
+ * nothing that hunts may be *placed*, in world units, and what counts as large.
+ *
+ * "Better if no mobs around the spawn area all sides, fishes, bees and some
+ * small animals makes sense but the big ones doesn't make sense specially
+ * animals that could prey on each other." Waking up between a tiger and a cow
+ * is not an opening, it is a diorama, and the first thing a new player does is
+ * walk into the middle of it.
+ *
+ * 40 units against populate()'s 8..120 band leaves 89% of the seeded disc
+ * untouched, so this costs the founding herd almost nothing — it moves it
+ * outward rather than thinning it. Fish and bees never see the rule at all:
+ * they come from _spawnShoal and _spawnDrift, which draw their own species and
+ * never go through the land draw this gates.
+ *
+ * 1.7 is a shade under the player's own 1.8, and it is a *size* bar rather than
+ * a danger bar — the two tests below carry the danger. It keeps the bunny,
+ * chick, parrot, crab, caterpillar, beaver, koala, monkey and penguin, and
+ * also the cow, the deer and the panda; it excludes the polar bear, both big
+ * cats, the elephant and the giraffe.
+ *
+ * The bar was 1.0 first, which is knee-high, and that read the request too
+ * literally. What was asked for was no *big* animals and nothing that preys on
+ * anything — a cow is neither, and its own note calls it "the one animal a
+ * player meets in the first minute", the thing that sets the scale everything
+ * else is judged against. A clearing with no cow in it is not gentler, it is
+ * emptier. Forty units is about fifteen seconds' walk, which is the right price
+ * for not being able to see a lion from the spawn point but the wrong one for
+ * not being able to see a cow.
+ *
+ * And it is an *opening*, not a safe zone. Walk out of it and you meet whatever
+ * the biome holds at full density with nothing softened, and the top-up ring
+ * travels with the player, so the second minute is exactly as dangerous as it
+ * always was. Nothing here protects a base built on the spawn point either —
+ * the hearth ward is what does that, and it is earned. This buys the first
+ * minute, and the first minute only.
+ */
+const CALM_RADIUS = 40;
+const CALM_HEIGHT = 1.0;
+/**
+ * Gentle enough for the opening clearing?
+ *
+ * Three tests and not one, because "big" and "dangerous" are genuinely
+ * different complaints and the player made both. `preyOn` is "animals that
+ * could prey on each other" written as data — it is the same Set _findPrey
+ * hunts from — and `predator` is the flag `fights` sets, i.e. anything that
+ * hits back. The cat is the case that proves the pair are not redundant: at
+ * 0.46 it is well under the height bar and it has no `fights`, but it hunts
+ * chicks, and a kitten killing something in front of a new player is exactly
+ * the report.
+ */
+const isCalm = (spec) => spec.height <= CALM_HEIGHT && !spec.preyOn && !spec.predator;
 
 // --- vocalisation pacing ----------------------------------------------------
 // Each animal keeps its own jittered clock, seeded at random on spawn, so a
@@ -1117,6 +1183,14 @@ const SWIM_LOOK = 14;
 const SWIM_PERIOD = 0.6;
 /** How hard it swims, as a multiple of its wander. Not a bolt; a determined paddle. */
 const SWIM_SPEED = 1.5;
+/**
+ * And how fast the walk clip plays while it does — see the gait in _animate.
+ *
+ * Slow enough to read as effort against water rather than as a stroll, and the
+ * only number in the animation block that is not a ratio of a ground speed,
+ * because there is no ground.
+ */
+const WADE_CLIP_RATE = 0.55;
 
 const LOVE_SECONDS = 22;      // how long a fed animal stays willing
 const BREED_RANGE = 4.5;      // how close a willing pair must be
@@ -1304,6 +1378,11 @@ export class Mobs {
     scene.add(this.group);
     this.list = [];
     this.spawnTimer = 4;
+    /**
+     * World position of the spawn point, or null if this world was loaded
+     * rather than created. Set by populate(); read by _nearHome.
+     */
+    this.homePos = null;
     /** Seconds before a merchant may appear. Reset every time one leaves. */
     this.merchantT = MERCHANT_FIRST;
     /** (mob) => void — a merchant has just arrived, for a nudge to the player. */
@@ -1524,6 +1603,9 @@ export class Mobs {
       // Being thrown rather than walking: the walking rules are suspended
       // until it is back on its feet. See the tumble in update().
       tumbling: false,
+      // Could not move at all last frame, so the terrain check on its turn is
+      // suspended — see the steering in update().
+      stuck: false,
       /** Highest layer reached since leaving the ground, or null if it has not. */
       fallFrom: null,
       lavaT: 0,            // seconds until the next instalment of the lava toll
@@ -1696,11 +1778,24 @@ export class Mobs {
    * @returns {boolean} true if something was actually placed
    */
   _spawnWild(col, k) {
-    const type = this._pickWildlife(col, k);
-    // Null means this biome's whole list flies — nothing does today, but the
-    // draw can return it and a silent SPECIES[null] would spawn nothing while
-    // reporting success, which is the kind of thing that shows up later as a
-    // budget that never fills.
+    // The opening clearing — see CALM_RADIUS. Draw again rather than refuse
+    // outright: a straight refusal would leave the first forty units of a new
+    // world visibly emptier than everywhere else, which is a different
+    // complaint about the same ground. Three passes and then give up, because
+    // a biome whose entire land list is large would otherwise spin — there is
+    // no such biome today, but the tables are data and this is not the place to
+    // find that out.
+    const calm = this._nearHome(col, k);
+    let type = null;
+    for (let t = 0; t < (calm ? 3 : 1) && !type; t++) {
+      const pick = this._pickWildlife(col, k);
+      // Null means this biome's whole list flies — nothing does today, but the
+      // draw can return it and a silent SPECIES[null] would spawn nothing while
+      // reporting success, which is the kind of thing that shows up later as a
+      // budget that never fills.
+      if (!pick) return false;
+      if (!calm || isCalm(SPECIES[pick])) type = pick;
+    }
     if (!type) return false;
     const spec = SPECIES[type];
     if (spec?.shore && !this._nearWater(col, SHORE_NEAR)) return false;
@@ -1856,6 +1951,29 @@ export class Mobs {
     return false;
   }
 
+  /**
+   * Is this spot inside the opening clearing?
+   *
+   * Modelled on _warded, including the part that matters most: only *spawning*
+   * is refused. A lion that walks in from the plain is welcome, and one already
+   * standing there stays. A clearing that pushed bodies out of itself would be
+   * an invisible fence around the spawn point, which is a stranger thing to
+   * explain than a lion.
+   *
+   * `homePos` is null on a loaded save — populate() is the only thing that sets
+   * it and only a new world calls it — so the rule is simply inactive there.
+   * That is the right answer rather than an omission: a returning player has
+   * moved in, and the clearing they woke up in years ago has stopped meaning
+   * anything.
+   */
+  _nearHome(col, k) {
+    const h = this.homePos;
+    if (!h) return false;
+    const { f, i, j } = colParts(col, _wp);
+    cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
+    return Math.hypot(_p[0] - h.x, _p[1] - h.y, _p[2] - h.z) < CALM_RADIUS;
+  }
+
   _litNear(col, k) {
     const p = this.planet;
     for (let dk = -LIGHT_GUARD_K; dk <= LIGHT_GUARD_K; dk++) {
@@ -1905,6 +2023,23 @@ export class Mobs {
       return { col, k };
     }
     return null;
+  }
+
+  /**
+   * Is the player swimming, as opposed to standing in shallow water?
+   *
+   * `inWater` on its own is read at the player's feet, so it is true of a
+   * puddle and of every ford on the planet — gating a predator on it alone
+   * would make stepping into an inch of stream a way to call off a tiger.
+   * `grounded` is false exactly when there is nothing under the feet, which is
+   * the difference between being out of your depth and wading.
+   *
+   * Read off the flags the player already maintains rather than recomputed
+   * from the terrain here: two answers to one question drift apart, and the
+   * player's own are the ones its movement is actually obeying.
+   */
+  _playerAfloat(player) {
+    return !!player.inWater && !player.grounded;
   }
 
   /** Is this column's surface under water? */
@@ -2132,6 +2267,12 @@ export class Mobs {
   populate(player, count = Math.round(MAX_WILDLIFE * 0.65)) {
     const c = player.cell;
     const startCol = cidx(c.f, Math.floor(c.ci), Math.floor(c.cj));
+    // Where the world began, so the opening clearing stays where the player
+    // woke up instead of travelling with them. A plain object rather than the
+    // player's own Vector3: this is a fixed point on the planet and holding a
+    // reference to something that moves every frame would make it the last
+    // place the player stood.
+    this.homePos = { x: player.position.x, y: player.position.y, z: player.position.z };
     for (let n = 0; n < count; n++) {
       const spot = this._findSpawnColumn(startCol, SPAWN_RADIUS, null);
       if (spot) this._spawnWild(spot.col, spot.k);
@@ -2312,16 +2453,21 @@ export class Mobs {
    * up was the scan starting too high, and started it from the animal's own
    * feet instead. The escalator that survived it works like this:
    *
-   *   1. An animal's footprint is oriented, and it *rotates* freely — nothing
-   *      gates turning on the terrain. A deer standing beside a trunk needs
+   *   1. An animal's footprint is oriented, and it *rotated* freely — nothing
+   *      gated turning on the terrain. A deer standing beside a trunk needed
    *      only to turn to face it for its half-length-ahead sample to land in
-   *      the trunk's column.
+   *      the trunk's column. (Turning is checked against the terrain now, in
+   *      the steering in update(), so that entry condition is shut as well.
+   *      The qualification below is still what broke the escalator and is what
+   *      to keep if the turn check is ever loosened: a body can be rotated by
+   *      a shove or arrive already overlapping, and step 1 is the only one of
+   *      the four that anything outside this file can cause.)
    *   2. That sample scans down from the deer's own feet layer and finds the
    *      trunk block *at* that layer. Its top is one cell up, so `best` — a
    *      max over the samples — comes back one higher than the ground the deer
    *      is standing on.
    *   3. The floor clamp's one-block cap is satisfied exactly: the rise is 1.0
-   *      against a limit of 1.05. It lifts.
+   *      against MOB_MAX_RISE's 1.05. It lifts.
    *   4. Next frame the feet are a layer higher, so the scan starts a layer
    *      higher, and finds the *next* trunk block. Repeat at sixty frames a
    *      second.
@@ -2452,6 +2598,13 @@ export class Mobs {
     // against the step it was trying to climb.
     const moved = okI || okJ;
     const blockedAhead = !okI || !okJ;
+    // Remembered for the turn check in update(). A body that cannot translate
+    // at all has to be allowed to rotate however it likes, because rotating is
+    // the only move it has left and every way out of here — the veer below, the
+    // wall slide, the doorway probe — works by changing the heading. Set before
+    // the early return on purpose: an animal that is boxed in while standing
+    // still is the case that most needs the exemption.
+    mob.stuck = !moved;
     if (!blockedAhead || mob.speedNow <= 0.02) return;
     if (mob.grounded && this._stepAhead(mob, ni, nj, here)) {
       // A step it could stand on: push off and let gravity do the rest. The
@@ -2782,6 +2935,56 @@ export class Mobs {
     const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
     mob.want = Math.atan2(rb, ra);
 
+    // --- and the player has taken to the water ----------------------------
+    //
+    // "It should give up the moment I jump on the water and perhaps wait till
+    // I get back in land." A land animal that follows you in does not swim: it
+    // floats, because the `wading` rule in update() will not let it sink, and
+    // the steering there is applied *after* this and overrides everything
+    // decided here in favour of striking out for the nearest bank. So the
+    // chase never resumed anyway — what the player saw was a tiger bobbing
+    // about playing the run clip. Stopping at the edge is both better and
+    // truer to the animal.
+    //
+    // A hold, not a give-up: the target is kept, so the moment you step back
+    // onto land the ordinary chase picks up exactly where it left off with no
+    // re-acquisition. That distinction is load-bearing for the provoked
+    // species — only hurt() ever hands a tiger a target, so clearing it here
+    // would mean a tiger could never resume at all, and you would have to
+    // punch it a second time to get the fight back.
+    //
+    // It does not wait forever, and it needs no clock of its own. The stall
+    // test above is already running and already means "nine seconds without
+    // getting any closer"; holding is precisely that, so a mob that waits out
+    // HUNT_STALL loses the target and takes HUNT_COOLDOWN off, while a player
+    // who swims back toward it resets the clock and keeps it waiting. The one
+    // number this needs was tuned years before the behaviour existed.
+    //
+    // Swimming, not paddling: `inWater` alone is read at the player's feet, so
+    // it is true of ankle depth and a ford would have become an escape. Adding
+    // `!grounded` is what separates "I am out of my depth" from "I am walking
+    // through a stream", and a predator should absolutely follow you through a
+    // stream.
+    //
+    // Amphibious and aquatic species are exempt, which is the whole meaning of
+    // the flags: a polar bear fishes for a living and being followed into the
+    // sea by one is the point of it.
+    //
+    // The husk is deliberately *not* exempt. Deep water is a refuge from it for
+    // as long as you are willing to tread it, and it is waiting on the bank
+    // when you get out — a better night than one spent being paddled after,
+    // and it costs the player everything they could otherwise be doing with
+    // that time, which is what keeps it from being a free win.
+    if (!spec.aquatic && !spec.amphibious && this._playerAfloat(player)) {
+      mob.state = 'idle';
+      mob.stateT = 0.5;
+      // No route to a swimmer, and the search is the expensive half of this
+      // function. Clearing the flag rather than leaving it set keeps the stall
+      // test above reading a path this mob is no longer walking.
+      mob.onPath = false;
+      return true;              // still hunting — just not following
+    }
+
     // ...unless there is something in the way, in which case walk the route
     // rather than the bearing. The whisker probe further down can lean around a
     // boulder but has no idea a wall has a door in it twelve cells to the left;
@@ -3111,10 +3314,16 @@ export class Mobs {
       return false;
     }
 
+    // Nothing starts a stalk on a swimmer. _hunt will only hold at the water's
+    // edge the instant the cat commits, so a stalk begun on someone treading
+    // water is a full telegraph — growl, creep, the lot — spent to arrive at a
+    // standstill, and it burns the hunger clock doing it.
+    const afloat = this._playerAfloat(player);
     const eligible = this.daylight < 0.02      // night, where the player stands
       && mob.hungerT <= 0                      // and hungry, on the hunting clock
       && mob.baby <= 0 && mob.love <= 0
       && !mob.prey && mob.target !== 'player'
+      && !afloat
       && dist < PROWL_RANGE;
     if (mob.prowl <= 0) {
       if (!eligible) return false;
@@ -3125,9 +3334,9 @@ export class Mobs {
       mob.prowl = PROWL_TELL;
       mob.growlT = 0;
     } else if (this.daylight > 0.06 || dist > PROWL_RANGE * 1.5
-      || mob.target === 'player') {
-      // The sun came up mid-telegraph, or you left, or — the third case, and
-      // the one worth spelling out — you shot first. A player who answers the
+      || mob.target === 'player' || afloat) {
+      // The sun came up mid-telegraph, or you left, or you took to the water,
+      // or — the case worth spelling out — you shot first. A player who answers the
       // tell with an axe has ended the telegraph by definition, and a cat that
       // went on creeping politely through being hit would make the tell read as
       // scenery. hurt() has already set the target; drop the stalk and let the
@@ -3631,10 +3840,78 @@ export class Mobs {
           : mob.creep ? PROWL_SPEED
           : chasing ? CHASE_SPEED : 1) : 0;
 
+      // The layer the feet are standing on, hoisted above the steering because
+      // the turn is checked against terrain now and wants the same reference
+      // layer the move does. Nothing between here and where it used to sit
+      // touches c.ck.
+      //
+      // The block directly under the feet — NOT the highest ground under the
+      // footprint. _groundUnder takes the max, which is right for deciding how
+      // high to stand (it keeps the body out of a step's riser) but wrong for
+      // deciding whether a move is legal: the moment the animal's nose reached
+      // over a step it counted as already standing on it, so the step stopped
+      // reading as a rise and the hop never fired.
+      const here = Math.floor(c.ck + 0.02) - 1;
+
       // --- steering: limited turn rate, smooth acceleration -----------------
+      //
+      // The turn is checked against the terrain, and it did not used to be.
+      // A footprint is oriented, so rotating sweeps it: a body with 1.47 of
+      // half-length can swing its own length into a block it could never have
+      // walked into, and stand there with its snout inside the wall. That is
+      // also how the tree-climbing escalator got in — turning to face a trunk
+      // was what put a sample in the trunk's column, see _groundUnder — and
+      // although the floor scan no longer takes the bait, the overlap the turn
+      // creates was always real and is exactly the sort of state the next
+      // change to this code would trip over.
+      //
+      // The rule is the one the move already uses, applied to rotation instead
+      // of translation: a turn is refused only if it makes the overlap
+      // *strictly* worse. Equal is allowed, unlike the move, and the difference
+      // is load-bearing — a body walking along a wall keeps a sample in the
+      // stone for as long as it is beside it, and "must improve" would pin its
+      // nose facing wherever it happened to be pointing when it arrived.
+      // Rotation cannot creep the way translation can, which is what "no worse"
+      // permitted there: the limiter only ever turns toward `want` and stops on
+      // it, so there is no deeper for a body to drift to one frame at a time.
+      //
+      // Refusing turns is the obvious way to lock an animal up, so it is off
+      // whenever the body could not translate either — `mob.stuck`, set by
+      // _walkStep. Being unable to move is exactly when rotation is the only
+      // move left: the wall slide and the doorway probe both work by changing
+      // the heading, and gating those would put a husk back to standing at the
+      // wall it cannot get round, which an open door was supposed to have
+      // fixed. Nothing else needs an escape valve, because holding a heading
+      // does not stop a body: it keeps walking the way it was already going,
+      // the footprint moves with it, and the turn goes through a frame or two
+      // later once the wall has run out. No stutter either — the heading only
+      // ever moves toward `want`, never back, so a refused frame is a pause in
+      // the rotation and never a reversal of it.
       const turn = spec.turn * (fleeing ? 1.6 : chasing ? 1.35 : 1) * dt;
       const dh = wrapAngle(mob.want - mob.heading);
-      mob.heading = wrapAngle(mob.heading + clamp(dh, -turn, turn));
+      const turned = wrapAngle(mob.heading + clamp(dh, -turn, turn));
+      // Two footprint tests, and only on the frames an animal is actually
+      // turning and is not already stuck — most frames it is sitting on its
+      // `want` and this costs nothing.
+      //
+      // The two tests are deliberately *both* taken here rather than one of
+      // them being handed to _walkStep to save a test. They agree with each
+      // other because they differ only in the heading, but they do not agree
+      // with _walkStep: _footprintCost branches on mob.swimming and mob.wading,
+      // and those are not rewritten until further down the frame. The
+      // comparison is unaffected — whatever the flags say, they say it to both
+      // sides — but a number measured under last frame's flags is not the
+      // baseline _walkStep's own tests are measured against, and on the frame a
+      // body enters or leaves water the two would disagree about whether water
+      // is a wall.
+      if (turned !== mob.heading) {
+        if (mob.stuck) mob.heading = turned;
+        else {
+          const held = this._footprintCost(c.f, c.ci, c.cj, here, mob, mob.heading);
+          const swept = this._footprintCost(c.f, c.ci, c.cj, here, mob, turned);
+          if (swept <= held) mob.heading = turned;
+        }
+      }
 
       const kAcc = 1 - Math.exp(-spec.accel * dt);   // frame-rate independent
       mob.speedNow += (targetSpeed - mob.speedNow) * kAcc;
@@ -3747,13 +4024,8 @@ export class Mobs {
       // floor(cj)) with the indices merely clamped, so at a cube seam it probed
       // a column on the WRONG face; the ground snap below then teleported the
       // animal to that column's height.
-      // The block directly under the feet — NOT the highest ground under the
-      // footprint. _groundUnder takes the max, which is right for deciding how
-      // high to stand (it keeps the body out of a step's riser) but wrong for
-      // deciding whether a move is legal: the moment the animal's nose reached
-      // over a step it counted as already standing on it, so the step stopped
-      // reading as a rise and the hop never fired.
-      const here = Math.floor(c.ck + 0.02) - 1;
+      // (`here`, the layer under the feet, is now worked out above the steering
+      // — the turn check needs it too.)
 
       // Walking, or being thrown. They are not the same move and this is the
       // fork between them.
@@ -3774,8 +4046,15 @@ export class Mobs {
       // The tumble ends the moment it is back on its feet with the shove spent.
       const tumbling = mob.knockT > 0 || (mob.tumbling && !mob.grounded);
       mob.tumbling = tumbling;
-      if (tumbling) this._tumble(mob, mob.vel.i * dt, mob.vel.j * dt);
-      else this._walkStep(mob, ni, nj, here, fr, player);
+      if (tumbling) {
+        this._tumble(mob, mob.vel.i * dt, mob.vel.j * dt);
+        // A thrown body does not get its rotation policed either, for the same
+        // reason it does not get the footprint test: it has stopped choosing.
+        // Leaving the flag at whatever the last walking frame set would have a
+        // struck animal's heading held by terrain it is no longer negotiating
+        // with.
+        mob.stuck = true;
+      } else this._walkStep(mob, ni, nj, here, fr, player);
 
       const prevCk = c.ck;
       c.ck += mob.vel.k * dt;
@@ -3795,8 +4074,9 @@ export class Mobs {
       // above where it now is: starting high let it discover the block above
       // its head — a tree trunk, say — and "land" on top of it, then repeat
       // the next frame. That is what walked animals up trunks to the canopy,
-      // a block per frame. The lift is also capped at one block, so a genuine
-      // step up still works but nothing can escalate.
+      // a block per frame. The lift is also capped at MOB_MAX_RISE, so a
+      // genuine step up still works but nothing can escalate — and both
+      // branches below are capped now, which the swimming one was not.
       // `floor` is a real height now, not a layer index — see _groundUnder.
       const floor = this._groundUnder(mob, c.f, c.ci, c.cj, Math.floor(prevCk + 0.02));
 
@@ -3827,10 +4107,39 @@ export class Mobs {
         // Never snap to the floor and never count as grounded — the same reason
         // a fish must not: the ground clamp is what would put it back on foot.
         // It still may not sink through anything solid.
-        if (floor >= 0 && c.ck < floor) { c.ck = floor; mob.vel.k = Math.max(0, mob.vel.k); }
+        //
+        // Bounded by the same MOB_MAX_RISE as the walking clamp below, and it
+        // was not. This branch set the height outright, which made it the one
+        // place left in the movement code where a body could be moved upward an
+        // arbitrary distance in a single frame: a bee inside a structure a
+        // player had just built round it, or a fish under ground that arrived
+        // beneath it, was on top of the thing instantly. Lifting at a bounded
+        // rate squeezes it out over a handful of frames instead, which is a
+        // body working itself free rather than a teleport, and it cannot
+        // escalate for the reason the cap exists at all — the lift per frame is
+        // capped whatever the terrain says.
+        //
+        // A body that came down *through* the surface this frame is exempt,
+        // exactly as it is below. That is a plunge being caught rather than a
+        // rise, and the distance involved is whatever it just fell, which its
+        // own speed has already bounded.
+        //
+        // Neither of the cases this branch exists for is touched. A fish rising
+        // through deep water and a bee climbing to clear a tree both do it with
+        // vel.k; the clamp only ever pushes a body up off ground it is already
+        // below, and in open water or open air there is no such ground within
+        // reach of the scan. The third case, a wading land animal being lifted
+        // onto a bank, is deliberately not in this branch at all — see the note
+        // above — so it still runs on the walking clamp and has always had the
+        // cap. Nothing about it changes here; the two branches simply agree on
+        // the number now.
+        if (floor >= 0 && c.ck < floor) {
+          c.ck = crossed ? floor : Math.min(floor, c.ck + MOB_MAX_RISE);
+          mob.vel.k = Math.max(0, mob.vel.k);
+        }
         mob.grounded = false;
       } else if (floor >= 0 && c.ck < floor && mob.vel.k <= 0
-        && (crossed || floor - c.ck <= 1.05)) {
+        && (crossed || floor - c.ck <= MOB_MAX_RISE)) {
         // The `vel.k <= 0` is a second belt against the escalator described on
         // _groundUnder: a body on its way *up* — mid-hop, or shoved by a blow —
         // is never also stepping up onto something. On the ground vel.k is
@@ -3974,8 +4283,26 @@ export class Mobs {
     // --- animation ---
     // The clips carry the whole performance — gait, idle sway, the eating dip.
     // Choosing one is all that is left, and the mixer crossfades between them.
+    //
+    // A body in water over its head gets the walk, slowed, and never the run.
+    // There is no swim clip in the Cube Pets pack — the same gap the lunge
+    // works around, and answered the same way: pick the clip that already
+    // reads closest and re-time it, rather than pointing at a name that does
+    // not exist. A land animal that fell in is *swimming* by the `wading` rule
+    // in update(), so its ground speed is a full SWIM_SPEED gait and the clip
+    // chain below put it on `run` — a tiger sprinting on the spot across a
+    // lake, which is what was reported. Idle was the other candidate and is
+    // worse: the body is genuinely travelling, so idle skates. A halved walk
+    // cycle is legs moving under a body that is going somewhere, which is what
+    // a dog paddle looks like from outside the water, and the vertical bob the
+    // wading buoyancy already applies supplies the rest.
+    //
+    // `mob.wading` only, not `swimming`: a fish and a crab are at home in the
+    // water and their own clips were authored for it.
+    const paddling = mob.wading && mob.dying <= 0;
     let clip = spec.clips.idle;
     if (mob.dying > 0) clip = spec.clips.die || spec.clips.idle;
+    else if (paddling) clip = spec.clips.walk;
     else if (mob.speedNow > spec.speed * 1.25) clip = spec.clips.run;
     else if (mob.speedNow > 0.06) clip = spec.clips.walk;
     else if (mob.state === 'graze') clip = spec.clips.graze;
@@ -3997,7 +4324,16 @@ export class Mobs {
     // and the animal skates while standing still in the numbers.
     const walking = clip === spec.clips.walk || clip === spec.clips.run;
     const act = model.actions[clip];
-    if (act && walking) {
+    if (act && paddling) {
+      // Flat, and deliberately not derived from speedNow the way the gaits
+      // below are. Every one of those divisors is a *ground* pace and reads
+      // "how fast are the feet passing the floor", which is a question with no
+      // answer for a body that is not touching one — a swimming animal driven
+      // by the same rule speeds its legs up as the current carries it, which is
+      // the skating this whole block exists to prevent, in the one case where
+      // there is nothing to skate on.
+      act.setEffectiveTimeScale(WADE_CLIP_RATE);
+    } else if (act && walking) {
       const base = clip === spec.clips.run ? spec.speed * 2 : spec.speed;
       act.setEffectiveTimeScale(clamp(mob.speedNow / Math.max(0.15, base), 0.45, 2.2));
     } else if (act) {

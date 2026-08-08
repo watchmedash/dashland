@@ -242,6 +242,17 @@ button small { display: block; font-size: 10.5px; font-weight: 500; opacity: .8;
 }
 #item-name.show { opacity: 1; }
 
+/* Deliberately quieter than the item name: this one is on screen almost all the
+   time, so it reads as a label rather than as an announcement. The fade is
+   short — a name that lingers after you look away is worse than none, because
+   it describes something you are no longer pointing at. */
+#look-at {
+  font-size: 11.5px; font-weight: 500; letter-spacing: .04em; white-space: nowrap;
+  color: rgba(255, 255, 255, .82); text-shadow: 0 2px 6px rgba(0, 0, 0, .95);
+  opacity: 0; transition: opacity .12s ease;
+}
+#look-at.show { opacity: 1; }
+
 #toasts {
   position: fixed; left: 50%; top: 34px; transform: translateX(-50%); z-index: 95;
   display: flex; flex-direction: column; gap: 5px; align-items: center;

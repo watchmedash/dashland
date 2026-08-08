@@ -49,7 +49,7 @@ export class UI {
       menu: $('menu'), mmContinue: $('mm-continue'), mmSaveInfo: $('mm-save-info'),
       mmClock: $('mm-clock'),
       hud: $('hud'), crosshair: $('crosshair'), hotbar: $('hotbar'),
-      itemName: $('item-name'),
+      itemName: $('item-name'), lookAt: $('look-at'),
       vHealth: $('v-health'), vFood: $('v-food'),
       vStamina: $('v-stamina'), vBreath: $('v-breath'),
       clockDial: $('clock-dial'), clockText: $('clock-text'),
@@ -908,6 +908,24 @@ export class UI {
     this.el.itemName.classList.add('show');
     clearTimeout(this._nameTimer);
     this._nameTimer = setTimeout(() => this.el.itemName.classList.remove('show'), 1500);
+  }
+
+  /**
+   * Name whatever the crosshair is on. `null` clears it.
+   *
+   * Called every frame, so it does the change check itself rather than trusting
+   * the caller to: writing `textContent` unconditionally would dirty the layout
+   * sixty times a second to set the same string. Aiming at a block is the normal
+   * state of play, not an event, which is also why this is styled quieter than
+   * the held-item name and fades in a tenth of a second — a label that lags
+   * behind the crosshair is describing something you have stopped looking at.
+   */
+  setLookAt(text) {
+    if (text === this._lookAt) return;
+    this._lookAt = text;
+    if (!text) { this.el.lookAt.classList.remove('show'); return; }
+    this.el.lookAt.textContent = text;
+    this.el.lookAt.classList.add('show');
   }
 
   /**

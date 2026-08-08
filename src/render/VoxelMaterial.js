@@ -449,6 +449,35 @@ const LIGHTS_END = /* glsl */`
   reflectedLight.directSpecular *= shadowGate;
 `;
 
+/**
+ * Lava is hotter than the light falling on it. Nothing else in the world is.
+ *
+ * The report was that lava and basalt look alike, and that you learn which is
+ * which by standing on one and losing health. That is a legibility problem and
+ * the cause is that world lava had **no emissive term at all** — it was a
+ * diffuse surface like any rock, lit by the same sun, so a molten lake and a
+ * dark volcanic stone with warm seams in it genuinely were the same kind of
+ * thing to the renderer. The seams on magma stone even light their
+ * surroundings, via voxel block light, which lava's did not.
+ *
+ * Emissive fixes it in the one way that cannot be mistaken for shading: it is
+ * light the surface makes rather than light it receives, so lava stays bright
+ * in a cave, at midnight and in its own shadow, where every rock goes dark. And
+ * because the post stack blooms above 0.86, the hottest cracks now spill light
+ * past their own edges — solid rock, sitting under that threshold, never does.
+ *
+ * Gated on the texel being *hot* rather than merely bright: red running well
+ * ahead of blue is fire, and it leaves the dark crust between the cracks alone
+ * so the surface keeps the contrast that makes it read as crusted-over rather
+ * than as a flat orange sheet.
+ */
+const LAVA_EMISSIVE = /* glsl */`
+  if (vWave > 2.5) {
+    float lavaHot = smoothstep(0.18, 0.62, diffuseColor.r - diffuseColor.b);
+    totalEmissiveRadiance += diffuseColor.rgb * (0.42 + 1.35 * lavaHot);
+  }
+`;
+
 const BREAK_FRAG = /* glsl */`
   if (uBreakStage >= 0.0 && distance(vWorld, uBreakPos) < 0.95) {
     vec4 cr = texture(uCrack, vec3(fract(vTexUv), uBreakStage));
@@ -509,6 +538,7 @@ function patch(material, opts = {}) {
       .replace('#include <normal_fragment_maps>', opts.liquid ? LIQUID_NORMAL_FRAG : NORMAL_FRAG)
       .replace('#include <roughnessmap_fragment>', ROUGH_FRAG)
       .replace('#include <metalnessmap_fragment>', METAL_FRAG)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + LAVA_EMISSIVE)
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + LIGHTS_END);
 
     if (opts.liquid) {

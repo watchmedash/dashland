@@ -180,6 +180,89 @@ uniform vec3 uDropLightColor;
 uniform float uDropLightRadius;
 
 /**
+ * Where the block-light highlight starts to roll off, and where it stops.
+ *
+ * The report was that sand, red sandstone and pine logs go glaring beside a
+ * torch while dirt and grass do not, and the first instinct — that it is simply
+ * albedo, and therefore physics — is only half right. Measured off the baked
+ * atlas (public/tiles/albedo.webp, linearised, alpha-masked), the peak linear
+ * channel of each tile is: sand 0.839, red_sandstone 0.740, log_pine 0.553,
+ * against dirt 0.272, stone 0.292, grass_top 0.129. Sand's red is 3.1x dirt's.
+ *
+ * What turns a 3x albedo ratio into a blowout is the *level* the block light
+ * runs at. A torch is light 13 of 15, so vBlock peaks at 0.867; times
+ * uBlockIntensity 5.0 and RECIPROCAL_PI that is an irradiance factor of 1.33 on
+ * the red channel. The whole of noon — direct sun at intensity 1.62 through the
+ * Lambert factor, plus the sky fill — comes to about 0.75 on the same channel.
+ * A torch one cell away is therefore **1.8x brighter than the midday sun**, and
+ * the tiles that show it are exactly the ones with somewhere to go: torch-lit
+ * sand measured 244/205/124 on screen against 217/186/142 at noon, and
+ * red_sandstone measured 253/152/49 — the red channel fully clipped, so the
+ * texture had no detail left in it at all.
+ *
+ * So the surface is not lying about its albedo; the flame is lying about its
+ * output. This is a shoulder on the block-light term alone: below the knee
+ * nothing happens at all, above it the radiance rolls off exponentially toward
+ * a ceiling. The numbers are chosen so the bright tiles land back at roughly
+ * their noon value while a torch stays a torch on everything else — measured,
+ * torch-adjacent: sand 244 -> 217, red_sandstone 253 -> 224, log_pine 232 ->
+ * 213, against dirt 188 -> 186, stone 190 -> 186, planks 205 -> 198 and
+ * grass_top 89 -> 89 (bit-identical; it never reaches the knee).
+ *
+ * ### Two levers tried and rejected
+ *
+ * Lowering uBlockIntensity, or HAND_LIGHT_GAIN in main.js, is the obvious knob
+ * and is wrong twice over. It dims dirt and stone — which is most of what a
+ * cave is made of, and which nobody complained about — and HAND_LIGHT_GAIN is
+ * deliberately tied to uBlockIntensity so that a carried torch and a planted
+ * one match; breaking that reintroduces the bug that constant was raised to
+ * fix. The shoulder needs no change in main.js and leaves that invariant alone.
+ *
+ * Clamping per channel instead of scaling all three by one ratio was also tried
+ * on paper and rejected: it compresses red harder than green, which walks the
+ * colour toward white and takes the warmth out of firelight, which is the one
+ * thing the fix was not allowed to cost. Scaling by the max channel keeps the
+ * hue and the saturation exactly and only moves the value.
+ */
+const float BLOCK_KNEE = 0.28;
+const float BLOCK_CEIL = 0.58;
+
+/**
+ * How much brighter the night sky is allowed to be *under open sky*.
+ *
+ * "Without a light source everything is pitch black except the tree leaves."
+ * That is true and the numbers agree: at midnight uSkyIntensity is 0.29 and
+ * uSkyColor has been dragged all the way to MOON_FILL, which puts open ground
+ * at 0.005 linear on dirt and 0.004 on grass. The ACES toe has a slope of about
+ * 0.1 down there, so those land on screen at 0/0/2 and 0/0/0 — literally black
+ * — while leaves, at twice the albedo luminance and always facing the sky,
+ * scrape 0/2/7 and are the only thing with any shape left.
+ *
+ * The lever cannot be uSkyIntensity, and that is the whole difficulty: sunAmt
+ * has a 0.10 floor under it, deliberately, so that a sealed room at noon and an
+ * unlit cave stay dark, and anything multiplied into uSkyIntensity is
+ * multiplied into that floor as well. Raise it and you light every cave on the
+ * planet. Raising the moon has the same defect for the same reason — a
+ * directional with no shadow map goes straight through rock.
+ *
+ * vSun is the thing that actually knows the difference. It is voxel skylight,
+ * so it is 1 on a meadow at midnight and 0 in a cave and 0 in a sealed room,
+ * and squaring it means a cave mouth or the ground under a thick canopy gets a
+ * fraction rather than the lot. Gating on vSun-squared *with no floor at all*
+ * is what lets this be generous outdoors and provably nothing indoors.
+ *
+ * Measured at midnight on open ground, before -> after: dirt 0/0/2 -> 13/14/21,
+ * grass_top 0/0/0 -> 4/9/14, stone 1/4/11 -> 25/30/45, log_pine 4/5/10 ->
+ * 33/33/43, leaves_pine 0/2/7 -> 17/24/35. Noon dirt is 139/94/58 for scale, so
+ * night is still an order of magnitude down; it is simply no longer zero.
+ *
+ * Applied to the sky fill and not to the ground bounce, on purpose: bounce is
+ * light coming back off a brightly lit floor, and at midnight there is no such
+ * floor to bounce off.
+ */
+const float NIGHT_OPEN_GAIN = 3.0;
+
+/**
  * One moving flame's contribution. Inverse-square with a linear cutoff at the
  * radius so it reaches zero instead of trailing a wash across the whole chunk,
  * and lambert-shaded off the surface normal so it wraps around geometry rather
@@ -511,7 +594,18 @@ const LIGHTS_END = /* glsl */`
   // daylight shadow while letting the material's own colour show through.
   // (Brightness is preserved: this is a saturation trim, not a dimming, and the
   // RECIPROCAL_PI division below is unchanged.)
-  vec3 skyTinted = uSkyColor * uSkyIntensity * sunAmt;
+  //
+  // The night floor, and the one term in this shader that can tell "outdoors
+  // under an open sky" from "inside a sealed room" — see NIGHT_OPEN_GAIN.
+  //
+  // vSun squared, with no floor beneath it, so the gate is exactly zero
+  // wherever the voxel skylight is: uNight is 0 for every sun more than about
+  // 6 degrees up, so noon is untouched by construction, and openSky is 0 in a
+  // cave and in a sealed room, so those are untouched at every hour. Both have
+  // to fail for this to do anything, which is why it can afford to be large.
+  float openSky = vSun * vSun;
+  float nightLift = 1.0 + uNight * NIGHT_OPEN_GAIN * openSky;
+  vec3 skyTinted = uSkyColor * uSkyIntensity * sunAmt * nightLift;
   vec3 skyFill = mix(skyTinted, vec3(dot(skyTinted, vec3(0.2126, 0.7152, 0.0722))), 0.34);
   // ground bounce, strongest on downward-facing surfaces
   vec3 upDir = normalize(vWorld - uPlanetCenter);
@@ -537,18 +631,8 @@ const LIGHTS_END = /* glsl */`
   skyFill *= mix(mix(0.62, 0.30, uNight), 1.0, skyFacing);
 
   reflectedLight.indirectDiffuse += diffuseColor.rgb * (skyFill + bounce) * aoTotal * RECIPROCAL_PI;
-  reflectedLight.indirectDiffuse += diffuseColor.rgb * vBlock * uBlockIntensity * mix(0.65, 1.0, aoTotal) * RECIPROCAL_PI;
-  // Remember how much of this surface a *flame* is responsible for, for the
-  // scotopic pass at the end of the shader. It has to be captured here because
-  // this is the only place the two are still separate — by the time anything
-  // downstream sees the fragment they are one colour, and a moonlit leaf and a
-  // torchlit plank are indistinguishable by brightness alone. That is not a
-  // guess: the first version of NIGHT_SCOTOPIC gated on final luminance and
-  // left the canopy exactly as green as before, because at midnight a leaf
-  // under open sky *is* as bright as ground beside a torch.
-  gBlockLum = dot(vBlock * uBlockIntensity, vec3(0.2126, 0.7152, 0.0722));
 
-  // What you are carrying.
+  // What you are carrying, and what is lying on the floor near you.
   //
   // Every other light in this world is baked into the voxel grid, which is
   // wonderfully cheap and cannot follow anything: a torch lit the cave it was
@@ -560,14 +644,51 @@ const LIGHTS_END = /* glsl */`
   // Inverse-square with a linear cutoff at the radius, so it reaches zero
   // instead of trailing a faint wash across the whole chunk, and lambert-shaded
   // off the surface normal so it wraps around geometry rather than flooding it.
+  //
+  // Gathered here, *above* where it used to be added, because the shoulder
+  // below has to see the flames and the grid as one light. Rolling them off
+  // separately would let a player standing beside a planted torch while holding
+  // one collect two sub-knee contributions that sum to a blowout, which is the
+  // exact case the shoulder exists for.
   vec3 moving = flameLight(uHandLightPos, uHandLightColor, uHandLightRadius, normal, vWorld)
               + flameLight(uDropLightPos, uDropLightColor, uDropLightRadius, normal, vWorld);
-  reflectedLight.indirectDiffuse += diffuseColor.rgb * moving * RECIPROCAL_PI;
-  // Both moving flames count as block light for the scotopic pass, or the
-  // ground your own torch is lighting would drain of colour while the identical
-  // patch beside a planted torch kept it. Firelight is firelight wherever it is
-  // standing.
-  gBlockLum += dot(moving, vec3(0.2126, 0.7152, 0.0722));
+
+  // All block light, grid and flames together, with a highlight shoulder on the
+  // pair. See BLOCK_KNEE. The AO weighting stays on the grid term only and off
+  // the moving one, exactly as before: a flame you are holding is not occluded
+  // by the crease it is shining into.
+  vec3 blockRad = (diffuseColor.rgb * vBlock * uBlockIntensity * mix(0.65, 1.0, aoTotal)
+                 + diffuseColor.rgb * moving) * RECIPROCAL_PI;
+  // Scaled by the max channel rather than clamped per channel, so the roll-off
+  // moves the value and leaves the hue and saturation of firelight alone.
+  float blockPeak = max(blockRad.r, max(blockRad.g, blockRad.b));
+  if (blockPeak > BLOCK_KNEE) {
+    float over = (blockPeak - BLOCK_KNEE) / (BLOCK_CEIL - BLOCK_KNEE);
+    float rolled = BLOCK_KNEE + (BLOCK_CEIL - BLOCK_KNEE) * (1.0 - exp(-over));
+    blockRad *= rolled / blockPeak;
+  }
+  reflectedLight.indirectDiffuse += blockRad;
+
+  // Remember how much of this surface a *flame* is responsible for, for the
+  // scotopic pass at the end of the shader. It has to be captured here because
+  // this is the only place the two are still separate — by the time anything
+  // downstream sees the fragment they are one colour, and a moonlit leaf and a
+  // torchlit plank are indistinguishable by brightness alone. That is not a
+  // guess: the first version of NIGHT_SCOTOPIC gated on final luminance and
+  // left the canopy exactly as green as before, because at midnight a leaf
+  // under open sky *is* as bright as ground beside a torch.
+  //
+  // Deliberately the *pre-shoulder* irradiance, and deliberately not scaled by
+  // RECIPROCAL_PI: the thresholds NIGHT_SCOTOPIC gates on (0.02 to 0.35) are
+  // calibrated in this raw scale, and both of them sit well below BLOCK_KNEE
+  // anyway, so measuring before or after the roll-off makes no difference to
+  // any fragment that is near the gate. Leaving it untouched is what keeps this
+  // change out of the scotopic pass entirely.
+  //
+  // Both moving flames count as block light here too, or the ground your own
+  // torch is lighting would drain of colour while the identical patch beside a
+  // planted torch kept it. Firelight is firelight wherever it is standing.
+  gBlockLum = dot(vBlock * uBlockIntensity + moving, vec3(0.2126, 0.7152, 0.0722));
   reflectedLight.indirectSpecular *= aoTotal;
 
   float shadowGate = smoothstep(0.0, 0.30, vSun);

@@ -2331,7 +2331,17 @@ class Game {
         // soft flesh impact at the animal, not a grass footstep at your feet.
         // The species' own hurt/death cry comes from Mobs via onSound.
         this.audio.mobHit(mobHit.mob.pos);
-        this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge > 0.85 ? 1 : 0);
+        // Shove scales with the swing, rather than switching on at 85%.
+        //
+        // The damage above is already a smooth 0.3..1 ramp on the same charge;
+        // the knock was the one part of a blow that was a step function, so
+        // every swing under the threshold — which is most swings — landed with
+        // literally zero shove, and the animals read as bolted to the ground.
+        //
+        // Raw `charge` and not a pre-floored ramp: `hurt` applies its own floor
+        // so that a connecting blow always moves what it hits, and flooring it
+        // twice would quietly halve what timing is worth.
+        this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge);
         if (held?.tool) this.inventory.damageHeld(1);
       }
       // Right-click offers whatever you're holding. Feeding is how a herd

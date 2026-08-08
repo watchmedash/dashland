@@ -137,6 +137,12 @@ it *says*.
   cards. Reflect it in water and you get a white lake under a blue sky. Anything
   that needs the sky as something *seen* wants `uSkyReflect`, which keeps the
   palette's real hue.
+- **A tool's `speed` is a divisor, not a multiplier over bare hands.** A wooden
+  pickaxe says `speed: 2.4`, but it breaks stone about *eight* times faster than
+  a fist, because bare hands are separately held to `0.30` on anything a pick is
+  meant for (`HAND_HARD` in `miningTime`). Both numbers are deliberate; reading
+  the 2.4 as "2.4× faster than hands" makes the measured result look wrong.
+  Stone: `2.2 × 1.35 = 2.97` base, so 9.9s by hand and 1.24s with the pick.
 - **Drops are rolls.** `computeDrops` takes an rng; handing it a constant like
   `() => 0.5` fails every probability test in it and reports that tall grass and
   leaves drop nothing. They drop seeds, forage, saplings, apples and sticks.

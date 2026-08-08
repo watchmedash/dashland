@@ -120,6 +120,11 @@ it *says*.
   and is always false. Under a tree it is the canopy. This has caused a shipped
   bug and two measurements that reported a planet with no water, on a planet
   that is a fifth water.
+- **`uSkyColor` is a light, not a colour.** It is the ambient fill: desaturated
+  and pulled a third of the way to white so shaded faces don't render as blue
+  cards. Reflect it in water and you get a white lake under a blue sky. Anything
+  that needs the sky as something *seen* wants `uSkyReflect`, which keeps the
+  palette's real hue.
 - **Drops are rolls.** `computeDrops` takes an rng; handing it a constant like
   `() => 0.5` fails every probability test in it and reports that tall grass and
   leaves drop nothing. They drop seeds, forage, saplings, apples and sticks.

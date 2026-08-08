@@ -24,6 +24,16 @@ export const voxelUniforms = {
   uUnderwater: { value: 0 },
   uWaterFog: { value: new THREE.Color(0.045, 0.20, 0.29) },
   uWaterTint: { value: new THREE.Color(0.34, 0.72, 0.78) },
+  // Where the sun is, for the one surface that shows you: water. Everything
+  // else takes its key light from the scene's directional light, but a glint
+  // needs the direction in the fragment shader.
+  uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+  uSunColor: { value: new THREE.Color(1, 1, 1) },
+  // The sky as something to *see*, not as something to light with. uSkyColor is
+  // an ambient fill: desaturated and pulled a third of the way to white so it
+  // does not paint shadowed faces blue. Reflecting that in water gives you a
+  // white lake under a blue sky. This one keeps the palette's real hue.
+  uSkyReflect: { value: new THREE.Color(0.35, 0.52, 0.78) },
   // The turning year, applied to the biome tint a vertex already carries. See
   // SEASON_FRAG.
   uSeasonColor: { value: new THREE.Vector3(1, 1, 1) },
@@ -116,6 +126,9 @@ uniform vec3 uCamPos;
 uniform float uUnderwater;
 uniform vec3 uWaterFog;
 uniform vec3 uWaterTint;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform vec3 uSkyReflect;
 uniform float uTime;
 uniform vec3 uSeasonColor;
 uniform float uSeasonStrength;
@@ -366,6 +379,12 @@ const FOG_FRAG = /* glsl */`
   float dist = length(vWorld - uCamPos);
 
   if (uUnderwater > 0.5) {
+    // Water absorbs. Everything down here was being lit as though it were in
+    // open air and then tinted blue afterwards, which is why a sand bed two
+    // metres down came out brighter than the beach it runs into — a pale cyan
+    // haze rather than anything submerged. Take the light down first.
+    gl_FragColor.rgb *= 0.58;
+
     // Caustics before the fog, so they're attenuated by distance like the
     // surface they sit on. Only upward faces catch them.
     vec3 upW = normalize(vWorld - uPlanetCenter);
@@ -375,8 +394,11 @@ const FOG_FRAG = /* glsl */`
       vec3 e2 = cross(upW, e1);
       vec2 cp = vec2(dot(vWorld, e1), dot(vWorld, e2));
       float c = caustic(cp * 0.9, uTime * 0.9);
-      // only where daylight actually reaches
-      gl_FragColor.rgb += uWaterTint * c * facing * vSun * 1.5;
+      // At 1.5 this was not a caustic, it was a second sun: white ridges laid
+      // over every horizontal face until the bed lost its own colour. Caustics
+      // are a *modulation* of the light already arriving, so they have to stay
+      // small enough that the surface underneath still reads.
+      gl_FragColor.rgb += uWaterTint * c * facing * vSun * 0.42;
     }
   }
 
@@ -411,13 +433,36 @@ function patch(material, opts = {}) {
       fs = fs.replace('#include <opaque_fragment>', /* glsl */`
         #include <opaque_fragment>
         if (vWave < 2.5) {
+          // What makes water read as water, at distance, is not its own colour
+          // — it is that you stop seeing through it and start seeing the sky in
+          // it. Straight down, water reflects about 2% and you see the bed. At
+          // a grazing angle it reflects nearly everything and becomes a mirror.
+          //
+          // This was previously a small additive sheen at a fixed 0.22, which
+          // brightened the surface without ever replacing what was under it, so
+          // a lake seen across its length stayed a pale wash of sand-through-
+          // tint all the way to the far shore: flat, and lighter than the sky
+          // it should have been reflecting.
           vec3 vDir = normalize(vWorld - uCamPos);
-          // Grazing-angle fresnel used to drive this to pure white, which read
-          // as pale panels floating over the sea. Keep the sheen subtle.
-          float fres = pow(1.0 - clamp(dot(-vDir, normal), 0.0, 1.0), 5.0);
-          vec3 sheen = mix(uSkyColor, vec3(1.0), 0.25) * min(uSkyIntensity, 1.2);
-          gl_FragColor.rgb += sheen * fres * 0.22;
-          gl_FragColor.a = clamp(mix(gl_FragColor.a, 0.94, fres * 0.5), 0.0, 0.95);
+          float cosT = clamp(dot(-vDir, normal), 0.0, 1.0);
+          float fres = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
+
+          // The reflected sky, dimmed a little: a real surface is never a
+          // perfect mirror and the roughness here stands in for chop.
+          vec3 refl = uSkyReflect * 0.88;
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, refl, fres * 0.88);
+
+          // Sun glint. The single strongest cue that a surface is liquid, and
+          // the thing whose absence made this read as painted-on colour. It
+          // rides the wave-perturbed normal, so it breaks into a scattering
+          // path across the chop instead of one clean disc. Gated on skylight
+          // so it does not shine out of a roofed cave.
+          vec3 half3 = normalize(uSunDir - vDir);
+          float glint = pow(clamp(dot(normal, half3), 0.0, 1.0), 190.0);
+          gl_FragColor.rgb += uSunColor * glint * fres * vSun * 9.0;
+
+          // Opacity follows the same curve: grazing water hides its bed.
+          gl_FragColor.a = clamp(mix(gl_FragColor.a, 0.97, fres), 0.0, 0.97);
         }
       `);
     }

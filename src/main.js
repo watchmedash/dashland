@@ -2468,6 +2468,13 @@ class Game {
     voxelUniforms.uSkyColor.value.copy(p.zenith).lerp(p.horizon, 0.55).lerp(WHITE, 0.34);
     voxelUniforms.uSkyIntensity.value = (0.34 + p.sunIntensity * 0.72) * (0.5 + w.sun * 0.5);
     voxelUniforms.uBounceColor.value.copy(p.fog).lerp(WHITE, 0.2).multiplyScalar(0.7);
+    voxelUniforms.uSunDir.value.copy(this.sky.sunDir);
+    voxelUniforms.uSunColor.value.copy(p.sun).multiplyScalar(w.sun);
+    // Reflection sky: the palette's own hue, untouched by the whitening that
+    // makes uSkyColor usable as ambient fill. Overcast drags it toward the fog
+    // colour, so a grey day gives a grey sea.
+    voxelUniforms.uSkyReflect.value.copy(p.zenith).lerp(p.horizon, 0.5)
+      .lerp(p.fog, 1 - w.sun);
     voxelUniforms.uFogColor.value.copy(p.fog);
     voxelUniforms.uFogDensity.value = this.player.headInWater ? 0 : 0.0013 * Math.min(1.9, w.fog);
     voxelUniforms.uCamPos.value.copy(this.camera.position);

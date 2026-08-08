@@ -113,6 +113,22 @@ finding ("buying is broken", "the errand pays twice", "the bobber leaks").
 The pattern in all of them: asking whether an object *exists* rather than what
 it *says*.
 
+## Invariants that are load-bearing but not written down anywhere
+
+- **A shelter keeps you alive by a margin of 0.07 cells.** `_resolveHits` tests
+  distance and nothing else — there is no line-of-sight check, so a hostile
+  inside reach lands its blow whether or not a wall is in the way. Walls work
+  today because collision holds a husk a full two cells off, and its reach is
+  `spec.reach + radius + 0.35` = **2.07**. Measured: a sealed hut, seven husks
+  outside for two minutes, closest approach 2.0, zero damage. Raise any husk's
+  reach past ~2.1 and every shelter in the game starts leaking damage through
+  its walls, with nothing in the combat code to catch it.
+- **Light stops cave spawns but not surface ones.** `_findDarkColumn` calls
+  `_litNear`; `_findSpawnColumn` does not. Torching a camp is therefore not a
+  way to keep husks from appearing next to it at night — the surface ward is a
+  hearth, and only a hearth. Worth knowing before adding torches to a base and
+  expecting them to do what they do in Minecraft.
+
 ## Two things that read wrong
 
 - **`surfaceK` is the ground, not the top.** On water it is the *bed* — the

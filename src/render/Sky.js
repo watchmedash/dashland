@@ -294,10 +294,27 @@ export class Sky {
     this.ambient = new THREE.AmbientLight(0xffffff, 0.0);
     scene.add(this.ambient);
 
-    // Entities (player, drops, debris) don't get the voxel shader's skylight
-    // term, so they get their own hemisphere fill on layer 1.
+    // Entities — animals, drops, debris — get no skylight, because skylight in
+    // this world is baked into the chunk vertices and an animal is not a chunk.
+    // Without a fill of their own they are lit by the sun and a flat ambient
+    // and nothing else, so the moment the sun is off them they fall to that
+    // ambient alone: an animal walking under a tree turned into a black cut-out
+    // while the grass it was standing on stayed bright.
+    //
+    // This used to be a hemisphere light on layer 1, which looks like it says
+    // "light entities, not terrain" and does not. three tests a light's layers
+    // against the CAMERA, not against each object — object layers cannot select
+    // lights at all. The camera sits on layer 0, so this light was excluded
+    // from every render ever made and lit precisely nothing. Two rounds of
+    // tuning its intensity, and a change putting mobs on layer 1 to "reach"
+    // it, were all adjusting a light that was switched off.
+    //
+    // So it lights everything now. Terrain barely notices — it already carries
+    // its own baked sky term and is dominated by it — while the entities that
+    // had nothing finally have a sky over them. See _fillEntities for the
+    // brightness, which has to stay low at night or a husk in the dark becomes
+    // the brightest thing on screen.
     this.entityFill = new THREE.HemisphereLight(0xbcd6f5, 0x6a5a44, 1.0);
-    this.entityFill.layers.set(1);
     scene.add(this.entityFill);
   }
 

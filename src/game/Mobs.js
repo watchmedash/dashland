@@ -669,15 +669,10 @@ export class Mobs {
         : n.material.clone();
       n.material = cloned;
       for (const m of (Array.isArray(cloned) ? cloned : [cloned])) model.owned.push(m);
-      // Layer 1 is where the entity fill lights. The terrain carries its own
-      // baked skylight in the voxel shader; anything that is not terrain needs
-      // that hemisphere instead, which is why drops and debris enable this —
-      // and animals never did. They were lit by the flat scene ambient alone,
-      // so an animal that walked into the shade of a tree lost the sun and had
-      // nothing left, and at night it stayed at a fixed brightness while the
-      // world around it went dark, which is what read as glowing. The fill has
-      // been tuned twice for a case it was never actually reaching.
-      n.layers.enable(1);
+      // (No layer juggling here. Putting a mesh on layer 1 to "reach" the
+      // entity fill was tried and does nothing: three tests a light's layers
+      // against the camera, not against each object, so object layers cannot
+      // select lights at all. The fill is a plain scene light now — see Sky.)
     });
     this.group.add(model.root);
 

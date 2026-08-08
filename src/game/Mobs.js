@@ -230,37 +230,37 @@ const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 const SPECIES = {
   // --- large grazers ---
   cow: pet('cow', {
-    label: 'Cow', h: 0.92, hp: 10, spd: 0.85, shy: 0.35, turn: 2.0, accel: 4.5,
+    label: 'Cow', h: 1.30, hp: 10, spd: 0.85, shy: 0.35, turn: 2.0, accel: 4.5,
     graze: 0.6, idleMin: 3, idleMax: 7, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   deer: pet('deer', {
-    label: 'Deer', h: 1.15, hp: 10, spd: 1.25, shy: 0.9, turn: 3.0, accel: 6.0,
+    label: 'Deer', h: 1.40, hp: 10, spd: 1.25, shy: 0.9, turn: 3.0, accel: 6.0,
     idleMin: 2.5, idleMax: 6, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   elephant: pet('elephant', {
-    label: 'Elephant', h: 1.55, hp: 20, spd: 0.75, shy: 0.2, turn: 1.6, accel: 3.5,
+    label: 'Elephant', h: 2.60, hp: 20, spd: 0.75, shy: 0.2, turn: 1.6, accel: 3.5,
     graze: 0.6, idleMin: 3, idleMax: 8, drops: [['hide', 2, 3], ['meat', 2, 3]],
   }),
   giraffe: pet('giraffe', {
-    label: 'Giraffe', h: 1.75, hp: 14, spd: 1.0, shy: 0.5, turn: 1.8, accel: 4.0,
+    label: 'Giraffe', h: 3.10, hp: 14, spd: 1.0, shy: 0.5, turn: 1.8, accel: 4.0,
     graze: 0.55, idleMin: 3, idleMax: 7, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   panda: pet('panda', {
-    label: 'Panda', h: 1.0, hp: 14, spd: 0.7, shy: 0.3, turn: 2.2, accel: 4.0,
+    label: 'Panda', h: 1.20, hp: 14, spd: 0.7, shy: 0.3, turn: 2.2, accel: 4.0,
     graze: 0.7, idleMin: 3, idleMax: 8, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   polar: pet('polar', {
-    label: 'Polar Bear', h: 1.05, hp: 16, spd: 1.0, shy: 0.3, turn: 2.4, accel: 5.0,
+    label: 'Polar Bear', h: 1.55, hp: 16, spd: 1.0, shy: 0.3, turn: 2.4, accel: 5.0,
     graze: 0.35, drops: [['hide', 2, 3], ['meat', 1, 2]], cold: true,
   }),
 
   // --- big cats: no teeth yet, but they read as dangerous ---
   lion: pet('lion', {
-    label: 'Lion', h: 1.0, hp: 14, spd: 1.4, shy: 0.25, turn: 3.4, accel: 8.0,
+    label: 'Lion', h: 1.15, hp: 14, spd: 1.4, shy: 0.25, turn: 3.4, accel: 8.0,
     graze: 0.3, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
   tiger: pet('tiger', {
-    label: 'Tiger', h: 1.0, hp: 14, spd: 1.5, shy: 0.25, turn: 3.6, accel: 8.5,
+    label: 'Tiger', h: 1.20, hp: 14, spd: 1.5, shy: 0.25, turn: 3.6, accel: 8.5,
     graze: 0.3, drops: [['hide', 1, 2], ['meat', 1, 2]],
   }),
 

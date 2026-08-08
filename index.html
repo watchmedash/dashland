@@ -138,6 +138,40 @@
   <div id="cursor-stack" class="hidden"><img alt="" /><span></span></div>
   <div id="tooltip" class="hidden"></div>
 
+  <!-- ── growth ──────────────────────────────────────────────
+       The skill tree, on K. Its own overlay rather than a tab of the inventory
+       screen: there is nothing here to drag, and six branches with their prices
+       and their reasons want the width the worn-armour column used to take.
+       UI.js builds every row from `skills.summary()`, so the branches, their
+       costs and their prerequisites are stated once, in Skills.js. -->
+  <div id="skills" class="overlay hidden">
+    <div class="panel skills-panel">
+      <header>
+        <h2>Growth</h2>
+        <button class="ghost" data-close-skills>Close <kbd>K</kbd></button>
+      </header>
+      <div class="skills-body">
+        <div class="skills-left">
+          <div class="skills-bar">
+            <span class="skill-points" id="sk-points">0</span>
+            <p class="skill-sub" id="sk-sub">—</p>
+            <button class="ghost" id="sk-reset">Unlearn everything</button>
+          </div>
+          <div class="skill-tree" id="sk-tree"></div>
+        </div>
+        <aside class="skills-side">
+          <h3>Where points come from</h3>
+          <div id="sk-earned"></div>
+          <h3>Firsts</h3>
+          <div id="sk-marks"></div>
+          <p class="note">Points are counted from what you have done, so nothing is
+            ever lost — and what you spend them on is yours for good. It does not
+            wear out, and you do not drop it when you die.</p>
+        </aside>
+      </div>
+    </div>
+  </div>
+
   <!-- ── pause ───────────────────────────────────────────── -->
   <div id="pause" class="overlay hidden">
     <div class="menu-card small">
@@ -212,6 +246,7 @@
         <div><kbd>E</kbd><span>Inventory</span></div>
         <div><kbd>Q</kbd><span>Drop held item</span></div>
         <div><kbd>F</kbd><span>Swap hands — held ⇄ offhand</span></div>
+        <div><kbd>K</kbd><span>Growth — spend skill points</span></div>
         <div><kbd>RMB</kbd><span>Hold to eat food</span></div>
         <div><kbd>RMB</kbd><span>Trade with a merchant</span></div>
         <div><kbd>RMB</kbd><span>Open a crate</span></div>
@@ -253,8 +288,12 @@
         the night is yours to deal with.<br />
         Husks come out after dark, and out of any unlit space at any hour. <strong>Torches keep them out</strong> —
         light a mine as you dig it and nothing will spawn behind you.<br />
-        Craft <strong>armour</strong> — hide first, then copper, iron, astral and cinder — and shift-click a piece
-        to wear it. A full set takes between a quarter and four fifths off every blow, and wears out by what it stops.<br />
+        You get tougher by <strong>playing</strong>, not by carrying. Press <kbd>K</kbd> for
+        <strong>Growth</strong>: six branches — health, damage tolerance, agility, lungs, hands and reach —
+        bought with points earned from everything you have already done, plus a few for firsts like
+        reaching the core or putting down a husk. Nothing in it wears out, nothing is dropped when you
+        die, and you can unlearn the lot and spend the points again for free. Three branches sit behind
+        another, so the first dozen points are a choice about who you are.<br />
         A <strong>crate</strong> holds twenty-seven stacks — shift-click to move a whole stack in or out,
         and break one to get everything back. Crates you find already standing in the world have something in them.
         Listen for a <strong>bell</strong>: it means a wandering merchant is somewhere within earshot.

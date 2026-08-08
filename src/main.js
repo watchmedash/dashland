@@ -25,8 +25,9 @@ import { Farming } from './game/Farming.js';
 import { Water } from './game/Water.js';
 import { Save } from './game/Save.js';
 import {
-  ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, ARMOUR_SLOT_ORDER,
+  ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, armourPoints,
 } from './game/Items.js';
+import { Skills, MARKS } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
@@ -198,6 +199,9 @@ const FLOWER_KIND = [];
 const FLOWER_HEIGHT = 0.62;
 for (const n of FLOWER_NAMES) if (ID[n]) FLOWER_KIND[ID[n]] = n;
 
+/** Seconds under an open night sky that count as having survived a night. */
+const NIGHT_OUTDOORS = 180;
+
 const DEFAULT_SETTINGS = {
   fov: 75, sensitivity: 1.0, renderScale: 1,
   volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: false,
@@ -267,6 +271,17 @@ class Game {
     this._streamTimer = 0;
     this._hurtGuard = 0;
 
+    /**
+     * What you have become, as opposed to what you are carrying.
+     *
+     * Built before the UI and the player because both read it on their first
+     * frame: the skills screen asks it for a summary, and `player.maxHealth` is
+     * its answer rather than a constant from the moment the world opens.
+     */
+    this.skills = new Skills();
+    /** Seconds until the next `skills.observe`. See `_tickSkills`. */
+    this._skillTimer = 0;
+
     this._initRenderer();
     this.inventory = new Inventory();
     this.ui = new UI(this);
@@ -275,7 +290,10 @@ class Game {
     this.input = new Input(this.canvas);
     this.input.invertY = this.settings.invertY;
     this.input.onLockChange = (locked) => {
-      if (!locked && this.state === 'playing' && !this.ui.screenOpen) {
+      // `skillsOpen` for the same reason `screenOpen` is here: opening a screen
+      // is what dropped the lock, and pausing on top of it would be the game
+      // reacting to its own action.
+      if (!locked && this.state === 'playing' && !this.ui.screenOpen && !this.ui.skillsOpen) {
         // Esc is also what dropped the pointer lock, and that key press has now
         // been spent on opening this menu. Swallow it, or the global Escape
         // handler would close the pause screen in the very same frame.
@@ -290,6 +308,8 @@ class Game {
     this.scene.add(this.planet.root);
 
     this.player = new Player(this.planet);
+    this.player.skills = this.skills;
+    this._applySkills();
     this.player.autoJump = !!this.settings.autoJump;
     this.viewModel = new ViewModel((id) => this.drops.createItemMesh(id));
     this.sky = new Sky(this.scene, this.renderer);
@@ -595,6 +615,16 @@ class Game {
     this.inventory.onChange = () => this.ui.refresh();
     this.stats = { mined: 0, placed: 0, crafted: 0 };
     this.playtime = 0;
+    // A new person, not just a new planet. `fromJSON(null)` is the module's own
+    // "nothing spent, nothing marked, nothing converted" — the same state a
+    // fresh `Skills` is in — and going through it rather than through `reset()`
+    // is deliberate: `reset` only unlearns the levels and would carry the marks
+    // and the armour conversion of the previous world into this one.
+    this.skills.fromJSON(null);
+    this.skills.observe(this.stats, this.playtime);
+    this._skillTimer = 1;
+    // Before the health line below, which is what fills the bar this sets.
+    this._applySkills();
     this.player.health = this.player.maxHealth;
     this.breath = 1;
     this.energy = 1;
@@ -946,6 +976,12 @@ class Game {
       this.seasons.fromJSON(save.season);
       this._pushSeason();
       this.stats = { ...this.stats, ...(save.stats || {}) };
+      // After `stats`, `playtime` and the inventory, and it has to be: the tree
+      // counts the first two and converts the armour in the third. See the
+      // ordering note on `_loadSkills`. `player.health` was assigned from the
+      // save above, so a respec-shrunk bar is clamped here rather than left
+      // over its own maximum.
+      this._loadSkills(save);
       for (const k of save.kilns || []) {
         this.kilns.set(k.key, {
           input: Slot.fromJSON(k.in), fuel: Slot.fromJSON(k.fu), output: Slot.fromJSON(k.out),
@@ -1088,6 +1124,169 @@ class Game {
     this.player.updateCamera(this.camera, 1 / 60, this.settings.fov);
   }
 
+  // --- growth ---------------------------------------------------------------
+
+  /**
+   * Push the tree's numbers onto the body that has to obey them.
+   *
+   * Two of the six branches are read by other systems through `player` rather
+   * than through `skills` — the raycasts all take `player.reach`, and the HUD
+   * and every heal clamp against `player.maxHealth` — so those two have to be
+   * copied across whenever a level changes. The other four are read straight
+   * off `skills` at the point of use and need nothing here.
+   *
+   * `health` is only ever clamped *down*, never topped up: buying a heart
+   * should give you room to heal into, not heal you. Losing one — which only a
+   * respec can do — must not leave you standing at 24 out of 20.
+   */
+  _applySkills() {
+    const p = this.player;
+    p.maxHealth = this.skills.maxHealth;
+    p.reach = this.skills.reach;
+    if (p.health > p.maxHealth) p.health = p.maxHealth;
+  }
+
+  /**
+   * Recount the derived points, on a timer rather than per frame.
+   *
+   * `observe` is five square roots over counters that move a handful of times a
+   * second at most, and it reports whether the total actually changed — so once
+   * a second is both far cheaper than a frame and quick enough that the toast
+   * still lands while you are looking at the block you just broke.
+   */
+  _tickSkills(dt) {
+    this._tickNightOut(dt);
+    this._skillTimer -= dt;
+    if (this._skillTimer > 0) return;
+    this._skillTimer = 1;
+    if (!this.skills.observe(this.stats, this.playtime)) return;
+    const left = this.skills.available;
+    // Announce the balance, not the delta. A player who has banked points and
+    // not spent them wants to be reminded that they are sitting there; "+1" on
+    // its own says nothing about whether it is worth opening the screen.
+    this.ui.toast(left === 1 ? '1 skill point to spend — K' : `${left} skill points to spend — K`,
+      0, 3200);
+    this.ui.refreshSkills();
+  }
+
+  /**
+   * First Light: time spent out under a night sky, and still standing.
+   *
+   * Counted up to a threshold rather than watched for a sunrise, and that is
+   * the only way it can work here. With `dayMinutes` at 0 — the default — the
+   * planet follows the device clock and a night is twelve real hours long, so a
+   * mark that waited for the moment of dawn would be a mark almost nobody ever
+   * got. Three minutes of open sky after dark is the same experience at every
+   * cycle length: long enough that stepping outside to shut a door does not
+   * count, short enough to fit inside one evening's play.
+   *
+   * `shelter` is the sky-exposure the weather already computes, so standing in
+   * a doorway or under a tree pays at whatever fraction of the sky is over you,
+   * and a roof pays nothing. `_die` puts the clock back to zero: a night you
+   * did not live through is not a night you survived.
+   */
+  _tickNightOut(dt) {
+    const t = this.timeOfDay();
+    if (!(t < 0.25 || t > 0.75)) { this._nightOut = 0; return; }
+    if (this.shelter < 0.55) return;
+    this._nightOut = (this._nightOut ?? 0) + dt;
+    if (this._nightOut >= NIGHT_OUTDOORS) this._mark('dawn');
+  }
+
+  /**
+   * Award a mark, and say so. Idempotent — `Skills.mark` swallows repeats — so
+   * callers are free to fire from inside a hot path.
+   */
+  _mark(key) {
+    if (!this.skills.mark(key)) return;
+    const m = MARKS[key];
+    this.ui.toast(`${m.label} — ${m.points} skill point${m.points > 1 ? 's' : ''}`, 0, 4000);
+    this.audio.ui(760);
+    this.ui.refreshSkills();
+  }
+
+  /** Buy one level. Called from the skills screen; returns whether it took. */
+  buySkill(key) {
+    if (!this.skills.buy(key)) { this.audio.ui(220); return false; }
+    this._applySkills();
+    this.audio.ui(720);
+    this.ui.refreshSkills();
+    return true;
+  }
+
+  /**
+   * Hand every point back. Free, by the module's own argument — the points come
+   * from a history that cannot be earned twice, so a fee would be a permanent
+   * tax for having chosen before you knew what the branches felt like.
+   */
+  resetSkills() {
+    this.skills.reset();
+    // Strictly after the reset: `_applySkills` is what clamps a player who was
+    // standing at 30 health down to the 20 they now have room for.
+    this._applySkills();
+    this.audio.ui(420);
+    this.ui.toast('Everything unlearned. Your points are back.', 0, 3200);
+    this.ui.refreshSkills();
+  }
+
+  /**
+   * Load the tree out of a save, and pay for whatever armour was in it.
+   *
+   * The order in here is the whole of the "do not silently rob the player"
+   * requirement, so it is worth stating: the levels come back first, then the
+   * armour is converted into points, then `observe` recounts everything the
+   * save's own counters have always been worth. All three land before the first
+   * frame is drawn, which is what makes the swap arrive as one event — you open
+   * a planet, you are told what your set became and what your history is worth,
+   * and the screen that spends it is one key away. Deferring any of it by even
+   * a frame would give the player a moment of being flatly weaker than they
+   * were, which is the one outcome this is not allowed to have.
+   */
+  _loadSkills(save) {
+    this.skills.fromJSON(save?.player?.skills);
+
+    // The worn set, once. `takeLegacyArmour` empties the field as it hands it
+    // over and `redeemArmour` refuses a second conversion, so this cannot pay
+    // twice — and because the pieces are only destroyed when the conversion
+    // actually returns something, it cannot take without paying either.
+    const worn = this.inventory.takeLegacyArmour();
+    // Spares in the bags count too. A chestplate in a backpack is armour the
+    // player earned exactly as much as the one on their chest, and leaving it
+    // behind would be converting some of what they owned and quietly turning
+    // the rest into an ornament.
+    const carried = [...this.inventory.slots, this.inventory.offhand]
+      .filter((s) => !s.empty && ITEMS[s.item]?.armour);
+    const points = armourPoints(worn) + armourPoints(carried);
+    const gained = this.skills.redeemArmour(points);
+    if (gained > 0) {
+      const pieces = worn.length + carried.reduce((n, s) => n + s.count, 0);
+      for (const s of carried) s.clear();
+      this.inventory.changed();
+      this.ui.toast(
+        `Armour is gone. ${pieces} piece${pieces > 1 ? 's' : ''} became ${gained} skill point${gained > 1 ? 's' : ''} — press K.`,
+        0, 9000);
+    }
+
+    // Last, and never skipped: this is where a twenty-hour save gets the sixty
+    // points its history has been worth all along.
+    this.skills.observe(this.stats, this.playtime);
+    this._skillTimer = 1;
+    this._applySkills();
+
+    // And say so. This is the other half of the promise the conversion makes,
+    // and it matters most for the player who owned no armour at all: they lost
+    // nothing, so the toast above never fires, and without this they would open
+    // a save that is quietly missing a system and be given no reason to press
+    // any key at all. `observe` will not announce it either — it has just run,
+    // so the total is not going to move again for a while.
+    const left = this.skills.available;
+    if (left > 0) {
+      setTimeout(() => this.ui.toast(
+        `${left} skill point${left === 1 ? '' : 's'} waiting — press K to spend ${left === 1 ? 'it' : 'them'}.`,
+        0, 8000), gained > 0 ? 2600 : 600);
+    }
+  }
+
   // --- state ----------------------------------------------------------------
 
   /**
@@ -1100,6 +1299,7 @@ class Game {
     const ui = this.ui;
     if (ui.anyModalOpen) { ui.closeSettings(); ui.closeControls(); return; }
     if (ui.deathOpen) return;
+    if (ui.skillsOpen) { this.closeSkills(); return; }
     if (ui.pauseOpen) { this.resume(); return; }
     if (ui.screenOpen) { this.closeScreen(); return; }
     if (this.state === 'playing') this.pause();
@@ -1124,6 +1324,7 @@ class Game {
     this.state = 'dead';
     this.input.exitLock();
     this.closeScreen();
+    this.closeSkills();
     // Everything you carried stays where you fell, and stays there — `keep`
     // exempts it from the despawn clock. What you were *wearing* stays on you:
     // you respawn at a bed that may be a long way from your body, and sending
@@ -1141,6 +1342,8 @@ class Game {
       dropped++;
     }
     this.deathSite = dropped ? { pos: _v1.clone(), at: this.playtime } : null;
+    // See `_tickNightOut`: a night you did not live through does not count.
+    this._nightOut = 0;
     this.ui.refresh();
     this.ui.showDeath(cause);
   }
@@ -1191,6 +1394,7 @@ class Game {
     this.ui.closePause();
     this.ui.hideDeath();
     this.closeScreen();
+    this.closeSkills();
     this.ui.showHud(false);
     this.input.exitLock();
     this.state = 'menu';
@@ -1276,6 +1480,11 @@ class Game {
         // you are holding. A save from before this existed has no key at all,
         // and `loadOffhand` turns `undefined` into an empty slot.
         offhand: this.inventory.offhandJSON(),
+        // The other thing that block was written in anticipation of. Only what
+        // cannot be recomputed goes in — levels, marks, the armour conversion —
+        // because the rest is a function of `stats` and `playtime`, which are
+        // already in this file. See `Skills.toJSON`.
+        skills: this.skills.toJSON(),
       },
       inventory: this.inventory.toJSON(),
       drops: this.drops.toJSON(),
@@ -1595,6 +1804,9 @@ class Game {
     this.particles.blockBreak(center, hit.id, b.render === R_CROSS ? 10 : 26);
     this.audio.break_(b.sound, center);
     this.stats.mined++;
+    // Ripe wheat only. Breaking a green shoot is losing a crop, not harvesting
+    // one, and marking it would teach exactly the wrong lesson about farming.
+    if (hit.id === ID.wheat_3) this._mark('harvest');
     this.player.swing();
     this.viewModel.punch();
     if (heldDef?.tool && b.hardness > 0.15) this.inventory.damageHeld(1);
@@ -1706,6 +1918,23 @@ class Game {
   }
 
   /**
+   * The growth screen. Same shape as `openScreen` — free the cursor, make a
+   * noise — but it is not a container, so it does not go through the inventory
+   * screen's machinery and nothing in it can be dragged or dropped.
+   */
+  openSkills() {
+    this.ui.openSkills();
+    this.input.exitLock();
+    this.audio.ui(560);
+  }
+
+  closeSkills() {
+    if (!this.ui.skillsOpen) return;
+    this.ui.closeSkills();
+    if (this.state === 'playing') this.input.requestLock();
+  }
+
+  /**
    * Twenty-seven slots, created lazily so an untouched crate costs nothing.
    *
    * A crate with no entry yet is one the player has never touched, which — since
@@ -1789,6 +2018,10 @@ class Game {
       if (k.burn <= 0 && recipe && canOutput && !k.fuel.empty && FUEL[k.fuel.item]) {
         k.burnMax = FUEL[k.fuel.item];
         k.burn = k.burnMax;
+        // A kiln taking light is the closest thing the game has to an event for
+        // "you have started smelting", and it is the right one: it fires when
+        // fuel, ore and a free output all line up, which is the whole lesson.
+        this._mark('forge');
         k.fuel.count--;
         if (k.fuel.count <= 0) k.fuel.clear();
       }
@@ -1890,7 +2123,22 @@ class Game {
 
     if (input.pressed('KeyE')) {
       if (ui.screenOpen) this.closeScreen();
-      else this.openScreen('inventory');
+      else {
+        // One overlay at a time. E from the growth screen means "I want my
+        // bags", not "put my bags on top of this".
+        this.closeSkills();
+        this.openScreen('inventory');
+      }
+      return;
+    }
+    // K for the tree. The letters were nearly all spoken for — E, Q and F are
+    // taken, I and C are the two every player would guess and both are one
+    // finger away from a key that already does something — and K is what the
+    // genre uses for a character sheet. Like E it toggles, so the key that
+    // opened it closes it without reaching for Escape.
+    if (input.pressed('KeyK')) {
+      if (ui.skillsOpen) this.closeSkills();
+      else if (!ui.screenOpen) this.openSkills();
       return;
     }
     if (input.pressed('F3')) ui.toggleDebug();
@@ -1908,7 +2156,13 @@ class Game {
     // inventory indefinitely and never drown. Minecraft doesn't pause for a
     // chest either. The screen now only suppresses *input*: the body below runs
     // every frame, driven by a neutral input while a screen is up.
-    const busy = ui.screenOpen;
+    // The skills screen takes your hands on exactly the same terms a container
+    // does: the world keeps running behind it, but nothing you type reaches the
+    // player. It has to be in this gate rather than relying on the pointer lock
+    // — `Input` listens on the window, so W and the number keys still arrive
+    // while the cursor is free, and browsing a skill tree would otherwise walk
+    // you into a lake.
+    const busy = ui.screenOpen || ui.skillsOpen;
     const act = busy ? Game.NO_INPUT : input;
 
     if (!busy) {
@@ -1969,7 +2223,11 @@ class Game {
     }
 
     if (this.player.headInWater) {
-      this.breath = Math.max(0, this.breath - dt / 9);
+      // Nine seconds of air, stretched by the lungs branch — 27 at lungs 4.
+      // The bar is still 0..1, so what the skill changes is how long it takes
+      // to empty, not how much of it there is; a HUD that showed "180% breath"
+      // would be describing the tree rather than the dive.
+      this.breath = Math.max(0, this.breath - dt / (9 * this.skills.breathScale));
       if (this.breath <= 0) {
         this._drownTimer = (this._drownTimer || 0) + dt;
         if (this._drownTimer > 0.7) {
@@ -2020,6 +2278,7 @@ class Game {
     this._safeTick('vitals', () => this._tickVitals(dt));
     this._safeTick('grace', () => this._tickGrace(dt));
     this._safeTick('core', () => this._tickCore(dt));
+    this._safeTick('skills', () => this._tickSkills(dt));
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
     // A merchant that has walked out of range, run out of life or been killed
     // takes its shop with it. Without this the screen stays up over a stock
@@ -2088,29 +2347,22 @@ class Game {
    * already paces itself on its own timer and cannot gang up.
    */
   /**
-   * @param {boolean} armoured whether worn armour applies. Blows land on you
-   *   through a suit; drowning and starving do not, and a helmet that saved you
-   *   from suffocating would be a strange thing to have to explain.
+   * @param {string} kind what sort of damage this is, for the tolerance branch.
+   *   'blow', 'fire' and 'lava' are reduced; 'drown' and anything unrecognised
+   *   are not. This used to be an `armoured` boolean and the rule is unchanged
+   *   — you cannot toughen your way out of not breathing — but a string is what
+   *   `Skills.soak` wants, and it means a damage source added tomorrow has to
+   *   opt in by name instead of inheriting a 45% discount by defaulting to true.
    */
-  _takeHit(damage, cause, guarded = true, armoured = true) {
+  _takeHit(damage, cause, guarded = true, kind = 'blow') {
     const p = this.player;
     if (p.health <= 0) return true;
     if (guarded && this._hurtGuard > 0) return false;
     if (guarded) this._hurtGuard = HURT_IMMUNITY;
 
-    if (armoured) {
-      const soaked = damage * this.inventory.protection;
-      if (soaked > 0) {
-        damage -= soaked;
-        // Armour wears by what it actually stopped, so a hide cap outside a
-        // cave lasts for days and a chestplate that ate a husk night does not.
-        const broken = this.inventory.wearArmour(Math.max(1, Math.round(soaked)));
-        for (const i of broken) {
-          this.ui.toast(`${ARMOUR_SLOT_ORDER[i]} broke`, 0, 2200);
-          this.audio.ui(180);
-        }
-      }
-    }
+    // Nothing wears out and nothing breaks: the reduction is a fact about the
+    // player now, not about four items with a durability bar.
+    damage = this.skills.soak(damage, kind);
 
     // `cause` is the mob for a blow and a string for everything else, so this
     // shoves you away from a husk but not away from drowning.
@@ -2160,7 +2412,7 @@ class Game {
       this._lavaTimer = (this._lavaTimer || 0) + dt;
       if (this._lavaTimer > 0.45) {
         this._lavaTimer = 0;
-        if (this._takeHit(3, 'The lava was not as shallow as it looked.', false)) return;
+        if (this._takeHit(3, 'The lava was not as shallow as it looked.', false, 'lava')) return;
       }
       this.particles.embers(p.eye, p.up, 3, 1.1);
     } else if (p.burning > 0) {
@@ -2171,7 +2423,7 @@ class Game {
         this._burnTimer = (this._burnTimer || 0) + dt;
         if (this._burnTimer > 0.9) {
           this._burnTimer = 0;
-          if (this._takeHit(1, 'You burned.', false)) return;
+          if (this._takeHit(1, 'You burned.', false, 'fire')) return;
         }
         if (Math.random() < dt * 12) this.particles.embers(p.eye, p.up, 1, 0.8);
       }
@@ -2246,6 +2498,7 @@ class Game {
     }
     if (!touching) return;
     this.coreFound = true;
+    this._mark('core');
     this.inventory.add(itemIdOf('hearth'), 1);
     this.ui.toast('The core is warm to the touch.', itemIdOf('hearth'), 5000);
     setTimeout(() => this.ui.toast('It gives you a hearth. Nothing that walks at night will come near it.',
@@ -2419,6 +2672,12 @@ class Game {
     this._hlCol = baseCol; this._hlK = ck; this._hlSeq = this.editSeq;
 
     let r = 0, g = 0, b = 0;
+    // Lava is an emitter, so the scan below already walks over every cell of it
+    // within a few blocks of you — which makes this the one place in the game
+    // that knows you have found some without casting a single extra ray. It
+    // only runs when the cache misses, i.e. when you move a cell or edit the
+    // world, and `_mark` is idempotent, so the cost of asking is a comparison.
+    let sawLava = false;
     // Every burning cell this scan passes is also somewhere a flame should be
     // seen, and the scan is already here and already cached — collecting them
     // costs a push. Doing it as its own sweep would be a second 2 000-cell walk
@@ -2439,6 +2698,7 @@ class Game {
           const bl = BLOCKS[id];
           const emit = bl?.light;
           if (!emit) continue;
+          if (id === ID.lava) sawLava = true;
           // Only things that actually burn get a flame. Glowstone and crystal
           // are lit, not alight.
           if (FLAME_BLOCKS.has(id) && flames.length < MAX_FLAMES) {
@@ -2456,6 +2716,7 @@ class Game {
         }
       }
     }
+    if (sawLava) this._mark('abyss');
     this._hlValue = { r, g, b };
     return this._hlValue;
   }
@@ -2753,7 +3014,12 @@ class Game {
         // Raw `charge` and not a pre-floored ramp: `hurt` applies its own floor
         // so that a connecting blow always moves what it hits, and flooring it
         // twice would quietly halve what timing is worth.
-        this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge);
+        // `hurt` returns true when that blow was the last one. Gated on
+        // `hostile` rather than on the husk's name so that whatever else comes
+        // out of the dark next patch counts for the same mark — and so that
+        // clubbing a cow never does.
+        const killed = this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge);
+        if (killed && mobHit.mob.spec.hostile) this._mark('slayer');
         if (held?.tool) this.inventory.damageHeld(1);
       }
       // Right-click offers whatever you're holding. Feeding is how a herd
@@ -2813,7 +3079,12 @@ class Game {
     if (input.buttons[0] && hit && input.locked) {
       const key = hit.col * D + hit.k;
       if (m.key !== key) { m.key = key; m.progress = 0; }
-      const time = miningTime(hit.id, heldDef, this.player.headInWater);
+      // The hands branch is a multiplier on the finished timer rather than a
+      // term inside `miningTime`: that function is shared with the worker's
+      // idea of hardness and with the tool ladder, and a skill reaching into it
+      // would make a block's break time depend on who was asking.
+      const time = miningTime(hit.id, heldDef, this.player.headInWater)
+        * this.skills.miningScale;
       if (isFinite(time) && hit.id !== ID.core) {
         m.progress += dt / time;
         if (Math.random() < dt * 10) {

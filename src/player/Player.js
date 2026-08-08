@@ -38,6 +38,11 @@ const FOOT = 0.002;    // ground tolerance, so resting on a surface is stable
 /** Stamina you need back before a spent sprint can start again — about 1.2s. */
 const SPRINT_RESUME = 0.15;
 
+/**
+ * The *base* free fall, in blocks. Agility adds to it — see `skills.fallFree`,
+ * which starts from this same 3.0 — so this constant is now what a player with
+ * no tree attached falls for free, and the floor everything else builds on.
+ */
 const FALL_FREE = 3.0;
 const FALL_PER_BLOCK = 1.0;
 /** Seconds a blow keeps shoving you. Matches the shove husks take from you. */
@@ -134,6 +139,15 @@ export class Player {
      * @type {import('../game/Water.js').Water|null}
      */
     this.water = null;
+    /**
+     * The skill tree, if there is one. Optional for the same reason `water` and
+     * `mobs` are: this class is built before the game around it, and a Player
+     * with nothing attached still has to walk, sprint and fall properly. Every
+     * read below is written so that `null` gives exactly the numbers this file
+     * used before the tree existed.
+     * @type {import('../game/Skills.js').Skills|null}
+     */
+    this.skills = null;
     this.headInWater = false;
     /** seconds still alight after leaving the lava */
     this.burning = 0;
@@ -594,7 +608,13 @@ export class Player {
     this.headInWater = p.isLiquidWorld(headP.x, headP.y, headP.z) && !this.inLava;
 
     // ---- desired tangential velocity, expressed in cells/second ----
-    let speed = this.crouching ? 2.0 : this.sprinting ? 6.8 : 4.4;
+    // Agility scales all three gaits by the same small factor rather than only
+    // the sprint. A branch that made sprinting faster and walking no faster
+    // would be a branch that punishes you for being in a cave, where there is
+    // nowhere to sprint; and the crouch has to keep its ratio to the walk or
+    // sneaking along a ledge stops feeling like the same action.
+    let speed = (this.crouching ? 2.0 : this.sprinting ? 6.8 : 4.4)
+      * (this.skills?.speedScale ?? 1);
     if (this.inWater) speed *= 0.62;
 
     const right = _c.copy(this.forward).cross(this.up).normalize();
@@ -802,8 +822,22 @@ export class Player {
       else if (this.fallStart !== null && r > this.fallStart) this.fallStart = r;
     } else if (this.fallStart !== null) {
       const drop = this.fallStart - r;
-      if (drop > FALL_FREE && !this.inWater) {
-        const dmg = Math.round((drop - FALL_FREE) * FALL_PER_BLOCK);
+      // Agility buys the blocks you fall for free; tolerance softens what is
+      // left of the ones you do not. Both are read through `skills`, and with
+      // no tree attached this is exactly the arithmetic it always was.
+      const free = this.skills?.fallFree ?? FALL_FREE;
+      if (drop > free && !this.inWater) {
+        // Soaked *before* rounding, so a level of tolerance can turn a 1-point
+        // scrape into nothing rather than being rounded straight back up.
+        //
+        // Still applied here rather than routed out to main's `_takeHit`, which
+        // was the other way to soak it. `_takeHit` exists to give a blow its
+        // immunity window, its knockback and its named killer, and a fall wants
+        // none of the three — it cannot gang up, it already shoved you, and
+        // `onHurt` below is what names it. What it was actually missing was the
+        // damage reduction, and that is what it now has.
+        const raw = (drop - free) * FALL_PER_BLOCK;
+        const dmg = Math.round(this.skills ? this.skills.soak(raw, 'fall') : raw);
         if (dmg > 0) { this.health = Math.max(0, this.health - dmg); this.onHurt?.(dmg); }
       }
       if (drop > 0.6) this.onLand?.(Math.min(1, drop / 8));
@@ -827,8 +861,13 @@ export class Player {
     this.fovBoost += ((this.sprinting && tanSpeed > 3 ? 1 : 0) - this.fovBoost) * Math.min(1, 6 * dt);
     this.stepOffset *= Math.max(0, 1 - 16 * dt);
 
-    if (this.sprinting && tanSpeed > 3) this.stamina = Math.max(0, this.stamina - dt * 0.055);
-    else this.stamina = Math.min(1, this.stamina + dt * 0.12);
+    // Only the drain is scaled, never the recovery. Both would have been the
+    // obvious move and it doubles the effect of every level while making the
+    // branch impossible to describe in one line — endurance is how long you can
+    // keep going, and 8% a level off the drain already says that.
+    if (this.sprinting && tanSpeed > 3) {
+      this.stamina = Math.max(0, this.stamina - dt * 0.055 * (this.skills?.staminaScale ?? 1));
+    } else this.stamina = Math.min(1, this.stamina + dt * 0.12);
 
     if (this.swingT < 1) this.swingT = Math.min(1, this.swingT + dt * 3.4);
   }

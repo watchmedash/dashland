@@ -233,13 +233,12 @@ const WARES = [
   ['wood_pick', 1, 1],
   ['wood_axe', 1, 1],
   ['wood_shovel', 1, 1],
-  // Hide armour only, and by the same rule as the wooden tools: the bottom rung
-  // is a shortcut past a chore, every rung above it is the reward for mining.
-  // A trader who sold iron plate would make the forge decorative.
-  ['hide_helm', 1, 1],
-  ['hide_chest', 1, 1],
-  ['hide_legs', 1, 1],
-  ['hide_boots', 1, 1],
+  // Hide armour used to be stocked here, one piece per line, on the same rule
+  // as the wooden tools. It is off the list because it no longer does anything:
+  // armour is gone, and a merchant selling a cap that protects you from nothing
+  // is the game taking coins for a lie. He will still *buy* one — `canSell`
+  // takes everything but his own coins — which is what an old set left in a
+  // crate is now for.
 ];
 
 const WARE_IDS = new Set(WARES.map(([n]) => itemIdOf(n)).filter(Boolean));

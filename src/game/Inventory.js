@@ -1,7 +1,7 @@
 // Player inventory: 9 hotbar slots + 27 storage, plus a crafting grid and the
 // cursor stack used while dragging.
 
-import { ITEMS, ARMOUR_SLOT_ORDER, armourReduction } from './Items.js';
+import { ITEMS } from './Items.js';
 
 export const HOTBAR = 9;
 export const STORAGE = 27;
@@ -27,10 +27,20 @@ export class Inventory {
   constructor() {
     this.slots = Array.from({ length: TOTAL }, () => new Slot());
     this.craft = Array.from({ length: 9 }, () => new Slot());   // 3x3, 2x2 uses 0,1,3,4
-    // Worn armour, in ARMOUR_SLOT_ORDER. Kept out of `slots` so nothing that
-    // walks the carried inventory — crafting costs, the recipe sidebar, a
-    // merchant's buy list — can quietly consume the boots off your feet.
-    this.armour = Array.from({ length: ARMOUR_SLOT_ORDER.length }, () => new Slot());
+    /**
+     * Worn armour, only for as long as it takes to pay for it.
+     *
+     * The four worn slots are gone — see Skills.js for what replaced them. What
+     * is left here is a one-shot: `fromJSON` unpacks a save's `armour` key into
+     * this array and nothing else ever writes it, so the loader can find the set
+     * the player was wearing, convert it to skill points and take it. It is not
+     * saved, not rendered and not part of the inventory; `takeLegacyArmour`
+     * empties it, and on a save written since the conversion it is already
+     * empty. Deleting the key outright would have been simpler and would also
+     * have silently thrown away the one thing the conversion is owed.
+     * @type {Slot[]}
+     */
+    this.legacyArmour = [];
     /**
      * The left hand — one stack you carry but are not holding.
      *
@@ -50,31 +60,20 @@ export class Inventory {
 
   changed() { this.onChange?.(); }
 
-  /** Fraction of an incoming blow the worn set absorbs, 0..0.8. */
-  get protection() { return armourReduction(this.armour); }
-
-  /** Which equipment slot an item belongs in, or -1 if it isn't armour. */
-  static armourIndexOf(itemId) {
-    const slot = ITEMS[itemId]?.armour?.slot;
-    return slot ? ARMOUR_SLOT_ORDER.indexOf(slot) : -1;
-  }
-
   /**
-   * Spread `damage` across the worn pieces and drop any that give out.
-   * @returns {number[]} indices of pieces that broke
+   * Hand over whatever armour the loaded save was wearing, once.
+   *
+   * Returns the pieces and empties the field in the same breath, so a second
+   * caller — or the same caller after a stray refresh — gets nothing. That is
+   * belt and braces: `Skills.redeemArmour` refuses a second conversion on its
+   * own, and this makes sure a second attempt cannot destroy the pieces without
+   * being paid for them either.
+   * @returns {Slot[]} the non-empty worn pieces
    */
-  wearArmour(damage = 1) {
-    const broken = [];
-    for (let i = 0; i < this.armour.length; i++) {
-      const s = this.armour[i];
-      if (s.empty) continue;
-      const max = ITEMS[s.item]?.armour?.durability ?? 0;
-      if (!max) continue;
-      s.wear += damage;
-      if (s.wear >= max) { s.clear(); broken.push(i); }
-    }
-    if (broken.length) this.changed();
-    return broken;
+  takeLegacyArmour() {
+    const worn = this.legacyArmour.filter((s) => !s.empty);
+    this.legacyArmour = [];
+    return worn;
   }
 
   held() { return this.slots[this.selected]; }
@@ -207,9 +206,12 @@ export class Inventory {
   // --- persistence ----------------------------------------------------------
 
   toJSON() {
+    // No `armour` key any more. A save written by this build and opened by an
+    // older one loses the worn set rather than corrupting anything — the old
+    // loader defaults a missing key to four empty slots — and the pieces it
+    // would have found have already been paid out as skill points.
     return {
       slots: this.slots.map((s) => s.toJSON()),
-      armour: this.armour.map((s) => s.toJSON()),
       selected: this.selected,
     };
   }
@@ -236,11 +238,10 @@ export class Inventory {
     // fresh Inventory today, so nothing is currently relying on this; that is a
     // property of the caller, not of this method. `loadOffhand` runs after.
     this.offhand.clear();
-    // Saves written before armour existed have no `armour` key at all, and
-    // fromJSON(undefined) is already an empty slot — so they load bare-headed
-    // rather than failing.
-    this.armour = Array.from({ length: ARMOUR_SLOT_ORDER.length },
-      (_, i) => Slot.fromJSON(data.armour?.[i]));
+    // The worn set, read for the last time. Saves from before armour existed
+    // and saves from after it was removed both have no `armour` key, and both
+    // want the same answer — nothing to convert.
+    this.legacyArmour = (data.armour || []).map((v) => Slot.fromJSON(v));
     this.selected = data.selected || 0;
     this.changed();
   }

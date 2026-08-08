@@ -205,14 +205,19 @@ for (const [tName, t] of Object.entries(TIERS)) {
 // --- armour -----------------------------------------------------------------
 
 /**
- * Every metal on the planet had exactly two fates: a storage block, or a tool
- * you already owned a better version of. Armour is the sink that makes the
- * middle of the ladder worth mining — and the only answer to a night that can
- * kill a full-health player in seven seconds other than "do not go outside".
+ * The pieces outlive the system.
  *
- * Hide sits below the metals deliberately: it is craftable the first evening
- * from what the animals already drop, so the progression starts before the
- * first pickaxe rather than after the first forge.
+ * Armour is gone — Skills.js is what makes you tougher now, and Recipes.js no
+ * longer knows how to make any of this. The twenty item definitions stay
+ * exactly where they were, and deliberately: an id in a save file is a number,
+ * and a number with no definition behind it is an item whose label, icon and
+ * value are all `undefined`. Old saves carry these ids in bags, in crates, on
+ * the ground and in a merchant's stock, and every one of them has to resolve to
+ * something the game can draw and the trader can buy. `points` in particular is
+ * what the one-time conversion is counted from, so it has to survive the system
+ * it described.
+ *
+ * What is *not* here any more is a way to acquire one or a reason to want one.
  */
 export const ARMOUR_TIERS = {
   hide: { label: 'Hide', points: 1.5, durability: 90, mat: 'hide', color: '#8a6339', edge: '#c2905a' },
@@ -234,7 +239,14 @@ export const ARMOUR_SLOTS = {
 
 export const ARMOUR_SLOT_ORDER = ['helm', 'chest', 'legs', 'boots'];
 
-/** Each point takes 4% off a blow, and no suit ever stops all of one. */
+/**
+ * What a point used to be worth: 4% off a blow, capped at 80% for a full set.
+ *
+ * Kept as a record rather than as a rule — nothing computes a reduction any
+ * more. These two numbers are the ones `Skills.redeemArmour` is priced against
+ * (a full iron set was 16.2 points, i.e. 65%, and converts to five skill
+ * points), and deleting them would leave that rate justified by nothing.
+ */
 export const ARMOUR_PER_POINT = 0.04;
 export const ARMOUR_MAX_REDUCTION = 0.8;
 
@@ -253,16 +265,17 @@ for (const [tName, t] of Object.entries(ARMOUR_TIERS)) {
 }
 
 /**
- * What a worn set takes off an incoming blow, 0..ARMOUR_MAX_REDUCTION.
- * @param {Array} worn the four equipped slots, empties included
+ * The points in a pile of armour, which is now the only question anyone asks
+ * about it: `Skills.redeemArmour` turns this into the tree it was replaced by.
+ * @param {Array} pieces slots holding armour, empties and non-armour included
  */
-export function armourReduction(worn) {
+export function armourPoints(pieces) {
   let points = 0;
-  for (const s of worn || []) {
+  for (const s of pieces || []) {
     if (!s || s.empty) continue;
     points += ITEMS[s.item]?.armour?.points ?? 0;
   }
-  return Math.min(ARMOUR_MAX_REDUCTION, points * ARMOUR_PER_POINT);
+  return points;
 }
 
 /** Lowest tier that can harvest each tier number, for naming in hints. */

@@ -161,20 +161,17 @@ const RAW = [
   }),
 
   // --- armour ---
-  // The classic silhouettes, because they are the one crafting shape every
-  // player of this kind of game already knows by heart — a helm is a hood, a
-  // chestplate is a vest. Guessing them right the first time is a small
-  // pleasure the game gets for free by not inventing its own.
-  ...['hide:hide', 'copper:copper_ingot', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder']
-    .flatMap((spec) => {
-      const [tier, mat] = spec.split(':');
-      return [
-        { out: `${tier}_helm`, count: 1, table: true, shape: ['MMM', 'M M'], key: { M: mat } },
-        { out: `${tier}_chest`, count: 1, table: true, shape: ['M M', 'MMM', 'MMM'], key: { M: mat } },
-        { out: `${tier}_legs`, count: 1, table: true, shape: ['MMM', 'M M', 'M M'], key: { M: mat } },
-        { out: `${tier}_boots`, count: 1, table: true, shape: ['M M', 'M M'], key: { M: mat } },
-      ];
-    }),
+  // Twenty recipes used to stand here, one per piece per tier. They are gone
+  // with the system that wore them: nothing on the planet reduces damage by
+  // being carried any more, so a recipe for a chestplate would be a recipe for
+  // an ornament that costs eight iron.
+  //
+  // The *items* are still defined — see Items.js for why — which means the
+  // pieces in an old save still have a label, an icon and a price. What they no
+  // longer have is a way to make another one. The metal sink they used to be is
+  // now the skill tree, which is paid for in play rather than in ingots; that
+  // leaves the middle of the tool ladder as the only large iron sink, and it is
+  // the one worth watching if ore starts to pile up.
 ];
 
 export const RECIPES = RAW.map((r) => {

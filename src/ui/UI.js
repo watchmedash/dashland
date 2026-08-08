@@ -2,8 +2,9 @@
 
 import * as THREE from 'three';
 import { BLOCKS } from '../world/Blocks.js';
-import { ITEMS, ARMOUR_SLOT_ORDER } from '../game/Items.js';
-import { Slot, Inventory, HOTBAR, TOTAL } from '../game/Inventory.js';
+import { ITEMS } from '../game/Items.js';
+import { Slot, HOTBAR, TOTAL } from '../game/Inventory.js';
+import { BRANCHES, EARNED, MARKS } from '../game/Skills.js';
 import { findRecipe, availableRecipes, craftFromInventory } from '../game/Recipes.js';
 import {
   COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest,
@@ -68,6 +69,8 @@ export class UI {
       deathCause: $('death-cause'),
       chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgGrid: $('cg-grid'),
       cgStatus: $('cg-status'),
+      skills: $('skills'), skPoints: $('sk-points'), skSub: $('sk-sub'),
+      skTree: $('sk-tree'), skEarned: $('sk-earned'), skMarks: $('sk-marks'),
     };
 
     /** Built the first time New Game is pressed, and kept — see `CharacterPicker.close`. */
@@ -103,6 +106,16 @@ export class UI {
     $('dz-quit').onclick = () => g.quitToMenu();
 
     document.querySelector('[data-close-screen]').onclick = () => g.closeScreen();
+    document.querySelector('[data-close-skills]').onclick = () => g.closeSkills();
+    // Confirmed, because it is the one button on the screen that takes
+    // something away — and unconfirmed it sits one mis-click from a build a
+    // player spent an evening on. The points all come back, which is why this
+    // is a confirm and not a second screen.
+    $('sk-reset').onclick = () => {
+      if (g.skills.spent > 0 && window.confirm('Unlearn every skill and take all your points back?')) {
+        g.resetSkills();
+      }
+    };
     document.querySelector('[data-close-settings]').onclick = () => this.closeSettings();
     document.querySelector('[data-close-controls]').onclick = () => this.closeControls();
 
@@ -385,8 +398,13 @@ export class UI {
     const cur = this.game.inventory.cursor;
     const max = (id) => ITEMS[id]?.stack ?? 64;
     // A restricted slot still gives up what it holds — it only refuses to take
-    // the wrong thing. Refusing both ways would make a filled helm slot
+    // the wrong thing. Refusing both ways would make a filled restricted slot
     // impossible to empty once you were holding anything else.
+    //
+    // Nothing passes `accepts` today: the four worn armour slots were its only
+    // caller and they are gone. Kept because it is three lines and it is the
+    // rule any future slot with a filter has to follow — the offhand's comment
+    // explains why *it* deliberately has none.
     if (!cur.empty && accepts && !accepts(cur.item)) {
       this.game.audio.ui(200);
       return;
@@ -425,21 +443,9 @@ export class UI {
     const inv = this.game.inventory;
     const src = inv.slots[index];
     if (src.empty) return;
-    // Shift-clicking a helmet means "wear it" — nobody has ever shift-clicked a
-    // breastplate hoping to move it one row up. Swaps with whatever is already
-    // in that slot, so upgrading a set is one click per piece.
-    const ai = Inventory.armourIndexOf(src.item);
-    if (ai >= 0 && !this.crate) {
-      const worn = inv.armour[ai];
-      const held = src.copy();
-      src.set(worn.item, worn.count, worn.wear);
-      worn.set(held.item, held.count, held.wear);
-      if (src.count <= 0) src.clear();
-      this.game.audio.ui(560);
-      inv.changed();
-      this.refresh();
-      return;
-    }
+    // Shift-clicking a helmet used to mean "wear it". There is nowhere to wear
+    // it any more, so a piece of armour now shift-moves like anything else you
+    // are carrying — which is what it is.
     if (this.crate) this._pour(src, this.crate.slots);
     else {
       const toStorage = index < HOTBAR;
@@ -555,7 +561,6 @@ export class UI {
     }
     if (this.kilnSlots) this._refreshKiln();
     if (this.crateSlots) this._refreshCrate();
-    if (this.armourSlots) this._refreshArmour();
     if (this.offhandEl) this._paint(this.offhandEl, inv.offhand);
     if (this.screen === 'shop') this._refreshShop();
     else if (this.screenOpen) this._refreshRecipes();
@@ -662,7 +667,7 @@ export class UI {
         : kind === 'shop' ? 'Wandering Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
     this.el.screenTop.innerHTML = '';
     this.craftSlots = null; this.craftMap = null; this.kilnSlots = null;
-    this.crateSlots = null; this.armourSlots = null; this.offhandEl = null;
+    this.crateSlots = null; this.offhandEl = null;
     this.shopEls = null;
 
     if (kind === 'kiln') this._buildKilnUI();
@@ -720,17 +725,17 @@ export class UI {
     this.craftOutSlot = new Slot();
     this._wireSlot(this.craftOut, () => this.craftOutSlot, { output: true });
     outWrap.appendChild(this.craftOut);
-    wrap.append(this._buildArmourUI(), this._buildOffhandUI(), grid, arrow, outWrap);
+    wrap.append(this._buildOffhandUI(), grid, arrow, outWrap);
     this.el.screenTop.appendChild(wrap);
   }
 
   /**
-   * The offhand slot, beside the worn column on every inventory screen.
+   * The offhand slot, on the left edge of every inventory screen.
    *
-   * Its own column rather than a fifth cell in `_buildArmourUI`, deliberately:
-   * the armour array is on its way out, and an offhand built inside the thing
-   * that is being removed would have to be rescued out of it. This shares the
-   * left edge with it and nothing else.
+   * It was built as its own column rather than as a fifth cell in the worn
+   * armour column, on the grounds that armour was on its way out and an offhand
+   * built inside it would have to be rescued out of it. Armour is now out, and
+   * this needed no rescuing — the removal was one line in `_buildCraftUI`.
    *
    * No `accepts` filter — see the class of decision in the report. Anything you
    * can carry can go in the left hand, including a pickaxe, because barring an
@@ -752,39 +757,6 @@ export class UI {
     col.append(d, cap);
     this.offhandEl = d;
     return col;
-  }
-
-  /**
-   * The four worn slots, beside the crafting grid on every inventory screen.
-   *
-   * Each one only accepts its own piece, so there is no way to end up wearing
-   * boots on your head or, worse, to lose a chestplate into a slot that quietly
-   * refused it while the cursor kept hold of nothing.
-   */
-  _buildArmourUI() {
-    const inv = this.game.inventory;
-    const col = document.createElement('div');
-    col.className = 'armour-col';
-    this.armourSlots = [];
-    ARMOUR_SLOT_ORDER.forEach((name, i) => {
-      const d = document.createElement('div');
-      d.className = `islot armour-slot armour-${name}`;
-      d.dataset.slot = name;
-      this._wireSlot(d, () => inv.armour[i], {
-        accepts: (itemId) => ITEMS[itemId]?.armour?.slot === name,
-      });
-      col.appendChild(d);
-      this.armourSlots.push(d);
-    });
-    return col;
-  }
-
-  _refreshArmour() {
-    if (!this.armourSlots) return;
-    const inv = this.game.inventory;
-    for (let i = 0; i < this.armourSlots.length; i++) {
-      this._paint(this.armourSlots[i], inv.armour[i]);
-    }
   }
 
   _refreshCraftOutput() {
@@ -953,6 +925,7 @@ export class UI {
     go.addEventListener('click', () => {
       if (fulfilRequest(g.inventory, req, this.shop?.purse)) {
         g.audio.pickup();
+        g._mark('trade');
         g.ui.toast(`Paid ${req.reward} coins`, COIN_ITEM, 2600);
         g.inventory.changed();
         this.refresh();
@@ -1022,6 +995,7 @@ export class UI {
         const got = buyFrom(g.inventory, mob.stock, line.item, n);
         if (got) {
           g.audio.pickup();
+          g._mark('trade');
           this.toast(`Bought ${ITEMS[line.item].label}`, line.item, 1400);
         } else g.audio.ui(240);
         this.refresh();
@@ -1044,6 +1018,10 @@ export class UI {
         const sold = sellTo(g.inventory, item, n, mob?.purse);
         if (sold) {
           g.audio.pickup();
+          // Any hand that changes counts as a trade — see MARKS.trade. Buying,
+          // selling and filling his errand are three ways of doing the one
+          // thing the mark is for, which is meeting the merchant at all.
+          g._mark('trade');
           this.toast(`Sold ${sold} × ${ITEMS[item].label}`, COIN_ITEM, 1400);
           // Say so when the purse is what stopped the sale, or it reads as a bug.
           if (sold < n && mob?.purse && mob.purse.coins < sellPriceOf(item)) {
@@ -1055,6 +1033,158 @@ export class UI {
         } else g.audio.ui(240);
         this.refresh();
       }));
+    }
+  }
+
+  // --- growth ---------------------------------------------------------------
+
+  /**
+   * The skill tree, on K.
+   *
+   * Its own overlay rather than a tab of the inventory screen, for two reasons.
+   * The inventory screen is built around slots you drag things between and
+   * there is nothing here to drag; and this is the screen you open to *read*
+   * — six branches, six prices and a reason each is or is not available — which
+   * wants the whole width rather than the column the worn armour used to have.
+   *
+   * Rebuilt from scratch on every refresh. It is thirty-odd elements, it is
+   * only ever repainted when a point is spent or earned, and the alternative is
+   * a dozen cached node references that have to be kept in step with a model
+   * that already computes the whole answer in one call.
+   */
+  openSkills() {
+    this.el.skills.classList.remove('hidden');
+    this.refreshSkills();
+  }
+
+  closeSkills() {
+    this.el.skills.classList.add('hidden');
+    this._hideTooltip();
+  }
+
+  get skillsOpen() { return !this.el.skills.classList.contains('hidden'); }
+
+  /** Repaint if it is up, and do nothing at all if it is not. */
+  refreshSkills() {
+    if (!this.skillsOpen) return;
+    const sk = this.game.skills;
+    const left = sk.available;
+
+    this.el.skPoints.textContent = left;
+    this.el.skPoints.classList.toggle('none', left <= 0);
+    // Both halves of the balance, because "8 points" on its own does not say
+    // whether the tree has been touched. Spent is the part a player checks
+    // before deciding to unlearn everything.
+    this.el.skSub.textContent = left === 1
+      ? `1 point to spend · ${sk.spent} spent`
+      : `${left} points to spend · ${sk.spent} spent`;
+
+    const tree = this.el.skTree;
+    tree.innerHTML = '';
+    for (const s of sk.summary()) {
+      const row = document.createElement('div');
+      // Leaves are indented under their root. The prerequisite is the shape of
+      // this tree and a flat list of six would hide it — a player who cannot
+      // see that Lungs sits behind Agility reads "Needs Agility 2" as a refusal
+      // rather than as a route.
+      row.className = `skill-row${BRANCHES[s.key].needs ? ' leaf' : ''}`;
+      if (s.level >= s.max) row.classList.add('maxed');
+
+      const head = document.createElement('div');
+      head.className = 'skill-head-row';
+      const name = document.createElement('span');
+      name.className = 'skill-name';
+      name.textContent = s.label;
+      const pips = document.createElement('span');
+      pips.className = 'skill-pips';
+      // Drawn as one pip per level rather than as "3/5", so the shape of what
+      // is left is legible without reading a number — and so a branch with
+      // three levels visibly is a shorter branch than one with five.
+      for (let i = 0; i < s.max; i++) {
+        const p = document.createElement('i');
+        if (i < s.level) p.className = 'on';
+        pips.appendChild(p);
+      }
+      head.append(name, pips);
+
+      const blurb = document.createElement('p');
+      blurb.className = 'skill-blurb';
+      blurb.textContent = s.blurb;
+
+      const buy = document.createElement('button');
+      buy.className = 'skill-buy';
+      if (s.blocked) {
+        buy.disabled = true;
+        // The module's own wording, not this file's. `blockedBy` is where the
+        // one decision about how a refusal is phrased lives.
+        buy.textContent = s.blocked;
+        // "Not enough points" is the one refusal that is about the player's
+        // balance rather than about the branch, and it is the one they can do
+        // something about — so it still shows the price.
+        if (s.blocked === 'Not enough points') buy.textContent = `Learn · ${s.cost}`;
+        buy.classList.toggle('short', s.blocked === 'Not enough points');
+      } else {
+        buy.textContent = `Learn · ${s.cost}`;
+        buy.onclick = () => this.game.buySkill(s.key);
+      }
+
+      row.append(head, blurb, buy);
+      tree.appendChild(row);
+    }
+
+    this._paintEarned();
+  }
+
+  /**
+   * Where the points came from, and what is still out there.
+   *
+   * This half of the screen is the answer to the only question a tree with no
+   * XP bar invites: "how do I get more?". Every source is shown with the count
+   * the game has actually been keeping and the cap it is worth, so a player can
+   * see at a glance that mining has another twelve points in it and that fish
+   * are close to spent.
+   */
+  _paintEarned() {
+    const g = this.game;
+    const sk = g.skills;
+
+    const earned = this.el.skEarned;
+    earned.innerHTML = '';
+    for (const key in EARNED) {
+      const src = EARNED[key];
+      const count = key === 'playtime' ? g.playtime : (g.stats?.[key] ?? 0);
+      // Points from this source, by the module's own formula. Recomputed here
+      // rather than exposed by `observe`, which reports one total on purpose —
+      // this is a readout, and a model field per source would be five more
+      // things to keep in step for the sake of one panel.
+      const n = Math.min(src.cap, Math.floor(Math.sqrt(count / src.per)));
+      const row = document.createElement('div');
+      row.className = 'earn-row';
+      const shown = key === 'playtime'
+        ? `${Math.floor(count / 60)}m`
+        : String(Math.floor(count));
+      row.innerHTML = `<span>${src.label}</span><em>${shown}</em><b>${n}/${src.cap}</b>`;
+      earned.appendChild(row);
+    }
+    if (sk.bonus > 0) {
+      const row = document.createElement('div');
+      row.className = 'earn-row bonus';
+      row.innerHTML = `<span>Armour, converted</span><em>—</em><b>${sk.bonus}</b>`;
+      earned.appendChild(row);
+    }
+
+    const marks = this.el.skMarks;
+    marks.innerHTML = '';
+    for (const key in MARKS) {
+      const m = MARKS[key];
+      const has = sk.marks.has(key);
+      const row = document.createElement('div');
+      row.className = `mark-row${has ? ' got' : ''}`;
+      // The hint is shown whether or not it has been earned. A locked mark that
+      // will not say what it wants is a riddle, and this game has no room for
+      // one — the marks are a list of things worth doing, not a puzzle.
+      row.innerHTML = `<span>${has ? m.label : m.hint}</span><b>${m.points}</b>`;
+      marks.appendChild(row);
     }
   }
 

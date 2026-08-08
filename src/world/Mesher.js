@@ -297,8 +297,12 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
    * @param {number[]} hi  opposite corner
    * @param {object}   skip {pi, mi, pj, mj, up, dn} truthy to omit that face
    */
-  const emitBox = (g, id, biomeId, f, i, j, k, lo, hi, dirF, skip) => {
+  const emitBox = (g, id, biomeId, f, i, j, k, lo, hi, dirF, skip, allCap) => {
     const [i0, j0, k0] = lo, [i1, j1, k1] = hi;
+    // A box may ask for its cap tile on every face — see the torch head in
+    // blockBoxes. Without it the flame only ever faces the sky.
+    const side = allCap ? () => capTile(id, dirF, true)
+      : (dir) => sideTile(id, dir, dirF);
     // Faces are wound so the normal points out of the box, matching the
     // full-cube path — emit() derives the normal from the winding.
     if (!skip.up) {
@@ -314,25 +318,25 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
         i1 - i0, j1 - j0);
     }
     if (!skip.pi) {
-      emit(g, id, sideTile(id, 0, dirF), biomeId,
+      emit(g, id, side(0), biomeId,
         cornerLerp(f, i + i1, j + j0, k + k0, _c0), cornerLerp(f, i + i1, j + j1, k + k0, _c1),
         cornerLerp(f, i + i1, j + j1, k + k1, _c2), cornerLerp(f, i + i1, j + j0, k + k1, _c3),
         j1 - j0, k1 - k0);
     }
     if (!skip.mi) {
-      emit(g, id, sideTile(id, 1, dirF), biomeId,
+      emit(g, id, side(1), biomeId,
         cornerLerp(f, i + i0, j + j1, k + k0, _c0), cornerLerp(f, i + i0, j + j0, k + k0, _c1),
         cornerLerp(f, i + i0, j + j0, k + k1, _c2), cornerLerp(f, i + i0, j + j1, k + k1, _c3),
         j1 - j0, k1 - k0);
     }
     if (!skip.pj) {
-      emit(g, id, sideTile(id, 2, dirF), biomeId,
+      emit(g, id, side(2), biomeId,
         cornerLerp(f, i + i1, j + j1, k + k0, _c0), cornerLerp(f, i + i0, j + j1, k + k0, _c1),
         cornerLerp(f, i + i0, j + j1, k + k1, _c2), cornerLerp(f, i + i1, j + j1, k + k1, _c3),
         i1 - i0, k1 - k0);
     }
     if (!skip.mj) {
-      emit(g, id, sideTile(id, 3, dirF), biomeId,
+      emit(g, id, side(3), biomeId,
         cornerLerp(f, i + i0, j + j0, k + k0, _c0), cornerLerp(f, i + i1, j + j0, k + k0, _c1),
         cornerLerp(f, i + i1, j + j0, k + k1, _c2), cornerLerp(f, i + i0, j + j0, k + k1, _c3),
         i1 - i0, k1 - k0);
@@ -474,7 +478,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
             if (bk1 === 1 && IS_OPAQUE[at(col, k + 1)]) skip.up = 1;
             if (bk0 === 0 && IS_OPAQUE[at(col, k - 1)]) skip.dn = 1;
             emitBox(grp, id, biomeId, f, i, j, k,
-              [bi0, bj0, bk0], [bi1, bj1, bk1], -1, skip);
+              [bi0, bj0, bk0], [bi1, bj1, bk1], -1, skip, boxes[b][6]);
           }
           continue;
         }

@@ -284,7 +284,7 @@ export const BLOCKS = [
   // `top` is the burning end: every box's upward face takes it, and the only
   // upward face a torch has that you can actually see is the head's, because
   // the shaft's is buried under it and dropped as an interior seam.
-  block({ name: 'torch', label: 'Torch', render: R_TORCH, top: 'torch_flame', side: 'torch_stick', bottom: 'torch_stick', solid: false, opaque: false, hardness: 0.05, light: 13, lightColor: [1.0, 0.76, 0.42], particle: [1, 0.7, 0.35], sound: 'wood' }),
+  block({ name: 'torch', label: 'Torch', render: R_TORCH, top: 'torch_flame', side: 'torch_stick', bottom: 'torch_stick', solid: false, opaque: false, hardness: 0.4, light: 13, lightColor: [1.0, 0.76, 0.42], particle: [1, 0.7, 0.35], sound: 'wood' }),
   // Where you wake up. Dying used to drop you on a random column of a planet
   // with a quarter of a million of them, which on a world this size means your
   // house is simply gone.
@@ -685,7 +685,12 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     const dir = byte === 0 ? -1 : (byte - 1) & 3;
     if (dir < 0) {
       out.push([m, m, 0, m + w, m + w, 0.60]);            // shaft
-      out.push([m - 0.02, m - 0.02, 0.60, m + w + 0.02, m + w + 0.02, 0.72]); // head
+      // The head burns on every side, not just on top. `top` is the flame tile,
+      // and giving it only to upward faces put the fire on a 0.18-cell square
+      // pointing at the sky — from standing height you saw the shaft's bark on
+      // all four sides and a placed torch read as a plain rod. The 7th element
+      // says "cap tile on every face of this box"; see emitBox.
+      out.push([m - 0.02, m - 0.02, 0.60, m + w + 0.02, m + w + 0.02, 0.72, 1]);
       return out;
     }
     // Five rungs climbing away from the wall, then the head on the end.
@@ -706,10 +711,10 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
       else out.push([m, a, k0, m + w, b, k0 + 0.16]);
     }
     const a = 0.44, b = a + w + 0.05;
-    if (dir === 0) out.push([1 - b, m - 0.03, 0.68, 1 - a, m + w + 0.03, 0.84]);
-    else if (dir === 1) out.push([a, m - 0.03, 0.68, b, m + w + 0.03, 0.84]);
-    else if (dir === 2) out.push([m - 0.03, 1 - b, 0.68, m + w + 0.03, 1 - a, 0.84]);
-    else out.push([m - 0.03, a, 0.68, m + w + 0.03, b, 0.84]);
+    if (dir === 0) out.push([1 - b, m - 0.03, 0.68, 1 - a, m + w + 0.03, 0.84, 1]);
+    else if (dir === 1) out.push([a, m - 0.03, 0.68, b, m + w + 0.03, 0.84, 1]);
+    else if (dir === 2) out.push([m - 0.03, 1 - b, 0.68, m + w + 0.03, 1 - a, 0.84, 1]);
+    else out.push([m - 0.03, a, 0.68, m + w + 0.03, b, 0.84, 1]);
     return out;
   }
   if (IS_FENCE[id]) {

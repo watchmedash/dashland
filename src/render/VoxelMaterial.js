@@ -317,7 +317,15 @@ const LIGHTS_END = /* glsl */`
   float aoTotal = clamp(vAO * texAO, 0.0, 1.0);
   // Skylight shapes ambient, but never all the way to black — deep shade still
   // catches bounced light.
-  float sunAmt = 0.16 + 0.84 * (vSun * (0.45 + 0.55 * vSun));
+  //
+  // The floor was 0.16, and a face with no light on it at all sat that far off
+  // black while everything around it was lit: the shaded side of a boulder, the
+  // wall of a cutting, anything indoors by day. That is not how shade looks —
+  // a surface facing away from the sun is still under the whole sky, and on an
+  // overcast day the sky *is* the light. Lifting the floor keeps unlit faces
+  // legible as the material they are made of; the sun term below is untouched,
+  // so lit-versus-unlit still reads as strongly as it did.
+  float sunAmt = 0.34 + 0.66 * (vSun * (0.45 + 0.55 * vSun));
 
   // Sky dome fill, occluded by voxel skylight. Irradiance goes through the
   // same 1/PI Lambert factor as direct light, otherwise ambient overwhelms the

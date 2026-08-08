@@ -89,19 +89,30 @@ function restoreFacing(pairs) {
   }
 }
 
-function transfers(groups) {
+function transfers(groups, crossLight) {
   const t = [];
   for (const g of groups) {
     if (!g) continue;
     t.push(g.position.buffer, g.normal.buffer, g.tangent.buffer, g.uv.buffer,
       g.aux.buffer, g.blockLight.buffer, g.tint.buffer, g.index.buffer);
   }
+  // Transferred, not copied, exactly like the vertex data. It is only tens of
+  // bytes for a typical chunk, but a plain array of {col, k, light} objects
+  // would be structured-cloned per entry per remesh — and a remesh happens
+  // every time any block within seventeen cells of a flower changes.
+  if (crossLight) t.push(crossLight.buffer);
   return t;
 }
 
 function meshAndPost(f, ci, cj, ck) {
-  const groups = meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck);
-  self.postMessage({ type: 'chunk', f, ci, cj, ck, groups }, transfers(groups));
+  const { groups, crossLight } = meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck);
+  // `crossLight` rides with the geometry rather than in a message of its own,
+  // because it must land in the same tick as the mesh it belongs to: it is the
+  // light of blocks this chunk deliberately did *not* mesh, and the main thread
+  // keys it by chunk id. Two messages could interleave with an eviction and
+  // leave a chunk holding light for flowers it no longer has.
+  self.postMessage({ type: 'chunk', f, ci, cj, ck, groups, crossLight },
+    transfers(groups, crossLight));
 }
 
 /**

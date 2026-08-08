@@ -41,23 +41,36 @@
 // branch ported to instances, phased off the instance matrix so neighbours are
 // out of step. See `_skin`.
 //
-// The light comes back only in part, and the missing part is not the render
-// layer's to fetch. The light field lives in the world worker — the main thread
-// holds `blocks` and nothing else — so there is no cell to sample when the
-// instance list is built, and a per-instance light attribute has nothing to put
-// in it. What is available is the treatment every other loose model in the game
-// gets: the scene's entity fill, which `Sky` already dims by the player's own
-// sky exposure, plus the sun's shadow map, which does know there is a roof.
-// `receiveShadow` is therefore on. That is the mobs' answer, applied to
-// flowers, and it fixes the loudest half — a flower under a roof at noon is no
-// longer in direct sunlight. What it still cannot do is block light: a flower
-// beside a torch stays unlit by it. See the note on `_fit`.
+// The light comes back in two halves, from two different places, and it is
+// worth being clear about which is which because they do not overlap.
+//
+// The *sun* half is the scene's: the entity fill, which `Sky` already dims by
+// the player's own sky exposure, plus the sun's shadow map, which does know
+// there is a roof. `receiveShadow` is therefore on. That is the mobs' answer,
+// applied to flowers, and it is why a flower under a roof at noon is not in
+// direct sunlight. None of it is going anywhere — see the note on `_fit`.
+//
+// The *block light* half used to be written off here as unreachable, on the
+// grounds that the light field lives in the world worker and the main thread
+// holds `blocks` and nothing else, so there was no cell to sample when the
+// instance list is built. The premise was true and the conclusion was wrong.
+// The sample does not have to be taken on the main thread — it only has to
+// *arrive* there. `Mesher.meshChunk` already reads the light at exactly these
+// cells, at exactly the moment it decides not to mesh them (see MODELLED_CROSS
+// there), and used to throw it away. It now keeps it: four bytes per modelled
+// cross cell, shipped with the chunk geometry as a transferable, kept per chunk
+// by `main.js` and looked up per instance in `sync` below.
+//
+// So a flower beside a torch is lit by it. The two halves add rather than
+// replace — block light is a term on top of whatever the scene already did —
+// which is also what makes a missing sample safe. See `sync`.
 
 import * as THREE from 'three';
 import { worldModel } from './ItemModels.js';
 import { applyInstancedSway } from './VoxelMaterial.js';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, R_CROSS } from '../world/Blocks.js';
+import { crossLightRGB } from '../world/Mesher.js';
 
 /**
  * Instances per kind, hard.
@@ -88,6 +101,7 @@ const _spin = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _Y = new THREE.Vector3(0, 1, 0);
+const _rgb = [0, 0, 0];
 
 export class BlockModels {
   constructor(scene) {
@@ -143,8 +157,30 @@ export class BlockModels {
   /**
    * Place every kind's models and hide whatever is left over.
    *
+   * ### The block light, and what happens when there isn't any
+   *
+   * `t.light` is the mesher's packed word for the cell this instance stands in,
+   * or -1 when the main thread does not have one — the chunk has not been meshed
+   * yet, or has been evicted, or the flower was planted this instant and the
+   * remesh has not come back. That case is not rare and it has to be safe.
+   *
+   * It is safe because the term is *additive*. The instance is already lit by
+   * the scene — sun, shadow map, ambient, entity fill — and this adds the voxel
+   * block light on top of that, so -1 means "add nothing" and the result is
+   * exactly the picture this layer drew before any of this existed: a flower
+   * lit like every other loose model in the game. Bright, never black.
+   *
+   * That is the reason the shipped light is block light *only* and the reason
+   * it is added rather than multiplied. A multiplicative light term is the
+   * natural way to write this and it fails the wrong way round: its neutral
+   * value is 1 rather than 0, so anyone who forgot the fallback, or any frame
+   * where the lookup loses a race with the mesher, renders a black flower — and
+   * a black flower is far more visible than an unlit one. There is no value of
+   * this attribute that can darken an instance.
+   *
    * @param {Object<string, Array<{pos:THREE.Vector3, up:THREE.Vector3,
-   *   out:THREE.Vector3|null, spin?:number}>>} lists one array per kind key
+   *   out:THREE.Vector3|null, spin?:number, light?:number}>>} lists one array
+   *   per kind key
    */
   sync(lists) {
     for (const [key, k] of this.kinds) {
@@ -152,9 +188,16 @@ export class BlockModels {
       if (!k.template || !list || !list.length) { if (k.mesh) k.mesh.count = 0; continue; }
       const n = Math.min(list.length, CAP);
       const mesh = this._fit(k, n);
+      const lit = mesh.geometry.getAttribute('aBlockLight');
 
       for (let i = 0; i < n; i++) {
         const t = list[i];
+        if (lit) {
+          const w = t.light ?? -1;
+          if (w < 0) { _rgb[0] = 0; _rgb[1] = 0; _rgb[2] = 0; }
+          else crossLightRGB(w, _rgb);
+          lit.setXYZ(i, _rgb[0], _rgb[1], _rgb[2]);
+        }
         _up.copy(t.up).normalize();
         _lean.copy(_up);
         if (k.lean && t.out) {
@@ -193,6 +236,7 @@ export class BlockModels {
       }
       mesh.count = n;
       mesh.instanceMatrix.needsUpdate = true;
+      if (lit) lit.needsUpdate = true;
     }
   }
 
@@ -250,6 +294,33 @@ export class BlockModels {
     // this kind sways. See `_skin`.
     const mesh = new THREE.InstancedMesh(k.template.geometry, k.material, cap);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    // Per-instance block light, for the kinds whose material we are allowed to
+    // patch — which is exactly the swaying ones, and that is not a coincidence
+    // worth papering over.
+    //
+    // `_skin` hands a non-swaying kind its template's *shared* material back
+    // untouched, because that is the same material the torch in your hand and
+    // the torch in the toolbar draw with. The shader that reads this attribute
+    // therefore cannot go there either, so a torch gets no block light — and
+    // that turns out to be the right picture anyway. A torch is an emitter, so
+    // its own cell reads 15/15/15 or near it, and a torch lit by its own light
+    // is a white lozenge with the flame texture washed clean off it. The one
+    // thing in the world that should *not* sample its own cell is the thing
+    // that filled that cell. (A neighbouring cell would be defensible, but a
+    // wall torch's neighbours are a wall on one side and air on three, so
+    // there is no single honest one to pick, and the torch model already
+    // carries its own glow.)
+    //
+    // The attribute lives on the geometry, which is the template's and is
+    // shared with the held and dropped copies of the same model. That is safe:
+    // a program that does not declare `aBlockLight` never binds it, and only
+    // the cloned swaying material declares it.
+    if (k.sway) {
+      const attr = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+      attr.setUsage(THREE.DynamicDrawUsage);
+      mesh.geometry.setAttribute('aBlockLight', attr);
+    }
     // The only piece of the baked voxel light a loose model can still be given.
     //
     // A meshed block carries its chunk's skylight and block light in its vertex

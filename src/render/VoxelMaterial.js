@@ -723,7 +723,8 @@ export function createMappedNormalMaterial(src) {
 }
 
 /**
- * Give an *instanced* model the wind a cross billboard gets for free.
+ * Give an *instanced* model the wind — and the voxel block light — a cross
+ * billboard gets for free.
  *
  * A plant drawn as a billboard sways because the mesher stamps a wave code into
  * `aux.w` and the `wType == 1` branch of COMMON_VERT_BODY bends it. A modelled
@@ -763,6 +764,30 @@ export function createMappedNormalMaterial(src) {
  * out to world units: a flower that stands 0.62 of a cell should sway 0.62 of
  * what a full-cell billboard sways, or the short ones thrash.
  *
+ * ### The other thing a billboard got for free
+ *
+ * Block light. A meshed cross carries its cell's coloured block light in the
+ * `blockLight` attribute and LIGHTS_END adds it; a modelled flower had no such
+ * attribute and no way to fill one, so a flower beside a torch was unlit by it.
+ * `Mesher` now ships the sample and `BlockModels` writes it into a per-instance
+ * `aBlockLight`, and this is where it is consumed — this function is already
+ * the one patch that only ever lands on an instanced clone, so it is the only
+ * place the attribute is safe to declare. (Declaring it on the shared WAM
+ * material would put it on every stick and ingot in the game, exactly as the
+ * sway branch would have.)
+ *
+ * It is **added**, not multiplied, and it is the only light term here: the sun
+ * half of a modelled flower's lighting already works through the scene's
+ * shadow map and entity fill (see `BlockModels._fit`) and is untouched by this.
+ * Additive is also what makes an instance with no sample — a chunk that has not
+ * arrived, a flower planted a frame ago — render as it did before rather than
+ * black. `BlockModels.sync` writes zero for those, and zero is a no-op.
+ *
+ * `uBlockIntensity` is the terrain's own live uniform, not a copy, so a flower
+ * and the grass block it stands on answer a torch by the same amount and can
+ * never drift apart. The AO factor the terrain applies is dropped: a model has
+ * no per-vertex AO to apply it with, and inventing one would be a guess.
+ *
  * @param {THREE.Material} material patched in place; clone first if it is shared
  * @param {number} loY  geometry-space Y where the stem is rooted — no movement
  * @param {number} hiY  geometry-space Y of the head — full movement
@@ -781,6 +806,7 @@ export function applyInstancedSway(material, loY, hiY) {
     shader.uniforms.uPlanetCenter = voxelUniforms.uPlanetCenter;
     shader.uniforms.uSwayLo = { value: loY };
     shader.uniforms.uSwayHi = { value: hiY };
+    shader.uniforms.uBlockIntensity = voxelUniforms.uBlockIntensity;
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', /* glsl */`
@@ -790,6 +816,22 @@ export function applyInstancedSway(material, loY, hiY) {
         uniform vec3 uPlanetCenter;
         uniform float uSwayLo;
         uniform float uSwayHi;
+        varying vec3 vInstBlock;
+        #ifdef USE_INSTANCING
+        attribute vec3 aBlockLight;
+        #endif
+      `)
+      // Behind the same guard as the sway, and for a second reason as well as
+      // the first: a non-instanced draw has no such attribute, and an undeclared
+      // one reads as an unspecified default rather than failing loudly. Zero is
+      // what we want there, so it is written explicitly.
+      .replace('#include <begin_vertex>', /* glsl */`
+        #include <begin_vertex>
+        #ifdef USE_INSTANCING
+        vInstBlock = aBlockLight;
+        #else
+        vInstBlock = vec3(0.0);
+        #endif
       `)
       // Guarded, because a material with no instancing has no `instanceMatrix`
       // and this would not compile at all — cheaper to keep the guard than to
@@ -818,6 +860,22 @@ export function applyInstancedSway(material, loY, hiY) {
           transformed += (dW * rot) / sqrt(s2);
         }
         #endif
+      `);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        uniform float uBlockIntensity;
+        varying vec3 vInstBlock;
+      `)
+      // After three has finished with the light loop, alongside where the
+      // terrain's LIGHTS_END adds its own `vBlock` term, and with the same
+      // RECIPROCAL_PI Lambert factor — otherwise a torch-lit flower would be pi
+      // times brighter than the torch-lit dirt underneath it.
+      .replace('#include <lights_fragment_end>', /* glsl */`
+        #include <lights_fragment_end>
+        reflectedLight.indirectDiffuse += diffuseColor.rgb * vInstBlock
+          * uBlockIntensity * RECIPROCAL_PI;
       `);
   };
   material.customProgramCacheKey = () => 'sway|' + prevKey.call(material);

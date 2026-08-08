@@ -97,6 +97,87 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom']) {
 
 const AO_CURVE = [0.36, 0.60, 0.80, 1.0];
 
+// --- baked light for the modelled crosses ------------------------------------
+//
+// The blocks in MODELLED_CROSS are the ones this file deliberately does *not*
+// emit geometry for, and losing the geometry lost the light with it: a modelled
+// flower is an InstancedMesh built on the main thread, which holds `blocks` and
+// nothing else, so it had no cell to sample and a flower beside a torch stayed
+// unlit by it. (See the header of `render/BlockModels.js`, which recorded that
+// as unreachable.)
+//
+// It is reachable, because the sample is *right here*. `emitCross` reads
+// `light.sun/r/g/b` at exactly this cell for exactly this kind of block, at
+// exactly the moment the chunk is meshed — and then the MODELLED_CROSS test
+// throws it away. So keep it: one word per modelled-cross cell, shipped
+// alongside the geometry as a transferable, looked up per instance by
+// `BlockModels`.
+//
+// ### The word
+//
+//   bits  0.. 3  block light r   0..15
+//   bits  4.. 7  block light g   0..15
+//   bits  8..11  block light b   0..15
+//   bits 12..15  skylight        0..15
+//   bits 16..27  address within the chunk, ((di * CHUNK_T) + dj) * CHUNK_K + dk
+//
+// 28 bits, so one Uint32 and no packing games. The address is chunk-*local* on
+// purpose: a global cell index (col * D + k) needs 27 bits on its own — the
+// planet has 85 million voxels — and would have forced a second array or a
+// 64-bit split. A chunk is 16 x 16 x 11 = 2816 cells, which is 12 bits, and the
+// receiver already knows which chunk it is unpacking because the message says
+// so. Nothing smaller is honest: dropping skylight would fit 16 bits of payload
+// into a Uint16 pair, but that is the same four bytes in two buffers.
+//
+// Cost is four bytes per modelled-cross cell and nothing at all for a chunk
+// with none — the buffer is only allocated on the first hit and a chunk with no
+// flowers ships `null`, which is the overwhelming majority of them. A surface
+// chunk over a meadow at the flora generator's densest is ~4% of 256 columns,
+// so ten to twenty cells: 40-80 bytes against the ~200 KB of vertex data that
+// chunk is already sending.
+//
+// Entries come out sorted by address, for free, because the emit loop walks i
+// then j then k ascending and the address is that same odometer. The main
+// thread binary-searches it and relies on that; if this loop is ever reordered,
+// sort here.
+export const CROSS_LIGHT_ADDR_SHIFT = 16;
+
+/**
+ * Unpack one word's block light into `out` as three 0..1 floats.
+ *
+ * Skylight is deliberately not returned. It is shipped because it is four spare
+ * bits in a word we are sending anyway and because the sun half of this problem
+ * will eventually want it, but nothing consumes it today: a modelled flower
+ * already gets the sun through the shadow map and the entity fill (see
+ * `BlockModels._fit`), and feeding it voxel skylight as well would be counting
+ * the sky twice on every flower in the open.
+ */
+export function crossLightRGB(w, out) {
+  out[0] = (w & 15) / 15;
+  out[1] = ((w >>> 4) & 15) / 15;
+  out[2] = ((w >>> 8) & 15) / 15;
+  return out;
+}
+
+/**
+ * Growable Uint32 list, allocated lazily so a chunk with no flowers in it —
+ * which is nearly all of them, including every chunk of solid rock — pays
+ * nothing at all, not even an empty typed array.
+ */
+class CrossLightBuf {
+  constructor() { this.data = null; this.len = 0; }
+  push(w) {
+    if (!this.data) this.data = new Uint32Array(32);
+    else if (this.len === this.data.length) {
+      const d = new Uint32Array(this.data.length * 2);
+      d.set(this.data);
+      this.data = d;
+    }
+    this.data[this.len++] = w;
+  }
+  out() { return this.len ? this.data.slice(0, this.len) : null; }
+}
+
 // --- growable buffers -------------------------------------------------------
 
 class Buf {
@@ -238,9 +319,13 @@ function cornerLerp(f, i, j, k, out) {
  * @param {Map<number,number>} facing sparse cell index —  facing 0..3; only
  *   directional blocks have an entry, so this is never touched for ordinary
  *   terrain.
+ * @returns {{groups: Array, crossLight: Uint32Array|null}} the four render
+ *   groups as before, plus the baked light of every modelled-cross cell in this
+ *   chunk (null when there are none). See CROSS_LIGHT_ADDR_SHIFT.
  */
 export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
   const groups = [new Group(), new Group(), new Group(), new Group()];
+  const crossLight = new CrossLightBuf();
   const i0 = ci * CHUNK_T, j0 = cj * CHUNK_T, k0 = ck * CHUNK_K;
   const i1 = Math.min(F, i0 + CHUNK_T), j1 = Math.min(F, j0 + CHUNK_T), k1 = Math.min(D, k0 + CHUNK_K);
   const { sun, r: lr, g: lg, b: lb } = light;
@@ -437,6 +522,18 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
         const rt = RENDER_TYPE[id];
         if (rt === R_CROSS) {
           if (!MODELLED_CROSS[id]) emitCross(groups[GROUP_CUTOUT], f, i, j, k, col, id, biomeId, light);
+          // ...and if it *is* modelled, keep the light sample the billboard
+          // would have baked in. This is the only line in the whole mesh loop
+          // that a non-flower cell can reach and it is inside a branch that
+          // already ended in `continue`, so no vertex path is touched and no
+          // block that is not a modelled cross pays for it.
+          else {
+            const vi = col * D + k;
+            crossLight.push(
+              (((i - i0) * CHUNK_T + (j - j0)) * CHUNK_K + (k - k0)) << CROSS_LIGHT_ADDR_SHIFT
+              | (sun[vi] & 15) << 12 | (lb[vi] & 15) << 8 | (lg[vi] & 15) << 4 | (lr[vi] & 15),
+            );
+          }
           continue;
         }
         const grp = groups[GROUP[id]];
@@ -689,7 +786,10 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
     }
   }
 
-  return groups.map((g) => (g.empty ? null : g.serialize()));
+  return {
+    groups: groups.map((g) => (g.empty ? null : g.serialize())),
+    crossLight: crossLight.out(),
+  };
 }
 
 // --- cross plants -----------------------------------------------------------

@@ -42,6 +42,7 @@ import {
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
 } from './world/Sphere.js';
+import { CROSS_LIGHT_ADDR_SHIFT } from './world/Mesher.js';
 import { makeRng } from './util/Noise.js';
 
 /**
@@ -121,6 +122,8 @@ const FREEZE_BATCH = 14;
 /** How far from the player winter is allowed to work, in columns. */
 const FREEZE_RADIUS = 24;
 const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
+/** Scratch for `_crossLightAt`, which runs once per modelled instance per frame. */
+const _clParts = { f: 0, i: 0, j: 0 };
 const WHITE = new THREE.Color(1, 1, 1);
 const WHITE_L = [1, 1, 1];
 /** Cells the hand-light scan reaches; must cover the brightest block light. */
@@ -274,6 +277,17 @@ class Game {
     this.autosaveTimer = 0;
     /** chunk ids that currently have (or have been asked for) a mesh */
     this.liveChunks = new Set();
+    /**
+     * chunk id -> the baked voxel light of the modelled-cross cells in it, as
+     * the mesher packed it. See `Mesher.CROSS_LIGHT_ADDR_SHIFT` for the word,
+     * and `_crossLightAt` for how it is read back.
+     *
+     * This is the only piece of the worker's light field the main thread has,
+     * and it exists so a flower beside a torch is lit by it. Chunks with no
+     * flowers in them are simply absent — the worker ships `null` for those —
+     * so this map is small even with the whole horizon resident.
+     */
+    this.crossLight = new Map();
     this._streamPending = false;
     this._streamTimer = 0;
     this._hurtGuard = 0;
@@ -606,6 +620,7 @@ class Game {
     // them alive at once while the old one is collected is a stall you can see.
     this.planet.resetWorld();
     this.liveChunks.clear();
+    this.crossLight.clear();
     this._streamPending = false;
     this._streamTimer = 0;
     this._welcome = false;
@@ -862,7 +877,15 @@ class Game {
         // we have already evicted it. Without this it would be re-added with no
         // entry in liveChunks, so nothing would ever free it again.
         const id = chunkIdx(msg.f, msg.ci, msg.cj, msg.ck);
-        if (this.liveChunks.has(id)) this.planet.applyChunk(msg.f, msg.ci, msg.cj, msg.ck, msg.groups);
+        if (this.liveChunks.has(id)) {
+          this.planet.applyChunk(msg.f, msg.ci, msg.cj, msg.ck, msg.groups);
+          // Must be *replaced*, not merged, and must be deleted when the chunk
+          // comes back empty: a remesh is the whole truth about that chunk, so
+          // picking the last flower out of it has to leave nothing behind or
+          // the next flower planted in the same cell inherits a dead sample.
+          if (msg.crossLight) this.crossLight.set(id, msg.crossLight);
+          else this.crossLight.delete(id);
+        }
         break;
       }
       case 'streamDone': this._streamPending = false; break;
@@ -904,7 +927,9 @@ class Game {
       if (!has && d2 <= load) { if (canAdd) { add.push(id); live.add(id); } }
       else if (has && d2 > keep) { drop.push(id); live.delete(id); }
     }
-    if (drop.length) for (const id of drop) this.planet.dropChunk(id);
+    if (drop.length) {
+      for (const id of drop) { this.planet.dropChunk(id); this.crossLight.delete(id); }
+    }
     if (!add.length && !drop.length && !initial) return;
     this._streamPending = true;
     this.worldWorker.postMessage({ type: 'chunks', add, drop, initial });
@@ -2805,6 +2830,38 @@ class Game {
    * keep their own 20 — widening theirs was not asked for and every extra cell
    * is instances that have to be matrix-written every rescan.
    */
+  /**
+   * The baked voxel light at one modelled-cross cell, or -1 if we do not have
+   * it, as the mesher's packed word.
+   *
+   * -1 is a real and common answer, not an error: the chunk may not have been
+   * meshed yet, may have been evicted while its flowers are still inside the
+   * model scan (the model radius is 34 cells, the keep radius is larger, but a
+   * newly entered region is meshed over several frames), or the flower may have
+   * been planted this instant and the remesh not yet come back. Every caller has
+   * to have an answer for that; see `BlockModels.sync`, where -1 means "add no
+   * block light", which is exactly the picture we had before this existed.
+   *
+   * Binary search, because the mesher emits in ascending address order (i, then
+   * j, then k — the same odometer the address is built from) and a densely
+   * planted chunk can hold hundreds of entries. A meadow chunk holds ten.
+   */
+  _crossLightAt(col, k) {
+    const p = colParts(col, _clParts);
+    const arr = this.crossLight.get(chunkIdx(
+      p.f, (p.i / CHUNK_T) | 0, (p.j / CHUNK_T) | 0, (k / CHUNK_K) | 0));
+    if (!arr) return -1;
+    const addr = ((p.i % CHUNK_T) * CHUNK_T + (p.j % CHUNK_T)) * CHUNK_K + (k % CHUNK_K);
+    let lo = 0, hi = arr.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const a = arr[mid] >>> CROSS_LIGHT_ADDR_SHIFT;
+      if (a === addr) return arr[mid];
+      if (a < addr) lo = mid + 1; else hi = mid - 1;
+    }
+    return -1;
+  }
+
   _syncBlockModels() {
     const bm = this.blockModels;
     bm.prime('torch', itemIdOf('torch'), { height: 0.95, lean: true });
@@ -2847,14 +2904,14 @@ class Game {
               // is a grid of identical stamps, which is the one way a model can
               // look worse than the billboard it replaced.
               lists[flower].push({
-                pos, up, out: null, d2,
+                pos, up, out: null, d2, col, k, light: -1,
                 spin: ((col * 37 + k * 101) % 628) / 100,
               });
               continue;
             }
 
             const byte = this.planet.facingAt(col, k) & 7;
-            const e = { pos, up, out: null, d2 };
+            const e = { pos, up, out: null, d2, col, k, light: -1 };
             if (byte !== 0) {
               const [wi, wj] = TORCH_WALL_STEP[(byte - 1) & 3];
               const ea = _frame.ea, eb = _frame.eb;
@@ -2875,6 +2932,32 @@ class Game {
       for (const key in lists) {
         if (lists[key].length > BLOCK_MODEL_CAP) lists[key].sort((a, b) => a.d2 - b.d2);
       }
+    }
+
+    // Light is refreshed every frame, *outside* the cache above, and that is
+    // deliberate — it is the whole reason placing a torch changes the flowers
+    // beside it.
+    //
+    // The obvious thing was to fold it into the cached scan, since `editSeq`
+    // already invalidates that on every edit. It does not work: `editSeq` is
+    // bumped when the edit is *posted* to the worker, so the rescan runs a
+    // frame or two before the relit chunk comes back, reads the old light and
+    // then caches it until the player next crosses a cell. A torch would light
+    // its neighbours only after you walked away and returned.
+    //
+    // The next thought was to invalidate the scan when a `chunk` message lands.
+    // That is correct and far too expensive: the scan is 71 000 array reads and
+    // the streamer lands hundreds of chunks in a burst, so entering a new
+    // region would run it hundreds of times in a few frames.
+    //
+    // So the two are separated by what they cost. Positions come from the scan
+    // and are cached; light is one binary search per instance — about 190 of
+    // them across all kinds, over arrays of a dozen words — and is simply
+    // redone. That is cheap enough to not need to be right about *when* it
+    // changed, which is the kind of correctness that does not rot.
+    for (const key in lists) {
+      const list = lists[key];
+      for (let n = 0; n < list.length; n++) list[n].light = this._crossLightAt(list[n].col, list[n].k);
     }
     bm.sync(lists);
   }

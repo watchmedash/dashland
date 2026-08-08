@@ -104,6 +104,8 @@ finding ("buying is broken", "the errand pays twice", "the bobber leaks").
 | Thing | Shape | The trap |
 |---|---|---|
 | `Trade.buyFrom` | `(inventory, stock, itemId, want)` | Not `(inv, line, purse)`. A wrong signature returns 0 and looks like a broken shop. |
+| `Trade.sellTo` | `(inventory, itemId, want, purse)` | The purse goes *last*, and it is `{ coins }`, not a number. Passing the mob returns 0 and reads as a trader who won't buy. |
+| errand `reward` | a **coin count**, not an item | It is a small integer, so it indexes a real item and prints a plausible name — a 172-coin reward reads as "charcoal". |
 | merchant errand | `{ item, count, reward, done }` | `!!m.request` stays true after it is paid. Check `request.done`. |
 | kiln | `{ input, fuel, output, burn, progress, col, k }` | Placing a kiln does not register it; the entry appears when the UI opens it. |
 | fishing | `game.fishing`, `game.bobber` | The bobber mesh is pooled, so `!!game.bobber` is always true once used. Check `.visible`. |

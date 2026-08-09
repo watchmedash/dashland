@@ -10,7 +10,7 @@ import {
 import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
 } from './Sphere.js';
-import { ID, N_BLOCKS, supports, growsOn } from './Blocks.js';
+import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
 import { placeStructures } from './Structures.js';
 
 /**
@@ -167,6 +167,38 @@ const CANYON_BENCH = 3;        // wall terrace height, in blocks
  */
 const CANYON_NEAR_MAX = 4;
 const CANYON_TREE_THIN = [0, 0, 0.35, 0.65, 1];
+
+/**
+ * What grows on the *grit* a canyon lays on its floor — the gravel and the red
+ * sand, as opposed to the coarse dirt, which is soil and takes the ordinary
+ * turf plants.
+ *
+ * Indexed by biome, and it has to be, which is the bug this table fixes. The
+ * grit branch of `floraAt` scattered `thornbrush` on every gravel canyon floor
+ * on the planet regardless of where that floor was, and a canyon is cut wherever
+ * the walk happened to go — so measured planet-wide, 550 of the 1,726 thorn
+ * bushes in the world were standing in snow, mountain and forest gorges. The
+ * soil rule could not catch it: gravel is legitimately thornbrush ground (see
+ * FLORA_SOIL), so every one of them was botanically fine and geographically
+ * absurd, which is the other half of "plants growing on wrong biome/block".
+ *
+ * A hole means that biome's gorge floor keeps its grit bare, and most of them
+ * are holes on purpose. Nothing in the palette roots in gravel *and* belongs in
+ * a meadow, a forest or a plain — those biomes' own plants (clover, fern,
+ * lavender) all take turf and nothing else — so the honest answer there is
+ * nothing at all, and the coarse-dirt half of the same branch still gives those
+ * gorges their tufts of grass. Snow is a hole for the same reason from the
+ * other end: the snowbell only grows in snow, and a snow gorge's floor is
+ * scoured down to gravel.
+ *
+ * `growsOn` remains the authority — the species chosen here is still put
+ * through `_floraSoilOk` — so this narrows what may grow and can never widen it.
+ */
+const CANYON_SCRUB = [];
+CANYON_SCRUB[BIOME.DESERT] = ID.thornbrush;
+CANYON_SCRUB[BIOME.BADLANDS] = ID.thornbrush;
+CANYON_SCRUB[BIOME.MOUNTAIN] = ID.alpine_aster;
+CANYON_SCRUB[BIOME.TUNDRA] = ID.cotton_grass;
 
 /**
  * Ore bands, deepest and rarest first. The loop takes the first vein that
@@ -356,6 +388,28 @@ LOG_CHANCE[BIOME.PLAINS] = 0.09;
  */
 const LOG_FLOOR = new Uint8Array(N_BLOCKS);
 for (const n of ['grass', 'podzol', 'dirt', 'coarse_dirt', 'moss_block', 'snow']) LOG_FLOOR[ID[n]] = 1;
+/**
+ * The four standing trees. Trunks are a little taller than they were: the crown
+ * hangs three courses below its top, so a five-block trunk put leaves at knee
+ * height and the tree read as a bush; these leave two or three clear blocks of
+ * trunk. Module scope because `_treeSize` and `stampTree` both read it.
+ */
+/**
+ * How tall a cactus grows: 2 to CACTUS_MAX segments. Named because
+ * `_cactusHasRoom` has to bound the layers a cactus will occupy without
+ * drawing the height, and a literal in two places is how the room check and
+ * the plant it protects come to disagree.
+ */
+const CACTUS_MAX_STEP = 3;
+const CACTUS_MAX = 1 + CACTUS_MAX_STEP;
+
+const TREE_CFG = {
+  oak: { h: [6, 8], log: ID.log_oak, leaf: ID.leaves_oak, rad: 2.6, shape: 'round' },
+  birch: { h: [7, 10], log: ID.log_birch, leaf: ID.leaves_birch, rad: 2.2, shape: 'round' },
+  pine: { h: [7, 11], log: ID.log_pine, leaf: ID.leaves_pine, rad: 3.0, shape: 'cone' },
+  savanna: { h: [5, 7], log: ID.log_oak, leaf: ID.leaves_oak, rad: 3.3, shape: 'flat' },
+};
+
 /** The two ids per species, indexed [axis 0:i 1:j]. */
 const LOG_IDS = {
   oak: [ID.log_oak_i, ID.log_oak_j],
@@ -376,6 +430,13 @@ const _spParts = { f: 0, i: 0, j: 0 };
  */
 const _logParts = { f: 0, i: 0, j: 0 };
 const _logNb = { f: 0, i: 0, j: 0 };
+/**
+ * And one for the cactus's room check, which holds its centre live across a
+ * sweep that calls `_treeKind` — which owns `_spParts` through `_springNear`
+ * and allocates its own for the parity test. Sharing either would move the
+ * centre halfway through the sweep.
+ */
+const _cactusParts = { f: 0, i: 0, j: 0 };
 
 /**
  * Inland lakes.
@@ -3195,7 +3256,7 @@ export class WorldGen {
    * nothing decoration writes, which is what lets both callers run over a
    * region's margin and agree from either side. See `decorateRegion`.
    */
-  _treeKind(blocks, col) {
+  _treeKind(blocks, col, noCrowdCheck = false) {
     const bi = this.colBiome[col];
     if (this.colSlope[col] > 1.5) return null;
     if (this.inLakeBed(col)) return null;
@@ -3310,12 +3371,97 @@ export class WorldGen {
       // seam line. That is a handful of columns on the whole planet against
       // 1.3 million, and the block rule handles them the moment anyone builds
       // there.
+      //
+      //
+      // 0.069 and not the 0.04 it was, and it is the same compensation the
+      // parity rule made when it halved the eligible columns: `_cactusHasRoom`
+      // below now throws out every site that is boxed in, which measures at 42%
+      // of them — a desert is dunes, and a dune steps a layer often enough that
+      // the terrain alone accounts for most of it. Left at 0.04 the fix would
+      // have taken the planet from 655 cacti to 380, which is not what "stop
+      // generating illegal ones" is supposed to mean. Measured back at 655.
       const cp = colParts(col);
-      if (((cp.i + cp.j) & 1) === 0) { kind = 'cactus'; chance = 0.04; }
+      if (((cp.i + cp.j) & 1) === 0) { kind = 'cactus'; chance = 0.069; }
     }
 
     if (!kind || rng() > chance * thin) return null;
+    if (kind === 'cactus' && !noCrowdCheck && !this._cactusHasRoom(blocks, col, k)) return null;
     return { kind, k, rng };
+  }
+
+  /**
+   * Is there room beside this column for a cactus?
+   *
+   * `NEEDS_ROOM` is the block rule: a cactus refuses to be placed against a
+   * solid neighbour, and an existing one breaks the moment a block lands beside
+   * it. The parity trick above keeps two cacti apart, which was the only half of
+   * that rule the generator obeyed — measured planet-wide, 246 of the world's
+   * 1,949 cacti were standing against something else. Generating one is showing
+   * the player an arrangement they are not allowed to build, and it is not
+   * cosmetic: the first edit anywhere near it takes the plant apart.
+   *
+   * Three sources, cheapest first, and every one of them is asked as a
+   * *decision* off the terrain rather than looked for in the block array — the
+   * rule `_fallenLog` follows and for the identical reason. Looking would ask
+   * whether the region next door had been decorated yet.
+   *
+   *  - Terrain. A neighbouring column whose ground stands even one layer higher
+   *    puts solid rock against the cactus's lowest segment. This is the bulk of
+   *    it, 229 of the 246, and it is four array reads.
+   *  - A boulder. Its cells reach two columns from its centre, so a centre
+   *    within three can touch us.
+   *  - A tree. The widest canopy is five columns of radius, so a trunk within
+   *    six can put a leaf against us — and six is exactly DECOR_MARGIN, the
+   *    bound on how far a decision may read as well as write, so that is the
+   *    largest sweep legal here.
+   *
+   *    The sweep alone is far too blunt to *act* on: refusing every cactus
+   *    within six columns of any tree threw away 195 of the planet's 655 to fix
+   *    eight cells, because a desert borders a savanna and a savanna has trees
+   *    in it. So each candidate tree is sized with `_treeSize` — the same
+   *    expression `stampTree` uses, shared for exactly this reason — and it only
+   *    counts if its crown actually reaches one of our four neighbours at one of
+   *    our own layers. `CACTUS_MAX` rather than this cactus's real height
+   *    because the height comes off `rng` and drawing it here would move the
+   *    stream `stampTree` is about to use; being two layers pessimistic costs
+   *    almost nothing and keeps the decision out of the stream.
+   *
+   * `noCrowdCheck` breaks the recursion: a neighbour that is itself a cactus
+   * candidate must not run its own sweep. It cannot change the answer either
+   * way, because a cactus is not something this refuses for — the parity rule
+   * already guarantees no cactus is tangentially adjacent to another.
+   */
+  _cactusHasRoom(blocks, col, k) {
+    for (let d = 0; d < 4; d++) {
+      const nb = colNeighbor(col, d);
+      if (nb < 0 || this.groundKOf(nb) > k) return false;
+    }
+    const p = colParts(col, _cactusParts);
+    const pf = p.f, pi = p.i, pj = p.j;
+    for (let di = -3; di <= 3; di++) {
+      for (let dj = -3; dj <= 3; dj++) {
+        if (this._boulderKind(blocks, patchColumn(pf, pi, pj, di, dj))) return false;
+      }
+    }
+    const kLo = k + 1, kHi = k + CACTUS_MAX;
+    for (let di = -DECOR_MARGIN; di <= DECOR_MARGIN; di++) {
+      for (let dj = -DECOR_MARGIN; dj <= DECOR_MARGIN; dj++) {
+        if (di === 0 && dj === 0) continue;
+        const t = this._treeKind(blocks, patchColumn(pf, pi, pj, di, dj), true);
+        if (t === null || t.kind === 'cactus') continue;
+        const s = this._treeSize(t.kind, t.k + 1, t.rng);
+        if (t.k + 1 > kHi || s.hiK < kLo) continue;
+        // Does any column the crown covers touch one of our four neighbours?
+        // The trunk is the centre column, which the same test catches at
+        // distance 0.
+        const near = Math.min(
+          Math.hypot(di - 1, dj), Math.hypot(di + 1, dj),
+          Math.hypot(di, dj - 1), Math.hypot(di, dj + 1),
+        );
+        if (near <= s.reach) return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -3527,44 +3673,31 @@ export class WorldGen {
     }
   }
 
-  stampTree(blocks, kind, col, k0, rng, rid = -1) {
-    const set = (c, k, id, force = false) => {
-      if (k < 0 || k >= D) return;
-      if (rid >= 0 && regionOfCol(c) !== rid) return;
-      const cur = blocks[c * D + k];
-      if (cur === ID.air || force) blocks[c * D + k] = id;
-    };
-    // A canopy is three or four columns across, which is wide enough to care
-    // which way is which. Walking the grid answers in the destination face's
-    // frame, so a tree near a cube seam had leaves land on columns other leaves
-    // had already claimed — up to 23 of a 49-column spread — and grew with a
-    // bite out of one side. Trees away from a seam are untouched: the two
-    // agree exactly whenever the canopy stays on one face.
-    const tp = colParts(col);
-    const at = (di, dj) => patchColumn(tp.f, tp.i, tp.j, di, dj);
-
-    if (kind === 'cactus') {
-      const h = 2 + Math.floor(rng() * 3);
-      for (let n = 0; n < h; n++) set(col, k0 + n, ID.cactus);
-      return;
-    }
-
-    const cfg = {
-      // Trunks a little taller than they were. The crown hangs three courses
-      // below its top, so a five-block trunk put leaves at knee height and the
-      // tree read as a bush; these leave two or three clear blocks of trunk.
-      oak: { h: [6, 8], log: ID.log_oak, leaf: ID.leaves_oak, rad: 2.6, shape: 'round' },
-      birch: { h: [7, 10], log: ID.log_birch, leaf: ID.leaves_birch, rad: 2.2, shape: 'round' },
-      pine: { h: [7, 11], log: ID.log_pine, leaf: ID.leaves_pine, rad: 3.0, shape: 'cone' },
-      savanna: { h: [5, 7], log: ID.log_oak, leaf: ID.leaves_oak, rad: 3.3, shape: 'flat' },
-    }[kind];
-
+  /**
+   * How big *this* tree comes out, and therefore how far it reaches.
+   *
+   * Drawn from the stream `_treeKind` left behind, in exactly the order
+   * `stampTree` used to draw it — this is that code, moved rather than copied.
+   * It is shared because a second caller now needs the same answer:
+   * `_cactusHasRoom` has to know whether a particular tree's canopy can put a
+   * block against a particular cactus, and a canopy and the rule that keeps out
+   * of its way are the classic pair of expressions that agree on the day they
+   * are written and not after the next tuning pass.
+   *
+   * `reach` is the widest any layer of the crown gets, fraying included, and
+   * `hiK` the topmost layer any part of the tree can occupy. The lowest is
+   * always `k0`, because the trunk starts there whatever the crown does.
+   *
+   * @param {number} k0 the layer the trunk starts at
+   */
+  _treeSize(kind, k0, rng) {
+    const cfg = TREE_CFG[kind];
     /**
-     * How big *this* tree is, as one multiplier on both trunk and crown.
+     * One multiplier on both trunk and crown.
      *
-     * The bands above are three to five values wide — an oak was exactly 6, 7
-     * or 8 — and, worse, `rad` was a constant per kind, so every oak on the
-     * planet wore an identical crown. That is the half that was actually
+     * The bands in TREE_CFG are three to five values wide — an oak was exactly
+     * 6, 7 or 8 — and, worse, `rad` was a constant per kind, so every oak on
+     * the planet wore an identical crown. That is the half that was actually
      * missing: two trees of different heights under the same canopy read as
      * the same tree at two distances, which is what "almost same height trees"
      * is describing even though height is not really the culprit.
@@ -3594,6 +3727,54 @@ export class WorldGen {
     const room = Math.max(3, D - 2 - k0 - Math.ceil(rad));
     const span = cfg.h[0] + Math.floor(rng() * (cfg.h[1] - cfg.h[0] + 1));
     const h = Math.max(2, Math.min(room, Math.round(span * size)));
+
+    // The three crown shapes below, read off the three branches of `stampTree`:
+    // a sapling is a 3x3 tuft with one cell over it, a cone's widest course is
+    // `rad + 0.4` and it caps one layer over the top, a flat crown is `rad` at
+    // the top and one above, and a round one frays out to half of `ragged` and
+    // closes two layers over the top.
+    const top = k0 + h - 1;
+    let reach, hiK;
+    if (h <= 3) { reach = 1.5; hiK = top + 1; }
+    else if (cfg.shape === 'cone') { reach = rad + 0.4; hiK = top + 1; }
+    else if (cfg.shape === 'flat') { reach = rad; hiK = top + 1; }
+    else { reach = rad + 0.45; hiK = top + 2; }
+    return { cfg, rad, h, reach, hiK };
+  }
+
+  stampTree(blocks, kind, col, k0, rng, rid = -1) {
+    const set = (c, k, id, force = false) => {
+      if (k < 0 || k >= D) return;
+      if (rid >= 0 && regionOfCol(c) !== rid) return;
+      const cur = blocks[c * D + k];
+      if (cur === ID.air || force) blocks[c * D + k] = id;
+    };
+    // A canopy is three or four columns across, which is wide enough to care
+    // which way is which. Walking the grid answers in the destination face's
+    // frame, so a tree near a cube seam had leaves land on columns other leaves
+    // had already claimed — up to 23 of a 49-column spread — and grew with a
+    // bite out of one side. Trees away from a seam are untouched: the two
+    // agree exactly whenever the canopy stays on one face.
+    const tp = colParts(col);
+    const at = (di, dj) => patchColumn(tp.f, tp.i, tp.j, di, dj);
+
+    if (kind === 'cactus') {
+      const h = 2 + Math.floor(rng() * CACTUS_MAX_STEP);
+      // `force`, exactly as a trunk is written, and for a sharper version of
+      // the trunk's reason. `set` skips a cell that is not air, so a cactus
+      // whose *base* cell had already been claimed — by a leaf off an oak
+      // leaning in from the forest next door, which is the only thing that ever
+      // reaches a desert column at ground level — lost that segment and grew
+      // from the one above instead: a cactus standing on a leaf, unsupported,
+      // which `NEEDS_FLOOR` then takes down the first time anything near it is
+      // disturbed. Forcing makes the run solid from `k0` up whatever it meets,
+      // and stays order-independent because `set` still refuses to write
+      // outside the region being decorated.
+      for (let n = 0; n < h; n++) set(col, k0 + n, ID.cactus, true);
+      return;
+    }
+
+    const { cfg, rad, h } = this._treeSize(kind, k0, rng);
     for (let n = 0; n < h; n++) set(col, k0 + n, cfg.log, true);
 
     /**
@@ -3726,14 +3907,19 @@ export class WorldGen {
       // in its walls and the shadow on its floor, and both survive scrub where
       // neither survives a canopy.
       //
-      // **The species is chosen by the ground and not by the biome, and this is
-      // the line that produced a bug report.** It used to scatter tall grass
-      // and flowers over all three of these surfaces, which is where "grass in
+      // **The species is chosen by the ground and by the biome, and both halves
+      // of that came from a bug report.** It used to scatter tall grass and
+      // flowers over all three of these surfaces, which is where "grass in
       // gravel" came from: a canyon re-surfaces its floor with gravel and red
       // sand, and turf plants were being laid on both. Grass now takes only the
-      // coarse dirt — the one of the three that is soil — and the grit takes
-      // thornbrush instead, which is the plant that belongs on it. `growsOn`
-      // is the authority either way, so the two cannot drift apart again.
+      // coarse dirt — the one of the three that is soil.
+      //
+      // The grit then took `thornbrush` unconditionally, which fixed the soil
+      // and left the geography: a gorge is cut wherever the walk went, so a
+      // third of the planet's thorn scrub was standing on snowfields and
+      // mountainsides. `growsOn` cannot catch that — gravel *is* thornbrush
+      // ground — so the species now comes from CANYON_SCRUB, which is indexed
+      // by biome, and `_floraSoilOk` still has the final word.
       const h = rng();
       if (surf === ID.coarse_dirt) {
         if (h < 0.11) blocks[base + k + 1] = ID.tall_grass;
@@ -3741,7 +3927,8 @@ export class WorldGen {
           blocks[base + k + 1] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
         }
       } else if (h < 0.085) {
-        blocks[base + k + 1] = ID.thornbrush;
+        const scrub = CANYON_SCRUB[bi];
+        if (scrub && this._floraSoilOk(scrub, surf)) blocks[base + k + 1] = scrub;
       }
     }
 
@@ -3749,9 +3936,19 @@ export class WorldGen {
     // well as CARVEABLE: the two nearly agree, and where they do not — a
     // sandstone cave wall under a desert — it is the soil table that decides,
     // because that is the table the harness measures against.
+    //
+    // A pocket needs a *ceiling* as well as a floor, which is the one test this
+    // loop was missing and `caveFloraAt` has always had. Without it a single
+    // air cell between two slabs of rock counts as a pocket, so the pass grew
+    // glowcaps sealed inside the crust where nobody can see or reach them —
+    // measured, 100 of the planet's 674 — and, five times over, grew one in the
+    // cell directly under a pool of lava. The test sits *after* the roll on
+    // purpose: drawing at the same rate as before keeps every mushroom that was
+    // already correct exactly where it was, and only removes the bad ones.
     for (let kk = 2; kk < k - 2; kk++) {
       if (blocks[base + kk] === ID.air && CARVEABLE[blocks[base + kk - 1]]
-        && rng() < 0.006 && growsOn(ID.mushroom, blocks[base + kk - 1])) {
+        && rng() < 0.006 && blocks[base + kk + 1] === ID.air
+        && growsOn(ID.mushroom, blocks[base + kk - 1])) {
         blocks[base + kk] = ID.mushroom;
       }
     }
@@ -3820,6 +4017,20 @@ export class WorldGen {
     if (k < 1 || k >= D - 2) return;
     const base = col * D;
     if (blocks[base + k + 1] !== ID.air) return;
+    // ...and a ceiling on it is as good as no room at all. A boulder is a
+    // hemisphere sat on the ground, so a column one step below its centre gets
+    // the overhang rather than the rock: `k + 1` comes out air and `k + 2` is
+    // stone, and the pass grew a plant into a sealed one-cell gap under it.
+    // Measured planet-wide, 245 of them — asters, ferns, clover and snowbells
+    // that nothing can see and nothing can reach. `caveFloraAt` has always
+    // demanded the same headroom for the same reason.
+    //
+    // This reads a cell decoration writes, which is safe here for the reason
+    // the `k + 1` test above it is safe: the boulder pass runs over this
+    // region's whole margin before this pass runs over its columns, and no
+    // other region ever writes into ours — so what is found is the finished
+    // answer and it is the same from either side of a boundary.
+    if (IS_OPAQUE[blocks[base + k + 2]]) return;
     const surf = blocks[base + k];
     const bi = this.colBiome[col];
 
@@ -4063,6 +4274,10 @@ export class WorldGen {
         const surf = blocks[b + k];
         if (!this._floraSoilOk(site.id, surf)) continue;
         if (!STAND_CLEARS[blocks[b + k + 1]]) continue;
+        // Headroom, for the reason spelled out in `landFloraAt`: the cell above
+        // the ground can be clear under a boulder's overhang and still be a
+        // sealed gap.
+        if (IS_OPAQUE[blocks[b + k + 2]]) continue;
 
         const w = 1 - d / site.rad;
         // The reef's smoothstep, and here for the same measured reason: a plain

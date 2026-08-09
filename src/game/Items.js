@@ -925,7 +925,37 @@ export function miningTime(blockId, toolItem, submerged = false) {
   let speed = handSpeed(b);
   if (toolItem?.tool) {
     if (toolItem.tool.kind === b.tool) speed = toolItem.tool.speed;
-    else if (toolItem.tool.kind === 'sword' && b.render === 2) speed = 12;
+    // The blade-through-undergrowth case, and **only** undergrowth: a cross
+    // block that names no tool and carries no tier gate.
+    //
+    // The 12x used to key off `render === 2` alone, and that is the last of the
+    // "breaking blocks is like mining ice cream" faults. Four cross blocks in
+    // the table are not undergrowth — they are gated, or they name a tool — and
+    // the bonus was reaching all four *before* either gate was consulted. Driven
+    // against the real table:
+    //
+    //   sea_shell (Giant Clam)   any sword 0.075s   hands 2.88s    and it drops
+    //   abyss_anemone            any sword 0.063s   hands 2.40s    and it drops
+    //   crystal_cluster          any sword 0.280s   hands 10.08s   drops nothing
+    //   driftwood                any sword 0.050s   wooden axe 0.22s
+    //
+    // The clam is the worst of them by a distance. A pearl is the one material
+    // on the planet with no ore, no smelt and no recipe — its whole supply is
+    // meant to be "how many shells have you held your breath for" — and any
+    // sword, including the first wooden one, was taking one out in **seven
+    // hundredths of a second**, 38x a bare hand, with the tier gate passed. And
+    // driftwood is the rule this file is built on inverted outright: the wrong
+    // tool was beating the right one, 0.05s against an axe's 0.22s.
+    //
+    // The two tests are the same split `handSpeed` and `computeDrops` already
+    // make. `!b.tool` is "nothing is the right tool for this, so a sword is not
+    // the wrong one"; `!b.tier` is "there is no gate for a blade to walk past".
+    // Every flower, grass, fern, kelp and crop still passes both and is
+    // untouched to the millisecond — that special case was always deliberate.
+    // The four above now fall to hand speed, which puts the clam at 0.90s, the
+    // anemone at 0.75s, the cluster at a fist's 10.08s and driftwood behind the
+    // axe where it belongs.
+    else if (toolItem.tool.kind === 'sword' && b.render === 2 && !b.tool && !b.tier) speed = 12;
     else speed = handSpeed(b);
   }
   // Minecraft's constant, exactly, so that `hardness` in `Blocks.js` is

@@ -182,6 +182,33 @@ const OVERRIDE = {
   // The bucket's own recipe (three iron) already values it; the filled one has
   // no recipe at all and would otherwise fall through to the stack-size guess.
   water_bucket: 38,
+  // --- the larder's two anchors -----------------------------------------
+  //
+  // A honeycomb has no recipe and no smelt, so `intrinsic` prices it from its
+  // food value alone and lands on four coins — the same as an apple off a tree,
+  // for the only sweetener on the planet and the one material you can only get
+  // by picking a fight with something that stings. Ten, twice a hide, and it is
+  // that number rather than the nourishment that decides what every treat
+  // costs: a donut is two wheat and a comb, so it sells for more than bread and
+  // feeds a good deal less, which is the whole definition of the tier.
+  honeycomb: 10,
+  // The pumpkin is a block, so `intrinsic` reaches `blockValue` before it
+  // reaches anything else and prices it at hardness 1 with no tool tier: one
+  // coin, the same as a shovelful of dirt. It is a scattered surface find the
+  // merchant stocks in ones and twos, and two things derive straight off it —
+  // a roast pumpkin came out at two coins for six points of nourishment, the
+  // cheapest food in the game by a factor of three, and a pumpkin pie at seven
+  // coins undercut every meal on the ladder including the soup it beats by a
+  // point. Six puts both back where the band says they belong.
+  pumpkin: 6,
+  // The two imports. Both are `shopOnly` (see Items.js) and neither has a
+  // recipe to derive from, so both fell through to `foodValue` and came out at
+  // four and six coins — cheaper than a lantern, for goods that by construction
+  // arrive from off the planet. Priced instead as what a merchant charges for
+  // the only two things in his pack nobody can undercut him on. Cheese sits
+  // level with a sea sponge, chocolate just under an amethyst.
+  cheese: 16,
+  chocolate: 22,
 };
 
 // --- the formula ------------------------------------------------------------
@@ -368,8 +395,11 @@ function larderPool() {
   for (let id = 1; id < N_ITEMS; id++) {
     const def = ITEMS[id];
     if (!def || WARE_IDS.has(id) || !def.food || def.tool) continue;
-    // Rich food in smaller lots, so a merchant is never a canteen.
-    pool.push([id, 1, def.food >= 8 ? 3 : 5]);
+    // Rich food in smaller lots, so a merchant is never a canteen — and sweets
+    // in smaller lots still, because the whole point of the treat band is that
+    // it is dear. A line of five lollipops in every third pack would make the
+    // trader the cheap way to the tier the bees are supposed to gate.
+    pool.push([id, 1, def.treat ? 2 : def.food >= 8 ? 3 : 5]);
   }
   return pool;
 }

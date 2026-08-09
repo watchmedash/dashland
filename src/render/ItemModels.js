@@ -419,6 +419,13 @@ const POSE = {
   // turned enough that the stepped margins read rather than the back sheet's
   // blank face.
   dried_kelp:    { file: 'wam/dried_kelp',    pack: 'wam', height: 0.22, grip: 0.34, rot: [0.14, -0.44, 0.20],  pos: [0.02, 0.11, -0.03], icon: [0.24, 0.38, -0.10] },
+  // The comb has the sea fan's problem and takes the sea fan's answer in a
+  // milder form: everything that identifies it — seven hexagonal cell mouths —
+  // is on one face, and at the lump family's three-quarter turn that face goes
+  // round the side and leaves a gold brick. Both rotations are shallow in yaw
+  // so the cells stay square to the viewer, and the icon is shallower still.
+  // Held at the middle: it is a chunk, not a handle.
+  honeycomb:     { file: 'wam/honeycomb',     pack: 'wam', height: 0.22, grip: 0.48, rot: [0.10, -0.26, 0.14],  pos: [0.02, 0.12, -0.04], icon: [0.14, 0.20, -0.08] },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -509,6 +516,8 @@ const BY_NAME = {
   sea_grape: 'sea_grape',
   abyss_anemone: 'abyss_anemone',
   dried_kelp: 'dried_kelp',
+  // Item-only, like the dried kelp: a bee drops it and nothing places it.
+  honeycomb: 'honeycomb',
   // The one place this map is not an identity, and deliberately: raw and
   // steamed crab are one model. A claw is a claw cooked or not — the shell is
   // already the orange it turns — so the pair share `crab_claw` rather than

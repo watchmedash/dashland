@@ -1,0 +1,147 @@
+# Honeycomb — a chunk torn out of a hive, and the only sweet thing on the planet.
+#
+# It has one job at 46 pixels: **not be an ingot**. A slab of gold-brown wax is
+# exactly the silhouette `iron_ingot.wam` and `gold_ingot.wam` already own, and
+# the colour is in the same family, so the model has to say "comb" with shape
+# rather than with hue.
+#
+# Three cues, in the order they matter:
+#
+# **The cells are geometry.** Seven six-sided cups stand proud of the front
+# face, in two offset rows the way a real comb tessellates. Hexagons are the one
+# thing nothing else in the item set has — every lump is irregular, every ingot
+# is a box, every gem is a spike — so the moment the cell mouths are legible the
+# item is identified. They are `cap end=none` open tubes with a dark floor
+# behind them, not domes: a filled dome is a blob of amber and reads as a berry.
+#
+# **The chunk is torn, not cut.** The slab's rings step in and out and the top
+# is narrower and rolled, so the outline is ragged along the top and one side.
+# A rectangle with square corners is an ingot again.
+#
+# **Honey is leaving it.** One drip hangs off the bottom-front lip. It costs
+# eight triangles, it breaks the slab's flat underside in silhouette, and it is
+# the only part of the model that says the stuff inside is liquid.
+#
+# Authored standing, like `dried_kelp.wam` and for the same reason:
+# `render/ItemModels.js` normalises by the Y extent and closes the fist
+# somewhere along Y, so a slab lying flat would be scaled by its own thickness
+# and gripped across its face.
+#
+# Colour is the wax/honey split and nothing else. `Wax` is the pale comb the
+# bees build; `Honey` is what is in the cells and in the drip, a good deal
+# darker so the cell mouths read as holes rather than as texture; `Glaze` is the
+# lit top margin, which is what keeps the chunk from being one flat field.
+
+model honeycomb
+  height 0.28
+  style chunky
+
+palette
+  Wax   #f0c25c
+  Honey #6f3d05
+  Glaze #fff0bf
+
+skeleton
+  root bed at 0.0
+
+parts
+  # The slab. `frame=fwd` for `dried_kelp.wam`'s reason: on a near-vertical
+  # path the up axis runs *along* the part, so `d` has nothing to span and the
+  # chunk comes out a solid brick with no controllable thickness. Pinning the
+  # depth axis to +Z makes `d` the wax thickness and `w` the width of the comb.
+  #
+  # The ring widths are deliberately not monotone — 0.62, 0.78, 0.74, 0.80,
+  # 0.66 — which is what puts the torn steps in the outline.
+  loft slab bone=bed at=0.0 dir=up pitch=-2 len=0.78 material=Wax frame=fwd sides=4
+    ring 0.00 w=0.72 d=0.24
+    ring 0.16 w=0.88 d=0.27 roll=4
+    ring 0.46 w=0.84 d=0.26 roll=-3
+    ring 0.74 w=0.90 d=0.25 roll=5
+    ring 0.90 w=0.74 d=0.22 material=Glaze
+    ring 1.00 w=0.58 d=0.18 roll=-7
+    cap start=flat end=flat
+
+  # The back plate: the midrib every comb is built on, sitting behind the cells
+  # so a mouth looks into something rather than through to the background.
+  # Dark, narrow, and it never reaches the silhouette.
+  loft midrib bone=bed at=0.0 offset=(0,0,-0.02) dir=up len=0.78 material=Honey frame=fwd sides=4
+    ring 0.00 w=0.52 d=0.10
+    ring 0.50 w=0.62 d=0.11
+    ring 1.00 w=0.46 d=0.09
+    cap start=flat end=flat
+
+  # Seven cells, two offset rows. `roll=30` stands each hexagon on a flat rather
+  # than on a point, which is how comb actually sits and is also the reading
+  # that survives being rasterised small — a point-up hex at 46px is a circle.
+  #
+  # Each is a short open tube: wide mouth, slightly narrower throat, `cap
+  # end=none` so the mouth is a hole. The lip ring is `Glaze` because the rim of
+  # a wax cell is the thinnest wax on the comb and catches the light; that pale
+  # ring around a dark opening is the whole read.
+  loft cellmid bone=bed at=0.0 offset=(0,0.42,0.03) dir=fwd len=0.15 material=Honey sides=6
+    ring 0.00 w=0.20 d=0.20 roll=30
+    ring 0.55 w=0.21 d=0.21 roll=30
+    ring 1.00 w=0.23 d=0.23 roll=30 material=Glaze
+    cap start=flat end=none
+
+  mirror
+    # Middle row, either side of the centre cell.
+    loft cellin bone=bed at=0.0 offset=(0.24,0.42,0.03) dir=fwd len=0.15 material=Honey sides=6
+      ring 0.00 w=0.20 d=0.20 roll=30
+      ring 0.55 w=0.21 d=0.21 roll=30
+      ring 1.00 w=0.23 d=0.23 roll=30 material=Glaze
+      cap start=flat end=none
+
+    # Upper row, half a cell across — the offset that makes it a tessellation
+    # and not a grid.
+    loft cellup bone=bed at=0.0 offset=(0.12,0.62,0.03) dir=fwd len=0.14 material=Honey sides=6
+      ring 0.00 w=0.19 d=0.19 roll=30
+      ring 0.55 w=0.20 d=0.20 roll=30
+      ring 1.00 w=0.22 d=0.22 roll=30 material=Glaze
+      cap start=flat end=none
+
+    # Lower row, same offset the other way.
+    loft celldn bone=bed at=0.0 offset=(0.12,0.22,0.03) dir=fwd len=0.14 material=Honey sides=6
+      ring 0.00 w=0.19 d=0.19 roll=30
+      ring 0.55 w=0.20 d=0.20 roll=30
+      ring 1.00 w=0.22 d=0.22 roll=30 material=Glaze
+      cap start=flat end=none
+  end
+
+  # The drip. Hangs off the front-bottom lip, fat at the top and drawn to a
+  # point, which is the only shape a falling liquid has.
+  loft drip bone=bed at=0.0 offset=(0.34,0.20,0.09) dir=down pitch=-8 len=0.20 material=Honey sides=6
+    ring 0.00 w=0.10 d=0.10
+    ring 0.35 w=0.13 d=0.13
+    ring 0.72 w=0.09 d=0.09
+    ring 1.00 w=0.02 d=0.02 tip
+    cap start=flat end=point
+
+checks
+  # Standing on the ground as a drop, with only the drip below the slab.
+  assert bottom(slab) < 0.02
+  # A slab, not a bar: at least twice as wide as it is thick, or the ingot
+  # silhouette is back.
+  assert width(slab) > depth(slab) * 2.0
+  # Y is the long axis by a margin, but not by so much that it reads as a plank.
+  # `ItemModels` normalises on the Y extent, so both bounds matter.
+  assert height / width in 0.95..1.6
+  # The cells stand proud of the wax face. This is the model; if a tidy-up ever
+  # flattens them into the slab the item is an ingot with a drip on it.
+  assert zmax(cellmid) > zmax(slab)
+  assert zmax(cellin.l) > zmax(slab)
+  # Two offset rows, and the offset is real: the upper cell is not above the
+  # middle one.
+  assert y(cellup.l) > y(cellin.l)
+  assert y(celldn.l) < y(cellin.l)
+  # Hexagons wide enough to read at icon size — a cell narrower than a sixth of
+  # the chunk is a speckle.
+  assert width(cellmid) > width(slab) * 0.2
+  # The drip is below the comb and is the lowest thing on the model.
+  assert bottom(drip) < bottom(slab) + 0.02
+  assert bottom(drip) > -0.02
+  # Wax, honey and the lit margin all survive. Losing one collapses the cell
+  # mouths into the face they sit on.
+  assert materials == 3
+  assert parts == 10
+  assert tris < 700

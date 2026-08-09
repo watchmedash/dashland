@@ -3216,6 +3216,11 @@ class Game {
       if (k < 0) continue;
       const key = col * D + k;
       if (this.frozen.has(key)) continue;
+      // Only standing water freezes. A spring has no level entry; anything with
+      // one is a flow, and a running stream icing over is both wrong and the
+      // thing that would make the thaw below dishonest — it can only give back
+      // standing water, so it must only ever take standing water.
+      if (!this.water.sources.has(key)) continue;
       this.frozen.add(key);
       edits.push({ col, k, id: ID.ice });
     }
@@ -3231,6 +3236,20 @@ class Game {
       // Mined out, built over, or already melted by other means — winter has no
       // claim on it any more either way.
       if (this.planet.at(col, k) !== ID.ice) continue;
+      // Melts back into the lake it came from — as a spring, which is what it
+      // was before it froze.
+      //
+      // Without this it came back as an *orphan*: water carrying neither a
+      // source mark nor a flow level, which the sim is entitled to sweep away,
+      // and does. Inside one session it happened to survive, because freezing
+      // never removed the mark and nothing put it back; the mark is only lost
+      // across a save, since a cell saved as ice is not liquid and so is not
+      // seeded on load. So a world saved in winter came back in spring and
+      // deleted its own lake surface, one thawed cell at a time — the cells
+      // beside open water refilled as *flowing* water, and the ones without a
+      // neighbour to feed them simply went. Measured: an orphan in a sealed
+      // pocket is gone after a single tick.
+      this.water.addSource(col, k);
       edits.push({ col, k, id: ID.water });
     }
     if (edits.length) this._applyEdits(edits);

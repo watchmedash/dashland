@@ -15,11 +15,9 @@ const STATES = {
 const COLD_BIOMES = new Set([BIOME.SNOW, BIOME.TUNDRA]);
 
 export class Weather {
-  constructor(seed = Math.random()) {
+  constructor() {
     this.state = 'fair';
-    this.next = 'fair';
     this.timer = 120;
-    this.blend = 1;
     this.cold = false;
 
     this.coverage = STATES.fair.coverage;
@@ -35,7 +33,10 @@ export class Weather {
 
   _pick() {
     const entries = Object.entries(STATES);
-    // storms don't follow storms; clear skies rarely jump straight to a storm
+    // Whatever it is doing now is a third as likely to be what it does next, so
+    // the sky keeps moving. That is the only rule here — no pair of states is
+    // treated specially, which is worth saying because the comment this replaces
+    // claimed two that were never implemented.
     const total = entries.reduce((a, [k, s]) => a + (k === this.state ? s.weight * 0.35 : s.weight), 0);
     let r = Math.random() * total;
     for (const [k, s] of entries) {

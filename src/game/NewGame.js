@@ -33,6 +33,7 @@ export const DEFAULT_DIFFICULTY = 'normal';
  *   easy 0.5    husk 3 -> 1.5, elephant 8 -> 4
  *   normal 1    the ladder as written
  *   hard 1.5    husk 3 -> 4.5, elephant 8 -> 12
+ *   extreme 2   husk 3 -> 6,   elephant 8 -> 16
  *
  * A flat scale on purpose. The ladder prices eight species against each other —
  * the elephant is top per blow and mid-table on damage per second, the tiger is
@@ -46,14 +47,43 @@ export const DEFAULT_DIFFICULTY = 'normal';
  * telegraphed blow. The husk is the floor: at 0.5 it takes thirteen blows rather
  * than seven, so a night outdoors on easy is survivable while being caught still
  * costs a bar you have to go and refill.
+ *
+ * --- and why extreme is 2 and not 2.5 ---------------------------------------
+ *
+ * The step is the step the other three already use: 0.5, 1, 1.5, 2 is one
+ * ladder with one spacing, and a fourth tier that jumped by a different amount
+ * would be inventing a second scale on top of the first.
+ *
+ * 2.5 was the other candidate, and it is exactly the one-shot: 8 x 2.5 is 20 of
+ * a 20-point bar, so an elephant would end a full-health player in a single
+ * blow. Hard is deliberately short of that line and extreme stays short of it
+ * too, for a reason hard never had — on extreme a death is the whole run (see
+ * `endsOnDeath`), and the one thing a run-ending blow must not be is one the
+ * player never got to answer. The elephant is also the wrong species to cross
+ * it with: it never comes for you, so every one of its blows is a fight the
+ * player walked into, and its whole lesson is that the single telegraphed hit
+ * is enormous. At 16 of 20 that lesson is still teachable once. At 20 it is
+ * only ever taught posthumously.
+ *
+ * So the escalation extreme carries is not a bigger number here. It is that
+ * the carnivores come for you (`huntsOnSight`), that there are more of them
+ * after dark, and that there is no second attempt. Two blows from anything at
+ * the top of the ladder is already the shortest fight in the game:
+ *
+ *   tiger    6 -> 12 / 1.15s   two bites, and it starts them
+ *   husk     3 ->  6 / 1.15s   four, from up to fourteen of them at once
+ *   fox      1 ->  2 / 1.00s   still the nuisance, still walkable-away-from
  */
-export const MOB_DAMAGE_SCALE = Object.freeze({ easy: 0.5, normal: 1, hard: 1.5 });
+export const MOB_DAMAGE_SCALE = Object.freeze({ easy: 0.5, normal: 1, hard: 1.5, extreme: 2 });
 
-/** The three, in the order they are offered. */
-export const DIFFICULTIES = Object.freeze(['easy', 'normal', 'hard']);
+/** The four, in the order they are offered. */
+export const DIFFICULTIES = Object.freeze(['easy', 'normal', 'hard', 'extreme']);
+
+/** The one that is not only a multiplier. See the three predicates below. */
+export const EXTREME = 'extreme';
 
 /**
- * Anything that is not one of the three becomes `normal` — which covers a save
+ * Anything that is not one of the four becomes `normal` — which covers a save
  * written before difficulty existed, where the field is simply absent.
  */
 export function normalizeDifficulty(name) {
@@ -63,6 +93,55 @@ export function normalizeDifficulty(name) {
 /** The multiplier for a difficulty, safe on anything at all. */
 export function mobDamageScale(name) {
   return MOB_DAMAGE_SCALE[normalizeDifficulty(name)];
+}
+
+// --- the three things extreme is besides a multiplier ------------------------
+//
+// Written as three predicates over the same string rather than as one
+// `isExtreme`, and that is the decision worth defending. Each one is read by a
+// different subsystem — the mob manager's targeting, the mob manager's night
+// budget, and the death path in main.js — and each is a separate claim about
+// the world that a harness can check on its own. `isExtreme` sprinkled through
+// three files would be three call sites that all mean "and whatever else
+// extreme turns out to do", which is how a fourth consequence gets added to a
+// tier by accident.
+//
+// They all answer the same way today. That is a fact about this tier, not a
+// property of the shape.
+
+/**
+ * Do the carnivores treat the player as prey?
+ *
+ * The species this actually changes are decided in `Mobs.js`, off the data
+ * already on the species table — see the `savage` note there. This only says
+ * which worlds the rule is switched on in.
+ */
+export function huntsOnSight(name) {
+  return normalizeDifficulty(name) === EXTREME;
+}
+
+/**
+ * Does the dark bring more of them?
+ *
+ * The budget itself lives with the other budgets in `Mobs.js`, for the reason
+ * the comment on MAX_MOBS gives: they are a set that has to be read together.
+ */
+export function crowdedNights(name) {
+  return normalizeDifficulty(name) === EXTREME;
+}
+
+/**
+ * Is a death the end of the run?
+ *
+ * True here means there is no respawn at all: `_die` hands the player to the
+ * spectator, and nothing puts them back. It is deliberately *not* folded into
+ * the death rule beside it — `keepsOnDeath` answers "what does a death cost",
+ * which presumes waking up afterwards, and this answers whether there is an
+ * afterwards. A world can be extreme and still be a keep world; the bag simply
+ * stays on a body that is never walked again.
+ */
+export function endsOnDeath(name) {
+  return normalizeDifficulty(name) === EXTREME;
 }
 
 // --- what a death costs ------------------------------------------------------

@@ -87,11 +87,22 @@ export const LOADOUT_MAX = 3;
  */
 export const DEFAULT_LOADOUT = ['torches'];
 
-/** Mob damage, and nothing else. The game side owns what the keys are worth. */
+/**
+ * Mob damage, and nothing else, for the first three. The game side owns what
+ * the keys are worth.
+ *
+ * Extreme is the one that is not only a multiplier — the animals hunt you, the
+ * dark is fuller, and a death ends the run — and it still gets one word here
+ * like the other three. The screen has one caption per control and no prose to
+ * explain any of it in, which is a rule the player has asked for three times;
+ * "Extreme" is a word every player already knows the shape of, and the world is
+ * the place to find out the details.
+ */
 export const DIFFICULTIES = [
   { key: 'easy', label: 'Easy' },
   { key: 'normal', label: 'Normal' },
   { key: 'hard', label: 'Hard' },
+  { key: 'extreme', label: 'Extreme' },
 ];
 export const DEFAULT_DIFFICULTY = 'normal';
 
@@ -423,7 +434,12 @@ export class UI {
       recipePanel: $('recipe-panel'),
       recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeEmpty: $('recipe-empty'),
       pause: $('pause'), settings: $('settings'), controls: $('controls'), death: $('death'),
-      deathCause: $('death-cause'), deathLost: $('death-lost'),
+      deathCause: $('death-cause'), deathLost: $('death-lost'), dzRespawn: $('dz-respawn'),
+      // The two clusters a spectator has no use for: what is left of a body,
+      // and what it was carrying. Held by id so `setSpectator` can put them
+      // away without a stylesheet rule of its own — `hidden` is the class the
+      // whole interface already uses for exactly this.
+      vitals: $('vitals'), bottom: $('bottom'),
       slots: $('slots'), slotList: $('slot-list'), slotsTitle: $('slots-title'),
       chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgStatus: $('cg-status'),
       cgWho: $('cg-who'), cgKit: $('cg-kit'), cgKitCount: $('cg-kit-count'),
@@ -1379,11 +1395,18 @@ export class UI {
    *
    * @param {string} cause
    * @param {string} [lost]
+   * @param {boolean} [final] there is no waking up on this world. The screen is
+   *   the same screen — same cause, same one line — and the one button that
+   *   would have put you back changes to what it will actually do. Nothing is
+   *   added to say the run is over: a button that says Spectate where a button
+   *   that said Wake Up used to be says it, and this screen has never explained
+   *   itself.
    */
-  showDeath(cause, lost = '') {
+  showDeath(cause, lost = '', final = false) {
     this.el.deathCause.textContent = cause;
     this.el.deathLost.textContent = lost;
     this.el.deathLost.classList.toggle('hidden', !lost);
+    if (this.el.dzRespawn) this.el.dzRespawn.textContent = final ? 'Spectate' : 'Wake Up';
     this.el.death.classList.remove('hidden');
   }
   hideDeath() { this.el.death.classList.add('hidden'); }
@@ -1395,6 +1418,28 @@ export class UI {
   showHud(on) {
     this.el.hud.classList.toggle('hidden', !on);
     this.el.toasts.classList.toggle('hidden', !on);
+  }
+
+  /**
+   * The HUD a spectator gets: the world, and where in it they are.
+   *
+   * What goes is everything that is a fact about a body — health, food, air,
+   * stamina — and everything that is a fact about carrying things: the hotbar,
+   * the offhand, the held item's name and the label under the crosshair. None
+   * of them can change again, and a health bar pinned at empty is a worse way
+   * of saying "you are dead" than simply not having one.
+   *
+   * What stays is the status row (clock, weather, season, biome), the compass
+   * and the minimap, because those are about the planet rather than the person
+   * and exploring is the entire remaining game.
+   *
+   * The crosshair goes too. It is a sight, there is nothing left to aim, and it
+   * is the only element that would still imply the world can be touched.
+   */
+  setSpectator(on) {
+    this.el.vitals?.classList.toggle('hidden', on);
+    this.el.bottom?.classList.toggle('hidden', on);
+    if (on) this.showCrosshair(false);
   }
 
   // --- slot rendering -------------------------------------------------------

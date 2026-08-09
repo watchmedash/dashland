@@ -1215,6 +1215,9 @@ class Game {
     this._pausedFrom = 'playing';
     this.mobs.ghost = false;
     this.ui.setSpectator(false);
+    // The sight comes back with the hands. `setSpectator` can only take it
+    // away, because it is the view mode that decides whether there is one.
+    this.ui.showCrosshair(this.viewMode === VIEW_FIRST);
     this.loadout = [];
     this._setDeathRule(DEFAULT_ON_DEATH);
     this.planet.clearMeshes();
@@ -3904,8 +3907,19 @@ class Game {
     // Hunger, healing and stamina, all three of which are about a body.
     if (!ghost) this._safeTick('vitals', () => this._tickVitals(dt));
     this._safeTick('grace', () => this._tickGrace(dt));
-    this._safeTick('core', () => this._tickCore(dt));
-    this._safeTick('skills', () => this._tickSkills(dt));
+    // The two that reach into the player without waiting to be asked, and the
+    // reason the input gate above is necessary but not sufficient: `_tickCore`
+    // watches for the player *touching* the core and puts a hearth in their bag
+    // for it, and `_tickSkills` pays XP for being alive and marks firsts. Both
+    // run every frame off the player's position, so both would fire for someone
+    // drifting through a world they are only meant to be looking at. A hearth
+    // is the one item in the game you cannot get any other way, and a spectator
+    // who flew down and collected it would have taken something out of a run
+    // that is over.
+    if (!ghost) {
+      this._safeTick('core', () => this._tickCore(dt));
+      this._safeTick('skills', () => this._tickSkills(dt));
+    }
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
     // After the animals have moved, so a shot lands where the body is drawn
     // this frame rather than where it was drawn last one. The mob list is handed

@@ -2008,6 +2008,33 @@ const SWIM_SPEED = 1.5;
  * because there is no ground.
  */
 const WADE_CLIP_RATE = 0.55;
+/**
+ * Looks at the bank that come back with nothing before a swimmer stops trying
+ * to land and starts following the shore instead.
+ *
+ * Two, so a single bad reading — a bank that happened to be behind a body it
+ * was drifting past — cannot change what the animal is doing, and 1.2 seconds
+ * is short enough that a lake with one way out is still found promptly.
+ *
+ * The case this exists for is a lake whose banks all stand two or more blocks
+ * over the water line. `_landBearing` correctly refuses every one of them —
+ * that is a cliff, and raising the limit so a body could climb it would let
+ * every animal on the planet climb walls — so it returns null, and the wading
+ * branch used to answer null by holding whatever heading it already had. Which
+ * is the heading it was swimming at the bank on. Measured on a ringed lake:
+ * the deer reached the rim in 1.6s and then spent the remaining 28 seconds
+ * pressed against it, 0.1 cells of ground covered, at a full determined
+ * paddle. Nothing about that is escape and all of it is visible.
+ */
+const SWIM_GIVE_UP = 2;
+/**
+ * How fast it follows the shore once it has given up on climbing out, as a
+ * multiple of its wander. Under SWIM_SPEED because this is no longer a body
+ * striking out for anywhere: it is a body keeping to the edge, which is what a
+ * real animal in a walled pool does and, more to the point, is a thing that
+ * looks like a decision rather than like a broken one.
+ */
+const SWIM_CIRCLE = 0.9;
 
 const LOVE_SECONDS = 22;      // how long a fed animal stays willing
 const BREED_RANGE = 4.5;      // how close a willing pair must be
@@ -2693,6 +2720,10 @@ export class Mobs {
       wading: false,       // in water, and very much not
       swimT: 0,            // when to look for the bank again
       swimWant: null,      // and the bearing it found last time it looked
+      /** Consecutive looks that found no bank it could climb — see SWIM_GIVE_UP. */
+      swimFail: 0,
+      /** ...and once it has given up, the bearing along the shore it follows. */
+      swimAlong: null,
       bestDist: Infinity,  // closest it has got while hunting, for the stall test
       stallT: 0,
       slideT: 0, slideDir: 1,   // which way it is currently going round a wall
@@ -3655,8 +3686,6 @@ export class Mobs {
       if (t === 2 || this._flowery(spot.col, spot.k)) seed = spot;
     }
     if (!seed) return 0;
-    const type = this._pickFlier(seed.col);
-    if (!type) return 0;
     let placed = 0;
     const want = Math.min(budget, DRIFT_MIN + Math.floor(Math.random() * DRIFT_SPAN));
     for (let t = 0; t < want * 2 && placed < want; t++) {
@@ -3668,6 +3697,16 @@ export class Mobs {
       // A flier does not need standing room, but it does need not to start
       // inside a block, and it must not start under water.
       if (this.planet.solidAt(col, k + 1) || this.planet.liquidAt(col, k + 1)) continue;
+      // Drawn per column, exactly as _spawnShoal draws its fish per column, and
+      // for the same reason: the seed decides where to look and nothing else.
+      // One draw for the whole drift was made against the seed's biome and then
+      // spent up to DRIFT_SPREAD columns away, which on any biome edge is a
+      // different list — measured over twelve biomes, that put bees into the
+      // savanna, the snow and the badlands, none of which lists one. A drift
+      // that straddles a treeline is now forest bees on one side and nothing on
+      // the other, which is what the tables say should happen.
+      const type = this._pickFlier(col);
+      if (!type) continue;
       if (this.spawn(type, col, k)) placed++;
     }
     return placed;
@@ -3745,6 +3784,51 @@ export class Mobs {
     mob.pos.set(_p[0], _p[1], _p[2]);
     tangentFrame(c.f, c.ci, c.cj, c.ck, mob.frame);
     mob.up.set(mob.frame.up[0], mob.frame.up[1], mob.frame.up[2]);
+  }
+
+  /**
+   * The reference layer every terrain rule is measured from: the layer the
+   * body's feet are being held up by.
+   *
+   * A layer INDEX, and that is the whole reason this exists as a function.
+   * `_footprintCost` takes it as one, `_groundK` starts its scan at `hereK + 1`,
+   * and both are integer-indexed into the block array — hand either of them a
+   * height instead and every probe lands between two layers, reads undefined,
+   * and comes back as "no ground here" for all nine samples. That is a body
+   * that may not move in any direction, reported as a preference rather than as
+   * an error. `_nudge` was doing exactly that (see the call there).
+   *
+   * For a walker it is the block under the feet. For a body floating at the
+   * water line it is the water surface holding it up — see the long note at the
+   * `here` in update(), which this is lifted from unchanged so that the two can
+   * no longer drift apart.
+   */
+  _refLayer(mob) {
+    const c = mob.cell;
+    const p = this.planet;
+    const feetK = Math.floor(c.ck);
+    const col = this._colOf(c.f, c.ci, c.cj);
+    const surfK = (mob.wading || (mob.swimming && !mob.spec.aquatic))
+      ? this._waterTop(col, feetK) : -1;
+    if (surfK >= 0 && c.ck > surfK - 1) return surfK;
+    // A block whose top is inside its own layer — a slab, a stair tread — holds
+    // the feet up from *within* the layer they are standing in, not from the
+    // layer below. `floor(ck) - 1` is the layer under the feet and is right for
+    // every full block on the planet; on a slab it names the block underneath
+    // the slab, one lower than the thing actually carrying the animal.
+    //
+    // Everything downstream then reads one layer low. `_groundK` starts its
+    // scan at `hereK + 1` and finds the slab, `gk > hereK` calls it a rise, and
+    // all nine samples cost 1 — so a body standing on a slab floor scores 9
+    // where it stands, in every direction. The consequences run both ways: a
+    // shove is refused outright (see `_nudge`), and, worse, the equal-cost
+    // escape rule in `_walkStep` then admits *every* move, because everything
+    // ties at 9 — including walking into stone. Half-height blocks are the one
+    // shape on which an animal could leave the world.
+    if (c.ck - feetK > 0.02 && p.solidAt(col, feetK)
+        && !isPassable(p.at(col, feetK), p.facingAt(col, feetK))
+        && feetK + this._topOf(col, feetK) <= c.ck + 0.02) return feetK;
+    return Math.floor(c.ck + 0.02) - 1;
   }
 
   /** Highest solid layer at or below `fromK` in `col`. */
@@ -4311,16 +4395,91 @@ export class Mobs {
   _landBearing(mob, col) {
     const p = this.planet;
     const topK = this._waterTop(col, Math.floor(mob.cell.ck));
-    for (let s = 1; s <= SWIM_LOOK; s++) {
+    // Eight rays rather than eight rings, and the difference is a `blocked`
+    // flag per direction.
+    //
+    // Rings looked *through* walls. A cliff was `continue` — keep looking — so
+    // the search went on past it and cheerfully returned the bearing to the
+    // open plain on the far side of a rim it had already refused. That is the
+    // ringed-lake report exactly, and it is worse than no answer: the animal
+    // holds a heading at ground it can see and can never reach, and presses
+    // itself into the intervening wall for as long as anyone is watching.
+    // Measured on a lake with a three-column rim standing two blocks proud: the
+    // deer reached the rim at 4.0s and had not moved a hundredth of a cell by
+    // 30s, at a full paddle the whole time.
+    //
+    // A cliff now ENDS that direction. Everything beyond it is somewhere this
+    // body cannot walk to from here, whatever it looks like, and a search that
+    // reports unreachable ground is not a search that has found anything.
+    let live = 0xff;
+    for (let s = 1; s <= SWIM_LOOK && live; s++) {
       for (let n = 0; n < 8; n++) {
+        const bit = 1 << n;
+        if (!(live & bit)) continue;
         const di = RING8[n * 2] * s, dj = RING8[n * 2 + 1] * s;
         const c2 = stepColumn(col, di, dj);
         const gk = this._groundK(c2, topK + 2, !!mob.spec.climbs);
         if (gk < 0) continue;
-        if (gk > topK + 1) continue;                  // a cliff face, not a bank
-        if (p.liquidAt(c2, gk + 1)) continue;         // still water — keep looking
+        if (gk > topK + 1) { live &= ~bit; continue; }  // a cliff face, not a bank
+        if (p.liquidAt(c2, gk + 1)) continue;           // still water — keep looking
         return Math.atan2(dj, di);
       }
+    }
+    return null;
+  }
+
+  /**
+   * Which way is *along* the bank, for a swimmer that has been told there is no
+   * way out of this water.
+   *
+   * The companion to `_landBearing` and deliberately a separate search rather
+   * than a flag on it, on the same grounds that `_shoreBearing` is separate:
+   * they are asking different questions. `_landBearing` wants a bank it may
+   * climb and refuses everything else. This wants the nearest bank of ANY
+   * height — a cliff is still a shore — and returns the bearing turned a right
+   * angle, so the body travels along the water's edge instead of into it.
+   *
+   * Which of the two right angles is held on `slideDir`, the same field the
+   * wall slide commits to a side with, and for the same reason: a side redrawn
+   * every time this is asked would average out to swimming on the spot, which
+   * is the behaviour being replaced.
+   *
+   * Following the shore is also what *finds* a way out on any lake bigger than
+   * the search: a low stretch a long way round the rim is out of
+   * `_landBearing`'s SWIM_LOOK columns from here, and is inside it from a
+   * quarter of the way round. So this is not only the thing that stops the
+   * thrashing, it is the only route out of a large lake that has one.
+   *
+   * @returns {number|null} a heading, or null if there is no bank in reach at
+   *   all — the middle of an ocean, where there is nothing to follow.
+   */
+  _shoreTangent(mob, col) {
+    const p = this.planet;
+    const topK = this._waterTop(col, Math.floor(mob.cell.ck));
+    for (let s = 1; s <= SWIM_LOOK; s++) {
+      // Every bank at this range, summed, and not the first one found. In a
+      // corner two walls are the same distance away, and taking either one of
+      // them alone gives a tangent that runs straight into the other — measured,
+      // a deer followed the east bank of a walled lake for fourteen seconds and
+      // then parked in the north-east corner for the rest of the run. Summing
+      // gives the direction the water's edge actually faces, so a corner reads
+      // as diagonal and the tangent rounds it.
+      let ai = 0, aj = 0;
+      for (let n = 0; n < 8; n++) {
+        const di = RING8[n * 2], dj = RING8[n * 2 + 1];
+        const c2 = stepColumn(col, di * s, dj * s);
+        // Ground standing over the water line, whether or not it can be climbed
+        // onto. Above `topK` is the bank; anything at or under the water line is
+        // more water, or the bed, and neither is a shore.
+        const gk = this._groundK(c2, topK + 3, !!mob.spec.climbs);
+        if (gk < 0 || gk <= topK) continue;
+        if (p.liquidAt(c2, gk + 1)) continue;
+        const inv = (di && dj) ? Math.SQRT1_2 : 1;    // diagonals are longer
+        ai += di * inv; aj += dj * inv;
+      }
+      if (ai === 0 && aj === 0) continue;
+      const side = mob.slideDir || 1;
+      return wrapAngle(Math.atan2(aj, ai) + side * (Math.PI / 2));
     }
     return null;
   }
@@ -4497,6 +4656,18 @@ export class Mobs {
     const k = Math.min(1, dt * 9);
     for (let a = 0; a < list.length; a++) {
       const m = list[a];
+      // Not him. He is a sighting, not a body: nothing may push him and he may
+      // push nothing.
+      //
+      // This was the one system he was not exempt from, and it is the one that
+      // undoes him. Animals correctly do not fear him — `_buildThreats` leaves
+      // him out — so they walk straight into him, and a herd nosing a silhouette
+      // off the ridge that `_findStalkerSpot` chose for its sightline is the
+      // exact opposite of the effect. `_nudge` would also slide him along terrain
+      // he was placed on deliberately. The player half is unreachable in practice
+      // (STALKER_VANISH collects him at 24 units, well outside touching range)
+      // and is covered by the same line, which is where it belongs.
+      if (m.spec.phantom) continue;
       // --- against the player ---
       _rel.copy(m.pos).sub(player.position);
       const up = m.up;
@@ -4516,6 +4687,7 @@ export class Mobs {
       // --- against each other ---
       for (let b = a + 1; b < list.length; b++) {
         const o = list[b];
+        if (o.spec.phantom) continue;      // ...from either side of the pair
         const reach = m.radius + o.radius;
         if (m.pos.distanceToSquared(o.pos) >= reach * reach) continue;
         _rel.copy(m.pos).sub(o.pos);
@@ -4539,8 +4711,18 @@ export class Mobs {
     const fr = mob.frame;
     const di = (dir.x * fr.ea[0] + dir.y * fr.ea[1] + dir.z * fr.ea[2]) / fr.arcA;
     const dj = (dir.x * fr.eb[0] + dir.y * fr.eb[1] + dir.z * fr.eb[2]) / fr.arcB;
-    const here = this._groundUnder(mob, mob.cell.f, mob.cell.ci, mob.cell.cj,
-      Math.floor(mob.cell.ck + 0.02));
+    // A layer index, not a height. This read `_groundUnder(...)`, which returns
+    // the *height* of the surface — one more than the layer under the feet on
+    // flat ground, and a fraction on anything shaped. `_footprintCost` passes
+    // it to `_groundK` as `hereK + 1`, and a fractional start index means every
+    // `solidAt` in that scan is asked about a layer that does not exist: all
+    // nine samples came back gk < 0, cost 9, and the shove was refused outright.
+    // So an animal standing on a slab, a stair tread or any half-height block
+    // could not be pushed apart from its herd or yielded out of the player's
+    // way at all — silently, because a refused nudge looks exactly like a body
+    // with nowhere to go. The whole-block case was merely off by one, which let
+    // a shove climb a step the animal could not have walked up.
+    const here = this._refLayer(mob);
     const ni = mob.cell.ci + di * amount;
     const nj = mob.cell.cj + dj * amount;
     // never let a shove put an animal somewhere it could not have walked
@@ -4628,8 +4810,14 @@ export class Mobs {
      * table rather than this flag — a savage tiger is a tiger that has added
      * the player to a list it already had.
      */
+    // ...and the cub exception does need code after all. The comment above says
+    // `_stalk` already refuses on `baby`, which is true and is about the *herd*
+    // hunt — this is the player hunt, and it had no such test anywhere, so on a
+    // savage world a lion cub acquired the player and swung for the adult's
+    // full damage. The test goes on the savage term alone: nothing hostile or
+    // monstrous is ever born a cub.
     const acquires = spec.hostile || spec.monster
-      || (this.savage && !!spec.preyOn && !!spec.predator);
+      || (this.savage && !!spec.preyOn && !!spec.predator && mob.baby <= 0);
     if (acquires && dist < spec.aggroRange) {
       if (mob.target !== 'player') { mob.bestDist = dist; mob.stallT = 0; }
       mob.target = 'player';
@@ -5029,6 +5217,15 @@ export class Mobs {
       // enough to take it. It never showed while bees were rare; with fliers on
       // their own budget there are fourteen of them and it would.
       if (o.spec.flies && !mob.spec.flies) continue;
+      // And a canopy is the third wall, on exactly the same grounds. The monkey
+      // is the only `climbs` species and foliage is floor to it alone, so a
+      // monkey sitting in the branches is as unreachable to a lion as a bee is
+      // to a cat — and the lion, having no rule about it, would pick it and pad
+      // about under the tree for the whole PREY_GIVE_UP window. `climbTo` is
+      // the ascent and `perchT` the sit at the top; either means it is not on
+      // the ground. Nothing stops a hunter taking the same monkey once it comes
+      // down, which is the outcome the water and air rules also produce.
+      if ((o.climbTo !== null || o.perchT > 0) && !mob.spec.climbs) continue;
       const d = mob.pos.distanceToSquared(o.pos);
       if (d < bestD) { bestD = d; best = o; }
     }
@@ -5088,6 +5285,22 @@ export class Mobs {
     // The prey-ceiling rule, from the hunter's side. Above it, I am simply too
     // big to be dinner.
     if (ph > th * PREY_SIZE) return 0;
+    // A hunter is not frightened of something no bigger than itself.
+    //
+    // Without this the rule above is the only one, and it admits anything
+    // within half again my height — which for two animals of the same guild is
+    // mutual. Both directions then hold at once: a lion (1.45) and a tiger
+    // (1.60) each bolt from the other, a fox (0.58) and a dog (0.78) each bolt
+    // from the other, and a fox bolts from a *cat*, which has no `fights` at
+    // all and gets the default threat weight of a dog for having none. Two
+    // resting big cats on a badlands list that contains both became a bolt-and-
+    // alarm metronome on a seven-second cycle.
+    //
+    // `predator` and not `preyOn`, deliberately: the flag means this animal
+    // fights, and that is what makes standing its ground plausible. A cat has
+    // prey and no fight, so a cat still fears the dog — and no longer
+    // frightens the fox.
+    if (ps.predator && th <= ph) return 0;
     const weight = (ts.preyOn && ts.preyOn.has(p.type)) ? 1 : SPOOK_UNLISTED;
     const size = clamp(0.6 + 0.4 * (th / Math.max(0.2, ph)), SPOOK_SIZE_MIN, SPOOK_SIZE_MAX);
     const r = (SPOOK_BASE + SPOOK_PER_DMG * (ts.damage ?? 2)) * size * weight;
@@ -5394,12 +5607,19 @@ export class Mobs {
     const spec = mob.spec;
     if (!spec.preyOn) return false;
     if (spec.diet !== 'carnivore' && spec.diet !== 'omnivore') return false;
-    // Ticked before the early-outs below so the cooldown keeps running while
-    // the hunter rests, rather than being frozen at whatever the last bite set.
-    if (mob.biteT > 0) mob.biteT -= dt;
+    // (The bite cooldown and the hunger clock are ticked in update() now, with
+    // the rest of this body's clocks. They were ticked here, which meant they
+    // only ran on the frames this function was reached — and it is not reached
+    // at all while the animal is hunting the player or telegraphing a night
+    // stalk. On a savage world every carnivore inside its aggro range is
+    // permanently locked onto the player, so its hunger stopped where it stood:
+    // one that had just eaten stayed full for as long as the player was in
+    // sight, and one that was hungry when they arrived was still exactly as
+    // hungry when they left. A clock that only runs while nothing is happening
+    // is not a clock.)
     // A cub does not hunt, and a fed animal has other plans.
     if (mob.baby > 0 || mob.love > 0) return false;
-    if (mob.hungerT > 0) { mob.hungerT -= dt; mob.prey = null; return false; }
+    if (mob.hungerT > 0) { mob.prey = null; return false; }
 
     if (mob.prey && (mob.prey.taken || mob.prey.released
       || mob.prey.dying > 0 || mob.prey.health <= 0)) mob.prey = null;
@@ -5775,7 +5995,13 @@ export class Mobs {
       // left behind — someone who camps in one spot would watch the same
       // daytime meadow graze around them all night. This retires the surplus
       // instead, a couple at a time and only well out of sight.
-      if (night) this._bedDown(player, (wild - wildCap) + (air - airCap));
+      // Two arguments, because there are two budgets. Adding them at the call
+      // site is the exact bug `_bedDown` says in its own comment was removed —
+      // the signature was widened and this line was not, so the parameter list
+      // read (player, landSurplus) with `airSurplus` undefined, `air` came out
+      // 0, and every flier over the night budget was paid for by retiring land
+      // animals. A signed sum also let an empty sky raise the land ceiling.
+      if (night) this._bedDown(player, wild - wildCap, air - airCap);
       // Husks come out of the dark: after sunset in the open, and at any hour
       // underground. That is what makes a cave dangerous rather than just dim,
       // and what makes a torch worth carrying.
@@ -5901,6 +6127,10 @@ export class Mobs {
       }
 
       mob.hurtT = Math.max(0, mob.hurtT - dt);
+      // The predation clocks, here rather than inside _stalk — see the note
+      // there. Every frame this body exists, whatever it is doing.
+      mob.biteT = Math.max(0, mob.biteT - dt);
+      mob.hungerT = Math.max(0, mob.hungerT - dt);
       mob.lungeT = Math.max(0, mob.lungeT - dt);
       mob.slideT = Math.max(0, mob.slideT - dt);
       mob.stateT -= dt;
@@ -6051,16 +6281,35 @@ export class Mobs {
         mob.swimT -= dt;
         if (mob.swimT <= 0) {
           mob.swimT = SWIM_PERIOD;
-          mob.swimWant = this._landBearing(mob, this._colOf(c.f, c.ci, c.cj));
+          const wcol = this._colOf(c.f, c.ci, c.cj);
+          mob.swimWant = this._landBearing(mob, wcol);
+          if (mob.swimWant !== null) { mob.swimFail = 0; mob.swimAlong = null; } else {
+            // No bank it may climb. After SWIM_GIVE_UP of those in a row, stop
+            // swimming at the one it cannot climb and follow it instead.
+            mob.swimFail++;
+            if (mob.swimFail >= SWIM_GIVE_UP) {
+              // Commit to a side once, here, and keep it for as long as this
+              // body is trapped — see _shoreTangent.
+              if (!mob.slideDir) mob.slideDir = Math.random() < 0.5 ? -1 : 1;
+              mob.swimAlong = this._shoreTangent(mob, wcol);
+            }
+          }
         }
-        // No bank within SWIM_LOOK columns — the middle of an ocean, or a
-        // walled reservoir. It keeps swimming the way it was already going
-        // rather than treading water or drowning: there is no drowning clock
-        // for mobs and this is not the place to add one, because it would fire
-        // out at sea where nobody can see it and quietly eat the wildlife
-        // budget. It floats, it keeps looking, and it either finds a shore or
-        // the despawn ring collects it when the player walks away.
+        // Three answers, not two.
+        //
+        // A bank it can climb: swim at it. A bank it cannot: swim ALONG it —
+        // `swimAlong` — which stops the body pressing itself into a cliff for
+        // as long as the player is there to watch, and is the only way it will
+        // ever reach a low stretch further round a lake than it can see from
+        // here. And no bank at all within SWIM_LOOK columns: the middle of an
+        // ocean, where it keeps swimming the way it was already going rather
+        // than treading water or drowning. There is no drowning clock for mobs
+        // and this is not the place to add one — it would fire out at sea where
+        // nobody can see it and quietly eat the wildlife budget. It floats, it
+        // keeps looking, and it either finds a shore or the despawn ring
+        // collects it when the player walks away.
         if (mob.swimWant !== null) mob.want = mob.swimWant;
+        else if (mob.swimAlong !== null) mob.want = mob.swimAlong;
         mob.state = 'walk';
         mob.stateT = Math.max(mob.stateT, 0.5);
       }
@@ -6082,8 +6331,15 @@ export class Mobs {
       // flee it was very likely also in: an animal in water it did not choose
       // to be in is neither ambling nor bolting, and a bolt's turn rate would
       // have it overshoot the one gap in the bank anyway.
+      // ...and a body that has given up on getting out drops to SWIM_CIRCLE.
+      // A determined paddle is what a swimmer heading for a bank looks like; a
+      // swimmer that has been round this pool twice is not still determined,
+      // and holding SWIM_SPEED there is the difference between an animal that
+      // has settled and one that is visibly still trying to leave.
+      const swimPace = (mob.swimWant === null && mob.swimAlong !== null)
+        ? SWIM_CIRCLE : SWIM_SPEED;
       const targetSpeed = moving
-        ? spec.speed * (mob.wading ? SWIM_SPEED
+        ? spec.speed * (mob.wading ? swimPace
           : fleeing ? FLEE_SPEED
           : mob.creep ? PROWL_SPEED
           : chasing ? CHASE_SPEED : 1) : 0;
@@ -6165,10 +6421,11 @@ export class Mobs {
       // reference off a surface a few layers above it would let it. Fish are
       // excluded outright; `aquatic` has its own branch in _footprintCost and
       // never climbs out of anything.
-      const surfK = (wading || (swimming && !spec.aquatic))
-        ? this._waterTop(bodyCol, feetK) : -1;
-      const here = (surfK >= 0 && c.ck > surfK - 1)
-        ? surfK : Math.floor(c.ck + 0.02) - 1;
+      // ...and it is `_refLayer` rather than the expression written out here,
+      // because `_nudge` needs the same number and had a different one. Both
+      // flags it reads were written a few lines above, so this is the same
+      // reading it always was.
+      const here = this._refLayer(mob);
 
       // --- steering: limited turn rate, smooth acceleration -----------------
       //
@@ -6923,6 +7180,13 @@ export class Mobs {
 
   feed(mob, itemId) {
     if (!mob || mob.health <= 0) return false;
+    // He is not an animal and there is nothing to be got from him. Unreachable
+    // today — `raycast` already filters phantoms, so nothing can be offered to
+    // him — and written down anyway, because it is the only thing that can set
+    // `love`, and `love` is the whole of the breeding path. Two stalkers
+    // courting each other is prevented at present by a cap of one and by a
+    // door nobody has opened; a rule is cheaper than either.
+    if (mob.spec.phantom) return false;
     if (!FEEDS.has(itemId)) return false;
     if (mob.baby > 0) {
       // Feeding a calf just brings it up faster — it can't breed yet.

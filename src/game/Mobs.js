@@ -662,8 +662,16 @@ const FISH_CLIPS = {
  */
 const FISH_KINDS = [
   'clownfish', 'bluetang', 'butterflyfish', 'moorishidol',
-  'yellowtang', 'royalgramma', 'koi', 'tetra',
+  'yellowtang', 'royalgramma', 'koi', 'tetra', 'puffer',
 ];
+/**
+ * The ones that live where the light does not reach. Same rig and the same
+ * clips — the pack is consistent — so they are a second species rather than a
+ * second system, told apart only by where they are allowed to spawn.
+ */
+const DEEP_KINDS = ['anglerfish', 'blobfish', 'goblinshark'];
+/** How many layers of water count as deep enough for them. */
+const DEEP_WATER = 8;
 
 // --- the monsters ------------------------------------------------------------
 //
@@ -1182,6 +1190,48 @@ const SPECIES = {
       graze: 0.3, idleMin: 1, idleMax: 3, drops: [['fish', 1, 1]], aquatic: true,
     }),
     urls: FISH_KINDS.map(FISH),
+    clips: FISH_CLIPS,
+  },
+  /**
+   * The deep water, which until now held exactly the same fish as a pond.
+   *
+   * Gated on depth at the spawn rather than on biome: the ocean shelf is the
+   * same biome as the abyss beside it, and what decides whether an anglerfish
+   * belongs is how far down the bed is, not what the map calls it.
+   */
+  deep_fish: {
+    ...pet('fish', {
+      label: 'Fish', h: 0.55, var: 0.14, hp: 6, spd: 1.30, shy: 0.9, turn: 4.0, accel: 7.0,
+      graze: 0.2, idleMin: 1, idleMax: 4, drops: [['fish', 1, 1]], aquatic: true,
+    }),
+    urls: DEEP_KINDS.map(FISH),
+    clips: FISH_CLIPS,
+  },
+  /**
+   * Something that eats the shoal.
+   *
+   * `eats` is the same data the lions and tigers use, so nothing new is needed
+   * to make it hunt — a predator that happens to be aquatic hunts down the same
+   * path as one that walks. It is deliberately not `fights`: a shark chases
+   * fish, not you. Swimming into one should be unwise, not a death sentence
+   * delivered from across the bay.
+   */
+  shark: {
+    ...pet('fish', {
+      label: 'Shark', h: 1.5, var: 0.12, hp: 20, spd: 1.85, shy: 0.2, turn: 3.4, accel: 8.0,
+      graze: 0, idleMin: 1, idleMax: 3, drops: [['meat', 1, 2], ['hide', 1, 1]],
+      aquatic: true, diet: 'carnivore', eats: ['fish', 'deep_fish'],
+    }),
+    urls: [FISH('shark')],
+    clips: FISH_CLIPS,
+  },
+  piranha: {
+    ...pet('fish', {
+      label: 'Piranha', h: 0.45, var: 0.10, hp: 6, spd: 1.95, shy: 0.3, turn: 5.0, accel: 9.0,
+      graze: 0, idleMin: 0.6, idleMax: 2, drops: [['fish', 1, 1]],
+      aquatic: true, diet: 'carnivore', eats: ['fish'],
+    }),
+    urls: [FISH('piranha')],
     clips: FISH_CLIPS,
   },
 
@@ -2663,6 +2713,37 @@ export class Mobs {
     return bed + Math.floor(depth * 0.4);
   }
 
+  /** How many layers of water stand over the bed here, or 0 if none. */
+  _waterDepth(col) {
+    const p = this.planet;
+    let bed = -1;
+    for (let k = D - 1; k > 1; k--) if (p.solidAt(col, k)) { bed = k; break; }
+    if (bed < 1) return 0;
+    let depth = 0;
+    while (bed + 1 + depth < D && p.liquidAt(col, bed + 1 + depth)) depth++;
+    return depth;
+  }
+
+  /**
+   * Which fish belongs in this column, decided by how deep the water is.
+   *
+   * Depth rather than biome, because the shelf and the abyss beside it are the
+   * same biome and the difference that matters to an anglerfish is the one the
+   * map does not record. A shark wants room to be a shark, so it takes the same
+   * threshold; a piranha is a river fish and takes any water that will hold a
+   * shoal.
+   */
+  _pickFish(col) {
+    const depth = this._waterDepth(col);
+    if (depth >= DEEP_WATER) {
+      const r = Math.random();
+      if (r < 0.06) return 'shark';
+      if (r < 0.34) return 'deep_fish';
+      return 'fish';
+    }
+    return Math.random() < 0.04 ? 'piranha' : 'fish';
+  }
+
   /** Open water deep enough for the fish. */
   _findWaterColumn(nearCol, playerPos) {
     for (let tries = 0; tries < 44; tries++) {
@@ -2696,7 +2777,10 @@ export class Mobs {
     if (budget <= 0) return 0;
     const seed = this._findWaterColumn(nearCol, playerPos);
     if (!seed) return 0;
-    let placed = this.spawn('fish', seed.col, seed.k) ? 1 : 0;
+    // The seed fish decides nothing for the rest — every body in the shoal asks
+    // its own column, so a shoal that straddles a drop-off is reef fish on the
+    // shelf and something else over the deep.
+    let placed = this.spawn(this._pickFish(seed.col), seed.col, seed.k) ? 1 : 0;
     const want = Math.min(budget, SHOAL_MIN + Math.floor(Math.random() * SHOAL_SPAN));
     // Twice the attempts of the target count, so a shoal on a lake edge still
     // fills out rather than coming back as the one fish this was meant to end.
@@ -2706,7 +2790,7 @@ export class Mobs {
       const col = stepColumn(seed.col, di, dj);
       const k = this._waterLayer(col);
       if (k < 0) continue;
-      if (this.spawn('fish', col, k)) placed++;
+      if (this.spawn(this._pickFish(col), col, k)) placed++;
     }
     return placed;
   }

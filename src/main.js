@@ -3695,7 +3695,13 @@ class Game {
     // where your hands are, so a dot in the middle of the screen is pointing at
     // something you cannot necessarily reach — the sight is honest only in
     // first person.
-    this.ui.showCrosshair(this.viewMode === VIEW_FIRST);
+    // ...and never for a spectator, in any view. `setSpectator` takes the sight
+    // away on the grounds that it is the last element implying the world can be
+    // touched, but V is handled above the `busy` gate and so still runs while
+    // spectating: two presses put the crosshair straight back on a player who
+    // cannot reach anything. Answered here rather than in `showCrosshair`
+    // because this is where the view's own rule is decided.
+    this.ui.showCrosshair(this.viewMode === VIEW_FIRST && !this.spectating);
     // Written on the keypress rather than at shutdown: a browser tab is closed,
     // not quit, and there is no reliable moment later to catch.
     this.settings.view = this.viewMode;

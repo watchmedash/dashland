@@ -378,6 +378,176 @@ const _logParts = { f: 0, i: 0, j: 0 };
 const _logNb = { f: 0, i: 0, j: 0 };
 
 /**
+ * Inland lakes.
+ *
+ * Until this pass the only standing water on the planet was the ocean and the
+ * two canyons that breach it, which is why every body of water read the same:
+ * they were all literally the same water, at the same altitude, over the same
+ * depth-graded seabed. A lake is the opposite proposition — a small, closed
+ * surface at whatever altitude the ground around it happens to sit at, with a
+ * bed and a bank that belong to the country it is in rather than to the sea.
+ *
+ * Four kinds, and they are meant to be told apart at a glance and from a
+ * distance: a POND is a round, waist-to-chest-deep bowl of mud and clay with a
+ * mossy bank and sometimes an islet in it; a TARN is small, near-cylindrical
+ * and deep, cut into gravel and slate high on a mountain; a MARSH is wide,
+ * ankle-deep, ragged at the edge, and floored with peat; an OASIS is a rare
+ * pocket of sand and water in a desert, and is the one worth walking to.
+ *
+ * Candidates sit on a lattice, like the hot springs and the fallen logs, for
+ * the same reason and for one more. The same reason: it turns "is there a lake
+ * near this column" from a search into arithmetic. The one more: LAKE_LATTICE
+ * is greater than twice the largest disc plus its guard ring, so two lakes can
+ * never touch, and the containment argument below never has to consider a
+ * second lake having moved the ground under this one's rim.
+ */
+const LAKE_LATTICE = 26;
+const LAKE_LI = 11;
+const LAKE_LJ = 17;
+/** Kinds. The low three bits of `lakeKind`; the two flags live above them. */
+const LAKE_POND = 1;
+const LAKE_TARN = 2;
+const LAKE_MARSH = 3;
+const LAKE_OASIS = 4;
+/** Bank rather than bed: not carved, re-surfaced, and never holds water. */
+const LAKE_SHORE = 0x80;
+/** Bed raised back above the waterline: an islet in a large pond. */
+const LAKE_ISLE = 0x40;
+/**
+ * The hard ceiling on the wobbled radius. Everything else is pinned to it:
+ * LAKE_LATTICE is 2 * (this + 1 guard column) rounded up, LAKE_EDGE keeps a
+ * whole disc on one face, and LAKE_BFS is the L1 radius that provably contains
+ * a Euclidean disc of this size — L1 distance is what the column graph
+ * measures, and a diamond of radius r only reaches r/sqrt(2) on the diagonal.
+ */
+const LAKE_MAX_R = 11.5;
+const LAKE_EDGE = 16;
+const LAKE_BFS = Math.ceil((LAKE_MAX_R + 2.5) * Math.SQRT2) + 1;
+const LAKE_DISC_MAX = 2 * LAKE_BFS * LAKE_BFS + 2 * LAKE_BFS + 1 + 64;
+/**
+ * Columns per radian. The mapping is equi-angular along a face axis — see
+ * Sphere.js — so a column is exactly pi/(2F) of arc there, and within about
+ * 15% of it anywhere else on the face. That is what lets the profile be taken
+ * from real angular distance instead of from graph distance: graph distance is
+ * L1, and a lake shaped by an L1 radius comes out a diamond.
+ */
+const LAKE_COL_PER_RAD = 2 * F / Math.PI;
+/**
+ * Freeboard: how far the water surface sits below the *lowest* column of the
+ * ring that touches the lake.
+ *
+ * This is the whole containment argument, and it is structural rather than
+ * checked. Worldgen liquid is a permanent source (see Water.js
+ * `_seedWaterRegion`) — a lake with one cell of leak does not find a level, it
+ * pours into whatever it found forever. So the surface is defined *from* the
+ * ring: take the minimum ground height over every column that is a tangential
+ * neighbour of a carved column, and put the water 0.8 below it. Every one of
+ * those columns is then, by construction, solid rock at and below the water's
+ * own layers, and no test after the fact is needed or trusted.
+ */
+const LAKE_FREEBOARD = 0.8;
+/**
+ * Blocks of clearance a cave must leave under a lake's *surface*, in the bed
+ * and in the ring alike.
+ *
+ * The ordinary rule (`skin`, 2.2 blocks under the ground) is not enough here
+ * and the failure is one-sided in the worst way: a ring column stands only
+ * LAKE_FREEBOARD over the surface, so a cave in it may open 2.2 below its own
+ * ground — which is above the lake's floor — and the lake drains sideways into
+ * the cave system. This is the deepest lake plus that same 2.2 and a little
+ * over, so no cave can reach the water from any direction.
+ */
+const LAKE_CAVE_CLEAR = 11;
+/** Per kind, indexed by the id: [rMin, rMax], [depthMin, depthMax]. */
+const LAKE_R = [];
+const LAKE_DEPTH = [];
+/** Outline wobble: two octaves of simplex on the direction, as a fraction. */
+const LAKE_WOBBLE = [];
+/** How rough the bed is, in blocks. */
+const LAKE_BED_ROUGH = [];
+/** Which biomes host it, how likely a candidate takes, and how flat it needs. */
+const LAKE_CHANCE = [];
+const LAKE_TOL = [];
+const LAKE_MIN_ALT = [];
+/**
+ * The one that decides whether a site is a lake or an excavation: how much
+ * ground, per column of bed and averaged over it, stood above the finished
+ * waterline and therefore had to be cut away.
+ *
+ * It replaced two tests that both looked more obvious and were both useless.
+ * The relief over the disc throws out a hollow, which is the best possible
+ * site. And the *fraction* of the bed standing above the water is about 0.95
+ * everywhere, on flat ground included — necessarily, because the waterline is
+ * set from the lowest column of the rim, so almost everything is above it by
+ * definition. Averaging the depth of the cut instead has a floor of roughly
+ * 1.3 on perfectly level ground (the freeboard plus how far the rim's minimum
+ * sits under its mean) and climbs from there with the slope, which is exactly
+ * the quantity being asked about.
+ */
+const LAKE_CUT = [];
+/*
+ * LAKE_MIN_ALT is barely above the waterline for the three lowland kinds, and
+ * that is measured rather than slack. The height field flattens low ground
+ * toward the sea, and the biome classifier hands everything above about
+ * R_SEA + 5 to Mountain or Snow — so Plains, Forest, Meadow, Savanna, Tundra,
+ * Desert and Badlands all live in a five-block band over sea level, with a
+ * median of about two. A floor of R_SEA + 4, which looks conservative, rejected
+ * 84 of 100 candidates outright and left the planet with four lakes on it, all
+ * of them tarns.
+ *
+ * Nothing is lost by dropping it, because altitude was never what held a lake
+ * in: the ring does, at whatever height the ring happens to be. What keeps a
+ * lake away from the sea is the `submerged` and shore-distance tests, which
+ * say what they mean. The floor here only stops a "lake" being cut into ground
+ * that is already under the waterline.
+ */
+LAKE_R[LAKE_POND] = [4.5, 8.5];
+LAKE_DEPTH[LAKE_POND] = [2.6, 4.2];
+LAKE_WOBBLE[LAKE_POND] = [0.18, 0.09];
+LAKE_BED_ROUGH[LAKE_POND] = 0.5;
+LAKE_CHANCE[LAKE_POND] = 0.9;
+LAKE_TOL[LAKE_POND] = 6.0;
+LAKE_CUT[LAKE_POND] = 2.0;
+LAKE_MIN_ALT[LAKE_POND] = R_SEA - 0.25;
+LAKE_R[LAKE_TARN] = [3, 5];
+LAKE_DEPTH[LAKE_TARN] = [4.5, 7.5];
+LAKE_WOBBLE[LAKE_TARN] = [0.10, 0.05];
+LAKE_BED_ROUGH[LAKE_TARN] = 0.8;
+LAKE_CHANCE[LAKE_TARN] = 0.55;
+// Mountains are not flat and a tarn is not owed one — it wants a corrie, which
+// is uneven by definition. The rim rule keeps it honest whatever the ground
+// does, so this is only here to throw out a cliff face.
+LAKE_TOL[LAKE_TARN] = 9.0;
+LAKE_CUT[LAKE_TARN] = 3.2;
+LAKE_MIN_ALT[LAKE_TARN] = R_SEA + 9;
+LAKE_R[LAKE_MARSH] = [6.5, 9.5];
+LAKE_DEPTH[LAKE_MARSH] = [1.7, 2.3];
+LAKE_WOBBLE[LAKE_MARSH] = [0.26, 0.12];
+LAKE_BED_ROUGH[LAKE_MARSH] = 0.35;
+LAKE_CHANCE[LAKE_MARSH] = 0.85;
+LAKE_TOL[LAKE_MARSH] = 5.0;
+LAKE_CUT[LAKE_MARSH] = 2.0;
+LAKE_MIN_ALT[LAKE_MARSH] = R_SEA - 0.25;
+LAKE_R[LAKE_OASIS] = [3, 4.5];
+LAKE_DEPTH[LAKE_OASIS] = [2.2, 3.2];
+LAKE_WOBBLE[LAKE_OASIS] = [0.14, 0.07];
+LAKE_BED_ROUGH[LAKE_OASIS] = 0.3;
+// Rare on purpose. A desert with a pool every few hundred metres is not a
+// desert, and the whole value of an oasis is that finding one is an event.
+LAKE_CHANCE[LAKE_OASIS] = 0.45;
+LAKE_TOL[LAKE_OASIS] = 5.0;
+LAKE_CUT[LAKE_OASIS] = 2.0;
+LAKE_MIN_ALT[LAKE_OASIS] = R_SEA - 0.25;
+/** The least water a site has to hold to be worth being a lake at all. */
+const LAKE_MIN_DEPTH = 1.5;
+const LAKE_MIN_CELLS = 8;
+
+/** Scratch for the lake pass. It runs once, planet-wide, before any voxel. */
+const _lakeDir = [0, 0, 0];
+const _lakeCtr = [0, 0, 0];
+const _lakeParts = { f: 0, i: 0, j: 0 };
+
+/**
  * Volcano geometry. Module scope rather than locals now that choosing a site
  * and building it are two different passes run at two different times, and both
  * have to agree about how big the thing is — the region bookkeeping in the
@@ -427,6 +597,22 @@ export class WorldGen {
     this.nBiome = new Noise(seed + 404);
     this.nDetail = new Noise(seed + 505);
     this.nAq = new Noise(seed + 606);
+    this.nLake = new Noise(seed + 707);
+    /**
+     * Water surface radius per column, 0 where there is no lake — see
+     * `carveLakes`. A Float32Array(COLUMNS) is 5 MB resident, which is real
+     * money and is spent knowingly: it is read by the fill loop, by the cave
+     * carve and by four decoration passes, all of which run per column and in
+     * no particular order, so there is nowhere cheaper to keep it. Against the
+     * 770 MB voxel field it is under a percent.
+     *
+     * Set on the bed *and* on the ring of columns that touch it. A ring column
+     * stands above the surface by construction, so the fill loop's water test
+     * is simply never true there — but the cave carve needs to know.
+     */
+    this.lakeSurf = null;
+    /** Kind, plus the shore and islet flags. See LAKE_POND and friends. */
+    this.lakeKind = null;
     /**
      * One packed aquifer record per column, built on demand.
      *
@@ -826,6 +1012,16 @@ export class WorldGen {
       }
     }
 
+    // ---- inland lakes ------------------------------------------------------
+    // After the flood fill and the canyons, and before the slope — deliberately
+    // in that order. After, because a lake refuses any site the sea or a gorge
+    // has already claimed, and both of those are only settled by then. Before,
+    // because slope is derived from the finished height field a few lines down:
+    // carving afterwards would leave every lake's bank claiming to be flat,
+    // and the flatness of a bank is what several later passes decide on.
+    onProgress(0.95, 'Filling the lakes');
+    this.carveLakes(colHeight, colBiome, canyonMask, submerged, shoreDist);
+
     // slope from the finished height field — exact, unlike sampling the noise
     for (let col = 0; col < COLUMNS; col++) {
       const h = colHeight[col];
@@ -923,6 +1119,9 @@ export class WorldGen {
       // Not in a gorge and not on its rim: waking up fourteen blocks down a
       // slot canyon is a memorable start and a miserable one.
       if (this.canyonNear[col] < CANYON_NEAR_MAX) continue;
+      // Nor standing in a lake: the spawn test reads the height field, which
+      // after the lake pass describes the bed rather than the water over it.
+      if (this.lakeKind[col]) continue;
       const h = this.colHeight[col];
       if (h < R_SEA + 1.5 || h > R_SURFACE + 3.0) continue;
       let score = 4 - Math.min(4, this.colSlope[col] * 3);
@@ -956,6 +1155,26 @@ export class WorldGen {
   }
 
   /**
+   * Is this column inside a lake — the carved basin, not its bank?
+   *
+   * Every decoration pass asks this, and asks it of the *tables* rather than
+   * of the blocks, for the reason spelled out in `_treeKind`: a pass that
+   * looked at what was standing in the cell above the ground would be asking
+   * whether the region next door had been decorated yet.
+   *
+   * Most of the work is already done for free — a bed column's ground is under
+   * water, and trees, logs and flora all refuse liquid — but the margin of a
+   * lake can come out dry, and a dry patch of clay is not somewhere a pine
+   * should be standing. The bank is deliberately *not* covered: a tree leaning
+   * over the water is exactly what a lakeside should look like, and a canopy
+   * cannot displace water because leaves are only laid into air.
+   */
+  inLakeBed(col) {
+    const lk = this.lakeKind;
+    return lk !== null && lk[col] !== 0 && (lk[col] & LAKE_SHORE) === 0;
+  }
+
+  /**
    * A private random stream for one column.
    *
    * Everything scattered on the surface — trees, boulders, grass, mushrooms —
@@ -985,7 +1204,10 @@ export class WorldGen {
    * and at any time.
    */
   fillColumn(blocks, col) {
-    const { colHeight, colBiome, colSlope, canyonMask, shoreDist, submerged } = this;
+    const {
+      colHeight, colBiome, colSlope, canyonMask, shoreDist, submerged,
+      lakeSurf, lakeKind,
+    } = this;
     const dir = _fillDir;
     const h = colHeight[col];
     const bi = colBiome[col];
@@ -1135,6 +1357,65 @@ export class WorldGen {
       top = ID.sand; sub = ID.sand;
     }
 
+    /**
+     * A lake bed and its bank, last, so nothing above can repaint them.
+     *
+     * Last and not earlier for two specific reasons. The `rocky` rule fires on
+     * slope, and the wall of a tarn is the steepest ground on the planet — it
+     * would turn every deep lake into a bare stone hole. And the beach rule
+     * fires on altitude near the waterline, which a low pond can land in.
+     *
+     * The bed of each kind is a different material and so is its bank, because
+     * that is most of what tells them apart from the shore: mud and clay under
+     * a mossy bank for a pond, gravel and slate for a tarn, peat for a marsh,
+     * sand for an oasis. The bank is deliberately left partly as whatever the
+     * biome wears, so it reads as ground that got wet rather than as a painted
+     * ring — and where the biome's own grass survives, the flora pass grows
+     * tall grass on it, which is the reed line.
+     */
+    const lk = lakeKind[col];
+    if (lk) {
+      const kind = lk & 7;
+      const grit = this.colRng(col, 0x4a6d)();
+      if (lk & LAKE_ISLE) {
+        // An islet. Real ground, standing out of the water — so it wears the
+        // land's own coat rather than the lake's, with a mossy fringe.
+        top = grit < 0.22 ? ID.moss_block : (bi === BIOME.DESERT ? ID.sand : ID.grass);
+        sub = bi === BIOME.DESERT ? ID.sand : ID.dirt;
+      } else if (lk & LAKE_SHORE) {
+        switch (kind) {
+          case LAKE_TARN:
+            top = patch > 0.12 ? ID.slate : (grit < 0.45 ? ID.gravel : top);
+            sub = ID.gravel; break;
+          case LAKE_MARSH:
+            top = grit < 0.34 ? ID.peat : (patch > 0.1 ? ID.mud : top);
+            sub = ID.peat; break;
+          case LAKE_OASIS:
+            top = grit < 0.25 ? ID.moss_block : ID.sand;
+            sub = ID.sand; break;
+          default:
+            top = patch > 0.14 ? ID.moss_block : (grit < 0.3 ? ID.mud : top);
+            sub = grit < 0.5 ? ID.coarse_dirt : ID.dirt; break;
+        }
+      } else {
+        switch (kind) {
+          case LAKE_TARN:
+            // Scoured rock, and the one lake bed with no soil on it at all.
+            top = patch > 0.18 ? ID.slate : (grit < 0.28 ? ID.basalt : ID.gravel);
+            sub = ID.slate; break;
+          case LAKE_MARSH:
+            top = patch > 0.15 ? ID.mud : (grit < 0.3 ? ID.coarse_dirt : ID.peat);
+            sub = ID.peat; break;
+          case LAKE_OASIS:
+            top = grit < 0.2 ? ID.clay : ID.sand;
+            sub = ID.sandstone; break;
+          default:
+            top = patch > 0.24 ? ID.gravel : (grit < 0.38 ? ID.clay : ID.mud);
+            sub = ID.clay; break;
+        }
+      }
+    }
+
     for (let k = 0; k < D; k++) {
       const r = R_MIN + k + 0.5;
       let id;
@@ -1145,7 +1426,11 @@ export class WorldGen {
           : m > 0.16 ? ID.ash_stone
             : (m < -0.5 ? ID.lava : ID.basalt);
       } else if (r > h) {
-        id = (r <= R_SEA && submerged[col]) ? ID.water : ID.air;
+        // Two independent waters: the sea, which is everything below R_SEA the
+        // flood fill could reach, and a lake, which is everything below its own
+        // surface. `lakeSurf` is 0 off a lake, so the second test costs one
+        // compare per cell and cannot fire by accident.
+        id = ((r <= R_SEA && submerged[col]) || r <= lakeSurf[col]) ? ID.water : ID.air;
       } else {
         const depth = h - r;
         if (depth < 1.0) id = top;
@@ -1175,10 +1460,26 @@ export class WorldGen {
       // close underneath, which is a handful of openings per canyon rather
       // than a sieve.
       const skin = canyonMask[col] ? 1.0 : 2.2;
+      /**
+       * Under a lake — bed or bank — the skin rule is not enough on its own,
+       * and the way it fails is the flood bug rather than a cosmetic one.
+       *
+       * A bank column stands only LAKE_FREEBOARD over the water, so `h - skin`
+       * there is *above* the lake's floor: a passage running past the lake
+       * opens into its side, and a worldgen liquid is a permanent source, so it
+       * does not find a level — it pours into the cave system forever. The bed
+       * has the same problem from underneath, with less margin than it looks.
+       *
+       * So both are measured from the water surface instead, which is the one
+       * number every column round a lake agrees on. LAKE_CAVE_CLEAR is the
+       * deepest lake plus a skin, so the seal exists whatever the profile did.
+       */
+      const ls = this.lakeSurf[col];
+      const ceil = ls > 0 ? Math.min(h - skin, ls - LAKE_CAVE_CLEAR) : h - skin;
       for (let k = 0; k < D; k++) {
         if (!CARVEABLE[blocks[base + k]]) continue;
         const r = R_MIN + k + 0.5;
-        if (r < R_MANTLE + 1.5 || r > h - skin) continue;
+        if (r < R_MANTLE + 1.5 || r > ceil) continue;
         const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
         // Cheapest term first, and short-circuit on it.
         //
@@ -1379,6 +1680,298 @@ export class WorldGen {
     this.carveColumn(blocks, col);
     this.aquiferColumn(blocks, col);
     this.oreColumn(blocks, col);
+  }
+
+  /**
+   * Cut inland lakes into the height field.
+   *
+   * A height-field pass, for the same reason the canyons are one: lower the
+   * ground and the fill loop builds the basin as ordinary terrain, with its own
+   * soil and its own water, and every pass after it — caves, ore, trees, the
+   * slope test — is reasoning about the surface that is actually there. The one
+   * thing this does that the canyons do not is publish a *water surface* per
+   * column, because a lake's level has nothing to do with sea level and cannot
+   * be recovered from the height field afterwards.
+   *
+   * Three things make it correct rather than merely plausible:
+   *
+   *  - The profile is taken from real angular distance to the centre, not from
+   *    distance over the column graph. The graph is 4-connected, so its metric
+   *    is L1 and every lake shaped by it comes out a diamond with its corners
+   *    on the compass points. Distance is measured on the sphere and converted
+   *    to columns, and the radius itself is wobbled by two octaves of simplex
+   *    on the direction, so an outline is organic without being noisy.
+   *
+   *  - The water surface is defined from the ring, not from the centre. See
+   *    LAKE_FREEBOARD: `rim` is the minimum ground height over every column
+   *    that touches a carved one, and nothing in that ring is ever carved, so
+   *    the ring is provably solid at every layer the water occupies. A lake
+   *    cannot leak sideways, and there is no post-hoc check to get wrong.
+   *
+   *  - The candidates are a lattice coarser than twice the largest lake, so no
+   *    two discs — or a disc and another lake's ring — can ever meet, and the
+   *    rim of a lake cannot be moved by a lake carved after it.
+   *
+   * Rejected far more often than accepted, and deliberately: a site goes if it
+   * touches the sea's flood fill or a canyon, if any of it is ocean or beach,
+   * if it sits too low for its kind, or if the ground under it is more uneven
+   * than that kind tolerates. What survives is ground that could plausibly have
+   * held water in the first place.
+   */
+  carveLakes(colHeight, colBiome, canyonMask, submerged, shoreDist) {
+    const lakeSurf = new Float32Array(COLUMNS);
+    const lakeKind = new Uint8Array(COLUMNS);
+    this.lakeSurf = lakeSurf;
+    this.lakeKind = lakeKind;
+    this.lakes = [];
+
+    /**
+     * Which site last touched a column, and where it sits in that site's list.
+     * Two planet-wide scratch arrays rather than a Map per site: there are
+     * about a thousand candidates and a disc is nine hundred columns, so a Map
+     * would allocate a million short-lived entries to answer a question an
+     * integer compare answers. Both are dropped when this returns.
+     */
+    const seen = new Int32Array(COLUMNS).fill(-1);
+    const slot = new Int32Array(COLUMNS);
+    const disc = new Int32Array(LAKE_DISC_MAX);
+    const gdist = new Int16Array(LAKE_DISC_MAX);
+    const adist = new Float32Array(LAKE_DISC_MAX);
+    const rEff = new Float32Array(LAKE_DISC_MAX);
+    /** 0 outside, 1 bed (carved), 2 surround, 3 ring (touches the bed). */
+    const role = new Uint8Array(LAKE_DISC_MAX);
+    const newH = new Float32Array(LAKE_DISC_MAX);
+    const ctr = _lakeCtr, dir = _lakeDir, p = _lakeParts;
+    let sid = 0;
+
+    for (let f = 0; f < FACES; f++) {
+      for (let ci = LAKE_LI; ci < F - LAKE_EDGE; ci += LAKE_LATTICE) {
+        if (ci < LAKE_EDGE) continue;
+        for (let cj = LAKE_LJ; cj < F - LAKE_EDGE; cj += LAKE_LATTICE) {
+          if (cj < LAKE_EDGE) continue;
+          const col = cidx(f, ci, cj);
+          const bi = colBiome[col];
+
+          // Every draw before every test, so a site that is thrown away costs
+          // the same rolls as one that is kept and the stream stays a pure
+          // function of the column. Same rule as the boulders and the logs.
+          const rng = this.colRng(col, 0x1a7e);
+          const roll = rng(), pickR = rng(), pickD = rng(), pickMix = rng();
+          const isleRoll = rng(), isleAng = rng(), isleRad = rng();
+
+          let kind = 0;
+          if (bi === BIOME.MOUNTAIN || bi === BIOME.SNOW) kind = LAKE_TARN;
+          else if (bi === BIOME.DESERT || bi === BIOME.BADLANDS) kind = LAKE_OASIS;
+          else if (bi === BIOME.PLAINS || bi === BIOME.MEADOW || bi === BIOME.TUNDRA) {
+            kind = pickMix < 0.45 ? LAKE_MARSH : LAKE_POND;
+          } else if (bi === BIOME.FOREST || bi === BIOME.PINE_FOREST) {
+            // A wooded fen is a marsh too, and rarer than the open kind.
+            kind = pickMix < 0.25 ? LAKE_MARSH : LAKE_POND;
+          } else if (bi === BIOME.SAVANNA) kind = pickMix < 0.3 ? LAKE_MARSH : LAKE_POND;
+          if (!kind || roll > LAKE_CHANCE[kind]) continue;
+          // The cheap tests on the centre alone, before the disc is walked.
+          if (submerged[col] || canyonMask[col]) continue;
+          if (colHeight[col] < LAKE_MIN_ALT[kind]) continue;
+
+          const rr = LAKE_R[kind], dd = LAKE_DEPTH[kind], wob = LAKE_WOBBLE[kind];
+          const rBase = rr[0] + pickR * (rr[1] - rr[0]);
+          const depthMax = dd[0] + pickD * (dd[1] - dd[0]);
+          const rough = LAKE_BED_ROUGH[kind];
+          centerDir(f, ci, cj, ctr);
+
+          // ---- the disc, over the column graph ----------------------------
+          sid++;
+          let n = 1, over = false;
+          seen[col] = sid; slot[col] = 0; disc[0] = col; gdist[0] = 0;
+          for (let qi = 0; qi < n; qi++) {
+            const c = disc[qi];
+            const g = gdist[qi];
+            if (g >= LAKE_BFS) continue;
+            for (let d = 0; d < 4; d++) {
+              const nb = colNeighbor(c, d);
+              if (nb < 0 || seen[nb] === sid) continue;
+              if (n >= LAKE_DISC_MAX) { over = true; break; }
+              seen[nb] = sid; slot[nb] = n;
+              disc[n] = nb; gdist[n] = g + 1; n++;
+            }
+            if (over) break;
+          }
+          if (over) continue;
+
+          // ---- shape it, and check the ground it is being cut into --------
+          let bad = false, nBed = 0;
+          const minAlt = LAKE_MIN_ALT[kind];
+          for (let t = 0; t < n; t++) {
+            const c = disc[t];
+            this._dirOf(c, dir);
+            const chord = Math.hypot(dir[0] - ctr[0], dir[1] - ctr[1], dir[2] - ctr[2]);
+            const da = 2 * Math.asin(Math.min(1, chord * 0.5)) * LAKE_COL_PER_RAD;
+            adist[t] = da;
+            role[t] = 0; rEff[t] = 0;
+            // No radius can reach past the clamp, so this is exact, not a
+            // guess — and it keeps the noise off the 80% of the ball that is
+            // only there because an L1 diamond has to be big to hold a circle.
+            if (da > LAKE_MAX_R + 2.5) continue;
+            const s1 = this.nLake.simplex3(dir[0] * 46, dir[1] * 46, dir[2] * 46);
+            const s2 = this.nLake.simplex3(dir[0] * 110 + 5.3, dir[1] * 110, dir[2] * 110 - 2.7);
+            const re = Math.max(2, Math.min(LAKE_MAX_R,
+              rBase * (1 + wob[0] * s1 + wob[1] * s2)));
+            rEff[t] = re;
+            // The surround is validated two and a half columns wider than it
+            // is painted, so that every possible neighbour of a bed column has
+            // already been looked at by the time the ring is collected.
+            if (da > re + 2.5) continue;
+            role[t] = da <= re - 1 ? 1 : 2;
+            if (submerged[c] || canyonMask[c]) { bad = true; break; }
+            const b2 = colBiome[c];
+            // Off the coast entirely, bank included. The biome test alone
+            // leaves a lake able to bite into the column behind a beach, which
+            // reads as the sea having got in — and is one dug block from being
+            // true. `shoreDist` is only grown to BEACH_REACH + 1 and left at
+            // 255 elsewhere, so this is exactly "within two columns of water".
+            if (b2 === BIOME.OCEAN || b2 === BIOME.BEACH
+              || shoreDist[c] <= BEACH_REACH + 1) { bad = true; break; }
+            const hh = colHeight[c];
+            if (hh < minAlt || hh > R_TERRAIN_MAX - 6) { bad = true; break; }
+            if (role[t] === 1) nBed++;
+          }
+          if (bad || nBed < LAKE_MIN_CELLS) continue;
+
+          // ---- the ring, and therefore the waterline ----------------------
+          let rim = Infinity, ringHi = -Infinity;
+          for (let t = 0; t < n && !bad; t++) {
+            if (role[t] !== 1) continue;
+            const c = disc[t];
+            for (let d = 0; d < 4; d++) {
+              const nb = colNeighbor(c, d);
+              // Both of these are unreachable — the ball is wider than the
+              // disc and the surround is validated wider still — and both are
+              // a silent flood if they ever stop being, so the site goes
+              // rather than the assumption.
+              if (nb < 0 || seen[nb] !== sid) { bad = true; break; }
+              const t2 = slot[nb];
+              if (role[t2] === 1) continue;
+              if (role[t2] === 0) { bad = true; break; }
+              role[t2] = 3;
+              if (colHeight[nb] < rim) rim = colHeight[nb];
+              if (colHeight[nb] > ringHi) ringHi = colHeight[nb];
+            }
+          }
+          if (bad || rim === Infinity) continue;
+          /**
+           * A cliff, rather than a shore. Deliberately generous — this only
+           * throws out the sites where part of the rim towers over the rest,
+           * and LAKE_CUT below is what actually decides whether the ground is
+           * level enough to hold water. Measured on the shoreline and not over
+           * the whole disc, because the relief over the disc throws out a
+           * hollow, which is the best thing that can happen to a lake site.
+           */
+          if (ringHi - rim > LAKE_TOL[kind]) continue;
+          const surf = rim - LAKE_FREEBOARD;
+
+          // ---- the bed profile --------------------------------------------
+          let deepest = 0, water = 0, cut = 0;
+          for (let t = 0; t < n; t++) {
+            if (role[t] !== 1) continue;
+            const c = disc[t];
+            const u = Math.min(1, adist[t] / rEff[t]);
+            this._dirOf(c, dir);
+            const bump = this.nLake.simplex3(
+              dir[0] * 130 + 21.7, dir[1] * 130, dir[2] * 130,
+            ) * rough;
+            /**
+             * What separates the kinds in the water more than any block does.
+             * A tarn is very nearly a cylinder — steep walls, flat floor, you
+             * are out of your depth one step from the edge. A marsh is a pan
+             * with almost no wall at all. A pond is the parabola in between,
+             * which is the shape that gives a wadeable margin and a middle you
+             * have to swim.
+             */
+            let prof;
+            switch (kind) {
+              case LAKE_TARN: prof = Math.min(1, (1 - u) * 2.6); break;
+              case LAKE_MARSH: prof = 1 - u * u * u * u; break;
+              case LAKE_OASIS: prof = 1 - u * u * u; break;
+              default: prof = 1 - u * u;
+            }
+            // `min`, never `max`: the carve may deepen the ground it found but
+            // must never raise it, or a lake cut into a slope would build
+            // itself a wall of earth on the downhill side.
+            const hn = Math.min(colHeight[c], surf - (depthMax * prof + bump));
+            newH[t] = hn;
+            const dep = surf - hn;
+            if (dep > deepest) deepest = dep;
+            if (dep > 0.5) water++;
+            if (colHeight[c] > surf) cut += colHeight[c] - surf;
+          }
+          // Lake or excavation — see LAKE_CUT. A block or so of ground over
+          // the waterline, averaged across the basin, is the bank every lake
+          // has; three is a hole cut in a hillside.
+          if (deepest < LAKE_MIN_DEPTH || water < LAKE_MIN_CELLS
+            || cut > nBed * LAKE_CUT[kind]) continue;
+
+          // An islet, in a big pond only. It is ground raised back over the
+          // waterline inside the basin, which cannot leak by construction —
+          // the thing that holds the water in is the ring, and this is nowhere
+          // near it.
+          let oi = 0, oj = 0, isleR = 0;
+          if (kind === LAKE_POND && rBase >= 7.2 && isleRoll < 0.25) {
+            const ang = isleAng * Math.PI * 2;
+            const off = rBase * 0.34;
+            oi = Math.round(Math.cos(ang) * off);
+            oj = Math.round(Math.sin(ang) * off);
+            isleR = 1.3 + isleRad * 1.5;
+          }
+
+          // ---- commit ------------------------------------------------------
+          let nIsle = 0;
+          for (let t = 0; t < n; t++) {
+            const c = disc[t];
+            const rl = role[t];
+            if (rl === 1) {
+              let hn = newH[t];
+              let flag = 0;
+              if (isleR > 0) {
+                colParts(c, p);
+                const di = p.i - (ci + oi), dj = p.j - (cj + oj);
+                if (di * di + dj * dj <= isleR * isleR) {
+                  if (hn < surf + 0.9) hn = surf + 0.9;
+                  flag = LAKE_ISLE; nIsle++;
+                }
+              }
+              colHeight[c] = hn;
+              lakeSurf[c] = surf;
+              lakeKind[c] = kind | flag;
+            } else if (rl === 3) {
+              // The ring proper. It gets `lakeSurf` as well as the bank
+              // material, because the cave carve has to know how far to keep
+              // away — see LAKE_CAVE_CLEAR. It never holds water: its ground
+              // stands LAKE_FREEBOARD above the surface by construction.
+              lakeSurf[c] = surf;
+              lakeKind[c] = kind | LAKE_SHORE;
+            } else if (rl === 2 && adist[t] <= rEff[t] + 1.5) {
+              // Bank, but not touching the water. Re-surfaced and nothing
+              // more — and pointedly *no* `lakeSurf`, because out here the
+              // ground is not guaranteed to stand above the waterline and a
+              // water test that came out true would be a leak.
+              lakeKind[c] = kind | LAKE_SHORE;
+            }
+          }
+          this.lakes.push({
+            f, i: ci, j: cj, col, kind, biome: bi,
+            r: rBase, surf, depth: deepest, cells: water, bed: nBed, isle: nIsle,
+          });
+        }
+      }
+    }
+
+    const counts = [0, 0, 0, 0, 0];
+    for (let t = 0; t < this.lakes.length; t++) counts[this.lakes[t].kind]++;
+    this.lakeCounts = {
+      pond: counts[LAKE_POND], tarn: counts[LAKE_TARN],
+      marsh: counts[LAKE_MARSH], oasis: counts[LAKE_OASIS],
+      total: this.lakes.length,
+    };
   }
 
   /**
@@ -1772,6 +2365,29 @@ export class WorldGen {
       }
       if (bad || hi - lo > 4) continue;
 
+      /**
+       * Nothing of the apron may be lake.
+       *
+       * The cone is stamped into the *block array* long after the height field
+       * settled, and it re-lays the ground it covers — so a vent sited over a
+       * lake would bury the bed, leave the water standing in mid-air, and then
+       * have that water pour off the new slope as a permanent source. The scan
+       * is over the whole apron rather than the cone, because the scorched
+       * ground is re-laid too.
+       *
+       * Step two, not one: the smallest lake is four columns across including
+       * its bank, so a lattice of two cannot miss one. It only runs for a
+       * candidate that has already passed every other test, of which there are
+       * a handful on the whole planet.
+       */
+      for (let di = -APRON; di <= APRON && !bad; di += 2) {
+        for (let dj = -APRON; dj <= APRON; dj += 2) {
+          if (Math.hypot(di, dj) > APRON) continue;
+          if (this.lakeKind[patchColumn(parts.f, parts.i, parts.j, di, dj)]) { bad = true; break; }
+        }
+      }
+      if (bad) continue;
+
       // Claim the apron so the next candidate cannot stand in it. The stamp
       // used to do this as it laid the ground; it has to happen here now,
       // because the next candidate is chosen long before anything is built.
@@ -2031,6 +2647,10 @@ export class WorldGen {
         const c = patchColumn(p.f, p.i, p.j, di, dj);
         const bi = this.colBiome[c];
         if (bi === BIOME.OCEAN || bi === BIOME.BEACH) return -1;
+        // Not into a lake or its bank. A hot spring cuts its own bowl and lays
+        // its own rim, and doing that to ground a lake already owns would put
+        // one pool's floor through the other's wall.
+        if (this.lakeKind[c]) return -1;
         const g = this.groundKOf(c);
         if (g < 0) return -1;
         if (g < lo) lo = g;
@@ -2157,6 +2777,7 @@ export class WorldGen {
   _treeKind(blocks, col) {
     const bi = this.colBiome[col];
     if (this.colSlope[col] > 1.5) return null;
+    if (this.inLakeBed(col)) return null;
     // Nothing takes root in a hot spring. Asked of the terrain rather than of
     // the blocks — see `_springCenter`.
     if (this._springNear(col) >= 0) return null;
@@ -2293,6 +2914,7 @@ export class WorldGen {
     if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) return null;
     // A boulder is scenery, and a gorge floor already has rock lying about it.
     if (this.canyonNear[col] === 0) return null;
+    if (this.inLakeBed(col)) return null;
     if (this._springNear(col) >= 0) return null;
     return { rng, k };
   }
@@ -2445,6 +3067,7 @@ export class WorldGen {
     if (this.colSlope[c] > 1.2) return false;
     // Out of the gorge and off its rim, like everything else that decorates.
     if (this.canyonNear[c] < CANYON_NEAR_MAX) return false;
+    if (this.inLakeBed(c)) return false;
     if (this._springNear(c) >= 0) return false;
     if (this.groundKOf(c) !== k) return false;
     if (!LOG_FLOOR[blocks[c * D + k]]) return false;
@@ -2645,6 +3268,10 @@ export class WorldGen {
    */
   floraAt(blocks, col) {
     if (this._springNear(col) >= 0) return;
+    // Nothing grows in a lake bed. The water above the ground already stops
+    // most of it, but a lake's margin can come out dry, and a mushroom in an
+    // air pocket under the bed would be a hole waiting to be dug into.
+    if (this.inLakeBed(col)) return;
     const k = this.surfaceK(blocks, col);
     if (k < 0 || k >= D - 2) return;
     const base = col * D;

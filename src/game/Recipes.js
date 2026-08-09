@@ -153,9 +153,11 @@ const RAW = [
   // exception is the cake, whose 3x2 pattern is what forces it onto a bench —
   // the one recipe that should not be makeable standing in a field.
   //
-  // Shop-only food (see `shopOnly` in Items.js) is deliberately absent. So is
-  // anything built on an egg or a fish: both are trader stock, and the smelting
-  // table below is the only thing that turns them into a meal.
+  // Two things here used to have no recipe at all: anything built on an egg,
+  // because an egg was trader stock, and every treat, because the planet had no
+  // sweetener. Birds drop eggs now and bees drop honeycomb, so both branches
+  // are written out below and `shopOnly` is down to the two imports the planet
+  // genuinely cannot make (see Items.js).
   { out: 'bread', count: 1, table: true, shape: ['WWW'], key: { W: 'wheat' } },
   { out: 'salad', count: 1, in: ['carrot', 'tomato', 'corn'] },
   { out: 'soup', count: 1, in: ['mushroom', 'mushroom', 'carrot'] },
@@ -163,7 +165,12 @@ const RAW = [
   { out: 'stew', count: 1, table: true, in: ['cooked_meat', 'carrot', 'corn', 'mushroom'] },
   { out: 'pie', count: 1, table: true, in: ['wheat', 'wheat', 'pumpkin'] },
   { out: 'cake', count: 1, table: true, shape: ['BBB', 'WWW'], key: { B: 'berries', W: 'wheat' } },
-  { out: 'cookie', count: 2, in: ['wheat', 'berries'] },
+  // The comb went into the cookie, and it had to. Wheat and berries alone came
+  // to three coins for four points of nourishment, which made a cookie *better
+  // rations than bread* — the exact inversion the ladder in Items.js exists to
+  // prevent. Two to a craft still, so the batch is generous; it is the sugar
+  // that costs.
+  { out: 'cookie', count: 2, in: ['wheat', 'berries', 'honeycomb'] },
 
   // --- food from the sea ---
   //
@@ -190,6 +197,40 @@ const RAW = [
   { out: 'salad', count: 1, in: ['sea_lettuce', 'sea_grape', 'kelp'] },
   { out: 'sandwich', count: 1, in: ['bread', 'cooked_fish', 'sea_lettuce'] },
   { out: 'stew', count: 1, table: true, in: ['cooked_fish', 'dried_kelp', 'carrot', 'mushroom'] },
+  // The burger is where the sea lettuce earns its name. Both versions take it —
+  // there is no land salad leaf on this planet, so the *only* burger is a
+  // burger with a dive in it, and that is the point rather than a compromise.
+  { out: 'burger', count: 1, table: true, in: ['bread', 'cooked_meat', 'tomato', 'sea_lettuce'] },
+  { out: 'burger', count: 1, table: true, in: ['bread', 'cooked_fish', 'tomato', 'sea_lettuce'] },
+  // Pizza, twice. The land one is the marinara it has to be — there is no
+  // cheese to put on it — and the sea one is the only recipe in the file that
+  // wants a crab, which until now was a mob that dropped an ingredient with
+  // nowhere to go.
+  { out: 'pizza', count: 1, table: true, in: ['wheat', 'wheat', 'tomato', 'mushroom', 'cooked_meat'] },
+  { out: 'pizza', count: 1, table: true, in: ['wheat', 'wheat', 'tomato', 'dried_kelp', 'cooked_crab_meat'] },
+
+  // --- baking ---------------------------------------------------------------
+  //
+  // Every one of these runs on an egg, a honeycomb or both, which is exactly
+  // why none of it existed before: the planet had neither. All of it is
+  // shapeless and none of it needs a bench, because a bench requirement on a
+  // bun is a toll rather than a decision — the cost of a treat is the
+  // honeycomb, and the honeycomb costs a fight with a bee.
+  //
+  // Every treat in the game is below this line and every one of them takes a
+  // comb. That is what makes the band a band rather than a label: a sweet is
+  // dearer per point of nourishment than any staple or meal on the planet, and
+  // it is dearer for one reason you can point at.
+  { out: 'pancakes', count: 1, in: ['wheat', 'egg', 'honeycomb'] },
+  { out: 'muffin', count: 1, in: ['wheat', 'berries', 'egg', 'honeycomb'] },
+  { out: 'croissant', count: 1, in: ['wheat', 'wheat', 'egg', 'honeycomb'] },
+  { out: 'donut', count: 1, in: ['wheat', 'wheat', 'honeycomb'] },
+  // Ice from a cold coast, berries from the grass and a comb from a hive. No
+  // dairy anywhere in it, which is honest: this is a berry ice, and it is the
+  // one recipe on the planet that needs a climate rather than a building.
+  { out: 'ice_cream', count: 1, in: ['ice', 'berries', 'honeycomb'] },
+  // Two to a craft, and the stick is the stick it is served on.
+  { out: 'candy', count: 2, in: ['honeycomb', 'stick'] },
 
   // --- tools ---
   ...['wood:planks', 'stone:cobblestone', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder'].flatMap((spec) => {

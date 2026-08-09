@@ -54,10 +54,10 @@ const BLOCK_FOOD = {
   // smelts into `dried_kelp`, not because a mouthful of it does anything.
   kelp: 2,
   sea_lettuce: 3,
-  // The best raw food on the planet, level with an apple and above every
-  // vegetable, and the only forageable gated behind a warm-water reef *and* a
-  // dive. Still raw tier: 4 is the ceiling of "edible in a pinch", and nothing
-  // you can pick up without a fire goes above it.
+  // The best raw food on the planet, level with an apple and a honeycomb and
+  // above every vegetable, and the only forageable gated behind a warm-water
+  // reef *and* a dive. Still raw tier: 4 is the ceiling of "edible in a pinch",
+  // and nothing you can pick up without a fire goes above it.
   sea_grape: 4,
 };
 
@@ -80,16 +80,30 @@ for (const b of BLOCKS) {
  * place the whole food economy is decided:
  *
  *   2-4    raw and foraged. Edible in a pinch, never a plan.
- *   6-9    simple cooked. One fire, one ingredient. Cooking always beats raw:
+ *   6-9    simple cooked. One fire or one assembly. Cooking always beats raw:
  *          every smelt result is worth strictly more than what went in.
- *   10-14  proper meals. Several ingredients, a bench, and near a full bar.
- *   3-6    treats. Deliberately below cooked staples at a higher price: a
- *          sweet is a luxury, and buying rations from the trader should never
- *          be cheaper than farming them.
+ *   10-14  proper meals. Several ingredients, usually a bench, and a full bar.
+ *   3-6    treats, flagged `treat: true`. Deliberately below cooked staples at
+ *          a much higher price: every one of them runs through a honeycomb or
+ *          an egg, so a sweet costs two to four coins per point of nourishment
+ *          where bread costs one. Buying rations should never beat farming them.
  *
- * `shopOnly: true` marks food with no recipe and no drop anywhere in the world.
- * It exists so the merchant has stock the player cannot undercut; nothing else
- * reads the flag, and an item without it is expected to be obtainable.
+ * The two invariants the harness holds this to:
+ *
+ *   - **cooking beats raw** — every smelt whose input is edible outputs strictly
+ *     more nourishment than went in;
+ *   - **a meal beats its best part** — anything that is not a treat feeds at
+ *     least two points more than the most nourishing single thing in it. Not
+ *     more than the *sum* of its parts, which is unreachable by arithmetic: a
+ *     sandwich is bread (8) and cooked meat (8) and the bar only holds 11. What
+ *     a meal buys over eating the pile is the top of the ladder, the healing,
+ *     the price and the one inventory slot.
+ *
+ * `shopOnly: true` marks food the planet cannot make: it needs a dairy herd or
+ * a cocoa tree, and there is neither. Two items carry it and they are priced as
+ * the imports they are (see `OVERRIDE` in Trade.js). Everything else here has a
+ * recipe or a drop, and an item without the flag is expected to be obtainable —
+ * the harness walks the recipe graph and fails if one is not.
  */
 const FOOD = [
   // raw / foraged
@@ -97,36 +111,63 @@ const FOOD = [
   { name: 'carrot', label: 'Carrot', food: 3, color: '#d9711f', shine: '#f2a45c' },
   { name: 'corn', label: 'Corn', food: 3, color: '#d9b02c', shine: '#f5dc78' },
   { name: 'tomato', label: 'Tomato', food: 3, color: '#c33227', shine: '#ee6a55' },
-  { name: 'egg', label: 'Egg', food: 2, color: '#dfd0b4', shine: '#f6ecd9', shopOnly: true },
+  // A chick, a penguin and a parrot each leave one. It used to be the merchant's
+  // cheapest line and nothing else at all, which made the whole baking half of
+  // the kitchen a thing you bought rather than a thing you kept birds for.
+  { name: 'egg', label: 'Egg', food: 2, color: '#dfd0b4', shine: '#f6ecd9' },
   // No longer shop-only: a rod is the way to get one, which is the point of
   // having a lake within sight of everything you build.
   { name: 'fish', label: 'Raw Fish', food: 3, color: '#6f8697', shine: '#a9c0cf' },
+  // Imported, and the flag means it. Cheese is a herd, a pail and six weeks in
+  // a cellar; the planet has cows you can kill and no way to milk one, so there
+  // is no honest recipe to write. Priced as the luxury it is rather than as the
+  // four coins its food value would derive to.
   { name: 'cheese', label: 'Cheese', food: 4, color: '#dda52d', shine: '#f7d472', shopOnly: true },
 
   // simple cooked
   { name: 'cooked_fish', label: 'Grilled Fish', food: 8, cooked: true, color: '#c9702f', shine: '#eda468' },
   { name: 'cooked_egg', label: 'Fried Egg', food: 6, cooked: true, color: '#e8e2d2', shine: '#f7cf4a' },
-  { name: 'salad', label: 'Garden Salad', food: 6, color: '#4f8a35', shine: '#8cc25e' },
-  { name: 'pancakes', label: 'Pancakes', food: 9, color: '#c98b3f', shine: '#eeba74', shopOnly: true },
+  // Seven, up from six. Three raw vegetables come to nine points eaten one at a
+  // time, so at six the salad was the one recipe in the game that made its own
+  // ingredients worse — you assembled it for the inventory slot and for nothing
+  // else. Seven still sits under a grilled fish, which is the rule that matters:
+  // a cold assembly never beats a fire.
+  { name: 'salad', label: 'Garden Salad', food: 7, color: '#4f8a35', shine: '#8cc25e' },
+  // The top of the cooked band and the first thing a honeycomb is worth
+  // spending: wheat, an egg and the comb. Nine is a bar and a half short of a
+  // meal, which is right for something you make in a pan without a bench.
+  { name: 'pancakes', label: 'Pancakes', food: 9, color: '#c98b3f', shine: '#eeba74' },
 
   // proper meals. Stack low: a hot meal you can carry sixty-four of is not a
   // meal, it is a supply line, and it would flatten the trader's food prices.
-  { name: 'sandwich', label: 'Sandwich', food: 10, stack: 16, color: '#c9a057', shine: '#ecc98d' },
+  //
+  // The order is the ingredient bill, not taste: soup is two glowcaps and a
+  // carrot and needs neither fire nor bench, so it is the floor; the stew is
+  // four things including a cooked one and is the ceiling. Everything between
+  // moves with what it costs.
+  { name: 'sandwich', label: 'Sandwich', food: 11, stack: 16, color: '#c9a057', shine: '#ecc98d' },
   { name: 'soup', label: 'Glowcap Soup', food: 10, stack: 16, color: '#8a5a35', shine: '#c08d5c' },
   { name: 'pie', label: 'Pumpkin Pie', food: 11, stack: 16, color: '#c07a2c', shine: '#e8ab63' },
   { name: 'cake', label: 'Berry Cake', food: 12, stack: 16, color: '#e6d3c2', shine: '#f2a0b4' },
   { name: 'stew', label: 'Hearty Stew', food: 14, stack: 16, color: '#7a4a28', shine: '#b8794a' },
-  { name: 'pizza', label: 'Pizza', food: 12, stack: 16, color: '#c4762c', shine: '#eaa95e', shopOnly: true },
-  { name: 'burger', label: 'Burger', food: 13, stack: 16, color: '#b07a3a', shine: '#e0ad6c', shopOnly: true },
+  { name: 'pizza', label: 'Pizza', food: 12, stack: 16, color: '#c4762c', shine: '#eaa95e' },
+  { name: 'burger', label: 'Burger', food: 13, stack: 16, color: '#b07a3a', shine: '#e0ad6c' },
 
-  // treats
-  { name: 'cookie', label: 'Cookie', food: 4, color: '#b0763a', shine: '#dda86c' },
-  { name: 'donut', label: 'Donut', food: 5, color: '#d98fb0', shine: '#f4c2d6', shopOnly: true },
-  { name: 'ice_cream', label: 'Ice Cream', food: 4, color: '#e8a9c4', shine: '#f8dce9', shopOnly: true },
-  { name: 'chocolate', label: 'Chocolate Bar', food: 5, color: '#5a3520', shine: '#8d5c39', shopOnly: true },
-  { name: 'muffin', label: 'Muffin', food: 6, color: '#b4794a', shine: '#dfae7c', shopOnly: true },
-  { name: 'candy', label: 'Lollipop', food: 3, color: '#d64a86', shine: '#f79cc0', shopOnly: true },
-  { name: 'croissant', label: 'Croissant', food: 6, color: '#c9963f', shine: '#eec87e', shopOnly: true },
+  // treats. `treat` is read by the trader, which stocks them in ones and twos
+  // rather than in fives — see `larderPool` — and by the harness, which holds
+  // this band to the opposite rule from every other food: a treat is allowed to
+  // feed less than the things it is made of, and is required to cost more.
+  { name: 'cookie', label: 'Cookie', food: 4, treat: true, color: '#b0763a', shine: '#dda86c' },
+  { name: 'donut', label: 'Donut', food: 5, treat: true, color: '#d98fb0', shine: '#f4c2d6' },
+  { name: 'ice_cream', label: 'Ice Cream', food: 4, treat: true, color: '#e8a9c4', shine: '#f8dce9' },
+  // The second import, and the last one. Cocoa does not grow here and no amount
+  // of recipe writing makes it: the planet has one tree species per biome and
+  // none of them is a cacao. The merchant carries it because a merchant who
+  // only sold what you could already make would have nothing to sell.
+  { name: 'chocolate', label: 'Chocolate Bar', food: 5, treat: true, color: '#5a3520', shine: '#8d5c39', shopOnly: true },
+  { name: 'muffin', label: 'Muffin', food: 6, treat: true, color: '#b4794a', shine: '#dfae7c' },
+  { name: 'candy', label: 'Lollipop', food: 3, treat: true, color: '#d64a86', shine: '#f79cc0' },
+  { name: 'croissant', label: 'Croissant', food: 5, treat: true, color: '#c9963f', shine: '#eec87e' },
 ];
 
 // --- materials --------------------------------------------------------------
@@ -387,6 +428,33 @@ export const ARROW_ID = add({
 export const DRIED_KELP_ID = add({
   name: 'dried_kelp', label: 'Dried Kelp', food: 6, cooked: true,
   color: '#4a5c2a', shine: '#8d9a70',
+});
+
+/**
+ * Honeycomb — the planet's only sweetener, and the reason the treat tier exists
+ * at all rather than being a shelf in a shop.
+ *
+ * Appended here for the reason the bow's comment gives at length: ids are what
+ * saves store and `MATERIALS` is added before the tool and armour loops, so a
+ * line pushed into that array renumbers every tool and every piece of armour in
+ * every existing save. It belongs in the larder and it lives here.
+ *
+ * A bee drops it and nothing else does — no ore, no crop, no smelt — which puts
+ * the whole sugar supply behind the one animal on the planet that stings. That
+ * is deliberate on both counts. The bee was the only mob in the table with an
+ * empty drop list, so killing one was a fight you could win and get nothing for;
+ * and a sweetener that grew in a field would make every treat a farm chore
+ * rather than a decision to go and take one off something that fights back.
+ *
+ * 4 is the raw ceiling, level with an apple and a sea grape: it is the best
+ * thing on the planet you can eat without a fire, and it is still edible in a
+ * pinch rather than a meal. Its *price* is where the scarcity is (see
+ * `OVERRIDE` in Trade.js) — 10 coins, twice a hide — and that price is what
+ * makes every recipe downstream of it a luxury.
+ */
+export const HONEYCOMB_ID = add({
+  name: 'honeycomb', label: 'Honeycomb', food: 4,
+  color: '#e0ad45', shine: '#f6dc94',
 });
 
 /**

@@ -104,6 +104,10 @@ ITEMS = [
     # Dried kelp is item-only: it is what a kiln makes out of a kelp block and
     # it is never a block itself.
     "dried_kelp",
+    # The comb. Item-only as well — a bee drops it and nothing places it — and
+    # the only sweetener on the planet, so every treat recipe runs through this
+    # one file. A skipped rebuild here costs seven recipes their icon.
+    "honeycomb",
 ]
 
 # Models authored lying along +Z — bars, loaves, bundles — are stood up on

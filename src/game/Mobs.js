@@ -1247,7 +1247,7 @@ const SPECIES = {
     // Knee-high on the player. Small, but the biggest thing standing upright on
     // the ice apart from the bear, so it is not down with the chicks.
     label: 'Penguin', h: 0.80, hp: 6, spd: 1.10, shy: 0.6, turn: 3.2, accel: 5.5,
-    drops: [['poultry', 1, 1], ['feather', 1, 2]], cold: true,
+    drops: [['poultry', 1, 1], ['feather', 1, 2], ['egg', 1, 1]], cold: true,
   }),
 
   // --- small and skittish ---
@@ -1265,7 +1265,12 @@ const SPECIES = {
   }),
   chick: pet('chick', {
     label: 'Chick', h: 0.26, var: 0.06, hp: 4, spd: 1.30, shy: 0.85, turn: 6.0, accel: 11.0,
-    graze: 0.7, idleMin: 0.8, idleMax: 2.4, drops: [['feather', 1, 2], ['poultry', 1, 1]],
+    // The three birds all leave an egg now. It was the merchant's cheapest line
+    // and his alone, which meant the whole baking half of the kitchen — every
+    // pancake, muffin and croissant — was something you bought rather than
+    // something you kept birds for. One per bird, no roll: three species carry
+    // it, so the supply is a walk through a meadow rather than a lottery.
+    graze: 0.7, idleMin: 0.8, idleMax: 2.4, drops: [['feather', 1, 2], ['poultry', 1, 1], ['egg', 1, 1]],
   }),
   // The parrot flies. It hopped, like a bunny, which is a strange thing for the
   // only other bird on the planet with wings to do — the flight branch already
@@ -1281,7 +1286,7 @@ const SPECIES = {
   // until it is, this number cannot be raised.
   parrot: pet('parrot', {
     label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 2.60, shy: 1.0, turn: 6.5, accel: 12.0,
-    graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3], ['poultry', 1, 1]],
+    graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3], ['poultry', 1, 1], ['egg', 1, 1]],
     // Height and pace. Two blocks up is head-height on the player, which is
     // why a parrot read as hovering rather than flying — a bird you can reach
     // is a bird that is too low. Six clears the canopy, which is the height a
@@ -1322,8 +1327,16 @@ const SPECIES = {
     // even touching the player's face it reads as 1.5 away before any horizontal
     // gap is counted. At a ground animal's reach it could hover inside your head
     // and never once be close enough to swing.
+    //
+    // And it leaves something behind, which it did not. The bee was the only
+    // entry in this whole table with an empty drop list: a fight you could
+    // win — on 3hp, having probably been stung for a fifth of your bar getting
+    // there — and be paid nothing for. One honeycomb is the payment, and it is
+    // the only source of the only sweetener on the planet, so the entire treat
+    // tier in `Recipes.js` hangs off this one line.
     label: 'Bee', h: 0.26, var: 0.06, hp: 3, spd: 2.10, shy: 1.0, turn: 7.0, accel: 14.0,
     graze: 0.5, idleMin: 0.6, idleMax: 1.8, flies: true, hover: 1.5,
+    drops: [['honeycomb', 1, 1]],
     fights: true, dmg: 4, reach: 2.0, swing: 1.6, aggro: 12,
   }),
   crab: pet('crab', {

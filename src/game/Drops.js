@@ -10,6 +10,9 @@ import { hasModel, worldModel } from '../render/ItemModels.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+/** The axis every model in `ItemModels` is authored upright along. */
+const _Y = new THREE.Vector3(0, 1, 0);
+const _spin = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _hover = new THREE.Vector3();
 const _m = new THREE.Matrix4();
@@ -347,7 +350,26 @@ export class Drops {
       // non-unit quaternion then scaled the mesh up).
       const bob = Math.sin(d.age * 2.4 + d.spin) * 0.07;
       _hover.copy(d.pos).addScaledVector(up, 0.18 + bob);
-      _q.setFromAxisAngle(up, d.spin);
+      // Stand it up first, then spin it.
+      //
+      // This used to be `setFromAxisAngle(up, spin)` alone, which is a rotation
+      // *about* the local up and therefore leaves every component along it
+      // exactly where it was: a model authored upright along +Y kept its +Y on
+      // **world** +Y wherever on the planet it landed. On a flat world that is
+      // invisible. On this one the error is precisely the angle between world +Y
+      // and the local up, so a dropped shovel is upright at the north pole,
+      // lying on its side at the equator and standing on its handle at the
+      // south. Reported as "the shovel is upside down", and it was — but on the
+      // ground, and it was every modelled drop in the game and not that pose.
+      //
+      // `BlockModels.sync` has always done this correctly for planted models
+      // (the same swing-to-up followed by a spin about the model's own axis);
+      // this is that, and nothing else about the transform changes. A cube or a
+      // sprite card has no up to get wrong and is only helped by standing square
+      // to the ground it is lying on.
+      _q.setFromUnitVectors(_Y, up);
+      _spin.setFromAxisAngle(_Y, d.spin);
+      _q.multiply(_spin);
       const bid = ITEMS[d.item]?.block;
       const isCube = bid !== undefined && RENDER_TYPE[bid] !== R_CROSS;
       // A model is authored at its own size and only needs bringing down to

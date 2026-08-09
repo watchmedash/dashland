@@ -148,6 +148,21 @@ const SS = 3;
 // long diagonal running further; matching that is what stops a modelled pickaxe
 // from looking a size larger than the drawn shovel beside it.
 const FILL = 0.74;
+/**
+ * The eight offsets the model icons' outline is stamped at, in icon pixels.
+ *
+ * Two, not one: at one pixel the halo is swallowed by the model's own
+ * antialiased edge when the supersampled render is scaled down, and the icon
+ * looks exactly as it did. The diagonals are pulled in to 1.5 so the corners do
+ * not read as a square frame around round objects.
+ *
+ * `FILL` at 0.74 leaves ~12% of the icon empty on each side, so nothing here
+ * pushes a silhouette off its own canvas.
+ */
+const HALO = [
+  [-2, 0], [2, 0], [0, -2], [0, 2],
+  [-1.5, -1.5], [1.5, -1.5], [-1.5, 1.5], [1.5, 1.5],
+];
 
 /**
  * Paints one item model into an icon-sized data URL.
@@ -197,6 +212,9 @@ class ModelIconPainter {
     this.big.width = this.big.height = N;
     this.out = document.createElement('canvas');
     this.out.width = this.out.height = ICON;
+    /** Scratch for the outline pass; see the end of `paint`. */
+    this.halo = document.createElement('canvas');
+    this.halo.width = this.halo.height = ICON;
 
     this._box = new THREE.Box3();
     this._v = new THREE.Vector3();
@@ -249,10 +267,41 @@ class ModelIconPainter {
     }
     g.putImageData(img, 0, 0);
 
+    // A dark halo around the silhouette, and the one thing in this class that is
+    // about the panel rather than the model.
+    //
+    // Every hand-drawn icon in this file is stroked with `outline()` at
+    // rgba(18,14,12,.62) before it is filled; the painted ones had nothing, and
+    // got away with it while the inventory was dark. It is parchment now, and a
+    // pale model against pale ground is a shape with no boundary — the bone end
+    // of a drumstick, a silver ingot, a pearl, the light half of a bucket. The
+    // model itself cannot fix this: no amount of lighting saves a light object
+    // on a light field, because the problem is the edge and not the value.
+    //
+    // So the modelled icons take the drawn ones' outline, in the drawn ones'
+    // colour, which is also the answer to the goal stated at the top of this
+    // file — that a grid of modelled and drawn icons should scan as one set.
+    // Eight offsets rather than a stroked path because what has to be outlined
+    // is an alpha silhouette, not a shape anyone has the outline of; at this
+    // radius on a 96px icon it lands near a pixel wide in the 46px slot, which
+    // is what the drawn stroke lands at too.
+    const hg = this.halo.getContext('2d');
+    hg.clearRect(0, 0, ICON, ICON);
+    hg.globalCompositeOperation = 'source-over';
+    hg.drawImage(this.big, 0, 0, ICON, ICON);
+    // Recolour what was just drawn without touching its coverage: `source-in`
+    // keeps the destination's alpha and takes the source's colour, so this is
+    // the model's exact silhouette in the outline colour.
+    hg.globalCompositeOperation = 'source-in';
+    hg.fillStyle = 'rgba(18,14,12,.62)';
+    hg.fillRect(0, 0, ICON, ICON);
+    hg.globalCompositeOperation = 'source-over';
+
     const o = this.out.getContext('2d');
     o.clearRect(0, 0, ICON, ICON);
     o.imageSmoothingEnabled = true;
     o.imageSmoothingQuality = 'high';
+    for (const [dx, dy] of HALO) o.drawImage(this.halo, dx, dy);
     o.drawImage(this.big, 0, 0, ICON, ICON);
     return this.out.toDataURL();
   }

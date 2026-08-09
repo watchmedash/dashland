@@ -1,0 +1,184 @@
+# Fishing rod — the one item that must not read as `stick.wam`.
+#
+# `stick` is a brown tapered tube with a twig on it, and a fishing rod authored
+# naively is exactly that tube with a slightly better taper. At 46px the two
+# would be the same icon in two browns. So the model is built around the three
+# things a stick cannot have, in the order they survive being shrunk:
+#
+#   1. **A hanging line with a float on the end.** This is the whole read. A
+#      stick has nothing dangling off it. The bobber is a red-and-white ball
+#      out in front of the pole with clear air on both sides, and it is the
+#      first thing the eye resolves.
+#   2. **A dark grip at the butt**, a hard colour break at a fifth of the way
+#      up rather than a gradient. Two-tone along the length says "made object";
+#      one tone says "branch".
+#   3. **A reel** — a squat metal spool sticking out sideways off the top of
+#      the grip. It is the only thing in the model that breaks the silhouette
+#      sideways, which is what stops the rod reading as a single line.
+#
+# **The pole leans forward and that is load-bearing.** A dead-vertical rod puts
+# the line straight down the pole's own axis: the line is then hidden behind
+# the tube from every angle, and the bobber looks threaded onto the shaft. The
+# shaft is pitched 10° then 28°, so the tip finishes ~0.27 in front of the butt
+# and the line drops through open air a fifth of the model's width clear of the
+# pole. `gap(cord, rod)` is asserted every compile — it is the number that dies
+# quietly the moment someone straightens the rod to "tidy the silhouette".
+#
+# **The line is sized by two failures in opposite directions, and it is a
+# narrow window.** Honest monofilament at this scale is sub-pixel: a bobber
+# floating unattached in front of a stick, the failure `thornbrush`'s thorns are
+# written around, except here the thin element is what the item is named for. So
+# it is thickened — but the first pass thickened it to r=0.03, which is *twice*
+# the pole's own tip (w=0.032), and the render sheet came back showing two rods:
+# a fat pale vertical bar beside a tan curved one, with the bobber hung off the
+# bar. r=0.016..0.014 is about a pixel and a half in a 46px slot and reads as
+# half the tip's thickness, which is the relationship the eye actually checks.
+#
+# What buys back the pixels the thinning cost is **colour**. The cord is near
+# black (#2b2721) — by a wide margin the darkest thing in the model — so it
+# holds against the pale slot background and against the tan pole. The first cut
+# had it off-white, which is both invisible on the background and the reason the
+# fat version read as a structural member rather than as string.
+#
+# The taper is 3.3:1 butt to tip and the tip is still 0.032 wide, because a
+# genuinely hairline tip drops out of the raster entirely and the rod looks
+# snapped off. Same reason `stick` stops at 0.070.
+
+model fishing_rod
+  height 0.62
+  style chunky
+
+palette
+  Grip   #4a3324
+  Pole   #c9a05e
+  Dark   #8a6635
+  Metal  #9aa3ad
+  Cord   #2b2721
+  Float  #f2ece0
+  Red    #cf3b2c
+
+skeleton
+  # The butt is off-axis, and only the linter cares. Once the shaft yaws, the
+  # rod straddles x=0 lopsidedly — it leaves the butt on one side of the
+  # centreline and finishes on the other — and the symmetry lint (rightly) reads
+  # a straddling part as one claiming to be symmetric. Sliding the whole model
+  # sideways until the *tip* sits on the axis makes the pole honestly one-sided
+  # while leaving the line and the float centred, which is the arrangement with
+  # no lopsided part in it. Costs nothing downstream: `ItemModels.loadGeometry`
+  # recentres X and Z when it loads the glTF, so where this sits in x is not
+  # something the game ever sees.
+  root butt at (0.105,0,0)
+  # The grip is a fifth of the chain and none of the lean: a rod is held
+  # straight and bends above the hand. It is also the fraction the game's pose
+  # closes the fist at, so it stays a round number.
+  bone grip   parent=butt dir=up len=0.22
+  # Two shaft bones, not one. The lean has to accumulate — a single 20° bone is
+  # a rod leaning like a fence post, where a taper that starts straight and
+  # curves off is a rod under tension.
+  # The lean carries `yaw` as well as `pitch`, and the yaw is not cosmetic. With
+  # a purely forward lean the rod is edge-on from dead ahead and dead behind —
+  # two of the four turntable panels showed the bobber sitting *on* the pole
+  # with no daylight around it. Throwing the tip sideways as well means no
+  # viewing angle collapses the line onto the blank; the worst case is now a
+  # diagonal rather than an overlap.
+  bone shaft1 parent=grip   dir=up pitch=10 yaw=-8  len=0.42
+  bone shaft2 parent=shaft1 dir=up pitch=28 yaw=-26 len=0.42
+
+parts
+  # One loft for the whole rod, grip included, banded by material. Authoring the
+  # grip as its own part would put a seam where the hand goes and buy nothing:
+  # the colour break is the cue, and `material=` on a ring gives a crisp one
+  # with split vertices for free.
+  loft rod bones=butt..shaft2 material=Pole sides=6
+    # `material=` on every grip ring, not just the first. A material named once
+    # at ring 0.00 bands only as far as the next ring — the first render sheet
+    # came back with a 3%-tall black smudge at the butt and a tan pole above it,
+    # i.e. no grip at all.
+    ring 0.00 w=0.085 d=0.082 material=Grip
+    ring 0.03 w=0.108 d=0.104 material=Grip    # the butt cap flares — a pommel
+    ring 0.12 w=0.100 d=0.096 material=Grip
+    ring 0.18 w=0.096 d=0.092 material=Grip
+    ring 0.21 w=0.078 d=0.075 material=Metal   # the ferrule between grip and blank
+    ring 0.24 w=0.075 d=0.072 material=Pole
+    ring 0.42 w=0.060 d=0.058
+    ring 0.62 w=0.049 d=0.047 material=Dark
+    ring 0.84 w=0.040 d=0.038 material=Pole
+    ring 1.00 w=0.032 d=0.031
+    cap start=flat end=flat
+
+  # The reel. Runs out along +X off the top of the grip, `on=rod` so it is flush
+  # against the blank by construction rather than by a radius I would have had
+  # to guess. Fat and short: a spool, not a peg.
+  # Placed by hand rather than with `on=rod`. `on=` sinks the origin by a third
+  # of the base radius, which lands the spool's first ring ~0.02 *past* the
+  # centreline, and the lint then (correctly) calls the reel a lopsided central
+  # part. The blank is 0.042 across here, so starting at x=0.030 is still inside
+  # the tube — flush by arithmetic instead of by construction, and the reel is
+  # honestly one-sided.
+  loft reel bone=grip at=0.96 offset=(0.030,0,0) dir=side len=0.11 material=Metal sides=6
+    ring 0.00 w=0.075 d=0.075
+    ring 0.30 w=0.170 d=0.170 material=Dark
+    ring 0.72 w=0.170 d=0.170
+    ring 1.00 w=0.080 d=0.080 material=Metal
+    cap start=flat end=flat
+
+  # The line. Straight down from the tip through the air the forward lean opened
+  # up. Four sides, not three: a triangular prism has one facet that goes edge-on
+  # and the cord blinks out for part of the drop spin.
+  sweep cord bone=shaft2 at=1.00 offset=(0,-0.01,0) dir=down material=Cord sides=4
+    seg len=0.17 r=0.016
+    seg len=0.16 r=0.015
+    seg len=0.14 r=0.014
+
+  # The float. Red below, pale above — the standard two-tone that reads as a
+  # bobber and not as a berry. Placed off the tip bone by an explicit drop
+  # rather than `on=cord`, which would snap it onto the *side* of the line.
+  loft bobber bone=shaft2 at=1.00 offset=(0,-0.455,0) dir=down len=0.19 material=Float sides=6
+    ring 0.00 w=0.055 d=0.055
+    ring 0.20 w=0.150 d=0.150
+    ring 0.42 w=0.180 d=0.180
+    ring 0.50 w=0.180 d=0.180 material=Red   # the waterline: pale above, red below
+    ring 0.78 w=0.130 d=0.130 material=Red
+    ring 1.00 w=0.045 d=0.045 material=Red
+    cap start=flat end=flat
+
+checks
+  # Stands on its butt.
+  assert bottom(rod) < 0.01
+  # The line hangs in front of the pole rather than down it. This is the check
+  # that keeps the model from being a stick with a bead on it.
+  #
+  # It cannot be `gap(cord, rod)`: the cord is *tied to* the tip, so its closest
+  # approach to the rod is always ~0 by construction and the measurement says
+  # nothing about the part that matters. What matters is where the cord's body
+  # sits — out in front, past everything the pole occupies at those heights.
+  assert zmin(cord) > 0.15
+  assert zmin(cord) > zmax(reel)
+  assert gap(bobber, rod) > 0.05
+  measure clearance zmin(cord) - zmax(reel)
+  # The float is well below the tip and well above the butt — dangling, not
+  # perched and not dragging on the ground.
+  assert top(bobber) < top(rod) * 0.72
+  assert bottom(bobber) > top(rod) * 0.30
+  # A rod is meant to be narrow across, so `height / width` is not a bound worth
+  # having (it reads 6+ and should). The one that matters is depth: the forward
+  # lean plus the hanging line have to give the model real front-to-back spread,
+  # because that spread *is* the gap the line hangs in. Straighten the rod and
+  # this fails before the icon does.
+  assert height / depth in 1.9..3.2
+  # The reel breaks the outline sideways. Without it the whole model is one
+  # stroke and the icon is a stick again.
+  assert width(reel) > width(rod) * 0.6
+  # The sideways slide the root carries, restated as the two properties it was
+  # bought for, so that changing `yaw` without re-deriving the slide fails here
+  # rather than in a lint warning three edits later: the pole never crosses the
+  # axis, and the line does sit on it.
+  assert xmin(rod) > -0.01
+  assert abs(xmin(cord) + xmax(cord)) < 0.04
+  # The fraction of the model's height the handle occupies — what the game's
+  # pose table needs to place `grip`, the point the fist closes at. The handle
+  # runs from the butt to the ferrule, so the fist closes at about half of this.
+  measure handle len(grip) / height
+  assert len(grip) / height in 0.18..0.25
+  assert parts == 4
+  assert tris < 320

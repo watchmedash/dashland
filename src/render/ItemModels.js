@@ -112,11 +112,18 @@ export const POSE = {
   // which is what lifts a pickaxe head ready to swing, dropped the shovel's
   // blade down and behind the fist with the scoop rolled away from the ground.
   //
-  // Positive pitch instead: the shaft leans back over the shoulder, the blade
-  // drops forward and down where the ground is, and the scoop's hollow (the
-  // model's -Z face) ends up pointing up and forward — so the player sees the
-  // back of the blade going in, and the lift at the end of the dig track brings
-  // the hollow up towards them holding what it just cut.
+  // Positive pitch instead: the shaft leans back over the shoulder and the
+  // blade drops forward and down where the ground is.
+  //
+  // This note used to add that the scoop's hollow is the model's -Z face and
+  // ends up pointing away, so you watch the back of the blade go in. Both
+  // halves are wrong, and measuring the mesh is what settles it: across the
+  // blade the rim sits at mean z +0.055 and the floor at -0.006, so the dish is
+  // open toward **+Z**. Under this rotation +Z lands at (-0.52, -0.41, 0.75) in
+  // the view frame — toward the camera and tipped a little down. So what you
+  // actually get is the inside of the scoop turned to face you, which is the
+  // better of the two pictures and the one worth keeping; only the account of
+  // it was back to front.
   //
   // `grip` follows from that: the fist closes on the shaft above the blade, at
   // 0.70 of the model's height. It was 0.22, which is *inside the blade* — the
@@ -124,8 +131,46 @@ export const POSE = {
   // grip now hangs down from a fist that already sits near the bottom of the
   // frame, `pos` lifts the whole tool clear of the arm; without that the blade
   // is simply below the screen.
+  //
+  // **Re-measured after a report that the held shovel was upside down, and it
+  // is not.** Which end is the blade is not a matter of opinion — the pack
+  // paints heads in cool greys and handles in warm browns, which is the same
+  // property `isMetal` below already sorts the draw groups by. Sampled through
+  // it, the shovel's bottom 45% is steel (mean rgb 78,100,114 at the very
+  // bottom) and its top 55% is wood (196,143,104 at the very top); the pickaxe
+  // is the other way round, wood below and steel above. So the blade really is
+  // at the model's -Y, the grip at +Y, and `grip: 0.70` really is on the shaft
+  // above the blade. Do not "restore" 0.22.
+  //
+  // And with that established, the model's +Y — its grip — points *up* in every
+  // representation that has a camera: (-0.17, 0.91, 0.38) in the first-person
+  // view frame, the same to floating point in the third-person one (see
+  // `Character._wearPose`, whose mapping cancels exactly), and (0.22, 0.97,
+  // 0.05) in the icon. There is no upside-down shovel in the fist, on the body
+  // or in the toolbar. The one place a model *was* inverted is lying on the
+  // ground — see the note in `game/Drops.js`, which was a fault in every
+  // dropped model at once and not in this pose.
   shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [0.50, -0.55, 0.20],  pos: [-0.04, 0.28, -0.14], icon: [0.18, 0.52, -0.26] },
-  sword:  { file: 'sword_B',      pack: 'weapons', height: 0.50, grip: 0.16, rot: [-0.25, -0.60, 1.00], pos: [0.04, 0.04, -0.03],  icon: [0.05, 0.30, -0.42] },
+  // The roll is the whole of this entry's history. At `rot.z` 1.00 it was two
+  // and a half times the next largest in the table — the axe's 0.40 — and the
+  // number to read it by is where that leaves the blade: the tip sat **66° off
+  // vertical**, against 39° for the pickaxe, 41° for the axe, 25° for the
+  // shovel and 20° for the torch. A sword carried at two thirds of a right
+  // angle is not held high, it is held *across*, tip back over the left
+  // shoulder, and that is what "held the wrong way" was.
+  //
+  // 0.45 brings the tip to 36°, in among the other long tools rather than
+  // outside them. Pitch and yaw are untouched on purpose: they are what turns
+  // the flat of the blade toward the camera rather than its edge (model +Z
+  // lands 0.80 out of the screen either way, unchanged by this), and the lateral
+  // slash in `ViewModel`'s `SWINGS.sword` was authored against them.
+  //
+  // Worth being explicit, because it was reported in the same breath as the
+  // shovel and the two are not the same fault: this is one wrong number in one
+  // pose. There is no shared frame error. Every pose in this table lands on the
+  // third-person body at exactly its first-person orientation — measured across
+  // all of them, worst case 0.0° — so nothing here is inherited.
+  sword:  { file: 'sword_B',      pack: 'weapons', height: 0.50, grip: 0.16, rot: [-0.25, -0.60, 0.45], pos: [0.04, 0.04, -0.03],  icon: [0.05, 0.30, -0.42] },
 
   // --- archery --------------------------------------------------------------
   //
@@ -147,26 +192,67 @@ export const POSE = {
   // stave runs along model X, its limbs curve toward -Z and its string is a
   // straight run of verts at z = -0.28 — so the archer stands on -Z and the
   // arrow leaves along +Z. In the view model's hand space the camera looks down
-  // -Z, so the shot has to come out of the screen's -Z: `rot` maps model X to
-  // view Y (the stave stands up) and model +Z to view -Z (the bow faces where
-  // you are aiming). That is exactly Ry(π)·Rz(π/2), which in three's XYZ Euler
-  // order is [0, π, π/2]; the small departures from those two numbers are the
-  // three-quarter turn that stops the stave being a flat line across the frame.
+  // -Z, so the shot would come out of the screen's -Z if `rot` mapped model X to
+  // view Y (the stave stands up) and model +Z to view -Z. That is exactly
+  // Ry(π)·Rz(π/2), or [0, π, π/2] in three's XYZ Euler order, and it is what
+  // this entry used to be, to within a few hundredths.
   //
-  // The icon takes a much flatter yaw for the opposite reason: side-on, a bow is
-  // a curve and a cord and unmistakable at 46px, and any real turn foreshortens
-  // the stave into a stick.
+  // **It cannot be both, and squaring it to the shot is the wrong half to
+  // keep.** Those two constraints together pin all three axes: with X on view Y
+  // and +Z on view -Z, the model's own Y — the normal of the plane the bow lies
+  // in — is forced onto view X, which points the bow's plane straight off the
+  // side of the screen and leaves the camera looking at its *edge*. Measured on
+  // the real constants: the held bow projected to 0.090 x 0.613 view units and a
+  // silhouette of 0.017 square units, against 0.168 for a pickaxe. A tenth of a
+  // pickaxe, and the shape of it a vertical line — which is why it read as
+  // small when it is in fact the longest thing in this table. Nothing about the
+  // *size* was wrong; the bow was turned edge-on and there was nothing to see.
+  //
+  // So the yaw comes ~50° off the shot and the stave stays upright. The bow is
+  // not a gunsight — the arrow is aimed by `ViewModel.setDraw`, which nocks a
+  // separate model down the view's -Z and is unaffected by any of this — and
+  // turning the stave to show its curve and its string is what makes the object
+  // in the fist legible as a bow at all. That takes the silhouette to 0.075
+  // square units, four and a half times what it was, and `height` to 0.78, where
+  // the stave spans about three quarters of the visible frame.
+  //
+  // The icon is the same fault in the same model and takes the same answer. Flat
+  // on its side it fitted a 0.94 x 0.32 bar into a square slot and used a
+  // twentieth of it; standing the stave up on the slot's diagonal, with the arc
+  // turned toward the viewer, doubles the covered area and is the pose the
+  // silhouette is actually recognisable in.
   bow: {
-    file: 'bow_A_withString', pack: 'weapons', height: 0.62, grip: 0.50, fitMax: true,
-    rot: [0.10, 3.02, 1.44], pos: [0.02, 0.06, -0.10], icon: [0.10, 0.18, 0.30],
+    file: 'bow_A_withString', pack: 'weapons', height: 0.78, grip: 0.50, fitMax: true,
+    rot: [0.12, 2.26, 1.40], pos: [0.02, 0.06, -0.10], icon: [0.16, 0.40, 0.90],
   },
-  // Held like the shafts — the drawn diagonal the stick and the feather take —
-  // rather than pointed at the camera, which is what the model's own axis would
-  // give. Small: it is a stick with a stone on it, and at a sword's size it read
-  // as a spear.
+  // **The arrow is the one model in this table whose long axis is Z**, and both
+  // of its rotations were written as though it were Y, like the stick and the
+  // feather they were copied from. The comment here used to say the pose was the
+  // drawn diagonal "rather than pointed at the camera, which is what the model's
+  // own axis would give" — and pointed at the camera is exactly what it gave,
+  // because the numbers that put a *stick's* +Y on the diagonal leave a shaft
+  // that runs along +Z untouched. Measured: the held shaft sat 55° out of the
+  // screen plane and covered 0.009 square units, a nineteenth of a pickaxe. That
+  // is the "floating in the hand instead of held like a stick" report: what you
+  // see of a shaft aimed at your eye is a dot at the fist.
+  //
+  // The fix is the stick's own rotation with a quarter turn folded in ahead of
+  // it — R = R_stick · Rx(-π/2), which is what carries +Z to where the stick
+  // puts +Y — evaluated once and written out. So these numbers are not a taste
+  // either: the shaft now lands 17° out of the screen plane, which is the
+  // stick's angle to the last degree, and the icon 3°, which is the stick's
+  // icon. The head is the +Z end (the -Z end is the fletching: the atlas is
+  // bright blue there and steel grey at the tip), so it carries head-up, the way
+  // you would hold one.
+  //
+  // `grip` is inert here and is left at 0.5 to say so: it is a fraction of the
+  // model's *height*, and Y is this model's thinnest axis. What actually puts
+  // the fist at the middle of the shaft is `loadGeometry`'s unconditional
+  // centring of X and Z, which is correct for an arrow and is why nothing here
+  // needs to fight it.
   arrow: {
-    file: 'arrow_A', pack: 'weapons', height: 0.40, grip: 0.50, fitMax: true,
-    rot: [-0.30, -0.55, 0.30], pos: [0.02, 0.10, -0.04], icon: [0.10, 0.30, -0.44],
+    file: 'arrow_A', pack: 'weapons', height: 0.46, grip: 0.50, fitMax: true,
+    rot: [-1.87, -0.28, -0.42], pos: [0.02, 0.10, -0.04], icon: [-1.52, 0.46, 0.11],
   },
   // `glow`: the fraction of the model's own height over which the head lights
   // up. On this art the last fifth is the wrapped, burning end and nothing else.
@@ -174,6 +260,21 @@ export const POSE = {
   // made carrying one through a cave look like carrying a stick.
   torch:  { file: 'torch',        pack: 'tools',   height: 0.50, grip: 0.24, rot: [-0.20, -0.35, 0.22], pos: [0.02, 0.06, -0.02],  icon: [0.08, 0.55, -0.26], glow: [0.78, 0.94] },
   bucket: { file: 'bucket_metal', pack: 'tools',   height: 0.36, grip: 0.55, rot: [0, -0.55, 0.14],     pos: [0.03, 0.05, -0.03],  icon: [0.16, 0.60, 0] },
+  // **The key is `rod` and not `fishing_rod`, and that is not a nickname.**
+  // `poseKeyFor` sends anything carrying a `tool` block down `POSE[tool.kind]`
+  // and never consults `BY_NAME` for it, so an entry under the item's name is
+  // one this file can never reach — which is exactly why the rod was the only
+  // tool in the game still painting as drawn art while every pickaxe, axe,
+  // shovel, sword and bow had a model. There was no missing mesh; there was a
+  // missing key.
+  //
+  // Ours, in WAM, because no pack here ships one. `grip` is low because the
+  // whole butt of this model is the handle — dark cork to about a tenth of the
+  // height, with the reel just above it — and the fist has to close under the
+  // reel or it closes *on* it. Everything above that is pole, line and float,
+  // which is the part that has to stay in frame; hence a `pos` lift in the
+  // shovel's spirit rather than the bucket's.
+  rod:    { file: 'wam/fishing_rod', pack: 'wam',  height: 0.52, grip: 0.12, rot: [-0.18, -0.40, 0.26], pos: [0.02, 0.10, -0.03],  icon: [0.10, 0.36, -0.28] },
 
   // Food. Held small and close — an apple filling as much of the frame as a
   // pickaxe reads as a beach ball. `grip` sits at the middle of the fruit
@@ -256,7 +357,14 @@ export const POSE = {
   flint:      { file: 'wam/flint',      pack: 'wam', height: 0.19, grip: 0.50, rot: [0.10, -0.75, 0.34],   pos: [0.02, 0.11, -0.05], icon: [0.06, 0.60, -0.24] },
   wheat:      { file: 'wam/wheat',      pack: 'wam', height: 0.36, grip: 0.42, rot: [-0.14, -0.35, 0.34],  pos: [0.02, 0.20, -0.02], icon: [0.06, 0.20, -0.30] },
   seeds:      { file: 'wam/seeds',      pack: 'wam', height: 0.17, grip: 0.50, rot: [0.30, -0.55, 0.10],   pos: [0.02, 0.05, -0.05], icon: [0.42, 0.60, 0] },
-  hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.50, 1.30],   pos: [0.02, 0.11, -0.05], icon: [0.24, 0.92, 1.32] },
+  // The hide's roll is what lays it across the fist, and it is also what makes
+  // its *icon* yaw a different question from every other one in this table: once
+  // the roll has turned the model's long axis across the frame, a yaw does not
+  // turn the object in front of the camera any more, it swings that length away
+  // from it. At 0.92 the pelt was 54° out of the screen plane and drawn at about
+  // three fifths of the length it has. Reduced until it reads as a laid-out
+  // skin; the roll, which is the part that was chosen, is untouched.
+  hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.50, 1.30],   pos: [0.02, 0.11, -0.05], icon: [0.24, 0.40, 1.32] },
   feather:    { file: 'wam/feather',    pack: 'wam', height: 0.32, grip: 0.38, rot: [-0.16, -0.40, 0.36],  pos: [0.02, 0.18, -0.02], icon: [0.06, 0.30, -0.38] },
 
   // The rest of the ladder, on the same three family poses. Ores and the
@@ -309,6 +417,35 @@ export const POSE = {
   // closes on the arm, not on the claw: at 0.5 it would have gripped the palm
   // and swung the whole thing around the pincer.
   crab_claw:  { file: 'wam/crab_claw',  pack: 'wam', height: 0.30, grip: 0.24, rot: [0.06, -1.30, 0.24],  pos: [0.02, 0.07, -0.03], icon: [0.10, 1.45, 0.34] },
+
+  // The drumstick, and the last two foods that were still hand-drawn sprites
+  // in a line-up of twenty-seven modelled ones. `meat` and `cooked_meat` moved
+  // to the Kenney kit and left `ART.meat` — which is a picture of a drumstick —
+  // serving only the two poultry items, so the flat one in the hotbar was
+  // literally the bird.
+  //
+  // `grip` is the number that matters and it is not the family default: you
+  // hold a drumstick *by the bone*, and the bone is the upper 48% of this model
+  // (meat from y 0 to 0.17, shaft and knuckle from there to 0.32). 0.62 closes
+  // the fist just above the cut band, so the meat hangs below the hand the way
+  // it does in life; at the lump family's 0.5 the fist is inside the muscle and
+  // the thing orbits its own middle. `pos` lifts it for the same reason the
+  // shovel's does — most of the object is now below the grip.
+  //
+  // Two models and not one aliased pair, which is the opposite of the call made
+  // for the crab. A claw is the same object cooked or raw; a drumstick is not,
+  // and this exact pair is the one the retired WAM meats failed on — "the same
+  // drumstick in two browns", per the note above `bread`. So the cooked one is
+  // roasted *shape* as well as colour: the muscle pulls back off the bone as it
+  // cooks, which leaves a squatter drum (widest at 0.15 of the height against
+  // the raw one's 0.25) over a longer run of exposed bone (meat ends at 0.42 of
+  // the height rather than 0.50). They separate on silhouette alone, before any
+  // colour is resolved, which is the test the retired pair could not pass.
+  //
+  // `grip` follows the meat line in each: the fist closes on the bone just
+  // above it, so the drum hangs under the hand.
+  poultry:        { file: 'wam/poultry',        pack: 'wam', height: 0.28, grip: 0.62, rot: [0.06, -0.45, 0.22], pos: [0.02, 0.15, -0.04], icon: [0.12, 0.42, -0.18] },
+  cooked_poultry: { file: 'wam/cooked_poultry', pack: 'wam', height: 0.28, grip: 0.56, rot: [0.06, -0.45, 0.22], pos: [0.02, 0.14, -0.04], icon: [0.12, 0.42, -0.18] },
 
   // The three flowers, on the sapling's pose — they are the same object, a stem
   // with something on top, and `grip` is low for the same reason: you carry a
@@ -469,7 +606,15 @@ export const POSE = {
   // normalises on its longest axis instead of its height — without `fitMax` a
   // low tangle would be scaled up by its own thickness and arrive as a log
   // across the whole slot. Same reason the bow carries it.
-  driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.34, grip: 0.44, fitMax: true, rot: [0.16, -1.25, 0.22], pos: [0.02, 0.10, -0.04], icon: [0.24, 1.30, -0.10] },
+  //
+  // And being *wide* is also why it can't take the near-quarter yaw the fish
+  // and the sea fan take. That turn is the right answer for a model whose long
+  // axis is Z, where it swings the length across the frame; driftwood's long
+  // axis is X, where the identical turn swings it into the camera instead. It
+  // was 72° out of the screen plane in both poses — a wide tangle drawn end-on,
+  // which is the very thing `fitMax` is here to stop it looking like. A shallow
+  // yaw keeps the span across the view, where the forks read.
+  driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.34, grip: 0.44, fitMax: true, rot: [0.16, -0.40, 0.22], pos: [0.02, 0.10, -0.04], icon: [0.24, 0.40, -0.10] },
 };
 
 /**
@@ -600,6 +745,8 @@ export const BY_NAME = {
   // carrying a second near-identical mesh for the sake of the naming.
   crab_meat: 'crab_claw',
   cooked_crab_meat: 'crab_claw',
+  poultry: 'poultry',
+  cooked_poultry: 'cooked_poultry',
   // Food kit. Identity again, and again written out so this stays the list of
   // what is modelled — the food line-up is the part most likely to grow.
   bread: 'bread',

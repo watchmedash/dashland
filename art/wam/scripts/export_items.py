@@ -75,6 +75,10 @@ ITEMS = [
     # Backs both `crab_meat` and `cooked_crab_meat` — a claw is a claw either
     # way, and the generic drumstick they used to share said nothing about crab.
     "crab_claw",
+    # The bird. `meat` and `cooked_meat` above are the same joint in two browns
+    # and read as one item twice at icon size; this one is half bare bone and
+    # pale pink, so it is the drumstick and they are not.
+    "poultry", "cooked_poultry",
     # The three flowers. Unlike everything above them these are also *world*
     # geometry — `render/BlockModels.js` instances them where the blocks are —
     # so a full rebuild that skipped one would empty the meadows, not just a
@@ -119,6 +123,10 @@ ITEMS = [
     "cotton_grass", "snowbell", "alpine_aster", "marram",
     "lavender", "clover", "fern", "lingonberry",
     "cave_mushroom", "shelf_fungus", "crystal_cluster", "driftwood",
+    # The rod. Item-only, and a tool rather than a drop — the one entry here
+    # whose model carries a hanging line, which is the only thing separating its
+    # icon from `stick`'s.
+    "fishing_rod",
 ]
 
 # Models authored lying along +Z — bars, loaves, bundles — are stood up on

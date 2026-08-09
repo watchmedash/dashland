@@ -63,9 +63,6 @@ export const LOADOUT_OPTIONS = [
   { key: 'sword', label: 'Sword', items: [['stone_sword', 1]] },
   { key: 'bow', label: 'Bow', items: [['bow', 1], ['arrow', 16]] },
   { key: 'rod', label: 'Rod', items: [['fishing_rod', 1]] },
-  { key: 'bread', label: 'Bread', items: [['bread', 5]] },
-  { key: 'planks', label: 'Planks', items: [['planks', 16]] },
-  { key: 'coal', label: 'Coal', items: [['coal', 8]] },
 ];
 
 /** How many of the above one player may take. */

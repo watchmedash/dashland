@@ -9,6 +9,14 @@
    screen to be made of the same thing the inventory is made of, and a HUD that
    is a different material to every screen behind it is two products.
 
+   The title, pause, death, confirm and character screens held out one round
+   longer, on the argument that a card over a dimmed world should read as the
+   world going away and so ought to be dark. Same answer, from the same player:
+   they are parchment too. The dimming is what says the world went away, and it
+   says it better under a light card than under a dark one, which only merges
+   with it. There is no plate left in the game and no plate tokens either, so
+   the dark theme cannot come back one element at a time.
+
    So the HUD is parchment now, in the over-the-world weight, and the legibility
    the plate was buying is bought three other ways instead:
      - the sheet is near-opaque, so grass, water and a night sky are behind it
@@ -18,10 +26,6 @@
        plus a tight black drop shadow is what holds the edge on a white field;
      - mass stays low. Nothing grew: the vitals got narrower, and the map, the
        chips and the hotbar occupy exactly the boxes they did before.
-
-   PLATE survives on the screens the game stops for that are not workspaces:
-   the title, pause, death and the character picker, which sit on a dimmed
-   world and are meant to read as the world going away.
 
    Two rules the HUD side obeys without exception, because it runs at 60fps
    over a 1.6GB heap:
@@ -129,24 +133,7 @@
   --danger: #cf4630;
   --good: #63b04b;
 
-  /* --- plate ----------------------------------------------------------- */
-  /* One gradient, top-lit, over a near-opaque base. Opaque enough to read a
-     white numeral on snow, transparent enough that the world still shows. */
-  --plate: linear-gradient(180deg, rgba(30, 38, 58, .80), rgba(10, 14, 24, .86));
-  --plate-solid: linear-gradient(180deg, rgba(30, 38, 58, .94), rgba(10, 14, 24, .96));
-  /* The bevel: a dark keyline outside so the plate never dissolves into a pale
-     sky, a light line inside so it reads as a lifted face rather than a hole. */
-  --bevel:
-    0 0 0 1px rgba(0, 0, 0, .55),
-    inset 0 1px 0 rgba(255, 255, 255, .16),
-    inset 0 -1px 0 rgba(0, 0, 0, .35),
-    0 6px 16px -8px rgba(0, 0, 0, .85);
-  --bevel-lift:
-    0 0 0 1px rgba(0, 0, 0, .6),
-    inset 0 1px 0 rgba(255, 255, 255, .22),
-    inset 0 -1px 0 rgba(0, 0, 0, .4),
-    0 10px 22px -10px rgba(0, 0, 0, .95);
-  --plate-edge: rgba(255, 255, 255, .14);
+  /* --- radii ----------------------------------------------------------- */
   --r-sm: 3px;
   --r-md: 5px;
   --r-lg: 9px;
@@ -223,10 +210,14 @@ html, body {
    than as a pattern. The tooth is two repeating gradients, painted once, and
    it is the single thing that stops a light card looking like a browser
    dialog. */
-.panel {
+/* The sheet itself, written once for all three sizes of it: the workspace
+   screens (`.panel`), the cards the game stops for (`.menu-card`), and the
+   character picker (`.chargen-card`). They were two materials until the player
+   pointed out, twice, that they should not be. Only the box each one occupies
+   differs now. */
+.panel, .menu-card, .chargen-card {
   position: relative;
-  width: min(660px, 93vw); max-height: 88vh; overflow: auto;
-  padding: 20px 22px; border-radius: var(--r-xl);
+  border-radius: var(--r-xl);
   background:
     repeating-linear-gradient(92deg, rgba(122, 94, 54, .035) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
     repeating-linear-gradient(2deg, rgba(122, 94, 54, .03) 0 1px, rgba(0, 0, 0, 0) 1px 5px),
@@ -236,13 +227,16 @@ html, body {
     inset 0 1px 0 rgba(255, 255, 255, .9),
     inset 0 -20px 40px -30px rgba(74, 54, 28, .5),
     var(--shadow);
+}
+.panel {
+  width: min(660px, 93vw); max-height: 88vh; overflow: auto;
+  padding: 20px 22px;
   animation: rise .26s var(--ease);
 }
 /* The screens the game stops for get one warm hairline along the top edge of
-   the sheet, which is the parchment's answer to the plate's bright inner
-   keyline. It is what makes a menu and the hotbar look struck from the same
+   the sheet. It is what makes a menu and the hotbar look struck from the same
    set of rules. */
-.panel::before {
+.panel::before, .menu-card::before, .chargen-card::before {
   content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   background: linear-gradient(90deg, rgba(221, 124, 56, 0), var(--accent-2), rgba(221, 124, 56, 0));
@@ -278,103 +272,107 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
   text-align: center; margin: 7px 0 0;
   font-size: var(--fs-md); letter-spacing: .05em; color: rgba(247, 238, 222, .5);
 }
+/* The two above are the loader's, which is still light type on a dark void and
+   is the one screen in the game that is not made of paper. The same two on a
+   card are cut into the sheet instead. */
+.menu-card h1 { color: var(--ink); text-shadow: 0 1px 0 rgba(255, 255, 255, .8); }
+.menu-card h1 em { color: var(--accent-deep); }
+.menu-card .tagline { color: var(--ink-soft); }
 
 /* ── menu cards ────────────────────────────────────────── */
 
-/* PLATE, at card scale. The menus that sit over the world rather than being a
-   workspace in it — the title screen, pause, death, the confirm — are the same
-   material as the HUD one size up: dark, top-lit, hard outer keyline. */
+/* PARCHMENT, at card scale. The menus that sit over the world rather than
+   being a workspace in it — the title screen, pause, death, the confirm — are
+   the same sheet as every screen, in a narrower box. */
 .menu-card {
   width: min(340px, 90vw); padding: 26px 22px 20px; text-align: center;
-  border-radius: var(--r-xl);
-  background:
-    radial-gradient(120% 70% at 50% 0%, rgba(90, 116, 170, .22), rgba(0, 0, 0, 0) 62%),
-    var(--plate-solid);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, .6),
-    inset 0 1px 0 rgba(255, 255, 255, .2),
-    inset 0 -1px 0 rgba(0, 0, 0, .5),
-    0 30px 70px -28px rgba(0, 0, 0, .92);
   animation: rise .28s var(--ease);
 }
 .menu-card.small { width: min(320px, 90vw); padding: 22px 20px 18px; }
 .menu-card h2 {
-  color: var(--parchment); font-size: var(--fs-xl); font-weight: 600;
+  color: var(--ink); font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: var(--ls-disp); text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
 }
 .menu-card .tagline { margin-bottom: 16px; }
 /* Every card action is the full width of the card. A row of differently sized
    buttons has to be read; a stack of identical ones is a list you point at. */
 .menu-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
 .menu-actions button { width: 100%; padding: 10px 15px; }
-/* Death. A red keyline round the plate, the word "Died" as the smallest thing
-   on it, and the cause as the biggest. */
+/* Death. A red keyline round the sheet, the word "Died" as the smallest thing
+   on it, and the cause as the biggest. The red is the only thing that changes:
+   it is the same paper as the pause card, scorched at the edge. */
 .death-card {
   box-shadow:
-    0 0 0 1px rgba(226, 88, 66, .55),
-    inset 0 1px 0 rgba(255, 190, 175, .25),
-    inset 0 -1px 0 rgba(0, 0, 0, .5),
-    0 0 40px -10px rgba(190, 50, 34, .5),
-    0 30px 70px -28px rgba(0, 0, 0, .92);
+    0 0 0 1px rgba(158, 44, 28, .6),
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    inset 0 -20px 40px -30px rgba(140, 34, 20, .4),
+    0 0 40px -12px rgba(190, 50, 34, .45),
+    var(--shadow);
+}
+.death-card::before {
+  background: linear-gradient(90deg, rgba(207, 70, 48, 0), var(--danger), rgba(207, 70, 48, 0));
+  opacity: .8;
 }
 .death-kicker {
   font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase;
-  color: rgba(240, 160, 138, .72);
+  color: rgba(140, 44, 28, .72);
 }
 .menu-card h2.death-title {
   margin-top: 5px;
   font-size: var(--fs-2xl); font-weight: 200;
   letter-spacing: var(--ls-disp);
-  color: #ffd8ce;
-  text-shadow: 0 2px 18px rgba(190, 50, 34, .85);
+  color: #8e2417;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
 }
 /* On screen only when something really was taken, and only ever one line. */
 .death-lost {
   margin-top: 10px; font-size: var(--fs-sm); font-weight: 600;
-  color: rgba(247, 238, 222, .5);
+  color: var(--ink-soft);
 }
 
 .credit-list { list-style: none; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
 .credit-list li { padding-left: 10px; text-indent: -10px; margin-bottom: 3px; }
 .credit-list strong { color: var(--ink); font-weight: 700; }
 
+/* Every button in the game is cut from parchment: the same emboss as every
+   other raised thing on a sheet, so a control and a row are visibly the same
+   material. This used to be the `.panel` exception to a dark default, and the
+   dark default is what has gone. */
 button {
-  font: inherit; cursor: pointer; border-radius: 7px;
-  padding: 9px 15px; font-size: var(--fs-md); font-weight: 600;
-  letter-spacing: .015em;
-  color: rgba(247, 238, 222, .9);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .04));
-  border: 1px solid rgba(255, 255, 255, .12);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1);
-  transition: transform .12s ease, box-shadow .18s ease, background .18s ease, filter .18s;
-}
-button:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(255, 255, 255, .17), rgba(255, 255, 255, .07));
-  transform: translateY(-1px);
-}
-button:active:not(:disabled) { transform: translateY(0); filter: brightness(.94); }
-button:disabled { opacity: .32; cursor: default; }
-button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-button.primary {
-  color: #2a1607; border-color: rgba(255, 226, 180, .5);
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
-  box-shadow: 0 10px 22px -12px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .55);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .28);
-}
-button.primary:hover { filter: brightness(1.05); }
-/* A button cut from parchment: the same emboss as every other raised thing on
-   the sheet, so a control and a row are visibly the same material. */
-.panel button {
+  font: inherit; cursor: pointer;
+  padding: 9px 15px; border-radius: var(--r-md);
+  font-size: var(--fs-md); font-weight: 600; letter-spacing: .015em;
   color: var(--ink-soft); text-shadow: none; border: none;
-  border-radius: var(--r-md);
   background: var(--paper-cell);
   box-shadow: var(--emboss);
+  transition: transform var(--t-fast) ease, box-shadow var(--t-mid) ease, background var(--t-mid) ease, filter var(--t-mid);
 }
-.panel button:hover:not(:disabled) { background: #fff; color: var(--ink); box-shadow: var(--emboss-lift); }
-.panel button:active:not(:disabled) { filter: none; box-shadow: var(--sunk); transform: translateY(1px); }
-.panel button:disabled { box-shadow: var(--sunk); background: rgba(122, 94, 54, .06); }
-.panel button.ghost {
+button:hover:not(:disabled) {
+  background: #fff; color: var(--ink);
+  box-shadow: var(--emboss-lift); transform: translateY(-1px);
+}
+/* Pressed is the face going into the sheet, not a brightness change: on paper
+   there is nothing to darken. */
+button:active:not(:disabled) { filter: none; box-shadow: var(--sunk); transform: translateY(1px); }
+button:disabled {
+  cursor: default; opacity: 1; color: var(--ink-faint);
+  background: rgba(122, 94, 54, .06); box-shadow: var(--sunk);
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary {
+  color: #2a1607; border: none;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  box-shadow: 0 10px 22px -12px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .55), 0 0 0 1px rgba(140, 74, 26, .35);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .28);
+}
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.05); color: #2a1607;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  box-shadow: 0 12px 24px -12px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .6), 0 0 0 1px rgba(140, 74, 26, .4);
+}
+button.ghost {
   padding: 6px 10px; font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase;
   display: flex; gap: 6px; align-items: center;
@@ -478,151 +476,129 @@ button.primary:hover { filter: brightness(1.05); }
   animation: fade .22s ease;
   overflow: auto; padding: 16px 0;
 }
-/* The same plate as `.menu-card`, one size wider, because it is the same
+/* The same sheet as `.menu-card`, one size wider, because it is the same
    material doing the same job. */
 .chargen-card {
-  width: min(440px, 94vw); padding: 22px 22px 16px; border-radius: var(--r-xl);
-  background:
-    radial-gradient(120% 60% at 50% 0%, rgba(90, 116, 170, .2), rgba(0, 0, 0, 0) 60%),
-    var(--plate-solid);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, .6),
-    inset 0 1px 0 rgba(255, 255, 255, .2),
-    inset 0 -1px 0 rgba(0, 0, 0, .5),
-    0 30px 70px -28px rgba(0, 0, 0, .92);
+  width: min(440px, 94vw); padding: 22px 22px 16px;
   animation: rise .28s var(--ease);
 }
 .chargen-card h2 {
-  color: var(--parchment); font-size: var(--fs-lg); font-weight: 700;
+  color: var(--ink); font-size: var(--fs-lg); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase; text-align: center;
-  opacity: .8;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
 }
-/* A pale backdrop, and it goes *behind* the canvas rather than on the cells.
+/* A cool backdrop, and it goes *behind* the canvas rather than on the cells.
    These characters are mostly dark hair and dark clothing, and against the
-   card's own near-black panel the top third of every figure simply vanished.
-   The canvas is transparent, so a lit panel underneath lights them from behind
-   and dark-on-pale does the rest. */
+   card's own sheet a fair-haired one washed out at the top and a dark-haired
+   one vanished into a near-black card before that. The canvas is transparent,
+   so a lit panel underneath lights every figure from behind and separates it
+   from whichever material the card happens to be made of. It is a window cut
+   into the paper, so it carries the sheet's own sunk edge. */
 .chargen-stage {
   position: relative; margin-top: 14px; border-radius: var(--r-lg); overflow: hidden;
   background:
-    radial-gradient(115% 95% at 50% 0%, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 62%),
-    linear-gradient(180deg, #808ba6, #5c6684);
-  background-color: #6b7590;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), inset 0 -16px 30px -18px rgba(0, 0, 0, .65),
-              0 0 0 1px rgba(0, 0, 0, .4);
+    radial-gradient(115% 95% at 50% 0%, rgba(255, 255, 255, .18), rgba(255, 255, 255, 0) 62%),
+    linear-gradient(180deg, #8b95ad, #626c88);
+  background-color: #737d97;
+  box-shadow: inset 0 -16px 30px -18px rgba(0, 0, 0, .55), var(--sunk);
 }
 /* Square, set inline by UI.js, matching the picker's square frustum. */
 #cg-canvas { display: block; width: 100%; }
+/* Two chips of the card, laid on the window. `transform` is restated on every
+   state because the base button lifts and presses by a pixel, and a pixel of
+   translate here would drop the -50% that centres them. */
 .cg-arrow {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 38px; height: 54px; padding: 0; border-radius: var(--r-md);
-  background: rgba(12, 15, 26, .38); border: 1px solid rgba(255, 255, 255, .2);
-  box-shadow: none;
+  background: var(--paper-cell); box-shadow: var(--emboss-lift);
 }
 .cg-arrow.prev { left: 8px; }
 .cg-arrow.next { right: 8px; }
-.cg-arrow:hover:not(:disabled) { background: rgba(12, 15, 26, .58); transform: translateY(-50%); }
+.cg-arrow:hover:not(:disabled) { background: #fff; transform: translateY(-50%); }
+.cg-arrow:active:not(:disabled) { transform: translateY(-50%); box-shadow: var(--sunk); }
 /* The chevron itself: two borders of an empty box, turned 45 degrees. Drawn
    rather than typed, so it is the same shape in every font. */
 .cg-arrow i {
   display: block; width: 11px; height: 11px; margin: 0 auto;
-  border-left: 2.5px solid rgba(247, 238, 222, .9);
-  border-bottom: 2.5px solid rgba(247, 238, 222, .9);
+  border-left: 2.5px solid var(--ink-soft);
+  border-bottom: 2.5px solid var(--ink-soft);
   border-radius: 2px;
 }
+.cg-arrow:hover:not(:disabled) i { border-color: var(--ink); }
 .cg-arrow.prev i { transform: rotate(45deg) translate(1px, -1px); }
 .cg-arrow.next i { transform: rotate(-135deg) translate(1px, -1px); }
 .cg-name { text-align: center; margin-top: 12px; }
 .cg-name b {
-  color: var(--parchment); font-size: var(--fs-xl); font-weight: 600;
+  color: var(--ink); font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: var(--ls-disp);
-  text-shadow: 0 2px 14px rgba(0, 0, 0, .7);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
 }
 
-/* What you bring, and how hard it hits back. */
+/* How hard it hits back, and what a death costs. Two rows, one caption each.
+   The row that used to sit above these, the three-of-six loadout picker, was
+   removed with the tool economy it depended on; its markup and its styling
+   went with it rather than being left behind as a hole with a caption over it.
+   `_buildKit` and friends are still in UI.js for when it comes back. */
 .cg-pick { margin-top: 14px; }
 .cg-cap {
   display: flex; align-items: baseline; justify-content: space-between;
-  color: rgba(247, 238, 222, .38); margin-bottom: 7px;
-}
-/* How much of the choice is left, on the caption. Quiet until it is spent, and
-   then the same warm the live tiles are, so the number and the tiles that have
-   gone dead are visibly the same statement. */
-#cg-kit-count {
-  font: 700 var(--fs-xs) var(--mono); letter-spacing: 0;
-  color: rgba(247, 238, 222, .45);
-}
-#cg-kit-count.full { color: var(--accent-2); }
-.cg-kit { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
-.cg-opt {
-  position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 7px 3px 5px; border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02));
-  border: 1px solid rgba(255, 255, 255, .1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
-  font: 600 var(--fs-xs)/1.2 var(--font); letter-spacing: .02em;
-  color: rgba(247, 238, 222, .62);
-}
-.cg-opt img { width: 28px; height: 28px; pointer-events: none; }
-.cg-opt .qty {
-  position: absolute; top: 3px; right: 4px;
-  font: 700 var(--fs-2xs) var(--mono); color: rgba(247, 238, 222, .5);
-}
-.cg-opt:hover:not(:disabled) { transform: none; color: rgba(247, 238, 222, .92); }
-.cg-opt.on {
-  color: #2a1607; border-color: rgba(255, 226, 180, .55);
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 60%, var(--accent));
-  box-shadow: 0 8px 18px -10px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .55);
-}
-.cg-opt.on .qty { color: rgba(42, 22, 7, .6); }
-/* Nothing left to spend. The unpicked tiles stay on screen, because the shape
-   of the choice is part of reading it, but they have to say they are shut and
-   not merely say it faintly: a tile at 30% opacity still looks like a tile you
-   press, so a fourth click read as the screen being broken. They go the other
-   way instead. The face is pressed *into* the card rather than raised out of
-   it, the lit top edge that makes every other tile look pressable is gone, the
-   art is knocked back, and the cursor stops offering. Same three moves the
-   disabled buttons on the parchment screens make, which is what makes this
-   read as "not now" rather than as a rendering fault. */
-.cg-kit.full .cg-opt:not(.on) {
-  cursor: default;
-  color: rgba(247, 238, 222, .26);
-  background: rgba(0, 0, 0, .3);
-  border-color: rgba(255, 255, 255, .04);
-  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55);
-}
-.cg-kit.full .cg-opt:not(.on) img { opacity: .28; }
-.cg-kit.full .cg-opt:not(.on) .qty { color: rgba(247, 238, 222, .2); }
-.cg-kit.full .cg-opt:not(.on):hover { color: rgba(247, 238, 222, .26); }
-/* And the other half of the same sentence, which is the half that was missing:
-   the three tiles that *are* on stay lit, keep the pointer, and are the only
-   things on the row that answer it. A full row where everything looks equally
-   inert says "broken"; a full row where three tiles are clearly the live ones
-   says "press one of these back off", which is the actual way out and the way
-   the torches get replaced. */
-.cg-kit.full .cg-opt.on { cursor: pointer; }
-.cg-kit.full .cg-opt.on:hover {
-  box-shadow:
-    0 0 0 2px var(--accent-hi),
-    inset 0 1px 0 rgba(255, 255, 255, .6),
-    0 8px 18px -10px rgba(221, 124, 56, .95);
+  color: var(--ink-faint); margin-bottom: 7px;
 }
 
-/* Three buttons in one bar. A segmented control says "pick exactly one" by its
-   shape, which is the whole reason there is no sentence under it. */
+/* The difficulty control is a real `<select>`.
+   It was a segmented bar built for three, and there are four settings now: a
+   fourth cell took "Extreme" down to a width it could not set the word in, and
+   a custom widget carries its own keyboard handling and its own copy of which
+   option is current, both of which can drift from the value. The platform
+   control has neither problem. `appearance: none` takes the platform paint off
+   the closed face only; the list that drops out of it is the operating
+   system's, which is the trade that buys arrow keys, type-ahead and a screen
+   reader for nothing. */
+.pick-wrap { position: relative; }
+select.pick {
+  -webkit-appearance: none; appearance: none;
+  display: block; width: 100%;
+  padding: 9px 34px 9px 13px; border: none; border-radius: var(--r-md);
+  font: 600 var(--fs-md)/1.2 var(--font); letter-spacing: .015em;
+  color: var(--ink); cursor: pointer;
+  background: var(--paper-cell); box-shadow: var(--emboss);
+  transition: box-shadow var(--t-fast) ease, background var(--t-fast) ease;
+}
+select.pick:hover { background: #fff; box-shadow: var(--emboss-lift); }
+select.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The list itself is drawn by the platform, so the two colours it will honour
+   are set and nothing else is attempted. */
+select.pick option { color: var(--ink); background: var(--parchment); }
+/* The chevron: two borders of an empty box turned 45 degrees, which is how
+   every other arrow in this game is drawn. */
+.pick-wrap::after {
+  content: ''; position: absolute; right: 14px; top: 50%; pointer-events: none;
+  width: 7px; height: 7px; margin-top: -6px;
+  border-right: 2px solid var(--ink-soft);
+  border-bottom: 2px solid var(--ink-soft);
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
+/* A segmented bar, for the one remaining pick that is a pair. It says "exactly
+   one of these" by its shape, which is the whole reason there is no sentence
+   under it. The columns come from the number of buttons rather than from a
+   hardcoded three, so the two death rules fill the bar instead of sitting in
+   the left two thirds of one built for difficulty. */
 .seg {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px;
   padding: 2px; border-radius: 7px;
-  background: rgba(0, 0, 0, .3);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .5);
+  background: rgba(122, 94, 54, .1);
+  box-shadow: var(--sunk);
 }
 .seg button {
-  padding: 7px 4px; border-radius: var(--r-md); border-color: transparent;
+  padding: 7px 4px; border-radius: var(--r-md);
   background: transparent; box-shadow: none;
   font-size: var(--fs-sm); font-weight: 700; letter-spacing: .04em;
-  color: rgba(247, 238, 222, .5);
+  color: var(--ink-soft); text-align: center;
 }
-.seg button:hover:not(.on) { transform: none; background: rgba(255, 255, 255, .07); color: rgba(247, 238, 222, .85); }
+.seg button:hover:not(.on) { transform: none; background: rgba(255, 255, 255, .7); color: var(--ink); }
+.seg button:active:not(:disabled) { transform: none; }
 .seg button.on {
   color: #2a1607;
   background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 60%, var(--accent));
@@ -631,10 +607,12 @@ button.primary:hover { filter: brightness(1.05); }
 
 .chargen-foot {
   display: flex; align-items: center; gap: 12px; margin-top: 16px;
-  padding-top: 13px; border-top: 1px solid rgba(255, 255, 255, .09);
+  padding-top: 13px;
+  border-top: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
 }
-.chargen-foot .status { flex: 1; text-align: left; }
-.chargen-foot .status.ready { color: var(--accent-2); }
+.chargen-foot .status { flex: 1; text-align: left; color: var(--ink-faint); }
+.chargen-foot .status.ready { color: var(--accent-deep); }
 .chargen-actions { display: flex; gap: 6px; }
 .chargen-actions button { min-width: 92px; }
 
@@ -1430,12 +1408,15 @@ button.primary:hover { filter: brightness(1.05); }
    as a magnitude. This one keeps its lowercase unit. */
 #chip-pack { background: rgba(190, 92, 40, .9); color: #fff5ec; gap: 6px; text-transform: none; }
 
-/* A button that is about to throw something away. */
-button.danger {
+/* A button that is about to throw something away. Loud enough to be the one
+   red thing on the card, and it stays red on hover: a destructive control that
+   goes pale under the pointer is a destructive control you stop reading. */
+button.danger, button.danger:hover:not(:disabled) {
   background: linear-gradient(180deg, #d4503c, #96271b);
-  border-color: rgba(255, 160, 140, .35);
-  color: #fff3f0;
+  color: #fff3f0; text-shadow: 0 1px 1px rgba(0, 0, 0, .35);
+  box-shadow: 0 10px 22px -12px rgba(150, 39, 27, .95), inset 0 1px 0 rgba(255, 255, 255, .3), 0 0 0 1px rgba(110, 28, 18, .5);
 }
+button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 .confirm-card h2 { letter-spacing: .04em; }
 .confirm-card .tagline { margin-bottom: 4px; }
 #confirm { z-index: 120; }
@@ -1682,14 +1663,10 @@ kbd {
     inset 0 1px 0 rgba(255, 255, 255, .9),
     0 2px 0 rgba(122, 94, 54, .35);
 }
-/* The dark key cap belongs to the plate, which after the HUD came onto
-   parchment means the title, pause and death cards and nothing else. `#hint`
-   used to be listed here and is a sheet now, so it takes the paper cap. */
-.menu-card kbd, .panel button kbd {
-  background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .2);
-  box-shadow: 0 1.5px 0 rgba(0, 0, 0, .35); color: #f3ece0;
-}
-.panel button kbd { background: rgba(0, 0, 0, .07); border-color: rgba(0, 0, 0, .12); box-shadow: none; color: var(--ink-soft); }
+/* A cap on a button is already sitting on a raised face, so it drops its own
+   lift and reads as printed on the key instead. There is no dark cap any more:
+   there is nothing dark left for one to sit on. */
+button kbd { background: rgba(0, 0, 0, .07); box-shadow: none; color: var(--ink-soft); }
 
 /* ── narrow windows ────────────────────────────────────── */
 /* The nine-column grid and the 236px sidebar together need ~760px of viewport.

@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ITEMS } from '../game/Items.js';
+import { ITEMS, ARMOUR_TIERS } from '../game/Items.js';
 
 const BASE = 'models/';
 
@@ -602,6 +602,34 @@ export const POSE = {
   shelf_fungus:    { file: 'wam/shelf_fungus',    pack: 'wam', height: 0.24, grip: 0.38, rot: [0.34, -0.44, 0.18], pos: [0.02, 0.10, -0.04], icon: [0.52, 0.40, -0.12] },
   crystal_cluster: { file: 'wam/crystal_cluster', pack: 'wam', height: 0.26, grip: 0.40, rot: [0.10, -0.55, 0.20], pos: [0.02, 0.11, -0.04], icon: [0.18, 0.52, -0.14] },
 
+  // --- armour ---------------------------------------------------------------
+  //
+  // Four shapes for twenty items: each is worn by all five tiers, which are
+  // separated by `tintAll` (see `tintedMaterial`) rather than by geometry.
+  // That is the opposite call to the poultry pair above and it is the right one
+  // here — an iron helm and a copper helm really are one helm in two metals,
+  // where a raw and a roasted drumstick are two objects.
+  //
+  // The models are therefore authored in near-white neutral grey, because a
+  // multiply cannot put a hue onto something that already has one: anything
+  // saturated in the source would drag every tier back toward itself, which is
+  // the same trap the note on `TIER_LOOK` records for the KayKit steel.
+  //
+  // `grip` is the odd one across the set and follows what a hand would take
+  // hold of rather than the middle of the box: a helm by its crown, a
+  // chestplate at the shoulder line, leggings at the waist band — all near the
+  // top, so the piece hangs under the fist — and boots low, because a pair of
+  // boots is picked up by the ankles with the feet below.
+  //
+  // `fitMax` on the chest and the boots: both are authored wider (or deeper)
+  // than they are tall, and normalising those by *height* is what turned a low
+  // wide thing into a giant — the same fault the food kit and the bow carry the
+  // flag for.
+  armour_helm:  { file: 'wam/armour_helm',  pack: 'wam', height: 0.30, grip: 0.62, tintAll: true, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.10, -0.04], icon: [0.14, 0.50, -0.10] },
+  armour_chest: { file: 'wam/armour_chest', pack: 'wam', height: 0.36, grip: 0.72, tintAll: true, fitMax: true, rot: [0.10, -0.50, 0.10], pos: [0.02, 0.12, -0.04], icon: [0.14, 0.44, -0.10] },
+  armour_legs:  { file: 'wam/armour_legs',  pack: 'wam', height: 0.34, grip: 0.78, tintAll: true, rot: [0.08, -0.50, 0.12], pos: [0.02, 0.14, -0.04], icon: [0.12, 0.44, -0.12] },
+  armour_boots: { file: 'wam/armour_boots', pack: 'wam', height: 0.30, grip: 0.55, tintAll: true, fitMax: true, rot: [0.14, -0.55, 0.10], pos: [0.02, 0.10, -0.04], icon: [0.20, 0.48, -0.08] },
+
   // Driftwood is the one authored wider than it is tall on purpose, so it
   // normalises on its longest axis instead of its height — without `fitMax` a
   // low tangle would be scaled up by its own thickness and arrive as a log
@@ -777,6 +805,33 @@ export const BY_NAME = {
   muffin: 'muffin',
   candy: 'candy',
   croissant: 'croissant',
+
+  // --- armour ---------------------------------------------------------------
+  //
+  // Twenty ids, four models. Five tiers of each slot share a shape and are told
+  // apart by colour alone, which is the one case in this file where that is the
+  // right call rather than the failure mode: a copper helm and an iron helm *are*
+  // the same helm in two metals, unlike a raw and a cooked drumstick, which are
+  // two different objects. See `tintAll` on the poses for how the tier colour
+  // gets onto a shared mesh.
+  //
+  // Worth knowing before touching any of this: armour is a **retired system**.
+  // Nothing crafts it, nothing drops it and nothing equips it — see the note
+  // above `ARMOUR_TIERS` in `game/Items.js`. These twenty definitions exist so
+  // that ids sitting in old saves, in crates and in traders' stock still resolve
+  // to something with a label and a picture. So this is not new content; it is
+  // the last twenty items in the game that were still hand-drawn, finally
+  // drawn the way everything else is.
+  hide_helm: 'armour_helm',       hide_chest: 'armour_chest',
+  hide_legs: 'armour_legs',       hide_boots: 'armour_boots',
+  copper_helm: 'armour_helm',     copper_chest: 'armour_chest',
+  copper_legs: 'armour_legs',     copper_boots: 'armour_boots',
+  iron_helm: 'armour_helm',       iron_chest: 'armour_chest',
+  iron_legs: 'armour_legs',       iron_boots: 'armour_boots',
+  crystal_helm: 'armour_helm',    crystal_chest: 'armour_chest',
+  crystal_legs: 'armour_legs',    crystal_boots: 'armour_boots',
+  cinder_helm: 'armour_helm',     cinder_chest: 'armour_chest',
+  cinder_legs: 'armour_legs',     cinder_boots: 'armour_boots',
 };
 
 /**
@@ -810,10 +865,81 @@ const TIER_LOOK = {
   5: { roughness: 0.45, metalness: 0.28, emissive: 0.52, sat: 0.92, light: 0.34 },
 };
 
+/**
+ * The same idea as `TIER_LOOK`, for the armour ladder, and deliberately not
+ * `TIER_LOOK` itself.
+ *
+ * Borrowing the tool ladder was tried first and does not work, for a reason
+ * worth writing down because it is the whole difficulty of this table: the two
+ * ladders' *hues* are not spread the same way. The tools run wood, stone, iron,
+ * astral, cinder — one brown at the bottom and one hot red at the top, a long
+ * way apart in lightness. Armour runs hide, copper, iron, astral, cinder, and
+ * **three of its five are warm oranges**: hide at hue 28°, copper at 23°,
+ * cinder at 14°. Hue cannot separate them, so lightness and saturation have to,
+ * and they have to be chosen against each other rather than inherited.
+ *
+ * Measured, in linear RGB on the models' lit face (their authored greys times
+ * this colour), worst pair of all ten:
+ *
+ *   - raw hexes, flat multiply, no regrade        0.083  (copper vs cinder)
+ *   - regraded through TIER_LOOK                  0.086  (hide vs cinder)
+ *   - this table                                  0.237  (copper vs cinder)
+ *
+ * 0.22 is the tolerance `glowPalette` picks colours apart with a few hundred
+ * lines down, so 0.237 clears the bar this file already set itself, and every
+ * other pair is 0.29 or better.
+ *
+ * The one honest cost: copper's grade is a light warm bronze rather than the
+ * saturated orange its icon hex is, because the saturated orange is where
+ * cinder has to live. It is not arbitrary — a polished copper *is* pale — and
+ * the two do not rely on colour alone anyway: copper is 0.35 metal at 0.52
+ * rough, cinder is a hot surface with an emissive over half, and neither of
+ * those shows up in the number above.
+ *
+ * Hide takes no metalness at all and the highest roughness in the set, which is
+ * the other half of why it stays clear of cinder: it is boiled leather and
+ * should read as cloth next to a glowing plate.
+ */
+const ARMOUR_LOOK = {
+  1: { sat: 0.50, light: 0.22, roughness: 0.95, metalness: 0.00, emissive: 0.00 }, // hide
+  2: { sat: 0.85, light: 0.62, roughness: 0.52, metalness: 0.35, emissive: 0.00 }, // copper
+  3: { sat: 0.28, light: 0.84, roughness: 0.26, metalness: 0.45, emissive: 0.00 }, // iron
+  4: { sat: 1.00, light: 0.70, roughness: 0.18, metalness: 0.20, emissive: 0.35 }, // astral
+  5: { sat: 1.00, light: 0.40, roughness: 0.45, metalness: 0.25, emissive: 0.55 }, // cinder
+};
+
 /** Which item art maps to which model. */
 export function poseKeyFor(def) {
   if (def.tool) return POSE[def.tool.kind] ? def.tool.kind : null;
   return BY_NAME[def.name] ?? null;
+}
+
+/**
+ * A piece of armour's tier as a 1..5 ordinal, or 0 if it isn't armour.
+ *
+ * Armour carries no tier on its definition — `def.armour` is slot, points and
+ * durability, and the tier survives only in the item's *name*, which the
+ * generator builds as `${tier}_${slot}`. So it is read back off the name and
+ * looked up in the table that made it, rather than guessed from the colour.
+ *
+ * Worth having rather than leaving every piece at tier 0, because tier 0 is
+ * what `TIER_LOOK` is not indexed by: a flat multiply left copper and cinder
+ * 0.083 apart in linear RGB (both are mid oranges) where the next closest pair
+ * in the set is 0.202. Running them through the same per-tier regrade the tools
+ * use is what pulls them back apart — copper to a desaturated light tan, cinder
+ * to a deep red that carries its own emissive — and it is a ladder that already
+ * exists and is already tuned.
+ *
+ * The two ladders are not the same metals, but they are the same *shape*:
+ * hide/copper/iron/crystal/cinder lands on rough, dull, polished, glowing,
+ * forge-hot in exactly the order `TIER_LOOK` runs in.
+ */
+function armourTier(def) {
+  if (!def.armour || !def.name) return 0;
+  const cut = def.name.lastIndexOf('_');
+  if (cut < 0) return 0;
+  const i = Object.keys(ARMOUR_TIERS).indexOf(def.name.slice(0, cut));
+  return i < 0 ? 0 : i + 1;
 }
 
 /** @returns {{key:string, tier:number, tint:string, fill:string|null}|null} */
@@ -823,14 +949,22 @@ function modelSpecFor(itemId) {
   const key = poseKeyFor(def);
   if (!key) return null;
   return {
-    key, tier: def.tool?.tier ?? 0, tint: def.color ?? '#ffffff',
+    key, tier: def.tool?.tier ?? armourTier(def), tint: def.color ?? '#ffffff',
     // A pail and a pail of water are one model, and telling them apart matters
     // more in the inventory than anywhere else — so the contents are modelled.
     fill: def.fill ?? null,
   };
 }
 
-const meshKey = (spec) => `${spec.key}|${spec.tier}|${spec.fill ?? ''}`;
+// The tint is part of the key only for the poses that actually bake it into a
+// material (`tintAll`). Everywhere else `spec.tint` is the item's icon colour
+// and has no effect on the mesh, so putting it in unconditionally would split
+// the cache — one geometry upload per *colour* rather than per model — for
+// nothing. Where it does matter it is essential: the five armour tiers share a
+// pose key and a tier of 0, so without this a copper helm and an iron helm are
+// the same cache entry and whichever loaded first colours both.
+const meshKey = (spec) =>
+  `${spec.key}|${spec.tier}|${spec.fill ?? ''}${POSE[spec.key]?.tintAll ? `|${spec.tint}` : ''}`;
 
 // --- shared resources -------------------------------------------------------
 
@@ -1021,12 +1155,16 @@ function splitMetalGroup(geo, atlas) {
 }
 
 const _hsl = { h: 0, s: 0, l: 0 };
-/** The item's tier colour, re-graded to read as a lit surface rather than an icon. */
-function tintColor(hex, tier) {
-  const look = TIER_LOOK[tier];
+/** Re-grade one hex by a look's saturation and lightness. */
+function regrade(hex, look) {
   const c = new THREE.Color(hex);
   c.getHSL(_hsl, THREE.SRGBColorSpace);
   return c.setHSL(_hsl.h, Math.min(1, _hsl.s * look.sat), look.light, THREE.SRGBColorSpace);
+}
+
+/** The item's tier colour, re-graded to read as a lit surface rather than an icon. */
+function tintColor(hex, tier) {
+  return regrade(hex, TIER_LOOK[tier]);
 }
 
 /**
@@ -1165,6 +1303,50 @@ function atlasMaterial(pack, texture) {
   return m;
 }
 
+/**
+ * A WAM model's own vertex colours, multiplied by one flat item colour.
+ *
+ * The third colouring route in this file, and the cheapest. `atlasMaterial`
+ * paints a model with the pack's texture; `metalMaterial` replaces half a
+ * KayKit mesh with a flat tier colour chosen by draw group. This one keeps the
+ * whole mesh and multiplies — which only works because the models that ask for
+ * it are authored in near-white neutral grey, so the multiply *is* the colour
+ * rather than a stain over one. That is a constraint on the art, and it is
+ * written on the poses that carry `tintAll` as well as here.
+ *
+ * Cached per pack *and* colour, which is the whole point: four armour meshes
+ * and five tier colours come to four geometries and up to twenty materials,
+ * against twenty meshes if the tiers had been modelled apart.
+ */
+function tintedMaterial(pack, hex, tier) {
+  const id = `tinted|${pack}|${hex}|${tier}`;
+  let m = matCache.get(id);
+  if (m) return m;
+  const look = ARMOUR_LOOK[tier];
+  m = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    // `THREE.Color` converts the hex out of sRGB into the renderer's linear
+    // working space, which is the space the WAM exporter already bakes COLOR_0
+    // in (see the note on `glowPalette`), so the two multiply in the same units.
+    //
+    // Regraded through the tool ladder where there is one (see `armourTier`).
+    // The raw hexes are icon colours: at this size, unregraded, copper and
+    // cinder are the same orange.
+    color: look ? regrade(hex, look) : new THREE.Color(hex),
+    // A shade harder and glossier than the plain WAM material: everything that
+    // routes through here is metal plate or boiled hide, and at the WAM
+    // default (0.85 rough, 0.02 metal) a full set read as five paper cut-outs.
+    roughness: look ? look.roughness : 0.58,
+    metalness: look ? look.metalness : 0.14,
+  });
+  // Astral and cinder carry their own light, the same as the gear does — which
+  // is the second thing keeping cinder off copper, and the only one that still
+  // works after dark.
+  if (look && look.emissive > 0) m.emissive = regrade(hex, look).multiplyScalar(look.emissive);
+  matCache.set(id, m);
+  return m;
+}
+
 /** The flat tier-coloured half: heads, blades, fittings. One per tier. */
 function metalMaterial(tier, tintHex) {
   const id = `metal|${tier}`;
@@ -1192,8 +1374,11 @@ function buildMesh(spec, base, atlas) {
   const id = meshKey(spec);
   let mesh = meshCache.get(id);
   if (mesh) return mesh;
+  const pose0 = POSE[spec.key];
   const pack = atlasMaterial(base.pack, atlas.texture);
-  const skin = POSE[spec.key].glow || POSE[spec.key].glowMatch
+  const skin = pose0.tintAll
+    ? tintedMaterial(base.pack, spec.tint, spec.tier)
+    : pose0.glow || pose0.glowMatch
     ? glowMaterial(spec.key, base.geometry, pack)
     : pack;
   const split = PACKS[base.pack].tint && spec.tier > 0;

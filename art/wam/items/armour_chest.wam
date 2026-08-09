@@ -1,0 +1,183 @@
+# Armour chestplate — the broad half of the armour pair.
+#
+# **This model is authored in neutral greys on purpose and must stay that way.**
+# One chest mesh backs five armour tiers (hide, copper, iron, astral, cinder) and
+# `render/ItemModels.js` multiplies a per-tier colour over COLOR_0 at runtime. A
+# multiply can only take a colour *down*, so any saturated hue authored here
+# survives into all five tiers and no tint can remove it. Every value is a
+# near-white neutral carrying form by value alone; the only dark thing is the
+# waist belt, which is dark because it is leather.
+#
+# **The silhouette is the whole job, and it is defined against `armour_helm`.**
+# See that file's header for the pair rule. The short version:
+#
+#   helm  — TALL AND DOMED, w/h ~0.95, one closed mass, no limbs off it.
+#   chest — BROAD AND WIDE, w/h ~1.45, notched at the arm holes.
+#
+# The `checks` bands in the two files do not touch, on purpose.
+#
+# Four cues make the mass a chestplate rather than a barrel or a bell:
+#
+#   1. **The pauldrons, and the notch under them.** Two mirrored caps thrown out
+#      sideways off the top of the trunk, past the widest the shell ever gets.
+#      The empty wedge between a pauldron's underside and the shell's flank is
+#      the **arm hole**, and it is the single most valuable pixel in the model:
+#      it is the only concavity in the outline, and a concavity is what the eye
+#      uses to tell a worn shell from a jar. Everything else here is convex.
+#   2. **The taper.** Widest at the chest (0.94) and narrowest at the waist
+#      (0.58) — an inverted trapezoid, which is the torso read. The first
+#      instinct is to make the base wide so the thing stands up; that gives a
+#      flowerpot.
+#   3. **The centre ridge.** A thin box standing proud down the breastbone, and
+#      it is a separate part rather than a painted stripe because a stripe has
+#      no silhouette from the side and no shading break from the front.
+#   4. **The collar.** A short step up out of the yoke. Without it the top of
+#      the trunk is a flat lid and the model reads as a tub.
+#
+# `frame=up` on the pauldrons is load-bearing: they run along ±X, where the
+# automatic depth axis is undefined, and unpinned their rings roll over halfway
+# out and the cap turns edge-on.
+
+model armour_chest
+  height 0.34
+  style chunky
+
+palette
+  # Same neutral ladder as the helm, so the pair looks like one set once the
+  # tier tint lands on both.
+  Lit    #d8dae0
+  Mid    #a8abb4
+  Shade  #7b7e87
+  # The one genuinely dark accent: the belt the plate is strapped on with.
+  Strap  #443f4a
+
+skeleton
+  root waist at 0.0
+  bone trunk parent=waist dir=up len=0.80
+
+parts
+  # The shell. Narrow at the waist, broad at the chest, stepping back in at the
+  # yoke so the pauldrons have something to overhang.
+  #
+  # `material=` is named on every ring including the repeats: a material named
+  # once bands only as far as the *next* ring and then reverts to the loft
+  # default, which is the bug that turned the helm's crown into a dark cone on
+  # its first sheet.
+  loft shell bones=waist..trunk material=Mid sides=8
+    ring 0.00 w=0.58 d=0.34 material=Mid
+    ring 0.09 w=0.66 d=0.39 material=Mid
+    ring 0.34 w=0.80 d=0.45 material=Shade
+    ring 0.60 w=0.94 d=0.49 material=Lit     # the chest, widest the shell gets
+    ring 0.82 w=0.88 d=0.46 material=Lit
+    ring 1.00 w=0.64 d=0.38 material=Mid     # the yoke tucks back in
+    cap start=flat end=flat
+
+  # The belt. A separate loft standing proud of the waist rather than a colour
+  # band on the shell, for the reason `hide.wam` gives its cord: a painted
+  # stripe has no silhouette, and the first sheet's painted one rendered as a
+  # two-pixel black sliver tucked under the base where nothing could see it.
+  # Being a part also makes the waist *measurable*, which is what the taper
+  # assertion at the bottom of this file needs.
+  loft belt bones=waist..trunk material=Strap sides=8
+    ring 0.02 w=0.62 d=0.37 material=Strap
+    ring 0.06 w=0.70 d=0.42 material=Strap
+    ring 0.14 w=0.70 d=0.42 material=Strap
+    ring 0.18 w=0.64 d=0.38 material=Strap
+    cap start=none end=none
+
+  # The gorget. Short and flared back out at the lip, and it ends on a dark disc
+  # — the neck *hole*. The first cut was a tall straight tube capped pale, and
+  # between that and a pair of round pauldrons the whole model read as a vase
+  # with handles. A collar that steps in and then back out is a piece of armour;
+  # one that only steps in is a bottle neck.
+  loft collar bone=trunk at=1.00 dir=up len=0.13 material=Mid sides=8
+    ring 0.00 w=0.60 d=0.36 material=Mid
+    ring 0.50 w=0.47 d=0.30 material=Lit
+    ring 1.00 w=0.50 d=0.32 material=Shade
+    cap start=none end=flat
+
+  # The breastbone ridge. Wide and shallow — a keel, not a pipe. The first cut
+  # was 0.14 across and stood 0.063 proud, and the side view showed a rounded
+  # bar floating in front of the chest like a jug handle. Rides forward with the
+  # shell's own bulge via per-ring `fwd=`, so it stands proud at every height
+  # instead of surfacing at the chest and sinking out of sight at the waist
+  # (which the lint calls a buried part, and rightly).
+  loft ridge bone=trunk at=0.16 dir=up len=0.60 material=Lit frame=fwd sides=4 shape=box
+    ring 0.00 w=0.22 d=0.08 fwd=0.150 material=Lit
+    ring 0.42 w=0.24 d=0.09 fwd=0.200 material=Lit
+    ring 0.76 w=0.22 d=0.08 fwd=0.220 material=Lit
+    ring 1.00 w=0.15 d=0.06 fwd=0.190 material=Lit
+    cap start=flat end=flat
+
+  mirror
+    # A pauldron. `tilt` splays a `side` bone, negative tips it down, so the
+    # shoulder line slopes the way a shoulder does — and 26° rather than the
+    # first cut's 12°, because a near-horizontal one reads as an outstretched
+    # arm. `cap end=flat` for the same reason: a domed end turned each pauldron
+    # into a torpedo nose, where a slanted flat cut reads as the edge of a
+    # plate.
+    #
+    # `frame=up` is load-bearing here — the part runs along ±X where the
+    # automatic depth axis is undefined — and it fixes what the two numbers
+    # mean: `d` is the plate's vertical thickness, `w` its front-to-back span.
+    # A pauldron is wide across the body and thin top-to-bottom, so w > d by
+    # half again; equal numbers give a sausage.
+    #
+    # The root sits inside the shell so the two never part company; the outer
+    # two thirds is overhang, and the air beneath that overhang is the arm hole.
+    loft pauldron bone=trunk at=0.94 offset=(0.28,0.05,0) dir=side tilt=-22 len=0.45 material=Lit frame=up sides=6 shape=squarish
+      ring 0.00 w=0.48 d=0.30 material=Mid
+      ring 0.30 w=0.52 d=0.30 material=Lit
+      ring 0.70 w=0.48 d=0.24 material=Lit
+      ring 1.00 w=0.38 d=0.13 material=Shade
+      cap start=flat end=flat
+  end
+
+checks
+  # Sits on its waist rim.
+  assert bottom(shell) < 0.012
+  assert bottom(shell) > -0.012
+
+  # ---- THE PAIR TEST -------------------------------------------------------
+  # `armour_helm.wam` asserts this same ratio in 0.82..1.08. The two bands do
+  # not overlap and there is a clear 0.20 of daylight between them, so the
+  # chestplate can never quietly converge on the helm's outline the way the
+  # retired meat/cooked_meat pair converged on each other. INTENDED ASPECT
+  # ~1.45:1 (width:height) — half again as wide as it is tall.
+  assert width / height in 1.28..1.75
+  measure aspect width / height
+
+  # The pauldrons carry that width, not the shell. If a later edit fattens the
+  # shell to hit the aspect band instead, this fails: a wide barrel is not a
+  # wide-shouldered plate.
+  assert width > width(shell) * 1.35
+  # ...and the shell tapers to the waist. An inverted trapezoid, not a pot. The
+  # belt girdles the narrowest ring, so it is a usable stand-in for a waist
+  # measurement the language has no other way to take.
+  assert width(shell) / width(belt) in 1.20..1.60
+  measure taper width(shell) / width(belt)
+  assert width(belt) > width(shell) * 0.0 + 0.55
+
+  # THE ARM HOLE. The pauldron has to reach genuinely past the shell's flank at
+  # the height it hangs over, or there is no notch and the outline is one convex
+  # blob. Stated as an x-extent rather than `gap()`, because the pauldron is
+  # rooted inside the shell and its closest approach is 0 by construction.
+  assert xmax(pauldron.l) > xmax(shell) + 0.16
+  measure overhang xmax(pauldron.l) - xmax(shell)
+  # ...and the overhang has air under it: the pauldron's underside must clear
+  # the shell's widest ring (which sits at y ~0.48) or the notch closes and the
+  # outline goes convex everywhere.
+  assert ymin(pauldron.l) > 0.55
+  measure armhole ymin(pauldron.l) - 0.48
+
+  # The ridge stands proud along its whole length rather than surfacing once.
+  assert zmax(ridge) > zmax(shell) + 0.01
+
+  # A shell, not a box: real front-to-back depth but nothing like its width.
+  assert width / depth in 2.0..3.4
+  measure depth_ratio width / depth
+
+  assert materials == 4
+  assert parts == 6
+  assert tris < 360
+  assert tris > 150

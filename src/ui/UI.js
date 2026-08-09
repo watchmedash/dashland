@@ -1236,29 +1236,38 @@ export class UI {
     }
   }
 
-  /** Three buttons in a bar. A segmented control needs no caption per option. */
+  /**
+   * The four settings, in a dropdown.
+   *
+   * It was a segmented bar, which was built when there were three of them and
+   * could not set "Extreme" in a quarter of the card once there were four. A
+   * real `<select>` is the trade: the platform draws the open list, and in
+   * return the control is keyboard operable, type-ahead searchable and
+   * announced by a screen reader without a line of code here. It also cannot
+   * drift from its own value, because there is no second copy of "which one is
+   * current" to keep in step — `_syncDifficulty` writes `value` and the browser
+   * owns the rest.
+   */
   _buildDifficulty() {
-    const bar = this.el.cgDiff;
-    if (!bar) return;
-    bar.innerHTML = '';
+    const sel = this.el.cgDiff;
+    if (!sel) return;
+    sel.innerHTML = '';
     for (const d of DIFFICULTIES) {
-      const b = document.createElement('button');
-      b.textContent = d.label;
-      b.dataset.key = d.key;
-      b.onclick = () => {
-        this._difficulty = d.key;
-        this._syncDifficulty();
-        this.game.audio.ui(560);
-      };
-      bar.appendChild(b);
+      const o = document.createElement('option');
+      o.value = d.key;
+      o.textContent = d.label;
+      sel.appendChild(o);
     }
+    sel.onchange = () => {
+      this._difficulty = sel.value;
+      this.game.audio.ui(560);
+    };
     this._syncDifficulty();
   }
 
   _syncDifficulty() {
-    const bar = this.el.cgDiff;
-    if (!bar) return;
-    for (const b of bar.children) b.classList.toggle('on', b.dataset.key === this._difficulty);
+    const sel = this.el.cgDiff;
+    if (sel) sel.value = this._difficulty;
   }
 
   /**
@@ -1270,10 +1279,16 @@ export class UI {
    * existing styling exactly and adds no rule to the stylesheet. Idempotent —
    * the picker is opened once per New Game and the row is made on the first of
    * those and reused after.
+   *
+   * The anchor is the difficulty row, found by `closest`, not by walking up one
+   * parent from the control. The select sits in a `.pick-wrap` that carries the
+   * drawn chevron, so one `parentElement` lands inside the row rather than on
+   * it, and the death rule would have been inserted into the middle of the
+   * difficulty control.
    */
   _deathRuleBar() {
     if (this._cgDeath) return this._cgDeath;
-    const after = this.el.cgDiff?.parentElement;
+    const after = this.el.cgDiff?.closest('.cg-pick');
     if (!after?.parentElement) return null;
     const row = document.createElement('div');
     row.className = 'cg-pick';
@@ -1362,6 +1377,15 @@ export class UI {
    * and commits a world would be the one way to start a planet by accident.
    */
   _characterKey(e) {
+    // A focused control owns the keys it uses, and this listener is on the
+    // window in the capture phase, so it sees them first and would eat them.
+    // The difficulty select owns all four arrows and Enter, which is the whole
+    // reason it is keyboard operable; a focused button owns Enter, because the
+    // browser turns that into a click on that button, which is what the player
+    // pressing Enter on "Back" meant.
+    const t = e.target;
+    if (t instanceof HTMLSelectElement) return;
+    if (e.key === 'Enter' && t instanceof HTMLButtonElement) return;
     const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
     if (step !== undefined) {
       this.stepCharacter(step);

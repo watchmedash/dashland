@@ -1,0 +1,126 @@
+# Armour leggings — a waisted piece that splits into two legs.
+#
+# **This model is authored in neutral greys on purpose and must stay that way.**
+# One mesh backs all five armour tiers (hide, copper, iron, astral, cinder);
+# `render/ItemModels.js` multiplies a per-tier colour over these vertex colours
+# at runtime. Multiplication can only ever darken and tint *towards* a hue, so a
+# model authored in a saturated colour cannot be re-tinted to another one — a
+# green pair could never become copper. Every value below is a desaturated grey
+# with the tonal separation carrying the form, and the one dark accent (the
+# belt) is a near-neutral charcoal rather than a brown, so it stays a belt in
+# every tier instead of turning into a colour clash in four of them.
+#
+# **The gap between the legs is the entire silhouette.** The four armour models
+# are read side by side in the same 46px inventory slot, so each one has to be
+# identifiable from its outline alone with colour thrown away:
+#
+#   helm      a dome, roughly as wide as it is tall
+#   chest     one broad torso shell, wider than tall, unbroken
+#   legs      TALL and narrow, split up the middle by a hole            <- this
+#   boots     LOW and wide, an L in profile, on a dark sole
+#
+# So the hole is not decoration, it is the whole read, and it is defended by
+# `checks` at the bottom of this file rather than by eye. It runs from the
+# crotch at 74% of the model's height down to the floor — nearly three quarters
+# of the outline is split — and it *widens* on the way down (0.07 at the crotch,
+# ~0.20 at the cuffs) because the legs splay 2°. A parallel-sided gap of a
+# constant 0.07 is about three pixels in the slot and closes up the moment the
+# rasteriser is unkind; a wedge cannot close, because its widest point is at the
+# bottom edge of the icon where nothing overlaps it.
+#
+#   INTENDED ASPECT RATIO — width : height ~= 0.52 : 1  (tall and narrow)
+#
+# and `armour_boots.wam` is asserted to be 1.0..1.45 the other way up. The two
+# bands do not touch and must never be widened until they do: that pair of
+# assertions *is* the silhouette test, written down. This is the failure the
+# retired `meat`/`cooked_meat` pair had and the fix the `poultry`/
+# `cooked_poultry` pair carries.
+
+model armour_legs
+  height 0.5
+  style chunky
+
+palette
+  # Near-white metal down to a mid grey. No hue in any of these — the runtime
+  # tint supplies all of it.
+  Lit   #d8dae0
+  Mid   #b6b9c1
+  Shade #8f929b
+  # The one genuinely dark value, and it is deliberately dark: the inventory
+  # panel is parchment, so a model made entirely of pale greys floats on it. The
+  # belt is the anchor that stops that happening.
+  Belt  #34363c
+
+skeleton
+  root waist at 0.99
+  # The hips are short — a quarter of the model — because everything below their
+  # tail is gap. Lengthen this bone and the split shortens, which is the one
+  # edit that quietly turns this back into a chestplate-shaped blob.
+  bone hips parent=waist dir=down len=0.26
+
+  mirror
+    # `up=0.05` starts the thigh *inside* the hip block, so the two never part
+    # company at the crotch and the leg's start cap is buried rather than shown.
+    # `tilt` splays a `down` bone outward: 2° then 1° more, which is what turns
+    # the gap into a wedge (see the header).
+    bone thigh parent=hips side=0.145 up=0.05 dir=down tilt=2 len=0.47
+    bone shin  parent=thigh dir=down tilt=1 len=0.31
+  end
+
+parts
+  # The waist. Widest at the hip, tapering slightly to the crotch, with the belt
+  # as a banded pair of rings that also stand a little proud of the plate so the
+  # accent has a silhouette and not just a colour.
+  loft hips bones=waist..hips material=Lit sides=8
+    ring 0.00 w=0.44 d=0.30 material=Belt
+    ring 0.09 w=0.475 d=0.325 material=Belt
+    ring 0.18 w=0.455 d=0.305 material=Lit
+    ring 0.55 w=0.47 d=0.315 material=Mid
+    # The hem *flares*, and the number is not free: the leg tops sit at
+    # +-0.2575 across, so a hem narrower than that leaves each thigh sticking
+    # out from under the waist as a little square tab — which is what the first
+    # render sheet showed. 0.53 overhangs them and the legs emerge from beneath
+    # a skirt, which is both what a tasset is and the tidier outline.
+    ring 1.00 w=0.51 d=0.315 material=Shade
+    cap start=flat end=flat
+
+  # One leg, mirrored. Tapers thigh -> knee -> cuff so the pair reads as legs
+  # and not as two posts, and the bottom two rings drop to `Shade` for a dark
+  # cuff that separates the leggings from whatever they stand on.
+  mirror
+    loft leg bones=thigh..shin material=Lit sides=8
+      ring 0.00 w=0.225 d=0.255
+      ring 0.28 w=0.205 d=0.235 material=Mid
+      ring 0.50 w=0.185 d=0.215
+      ring 0.75 w=0.165 d=0.195
+      ring 0.93 w=0.165 d=0.195 material=Shade
+      ring 1.00 w=0.150 d=0.180 material=Shade
+      cap start=flat end=flat
+  end
+
+checks
+  assert bottom(leg.l) < 0.012
+  # THE READ. Two separate legs with real air between them, measured as
+  # geometry rather than trusted from the ring table.
+  assert gap(leg.l, leg.r) > 0.05
+  assert xmin(leg.l) > 0.025
+  measure crotch_gap xmin(leg.l) * 2
+  # The split has to own most of the outline. `top(leg)` is the crotch height;
+  # anything less than two thirds of the model below it and the piece starts
+  # reading as a torso shell with a notch in it.
+  measure split_fraction top(leg.l) / height
+  assert top(leg.l) / height > 0.66
+  # THE PAIR TEST, against `armour_boots.wam`, which asserts this same ratio in
+  # 1.0..1.45. Tall-and-narrow versus low-and-wide is the contrast that survives
+  # colour being thrown away; the two bands do not overlap and widening either
+  # one reopens the "every armour piece is the same grey lump" bug.
+  assert width / height in 0.44..0.62
+  # Slab-ish front to back: leggings are a flat piece, not a barrel. This is
+  # also what keeps them distinct from the boots, which are nearly as deep as
+  # they are tall.
+  assert depth / height in 0.25..0.42
+  # The legs taper. Untapered they are two pipes and the piece reads as a
+  # tuning fork.
+  assert width(leg.l) < 0.24
+  assert parts == 3
+  assert tris < 350

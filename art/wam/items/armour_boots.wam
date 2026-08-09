@@ -1,0 +1,150 @@
+# Armour boots — a low, wide pair, L-shaped in profile, on dark soles.
+#
+# **Authored in neutral greys on purpose, and it must stay that way.** One mesh
+# backs all five armour tiers (hide, copper, iron, astral, cinder);
+# `render/ItemModels.js` multiplies a per-tier colour over these vertex colours
+# at runtime. Multiplication only darkens and pulls towards a hue, so a model
+# authored in a saturated colour can never be re-tinted into another one — a
+# green pair could not become copper. Every value below is a desaturated grey
+# doing nothing but describing form, and the one dark accent is the sole, kept
+# near-neutral charcoal so it stays a sole in all five tiers.
+#
+# **The silhouette is the whole job.** Four armour models share the same 46px
+# inventory slot and each has to be identifiable from its outline with colour
+# thrown away:
+#
+#   helm      a dome, roughly as wide as it is tall
+#   chest     one broad torso shell, wider than tall, unbroken
+#   legs      TALL and narrow, split up the middle by a hole
+#   boots     LOW and wide, an L in profile, on a dark sole            <- this
+#
+# So this model is built around two facts, in this order:
+#
+#   1. **It is wider than it is tall.** `armour_legs.wam` asserts its
+#      width/height in 0.44..0.62; this one asserts 1.00..1.45. The bands do not
+#      touch and must never be widened until they do — that pair of assertions
+#      *is* the silhouette test between the two pieces, written down, in the way
+#      the `poultry`/`cooked_poultry` pair carries its own. The failure it
+#      prevents is real: leggings and boots are both "grey armour on a leg" and
+#      a lazy pair of boots is just short leggings.
+#   2. **It is an L from the side.** A cuff rising vertically at the back, a
+#      foot running out forward from the bottom of it, and nothing filling the
+#      corner. 73% of the model's depth is in front of the ankle. That corner is
+#      what separates boots from a helm (a dome) and from a chestplate (a shell)
+#      even before the width does.
+#
+#   INTENDED ASPECT RATIO — width : height ~= 1.2 : 1, depth : height ~= 1.05 : 1
+#
+# Because the model is wider than it is tall, its pose entry in
+# `render/ItemModels.js` wants `fitMax: true` — the shared normalisation divides
+# by *height*, which would blow a 1.2-wide pair up past the edges of the icon.
+# This is the same flag the food kit carries and the reason it exists.
+#
+# The construction is three lofts a side rather than one bent tube: a 90° bend
+# in a loft as fat as an ankle folds the surface back on itself (the classic
+# invisible-faces bug the linter watches for), so the cuff, the foot and the
+# sole are separate parts that overlap inside each other. The sole is a real
+# slab and not a colour band because it has to overhang the upper sideways —
+# a painted stripe has no silhouette, and this one is the model's baseline.
+
+model armour_boots
+  height 0.28
+  style chunky
+
+palette
+  Lit   #d8dae0
+  Mid   #b0b3bb
+  Shade #8a8d96
+  # The cuff rim was #7b7e87 on the first pass and the render sheet showed the
+  # model with *two* dark values in it — the rim read almost as dark as the sole
+  # and the pair lost its single anchor. Lightened until the sole is
+  # unambiguously the darkest thing in the model.
+  Cuff  #9ea2ab
+  # The dark accent. The inventory panel is parchment, so an all-pale model
+  # floats on it; the sole is the value that pins the pair to a baseline and it
+  # is deliberately near-black rather than merely darker grey.
+  Sole  #33353a
+
+skeleton
+  # A central root between the two boots. Everything is mirrored off it.
+  root mid at 0.46
+  mirror
+    # The cuff drops from the top of the model to the ankle. `fwd=-0.06` sits it
+    # towards the *back* of the foot, which is what leaves room for the forward
+    # projection that makes the L.
+    bone cuff parent=mid side=0.155 fwd=-0.06 dir=down len=0.27
+    # The foot's head is pulled back a further 0.12 so it starts at the heel,
+    # behind the cuff, and one bone then carries both the upper and the sole out
+    # to the toe. `yaw` splays the toes outward — inside a `mirror` block it
+    # flips sign, so the pair toes-out rather than both pointing the same way,
+    # and the gap between the two boots widens towards the front of the model
+    # where the icon has room for it.
+    bone foot parent=cuff at=1.0 fwd=-0.12 dir=fwd yaw=7 len=0.48
+  end
+
+parts
+  mirror
+    # The cuff. Slightly flared at the lip so it reads as an opening rather than
+    # a cut-off pipe.
+    loft shaft bones=cuff..cuff material=Lit sides=6
+      ring 0.00 w=0.250 d=0.250 material=Cuff
+      ring 0.15 w=0.225 d=0.225 material=Cuff
+      ring 0.24 w=0.205 d=0.205 material=Lit
+      ring 1.00 w=0.210 d=0.230 material=Mid
+      cap start=flat end=flat
+
+    # The foot. `frame=up` pins the depth axis to world vertical, so `dtop` is
+    # the height of the upper above the bone and `dbot` the drop below it —
+    # which is what lets the boot taper down towards the toe while its *sole
+    # line stays flat*. Tapering symmetrically (a plain `d`) lifts the toe off
+    # the ground and the boot reads as a slipper curling up.
+    loft upper bones=foot..foot material=Lit frame=up sides=6
+      ring 0.00 w=0.205 dtop=0.200 dbot=0.236 material=Mid
+      ring 0.20 w=0.220 dtop=0.200 dbot=0.236 material=Mid
+      ring 0.48 w=0.215 dtop=0.150 dbot=0.236 material=Lit
+      ring 0.78 w=0.200 dtop=0.105 dbot=0.236 material=Shade
+      ring 1.00 w=0.145 dtop=0.065 dbot=0.236 material=Shade
+      cap start=dome end=flat
+
+    # The sole. Rides the same bone, dropped 0.145 in world Y so its underside
+    # lands on y=0, and a shade wider than the upper so it overhangs as a welt —
+    # the overhang is what makes it read as a separate sole at icon size rather
+    # than as the boot's bottom being in shadow.
+    loft sole bones=foot..foot material=Sole frame=up sides=6
+      ring 0.00 w=0.185 d=0.060 up=-0.160
+      ring 0.10 w=0.240 d=0.072 up=-0.154
+      ring 0.58 w=0.245 d=0.072 up=-0.154
+      ring 0.90 w=0.220 d=0.068 up=-0.156
+      ring 1.00 w=0.155 d=0.052 up=-0.164
+      cap start=dome end=dome
+  end
+
+checks
+  # Stands on the ground on its soles, and the soles are the lowest thing.
+  assert bottom(sole.l) < 0.012
+  assert bottom(upper.l) > bottom(sole.l) + 0.05
+  # THE PAIR TEST, against `armour_legs.wam`, which asserts this same ratio in
+  # 0.44..0.62. Low-and-wide versus tall-and-narrow is the contrast that
+  # survives colour being thrown away. Do not let the two bands meet.
+  assert width / height in 1.00..1.45
+  # THE L. The foot has to run out well in front of the cuff, or the pair is a
+  # couple of cups and reads as a helm at 46px. Measured against the cuff's own
+  # front face, not against a literal, so lengthening the cuff cannot fake it.
+  assert zmax(upper.l) > zmax(shaft.l) + 0.18
+  assert depth / height in 0.85..1.25
+  measure toe_reach zmax(sole.l) - zmax(shaft.l)
+  # ...and the fraction of the total depth that lies forward of the ankle joint,
+  # which is the number the icon framing is set from.
+  measure fwd_projection (zmax(sole.l) - z(cuff.l.tail)) / depth
+  # The pair is two objects with daylight between them, like the leggings' gap
+  # but a fraction of the height — the boots read as a *pair*, side by side, not
+  # as one block.
+  assert gap(sole.l, sole.r) > 0.03
+  assert gap(shaft.l, shaft.r) > 0.05
+  # The sole overhangs the upper, or it is a shadow and not a sole.
+  assert width(sole.l) > width(upper.l) * 1.02
+  # It is low. Belt and braces on the width ratio above: no amount of adding
+  # cuff can turn this into a tall model.
+  assert height < width
+  assert parts == 6
+  assert tris < 350

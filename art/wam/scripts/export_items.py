@@ -127,6 +127,13 @@ ITEMS = [
     # whose model carries a hanging line, which is the only thing separating its
     # icon from `stick`'s.
     "fishing_rod",
+    # Two of the four armour pieces, and the only entries here whose model is
+    # shared by five items apiece: `render/ItemModels.js` multiplies a per-tier
+    # colour (hide, copper, iron, astral, cinder) over the vertex colours, which
+    # is why both sources are authored in neutral greys. Rebuilding one of these
+    # therefore reskins ten inventory slots, not two.
+    "armour_legs", "armour_boots",
+    "armour_helm", "armour_chest",
 ]
 
 # Models authored lying along +Z — bars, loaves, bundles — are stood up on

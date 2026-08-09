@@ -67,20 +67,18 @@
         <button id="cg-next" class="cg-arrow next" aria-label="Next character"><i></i></button>
       </div>
       <p class="cg-name"><b id="cg-who">Ama</b></p>
-      <!-- What you bring, and how hard the planet hits back. Both are built by
-           UI.js from `LOADOUT_OPTIONS` and `DIFFICULTIES`, which are the same
-           two lists the game side imports to turn a key into stacks and a
-           multiplier. One caption each, no prose. -->
+      <!-- How hard the planet hits back, and what a death costs. Both are built
+           by UI.js, from `DIFFICULTIES` and `DEATH_RULES`, which are the same
+           two lists the game side imports. One caption each, no prose. The
+           loadout row that used to head this group is gone; see UI.js.
+
+           Difficulty is a real select rather than a bar of buttons: there are
+           four settings, and a select cannot disagree with its own value or
+           need its own arrow-key handling. The chevron beside it is drawn in
+           CSS. -->
       <div class="cg-pick">
-        <!-- The count is on the caption rather than on a line of its own: once
-             the tiles can refuse a fourth press, the screen owes the player the
-             number that says why, and it is a readout, not a sentence. -->
-        <span class="cg-cap">Bring<b id="cg-kit-count"></b></span>
-        <div class="cg-kit" id="cg-kit"></div>
-      </div>
-      <div class="cg-pick">
-        <span class="cg-cap">Difficulty</span>
-        <div class="seg" id="cg-diff"></div>
+        <label class="cg-cap" for="cg-diff">Difficulty</label>
+        <div class="pick-wrap"><select class="pick" id="cg-diff"></select></div>
       </div>
       <div class="chargen-foot">
         <p class="status" id="cg-status">Shaping</p>

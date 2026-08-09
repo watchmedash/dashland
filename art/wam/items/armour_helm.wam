@@ -1,0 +1,147 @@
+# Armour helm — the tall half of the armour pair.
+#
+# **This model is authored in neutral greys on purpose and must stay that way.**
+# One helm mesh backs five armour tiers (hide, copper, iron, astral, cinder) and
+# `render/ItemModels.js` multiplies a per-tier colour over COLOR_0 at runtime. A
+# multiply can only ever take a colour *down*, so a saturated authored hue would
+# survive into every tier and no tint could remove it — a helm authored in iron
+# blue tints to a blue-copper and a blue-cinder. Every value here is therefore a
+# near-white neutral with tonal variation carrying the form, and the only two
+# things allowed to be dark are the eye slot and the brow bar, which are dark
+# because they are holes and leather rather than because they are coloured.
+#
+# **The silhouette is the whole job, and it is defined against `armour_chest`.**
+# The two sit side by side in the inventory at 46px, where colour is the first
+# thing to go, so the pair has to separate on outline alone:
+#
+#   helm  — TALL AND DOMED, w/h ~0.95, one closed mass, no limbs off it.
+#   chest — BROAD AND WIDE, w/h ~1.45, notched at the arm holes.
+#
+# The `checks` band at the bottom of each file is that judgement written down,
+# and the two bands deliberately do not touch — the same guard the poultry pair
+# carries. Widening either one reopens the bug where the two read as one item
+# twice, which is exactly what happened to the retired meat/cooked_meat pair.
+#
+# Three cues make the mass a helm rather than an egg, an acorn or a bell:
+#
+#   1. **The neck flare.** The bottom ring is the widest thing in the model
+#      (0.94) and the ring immediately above it is the narrowest below the crown
+#      (0.72). That step — flare out, tuck in — is a skirt, and it is the one
+#      feature that says "worn on a head" from every angle. It is ~14% of the
+#      height, so it survives the icon rasteriser as two or three pixels of
+#      deliberate overhang rather than as a taper.
+#   2. **The brow peak.** A short box jutting forward at eye height, breaking
+#      the outline front-to-back. Without it the side view is a plain ovoid and
+#      the model reads as `pearl` scaled up.
+#   3. **The eye slot.** A dark `material_arc` band across the front between the
+#      brow and the cheek. No silhouette, so it is the *third* cue and not the
+#      first — but it is what makes the front view unambiguous, and it is the
+#      one genuinely dark value in the model.
+#
+# The dome is capped `dome`, so the top ~13% of the height comes from the cap
+# rather than from the ring table; shortening the last rings does not shorten
+# the model, it only makes the crown blunter.
+
+model armour_helm
+  height 0.32
+  style chunky
+
+palette
+  # Lit / mid / shadow, all on the same neutral axis. Held apart by ~0.16 of
+  # value each, because the inventory panel is parchment and a helm painted in
+  # three near-identical off-whites is a white blob on a cream ground.
+  Lit    #d8dae0
+  Mid    #a8abb4
+  Shade  #7b7e87
+  # The two dark accents. Slot is a hole, Strap is leather.
+  Slot   #24232a
+  Strap  #443f4a
+
+skeleton
+  root rim at 0.0
+  bone crown parent=rim dir=up len=0.84
+
+parts
+  # The skull. One closed loft from the neck rim to the crown: a helm has no
+  # separable pieces at this size and splitting it would only buy a seam.
+  #
+  # The ring table is not monotonic and that is the model. 0.94 → 0.72 → 0.88 is
+  # the flare, the tuck, and the temple; a table that only ever narrowed upward
+  # would be a bell, and a table that only ever widened would be a thimble.
+  #
+  # **`material=` is named on every ring, including the ones that repeat.** A
+  # material named once bands only as far as the *next* ring and then reverts to
+  # the loft's own default — the first render sheet came back with a dark cone
+  # for a crown and a dark belt round the eyes, because three of the bands here
+  # had quietly fallen back to `Shade`. Same trap `fishing_rod.wam` records for
+  # its grip.
+  loft skull bones=rim..crown material=Lit sides=8
+    ring 0.00 w=0.94 d=0.88 material=Shade    # the neck flare, widest in the model
+    ring 0.07 w=0.86 d=0.81 material=Shade
+    ring 0.14 w=0.72 d=0.70 material=Mid      # the tuck above the flare
+    # The face opening. The arc is measured from the +side axis, so 90° is dead
+    # ahead: 56-124 is a ~68° band across the front and nothing on the sides.
+    ring 0.26 w=0.80 d=0.78 material=Mid  material_arc=Slot:56-124
+    # ...and closed again by restating the arc in the band's own colour. There is
+    # no "end arc" keyword; an arc runs to the next ring that names one.
+    ring 0.46 w=0.88 d=0.85 material=Lit  material_arc=Lit:56-124
+    ring 0.70 w=0.87 d=0.84 material=Lit
+    ring 0.87 w=0.74 d=0.72 material=Lit
+    ring 1.00 w=0.52 d=0.51 material=Lit
+    cap start=flat end=dome
+
+  # The brow peak. `frame=up` is load-bearing: the part runs along +Z, which is
+  # the diagonal where the automatic depth axis flips, and without it the tip
+  # ring stands at right angles to the root ring. With it, `w` spans the temples
+  # and `d` is the bar's own thickness, which is what those numbers mean here.
+  #
+  # `pitch` tips a `fwd` bone downward, so 8° is a brow that shades the eyes
+  # rather than a spout. Kept short — the first cut jutted 0.085 and the side
+  # view read as a beak; a visor is a ledge.
+  loft brow bone=crown at=0.49 offset=(0,0,0.22) dir=fwd pitch=8 len=0.22 material=Strap frame=up sides=4 shape=box
+    ring 0.00 w=0.64 d=0.16 material=Strap
+    ring 0.55 w=0.60 d=0.12 material=Strap
+    ring 1.00 w=0.46 d=0.07 material=Strap
+    cap start=flat end=flat
+
+checks
+  # Sits on its rim.
+  assert bottom(skull) < 0.012
+  assert bottom(skull) > -0.012
+
+  # ---- THE PAIR TEST -------------------------------------------------------
+  # `armour_chest.wam` asserts this same ratio in 1.28..1.75. The two bands do
+  # not overlap and there is a clear 0.20 of daylight between them, so the helm
+  # can never quietly converge on the chestplate's outline the way the retired
+  # meat/cooked_meat pair converged on each other. INTENDED ASPECT ~0.95:1
+  # (width:height) — taller than it is wide, one domed mass.
+  assert width / height in 0.82..1.08
+  measure aspect width / height
+
+  # The neck flare is real overhang and not a taper: the bottom ring has to be
+  # the widest thing in the model. Bounded at 0.84 rather than at the ring
+  # table's 0.94 because an 8-sided chunky section measures its bbox across
+  # facet *corners*, which sit inside the nominal `w`.
+  assert width(skull) > 0.84
+  # The dome/flare split the game's pose table needs for the grip point. The
+  # flare is everything below the tuck ring, which sits at t=0.14 along an 0.84
+  # chain rooted at y=0 — i.e. y = 0.1176. Hardcoded because the language can
+  # measure a part's extents but not one ring inside it; if the tuck ring or the
+  # bone length moves, this number has to move with it.
+  measure flare_top top(skull) * 0.0 + 0.1176
+  measure flare_fraction (top(skull) * 0.0 + 0.1176) / top(skull)
+  measure dome_fraction (top(skull) - 0.1176) / top(skull)
+
+  # The brow breaks the outline forward. Stated as depth rather than as
+  # `gap()`, because the brow is rooted *inside* the skull by construction and
+  # its closest approach is 0 however far it juts.
+  assert zmax(brow) > zmax(skull) + 0.03
+  # ...but it is a ledge, not a beak.
+  assert zmax(brow) < zmax(skull) + 0.13
+  measure brow_jut zmax(brow) - zmax(skull)
+
+  # Neither dark accent may be dropped: the slot is the front view's only cue.
+  assert materials == 5
+  assert parts == 2
+  assert tris < 350
+  assert tris > 140

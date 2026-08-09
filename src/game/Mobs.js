@@ -1138,9 +1138,13 @@ const SPECIES = {
   // reason. See the note on _walkStep — that coupling is worth removing, and
   // until it is, this number cannot be raised.
   parrot: pet('parrot', {
-    label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 1.50, shy: 1.0, turn: 6.5, accel: 12.0,
+    label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 2.60, shy: 1.0, turn: 6.5, accel: 12.0,
     graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3], ['poultry', 1, 1]],
-    flies: true, hover: 2.0,
+    // Height and pace. Two blocks up is head-height on the player, which is
+    // why a parrot read as hovering rather than flying — a bird you can reach
+    // is a bird that is too low. Six clears the canopy, which is the height a
+    // parrot should be seen at, and the speed goes with it: 1.5 was a walk.
+    flies: true, hover: 6.0,
   }),
   bee: pet('bee', {
     // "Bees should sting harder" was reported, and the honest answer was that a
@@ -1447,6 +1451,18 @@ const FOOT_OFF = [
 // for it, because the rest below — not the chase — is what caps the kill rate:
 // a carnivore eats at most once per PREY_REST, however good it is at catching.
 const PREY_PERIOD = 1.6;      // seconds between prey searches for one carnivore
+/**
+ * Seconds a hunter must wait between two bites of the same hunt.
+ *
+ * Without this the bite is per-frame while the prey is in reach, and telling
+ * the prey to flee is not enough to separate them: at 0.05s a tick a bolting
+ * deer has moved 0.15 cells, still well inside `reach`, so the second bite
+ * lands on the next tick. Two bites 0.1s apart is arithmetically not a
+ * one-shot and visually exactly one — which is what was still being reported
+ * after the bite replaced the outright deletion. The cooldown is what actually
+ * puts the chase between the bites.
+ */
+const BITE_PERIOD = 1.5;
 const PREY_RANGE = 20;        // cells it will notice something to eat from
 const PREY_GIVE_UP = 12;      // seconds of chasing before it loses interest
 const PREY_REST_MIN = 34;     // seconds after a kill before it hunts again
@@ -1654,10 +1670,32 @@ const BABY_SECONDS = 210;     // calf → adult
  */
 const FOOT_HALF_W_MIN = 0.47;
 const FOOT_HALF_L_MIN = 0.80;
-const FOOT_HALF_MAX = 1.55;
+/*
+ * These were throttling the big animals to a fraction of the body you can see.
+ *
+ * Measured against the drawn mesh: an elephant is 2.17 half-cells across and
+ * was colliding as 0.86, so you could walk 1.31 cells into its flank before
+ * anything stopped you — which is exactly "I can see their inside if I push
+ * hard enough" — and its drawn body overlapped trunks the footprint test never
+ * sampled, which is the walking-through-trees half of the same fault. A giraffe
+ * was 1.02 against 1.76 drawn.
+ *
+ * `0.26 * height` was the binding constraint and it is simply too narrow for
+ * anything tall: the real ratio is about 0.45 for a deer or a tiger and 0.71
+ * for an elephant. At 0.55 and 0.70 the giraffe is no longer clamped at all,
+ * and the elephant's overlap falls from 1.31 to about 0.49.
+ *
+ * The elephant is deliberately still clamped rather than let out to its full
+ * 2.43. A footprint is a rectangle that has to fit between trees, and the
+ * honest trade is stated in the paragraph above this one: a wider giant refuses
+ * more headings in dense forest and leans harder on the strict-improvement rule
+ * to walk itself out. Closing two thirds of the overlap is worth that; closing
+ * all of it would pen the largest animals in the woods they spawn in.
+ */
+const FOOT_HALF_MAX = 1.90;
 /** Drawn height a body is allowed to be, across and along, before the caps bind. */
-const FOOT_W_PER_H = 0.26;
-const FOOT_L_PER_H = 0.42;
+const FOOT_W_PER_H = 0.55;
+const FOOT_L_PER_H = 0.70;
 
 const footCaps = (drawnHeight) => ({
   capW: Math.min(FOOT_HALF_MAX, Math.max(FOOT_HALF_W_MIN, drawnHeight * FOOT_W_PER_H)),
@@ -2133,6 +2171,8 @@ export class Mobs {
       // not all set off at the same instant.
       hungerT: Math.random() * PREY_REST_MIN,
       preyT: Math.random() * PREY_PERIOD,
+      /** Seconds until this hunter may bite again. See BITE_PERIOD. */
+      biteT: 0,
       prey: null,
       // --- up a tree, monkeys only ---
       /** Layer it is climbing toward, or null when it is not climbing. */
@@ -3008,7 +3048,11 @@ export class Mobs {
       // meaning of the flag. And a body already in the water is exempt for as
       // long as it is in there, or it could never swim a stroke.
       const wet = p.liquidAt(col, gk + 1);
-      if (mob.spec.aquatic ? !wet : (wet && !mob.spec.amphibious && !mob.wading)) {
+      // A flier is not walking, so water is not a wall to it. Without this a
+      // bee or a parrot treated a lake exactly as a land animal does and turned
+      // back at the shore — which is why nothing ever flew over open water.
+      if (mob.spec.aquatic ? !wet
+        : (wet && !mob.spec.flies && !mob.spec.amphibious && !mob.wading)) {
         cost++; continue;
       }
       // The step rules, which are about *walking* and so do not apply to
@@ -3839,7 +3883,9 @@ export class Mobs {
     if (fromK - gk > PATH_MAX_DROP) return -1;     // too far to fall
     if (p.at(col, gk + 1) === ID.lava) return -1;  // and never through lava
     const wet = p.liquidAt(col, gk + 1);
-    if (mob.spec.aquatic ? !wet : (wet && !mob.spec.amphibious)) return -1;
+    // Same exemption as the footprint test — the pathfinder has to agree with
+    // it or a flier plans a route round a lake it is perfectly able to cross.
+    if (mob.spec.aquatic ? !wet : (wet && !mob.spec.flies && !mob.spec.amphibious)) return -1;
     for (let h = 1; h <= mob.tall; h++) {
       const above = p.at(col, gk + h);
       if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) return -1;
@@ -4113,6 +4159,9 @@ export class Mobs {
     const spec = mob.spec;
     if (!spec.preyOn) return false;
     if (spec.diet !== 'carnivore' && spec.diet !== 'omnivore') return false;
+    // Ticked before the early-outs below so the cooldown keeps running while
+    // the hunter rests, rather than being frozen at whatever the last bite set.
+    if (mob.biteT > 0) mob.biteT -= dt;
     // A cub does not hunt, and a fed animal has other plans.
     if (mob.baby > 0 || mob.love > 0) return false;
     if (mob.hungerT > 0) { mob.hungerT -= dt; mob.prey = null; return false; }
@@ -4168,11 +4217,52 @@ export class Mobs {
       return true;
     }
 
+    // In reach, but not yet allowed to bite again: keep after it. Returning
+    // here rather than falling through is the whole point of BITE_PERIOD — the
+    // hunter stays on the prey's heels and the wound has a moment to read.
+    if (mob.biteT > 0) {
+      mob.state = 'chase';
+      mob.stateT = 0.5;
+      return true;
+    }
+
     // Contact. The body is *not* removed here: this runs from inside the update
     // loop's reverse walk over this.list, and splicing an entry below the
     // cursor shifts everything under it, so a mob gets ticked twice or skipped.
     // It is marked and collected after the loop instead.
     this._lunge(mob);
+    mob.biteT = BITE_PERIOD;
+
+    /**
+     * A bite, not a deletion.
+     *
+     * Contact used to end the animal outright, whatever it was: a lion reaching
+     * a deer removed it on the frame it touched it, so predation had no middle
+     * and nothing ever got away. Now the lunge costs the prey the hunter's own
+     * damage, and a deer with health left bolts — so a kill takes two or three
+     * passes and the chase is the part you watch.
+     *
+     * Health is decremented here rather than through `_damage` on purpose. That
+     * calls `_die`, which splices the list, and this runs inside the update
+     * loop's reverse walk — removing an entry under the cursor is what the
+     * comment above is about. The `_kills` list exists precisely so a death is
+     * collected after the loop, so a fatal bite goes there exactly as before.
+     */
+    prey.health -= spec.damage ?? 4;
+    prey.hurtT = 0.25;
+    if (prey.health > 0) {
+      if (this.onSound) this.onSound('hurt', prey);
+      // It breaks away. The hunter has to close again, which is what turns a
+      // kill into a chase, and the pause stops it re-biting on the next frame.
+      prey.state = 'flee';
+      prey.stateT = 2.5;
+      prey.speedNow = prey.spec.speed * FLEE_SPEED;
+      mob.preyT = PREY_PERIOD;
+      mob.state = 'chase';
+      mob.stateT = 0.6;
+      return true;
+    }
+
     prey.taken = true;
     this._kills.push(prey);
     mob.prey = null;

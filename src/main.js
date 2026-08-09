@@ -28,13 +28,13 @@ import { UI } from './ui/UI.js';
 // kit falls back to the six torches — see `loadoutStacks`.
 import * as UIModule from './ui/UI.js';
 import { IconFactory } from './ui/Icons.js';
-import { Inventory, Slot, HOTBAR } from './game/Inventory.js';
+import { Inventory, Slot, HOTBAR, useKind } from './game/Inventory.js';
 import { Drops } from './game/Drops.js';
 import { Weather } from './game/Weather.js';
 import { Seasons } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import * as MobModels from './game/MobModels.js';
-import { Farming } from './game/Farming.js';
+import { Farming, roofsSoil } from './game/Farming.js';
 import { Water } from './game/Water.js';
 import { Save } from './game/Save.js';
 import {
@@ -2715,6 +2715,52 @@ class Game {
     this._breakWhereItStands(doomed.values());
   }
 
+  /**
+   * Farmland that has just been built over goes back to being dirt.
+   *
+   * The other half of "a dirt can only be turned to farmland if no block is
+   * above it", and the honest reading of it: a rule that only applied at the
+   * moment of tilling would be a rule you get around by tilling first and
+   * building afterwards, and the field would sit under a stone floor for ever.
+   * Reverting is also the cheapest thing to explain — the block you put there is
+   * the block that did it, and you can see the soil change under it.
+   *
+   * **The crop is not destroyed here, and does not need to be.** Roofing
+   * farmland means putting a block in the cell the crop occupies, and that cell
+   * was a plant: `_placeBlock` replaces it and drops its seeds first, exactly as
+   * if you had punched it. A crop is never quietly deleted by this pass, and
+   * what the player loses is one wheat's worth of growth they chose to build on.
+   * The other direction — a block one cell higher, over a crop that still stands
+   * on good farmland — is not a revert at all; the crop simply stops growing.
+   * See `Farming.update`.
+   *
+   * Runs after the batch is in the world for the same reason as `_crushCrowded`,
+   * and re-enters `_applyEdits` with its own edits. That terminates at depth
+   * one: it writes dirt into the farmland cell, and the only cell it then looks
+   * at is the one below *that*, which cannot be farmland — nothing grows under
+   * soil.
+   *
+   * Deliberately not called on chunk load or save restore: neither goes through
+   * here (see `_dropUnsupported`), so a field you built a roof over in an older
+   * build stays farmland until something near it changes. The growth pause in
+   * `Farming.update` is what covers that case.
+   */
+  _uncoverFarmland(edits) {
+    let reverts = null;
+    for (const e of edits) {
+      // The world, not `e.id`: by now it is the same answer, and the world is
+      // the one that stays right if an edit is ever rewritten on the way in.
+      if (!roofsSoil(this.planet.at(e.col, e.k))) continue;
+      const k = e.k - 1;
+      if (k < 0) continue;
+      const soil = this.planet.at(e.col, k);
+      if (soil !== ID.farmland && soil !== ID.farmland_wet) continue;
+      if (!reverts) reverts = new Map();
+      reverts.set(e.col * D + k, { col: e.col, k, id: ID.dirt });
+    }
+    if (reverts) this._applyEdits([...reverts.values()]);
+  }
+
   _applyEdits(edits) {
     for (const e of edits) {
       // any change can open a path for water or cut one off
@@ -2744,6 +2790,8 @@ class Game {
     // runs for the original batch those cells are already air, so nothing is
     // dropped twice.
     this._dropUnsupported(edits);
+    // Then any field these edits have just roofed over.
+    this._uncoverFarmland(edits);
     // And finally the sand. Queued rather than done here: see `_seedGravity`.
     this._seedGravity(edits);
   }
@@ -3167,8 +3215,13 @@ class Game {
     if (heldDef?.tool && b.hardness > 0.15) this.inventory.damageHeld(1);
   }
 
-  _placeBlock(hit) {
-    const held = this.inventory.active();
+  /**
+   * @param hit the cell under the crosshair
+   * @param {Slot} [held] the hand doing it. The right-button chain resolves this
+   *   once (see `_hasUse`) and passes it in, so a torch placed out of the
+   *   offhand while the main hand holds a pickaxe comes off the torch.
+   */
+  _placeBlock(hit, held = this.inventory.active()) {
     const def = ITEMS[held.item];
     if (!def || def.block === undefined) return false;
     const id = def.block;
@@ -3321,7 +3374,7 @@ class Game {
         });
       }
     }
-    this.inventory.consumeHeld(1);
+    this.inventory.consumeHeld(1, held);
     this.audio.place(BLOCKS[id].sound, this.planet.centerOf(col, k, _v1));
     this.stats.placed++;
     this.player.swing();
@@ -5476,7 +5529,8 @@ class Game {
     if (mob.spec.trader) return `<kbd>RMB</kbd> Trade`;
     if (mob.baby > 0) return 'Calf';
     if (mob.love > 0) return 'Ready to breed';
-    const held = this.inventory.active();
+    // The hand that would actually feed it, so the prompt and the click agree.
+    const held = this.inventory.actingSlot((s) => this.mobs.canFeed(s.item));
     if (!held.empty && this.mobs.canFeed(held.item) && mob.breedCooldown <= 0) {
       return `<kbd>RMB</kbd> Feed`;
     }
@@ -5641,6 +5695,59 @@ class Game {
     this.audio.ui(240 + 140 * shot.power);
   }
 
+  /**
+   * Does the item in this hand have anything to do with the right button, aimed
+   * at this cell?
+   *
+   * The whole of the fall-through rule. `Inventory.actingSlot` asks it of the
+   * main hand first and only reaches the offhand when the answer is no, so this
+   * is the list of things that stop a torch in the left hand from going down.
+   *
+   * **Precedence, top to bottom.** Nothing below a line that claims is ever
+   * consulted:
+   *
+   *  1. The *block* you are aiming at, before either hand: a bench, a kiln, a
+   *     crate, a bed, a door, a sign. Those are answers the world gives, and
+   *     they are why you can open a chest with a full pickaxe hand. Not decided
+   *     here — see the top of the right-button chain in `_interact`.
+   *  2. The main hand, if this returns true for it.
+   *  3. The offhand, if this returns true for it.
+   *  4. Neither: the main hand, doing nothing.
+   *
+   * **What claims unconditionally**, because the item is the action and the cell
+   * has no say in it: anything that places a block, food, a bucket full or
+   * empty, a fishing rod, a bow. Two blocks, one in each hand, is the case this
+   * settles most often: the right hand wins, always, and the left is not a
+   * second chance at a placement the right hand refused.
+   *
+   * **What claims only against the right cell**: the shovel, which tills, and
+   * seeds, which sow. These are the point of the exercise — a shovel and a torch
+   * has to till dirt and light a wall, and it can, because the shovel only
+   * speaks up when there is soil under the crosshair.
+   *
+   * Note which test the shovel uses: `canTill`, the soil test, and **not**
+   * `tillable`, which also wants an open sky. A shovel aimed at dirt with a
+   * block over it claims the click and is refused out loud. The alternative —
+   * treating roofed dirt as "no action" — would place the offhand torch instead,
+   * and a click that does something you did not ask for is worse than a click
+   * that tells you why it did nothing.
+   *
+   * **What never claims**: an empty hand, a pickaxe, an axe, a sword, and every
+   * other plain material. That is the set a torch can be used over.
+   *
+   * @param {Slot} slot
+   * @param {object|null} hit the cell under the crosshair, if any
+   */
+  _hasUse(slot, hit) {
+    if (slot.empty) return false;
+    switch (useKind(slot.item)) {
+      case 'any': return true;
+      case 'soil': return !!hit && this.farming.canTill(hit.id);
+      case 'seed': return !!hit && this.farming.canPlant(hit.col, hit.k);
+      default: return false;
+    }
+  }
+
   _interact(dt, input) {
     const hit = this.planet.raycast(this.player.eye, this.player.lookDir, this.player.reach);
 
@@ -5762,7 +5869,13 @@ class Game {
       }
       // Right-click offers whatever you're holding. Feeding is how a herd
       // grows, and it's the only reason to keep an animal alive.
-      const heldSlot = this.inventory.active();
+      //
+      // Same fall-through as the block path, with the creature's own test in
+      // place of `_hasUse`: a pickaxe is not food, so wheat in the left hand is
+      // what the cow is offered. `feed` is asked again below because it also
+      // refuses a cow on cooldown, and that refusal must not silently eat the
+      // stack.
+      const heldSlot = this.inventory.actingSlot((s) => this.mobs.canFeed(s.item));
       if (input.clicked[2] && input.locked && this.useCooldown === 0) {
         this.useCooldown = 0.3;
         // The merchant answers the same button, empty-handed or not — it is the
@@ -5770,7 +5883,7 @@ class Game {
         if (mobHit.mob.spec.trader) {
           this.openScreen('shop', mobHit.mob);
         } else if (!heldSlot.empty && this.mobs.feed(mobHit.mob, heldSlot.item)) {
-          this.inventory.consumeHeld(1);
+          this.inventory.consumeHeld(1, heldSlot);
           this.player.swing();
           this.viewModel.punch();
           this.ui.toast(mobHit.mob.baby > 0 ? 'Fed the calf' : 'Ready to breed',
@@ -5801,6 +5914,23 @@ class Game {
     // One chain, one winner. Setting a hint anywhere above this ran into the
     // unconditional clear at the end of it and lasted exactly zero frames.
     const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.active().item]) : null;
+    // The hand the right button is speaking to, for the whole of the rest of
+    // this method. `actingSlot` and not `active()`: the offhand acts when the
+    // main hand has nothing to do with the cell under the crosshair, which is
+    // what makes a torch in the left hand placeable while a shovel is in the
+    // right. Left-click is untouched and still runs off `active()` — mining is
+    // the main hand's job and a torch in the other one has no opinion about it.
+    const heldSlot = this.inventory.actingSlot((s) => this._hasUse(s, hit));
+    const heldItem = ITEMS[heldSlot.item];
+    // Soil with something built over it, said while you are *aiming*.
+    //
+    // The till is edge-triggered, so a refusal written from inside the click
+    // branch would live for one frame and be seen by nobody. Up here it is
+    // re-set every frame the crosshair is on covered soil, which is also when
+    // the player is deciding what to do about it.
+    const tillHint = hit && heldItem?.tool?.kind === 'shovel'
+      && this.farming.canTill(hit.id) && !this.farming.openAbove(hit.col, hit.k)
+      ? 'No room to till' : null;
     // Same argument as the line above it, for the other invisible tax. A player
     // who dives onto a lake bed and finds sand taking two thirds of a second a
     // block has no way to tell a rule from a broken timer, so the rule says so
@@ -5817,11 +5947,11 @@ class Game {
       this.ui.setHint(text ? `"${text}"` : 'A blank sign');
     } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
       this.ui.setHint(`<kbd>RMB</kbd> ${hit.id === ID.bench ? 'Craft' : 'Smelt'}`);
-    } else if (needTool || dragHint) {
+    } else if (needTool || dragHint || tillHint) {
       // Both can be true — a wrong tool on a wet seam is the worst case in the
       // game and the one most likely to be read as broken — so neither hides
       // the other.
-      this.ui.setHint([needTool, dragHint].filter(Boolean).join(', '));
+      this.ui.setHint([needTool, dragHint, tillHint].filter(Boolean).join(', '));
     } else this.ui.setHint(null);
 
     const m = this.mining;
@@ -5893,8 +6023,7 @@ class Game {
     // `IS_SUBMERGED` means these only go down under water, so holding the
     // button while you swim plants a bed and holding it on dry land eats the
     // plant, and neither needed a new control.
-    const heldSlot = this.inventory.active();
-    const heldItem = ITEMS[heldSlot.item];
+    // `heldSlot`/`heldItem` are the acting hand, resolved with the aim above.
     const edibleBlock = !!(heldItem?.food && heldItem.block !== undefined);
     if (!edibleBlock) {
       if (heldItem?.food && input.buttons[2] && input.locked) {
@@ -5944,17 +6073,23 @@ class Game {
       if (IS_DOOR[hit.id]) { this._toggleDoor(hit.col, hit.k); return; }
       if (IS_SIGN[hit.id]) { this._writeSign(hit.col, hit.k); return; }
       // --- till soil with a shovel ---
+      //
+      // Soil under a block is refused rather than tilled, and the click still
+      // ends here: the shovel claimed it (see `_hasUse`), so this returns either
+      // way and the hint is the whole of the answer. Nothing is spent on a
+      // refusal — no wear, no sound, no swing.
       if (heldItem?.tool?.kind === 'shovel' && this.farming.canTill(hit.id)) {
-        this.farming.till(hit.col, hit.k);
+        // The refusal already says so on the hint line — see `tillHint`.
+        if (!this.farming.till(hit.col, hit.k)) return;
         this.audio.place('soil');
         this.player.swing();
         this.viewModel.punch();
-        this.inventory.damageHeld(1);
+        this.inventory.damageHeld(1, heldSlot);
         return;
       }
       // --- sow seeds on farmland ---
       if (heldSlot.item === itemIdOf('seeds') && this.farming.plant(hit.col, hit.k)) {
-        this.inventory.consumeHeld(1);
+        this.inventory.consumeHeld(1, heldSlot);
         this.audio.place('grass');
         this.player.swing();
         this.viewModel.punch();
@@ -5964,7 +6099,7 @@ class Game {
     }
     let placed = false;
     if (input.buttons[2] && hit && this.placeCooldown === 0 && input.locked) {
-      placed = this._placeBlock(hit);
+      placed = this._placeBlock(hit, heldSlot);
       this.placeCooldown = placed ? 0.2 : 0.12;
     }
 
@@ -6002,7 +6137,7 @@ class Game {
     this.energy = Math.min(1, this.energy + heldItem.food * FOOD_TO_ENERGY);
     this.player.health = Math.min(this.player.maxHealth,
       this.player.health + Math.ceil(heldItem.food * 0.35));
-    this.inventory.consumeHeld(1);
+    this.inventory.consumeHeld(1, heldSlot);
     this.audio.pickup();
     this.ui.toast(`Ate ${heldItem.label}`, heldSlot.item, 1400);
   }
@@ -6137,7 +6272,11 @@ class Game {
     this.audio.pickup();
     this.stats.fished = (this.stats.fished ?? 0) + 1;
     this.skills.xpFish();
-    this.inventory.damageHeld(1);
+    // The rod that was cast is the rod that wears, wherever it is being held.
+    // `active()` would have charged the catch to a pickaxe in the main hand
+    // while the left hand did the fishing.
+    this.inventory.damageHeld(1, this.inventory.actingSlot(
+      (s) => ITEMS[s.item]?.tool?.kind === 'rod'));
     this._stopFishing();
   }
 
@@ -6220,7 +6359,7 @@ class Game {
       // on a dry cell reads as flowing water to everything that asks.
       this.water.level.delete(key);
       this.water.onEdit(wet.col, wet.k);
-      this.inventory.consumeHeld(1);
+      this.inventory.consumeHeld(1, heldSlot);
       this.inventory.add(itemIdOf(FILLED[kind]), 1);
       this.inventory.changed();
       this.audio.splash();
@@ -6247,7 +6386,7 @@ class Game {
     this._applyEdits([{ col: target.col, k: target.k, id: pouring }]);
     // Poured water is a spring, not a puddle: it feeds a flow and never drains.
     this.water.addSource(target.col, target.k);
-    this.inventory.consumeHeld(1);
+    this.inventory.consumeHeld(1, heldSlot);
     this.inventory.add(itemIdOf('bucket'), 1);
     this.inventory.changed();
     this.audio.splash();

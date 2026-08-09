@@ -7,7 +7,7 @@
 
 import { D } from '../world/Constants.js';
 import { colNeighbor } from '../world/Sphere.js';
-import { ID } from '../world/Blocks.js';
+import { ID, IS_REPLACEABLE, RENDER_TYPE, R_LIQUID } from '../world/Blocks.js';
 
 export const CROP_MIN = ID.wheat_0;
 export const CROP_MAX = ID.wheat_3;
@@ -15,6 +15,33 @@ export const CROP_MAX = ID.wheat_3;
 const STAGE_SECONDS = 46;      // dry farmland
 const WET_MULTIPLIER = 2.1;
 const WATER_RANGE = 3;         // columns
+
+/**
+ * Does a block sitting in the cell directly above soil shut the sky out of it?
+ *
+ * The one predicate behind the whole rule, deliberately: "you cannot till under
+ * a block", "farmland built over goes back to dirt" and "a roofed crop stops
+ * growing" are the same sentence read three times, and three separate tests
+ * would let them disagree — soil you were allowed to till and that then
+ * immediately reverted would read as the game eating a click.
+ *
+ * Three things are *not* a roof:
+ *  - air, obviously;
+ *  - a plant (`IS_REPLACEABLE` is exactly the crossed-quad plants, wheat
+ *    included), because the crop standing on farmland is the entire point of
+ *    the farmland and must not count as covering it;
+ *  - a liquid, because rain and a poured bucket land on a field and irrigation
+ *    is what the player wanted from them. Water over a crop drowning it is a
+ *    different rule and this is not the place to invent it.
+ *
+ * Everything else roofs, a torch included. A torch is not a full block and
+ * Minecraft would let it stand there, but the rule the player asked for is "no
+ * block above", and a single test that answers for every id is worth more than
+ * an exemption list that has to be maintained every time a block is added.
+ */
+export function roofsSoil(id) {
+  return id !== 0 && !IS_REPLACEABLE[id] && RENDER_TYPE[id] !== R_LIQUID;
+}
 
 export class Farming {
   constructor(planet, applyEdits) {
@@ -30,27 +57,58 @@ export class Farming {
 
   // --- player actions -------------------------------------------------------
 
-  /** Can this block be turned into farmland? */
+  /**
+   * Can this block be turned into farmland, as far as the *soil* is concerned?
+   *
+   * Half the question. It takes an id rather than a cell because it is also the
+   * "does a shovel want this cell at all" test — see `_hasUse` in main.js: a
+   * shovel aimed at dirt claims the right button whether or not the sky is
+   * open, so that a roofed field says why it refused instead of quietly letting
+   * the offhand act instead.
+   */
   canTill(blockId) {
     return blockId === ID.grass || blockId === ID.dirt || blockId === ID.dirt_path;
   }
 
-  /** Turn soil into farmland, wet if there's water nearby. */
+  /** Is there farmland here with room for a seed on top? */
+  canPlant(col, k) {
+    const soil = this.planet.at(col, k);
+    return (soil === ID.farmland || soil === ID.farmland_wet)
+      && this.planet.at(col, k + 1) === 0;
+  }
+
+  /** Is the sky above this cell clear enough for farmland? */
+  openAbove(col, k) {
+    return k + 1 >= D || !roofsSoil(this.planet.at(col, k + 1));
+  }
+
+  /** Soil, with nothing built over it: the whole test. */
+  tillable(col, k) {
+    return this.canTill(this.planet.at(col, k)) && this.openAbove(col, k);
+  }
+
+  /**
+   * Turn soil into farmland, wet if there's water nearby.
+   *
+   * Re-checks `tillable` rather than trusting the caller: this is the only way
+   * farmland is ever made, so it is the right place for the rule to be true.
+   * @returns {boolean} false if the cell refused
+   */
   till(col, k) {
+    if (!this.tillable(col, k)) return false;
     const soil = this.nearWater(col, k) ? ID.farmland_wet : ID.farmland;
     const above = this.planet.at(col, k + 1);
     const edits = [{ col, k, id: soil }];
-    // clear whatever was growing on top, otherwise it floats
-    if (above !== 0 && !this.planet.solidAt(col, k + 1)) edits.push({ col, k: k + 1, id: 0 });
+    // clear whatever was growing on top, otherwise it floats. Only a plant can
+    // be up there now — anything else is a roof and was refused above.
+    if (above !== 0 && IS_REPLACEABLE[above]) edits.push({ col, k: k + 1, id: 0 });
     this.applyEdits(edits);
     return true;
   }
 
   /** Plant seeds on farmland. */
   plant(col, k) {
-    const soil = this.planet.at(col, k);
-    if (soil !== ID.farmland && soil !== ID.farmland_wet) return false;
-    if (this.planet.at(col, k + 1) !== 0) return false;
+    if (!this.canPlant(col, k)) return false;
     this.applyEdits([{ col, k: k + 1, id: CROP_MIN }]);
     this.crops.set(this.key(col, k + 1), { col, k: k + 1, t: 0 });
     return true;
@@ -99,6 +157,15 @@ export class Farming {
       const below = p.at(c.col, c.k - 1);
       const wet = below === ID.farmland_wet;
       if (below !== ID.farmland && !wet) { this.crops.delete(key); continue; }
+
+      // Built over: the clock stops, and it stops without losing what the crop
+      // has already earned. Roofing a field cannot destroy the crop here,
+      // because the block goes into the crop's own cell and the loop above has
+      // already dropped it — this is for the roof one cell higher, and for the
+      // farmland a save or a chunk of worldgen handed us already covered. A
+      // pause rather than a death: the player only has to take the roof off,
+      // which is the same thing the refusal to till is telling them.
+      if (!this.openAbove(c.col, c.k)) continue;
 
       // Only the crop clock feels the season. Scaling the whole tick would have
       // slowed the irrigation refresh below with it, and how often the game

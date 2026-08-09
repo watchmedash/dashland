@@ -7,6 +7,46 @@ export const HOTBAR = 9;
 export const STORAGE = 27;
 export const TOTAL = HOTBAR + STORAGE;
 
+/** The test `active()` asks: a hand with something in it has something to do. */
+const NON_EMPTY = () => true;
+
+/**
+ * What the right button can do with an item, *before* the world is consulted.
+ *
+ * The item half of the fall-through rule — see `_hasUse` in main.js, which is
+ * the other half and does nothing but resolve the two conditional answers below
+ * against the cell under the crosshair. Split here rather than written out in
+ * one place because main.js builds a game on import and cannot be loaded by a
+ * test, and this is the part with a wrong answer nobody would see: a new item
+ * kind that forgets to declare itself is an item that silently lets the offhand
+ * act over the top of it.
+ *
+ *  - `'any'`  the item is the action and the cell has no say: it places, it is
+ *             food, it draws, it carries a liquid, it fishes. The main hand
+ *             holding one of these is never talked over, which is what stops a
+ *             torch in the left hand from being a second chance at a placement
+ *             the right hand just refused.
+ *  - `'soil'` a shovel: it tills, and only where there is soil.
+ *  - `'seed'` seeds: they sow, and only into farmland with room above.
+ *  - `'none'` nothing. A pickaxe, an axe, a sword, an ingot, an empty hand.
+ *             This is the set the offhand can act over.
+ *
+ * @param {number} item an item id
+ * @returns {'any'|'soil'|'seed'|'none'}
+ */
+export function useKind(item) {
+  const def = ITEMS[item];
+  if (!item || !def) return 'none';
+  if (def.block !== undefined) return 'any';
+  if (def.food) return 'any';
+  if (def.bow) return 'any';
+  if (def.carries || def.name === 'bucket') return 'any';
+  if (def.tool?.kind === 'rod') return 'any';
+  if (def.tool?.kind === 'shovel') return 'soil';
+  if (def.name === 'seeds') return 'seed';
+  return 'none';
+}
+
 export class Slot {
   constructor(item = 0, count = 0, wear = 0) {
     this.item = item; this.count = count; this.wear = wear;
@@ -101,10 +141,38 @@ export class Inventory {
    * down by one.
    */
   active() {
-    const main = this.slots[this.selected];
-    return main.empty ? this.offhand : main;
+    return this.actingSlot(NON_EMPTY);
   }
   activeDef() { return ITEMS[this.active().item] || null; }
+
+  /**
+   * The same question as `active()`, asked of a hand that knows what it is being
+   * asked to do.
+   *
+   * `active()` is this with the test "is there anything in this hand at all",
+   * which is why it is written in terms of this one rather than beside it: an
+   * empty main hand is the degenerate case of a main hand with nothing to do.
+   *
+   * The general case is the right button. A shovel and a torch, aimed at stone:
+   * the shovel has no answer for stone, so the torch goes down. Aimed at dirt
+   * the shovel tills, because tilling *is* an answer and the main hand is never
+   * talked over. `hasAction` is supplied by the caller and is the only place
+   * that decides what "no answer" means — see `_hasUse` in main.js, which is
+   * where the world, the aim and the item table all are.
+   *
+   * The last line is the tie-break: when neither hand claims the click, the main
+   * hand is still the one that acted, so an empty-handed punch, a wear tick or a
+   * refusal message is charged to the hand the player thinks they are using.
+   *
+   * @param {(slot: Slot) => boolean} hasAction
+   * @returns {Slot} the hand that acts. Never null; may be empty.
+   */
+  actingSlot(hasAction) {
+    const main = this.slots[this.selected];
+    if (!main.empty && hasAction(main)) return main;
+    if (!this.offhand.empty && hasAction(this.offhand)) return this.offhand;
+    return main.empty ? this.offhand : main;
+  }
 
   /**
    * Trade the selected hotbar stack for the offhand stack — the F key.
@@ -265,13 +333,21 @@ export class Inventory {
     return false;
   }
 
-  /** Consume one of the held stack (placing a block). */
-  consumeHeld(n = 1) {
+  /**
+   * Consume one of the held stack (placing a block).
+   *
+   * @param {number} [n]
+   * @param {Slot} [s] the hand that did it, when the caller has already worked
+   *   that out. Passed by every branch of the right-button chain, because
+   *   `active()` answers "the main hand unless it is empty" and the button now
+   *   resolves further than that: with a pickaxe in the right hand and bread in
+   *   the left, defaulting here would have taken a bite out of the pickaxe.
+   */
+  consumeHeld(n = 1, s = this.active()) {
     // `active()`, not `held()`: whichever hand did the thing pays for it. With
     // `held()` an offhand placement would have taken a torch off an empty main
     // hand — which is to say off nothing, giving infinite torches to anyone who
     // emptied their hotbar slot.
-    const s = this.active();
     if (s.empty) return false;
     s.count -= n;
     if (s.count <= 0) s.clear();
@@ -279,10 +355,13 @@ export class Inventory {
     return true;
   }
 
-  /** Apply tool wear; returns true if the tool broke. */
-  damageHeld(amount = 1) {
+  /**
+   * Apply tool wear; returns true if the tool broke.
+   * @param {number} [amount]
+   * @param {Slot} [s] the hand that swung, see `consumeHeld`.
+   */
+  damageHeld(amount = 1, s = this.active()) {
     // Same rule as consumeHeld: the tool that swung is the tool that wears.
-    const s = this.active();
     const def = ITEMS[s.item];
     if (!def?.tool) return false;
     s.wear += amount;

@@ -107,17 +107,17 @@ const ATTACK_PERIOD = 0.62;
  * What a critical hit is worth. Minecraft's number, and it survives this game's
  * ladder for the reasons below.
  *
- * The swords run 4.5 wood / 6 stone / 7.5 iron / 9 astral, and a bow at full
- * draw does 8.5. A crit lifts those to 6.75 / 9 / 11.25 / 13.5, so an iron
- * sword landed on the way down beats a perfect shot by a third and an astral
- * one by a bit under two thirds — which sounds like it buries the bow until you
- * count in time rather than in blows. A full-weight swing needs the whole
- * ATTACK_PERIOD back, and a crit needs it to come back *inside* the falling
- * half of a jump, which is 0.32s of a 0.65s hop at GRAVITY 26 and a jump of
- * 8.4. Perfect jump-crit rhythm is therefore about one 13.5 per 0.65s, against
- * one 9 per 0.62s for standing and swinging: ~21 dps against ~14.5, a 40%
- * reward for timing, at three cells of reach, inside the swing of whatever you
- * are hitting. The bow's 8.5 is bought at 1.0s of draw from anywhere on the
+ * The swords run 4.0 wood / 5.1 stone / 6.6 iron / 8.4 astral (see SWORD_BASE
+ * in Items.js), and a bow at full draw does 7.5. A crit lifts those to 6 / 7.7 /
+ * 9.9 / 12.6, so an iron sword landed on the way down beats a perfect shot by a
+ * third and an astral one by two thirds — which sounds like it buries the bow
+ * until you count in time rather than in blows. A full-weight swing needs the
+ * whole ATTACK_PERIOD back, and a crit needs it to come back *inside* the
+ * falling half of a jump, which is 0.32s of a 0.65s hop at GRAVITY 26 and a
+ * jump of 8.4. Perfect jump-crit rhythm is therefore about one 12.6 per 0.65s,
+ * against one 8.4 per 0.62s for standing and swinging: ~19 dps against ~13.5, a
+ * 40% reward for timing, at three cells of reach, inside the swing of whatever
+ * you are hitting. The bow's 7.5 is bought at 1.0s of draw from anywhere on the
  * planet with nothing able to reach back — the bow was never competing on
  * damage per second and does not start now. It also keeps the two mechanics
  * from being the same mechanic: see `bowShot`, a fully drawn bow is already its
@@ -5574,7 +5574,10 @@ class Game {
     // both the charge and the release, so the two can never disagree about
     // whether this was a shot or a cancellation.
     const armed = !!def?.bow && !busy && input.locked
-      && (arrowId ? this.inventory.count(arrowId) > 0 : false);
+      // `countWithOffhand`, not `count`: arrows held in the left hand are
+      // ammunition you deliberately put there, and `count` walks `slots` alone
+      // — so a full quiver in the offhand read as "Out of arrows".
+      && (arrowId ? this.inventory.countWithOffhand(arrowId) > 0 : false);
 
     // The state machine itself is in Items.js, as a pure function, because it is
     // the only part of this with a wrong answer that nobody would see — see
@@ -5619,7 +5622,9 @@ class Game {
     // no window in which an arrow has been spent on a shot that was refused.
     const shot = bowShot(def, t);
     if (!shot) return;
-    if (this.inventory.remove(arrowId, 1) < 1) return;
+    // Offhand first, then the bag — the same source `_tickBow` counted, so
+    // "armed" and "an arrow was actually spent" can never disagree.
+    if (this.inventory.removeWithOffhand(arrowId, 1) < 1) return;
     this.inventory.changed();
 
     // Out of the eye, along the look, pushed clear of the player's own body —

@@ -174,6 +174,54 @@ export class Inventory {
     return n;
   }
 
+  /**
+   * How many of an item the acting hand can actually reach — the offhand
+   * included.
+   *
+   * `count` deliberately walks `slots` alone, because the offhand is
+   * deliberately *not* in `slots`: see the field's own note, that is what stops
+   * a recipe, the merchant's sell list or the "Can Craft" sidebar spending the
+   * torch you parked in your left hand. Ammunition is the one thing that wants
+   * the opposite answer. A quiver is not a crafting reagent — you put arrows in
+   * the left hand precisely so the bow could find them — and the bow reported
+   * being out of them because the only place it looked was `slots`.
+   *
+   * Kept as its own pair of methods rather than folded into `count`/`remove`
+   * for exactly the reason above: every other caller of those two is a place
+   * the offhand must stay out of.
+   */
+  countWithOffhand(itemId) {
+    if (!itemId) return 0;
+    return (this.offhand.item === itemId ? this.offhand.count : 0) + this.count(itemId);
+  }
+
+  /**
+   * Take `count` of an item, **the offhand first**, then storage.
+   *
+   * Minecraft's order, and the reasoning survives the port: the offhand is the
+   * one slot you had to deliberately put something in, so it is a statement of
+   * intent about which stack you want spent. Draining it first also means the
+   * left hand empties visibly as you shoot — the quiver you can see is the
+   * quiver that goes down — where storage-first would leave that stack frozen
+   * at 12 for a hundred arrows and read as a broken counter.
+   *
+   * @returns {number} how many were actually taken
+   */
+  removeWithOffhand(itemId, count) {
+    if (!itemId || count <= 0) return 0;
+    let left = count;
+    const o = this.offhand;
+    if (o.item === itemId && o.count > 0) {
+      const take = Math.min(o.count, left);
+      o.count -= take;
+      left -= take;
+      if (o.count <= 0) o.clear();
+    }
+    if (left > 0) left -= this.remove(itemId, left);
+    if (left !== count) this.changed();
+    return count - left;
+  }
+
   /** Take `count` of an item out of storage. Returns how many were removed. */
   remove(itemId, count) {
     let left = count;

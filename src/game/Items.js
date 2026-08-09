@@ -280,6 +280,50 @@ export const TOOL_KINDS = {
   sword: { label: 'Sword', art: 'sword' },
 };
 
+/**
+ * The sword ladder: `SWORD_BASE * SWORD_STEP ** (tier - 1)`, i.e.
+ * **4.0 / 5.1 / 6.6 / 8.4 / 10.7**, where it used to be `3 + 1.5 * tier` —
+ * 4.5 / 6 / 7.5 / 9 / 10.5.
+ *
+ * The report was "weapons are so OP, no point in upgrading if they deal that
+ * much damage", and those are two complaints that pull in opposite directions,
+ * so it is worth being exact about which one the shape fixes.
+ *
+ * **What was actually wrong was the spacing, not the size.** An additive ladder
+ * on a growing base is a ladder whose rungs get closer together: the old steps
+ * were +33%, +25%, +20%, +17%, while the *price* of a rung went the other way
+ * — durability 60 → 140 → 320 → 820 → 2100 is 2.3x to 2.6x per tier, and the
+ * ingredients are a mineshaft deeper each time. Every tier cost more and bought
+ * less, which is the shape of "no point in upgrading" whatever the absolute
+ * numbers are. A constant 28% is one sentence — *each sword is a bit over a
+ * quarter better than the last* — and it holds at every rung.
+ *
+ * Two hard constraints pin it, and between them there is very little freedom:
+ *
+ *   - **a bunny (4hp) dies to one hit from anything**, which fixes the bottom
+ *     of the ladder at exactly 4.0. It cannot go lower, so the "OP" half of the
+ *     report cannot be answered by shrinking the whole thing.
+ *   - **the steps have to be legible**, which means a ratio of about 1.3.
+ *
+ * A floor of 4 and a ratio of 1.28 puts the top at 10.7 — within a rounding of
+ * where cinder already was. That is the honest answer to the size half of the
+ * complaint: the top of this ladder is *not* where the problem is, and the
+ * arithmetic above says it cannot be moved much anyway. What moves is the
+ * middle, which is where the game is actually played: stone loses 15%, iron
+ * 12%, astral 7%.
+ *
+ * The rest of the fix is not in this file. At 14hp a husk cannot tell four of
+ * these five swords apart — 14/4 is four hits and 14/10.7 is two, and there is
+ * no ladder of any shape with five distinguishable rungs on a 14-point bar. The
+ * ladder needs taller monsters to be read against, and that lives in Mobs.js.
+ *
+ * `sword` is the only kind with a real weapon number. The other three stay on
+ * `1 + 0.4 * tier` (1.4 .. 3.0), a shade over a bare fist, because a pickaxe
+ * that could fight is a pickaxe that makes the sword optional.
+ */
+const SWORD_BASE = 4.0;
+const SWORD_STEP = 1.28;
+
 for (const [tName, t] of Object.entries(TIERS)) {
   for (const [kName, k] of Object.entries(TOOL_KINDS)) {
     add({
@@ -290,7 +334,9 @@ for (const [tName, t] of Object.entries(TIERS)) {
       color: t.color,
       edge: t.edge,
       tool: { kind: kName, tier: t.tier, speed: k.art === 'sword' ? 1.5 : t.speed, durability: t.durability },
-      damage: kName === 'sword' ? 3 + t.tier * 1.5 : 1 + t.tier * 0.4,
+      damage: kName === 'sword'
+        ? Math.round(SWORD_BASE * SWORD_STEP ** (t.tier - 1) * 10) / 10
+        : 1 + t.tier * 0.4,
     });
   }
 }
@@ -387,19 +433,27 @@ for (const [tName, t] of Object.entries(ARMOUR_TIERS)) {
  *  - `speed` cells/s at zero power and at full power. The curve between them is
  *            `power()` below.
  *  - `dmg`   the same, in the health units `Mobs.hurt` takes. Full draw sits at
- *            8.5, which is deliberately read off the sword ladder rather than
- *            picked: `damage` there is `3 + 1.5 * tier`, so iron is 7.5 and
- *            astral is 9. A perfectly drawn bow beats the best weapon you can
- *            dig your way to at the iron stage and loses to the one two tiers
- *            above it — worth carrying, never a replacement for closing the
- *            distance. (The first draft said 9 and was tested against a comment
- *            claiming astral was 10.5; 10.5 is cinder. The test caught it.)
+ *            7.5, which is deliberately read off the sword ladder rather than
+ *            picked: it is the midpoint of iron (6.6) and astral (8.4). A
+ *            perfectly drawn bow beats the best weapon you can dig your way to
+ *            at the iron stage and loses to the one above it — worth carrying,
+ *            never a replacement for closing the distance. (The first draft
+ *            said 9 and was tested against a comment claiming astral was 10.5;
+ *            10.5 is cinder. The test caught it.)
+ *
+ *            It was 8.5 while the swords ran 4.5 / 6 / 7.5 / 9 / 10.5, which is
+ *            the same rule against the old numbers. When that ladder was
+ *            re-spaced to 4.0 / 5.1 / 6.6 / 8.4 / 10.7 (see SWORD_BASE) an
+ *            8.5 bow would have quietly become a *better* weapon than an astral
+ *            sword at a fraction of the metal, so this number moves with it or
+ *            the tuning it is derived from stops being true. That coupling is
+ *            the whole reason it is written down here rather than felt for.
  */
 export const BOW_ID = add({
   name: 'bow', label: 'Bow', stack: 1, art: 'rod',
   color: '#8a6a3a', shine: '#c9a86a',
   tool: { kind: 'bow', tier: 0, speed: 1, durability: 260 },
-  bow: { draw: 1.0, min: 0.25, speed: [20, 64], dmg: [2, 8.5] },
+  bow: { draw: 1.0, min: 0.25, speed: [20, 64], dmg: [2, 7.5] },
   ammo: 'arrow',
 });
 
@@ -465,7 +519,7 @@ export const HONEYCOMB_ID = add({
  * so the last tenth of the draw is worth noticeably more than the first, which
  * is what makes holding the button all the way down feel like a decision rather
  * than a formality. At the minimum draw of 0.25 it is 0.1875: a hurried shot
- * carries under a fifth of the punch, travels 28 cells/s and does 3.3 damage.
+ * carries under a fifth of the punch, travels 28 cells/s and does 3.0 damage.
  *
  * Exported because both `main.js` (which fires) and the tests (which check the
  * ladder) have to agree on one function, not on two copies of an expression.
@@ -556,7 +610,7 @@ const TIER_LABEL = Object.fromEntries(
  */
 export function harvestHint(blockId, toolItem) {
   const b = BLOCKS[blockId];
-  if (!b || b.hardness < 0 || !b.tier) return null;
+  if (!b || b.hardness < 0) return null;
   // Nothing to promise for a block that yields nothing however good the tool.
   // The planet core is the only one: it is tier 4 and reads as "Needs an Astral
   // Pickaxe", which is a requirement that does not exist — the core is refused
@@ -566,9 +620,19 @@ export function harvestHint(blockId, toolItem) {
   // sale.
   if (!b.drop || !itemIdOf(b.drop)) return null;
   const held = toolItem?.tool?.tier ?? 0;
-  if (held >= b.tier) return null;
-  const tier = TIER_LABEL[b.tier] ?? `tier ${b.tier}`;
+  // The two ways a block can refuse to pay out, in the order `computeDrops`
+  // applies them: the wrong *kind* of tool (pick blocks only) and too low a
+  // tier. Both end with the block gone and nothing on the floor, so both have
+  // to be said out loud before the swing.
+  const wrongKind = b.tool === 'pick' && toolItem?.tool?.kind !== 'pick';
+  const underTier = b.tier > 0 && held < b.tier;
+  if (!wrongKind && !underTier) return null;
   const kind = TOOL_KINDS[b.tool]?.label ?? 'Tool';
+  // One line, never two. When both are true the tier message is the one to
+  // show, because it names the kind as well — "Needs a Stone Pickaxe" already
+  // tells a player holding an axe everything the shorter message would.
+  if (!underTier) return `Needs a ${kind}`;
+  const tier = TIER_LABEL[b.tier] ?? `tier ${b.tier}`;
   const article = /^[AEIOU]/.test(tier) ? 'an' : 'a';
   return `Needs ${article} ${tier} ${kind}`;
 }
@@ -628,6 +692,19 @@ export function computeDrops(blockId, toolItem, rng = Math.random) {
     return out;
   }
 
+  // Rock needs a pickaxe, and nothing else will do.
+  //
+  // The tier gate below has always been able to say "that pickaxe is not good
+  // enough"; it could never say "that is not a pickaxe", so an axe took stone
+  // apart and handed you the cobble. Minecraft's split is the one worth
+  // copying and it is a split, not a blanket rule: **only `pick` blocks are
+  // gated on the kind.** Timber and soil come apart in your hands and always
+  // did — an axe is a speed, not a licence — so a log still drops with a
+  // shovel, and dirt still drops with a fist. That keeps the punishment on the
+  // one family where a player already expects it and where the wrong answer is
+  // recoverable (the block is still there until you swing at it, and
+  // `harvestHint` names the pickaxe before you do).
+  if (b.tool === 'pick' && toolItem?.tool?.kind !== 'pick') return [];
   if (b.tier > tier) return [];   // wrong tool: the block shatters with nothing to show
   const name = b.drop;
   if (!name) return [];
@@ -640,27 +717,100 @@ export function computeDrops(blockId, toolItem, rng = Math.random) {
 export const UNDERWATER_MINING = 3;
 
 /**
+ * How fast bare hands work on a block, as the divisor `miningTime` uses.
+ *
+ * One number per tool family, and it is the whole of the "wrong tool" rule as
+ * well — see `handSpeed` below. A block that names no tool is 1: there is no
+ * right tool for glass or wool, so there is nothing for a tool to be wrong
+ * about, and a pickaxe should not be a worse hand.
+ *
+ * `shovel` is new, and it is the smaller half of the report that said "chopping
+ * trees with axe pickaxe shovel etc almost same breaking time". Soil used to be
+ * left out of this table entirely — the old note said soil "is still meant to
+ * be diggable by hand" — and the consequence was that on the most-dug blocks in
+ * the game a bare hand (0.81s on dirt) and the wrong tool (0.70s) were 13%
+ * apart. Two things that differ by an eighth of a second are, to a player, the
+ * same thing, and that is exactly the complaint.
+ *
+ * 0.75 rather than the axe's 0.42 keeps the original intent intact: soil is
+ * still the fastest thing in the game to move by hand, at about a second a
+ * block. What it buys is headroom for the shovel to be *visible* — a wooden one
+ * is now 3.2x a hand instead of 2.4x, and an iron one 9x — and, more
+ * importantly, headroom for a pickaxe on dirt to be plainly the wrong choice.
+ *
+ * It is also the one number in here with a hard ceiling on it, and the ceiling
+ * is a lungful of air. Bare-handed digging on the seabed pays the drag
+ * multiplier from `Player.miningDrag` (3x standing, 9x adrift) on top of this,
+ * and base breath is 9 seconds: at 0.75 a bare hand takes 0.90s on sand, i.e.
+ * 2.7s planted on the bed and 8.1s treading water — still inside one breath.
+ * Anything harsher than about 0.8 puts a single block of sand past a lungful
+ * for an unequipped diver, which is the "underwater mining is impossible" wall
+ * this must not build. With a shovel of any tier it is never close: a wooden
+ * one is 2.5s adrift.
+ */
+const HAND_HARD = { pick: 0.30, axe: 0.42, shovel: 0.75 };
+
+/**
+ * What a hand — or, now, the wrong tool — is worth on this block.
+ *
+ * **The rule: the wrong tool is exactly your hands, and the right tool is the
+ * whole of the ladder.** Minecraft's rule, and it is the one change that makes
+ * the four tool kinds four different things rather than four skins.
+ *
+ * What it replaces was a flat 1.15 for any tool that was not the block's own,
+ * and that number is the report. It is worth writing down what it did, because
+ * "almost the same" was an understatement in one direction and an overstatement
+ * in the other:
+ *
+ *   - it was *generous*. A wrong tool at 1.15 beat a bare hand on timber by
+ *     2.7x and on stone by 8.6x, so simply holding any tool at all bought most
+ *     of what the correct one did. Carrying a pickaxe made you a competent
+ *     lumberjack.
+ *   - it did not scale, so every tier of every wrong tool was the *same* 1.15.
+ *     A wooden shovel, an iron sword and a cinder pickaxe all chopped an oak log
+ *     in exactly 1.64s. Three of the four things in your hotbar were literally
+ *     interchangeable on any given block, which is precisely what the player
+ *     described.
+ *   - and on soil it was invisible against a hand (0.70 vs 0.81), because
+ *     HAND_HARD had no shovel row.
+ *
+ * At hand speed instead, an iron pickaxe on an oak log takes the 4.5s a fist
+ * does and an iron axe takes 0.27s — a 17x gap where there was a 6x one, and
+ * one that widens with the tier you paid for rather than staying put.
+ *
+ * The sword's 12x on cross-render plants survives untouched: that is a
+ * deliberate special case (a blade through undergrowth), not an accident of the
+ * fallback, and it is checked before the fallback for that reason.
+ */
+function handSpeed(b) { return HAND_HARD[b.tool] ?? 1; }
+
+/**
  * How long this block takes to break, in seconds.
+ *
+ * Two multipliers are applied by the caller rather than in here, and both are
+ * deliberately outside: the `hands` skill (`Skills.miningScale`) and the
+ * water/adrift drag (`Player.miningDrag`). This function is the shared idea of
+ * hardness and the tool ladder — it is asked the same question by the mining
+ * loop and by the tests — and a block's break time must not depend on who is
+ * standing in front of it. Everything here is a divisor on one base time, so
+ * the two outside factors compose with it by plain multiplication and cannot be
+ * fought by anything below.
  *
  * @param {boolean} submerged whether the player's head is under water. Swinging
  *   a pick with water in the way is slow: you cannot plant your feet, and the
  *   swing is fighting the water the whole way down. Without this, the fastest
  *   way to clear a lake bed was to dive into it, which is exactly backwards —
- *   and it made the diving suit of an air supply worth nothing.
+ *   and it made the diving suit of an air supply worth nothing. Left false by
+ *   the mining loop, which applies the whole environment rule itself.
  */
 export function miningTime(blockId, toolItem, submerged = false) {
   const b = BLOCKS[blockId];
   if (!b || b.hardness < 0) return Infinity;
-  // Bare hands were as good as a tool on anything below the tier gate — stone
-  // came apart in three seconds with no penalty, which made the whole tool
-  // chain optional. Only stone and timber resist bare hands; soil is still
-  // meant to be diggable by hand, so shovel blocks are left alone.
-  const HAND_HARD = { pick: 0.30, axe: 0.42 };
-  let speed = (!toolItem?.tool && HAND_HARD[b.tool]) ? HAND_HARD[b.tool] : 1;
+  let speed = handSpeed(b);
   if (toolItem?.tool) {
     if (toolItem.tool.kind === b.tool) speed = toolItem.tool.speed;
     else if (toolItem.tool.kind === 'sword' && b.render === 2) speed = 12;
-    else speed = 1.15;
+    else speed = handSpeed(b);
   }
   const base = b.hardness * 1.35;
   const penalty = b.tier > (toolItem?.tool?.tier ?? 0) ? 3.2 : 1;

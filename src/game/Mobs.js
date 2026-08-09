@@ -852,8 +852,26 @@ const FLYER_CLIPS = {
  * @param {string} file model basename
  * @param {object} o the same shape `pet` takes, plus `flies`
  */
+/**
+ * How much tougher a thing that hunts you is than an animal of the same size.
+ *
+ * The weapon ladder was re-spaced so every tier buys a legible step, and it
+ * still could not give five distinguishable rungs against a husk: on a fourteen
+ * point bar the fight ran 4/3/3/2/2 hits, so two of the five upgrades bought
+ * nothing at all. No ladder of any shape fixes that, because the bar is too
+ * short to divide five ways.
+ *
+ * So the hostiles get the room instead, and only the hostiles: a uniform 1.5 on
+ * everything that hunts, and nothing at all on the animals. That keeps the long
+ * species-pricing comment above true term for term, since every monster moves
+ * together, and it keeps a bunny at four health rather than turning the wildlife
+ * into sponges. A husk at 21 runs 6/5/4/3/2, which is exactly one hit bought per
+ * tier on the fight a new player actually has.
+ */
+const HOSTILE_HP = 1.5;
+
 const monster = (file, o) => ({
-  ...pet(file, { ...o, diet: 'carnivore' }),
+  ...pet(file, { ...o, diet: 'carnivore', hp: Math.round(o.hp * HOSTILE_HP) }),
   urls: [MON(file)],
   // Which clip set, decided by what the model actually carries rather than by
   // whether it flies — the two are not the same question. Only the bat, the
@@ -1538,7 +1556,7 @@ const SPECIES = {
     // burn stamina. At 1.28 the chase is 3.84, comfortably under a walk: you
     // can always leave, but you cannot dawdle, and outrunning one still costs
     // you the ground you were standing on. The cap went up to pay for it.
-    health: 14, speed: 1.28, skittish: 0, turn: 3.2, accel: 6.0,
+    health: Math.round(14 * HOSTILE_HP), speed: 1.28, skittish: 0, turn: 3.2, accel: 6.0,
     // Cinder is the whole reason to be outside after dark; roughly every other
     // husk carries one, so a good night funds part of a cinder tool.
     drops: [['flint', 0, 1], ['coal', 0, 1], ['cinder', 0, 1]],

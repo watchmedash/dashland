@@ -55,6 +55,28 @@ import * as MobModels from './MobModels.js';
  * per PREY_PERIOD. None of that is the limiting factor at this ceiling; the
  * mixer update in _animate, which is per body per frame, is the larger bill.
  */
+/*
+ * The budgets below sum to more than this, and that is fine. Measured, because
+ * the arithmetic says otherwise and the arithmetic is misleading.
+ *
+ * 84 land + 18 aquatic + 18 flying + 8 surface husks + 4 cave husks + 3
+ * monsters + 1 merchant is 136 against a ceiling of 134, which reads as an
+ * over-subscription that would starve whatever spawns last — husks, monsters
+ * and the merchant, in that order. It is not one, because the two halves cannot
+ * be full at the same time: the surface husk budget only opens at night, and
+ * night is exactly when `_bedDown` takes the land and flier budgets down to
+ * NIGHT_WILDLIFE of themselves.
+ *
+ * Driven from the sun direction the spawner actually reads, over a long run:
+ *
+ *   day    84 land, 18 water, 18 air,  4 husks, 3 monsters, 1 trader = 128
+ *   night  34 land, 18 water,  7 air, 12 husks, 3 monsters          =  74
+ *
+ * So the true peak is 128, six under this ceiling, and the sum of 136 is a
+ * number no clock can produce. Raising the cap for it was the fix I nearly
+ * shipped. If a budget is ever raised, check the *day* line — that is the one
+ * with the headroom left in it.
+ */
 const MAX_MOBS = 134;
 /**
  * Of that, how many may be ordinary land animals. Kept as its own budget rather

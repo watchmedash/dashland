@@ -207,7 +207,18 @@ export class Water {
       const col = (key - k) / D;
       const here = this.levelAt(col, k);
 
-      if (here < 0) { this._maybeDry(col, k, edits); continue; }
+      // Not liquid any more: drop the stale bookkeeping and move on.
+      if (here < 0) { this.level.delete(key); continue; }
+
+      // Cut off from everything that was feeding it? Then it goes.
+      //
+      // This used to sit behind the `here < 0` branch above, which meant it ran
+      // only for cells that were *not* liquid — and the first thing it does is
+      // return when the cell is not liquid. So every line of the starvation
+      // test was unreachable and no flowing water ever drained: plug the spring
+      // and the flood stayed exactly where it was, for good, with the active
+      // set pinned at a few hundred cells so the sim never went idle either.
+      if (this._maybeDry(col, k, edits)) continue;
 
       // Whatever is in this cell is what spreads out of it. The simulation used
       // to place ID.water unconditionally, so any lava it touched became water.
@@ -255,26 +266,33 @@ export class Water {
    * Flowing water with nothing feeding it any more drains away. Sources — the
    * worldgen lakes and anything poured from a bucket — never do, so a shoreline
    * doesn't slowly evaporate.
+   *
+   * One layer goes per tick, which is what makes it look like draining rather
+   * than vanishing: the cells beside the spring lose their feed first, and
+   * their neighbours only notice once they are gone.
+   *
+   * @returns {boolean} true if the cell was emptied, so the caller stops
+   *   treating it as something that can still spread.
    */
   _maybeDry(col, k, edits) {
     const key = this.key(col, k);
-    if (this.sources.has(key)) return;
-    if (RENDER_TYPE[this.planet.at(col, k)] !== R_LIQUID) { this.level.delete(key); return; }
+    // A true source has no level entry at all, and never dries.
+    if (this.sources.has(key)) return false;
+    if (RENDER_TYPE[this.planet.at(col, k)] !== R_LIQUID) { this.level.delete(key); return false; }
+
+    const mine = this.level.get(key);
     // An orphan (water, no source mark, no level) is swept away with the rest.
-    if (!this.level.has(key)) {
-      this.level.delete(key);
+    if (mine === undefined) {
       edits.push({ col, k, id: 0 });
       this.touch(col, k);
-      return;
+      return true;
     }
-    if (RENDER_TYPE[this.planet.at(col, k)] !== R_LIQUID) { this.level.delete(key); return; }
+
     // Anything with a level entry is *flowing*, however strong. Exempting
     // full-strength cells here made falling water permanent: a waterfall kept
     // running after its source was gone, and every cell it filled behaved like
     // a spring. Only a true source — no entry at all — is exempt, which the
     // early return above already handles.
-    const mine = this.level.get(key);
-
     let fed = false;
     if (k + 1 < D && RENDER_TYPE[this.planet.at(col, k + 1)] === R_LIQUID) fed = true;
     if (!fed) {
@@ -287,7 +305,9 @@ export class Water {
       this.level.delete(key);
       edits.push({ col, k, id: 0 });
       this.touch(col, k);
+      return true;
     }
+    return false;
   }
 
   /**
@@ -313,8 +333,19 @@ export class Water {
     this.touch(col, k);
   }
 
+  /**
+   * Only the flowing cells. Sources are deliberately *not* written.
+   *
+   * They are fully derivable and enormous: a source is any liquid cell with no
+   * level entry, which is the whole ocean — a hundred thousand entries against
+   * the couple of hundred that are actually moving — and it is exactly the rule
+   * the loader's per-region seed pass already applies. So recording which cells
+   * flow is the entire content here; everything wet that is not in this list is
+   * a spring, including a bucket poured into a hole, whose `addSource` drops its
+   * level for precisely that reason.
+   */
   toJSON() {
-    return { lv: [...this.level].map(([i, v]) => [i, v]), src: [...this.sources] };
+    return { lv: [...this.level].map(([i, v]) => [i, v]) };
   }
 
   fromJSON(data) {

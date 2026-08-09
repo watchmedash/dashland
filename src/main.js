@@ -1009,6 +1009,22 @@ class Game {
     // the worker to echo them back. The message below is a structured clone —
     // nothing is transferred — so both sides end up with their own copy for the
     // price of the one the browser was going to make anyway.
+    // Strictly before any region is seeded, and that ordering is the whole
+    // point. `_seedWaterRegion` calls every liquid cell without a level entry a
+    // spring, so with the flow map still empty it promoted the lot — a
+    // waterfall, a puddle creeping out of a breached lake, every cell of it
+    // came back as a full-strength source that can never drain. Saving turned
+    // running water into permanent water, and because a source spreads seven
+    // cells the moment anything nearby is edited, each save-and-return pushed
+    // the flood further out. Restoring the levels first is what lets the seed
+    // pass tell worldgen's ocean apart from yesterday's spill.
+    //
+    // `Water.fromJSON` was written for this and had simply never been called;
+    // it already handles a save with no `water` key at all, which is every save
+    // written before now — those still take the old behaviour, because there is
+    // nothing recorded to tell their standing water from their flowing water.
+    this.water.fromJSON(data.water);
+
     if (data.regions && data.blocks) {
       this.planet.applyRegions(data.regions, data.blocks, (rid) => this._seedWaterRegion(rid));
     } else if (data.blocks) {
@@ -1792,6 +1808,11 @@ class Game {
       drops: this.drops.toJSON(),
       mobs: this.mobs.toJSON(),
       crops: this.farming.toJSON(),
+      // Which cells are flowing. Without it the loader cannot tell running
+      // water from standing water and calls all of it spring — see the restore
+      // in `_loadWorld`. Sources are derived rather than stored, so this is a
+      // couple of hundred numbers on a busy planet and empty on a still one.
+      water: this.water.toJSON(),
       weather: this.weather.toJSON(),
       kilns: [...this.kilns].map(([key, k]) => ({
         key, c: k.col, k: k.k, in: k.input.toJSON(), fu: k.fuel.toJSON(), out: k.output.toJSON(),

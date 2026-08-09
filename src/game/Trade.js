@@ -229,6 +229,18 @@ const OVERRIDE = {
   // The bucket's own recipe (three iron) already values it; the filled one has
   // no recipe at all and would otherwise fall through to the stack-size guess.
   water_bucket: 38,
+  // The same number, and it has to be the same number. Both filled pails are
+  // one empty pail plus a walk to a source: nothing is consumed, nothing is
+  // crafted, and neither liquid is scarcer than the other once you can reach
+  // it. Pricing lava above water would be the merchant paying for the walk.
+  //
+  // The margin over the empty pail is one coin, and it is one coin on purpose:
+  // filling costs nothing but the trip, so the filled bucket must not be worth
+  // meaningfully more than the bucket. The 0.5 sell / 1.6 buy spread means the
+  // loop cannot pay either way (buy a pail at 59, fill it free, sell it back at
+  // 19), but the spread is not what should be doing that work — the price is.
+  // 38 is the number the water bucket has always carried, for this reason.
+  lava_bucket: 38,
   // --- the larder's two anchors -----------------------------------------
   //
   // A honeycomb has no recipe and no smelt, so `intrinsic` prices it from its

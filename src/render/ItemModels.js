@@ -174,25 +174,75 @@ export const POSE = {
   // frame, `pos` lifts the whole tool clear of the arm; without that the blade
   // is simply below the screen.
   //
-  // **Re-measured after a report that the held shovel was upside down, and it
-  // is not.** Which end is the blade is not a matter of opinion — the pack
-  // paints heads in cool greys and handles in warm browns, which is the same
-  // property `isMetal` below already sorts the draw groups by. Sampled through
-  // it, the shovel's bottom 45% is steel (mean rgb 78,100,114 at the very
-  // bottom) and its top 55% is wood (196,143,104 at the very top); the pickaxe
-  // is the other way round, wood below and steel above. So the blade really is
-  // at the model's -Y, the grip at +Y, and `grip: 0.70` really is on the shaft
-  // above the blade. Do not "restore" 0.22.
+  // **Turned end for end, on the third report that the held shovel is upside
+  // down, and against two measurement passes that said it was not.**
   //
-  // And with that established, the model's +Y — its grip — points *up* in every
-  // representation that has a camera: (-0.17, 0.91, 0.38) in the first-person
-  // view frame, the same to floating point in the third-person one (see
-  // `Character._wearPose`, whose mapping cancels exactly), and (0.22, 0.97,
-  // 0.05) in the icon. There is no upside-down shovel in the fist, on the body
-  // or in the toolbar. The one place a model *was* inverted is lying on the
-  // ground — see the note in `game/Drops.js`, which was a fault in every
-  // dropped model at once and not in this pose.
-  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [0.50, -0.55, 0.20],  pos: [-0.04, 0.28, -0.14], icon: [0.18, 0.52, -0.26] },
+  // Both of those passes are still correct about what they measured, and both
+  // are preserved below, because what they got wrong is worth more than what
+  // they got right:
+  //
+  //   - the blade really is at the model's -Y and the grip at +Y. The pack
+  //     paints heads in cool greys and handles in warm browns — the same
+  //     property `isMetal` below sorts the draw groups by — and sampled through
+  //     it the shovel's bottom 45% is steel (mean rgb 78,100,114 at the very
+  //     bottom) and its top 55% wood (196,143,104 at the very top). Not in
+  //     doubt, and `grip: 0.70` is genuinely on the shaft above the blade. Do
+  //     not "restore" 0.22.
+  //   - and under the old rotation the model's +Y — the grip — genuinely did
+  //     point up: (-0.17, 0.91, 0.38) in the view frame, 24.5° off screen-up.
+  //
+  // **Both true, and the pose still read as inverted, because "which way is the
+  // grip pointing" is the wrong question.** The question the eye actually asks
+  // is where the mass of the tool sits relative to the fist, and measured
+  // across the family the shovel was the only one of the four long tools with
+  // its length *below* the hand:
+  //
+  //     pickaxe   y -0.090 .. 0.420      82% above the fist
+  //     sword     y -0.070 .. 0.341      83% above
+  //     axe       y -0.046 .. 0.289      86% above
+  //     shovel    y -0.292 .. 0.132      31% above   <- the odd one out
+  //
+  // Grip 0.70 with the blade at -Y puts seven tenths of the object under the
+  // hand. That is a shovel held near the top of the shaft with the blade
+  // dangling at the bottom of the frame, which is what "upside down" describes
+  // even though no axis is reversed — and it is why sampling the atlas could
+  // never find it. The sign error is not in the atlas reading; it is that the
+  // atlas reading was answering a different question from the player's.
+  //
+  // The turn is Rz(π) folded in ahead of the pose — a half turn about the
+  // model's *thin* axis (Z, 0.156 units against Y's 1.577), not about its long
+  // one, because a half turn about the long axis spins the tool without
+  // swapping its ends and the ends are the whole point. Z is also the axis that
+  // leaves the scoop where it was: the dish is open toward model +Z (rim at mean
+  // z +0.055, floor at -0.006) and Rz(π) fixes +Z, so it still lands at
+  // (-0.52, -0.41, 0.75) — the inside of the blade turned toward the camera,
+  // which was the better of the two pictures and is kept. Rx(π) would have
+  // swapped the ends too and shown you the back of the blade.
+  //
+  // Result: y -0.132 .. 0.294, 69% above the fist, which is the family's shape;
+  // and the silhouette goes 0.0765 -> 0.0846 square view units, so nothing is
+  // paid for it. `grip` stays 0.70 for the reason it was 0.70 — it is the point
+  // on the shaft the hand closes on, which is a fact about the shovel and not
+  // about the pose. Read from the end that is now lowest on screen it is 0.30,
+  // which is the 0.16-0.20 the other three carry.
+  //
+  // `pos` is the old lift undone, and only that: +0.28 existed to haul a tool
+  // that hung below the fist back into frame. It does not hang now. -0.02/+0.12
+  // is the value that leaves the projected centre exactly where it was, so this
+  // change is an orientation and nothing else — the shovel does not also move.
+  //
+  // **What this implies for the rest of the family, since it is the same
+  // measurement chain.** The axe, sword and pickaxe are not affected: all three
+  // measure 82-86% above the fist, which is the arrangement the shovel has just
+  // been brought into, and none of them has been reported. The chain's fault
+  // was never a sign flip that would infect them — it was that "is the grip
+  // up?" was accepted as the whole test. The check that would have caught this
+  // one is the table above, and it is now written down.
+  //
+  // The icon is deliberately left alone. It has not been reported, it is a
+  // different framing (a slot, not a fist), and the toolbar's convention is
+  // head-up across every tool.
+  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [0.500, -0.550, -2.942],  pos: [-0.02, 0.12, -0.14], icon: [0.18, 0.52, -0.26] },
   // The roll is the whole of this entry's history. At `rot.z` 1.00 it was two
   // and a half times the next largest in the table — the axe's 0.40 — and the
   // number to read it by is where that leaves the blade: the tip sat **66° off
@@ -705,7 +755,12 @@ export const BY_NAME = {
   // this table. The arrow has no tool block and does.
   arrow: 'arrow',
   bucket: 'bucket',
+  // All three pails are one model. What tells them apart is `fill` on the item
+  // def, which `fillDisc` turns into a disc at the rim — and `meshKey` includes
+  // it, so the three get three cached meshes off one geometry rather than
+  // fighting over one.
   water_bucket: 'bucket',
+  lava_bucket: 'bucket',
   apple: 'apple',
   roast: 'roast',
   // The WAM materials are one model per item id, so the map is an identity —

@@ -95,14 +95,52 @@ const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
  *    three quarters of the way across, on the right.
  *  - `r` was solved, not dialled: the bow lies in its own XZ plane (stave along
  *    model X, string a straight run at model z = -0.28, shot along +Z), so
- *    standing the stave up 12 degrees off vertical and running the shot LEFT
- *    across the frame — 22 degrees of it turned away into the screen — pins all
- *    three axes. That leaves the plane 22 degrees off face-on, which is what
- *    makes the arc and the string read; the shipped draw ended at 70 degrees,
- *    which is a bow seen very nearly edge-on.
+ *    standing the stave up off vertical and turning the shot across the frame
+ *    pins all three axes. The shipped draw before any of this ended with the
+ *    plane 70 degrees off face-on, which is a bow seen very nearly edge-on.
+ *
+ *    **Halved, on a report that the drawn bow is "sideways instead of facing
+ *    forward a little... the idea is correct, just way too sideways".** The
+ *    first pass turned the shot 67.6 degrees off the view axis to get the stave
+ *    and the string to read, which is a bow held nearly across the player. It is
+ *    now 25 degrees, which is `r` slerped 0.369 of the way from square-to-shot
+ *    toward that first answer:
+ *
+ *      shot direction     was (-0.904, 0.192, -0.382)   now (-0.418, 0.059, -0.907)
+ *      off the shot       was 67.6 deg                  now 25.0 deg
+ *      stave off vertical was 12.0 deg                  now  4.6 deg
+ *      plane off face-on  was 22.4 deg                  now 65.1 deg
+ *
+ *    That last row is the cost and it is unavoidable rather than a mistake: the
+ *    bow's plane *contains* its shot, so every degree the shot comes back toward
+ *    the camera is a degree the plane turns edge-on. The question is only
+ *    whether it stays clear of the failure, and it does. Bounding-box silhouette
+ *    through the real glTF, rescaled to the units the earlier figures are in
+ *    (the edge-on control reproduces at 0.0159 against the recorded 0.017, so
+ *    the scales agree):
+ *
+ *      edge-on, the broken pose    0.017
+ *      carried in the fist         0.075
+ *      drawn, before this          0.102
+ *      drawn, now                  0.049   <- 2.9x the failure, at the same height
+ *
+ *    and at the draw's own scale (`len` 1.41, not the 0.78 those are measured
+ *    at) it is 0.160, about what a pickaxe covers. The bow is not going back to
+ *    a vertical line.
+ *
+ *    `string` and `pull` need no adjustment for any of this, and that was the
+ *    point of moving them into the bow's model space — see `_poseDraw`. Checked
+ *    rather than assumed: the nock point's distance to the nearest vertex of the
+ *    string's straight run is identical under the old and new rotations at
+ *    t = 0, 0.5 and 1 (0.5477 / 0.3686 / 0.1912 in both), because the nock is
+ *    stated in bow space and carried by the bow's own matrix. Retuning the pose
+ *    cannot take the arrow off the string.
  *
  * What that does to the frame, measured off the real glTF through the real
- * chain at 16:9 (bow and arm as rasterised screen coverage, not bounding boxes):
+ * chain at 16:9 (bow and arm as rasterised screen coverage, not bounding boxes).
+ * **These rows are from the 67.6-degree pose** — the turn above changes the bow
+ * column and the last two, and the rise, the arm's retreat and the heights are
+ * untouched by a rotation:
  *
  *   draw   bow    arm     plane off face-on   stave off vertical   bow height
  *   0.00   1.05%  2.56%   39 deg              6 deg                1.45 NDC
@@ -127,8 +165,15 @@ const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
 const DRAW = {
   p: [-0.02, -0.42, 0.04],
   r: [-0.85, 0.26, -0.14],
-  /** Where the bow goes, in view space. */
-  aim: { p: [0.42, -0.07, -0.85], r: [-2.675, -1.129, -1.063], len: 1.41 },
+  /**
+   * Where the bow goes, in view space. `r` is 25 degrees off the shot — see the
+   * turn table above before changing it, and note that this is the *only*
+   * rotation the bow has at full draw: `POSE.bow.rot` in `render/ItemModels.js`
+   * is the carried pose and is slerped entirely out of the picture by then, so
+   * a "the drawn bow is turned wrong" report is always this number and never
+   * that one.
+   */
+  aim: { p: [0.42, -0.07, -0.85], r: [-3.077, -0.431, -1.488], len: 1.41 },
   /** The limb stops being drawn once its retreat is this far along. */
   hide: 0.35,
   /**

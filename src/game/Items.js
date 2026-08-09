@@ -512,6 +512,43 @@ export const HONEYCOMB_ID = add({
 });
 
 /**
+ * The lava bucket.
+ *
+ * Appended here, at the end, for the reason the bow and the honeycomb both
+ * give: `MATERIALS` is added before the tool and armour loops, so pushing this
+ * in beside `water_bucket` where it belongs would renumber every tool and every
+ * piece of armour in every existing save. Ids are save state.
+ *
+ * There was no way to hold lava at all. The pail existed in two states —
+ * empty and water — so the second liquid on the planet could be swum in,
+ * quenched and drowned in, but never picked up, carried or placed. That is a
+ * hole in a symmetry the rest of the game already keeps: `Water.js` runs both
+ * liquids through one sim, `_quench` is written as a rule *about* the pair, and
+ * obsidian is deliberately gated behind carrying water down to the mantle. The
+ * missing half is carrying the mantle up.
+ *
+ * It behaves exactly as the water bucket does, and the one rule that matters is
+ * shared rather than reimplemented: **only a `sources` cell fills a pail.** A
+ * poured pail makes a spring, so if the far end of a trickle could be scooped
+ * then one bucket would be unlimited springs — pour, let it run six cells,
+ * scoop the trickle, and you are up one source with the original still running.
+ * That is the bug the water bucket already carries the comment for, and lava is
+ * strictly worse to get wrong: a lava spring nobody poured is a fire that never
+ * goes out. `_useBucket` in main.js decides both from one branch for that
+ * reason — see the note there.
+ *
+ * `carries` names the liquid so the use path reads its id off the item instead
+ * of testing which of two bucket ids is in hand. `fill` is the disc inside the
+ * pail (see `fillDisc` in `render/ItemModels.js`), and it is the only visual
+ * difference between the two full states — same model, same pose, different
+ * waterline, which is what the water bucket already does.
+ */
+export const LAVA_BUCKET_ID = add({
+  name: 'lava_bucket', label: 'Lava Bucket', art: 'bucket', stack: 1,
+  color: '#a8adb8', shine: '#e8ecf4', fill: '#e2591b', carries: 'lava',
+});
+
+/**
  * How much of a bow's power a given fraction of the draw is worth.
  *
  * Quadratic-leaning rather than linear, and deliberately Minecraft's own curve:

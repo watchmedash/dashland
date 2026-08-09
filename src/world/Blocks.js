@@ -209,6 +209,58 @@ function block(o) {
   };
 }
 
+/**
+ * The materials that come in slab and stair form, and the parent each one is
+ * cut from.
+ *
+ * **One table, read twice.** It used to be two identical eighteen-row literals
+ * written out one after the other, and they had already drifted: `packed_ice`
+ * carried 0.8 in both while the block itself is 1.0, and `snow_brick` carried
+ * 0.6 against the block's 0.7. Two copies of a fact is two chances to be wrong
+ * about it, and a slab that is not made of what it says it is made of is a bug
+ * you can only find by reading the table.
+ *
+ * `tier` is the column that was missing entirely, and its absence was a live
+ * exploit rather than an untidiness. Every row defaulted to 0, so
+ * `slab_slate` and `stair_slate` were harvestable with bare hands and a wooden
+ * pick while `slate` itself is tier 1 — and slate is a deep stone. Cut a wall
+ * of it into slabs (which needs no tool at all, only the bench) and the
+ * gate was gone. **A derived block inherits its parent's tier, always**: the
+ * shape a block is cut into is not a reason to need a lesser tool for it.
+ *
+ * Hardness is the one thing that legitimately differs, and it differs by a
+ * fixed factor rather than per row: a slab is 0.7 of its parent and a stair
+ * 0.85, which is roughly how much of the cell each of them actually is. That
+ * keeps the family in step with the parent forever — retune `slate` and both
+ * of its shapes follow.
+ *
+ * Columns: [base name, label prefix, tile, parent hardness, tool, parent tier].
+ */
+const MASONRY = [
+  ['stone', 'Stone', 'smooth_stone', 2.2, 'pick', 0],
+  ['cobblestone', 'Cobblestone', 'cobblestone', 2.4, 'pick', 0],
+  ['stone_brick', 'Stone Brick', 'stone_brick', 2.4, 'pick', 0],
+  ['sandstone', 'Sandstone', 'sandstone', 1.6, 'pick', 0],
+  ['red_sandstone', 'Red Sandstone', 'red_sandstone', 1.6, 'pick', 0],
+  ['brick', 'Brick', 'brick', 2.4, 'pick', 0],
+  ['limestone', 'Limestone', 'limestone', 1.9, 'pick', 0],
+  ['marble', 'Marble', 'marble', 2.3, 'pick', 0],
+  ['granite', 'Granite', 'granite', 2.6, 'pick', 0],
+  ['andesite', 'Andesite', 'andesite', 2.4, 'pick', 0],
+  // The one row the tier column exists for. See above.
+  ['slate', 'Slate', 'slate', 3.0, 'pick', 1],
+  ['tuff', 'Tuff', 'tuff', 2.0, 'pick', 0],
+  ['planks', 'Oak', 'planks', 1.2, 'axe', 0],
+  ['planks_birch', 'Birch', 'planks_birch', 1.2, 'axe', 0],
+  ['planks_pine', 'Pine', 'planks_pine', 1.2, 'axe', 0],
+  ['mossy_stone_brick', 'Mossy Brick', 'mossy_stone_brick', 2.4, 'pick', 0],
+  ['snow_brick', 'Snow Brick', 'snow_brick', 0.7, 'shovel', 0],
+  ['packed_ice', 'Packed Ice', 'packed_ice', 1.0, 'pick', 0],
+];
+/** How much of its parent's hardness each cut shape keeps. */
+const SLAB_HARDNESS = 0.7;
+const STAIR_HARDNESS = 0.85;
+
 export const BLOCKS = [
   block({ name: 'air', render: R_AIR, solid: false, opaque: false, all: 'stone' }),
   block({ name: 'stone', label: 'Stone', all: 'stone', hardness: 2.2, tool: 'pick', drop: 'cobblestone', particle: [0.48, 0.48, 0.5], sound: 'stone' }),
@@ -266,9 +318,24 @@ export const BLOCKS = [
   // that says nothing — the deepest place on the planet was the only one with
   // nothing in it. This is the one of these that exists, it cannot be crafted,
   // and the planet only offers it once.
+  //
+  // Tier 3 and hardness 6 — obsidian's numbers, and read off obsidian on
+  // purpose. It used to be tier 0 at 1.4, softer than the stone in a hillside
+  // and softer than the basalt you dug through to reach it: the one object the
+  // whole descent exists to hand you came out of the wall faster than
+  // cobblestone. That is not a difficulty question, it is a legibility one. The
+  // deep blocks all say what they are by what it takes to move them, and the
+  // deepest prize saying "wooden pick, three seconds" contradicts every other
+  // thing about it.
+  //
+  // Tier 3 and not 4. The core beside it is tier 4 because it is scenery you
+  // are never meant to break; the hearth is a thing you carry home and re-site,
+  // and gating that behind astral would mean the reward for reaching the core
+  // is a block you cannot pick back up until the tier *after* the one that got
+  // you there. Iron is what you have when you arrive.
   block({
     name: 'hearth', label: 'Planet Hearth', all: 'hearth',
-    hardness: 1.4, tool: 'pick', light: 15, lightColor: [1.0, 0.72, 0.36],
+    hardness: 6, tool: 'pick', tier: 3, light: 15, lightColor: [1.0, 0.72, 0.36],
     particle: [1, 0.7, 0.3], sound: 'stone',
   }),
 
@@ -474,55 +541,18 @@ export const BLOCKS = [
   // `blockTop`/`blockBottom`, which every collision and ground scan now reads
   // instead of assuming a block spans k..k+1.
   // -------------------------------------------------------------------------
-  ...[
-    ['stone', 'Stone', 'smooth_stone', 2.2, 'pick'],
-    ['cobblestone', 'Cobblestone', 'cobblestone', 2.4, 'pick'],
-    ['stone_brick', 'Stone Brick', 'stone_brick', 2.4, 'pick'],
-    ['sandstone', 'Sandstone', 'sandstone', 1.6, 'pick'],
-    ['red_sandstone', 'Red Sandstone', 'red_sandstone', 1.6, 'pick'],
-    ['brick', 'Brick', 'brick', 2.4, 'pick'],
-    ['limestone', 'Limestone', 'limestone', 1.9, 'pick'],
-    ['marble', 'Marble', 'marble', 2.3, 'pick'],
-    ['granite', 'Granite', 'granite', 2.6, 'pick'],
-    ['andesite', 'Andesite', 'andesite', 2.4, 'pick'],
-    ['slate', 'Slate', 'slate', 3.0, 'pick'],
-    ['tuff', 'Tuff', 'tuff', 2.0, 'pick'],
-    ['planks', 'Oak', 'planks', 1.2, 'axe'],
-    ['planks_birch', 'Birch', 'planks_birch', 1.2, 'axe'],
-    ['planks_pine', 'Pine', 'planks_pine', 1.2, 'axe'],
-    ['mossy_stone_brick', 'Mossy Brick', 'mossy_stone_brick', 2.4, 'pick'],
-    ['snow_brick', 'Snow Brick', 'snow_brick', 0.6, 'shovel'],
-    ['packed_ice', 'Packed Ice', 'packed_ice', 0.8, 'pick'],
-  ].map(([base, label, tile, hardness, tool]) => block({
+  ...MASONRY.map(([base, label, tile, hardness, tool, tier]) => block({
     name: `slab_${base}`, label: `${label} Slab`, render: R_SLAB, all: tile,
-    hardness: hardness * 0.7, tool, sound: 'stone',
+    hardness: hardness * SLAB_HARDNESS, tool, tier, sound: 'stone',
     particle: [0.55, 0.55, 0.55],
   })),
 
-  // Stairs. Same materials as the slabs, so the two families cover the same
-  // palette and a build never runs out of one halfway through.
-  ...[
-    ['stone', 'Stone', 'smooth_stone', 2.2, 'pick'],
-    ['cobblestone', 'Cobblestone', 'cobblestone', 2.4, 'pick'],
-    ['stone_brick', 'Stone Brick', 'stone_brick', 2.4, 'pick'],
-    ['sandstone', 'Sandstone', 'sandstone', 1.6, 'pick'],
-    ['red_sandstone', 'Red Sandstone', 'red_sandstone', 1.6, 'pick'],
-    ['brick', 'Brick', 'brick', 2.4, 'pick'],
-    ['limestone', 'Limestone', 'limestone', 1.9, 'pick'],
-    ['marble', 'Marble', 'marble', 2.3, 'pick'],
-    ['granite', 'Granite', 'granite', 2.6, 'pick'],
-    ['andesite', 'Andesite', 'andesite', 2.4, 'pick'],
-    ['slate', 'Slate', 'slate', 3.0, 'pick'],
-    ['tuff', 'Tuff', 'tuff', 2.0, 'pick'],
-    ['planks', 'Oak', 'planks', 1.2, 'axe'],
-    ['planks_birch', 'Birch', 'planks_birch', 1.2, 'axe'],
-    ['planks_pine', 'Pine', 'planks_pine', 1.2, 'axe'],
-    ['mossy_stone_brick', 'Mossy Brick', 'mossy_stone_brick', 2.4, 'pick'],
-    ['snow_brick', 'Snow Brick', 'snow_brick', 0.6, 'shovel'],
-    ['packed_ice', 'Packed Ice', 'packed_ice', 0.8, 'pick'],
-  ].map(([base, label, tile, hardness, tool]) => block({
+  // Stairs. Same materials as the slabs — literally the same table — so the two
+  // families cover the same palette and a build never runs out of one halfway
+  // through.
+  ...MASONRY.map(([base, label, tile, hardness, tool, tier]) => block({
     name: `stair_${base}`, label: `${label} Stairs`, render: R_STAIR, all: tile,
-    hardness: hardness * 0.85, tool, sound: 'stone',
+    hardness: hardness * STAIR_HARDNESS, tool, tier, sound: 'stone',
     particle: [0.55, 0.55, 0.55],
   })),
 
@@ -974,6 +1004,41 @@ export const IS_TORCH = new Uint8Array(N_BLOCKS);
  * This is a placement rule only. Water that later flows *into* a torch does not
  * put it out — that would need the liquid simulation to know about block
  * removal, and it is a bigger change than the one being asked for.
+ *
+ * ---
+ *
+ * **Why ladders, signs and doors dam a flow, and why that stays.**
+ *
+ * Measured and reported as a fault: a ladder across a channel stops a river
+ * dead, and Minecraft would waterlog it instead. It was raised because these
+ * three are `IS_SHAPED` — they visibly do not fill their cell — so the water
+ * looks as though it should get past.
+ *
+ * They stay walls, deliberately, and the reason is that this world has no
+ * waterlogged state to move them to. A cell holds exactly one block id. There
+ * is no second slot for "and also water", and `Water._canEnter` has exactly two
+ * ways to treat a non-liquid cell: it is a wall, or it is something the flow
+ * destroys on its way through (`DROWNS`, see above). So the only available
+ * meaning of "let water through a ladder" is *"water washes ladders away"* —
+ * and that is plainly worse than the thing being fixed. A submerged doorway is
+ * a thing players build on purpose, a ladder down a flooded shaft is how you
+ * get out of one, and a rule that dissolved either the moment a source was
+ * disturbed nearby would cost far more than a dammed stream.
+ *
+ * The containment argument points the same way. Every rule in `Water.js` that
+ * stops a flood — a starved flow draining, a quench boundary being final, a
+ * poured source being scoopable back — rests on non-liquid cells being
+ * impermeable. Making a whole render class semi-permeable would put a leak in
+ * a door used as a dam wall, which is a thing players build *because* it holds,
+ * and the sim has no notion of a partial seal to describe what should happen
+ * instead.
+ *
+ * So the honest statement of the rule is not "shaped blocks let water past",
+ * it is **"a block is a wall unless the water destroys it"**, and a ladder is a
+ * wall. What actually flows through in this game is what a flow would sweep
+ * away anyway: stems and flames. If waterlogging is wanted later it is a
+ * cell-format change (a second id, or a wet bit in the side-table), not a flag
+ * flip here, and it should be costed as one.
  */
 export const DROWNS = new Uint8Array(N_BLOCKS);
 /**

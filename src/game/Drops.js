@@ -33,6 +33,15 @@ const MERGE_RADIUS = 0.7;
  * so a drop caught in a river still comes to you when you get near it.
  */
 const FLOW_PUSH = 9;
+/**
+ * Seconds a drop survives in lava before it is gone.
+ *
+ * Short on purpose: this is a beat, not a grace period. Long enough that the
+ * embers land and the eye follows the thing down, short enough that nobody
+ * tries to fish it back out — and it cannot be fished out anyway, because the
+ * pick-up magnet is refused for the whole of it.
+ */
+const BURN_TIME = 0.45;
 
 export class Drops {
   constructor(scene, planet, materials) {
@@ -154,7 +163,11 @@ export class Drops {
     if (!itemId || count <= 0) return;
     // merge into an existing nearby stack of the same item
     for (const d of this.list) {
-      if (d.item === itemId && !d.collected && d.wear === wear) {
+      // `d.burn` is deliberately part of the test: a pile that is already on
+      // fire is not a pile you can add to. Without it a stack broken on the lip
+      // of a lava lake would merge into the doomed one beside it and go up with
+      // it, which is the game taking something the lava never touched.
+      if (d.item === itemId && !d.collected && d.wear === wear && d.burn === undefined) {
         if (d.pos.distanceToSquared(_v.set(x, y, z)) < MERGE_RADIUS * MERGE_RADIUS) {
           const max = ITEMS[itemId]?.stack ?? 64;
           if (d.count + count <= max) {
@@ -303,12 +316,32 @@ export class Drops {
 
         // Lava eats what falls into it. Without this a stack of logs sits
         // glowing in a lava lake indefinitely, and swimming out to grab it is
-        // the safest way to loot a cavern.
-        if (here === ID.lava) {
-          this.group.remove(d.mesh);
-          this.list.splice(i, 1);
+        // the safest way to loot a cavern — and worse, the buoyancy below only
+        // ever asked about water, so a drop in lava sank to the floor of the
+        // lake and stayed there, safe, forever.
+        //
+        // It burns over BURN_TIME rather than blinking out. A silent vanish
+        // reads as the game losing your things; a couple of frames of embers
+        // over the spot reads as the lava taking them, and it is long enough
+        // that a player watching a chest's worth of loot go in can see what
+        // happened. `onBurn` fires once, on the frame it catches, so the
+        // particle burst is not re-emitted every tick of the fuse.
+        //
+        // Nothing is dropped and nothing is picked up while it burns: the
+        // magnet trigger at the foot of this branch is gated on the same flag,
+        // or a player standing beside the lake would hoover a burning stack out
+        // of the fire and the whole rule would be a suggestion.
+        if (here === ID.lava && d.burn === undefined) {
+          d.burn = BURN_TIME;
           this.onBurn?.(d.pos);
-          continue;
+        }
+        if (d.burn !== undefined) {
+          d.burn -= dt;
+          if (d.burn <= 0) {
+            this.group.remove(d.mesh);
+            this.list.splice(i, 1);
+            continue;
+          }
         }
 
         if (this.planet.isSolidWorld(d.pos.x, d.pos.y, d.pos.z)) {
@@ -338,7 +371,7 @@ export class Drops {
             d.grounded = false;
           }
         }
-        if (d.age > 0.45 && hasRoom(d.item)) {
+        if (d.burn === undefined && d.age > 0.45 && hasRoom(d.item)) {
           if (d.pos.distanceTo(player.position) < PICKUP_RADIUS) d.magnet = 0.01;
         }
       }

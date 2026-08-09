@@ -5909,7 +5909,7 @@ class Game {
     // *stops* on liquid — the ordinary interaction ray passes straight through
     // water, so a lake never registers as something you can click.
     if (input.clicked[2] && input.locked && this.useCooldown === 0
-        && (heldSlot.item === itemIdOf('bucket') || heldSlot.item === itemIdOf('water_bucket'))) {
+        && (heldSlot.item === itemIdOf('bucket') || heldItem?.carries)) {
       this.useCooldown = 0.28;
       if (this._useBucket(heldSlot)) return;
     }
@@ -6171,17 +6171,32 @@ class Game {
    * reasoning behind letting any water cell fill a bucket, which is the bug
    * fixed below.
    *
+   * **Both liquids, one branch.** The lava bucket is not a second copy of this
+   * method and must not become one: the source rule below is the only thing
+   * standing between a bucket and an unlimited supply of a liquid that never
+   * drains, and a second copy of it is a second chance to get it wrong. Which
+   * liquid is in hand is read off `carries` on the item def; everything else
+   * here — the source test, the spring on pour, the empty-cell target — is
+   * shared verbatim, and `Water` already keys `sources` by cell rather than by
+   * liquid, so a lava source and a lake source are the same kind of thing to it.
+   *
    * @returns {boolean} true if the bucket did something
    */
   _useBucket(heldSlot) {
     const empty = heldSlot.item === itemIdOf('bucket');
+    // Which liquid a full pail holds, and which one an empty pail is allowed to
+    // take. `carries` names it; the two ids are the only liquids in the game.
+    const CARRIED = { water: ID.water, lava: ID.lava };
+    const FILLED = { water: 'water_bucket', lava: 'lava_bucket' };
     // A ray that stops on liquid, which the normal interaction ray does not.
     const wet = this.planet.raycast(
       this.player.eye, this.player.lookDir, this.player.reach, { hitLiquid: true },
     );
 
     if (empty) {
-      if (!wet || wet.id !== ID.water) return false;
+      if (!wet) return false;
+      const kind = wet.id === ID.water ? 'water' : wet.id === ID.lava ? 'lava' : null;
+      if (!kind) return false;
       const key = this.water.key(wet.col, wet.k);
       // Only a spring fills a bucket. Flowing water shares the block id with
       // standing water — the difference is the level, not the block — so this
@@ -6190,8 +6205,12 @@ class Game {
       // unlimited springs: pour, let it run six cells, scoop the trickle, and
       // you are up one source with the original still running. Water that never
       // drains and can be multiplied is a planet under water.
+      //
+      // Lava is the same rule and it matters more, not less: a lava spring
+      // nobody poured is a fire with no end, and it can be minted next to
+      // anything you would rather not set alight. One test, both liquids.
       if (!this.water.sources.has(key)) {
-        this.ui.setHint('Too shallow to scoop');
+        this.ui.setHint(kind === 'lava' ? 'Too thin to scoop' : 'Too shallow to scoop');
         return false;
       }
       this._applyEdits([{ col: wet.col, k: wet.k, id: 0 }]);
@@ -6202,7 +6221,7 @@ class Game {
       this.water.level.delete(key);
       this.water.onEdit(wet.col, wet.k);
       this.inventory.consumeHeld(1);
-      this.inventory.add(itemIdOf('water_bucket'), 1);
+      this.inventory.add(itemIdOf(FILLED[kind]), 1);
       this.inventory.changed();
       this.audio.splash();
       this.player.swing();
@@ -6212,13 +6231,20 @@ class Game {
 
     // Pouring: take the empty cell the ray entered through, so water lands in
     // front of a wall rather than replacing it.
+    const pouring = CARRIED[ITEMS[heldSlot.item]?.carries];
+    if (pouring === undefined) return false;
     const target = wet && wet.prevCol >= 0 ? { col: wet.prevCol, k: wet.prevK } : null;
     if (!target) return false;
     if (this.planet.at(target.col, target.k) !== 0) return false;
     // Pouring at your own feet is allowed on purpose. It's what you'd expect,
     // it's how you break a fall or make a climb, and it can't strand you: the
     // source is a single static cell you can scoop straight back up.
-    this._applyEdits([{ col: target.col, k: target.k, id: ID.water }]);
+    //
+    // That last clause is the whole safety argument for the lava pail too, and
+    // it survives: a poured lava source is one cell, it is marked a spring the
+    // same way, and the same empty bucket picks it straight back up. What it
+    // does in the meantime is the player's problem, which is the point of it.
+    this._applyEdits([{ col: target.col, k: target.k, id: pouring }]);
     // Poured water is a spring, not a puddle: it feeds a flow and never drains.
     this.water.addSource(target.col, target.k);
     this.inventory.consumeHeld(1);

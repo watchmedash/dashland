@@ -323,6 +323,25 @@ const CLIMB_GRACE = 4;
 const LAVA_DPS = 6;
 const LAVA_PERIOD = 0.5;
 /**
+ * Still alight after climbing out, in seconds, and the toll while it lasts.
+ *
+ * The player's numbers, deliberately, and they are main.js's `_tickFire`: five
+ * seconds relit every frame the body is in the lava, one half-heart every 0.9s
+ * once it is out, and water puts it out at once. Measured before this existed:
+ * a player who touched lava lost 3 per 0.45s in it and another 5 over the five
+ * seconds after, while a mob lost 3 per 0.5s in it and nothing at all after —
+ * so a cow shoved into a pool and pulled straight out again walked away
+ * completely unhurt from the thing that was still killing the player. Fire that
+ * knows who the player is, the same complaint the spines already answered.
+ *
+ * Not `burnT`. That is the *daylight* clock — it counts up to BURN_SECONDS and
+ * then kills the husk — so lighting a husk from lava through the same field
+ * would burn it to death in 3.4s of shade. Two causes, two clocks.
+ */
+const LAVA_BURN_SECONDS = 5;
+const LAVA_BURN_PERIOD = 0.9;
+const LAVA_BURN_TOLL = 1;
+/**
  * How often a body pressed against something spiky takes a point, in seconds.
  *
  * The player's cadence, deliberately — a cactus does not care what walked into
@@ -3089,6 +3108,8 @@ export class Mobs {
       /** Highest layer reached since leaving the ground, or null if it has not. */
       fallFrom: null,
       lavaT: 0,            // seconds until the next instalment of the lava toll
+      alight: 0,           // ...and seconds still burning after climbing out
+      alightT: 0,          // when the next instalment of *that* falls due
       contactT: 0,         // ...and the same for anything spiky it is leaning on
       swimming: false,     // in water, and at home in it
       wading: false,       // in water, and very much not
@@ -3108,6 +3129,14 @@ export class Mobs {
       burnT: 0,            // hostiles: seconds alight in daylight
       hauntT: 0,           // phantoms: seconds left before an unbroken stare ends
       // --- predation ---
+      // `hungerT` is "when may I hunt again", not "how close am I to starving".
+      // Nothing here ever costs a mob health, and that is deliberate on the same
+      // grounds the swim override gives for there being no drowning clock: an
+      // animal that starved would do it out past the despawn ring where nobody
+      // can see it, and the only visible effect would be a wildlife budget that
+      // quietly empties. The player's own `energy` bar is the other half of a
+      // food economy the player is in and the herd is not.
+      //
       // The hunger clock is seeded from Math.random rather than from `rng` on
       // purpose: `rng` is the per-individual stream that decides the model
       // variant and the size, and drawing from it here would move every saved
@@ -7855,12 +7884,50 @@ export class Mobs {
       // body is standing in this is that something put it there — a shove, a
       // bucket, or the block it was standing on being mined.
       if (inLava) {
+        // Relights for as long as the body is in it, and the first instalment
+        // of the afterburn is always a full period away — so climbing out is
+        // 0.9s of grace and then the toll, which is what the player gets.
+        mob.alight = LAVA_BURN_SECONDS;
+        mob.alightT = LAVA_BURN_PERIOD;
         mob.lavaT -= dt;
         if (mob.lavaT <= 0) {
           mob.lavaT = LAVA_PERIOD;
           if (this._damage(mob, LAVA_DPS * LAVA_PERIOD)) continue;
         }
-      } else mob.lavaT = 0;
+      } else {
+        mob.lavaT = 0;
+        // Out of the lava and still on fire. One compare per mob per frame for
+        // everything that is not — which is everything, almost always — and two
+        // subtractions for the one that is.
+        if (mob.alight > 0) {
+          // Water puts it out at once, exactly as it does for the player, so
+          // shoving a burning animal in the river is the answer for it too.
+          // Rain is not checked here for the same reason main.js does not check
+          // it: the player standing in a downpour goes on burning, and a mob
+          // that a shower saved and a player that one did not would be a new
+          // asymmetry in place of the one this closes.
+          if (inWater) { mob.alight = 0; mob.alightT = 0; } else {
+            // Clamped rather than left to go a frame negative: `alight > 0` is
+            // read by the fire tint in _animate as well as by this branch, and
+            // "still burning" should stop being true on the same frame here and
+            // there.
+            mob.alight = Math.max(0, mob.alight - dt);
+            mob.alightT -= dt;
+            // The tell. Same call and same cadence as the daylight burn above,
+            // so a burning animal reads the same whatever lit it. Two guards,
+            // both about not being seen twice: `burnT` means the daylight
+            // branch is already emitting for this body and a husk that walked
+            // out of lava at noon would otherwise smoke at double rate, and
+            // `phantom` is the stalker — `_damage` already refuses him, and
+            // embers coming off an empty ridge would be him being caught.
+            if (!spec.phantom && mob.burnT <= 0.35 && this.onBurn) this.onBurn(mob);
+            if (mob.alightT <= 0) {
+              mob.alightT = LAVA_BURN_PERIOD;
+              if (this._damage(mob, LAVA_BURN_TOLL)) continue;
+            }
+          }
+        }
+      }
 
       // Spines. The same rule that hurts the player, applied to everything else
       // that can walk into one — asked for in the same breath ("it should hurt
@@ -8079,7 +8146,10 @@ export class Mobs {
     // clones; the map inside them is shared and never written to.
     let tr = 1, tg = 1, tb = 1;
     if (mob.hurtT > 0) { tr = 1; tg = 0.34; tb = 0.30; }
-    else if (mob.burnT > 0) {
+    // `alight` is the lava afterburn, `burnT` the daylight one. Same tint for
+    // both: what the player has to read is "that animal is on fire", not which
+    // clock is counting it down.
+    else if (mob.burnT > 0 || mob.alight > 0) {
       // pulse while alight, so a burning husk reads at a distance
       const beat = 0.65 + Math.abs(Math.sin(mob.idleT * 9)) * 0.35;
       tr = 1; tg = 0.55 * beat; tb = 0.22 * beat;

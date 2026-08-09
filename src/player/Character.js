@@ -39,6 +39,51 @@ export const CHARACTER_IDS = [
   'a', 'b', 'c', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'm', 'n', 'p', 'q', 'r',
 ];
 
+/**
+ * What each of them is called.
+ *
+ * "Character A" is not a person, it is a filename with a capital letter on it,
+ * and a picker that offers fifteen of those is asking the player to choose
+ * between rows of a table. These are the same fifteen bodies with names on.
+ *
+ * Three rules, and each of them is a constraint the picker imposes rather than
+ * a preference:
+ *
+ *  - **Short.** The name renders in a caption under the figure, in a card that
+ *    is as wide as one character is tall. Six letters fits at the size the
+ *    caption is set; nine wraps or shrinks, and a wrapping caption moves the
+ *    figure. The longest here is `Halvard`, at seven.
+ *  - **Plain ASCII, no punctuation.** These strings pass through markup, a save
+ *    file and a URL-shaped id lookup, and a name with an apostrophe in it is a
+ *    name that eventually appears as `O&#39;Neil`. Accents were the other
+ *    temptation and are the same class of bug one layer down.
+ *  - **Fifteen origins, not one family.** The pack's faces are visibly from
+ *    everywhere; naming them Ann, Ben, Carl down the alphabet would flatten
+ *    that into one village of siblings. No two share a first letter either,
+ *    which is what lets a player who has met one of them find them again.
+ *
+ * Keyed by id and not an array, so that the order of `CHARACTER_IDS` can change
+ * without silently renaming everyone. Consumers should fall back to the id: a
+ * missing entry is a caption reading `q`, not a crash.
+ */
+export const CHARACTER_NAMES = {
+  a: 'Rowan',
+  b: 'Mira',
+  c: 'Tomas',
+  e: 'Ines',
+  f: 'Nadia',
+  g: 'Kofi',
+  h: 'Sanne',
+  i: 'Yusuf',
+  j: 'Bela',
+  k: 'Priya',
+  m: 'Otto',
+  n: 'Amara',
+  p: 'Halvard',
+  q: 'Lucia',
+  r: 'Emeka',
+};
+
 /** Who you are until anything says otherwise. */
 export const DEFAULT_CHARACTER = 'a';
 
@@ -92,6 +137,61 @@ const CLIP = {
    */
   hold: { right: 'holding-right', left: 'holding-left' },
 };
+
+/**
+ * The twenty-seven, enumerated from the files rather than remembered.
+ *
+ * Every one of the eighteen `character-*.glb` ships the same list — checked,
+ * because the whole of the picker's one-model-fifteen-skins trick rests on it —
+ * and it is worth having written down, since two thirds of it was invisible
+ * from this file and so was being treated as if it did not exist:
+ *
+ *   static  idle  walk  sprint  sit  drive  die  pick-up
+ *   emote-yes  emote-no
+ *   holding-{right,left,both}  holding-{right,left,both}-shoot
+ *   attack-melee-{right,left}  attack-kick-{right,left}
+ *   interact-{right,left}
+ *   wheelchair-sit  wheelchair-move-{forward,back,left,right}
+ *
+ * Of those, the five wheelchair clips and `drive` are vehicle poses with no
+ * vehicle in this game, `static` is the rest pose, and `sit`/`die` leave the
+ * standing silhouette in ways the note on `POSE` already covers. What is left
+ * unused and *usable* is the gesture set below.
+ *
+ * Which is a fact about the pack and not about any one file, so nothing here
+ * assumes a given character has any of them: every play goes through
+ * `_gesture`, which asks that model's own `actions` first.
+ */
+
+/**
+ * Small things a body does when nobody is asking it to do anything.
+ *
+ * All four key `torso`, `head` and the arms and **not the legs** — that is the
+ * selection rule, not a coincidence of taste. A one-shot that keys the legs
+ * would leave them wherever its last frame put them, because `idle` does not
+ * key legs and the mixer does not clear what it does not key; that is the exact
+ * bug `_clearPose` documents. Legs are in the pose tables and so `_clearPose`
+ * would in fact catch it, but a fidget that needs the safety net to look right
+ * is one that will look wrong the day the net moves.
+ *
+ * `pick-up` reads as checking a pocket, `interact-*` as reaching out and
+ * thinking better of it, and the two emotes as a nod and a shake at nobody.
+ * None of them travel, so a body that fidgets is still standing exactly where
+ * the collision box says it is.
+ */
+const FIDGETS = ['emote-yes', 'emote-no', 'pick-up', 'interact-right', 'interact-left'];
+
+/**
+ * Seconds of genuinely doing nothing before the body fidgets, and between
+ * fidgets after that.
+ *
+ * Long, deliberately. A gesture every three seconds is a nervous tic and reads
+ * as a bug; the point is that a player who parks the character to read a
+ * crafting grid looks up and finds a person rather than a statue. The range is
+ * jittered per fire so it never settles into a rhythm.
+ */
+const FIDGET_MIN = 9;
+const FIDGET_MAX = 19;
 
 /** The two hands, in the order everything here iterates them. */
 const HANDS = ['right', 'left'];
@@ -398,6 +498,17 @@ export class PlayerCharacter {
     this.swingHand = 'right';
 
     /**
+     * The idle fidget: the action currently running, and the countdown to the
+     * next one. See `_maybeFidget`.
+     *
+     * Held as the action rather than as a name so it can be faded out the
+     * instant the player does something — a gesture that has to finish before
+     * the body will walk is worse than no gesture at all.
+     */
+    this._fidget = null;
+    this._fidgetT = FIDGET_MIN;
+
+    /**
      * Told whenever the body changes character, so first person can wear the
      * same arms.
      *
@@ -496,6 +607,9 @@ export class PlayerCharacter {
       this._poseNodes = null;
       this._poseAll = null;
       this._actions = null;
+      // An action belonging to a mixer that is about to be collected. Kept, it
+      // would be faded out on behalf of a body nobody can see.
+      this._fidget = null;
       for (const h of HANDS) {
         this.arms[h] = null;
         this.hands[h] = null;
@@ -664,6 +778,11 @@ export class PlayerCharacter {
     this.swingHand = CLIP.attack[hand] ? hand : 'right';
     this.swingT = SWING_TIME;
     if (!this.model) return;
+    // A fidget and a swing key the same three nodes, and two one-shots at
+    // weight 1 are averaged by the mixer rather than stacked — so a punch
+    // thrown mid-nod would be a half-hearted punch, which is a bug in the one
+    // animation the player is looking at when it matters.
+    this._stopFidget();
     const base = this.model.current;
     MobModels.playOnce(this.model, CLIP.attack[this.swingHand]);
     this.model.current = base;
@@ -674,6 +793,122 @@ export class PlayerCharacter {
    * from a game that is not drawing one — it writes a number.
    */
   setDraw(t) { this._drawTarget = Math.max(0, Math.min(1, t)); }
+
+  /**
+   * Play any one of the pack's clips once, over whatever gait is running.
+   *
+   * The public form of what `punch` does privately, and it exists so that the
+   * twenty-odd clips this file does not drive are one call away rather than one
+   * rewrite away: `character.gesture('pick-up')` when something goes in the
+   * pack, `'emote-yes'` and `'emote-no'` for an accepted or refused trade,
+   * `'interact-right'` at a chest or a door. Nothing calls it yet; that is the
+   * point of it being here.
+   *
+   * Two things it is careful about, both of which a caller would otherwise get
+   * wrong. `model.current` is put back, for the reason spelled out on `punch`:
+   * `playOnce` clears it and the next frame's `play(walk)` would then reset the
+   * gait to frame zero. And the clip is looked up in *this* model's actions, so
+   * a character file that happens not to ship it is a no-op rather than a
+   * throw.
+   *
+   * @param {string} name a clip name from the pack
+   * @returns {number} the clip's duration in seconds, or 0 if it did not play
+   */
+  gesture(name) {
+    const model = this.model;
+    if (!model || !model.actions[name]) return 0;
+    this._stopFidget();
+    const base = model.current;
+    const d = MobModels.playOnce(model, name);
+    model.current = base;
+    // So the body does not fidget on top of a gesture it was just given, and
+    // does not immediately follow one with another.
+    this._fidgetT = Math.max(this._fidgetT, d + 2);
+    return d;
+  }
+
+  /** The body checks what it just picked up. See `gesture`. */
+  pickUp() { return this.gesture('pick-up'); }
+
+  /** A nod or a shake of the head. See `gesture`. */
+  emote(yes = true) { return this.gesture(yes ? 'emote-yes' : 'emote-no'); }
+
+  /**
+   * Reach out and touch something — a chest, a door, a workbench.
+   * @param {'right'|'left'} [hand]
+   */
+  interact(hand = 'right') { return this.gesture(`interact-${hand === 'left' ? 'left' : 'right'}`); }
+
+  /**
+   * Idle life: a small gesture when the body has genuinely been doing nothing.
+   *
+   * The gate is deliberately the whole of the player's state and not just
+   * "speed is zero", because every one of these clauses is a way for a fidget
+   * to look like a glitch rather than like a person:
+   *
+   *  - **Empty hands.** The carrying pose slerps the arms 85% of the way to
+   *    `holding-*` after the mixer has run, so a nod performed while holding a
+   *    torch is a nod with 15% of its arm motion left in it — a twitch. The
+   *    fidgets are arm gestures; without hands free they are not worth playing.
+   *  - **On the ground, not posed, not drawing, not swinging.** `air`, `swim`,
+   *    `crouch` and `draw` are all layered *after* the mixer and would simply
+   *    win, so the clip would run invisibly and the timer would be spent on
+   *    nothing.
+   *  - **Standing still.** 0.05 rather than 0, because a player leaning on a
+   *    wall accumulates a whisper of tangential speed that never reaches the
+   *    0.6 the gait cares about.
+   *
+   * Failing the gate rearms rather than pauses: the countdown restarts, so the
+   * first fidget after a fight is a full interval away rather than instant.
+   */
+  _maybeFidget(dt, player) {
+    const model = this.model;
+    if (!model) return;
+
+    const idle = player.grounded && !player.inWater && !this.pose
+      && this._poseW < 0.02 && this._drawW < 0.02 && this.swingT <= 0
+      && player.moveAmount < 0.05
+      && this.heldItem.right <= 0 && this.heldItem.left <= 0;
+
+    if (!idle) {
+      this._stopFidget();
+      this._fidgetT = FIDGET_MIN + Math.random() * (FIDGET_MAX - FIDGET_MIN);
+      return;
+    }
+    if (this._fidget && !this._fidget.isRunning()) this._fidget = null;
+    if (this._fidget) return;
+
+    this._fidgetT -= dt;
+    if (this._fidgetT > 0) return;
+    this._fidgetT = FIDGET_MIN + Math.random() * (FIDGET_MAX - FIDGET_MIN);
+
+    // This model's own clips, not the pack's — `d`, `l` and `o` are excluded
+    // from the picker for being someone else, but nothing stops a save naming
+    // one, and a character file with a short clip list must fidget less rather
+    // than throw.
+    const have = FIDGETS.filter((n) => model.actions[n]);
+    if (!have.length) return;
+    const name = have[(Math.random() * have.length) | 0];
+    const base = model.current;
+    MobModels.playOnce(model, name);
+    model.current = base;
+    this._fidget = model.actions[name];
+  }
+
+  /**
+   * Let go of a fidget mid-gesture, without a pop.
+   *
+   * Faded rather than stopped. `stop()` removes the action's contribution
+   * between one frame and the next, and since these clips key the torso and the
+   * head — which `idle` also keys, at a different value — the body would snap.
+   * A tenth of a second is under the reaction time of the input that
+   * interrupted it.
+   */
+  _stopFidget() {
+    if (!this._fidget) return;
+    if (this._fidget.isRunning()) this._fidget.fadeOut(0.1);
+    this._fidget = null;
+  }
 
   /**
    * Put an item in a hand.
@@ -1000,6 +1235,11 @@ export class PlayerCharacter {
       act.setEffectiveTimeScale(base ? THREE.MathUtils.clamp(speed / base, 0.55, 1.8) : 1);
     }
 
+    // After the gait has been chosen and before the mixer runs, so a fidget
+    // started this frame is drawn this frame, and so `current` is already the
+    // gait's name when `_maybeFidget` saves and restores it.
+    this._maybeFidget(dt, player);
+
     model.mixer.update(dt);
 
     // --- the carrying pose, layered by hand ---
@@ -1175,6 +1415,184 @@ const SLIDE_RATE = 11;
 const PREVIEW_HEIGHT = 0.66;
 
 /**
+ * The rig, by name, for the preview's rest-restore. See `_rest`.
+ *
+ * `root` is in the list and the other six are limbs, which is the whole reason
+ * the list exists rather than being the pose tables' node set: the attack and
+ * kick clips key `root.translation`, and in the game that is harmless because
+ * `update` writes the body's position from the player every frame. Nothing
+ * writes it here. A picker figure that threw one punch would stand a few
+ * centimetres off its mark for the rest of the session.
+ */
+const PREVIEW_NODES = ['root', 'torso', 'head', 'arm-left', 'arm-right', 'leg-left', 'leg-right'];
+
+/**
+ * One signature gesture each, so that arriving at a character shows you
+ * something about them.
+ *
+ * This is the answer to "they are all doing the same thing", and they were: the
+ * picker played `idle` on fifteen copies of one body and the only difference
+ * between two cells was the texture. The pack ships twenty-seven clips and
+ * nine of them are gestures a standing person can perform, so each character
+ * gets one and no two neighbours share it — the sequence matters, because the
+ * carousel is walked left and right and two adjacent nods read as the arrow not
+ * having worked.
+ *
+ * The kicks and the melee swings are in here deliberately, and they are the
+ * ones that make this cost anything: they key the legs and `root.translation`,
+ * neither of which `idle` keys, so neither comes back on its own when the
+ * one-shot ends. `_rest` is what makes them safe, and it is written as a
+ * general rule rather than as a special case for these four so that changing an
+ * entry in this table stays a one-word edit.
+ */
+const PREVIEW_GESTURE = {
+  a: 'emote-yes',
+  b: 'interact-right',
+  c: 'attack-kick-right',
+  e: 'emote-no',
+  f: 'pick-up',
+  g: 'interact-left',
+  h: 'attack-melee-right',
+  i: 'emote-yes',
+  j: 'interact-right',
+  k: 'attack-kick-left',
+  m: 'emote-no',
+  n: 'pick-up',
+  p: 'interact-left',
+  q: 'attack-melee-left',
+  r: 'emote-yes',
+};
+
+/**
+ * How each of them stands, layered over `idle` the way the carrying pose is
+ * layered over the gait.
+ *
+ * A gesture every few seconds fixes the moment you arrive at a character; this
+ * fixes the other four seconds. Fifteen figures playing one idle clip have one
+ * silhouette between them, and silhouette is most of what tells two blocky
+ * people apart at this size — so this is a handful of Euler angles each,
+ * slerped toward at `STANCE_BLEND` after the mixer has run, which leaves the
+ * idle breathing underneath rather than replacing it.
+ *
+ * Angles follow the sign rule stated at length on `POSE`, and it is the rule
+ * that makes these readable rather than a table of magic numbers: **negative X
+ * carries an arm or a leg forward and positive carries it back, and that
+ * inverts for the torso and the head**, which stand up their own +Y — so
+ * positive X folds a chest down and lifts nothing. Z is splay, outward being
+ * positive on the right and negative on the left. Y is a turn.
+ *
+ * Kept small. Everything here is under 0.6 radians and most of it under 0.3,
+ * because the failure mode is not subtlety — it is fifteen people in fifteen
+ * yoga positions, which is a lineup of mannequins by a different route.
+ */
+const STANCE = {
+  /** Rowan: at ease, hands a little behind, chin up. */
+  a: { torso: [-0.05, 0, 0], 'arm-right': [0.16, 0, 0.10], 'arm-left': [0.16, 0, -0.10] },
+  /** Mira: head cocked, weight on the right leg. */
+  b: { head: [0, 0, 0.14], torso: [0, 0, 0.05], 'leg-right': [0, 0, 0.10], 'leg-left': [0, 0, -0.03] },
+  /** Tomas: broad, arms and feet out. */
+  c: {
+    'arm-right': [0, 0, 0.26], 'arm-left': [0, 0, -0.26],
+    'leg-right': [0, 0, 0.12], 'leg-left': [0, 0, -0.12],
+  },
+  /** Ines: hands held together in front. */
+  e: { 'arm-right': [-0.22, 0, -0.06], 'arm-left': [-0.22, 0, 0.06] },
+  /** Nadia: looking off to one side. */
+  f: { head: [0, 0.42, 0], torso: [0, 0.10, 0] },
+  /** Kofi: right arm half raised, mid-thought or mid-wave. */
+  g: { 'arm-right': [-0.45, 0, 0.18], 'arm-left': [0.08, 0, -0.06] },
+  /** Sanne: slouched, head up anyway. */
+  h: {
+    torso: [0.14, 0, 0], head: [-0.12, 0, 0],
+    'arm-right': [0.20, 0, 0.06], 'arm-left': [0.20, 0, -0.06],
+  },
+  /** Yusuf: bolt upright, arms in. */
+  i: { torso: [-0.12, 0, 0], head: [0.06, 0, 0], 'arm-right': [0, 0, 0.03], 'arm-left': [0, 0, -0.03] },
+  /** Bela: hands on hips, as near as a rig with no elbow gets. */
+  j: { 'arm-right': [0.30, 0, 0.34], 'arm-left': [0.30, 0, -0.34] },
+  /** Priya: head cocked the other way, one foot forward. */
+  k: { head: [0, 0, -0.13], 'leg-right': [-0.14, 0, 0.05], 'leg-left': [0.06, 0, -0.05] },
+  /** Otto: heavy, leaning back, planted wide. */
+  m: {
+    torso: [-0.14, 0, 0], head: [0.10, 0, 0],
+    'arm-right': [0, 0, 0.20], 'arm-left': [0, 0, -0.20],
+    'leg-right': [0, 0, 0.16], 'leg-left': [0, 0, -0.16],
+  },
+  /** Amara: turned away a quarter, left arm across. */
+  n: { torso: [0, -0.22, 0], head: [0, 0.16, 0], 'arm-left': [-0.30, 0, 0.16] },
+  /** Halvard: arms up and folded across the chest. */
+  p: { 'arm-right': [-0.55, 0, -0.10], 'arm-left': [-0.55, 0, 0.10] },
+  /** Lucia: turned the other quarter, looking down and away. */
+  q: { torso: [0, 0.26, 0], head: [0, -0.18, 0.08] },
+  /** Emeka: right shoulder forward, left foot back. */
+  r: { 'arm-right': [-0.34, 0, 0.06], 'arm-left': [0.18, 0, -0.06], 'leg-left': [0.16, 0, 0] },
+};
+
+/**
+ * `STANCE`, compiled to quaternions once — the same trade `POSE_Q` makes, for
+ * the same reason, and it matters more here: fifteen figures times a handful of
+ * nodes is a hundred-odd Euler conversions a frame otherwise.
+ */
+const STANCE_Q = {};
+for (const [id, nodes] of Object.entries(STANCE)) {
+  STANCE_Q[id] = Object.entries(nodes).map(([node, [x, y, z]]) => [
+    node, new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z)),
+  ]);
+}
+
+/**
+ * How much of the stance survives the idle clip.
+ *
+ * The same shape of number as `HOLD_BLEND` and for the same reason: at 1 the
+ * stance is a photograph and the figure stops breathing, which on a screen
+ * showing one large character is immediately a still image. At 0.62 the
+ * silhouette is unmistakably that person's and the chest and head still move.
+ */
+const STANCE_BLEND = 0.62;
+
+/** How fast the stance yields to a gesture and comes back after, per second. */
+const STANCE_RATE = 6;
+
+/** Seconds after arriving at a character before they do their thing. */
+const GESTURE_FIRST = 0.55;
+
+/** And between repeats, while they stay selected. */
+const GESTURE_EVERY = 4.2;
+
+/** Scratch for `_rest`: node names keyed by a running action, this frame. */
+const _rotKeyed = new Set();
+const _posKeyed = new Set();
+
+/**
+ * Which node each clip writes a rotation to, and which a translation.
+ *
+ * Read off the clips rather than listed here, for the reason `_clipKeys` gives
+ * in the body above: "does `emote-yes` key the legs?" is a fact about the pack,
+ * and the same question written down in this file is a fact about what the pack
+ * looked like the day someone wrote it down. GLTFLoader names a track
+ * `<node>.<property>`, so the split is on the suffix.
+ *
+ * @param {Object<string, THREE.AnimationAction>} actions
+ */
+function trackKeys(actions) {
+  const keys = {};
+  for (const [name, action] of Object.entries(actions)) {
+    const rot = new Set();
+    const pos = new Set();
+    for (const t of action.getClip().tracks) {
+      const dot = t.name.lastIndexOf('.');
+      if (dot < 0) continue;
+      const node = t.name.slice(0, dot);
+      const prop = t.name.slice(dot + 1);
+      if (prop === 'quaternion') rot.add(node);
+      else if (prop === 'position') pos.add(node);
+    }
+    keys[name] = { rot, pos };
+  }
+  return keys;
+}
+
+/**
  * Skins, kept for the session. Not disposed with the rest of the picker: they
  * are a quarter of a megabyte in total and a player who backs out of New Game
  * and comes straight back should not watch fifteen grey mannequins fill in
@@ -1227,6 +1645,11 @@ export class CharacterPicker {
     this.figures = [];
     /** The strip every figure hangs off. Sliding this is the whole carousel. */
     this.track = null;
+    /**
+     * Clip name -> which nodes it drives, shared by all fifteen figures because
+     * all fifteen are clones of one URL. Built on the first figure. See `_rest`.
+     */
+    this._keys = null;
     this.selected = DEFAULT_CHARACTER;
     /** Where the strip is, and where it is heading, in frustum units. */
     this._x = 0;
@@ -1280,6 +1703,11 @@ export class CharacterPicker {
    */
   setSelected(id, snap = false) {
     this.selected = id;
+    // Arm the new arrival's gesture. Only the selected figure's clock runs — see
+    // `_loop` — so this is what makes stepping onto a character show you what
+    // they do, rather than making you wait out whatever was left of a timer
+    // from the last time you passed through.
+    for (const fig of this.figures) if (fig.id === id && !fig.act) fig.next = GESTURE_FIRST;
     const n = CHARACTER_IDS.indexOf(id);
     if (n >= 0) this._targetX = -n * SPACING;
     if (snap) {
@@ -1372,17 +1800,61 @@ export class CharacterPicker {
       holder.add(model.root);
       this.track.add(holder);
 
+      // Which node each clip writes to, built once and shared by all fifteen —
+      // every figure is a clone of the same URL, so the answer cannot differ
+      // between them, and asking twenty-seven clips about their tracks fifteen
+      // times would be the picker's most expensive moment for no new
+      // information.
+      if (!this._keys) this._keys = trackKeys(model.actions);
+
+      // The rest pose, captured before a single clip has touched the rig. This
+      // is what `_rest` puts back, and it has to be read here rather than
+      // assumed to be identity: identity happens to be right for the rotations
+      // in this pack, but `root` sits at a translation of its own and a figure
+      // restored to zero would sink into the floor of the frame.
+      const rest = [];
+      for (const name of PREVIEW_NODES) {
+        const node = model.root.getObjectByName(name);
+        if (node) rest.push([node, node.position.clone(), node.quaternion.clone()]);
+      }
+
+      // Both tables degrade to nothing rather than to a wrong answer: a
+      // character with no stance simply stands, one whose gesture clip is
+      // absent from its own file simply does not gesture.
+      const gestureName = model.actions[PREVIEW_GESTURE[id]] ? PREVIEW_GESTURE[id] : null;
+
       const fig = {
         id, model, holder, mat,
         ref: template?.map || null,
         // What the colour goes back to once the map lands — white for these,
         // but read off the export rather than assumed.
         tint: template ? template.color.clone() : new THREE.Color(0xffffff),
+        rest,
+        /** The stance, with its node names already resolved on this clone. */
+        stance: (STANCE_Q[id] || [])
+          .map(([node, q]) => [model.root.getObjectByName(node), q])
+          .filter(([n2]) => n2),
+        stanceW: 0,
+        gesture: gestureName,
+        /** The gesture action while it runs, and the countdown to the next. */
+        act: null,
+        next: GESTURE_FIRST,
+        /**
+         * The only actions this figure can ever have running. `_rest` asks each
+         * of them whether it is contributing, and asking two is the difference
+         * between thirty questions a frame and four hundred.
+         */
+        live: [model.actions[CLIP.idle], gestureName && model.actions[gestureName]]
+          .filter(Boolean)
+          .map((a) => [a, a.getClip().name]),
       };
       this.figures.push(fig);
       MobModels.play(model, CLIP.idle, 0);
       // Offset each one into the clip so the wall breathes rather than pulsing
-      // in unison, which reads as fifteen copies of one person.
+      // in unison, which reads as fifteen copies of one person. The rates are
+      // spread too — five of them, cycled — because two figures at the same
+      // speed drift back into step every time the phase offset comes round.
+      model.actions[CLIP.idle]?.setEffectiveTimeScale(0.86 + (n % 5) * 0.07);
       model.mixer.update(n * 0.37);
       this._skin(fig);
     });
@@ -1443,6 +1915,50 @@ export class CharacterPicker {
     fig.mat.needsUpdate = true;
   }
 
+  /**
+   * Put back every part of the rig no running clip is driving.
+   *
+   * The preview's version of `_clearPose`, and it exists for the same reason
+   * stated at length there: **the mixer does not clear what it does not key.**
+   * `idle` keys the torso, the head and the two arms and nothing else, so a
+   * gesture that moved the legs or the root leaves them exactly where its last
+   * frame put them, forever — a figure that kicks once stands with one leg out
+   * for the rest of the session, and a figure that swings once stands a few
+   * centimetres off its mark. Neither is visible as a bug; both read as "that
+   * character is standing oddly", which is indistinguishable from the stance
+   * table doing its job.
+   *
+   * Two differences from the body's version, both forced by this being a
+   * preview rather than a player:
+   *
+   *  - **Translation as well as rotation.** In the game `update` writes the
+   *    body's position from the player every frame, so a clip's root motion is
+   *    overwritten before it can be seen. Here nothing writes it.
+   *  - **The captured rest, not identity.** Identity is right for every
+   *    rotation in this pack, which is what lets `_clearPose` hard-code it —
+   *    but `root` carries a translation, and zeroing that drops the figure.
+   *
+   * Running actions rather than the selected clip, and by weight, so that a
+   * gesture fading out is still allowed to own its nodes on the way down.
+   */
+  _rest(fig) {
+    const keys = this._keys;
+    if (!keys) return;
+    _rotKeyed.clear();
+    _posKeyed.clear();
+    for (const [action, name] of fig.live) {
+      if (!action.isRunning() || action.getEffectiveWeight() <= 0.001) continue;
+      const k = keys[name];
+      if (!k) continue;
+      for (const n of k.rot) _rotKeyed.add(n);
+      for (const n of k.pos) _posKeyed.add(n);
+    }
+    for (const [node, pos, quat] of fig.rest) {
+      if (!_rotKeyed.has(node.name)) node.quaternion.copy(quat);
+      if (!_posKeyed.has(node.name)) node.position.copy(pos);
+    }
+  }
+
   _resize() {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
@@ -1471,6 +1987,40 @@ export class CharacterPicker {
     for (const fig of this.figures) {
       fig.model.mixer.update(dt);
       const on = fig.id === this.selected;
+
+      // Strictly after the mixer and in this order: put back what no clip is
+      // driving, then lay the stance over what the clip did drive. Reversed,
+      // the restore would wipe the stance off every node `idle` leaves alone —
+      // which is every leg, which is half of what tells these fifteen apart.
+      this._rest(fig);
+      const busy = !!(fig.act && fig.act.isRunning() && fig.act.getEffectiveWeight() > 0.01);
+      // The stance steps aside for the gesture rather than being blended
+      // through it. A nod performed from a slouch is a slouching nod, which is
+      // charming; a punch thrown from folded arms is a punch that never
+      // extends, which is broken. One rule, applied to both.
+      fig.stanceW += ((busy ? 0 : 1) - fig.stanceW) * Math.min(1, dt * STANCE_RATE);
+      if (fig.stanceW > 0.004) {
+        const w = fig.stanceW * STANCE_BLEND;
+        for (const [node, q] of fig.stance) node.quaternion.slerp(q, w);
+      }
+
+      // Only the character you are looking at gestures. The other fourteen are
+      // a whole screen width off the frustum, so a kick out there is a kick
+      // nobody sees, and the clocks would all be running at once.
+      if (fig.act && !fig.act.isRunning()) fig.act = null;
+      if (on && fig.gesture && !fig.act) {
+        fig.next -= dt;
+        if (fig.next <= 0) {
+          fig.next = GESTURE_EVERY;
+          MobModels.playOnce(fig.model, fig.gesture);
+          // `playOnce` clears `current` so a caller's state machine re-blends;
+          // this one has no state machine and `idle` never stopped, so putting
+          // it back keeps a later `play(idle)` a no-op instead of a reset to
+          // frame zero.
+          fig.model.current = CLIP.idle;
+          fig.act = fig.model.actions[fig.gesture];
+        }
+      }
       // The chosen one turns, because half of what distinguishes these is the
       // back of the coat and the hair. The others ease back to facing you —
       // wrapped into ±π first, or a figure that had spun three times would take

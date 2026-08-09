@@ -79,7 +79,14 @@ const MAP = {
   leaves_birch: ['Bush_Hedge', 1, { tint: 0.35, bright: 1.10, holes: 0.21 }],
   log_pine: ['Tree Bark', 1],
   log_pine_top: ['Tree Bark', 5],
-  leaves_pine: ['Bush_Hedge', 2, { tint: 0.45, bright: 2.55, holes: 0.17 }],
+  // leaves_pine is deliberately NOT here. It used to be Bush_Hedge/2, which is
+  // a broadleaf shrub — round leaves on brown twigs, near enough the same plant
+  // as the oak and birch tiles it stood next to. Every category in the pack was
+  // contact-sheeted looking for needles (Bush_Hedge, Snowy Hedge_Bush, Grass,
+  // Snowy Grass, Fire Grass, Fall Ground, Swamp, Roots, Magical Forrest, the
+  // Alien sets) and there is no conifer texture in it, so the tile is drawn by
+  // the procedural pass instead: see G.leaves_pine in src/render/TextureGen.js.
+  // Leaving it out of MAP is what lets the procedural baseline stand.
 
   planks: ['Wood Planks', 4],
   // Mined stone becomes cobblestone, so the two have to read as the same rock.
@@ -524,10 +531,34 @@ async function writeAtlas(buf, name, kind) {
   //           atlas combined: 8.3 MB against albedo's 2.5.
   //   srgb    ordinary lossy, slightly higher quality since it is what you
   //           actually look at.
+  //
+  // `exact` is not an optimisation, it is a correctness flag, and leaving it
+  // off is what put rectangular blocks of the wrong colour inside every leaf,
+  // wheat, flower and plant tile in the exported atlas. With it false — the
+  // default — libwebp runs `WebPCleanupTransparentArea`, which walks the image
+  // in 8x8 blocks and overwrites the RGB of any block that is ENTIRELY
+  // alpha == 0 with one flat colour, merging runs of neighbouring blocks into
+  // wider rectangles. It is a compression win on RGB nobody is supposed to
+  // look at, and it fires on lossless encodes too, so neither quality nor
+  // lossless is a way round it.
+  //
+  // Measured: transparent-region RGB drifted from the baked buffer by mean 34
+  // counts and up to 197, with the luminance step at columns 0 and 8 mod 16
+  // measuring 30.5 and 28.7 counts against 0.4-0.8 at every other phase. The
+  // same buffer encoded with alpha forced opaque, or with `exact: true`, comes
+  // back at mean 3.2 — ordinary q93 quantisation. 15 of the 16 tiles a block
+  // detector flagged were exactly the 15 tiles in the atlas that contain
+  // alpha == 0; `glass` is 84% transparent but bottoms out at alpha 40 and was
+  // never touched. Cost of the flag: 24 KB on 2705 KB for albedo, 0 for arm.
+  //
+  // Not on the normal branch. Nothing writes a transparent pixel into the
+  // normal map — `bakeTile` and `encodeNormal` both hard-set alpha 255 — so
+  // there is no cleanup to suppress there, and measured, the flag costs the
+  // near-lossless encoder 1.4 MB (7.3 -> 8.8) for no change in output.
   const pipeline = sharp(sheet, { raw: { width: W, height: H, channels: 4 } });
   const opts = kind === 'normal'
     ? { nearLossless: true, quality: 80, alphaQuality: 100, effort: 6 }
-    : { quality: kind === 'srgb' ? 93 : 88, alphaQuality: 100, effort: 6 };
+    : { quality: kind === 'srgb' ? 93 : 88, alphaQuality: 100, effort: 6, exact: true };
   await pipeline.webp(opts).toFile(path.join(OUT, `${name}.webp`));
   const kb = Math.round(fs.statSync(path.join(OUT, `${name}.webp`)).size / 1024);
   console.log(`  ${name}.webp  ${W}x${H}  ${kb} KB`);

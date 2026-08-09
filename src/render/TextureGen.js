@@ -517,6 +517,176 @@ G.tall_grass = (s) => {
   return s;
 };
 
+/**
+ * One needle: a short tapered stroke that WRAPS at the tile edge, with a lit
+ * spine down one side.
+ *
+ * Wrapping is the whole reason this exists rather than reusing `stem`. A canopy
+ * is a repeating field of small marks, so any mark clipped at the border shows
+ * up as a seam on every leaf block in the world; `stem` clamps and would leave
+ * a bald 2px frame around all four edges of the tile.
+ *
+ * `depth` is a painter's-order stand-in for occlusion: a needle only writes
+ * where it is in front of what is already there, so a spray laid down late
+ * sits on top of the ones under it instead of averaging into them, and the
+ * height it leaves behind is what the normal map is built from.
+ */
+function needle(s, x0, y0, x1, y1, w, col, depth, lit) {
+  const size = s.size;
+  const len = Math.hypot(x1 - x0, y1 - y0) * size;
+  const steps = Math.max(2, Math.ceil(len * 1.6));
+  // Unit normal of the stroke, so the lit side can be picked by the SIGN of the
+  // cross-track offset. A symmetric profile reads as a wire; asymmetric reads as
+  // a round needle catching light from one direction.
+  const nx = -(y1 - y0) / (Math.hypot(x1 - x0, y1 - y0) || 1e-6);
+  const ny = (x1 - x0) / (Math.hypot(x1 - x0, y1 - y0) || 1e-6);
+  for (let k = 0; k <= steps; k++) {
+    const t = k / steps;
+    const cx = lerp(x0, x1, t) * size;
+    const cy = lerp(y0, y1, t) * size;
+    // taper: fattest a third of the way along, drawn to a point at the tip
+    const r = w * size * (0.55 + 0.45 * Math.sin(Math.min(1, t * 1.35) * Math.PI));
+    const ri = Math.ceil(r);
+    for (let dy = -ri; dy <= ri; dy++) {
+      for (let dx = -ri; dx <= ri; dx++) {
+        const d2 = dx * dx + dy * dy;
+        if (d2 > r * r) continue;
+        const x = ((Math.round(cx + dx) % size) + size) % size;
+        const y = ((Math.round(cy + dy) % size) + size) % size;
+        const i = y * size + x;
+        const z = depth + (1 - t) * 0.012;
+        if (s.a[i] > 0.5 && s.h[i] >= z) continue;
+        // cross-track position, +1 on the lit flank and -1 on the shaded one
+        const side = (dx * nx + dy * ny) / (r + 0.001);
+        const shade = 0.80 + 0.30 * lit + 0.18 * side - 0.10 * (d2 / (r * r + 0.001));
+        setRGB(s, i, [col[0] * shade, col[1] * shade, col[2] * shade]);
+        s.a[i] = 1;
+        s.h[i] = z;
+        s.ao[i] = 0.80 + 0.20 * depth;
+        s.rough[i] = 0.90;
+      }
+    }
+  }
+}
+
+/**
+ * A conifer sprig: a woody rachis with needles fanned off both sides, swept
+ * toward the tip and shortening as they go.
+ *
+ * The sweep angle is what separates a conifer from a bottle brush. Needles at a
+ * right angle to the twig read as a pipe cleaner, so they leave the rachis at
+ * roughly 50-70 degrees and the fan tightens along the last third.
+ */
+function sprig(s, cx, cy, ang, len, rng, palette, depth) {
+  const [dark, mid, litc, twig] = palette;
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  // Thinner than the needles it carries, and unlit. The first version drew the
+  // rachis at 0.0055 against the needles' 0.0042 and gave it a lit flank, so
+  // the twigs read as a brown web laid OVER the foliage rather than as the
+  // thing the foliage hangs off. A conifer sprig is needles with a twig you can
+  // just make out, not the reverse.
+  needle(s, cx, cy, cx + dx * len, cy + dy * len, 0.0034, twig, depth - 0.02, 0);
+  const pairs = 5 + Math.floor(rng() * 4);
+  for (let k = 0; k < pairs; k++) {
+    const t = 0.10 + 0.86 * (k / (pairs - 1));
+    const bx = cx + dx * len * t, by = cy + dy * len * t;
+    // needles shorten toward the tip, which is what gives a sprig its taper
+    const nl = len * (0.62 - 0.34 * t) * (0.8 + rng() * 0.45);
+    for (const sgn of [-1, 1]) {
+      const sweep = ang + sgn * (0.85 + rng() * 0.42) * (1 - t * 0.35);
+      const lit = rng();
+      const c = lit > 0.62 ? mixc(mid, litc, (lit - 0.62) / 0.38) : mixc(dark, mid, lit / 0.62);
+      needle(s, bx, by, bx + Math.cos(sweep) * nl, by + Math.sin(sweep) * nl,
+        0.0042 + rng() * 0.0016, c, depth + 0.004 * k, lit);
+    }
+  }
+}
+
+// dark / mid / lit needle, and the twig they hang off
+const PINE_PALETTE = [
+  px([40, 66, 62]), px([66, 100, 88]), px([112, 150, 126]), px([44, 40, 33]),
+];
+
+/**
+ * Pine canopy — actual needles.
+ *
+ * This tile used to be baked from the Lynocs pack's Bush_Hedge/2, which is a
+ * BROADLEAF shrub: round leaves on brown twigs, near enough the same plant as
+ * the oak and birch tiles beside it (atlas means pine 91,124,99 / oak
+ * 103,137,77 / birch 124,169,130). Every conifer in the game was therefore
+ * wearing broadleaf leaves, and the "trees in snow look green" complaint got
+ * chased twice through the biome tint tables before anyone exported the tile
+ * and looked at it. No tint can make a shrub read as a conifer, and the pack
+ * has no needle texture anywhere in it, so this one is drawn.
+ *
+ * The colour is deliberately only MODERATELY darker than the broadleaf tiles.
+ * The biome foliage colour is a MULTIPLIER on this albedo, and the snow row is
+ * [0.52, 0.58, 0.62] before the t===3 needle trim in Mesher.js — pre-darkening
+ * the tile to what a conifer "should" be is exactly how a previous attempt
+ * turned snow-biome trees black (see the comment on tintOf). What carries the
+ * read is the needle SHAPE plus a blue bias, not exposure. Measured off the
+ * baked atlas: 80,117,104 against oak's 103,137,77 and birch's 124,169,130.
+ * That is luminance 108 against 126 and 157, and blue-minus-red +23 where oak
+ * is -27 — no broadleaf tile in the pack has more blue in it than red, so a
+ * conifer and a broadleaf can never be confused even before a tint is applied.
+ */
+G.leaves_pine = (s) => {
+  const size = s.size;
+  // Deep interior first. A canopy face is mostly self-shadow with needles
+  // catching light on top of it; starting from the needle colour instead gives
+  // a flat green card.
+  const back = fbm(size, 6, 4, 1811);
+  const gaps = fbm(size, 4, 3, 1823);
+  s.h.fill(0.18); s.ao.fill(0.74); s.rough.fill(0.95); s.normalStrength = 1.1;
+  s.a.fill(1);
+  s.each((i) => setRGB(s, i, mixc(px([26, 42, 41]), px([44, 64, 58]), back[i])));
+
+  const rng = makeRng(1831);
+  // 150 sprigs. Layering matters more than count: one pass reads as scattered
+  // marks, overlapping passes at increasing depth read as a canopy.
+  for (let k = 0; k < 150; k++) {
+    const depth = 0.30 + (k / 150) * 0.55;
+    sprig(s, rng(), rng(), rng() * Math.PI * 2,
+      0.16 + rng() * 0.12, rng, PINE_PALETTE, depth);
+  }
+
+  // Large-scale light. Without it 150 sprigs at similar exposure average out to
+  // an even fuzz; a real canopy has lit crowns and shadowed hollows a few
+  // needle-lengths across, and that is most of what makes it read as painted.
+  // The gain lands the opaque mean at 80,117,104 — see the note above on why
+  // this is not darker still.
+  const light = fbm(size, 3, 3, 1847);
+  s.each((i) => {
+    const m = 1.42 * (0.74 + 0.52 * light[i]);
+    s.r[i] *= m; s.g[i] *= m; s.b[i] *= m;
+    s.ao[i] *= 0.86 + 0.14 * light[i];
+  });
+
+  // Holes LAST, and only through the BACKGROUND. Punching before the sprigs are
+  // laid down just gets filled back in (measured 98.4% coverage that way);
+  // punching through the sprigs as well cuts smooth bites out of the needles
+  // and the silhouette reads as a moth-eaten card. Needles that cross a gap
+  // survive it, which is what leaves a ragged conifer edge.
+  //
+  // The threshold is a quantile of the field rather than a fixed value, so
+  // coverage is the same whatever the fbm happens to be scaled to — that is
+  // what keeps the 128px runtime tile and the 256px baked tile in agreement.
+  //
+  // It is tuned to leave 97.1% coverage against the 96.2% the old baked tile
+  // measured, and the field is deliberately LOW frequency. An earlier pass
+  // opened the canopy to 85% on the reasoning that a conifer wants a ragged
+  // silhouette; the render showed why the old number was the right one. At 85%
+  // you see the TRUNK through the canopy, and log_pine is untinted orange bark,
+  // so every conifer came out flecked with orange. A high-frequency field is
+  // just as bad at any coverage — it sprinkles pinholes evenly over the whole
+  // face instead of opening two or three gaps, and every pinhole is another
+  // speck of trunk.
+  const sorted = Float32Array.from(gaps).sort();
+  const cut = sorted[Math.floor(sorted.length * 0.20)];
+  s.each((i) => { if (gaps[i] < cut && s.h[i] < 0.28) { s.a[i] = 0; s.h[i] = 0.08; } });
+  return s;
+};
+
 G.sapling = (s) => {
   clearAlpha(s);
   stem(s, 0.5, 1.0, 0.5, 0.5, 0.018, px([88, 62, 38]));

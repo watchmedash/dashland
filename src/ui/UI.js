@@ -307,7 +307,7 @@ export class UI {
     notch.className = 'cmp-notch';
     const polar = document.createElement('span');
     polar.className = 'cmp-polar';
-    polar.textContent = 'No bearing — the pole is underfoot';
+    polar.textContent = 'No bearing, the pole is underfoot';
     cmp.append(win, notch, polar);
     hud.appendChild(cmp);
 
@@ -334,7 +334,7 @@ export class UI {
     // Not guarded. `syncSettings` reads both of these by id on every open, so a
     // missing settings panel has to be a throw here rather than two checkboxes
     // that quietly never exist.
-    check('set-minimap', 'Minimap', 'The disc top-left. It has no global north — it turns with you.');
+    check('set-minimap', 'Minimap', 'The disc top-left. It has no global north, it turns with you.');
     check('set-compass', 'Compass', 'Bearings across the top. North is where the sun says it is.');
 
     // ---- the Controls sheet ------------------------------------------------
@@ -1294,7 +1294,7 @@ export class UI {
       return { c, list, empty };
     };
     const wares = column('For Sale', 'The pack is empty. Try the next one along.');
-    const goods = column('Your Goods', 'Nothing to sell — everything you find has a price.');
+    const goods = column('Your Goods', 'Nothing to sell. Everything you find has a price.');
 
     // The errand goes above the counter, because it is the reason to have
     // walked over here rather than one more line of stock.
@@ -1599,7 +1599,7 @@ export class UI {
     foot.innerHTML = p.maxed
       ? `<span>${total}</span><em>Nothing left to level</em>`
       : `<span>${total}</span><em>${p.toNext.toLocaleString('en-GB')} xp to level ${p.level + 1}`
-        + ` — worth 1 point</em>`;
+        + `, worth 1 point</em>`;
 
     box.append(head, bar, foot);
     return box;
@@ -1626,7 +1626,7 @@ export class UI {
       const row = document.createElement('div');
       row.className = `earn-row${src.value === '0' ? ' nil' : ''}`;
       row.innerHTML = `<span>${src.label}<em>${src.detail}</em></span>`
-        + `<b>${src.value === '0' ? '—' : src.value}</b>`;
+        + `<b>${src.value === '0' ? '-' : src.value}</b>`;
       earned.appendChild(row);
     }
     if (sk.bonus > 0) {
@@ -1738,7 +1738,7 @@ export class UI {
     const m = String(mins % 60).padStart(2, '0');
     this.el.clockText.textContent = `${h}:${m}`;
     this.el.clockDial.style.transform = `rotate(${clockFraction * 360}deg)`;
-    this.el.chipBiome.textContent = BIOME_NAMES[biomeId] ?? '—';
+    this.el.chipBiome.textContent = BIOME_NAMES[biomeId] ?? '-';
     this.el.chipWeather.textContent = weatherLabel;
     // "Autumn 2" rather than "Autumn": which day of the season is the part a
     // farmer needs, since it says how long is left to bring a field in.

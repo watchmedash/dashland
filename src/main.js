@@ -1168,7 +1168,7 @@ class Game {
     } catch (err) {
       console.error(err);
       this.ui.showMenu(Save.meta());
-      this.ui.toast('Could not read your planet — nothing is lost, try again', 0, 5200);
+      this.ui.toast('Could not read your planet. Nothing is lost, try again', 0, 5200);
       return;
     }
     if (!data) {
@@ -1550,7 +1550,7 @@ class Game {
       this.ui.toast('You wake on a small, quiet world.', 0, 4200);
       setTimeout(() => {
         if (dark) {
-          this.ui.toast('Night already. Plant a torch — light keeps the dark out.',
+          this.ui.toast('Night already. Plant a torch, light keeps the dark out.',
             itemIdOf('torch'), 5200);
           setTimeout(() => this.ui.toast('Punch a tree while it lasts.',
             itemIdOf('log_oak'), 5000), 5600);
@@ -1657,7 +1657,7 @@ class Game {
     // Announce the balance, not the delta. A player who has banked points and
     // not spent them wants to be reminded that they are sitting there; "+1" on
     // its own says nothing about whether it is worth opening the screen.
-    this.ui.toast(left === 1 ? '1 skill point to spend — K' : `${left} skill points to spend — K`,
+    this.ui.toast(left === 1 ? '1 skill point to spend. Press K' : `${left} skill points to spend. Press K`,
       0, 3200);
     this.ui.refreshSkills();
   }
@@ -1693,7 +1693,7 @@ class Game {
   _mark(key) {
     if (!this.skills.mark(key)) return;
     const m = MARKS[key];
-    this.ui.toast(`${m.label} — ${m.points} skill point${m.points > 1 ? 's' : ''}`, 0, 4000);
+    this.ui.toast(`${m.label}: ${m.points} skill point${m.points > 1 ? 's' : ''}`, 0, 4000);
     this.audio.ui(760);
     this.ui.refreshSkills();
   }
@@ -1756,7 +1756,7 @@ class Game {
       for (const s of carried) s.clear();
       this.inventory.changed();
       this.ui.toast(
-        `Armour is gone. ${pieces} piece${pieces > 1 ? 's' : ''} became ${gained} skill point${gained > 1 ? 's' : ''} — press K.`,
+        `Armour is gone. ${pieces} piece${pieces > 1 ? 's' : ''} became ${gained} skill point${gained > 1 ? 's' : ''}. Press K.`,
         0, 9000);
     }
 
@@ -1775,7 +1775,7 @@ class Game {
     const left = this.skills.available;
     if (left > 0) {
       setTimeout(() => this.ui.toast(
-        `${left} skill point${left === 1 ? '' : 's'} waiting — press K to spend ${left === 1 ? 'it' : 'them'}.`,
+        `${left} skill point${left === 1 ? '' : 's'} waiting. Press K to spend ${left === 1 ? 'it' : 'them'}.`,
         0, 8000), gained > 0 ? 2600 : 600);
     }
   }
@@ -1901,7 +1901,7 @@ class Game {
       this._quitAnyway = true;
       setTimeout(() => { this._quitAnyway = false; this.ui.setQuitConfirm(false); }, 10000);
       this.ui.setQuitConfirm(true);
-      this.ui.toast('Could not save — press again to leave anyway');
+      this.ui.toast('Could not save. Press again to leave anyway');
       return;
     }
     this._quitAnyway = false;
@@ -2062,7 +2062,7 @@ class Game {
         // chip needs to know the work since it is now safe.
         this.saveFailures = 0;
         this.ui.setSaveWarning(false);
-        this.ui.toast('Saved again — your world is safe');
+        this.ui.toast('Saved again, your world is safe');
       } else if (notify) {
         this.ui.toast('Planet saved');
       }
@@ -4691,7 +4691,7 @@ class Game {
     const where = p.headInWater
       ? (p.grounded ? 'Under water' : 'Under water, adrift')
       : 'Adrift';
-    return `${where} — ${+drag.toFixed(1)}× slower`;
+    return `${where}, ${+drag.toFixed(1)}x slower`;
   }
 
   _announceHeld() {

@@ -2180,6 +2180,22 @@ const WADE_STAND_MAX = 2.0;
  * four layers below and then teleported up onto it.
  */
 const WADE_CLIMB = 2.0;
+/**
+ * ...and how much further a body that has been stuck may reach.
+ *
+ * The same escape licence the step rules get (see ESCAPE_RISE), applied to the
+ * one rule that decides whether a floating body can get out of the water at
+ * all. A tiger knocked into a lake whose banks all stand two blocks proud is
+ * refused by WADE_CLIMB on every heading, correctly — that is a cliff — and
+ * then has nowhere to go: 76% of bodies knocked into water in the census were
+ * still within two units of where they landed three minutes later.
+ *
+ * Read through `_haulReach` by both the footprint test and the floor clamp,
+ * because those two have to be asking the same question. They were written out
+ * separately once before and drifted, and the animal in between them swam at a
+ * bank it was never permitted to touch.
+ */
+const WADE_ESCAPE = 2.0;
 /** Columns it will look for a bank, and how often it looks. */
 const SWIM_LOOK = 14;
 const SWIM_PERIOD = 0.6;
@@ -2220,6 +2236,96 @@ const SWIM_GIVE_UP = 2;
  * looks like a decision rather than like a broken one.
  */
 const SWIM_CIRCLE = 0.9;
+
+// --- getting unstuck ---------------------------------------------------------
+//
+// Everything above this point is a rule about where a body may go, and every
+// one of them is a rule about *this* frame: the footprint test, the step rules,
+// the water line, the swim for the bank. None of them can see a body that has
+// been refused in every direction for the last half minute, because none of
+// them remembers anything.
+//
+// That gap is what the reports are: "a deer stuck on a shore", "a tiger I
+// punched into the water is playing its run animation but cannot get out". A
+// census over the shipping code found the same shape wherever it looked. Over
+// 1,949 wild bodies at six sites, three simulated minutes each: 9.3% spent a
+// stretch of at least 45 seconds inside a 2-unit circle, and 5.5% spent at
+// least 8 seconds of it in a walk or a run cycle. Put deliberately in a hole,
+// 61% never left a two-block pit, 67% never left a three-block one, and 76% of
+// bodies knocked into water were still within two units of where they landed
+// three minutes later.
+//
+// So this is one mechanism rather than a rule per terrain feature: measure
+// progress, and when there has been none for long enough, go and find ground
+// that is definitely walkable and head for it with the step rules loosened by
+// one block. The alternative — a special case for pits, another for banks,
+// another for wedges — is how this file got the shoreline bugs it already has
+// three separate comments about.
+/** How often a body's progress is measured, in seconds. */
+const STALL_PERIOD = 1.0;
+/**
+ * How far it must get from where it was to count as having got anywhere.
+ *
+ * A distance from a fixed anchor and not ground covered per second, and the
+ * difference is the whole of one of the census's findings. Measured per second,
+ * a body circling inside a three-cell hollow covers a comfortable 1.1 cells
+ * every second of it and reads as making progress for as long as anyone cares
+ * to watch: 39% of bodies dropped into a one-block depression were still inside
+ * a two-unit circle three minutes later, and not one of them ever tripped a
+ * per-second test. Displacement from an anchor asks the question the player is
+ * actually asking, which is whether the animal is still there.
+ */
+const STALL_RANGE = 2.0;
+/**
+ * Seconds of trying, without leaving that circle, before it is treated as stuck.
+ *
+ * Five, and it was measured at eight as well because eight is the more cautious
+ * number and cautious looked right. It is not. Same seed, same six sites,
+ * nothing else changed: a three-block pit went from 17% of bodies never leaving
+ * it to 39%, water they had been knocked into from 29% to 57%, and open water
+ * from 31% to 52%. Waiting longer to notice does not make the escape gentler,
+ * it makes it miss — a body settles into whatever refuses it within a second or
+ * two, and every extra second of patience is a second of an animal standing
+ * still.
+ */
+const STALL_TRIES = 5;
+/**
+ * Seconds of escape licence once it is.
+ *
+ * Short on purpose. An escape holds the body in 'walk' while it runs, so a
+ * licence longer than it takes to walk a dozen columns is a body visibly trying
+ * for longer than it needed to; and a licence that has not worked in five
+ * seconds is not going to. Running out is also what counts an attempt against
+ * RELOCATE_AFTER, so a shorter one reaches the last resort sooner.
+ */
+const ESCAPE_TIME = 5;
+/**
+ * Layers a body may hop up while escaping, over the one it may hop ordinarily.
+ *
+ * Two and not three, and gated on the body being unable to translate *at all*
+ * (see `mob.stuck` at the call site). Both halves are about paddocks: a fence
+ * post stands 1.5 and is refused by _stepAhead's own shape test whatever this
+ * says, but a player's two-block stone wall is not, and an animal that has
+ * merely walked into a corner of its pen can still walk along the wall — so it
+ * is never `stuck`, and never gets this. What gets it is a body in a hole.
+ */
+const ESCAPE_RISE = 2;
+/** Columns the search for walkable ground reaches, and the nodes it may visit. */
+const ESCAPE_LOOK = 12;
+const ESCAPE_BUDGET = 260;
+/**
+ * Escapes that changed nothing before the body is simply moved.
+ *
+ * Three of them is 24 seconds of an animal visibly failing to leave a hole,
+ * which is well past the point where the thing on screen is a bug rather than
+ * an animal. It is still the last resort and it is still never done in view —
+ * see the gate at the call site.
+ */
+/** Escape searches the whole planet may run in one frame. */
+const ESCAPE_PER_FRAME = 2;
+const RELOCATE_AFTER = 3;
+/** ...and never nearer the player than this, in world units. */
+const RELOCATE_MIN_DIST = 14;
 
 const LOVE_SECONDS = 22;      // how long a fed animal stays willing
 const BREED_RANGE = 4.5;      // how close a willing pair must be
@@ -2652,6 +2758,12 @@ export class Mobs {
     this.voxCooldown = 0;
     /** The merchant's bell runs on its own clock, clear of the herd limiter. */
     this.bellT = 0;
+    /**
+     * Escape searches left this frame — see the guard in _unstick. Refilled at
+     * the top of update() rather than being a rate on the mob, because the cost
+     * this bounds is a frame's cost and not an animal's.
+     */
+    this._escapeBudget = 0;
     this.voxCount = 0;          // diagnostics: calls actually emitted
     this.voxSuppressed = 0;     // diagnostics: calls dropped by the rate limit
     this._nextId = 1;
@@ -2958,6 +3070,22 @@ export class Mobs {
       // Could not move at all last frame, so the terrain check on its turn is
       // suspended — see the steering in update().
       stuck: false,
+      // --- the progress watchdog, and the escape it starts: see _unstick ---
+      // (Named `prog*` rather than `stall*`: _hunt already owns `stallT`, which
+      // counts a chase that is not closing, and one field cannot mean two
+      // things.)
+      /** Seconds since progress was last measured. */
+      progT: 0,
+      /** Where the body was when it was, in world space. */
+      progAt: new THREE.Vector3(),
+      /** Consecutive measurements that found it trying and getting nowhere. */
+      progN: 0,
+      /** Seconds of escape licence left; 0 means it is not escaping. */
+      escapeT: 0,
+      /** The column it is escaping to, or -1. */
+      escapeCol: -1,
+      /** Escapes that ran out without the body getting anywhere. */
+      escapeFails: 0,
       /** Highest layer reached since leaving the ground, or null if it has not. */
       fallFrom: null,
       lavaT: 0,            // seconds until the next instalment of the lava toll
@@ -3093,6 +3221,7 @@ export class Mobs {
     this.list.push(mob);
     this._sync(mob);
     mob.prevPos.copy(mob.pos);
+    mob.progAt.copy(mob.pos);
     this._animate(mob, 0, null);   // place the model now; never render at the origin
     return mob;
   }
@@ -4363,7 +4492,7 @@ export class Mobs {
       // cannot disagree, which is the whole point: a body is allowed over
       // ground exactly when it is allowed onto it.
       if (afloat) {
-        if (gk + this._topOf(col, gk) > mob.cell.ck + WADE_CLIMB) { cost++; continue; }
+        if (gk + this._topOf(col, gk) > mob.cell.ck + this._haulReach(mob)) { cost++; continue; }
         // Headroom still applies — see the loop at the end.
         let boxed = false;
         for (let h = 1; h <= tall && !boxed; h++) {
@@ -4476,25 +4605,39 @@ export class Mobs {
    * That was the last of the sinking: every stray vertex measured was in the
    * same layer as the animal's feet, i.e. the face of the step ahead of it.
    */
-  /** Is the way forward a single step the animal could stand on top of? */
-  _stepAhead(mob, ci, cj, hereK) {
+  /**
+   * Is the way forward a step the animal could stand on top of, and how big?
+   *
+   * One block ordinarily. `reach` is the escape licence — see _unstick — and it
+   * is a parameter rather than a flag read off the mob so that the ordinary
+   * walking call is visibly, statically, the rule it always was.
+   *
+   * @returns {number} layers to climb, or 0 for "nothing to step onto"
+   */
+  _stepAhead(mob, ci, cj, hereK, reach = 1) {
     const p = this.planet;
     const cw = Math.cos(mob.heading), sw = Math.sin(mob.heading);
+    let best = 0;
     for (let n = 0; n < 9; n++) {
       const lw = FOOT_OFF[n * 2] * mob.halfW;
       const ll = FOOT_OFF[n * 2 + 1] * mob.halfL;
       const col = this._colOf(mob.cell.f, ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
-      const gk = this._groundK(col, hereK + 1, !!mob.spec.climbs);
-      if (gk !== hereK + 1) continue;              // not a one-block rise
+      const gk = this._groundK(col, hereK + reach, !!mob.spec.climbs);
+      const rise = gk - hereK;
+      if (rise < 1 || rise > reach) continue;      // not a rise it could take
       // ...unless the block is taller than its own cell. A fence stands 1.5,
       // and without this an animal read the top of it as an ordinary step and
       // hopped the paddock wall it was meant to be kept behind.
       if (this._topOf(col, gk) > 1) continue;
       let clear = true;
       for (let h = 1; h <= mob.tall && clear; h++) if (p.solidAt(col, gk + h)) clear = false;
-      if (clear) return true;                      // somewhere up there to land
+      if (!clear) continue;
+      // The smallest step that gets it up there. Hopping the height of the
+      // tallest thing under the footprint would clear a wall the body is only
+      // brushing with one corner sample.
+      if (!best || rise < best) best = rise;
     }
-    return false;
+    return best;
   }
 
   /**
@@ -4717,12 +4860,18 @@ export class Mobs {
     // still is the case that most needs the exemption.
     mob.stuck = !moved;
     if (!blockedAhead || mob.speedNow <= 0.02) return;
-    if (mob.grounded && this._stepAhead(mob, ni, nj, here)) {
+    // How tall a step it may take. One block ordinarily; taller while the
+    // escape licence is live *and* the body could not translate at all this
+    // frame, which is the difference between a hole and a wall it is merely
+    // walking alongside. See ESCAPE_RISE and _unstick.
+    const climb = (mob.escapeT > 0 && !moved) ? 1 + ESCAPE_RISE : 1;
+    const rise = mob.grounded ? this._stepAhead(mob, ni, nj, here, climb) : 0;
+    if (rise > 0) {
       // A step it could stand on: push off and let gravity do the rest. The
       // move stays refused until the animal is genuinely above the step, at
       // which point the footprint clears on its own and it walks on in mid-air.
       // Real arc, and the body is never inside the block.
-      mob.vel.k = Math.sqrt(2 * GRAVITY * 1.30);
+      mob.vel.k = Math.sqrt(2 * GRAVITY * (rise + 0.30));
       mob.grounded = false;
     } else if (!moved) {
       // veer, don't spin: nudge the desired heading and let the turn-rate
@@ -4892,6 +5041,224 @@ export class Mobs {
       return wrapAngle(Math.atan2(aj, ai) + side * (Math.PI / 2));
     }
     return null;
+  }
+
+  /**
+   * The progress watchdog: has this body actually been getting anywhere, and
+   * what to do about it if not.
+   *
+   * Every other rule in this file is about the current frame. This is the only
+   * one with a memory, and that is the whole point — a body pressed into a bank
+   * is refused by rules that are each individually correct, and no single-frame
+   * test can tell that state apart from a body that has simply stopped to
+   * graze. Half a minute of it can.
+   *
+   * Three stages, in increasing order of how much they are allowed to bend:
+   *
+   *   1. Steer at ground that is definitely walkable. Most of the census's
+   *      findings are a body that could walk somewhere useful and was aimed at
+   *      something else — a bank it may not climb, a wall it keeps sliding
+   *      along, the middle of a hollow.
+   *   2. Loosen the step rule while it does, so a two-block pit stops being a
+   *      permanent home. See ESCAPE_RISE for why this cannot open paddocks.
+   *   3. Only after three of those have run out with the body still in the same
+   *      place — about half a minute of it — move the body, and never in sight
+   *      of the player. Teleporting an animal is a bad thing to see and a worse
+   *      thing to leave broken.
+   *
+   * Cost: one distanceTo per body per second, plus a bounded column search per
+   * body that is actually stuck. Nothing here runs on the ordinary frame of an
+   * ordinary animal.
+   *
+   * @returns {number|null} a heading to hold this frame, or null
+   */
+  _unstick(mob, dt, dist, fr) {
+    if (mob.spec.phantom || mob.dying > 0 || mob.tumbling) return null;
+    mob.progT += dt;
+    if (mob.progT >= STALL_PERIOD) {
+      mob.progT = 0;
+      // Only the seconds it *wanted* to move count against it, and a second it
+      // spent grazing counts for nothing either way. Resetting on an idle
+      // second would mean a body that alternates walk and graze — which is what
+      // a stuck animal does, it still runs its state machine — could never
+      // accumulate enough of them.
+      //
+      // ...and a body that has arrived at something is not stuck either. A
+      // hunter standing over its kill, a hostile swinging at the player and a
+      // courting pair circling each other are all in a movement state, at
+      // speed, going nowhere, and all three are behaving exactly as intended.
+      const busy = (mob.love > 0)
+        || (mob.target === 'player' && dist < 4)
+        || (mob.prey && !mob.prey.released && mob.pos.distanceTo(mob.prey.pos) < 4);
+      const trying = !busy && mob.speedNow > 0.25
+        && (mob.state === 'walk' || mob.state === 'flee' || mob.state === 'chase');
+      if (mob.pos.distanceTo(mob.progAt) >= STALL_RANGE) {
+        mob.progAt.copy(mob.pos);
+        mob.progN = 0;
+        mob.escapeFails = 0;
+      } else if (trying) mob.progN++;
+      if (mob.progN >= STALL_TRIES && mob.escapeT <= 0) {
+        // The search is bounded per call, but a hundred bodies deciding they
+        // are stuck on the same frame is a frame spike rather than a hundred
+        // small costs. A couple a frame drains any plausible backlog inside a
+        // second, and the clock the body is waiting on is measured in seconds.
+        if (this._escapeBudget <= 0) return null;
+        this._escapeBudget--;
+        mob.progN = 0;
+        mob.escapeCol = this._escapeGoal(mob);
+        mob.escapeT = ESCAPE_TIME;
+        mob.escapeFails++;
+        // The last resort. `_inView` reads the camera and is false when there
+        // is none, which is right for a headless run and is *not* the whole
+        // gate: a body behind the player is out of frame and still only a few
+        // steps away, so the distance test stands beside it.
+        if (mob.escapeFails > RELOCATE_AFTER && mob.escapeCol >= 0
+            && dist > RELOCATE_MIN_DIST && !this._inView(mob, 1.15)) {
+          this._relocate(mob, mob.escapeCol);
+          mob.escapeT = 0;
+          mob.escapeCol = -1;
+          mob.escapeFails = 0;
+          return null;
+        }
+      }
+    }
+    if (mob.escapeT <= 0) return null;
+    mob.escapeT -= dt;
+    if (mob.escapeCol < 0) return null;
+    const c = mob.cell;
+    if (this._colOf(c.f, c.ci, c.cj) === mob.escapeCol) {
+      // Arrived. Nothing more to prove.
+      mob.escapeT = 0;
+      mob.escapeCol = -1;
+      mob.escapeFails = 0;
+      return null;
+    }
+    const g = colParts(mob.escapeCol, _pp);
+    cellToWorld(g.f, g.i + 0.5, g.j + 0.5, c.ck, _p);
+    _rel.set(_p[0] - mob.pos.x, _p[1] - mob.pos.y, _p[2] - mob.pos.z);
+    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
+    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    if (Math.abs(ra) < 1e-5 && Math.abs(rb) < 1e-5) return null;
+    return Math.atan2(rb, ra);
+  }
+
+  /**
+   * The nearest column this body could stand on and walk away from.
+   *
+   * A breadth-first walk over the column graph — `colNeighbor`, so it crosses a
+   * cube seam without arithmetic — with the step rules loosened by ESCAPE_RISE
+   * and, deliberately, no water rule at all. A deer that has to cross a lake to
+   * reach the bank has to be allowed to plan across the lake, and a fish thrown
+   * onto the sand has to be allowed to flop back over it. What the body may
+   * *do* is still decided by the ordinary movement code; this only decides
+   * which way to point it.
+   *
+   * @returns {number} a column, or -1 if there is nothing better in reach
+   */
+  _escapeGoal(mob) {
+    const p = this.planet;
+    const climbs = !!mob.spec.climbs;
+    const start = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
+    const from0 = Math.max(0, this._refLayer(mob));
+    /** The layer this body would end up on in `col`, or -1. */
+    const reach = (col, from) => {
+      const gk = this._groundK(col, from + ESCAPE_RISE + 1, climbs);
+      if (gk < 0) return -1;
+      if (gk - from > ESCAPE_RISE + 1) return -1;
+      if (from - gk > MOB_STEP_DOWN + ESCAPE_RISE) return -1;
+      if (p.at(col, gk + 1) === ID.lava) return -1;
+      for (let h = 1; h <= mob.tall; h++) {
+        const above = p.at(col, gk + h);
+        if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) return -1;
+      }
+      return gk;
+    };
+    const seen = new Map([[start, from0]]);
+    let frontier = [start];
+    let fallback = -1;
+    for (let ring = 0; ring < ESCAPE_LOOK && frontier.length && seen.size < ESCAPE_BUDGET; ring++) {
+      const next = [];
+      for (let n = 0; n < frontier.length; n++) {
+        const cur = frontier[n];
+        const from = seen.get(cur);
+        for (let d = 0; d < 4; d++) {
+          const nb = colNeighbor(cur, d);
+          if (nb < 0 || seen.has(nb)) continue;
+          const gk = reach(nb, from);
+          if (gk < 0) continue;
+          seen.set(nb, gk);
+          next.push(nb);
+          const q = this._goodGround(nb, gk, mob);
+          if (q === 2) return nb;
+          if (q === 1 && fallback < 0) fallback = nb;
+        }
+      }
+      frontier = next;
+    }
+    return fallback;
+  }
+
+  /**
+   * Is this somewhere the body could live, rather than merely stand?
+   *
+   * Two grades, because the best answer is often not in reach: 2 is ground with
+   * room to walk away in three directions, 1 is somewhere it could at least be.
+   * A swimmer's answer is the mirror image — water with water above it — since
+   * "walkable" for a fish means wet.
+   *
+   * @returns {number} 2, 1 or 0
+   */
+  _goodGround(col, gk, mob) {
+    const p = this.planet;
+    const wet = p.liquidAt(col, gk + 1);
+    if (mob.spec.aquatic) {
+      if (!wet || p.at(col, gk + 1) === ID.lava) return 0;
+      return p.liquidAt(col, gk + 1 + mob.tall) ? 2 : 1;
+    }
+    // Standing water counts only if the body could ford it; otherwise this is
+    // the lake it is trying to leave.
+    if (wet && !mob.spec.amphibious && !mob.spec.flies
+        && !this._fordable(col, gk, this._wadeDepth(mob))) return 0;
+    let open = 0;
+    for (let d = 0; d < 4; d++) {
+      const nb = colNeighbor(col, d);
+      if (nb >= 0 && this._stepTo(nb, gk, mob) >= 0) open++;
+    }
+    return open >= 3 ? 2 : open >= 2 ? 1 : 0;
+  }
+
+  /**
+   * Put a body somewhere it can walk. The last resort, and gated on nobody
+   * looking — see _unstick.
+   */
+  _relocate(mob, col) {
+    const gk = this._groundK(col, D - 1, !!mob.spec.climbs);
+    if (gk < 0) return;
+    const { f, i, j } = colParts(col);
+    const c = mob.cell;
+    c.f = f; c.ci = i + 0.5; c.cj = j + 0.5;
+    c.ck = gk + this._topOf(col, gk) + 0.02 + (mob.spec.aquatic ? mob.belly : 0);
+    mob.vel.i = 0; mob.vel.j = 0; mob.vel.k = 0;
+    // Not a fall, not a shove, and not still holding a tree it is no longer
+    // beside: everything the old spot had done to this body is over.
+    mob.fallFrom = null;
+    mob.knockT = 0;
+    mob.tumbling = false;
+    mob.climbTo = null;
+    mob.progN = 0;
+    this._sync(mob);
+    mob.progAt.copy(mob.pos);
+  }
+
+  /**
+   * How far above itself a floating body may haul out, in cells.
+   *
+   * One expression, read by the footprint test and by the floor clamp, so a
+   * body is allowed *over* exactly the ground it is allowed *onto*. See
+   * WADE_CLIMB and WADE_ESCAPE.
+   */
+  _haulReach(mob) {
+    return WADE_CLIMB + (mob.escapeT > 0 ? WADE_ESCAPE : 0);
   }
 
   /** How far above its own floor the block at (col, k) reaches, 0..1. */
@@ -5541,11 +5908,11 @@ export class Mobs {
    * Can a body standing on layer `fromK` walk into this column, and onto what?
    * @returns {number} the layer it would stand on, or -1 if it cannot go there
    */
-  _stepTo(col, fromK, mob) {
+  _stepTo(col, fromK, mob, rise = 1) {
     const p = this.planet;
-    const gk = this._groundK(col, fromK + 1, !!mob.spec.climbs);
+    const gk = this._groundK(col, fromK + rise, !!mob.spec.climbs);
     if (gk < 0) return -1;
-    if (gk - fromK > 1) return -1;                 // too big a step up
+    if (gk - fromK > rise) return -1;              // too big a step up
     if (fromK - gk > PATH_MAX_DROP) return -1;     // too far to fall
     if (p.at(col, gk + 1) === ID.lava) return -1;  // and never through lava
     const wet = p.liquidAt(col, gk + 1);
@@ -6508,6 +6875,7 @@ export class Mobs {
 
   update(dt, player, sky) {
     this.voxCooldown = Math.max(0, this.voxCooldown - dt);
+    this._escapeBudget = ESCAPE_PER_FRAME;
     this.bellT = Math.max(0, this.bellT - dt);
     this.merchantT = Math.max(0, this.merchantT - dt);
     this._resolveHits(dt, player);
@@ -6907,6 +7275,20 @@ export class Mobs {
         // collects it when the player walks away.
         if (mob.swimWant !== null) mob.want = mob.swimWant;
         else if (mob.swimAlong !== null) mob.want = mob.swimAlong;
+        mob.state = 'walk';
+        mob.stateT = Math.max(mob.stateT, 0.5);
+      }
+
+      // --- and last of all, a body that has been getting nowhere ------------
+      //
+      // After the swim override rather than before it, and after every other
+      // decision above for the same reason: this file already knows how to
+      // steer a deer out of a river, and the watchdog exists for the case where
+      // all of that has visibly failed. It only ever overrides a heading it has
+      // already watched not work for three seconds. See _unstick.
+      const escape = this._unstick(mob, dt, dist, fr);
+      if (escape !== null) {
+        mob.want = escape;
         mob.state = 'walk';
         mob.stateT = Math.max(mob.stateT, 0.5);
       }
@@ -7403,7 +7785,7 @@ export class Mobs {
           // is in the water, the reach it allows is the same WADE_CLIMB the
           // footprint test already used to permit the move, and the frame after
           // it lands the body is standing on the bank and is not wading at all.
-          || (wading && floor - c.ck <= WADE_CLIMB))) {
+          || (wading && floor - c.ck <= this._haulReach(mob)))) {
         // The `vel.k <= 0` is a second belt against the escalator described on
         // _groundUnder: a body on its way *up* — mid-hop, or shoved by a blow —
         // is never also stepping up onto something. On the ground vel.k is

@@ -231,6 +231,60 @@ const HAND_LIGHT_GAIN = 5.0;
  * volume before it is rebuilt, in cells. See _updateLightOcclusion.
  */
 const OCC_HYST = 3;
+/**
+ * The occupancy march's step, near-field stop and step cap, in cells.
+ *
+ * These are the shader's numbers — see OCC_STEP / OCC_NEAR / OCC_MAX_STEPS in
+ * VoxelMaterial.js for why each is what it is — and `_occMarch` below is the
+ * same algorithm, corner guard and all, so that an animal and the ground it
+ * stands on cannot disagree about what a wall is.
+ *
+ * Copied rather than imported because over there they are lines of GLSL inside
+ * a template literal, not exported bindings; exporting them would mean editing
+ * the file that owns the terrain half of this feature. If the shader's values
+ * ever move, move these with them.
+ */
+const OCC_STEP = 0.9;
+const OCC_MAX_STEPS = 14;
+/**
+ * How close to the emitter an *entity's* march stops, in cells. The shader's
+ * equivalent is OCC_NEAR = 1.5 and this is deliberately not that number.
+ *
+ * Shipping 1.5 here made the whole feature invisible at exactly the range it
+ * was written for, and the arithmetic is worth spelling out because it is not
+ * obvious from either end. The marched span is dist - near, sampled at the
+ * midpoints of equal steps, so the far end of a ray is examined only out to
+ * dist - near - ds/2. For a torch two and a half cells from an animal that is
+ * 2.5 - 1.5 - 0.4 = 0.6 cells: the march never leaves the animal's own cell,
+ * and a wall at the midpoint is not merely missed, it is unreachable. Measured
+ * against a hand-built world, nothing under about three and a half cells could
+ * be shadowed at all — and a torch on the other side of a wall from a cow is
+ * usually two or three cells away, because that is what a wall is.
+ *
+ * 1.5 is right for the shader and wrong here for a reason, not by accident.
+ * There the light is a *moving flame* — a torch in your fist or one lying on
+ * the ground — which sits against whatever surface it rests on, so the last cell
+ * and a half of the ray is the floor it is lying on and marching it would put
+ * out the ground under the torch. Here the emitter is a block *in the grid*,
+ * whose own cell cannot be opaque (a torch is not a wall) and whose support is
+ * exactly one cell away. So one cell is not a fudged-down 1.5, it is the
+ * precise statement of the same rule: do not let the block a torch is mounted
+ * on shadow what the torch lights.
+ */
+const OCC_ENTITY_NEAR = 1.0;
+/**
+ * Slots in the entity shadow cache, and it must be a power of two.
+ *
+ * Direct-mapped on the occupancy cell an entity stands in, so a herd packed
+ * into one barn shares one answer and a mob that has not moved recomputes
+ * nothing. A collision costs a remarch rather than a wrong answer — the cell
+ * index is stored and compared — but they are worth avoiding: at 256 slots a
+ * 130-strong herd standing still still remarched ten rays a frame, because the
+ * cells a herd occupies are anything but evenly spread once the index is folded
+ * to a byte. 1024 measured at zero. It is 12 kB and it must stay a power of two
+ * for the mask.
+ */
+const OCC_VIS_SLOTS = 1024;
 /** Scratch for the volume's recentring test; not shared, it is read every frame. */
 const _occCell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
 const _occLocal = new THREE.Vector3();
@@ -1953,6 +2007,9 @@ class Game {
       if (e.id === ID.hearth) this.hearths.add(e.col * D + e.k);
     }
     this.worldWorker.postMessage({ type: 'edit', edits, id: ++this.editSeq });
+    // The shadow volume is a copy of what is opaque around the player, and this
+    // is the only place a block changes under it. See `_patchOcclusion`.
+    this._patchOcclusion(edits);
     // Cheap, and only does anything at all once a hearth exists.
     if (this.hearths.size) this._refreshWards();
     // Last, and as its own edit batch: the block that did the crowding has to be
@@ -3315,10 +3372,81 @@ class Game {
    * lit by a torch twenty cells away gets nothing. That is the right trade: no
    * block light carries further than the scan does, so the only thing missed is
    * a torch that is near the mob and far from you — i.e. one you are looking at
-   * from across a valley, at which range the mob is a few pixels. It also does
-   * not know about walls, so a torch on the far side of one still reaches; the
-   * baked field does know, and the cost of matching it is a raycast per emitter
-   * per entity per frame.
+   * from across a valley, at which range the mob is a few pixels.
+   *
+   * ### Walls
+   *
+   * It used to say here that it did not know about them, and that matching the
+   * baked field would cost "a raycast per emitter per entity per frame". That
+   * was true when it was written and is not any more: the moving flames' shadow
+   * volume (`_rebuildOcclusion`) is a 48x48x32 byte array of opaque/not sitting
+   * on this thread, refreshed as the player walks, and the raycast in question
+   * is at most fourteen indexed reads into it. So the ray is now cast — see
+   * `_occMarch` — and a torch on your side of a wall no longer lights the deer
+   * on the far side of it while lighting none of the ground around it.
+   *
+   * What kept the cost down, in the order it matters:
+   *
+   *  - The combine is a `max`, so candidates are walked brightest-first and the
+   *    loop stops the moment the best a remaining one could add is under what
+   *    every channel already has. A lava sheet is two dozen emitters of one
+   *    colour and settles after the first march rather than twenty-four.
+   *  - An emitter already out of its own reach never gets marched, exactly as
+   *    before; the distance test is still the first thing that runs.
+   *  - Every answer is cached on the *cell* the entity stands in, not on the
+   *    entity, and thrown away when the emitter list or the volume changes. A
+   *    still herd in a lit barn marches once for the lot of them and then costs
+   *    a masked bit test each per frame. Caching per entity was the first
+   *    thought and this probe is handed a bare position with no identity behind
+   *    it, so there was nothing to key on — and cells are the better key
+   *    anyway, since two animals shoulder to shoulder genuinely have the same
+   *    answer.
+   *
+   * ### Where an animal and the ground under it can still disagree
+   *
+   * They agree about what a wall is — same volume, same step, same corner
+   * guard. A differential test against an exact DDA over 144 316 random rays in
+   * random volumes finds this march exact in both directions: no false shadow
+   * and no leak. What they do not share is the *field*:
+   *
+   *  - A planted torch lights terrain out of the baked light grid in the world
+   *    worker, which is a flood fill and therefore bends around corners; this is
+   *    a straight line. Round a corner from a torch the floor is dimly lit and
+   *    the mob standing on it is dark. Straight is the more defensible half of
+   *    that pair, and the flood fill is a million cells that never come to this
+   *    thread, so it is not a difference that can be closed here.
+   *  - The terrain's march runs only for the two *moving* flames. For those the
+   *    two answers are the same test off two different origins — the ground's
+   *    starts at the fragment plus OCC_BIAS along its normal, this one at the
+   *    centre of the entity's cell — so at the edge of a shadow the animal can
+   *    be up to a cell out of step with the floor it is on.
+   *  - Leaves and water are not in the volume (a flame should shine through a
+   *    canopy) but do dim the baked grid, so under a tree the ground is darker
+   *    than the deer.
+   *  - The two stop short of the light by different amounts and for different
+   *    reasons — OCC_ENTITY_NEAR against the shader's OCC_NEAR, see the
+   *    constant — so an occluder in the half cell between them shadows an
+   *    animal and not the floor.
+   *
+   * Measured on the worst herd the scan can produce — 130 mobs all standing
+   * inside the reach of all 24 emitters, which is a full spawn cap packed into
+   * one lava cavern — the whole probe costs 0.093 ms a frame with the cache
+   * warm and 0.110 ms on a frame where every answer is recomputed from scratch
+   * (214 marches). The same herd cost 0.048 ms before occlusion existed, so the
+   * walls are worth about 0.06 ms a frame at the very top end and nothing
+   * measurable in a field with one torch in it.
+   *
+   * ### The two things that made this do nothing at all when first written
+   *
+   * Recorded because neither is visible from the march, and staring at the
+   * march is what one does when no shadow appears. It was correct the whole
+   * time and answering about the wrong world. First, the volume was not
+   * refilled when a block changed, so a wall built between a torch and an animal
+   * was not in it — see `_patchOcclusion`. Second, the near-field stop was the
+   * shader's 1.5 cells, which at the two-to-three-cell range a wall actually
+   * has leaves no marchable span at all — see OCC_ENTITY_NEAR. Both are now
+   * covered by a harness that builds a world, places a torch, walls it off and
+   * probes without moving the player.
    *
    * @param {THREE.Vector3} pos world point to sample
    * @param {{r:number,g:number,b:number}} out written in place and returned
@@ -3328,14 +3456,21 @@ class Game {
     // Cached; this is what keeps the emitter list in step with the world.
     this._handLight();
     const emitters = this._emitters;
+    if (!emitters.length) return out;
     // The gain the terrain applies to its own block light, read live off the
     // uniform rather than copied — a torch-lit mob and the torch-lit dirt under
     // it answer by the same amount and can never drift apart. RECIPROCAL_PI
     // because the terrain's term carries the same Lambert factor; without it a
     // lit mob would come out pi times brighter than the ground it stands on.
     const gain = voxelUniforms.uBlockIntensity.value / Math.PI;
-    for (let n = 0; n < emitters.length; n++) {
-      const e = emitters[n];
+
+    // --- who is in range at all, brightest first ---
+    const ord = this._emitOrder || (this._emitOrder = new Int32Array(MAX_ENTITY_EMITTERS));
+    const wt = this._emitW || (this._emitW = new Float64Array(MAX_ENTITY_EMITTERS));
+    const key = this._emitKey || (this._emitKey = new Float64Array(MAX_ENTITY_EMITTERS));
+    let n = 0;
+    for (let i = 0; i < emitters.length; i++) {
+      const e = emitters[i];
       const d = pos.distanceTo(e.pos);
       if (d >= e.reach) continue;
       // Same curve as the hand light's, in world units rather than cells — the
@@ -3343,14 +3478,227 @@ class Game {
       // few percent of one.
       const fall = 1 - d / e.reach;
       const w = fall * fall * gain;
+      const k = Math.max(e.r, e.g, e.b) * w;
+      if (!(k > 0)) continue;
+      wt[i] = w; key[i] = k;
+      // Insertion sort into `ord`, descending. At most MAX_ENTITY_EMITTERS
+      // items and usually two or three, so this is cheaper than it looks and it
+      // is what makes the early break below worth anything.
+      let s = n++;
+      while (s > 0 && key[ord[s - 1]] < k) { ord[s] = ord[s - 1]; s--; }
+      ord[s] = i;
+    }
+    if (!n) return out;
+
+    // Null when there is no usable volume or this point is outside it: then
+    // nothing below marches and the answer is exactly the unoccluded one.
+    const ctx = this._entityOcc(pos);
+
+    for (let s = 0; s < n; s++) {
+      const i = ord[s];
+      // Descending, and the combine is a max: once the brightest channel a
+      // candidate could contribute is under what every channel already holds,
+      // no candidate after it can change the answer either.
+      if (key[i] <= out.r && key[i] <= out.g && key[i] <= out.b) break;
+      const e = emitters[i], w = wt[i];
+      const er = e.r * w, eg = e.g * w, eb = e.b * w;
+      // Same test per channel, for the case a dimmer emitter of another colour
+      // still cannot lift anything. Skipping here skips the march too.
+      if (er <= out.r && eg <= out.g && eb <= out.b) continue;
+      if (ctx && !this._occVisible(ctx, i, e.reach)) continue;
       // Max rather than sum, again matching `_handLight`: two torches in a room
       // are not twice the lamp, and a lava sheet summed over two dozen cells
       // would render anything near it pure white.
-      if (e.r * w > out.r) out.r = e.r * w;
-      if (e.g * w > out.g) out.g = e.g * w;
-      if (e.b * w > out.b) out.b = e.b * w;
+      if (er > out.r) out.r = er;
+      if (eg > out.g) out.g = eg;
+      if (eb > out.b) out.b = eb;
     }
     return out;
+  }
+
+  /**
+   * Set up the shadow test for one entity, or return null to leave it lit.
+   *
+   * ### Failing open is the whole contract
+   *
+   * The volume covers a bounded box around the player and an entity can stand
+   * outside it — up a mountain, across a valley, or simply before the first
+   * build has run. Every one of those returns null here and the caller then
+   * behaves exactly as it did before occlusion existed. That direction is not
+   * arbitrary: a mob lit through a wall is a wrong pixel, a mob that goes black
+   * because it wandered out of an invisible box is a broken game, and the box
+   * moves, so the second one would strobe.
+   *
+   * The bounds test is written positively (`>= 0 && < N`) so a NaN coordinate —
+   * which is what a stale volume on the far side of the planet produces — takes
+   * the null branch with everything else rather than sailing through a
+   * negated one.
+   *
+   * ### The sampling point, and why it is quantised
+   *
+   * The probe is handed one position per entity: `mob.pos + up * height/2` for
+   * an animal, chest height for the player's own body (see the call sites). Mid
+   * body is the right end of the ray. Feet sit in the cell the ground occupies
+   * and a wall torch is bracketed a block up, so marching from there shadows
+   * animals standing in the open; the head clears low walls the body is plainly
+   * behind and lights a mob on the wrong side of a fence.
+   *
+   * The ray then starts from the *centre of the cell* that point falls in,
+   * which is both what makes the cache shareable and, on its own merits, the
+   * steadier answer: an animal grazing on the spot cannot flicker, because
+   * nothing about its sub-cell position is read. Lighting changes when it
+   * crosses a cell boundary, which is the same granularity the terrain's own
+   * shadow has.
+   */
+  _entityOcc(pos) {
+    const o = this._occ;
+    if (!o || !o.ready) return null;
+    const l = this._worldToOccCell(pos, _occLocal);
+    const ix = Math.floor(l.x), iy = Math.floor(l.y), iz = Math.floor(l.z);
+    if (!(ix >= 0 && ix < OCC_NI && iy >= 0 && iy < OCC_NJ && iz >= 0 && iz < OCC_NK)) return null;
+
+    const c = this._occVis || (this._occVis = {
+      col: -1, k: -1, seq: -1, gen: -1,
+      keys: new Int32Array(OCC_VIS_SLOTS).fill(-1),
+      known: new Int32Array(OCC_VIS_SLOTS),
+      vis: new Int32Array(OCC_VIS_SLOTS),
+      // Where each emitter is in the volume's cell space. Every entity marches
+      // to the same two dozen points, so converting them once per generation
+      // instead of once per entity is two atan calls saved per test — the
+      // single biggest saving in here after the early break.
+      ecell: new Float64Array(MAX_ENTITY_EMITTERS * 3),
+      eok: new Uint8Array(MAX_ENTITY_EMITTERS),
+      ctx: { slot: 0, cx: 0, cy: 0, cz: 0 },
+    });
+
+    // The emitter list is rebuilt only when the hand-light scan misses, so its
+    // cache key *is* the list's identity; the volume's own counter covers a
+    // recentre. Any of the four moving means every stored answer is about a
+    // world that no longer exists.
+    if (c.col !== this._hlCol || c.k !== this._hlK || c.seq !== this._hlSeq || c.gen !== o.gen) {
+      c.col = this._hlCol; c.k = this._hlK; c.seq = this._hlSeq; c.gen = o.gen;
+      c.keys.fill(-1);
+      const em = this._emitters;
+      for (let i = 0; i < em.length; i++) {
+        const e = this._worldToOccCell(em[i].pos, _occLocal);
+        c.ecell[i * 3] = e.x; c.ecell[i * 3 + 1] = e.y; c.ecell[i * 3 + 2] = e.z;
+        // An emitter the volume does not cover fails open like everything else.
+        // In practice this never fires — the scan only reaches eight cells from
+        // the player and the volume reaches twenty-four — but a stale volume
+        // after a teleport is exactly the case that must not throw a shadow.
+        c.eok[i] = (e.x >= 0 && e.x < OCC_NI && e.y >= 0 && e.y < OCC_NJ
+          && e.z >= 0 && e.z < OCC_NK) ? 1 : 0;
+      }
+    }
+
+    const cell = ix + iy * OCC_NI + iz * OCC_NI * OCC_NJ;
+    const slot = cell & (OCC_VIS_SLOTS - 1);
+    if (c.keys[slot] !== cell) { c.keys[slot] = cell; c.known[slot] = 0; c.vis[slot] = 0; }
+    const ctx = c.ctx;
+    ctx.slot = slot; ctx.cx = ix + 0.5; ctx.cy = iy + 0.5; ctx.cz = iz + 0.5;
+    return ctx;
+  }
+
+  /** Memoised `_occMarch`: one bit per emitter per cached cell. */
+  _occVisible(ctx, i, reach) {
+    const c = this._occVis;
+    if (!c.eok[i]) return true;
+    const bit = 1 << i;
+    const slot = ctx.slot;
+    if (c.known[slot] & bit) return (c.vis[slot] & bit) !== 0;
+    const lit = this._occMarch(ctx, c.ecell[i * 3], c.ecell[i * 3 + 1], c.ecell[i * 3 + 2], reach);
+    c.known[slot] |= bit;
+    if (lit) c.vis[slot] |= bit;
+    return lit;
+  }
+
+  /**
+   * Is there a wall between a cell centre and an emitter? The CPU twin of
+   * `occMarch` in VoxelMaterial.js, and deliberately line for line the same:
+   * same step, same near-field stop, same step cap, same DDA corner guard with
+   * the second tap when a step crosses three planes at once, and the same
+   * guards written backwards so a NaN ray reports *lit* rather than being
+   * marched into a black world. Read the comments over there for why each of
+   * those is what it is; they are not restated here because two copies of a
+   * rationale drift and one of them is the shader's.
+   *
+   * Three things differ, all of them because this end of the ray is an entity
+   * and not a fragment, and each one was a measured hole before it was a
+   * difference:
+   *
+   *  - It starts at a cell centre with no normal bias. The shader needs OCC_BIAS
+   *    because a fragment sits on the face of a cell that is solid by
+   *    definition; an entity is already standing in air.
+   *  - It stops OCC_ENTITY_NEAR from the emitter rather than OCC_NEAR. See that
+   *    constant: 1.5 made short rays unshadowable and short rays are the entire
+   *    case.
+   *  - It takes one extra sample, at the far end of the span exactly. The
+   *    shader's last midpoint leaves ds/2 of the ray — up to 0.45 cells —
+   *    unexamined, which on a two-cell ray is a quarter of it. Over there that
+   *    tail is next to the flame and covered by OCC_NEAR anyway; here it is
+   *    where the wall is. It is also the whole of the residual disagreement
+   *    this port had with an exact DDA, so closing it makes the entity march
+   *    the stricter of the two.
+   *
+
+   * Everything is in volume-local cell space, so this is arithmetic and byte
+   * reads with no world-space geometry in it at all.
+   */
+  _occMarch(ctx, lx, ly, lz, reach) {
+    const sx = lx - ctx.cx, sy = ly - ctx.cy, sz = lz - ctx.cz;
+    const dist = Math.hypot(sx, sy, sz);
+    if (!(dist <= reach + 2)) return true;
+    const span = dist - OCC_ENTITY_NEAR;
+    if (!(span >= 0.5)) return true;
+    const dx = sx / dist, dy = sy / dist, dz = sz / dist;
+    const steps = Math.min(OCC_MAX_STEPS, Math.ceil(span / OCC_STEP));
+    const ds = span / steps;
+    let px = ctx.cx, py = ctx.cy, pz = ctx.cz;
+    // steps + 1 samples: the midpoints, then the end of the span itself.
+    for (let s = 0; s <= steps; s++) {
+      const t = Math.min((s + 0.5) * ds, span);
+      const x = ctx.cx + dx * t, y = ctx.cy + dy * t, z = ctx.cz + dz * t;
+      if (this._occSolid(x, y, z)) return false;
+      const pcx = Math.floor(px), pcy = Math.floor(py), pcz = Math.floor(pz);
+      const dcx = Math.floor(x) - pcx, dcy = Math.floor(y) - pcy, dcz = Math.floor(z) - pcz;
+      const moved = Math.abs(dcx) + Math.abs(dcy) + Math.abs(dcz);
+      if (moved > 1) {
+        const vx = x - px, vy = y - py, vz = z - pz;
+        const tx = dcx ? (pcx + (dcx > 0 ? 1 : 0) - px) / (Math.abs(vx) < 1e-6 ? 1 : vx) : 1e9;
+        const ty = dcy ? (pcy + (dcy > 0 ? 1 : 0) - py) / (Math.abs(vy) < 1e-6 ? 1 : vy) : 1e9;
+        const tz = dcz ? (pcz + (dcz > 0 ? 1 : 0) - pz) / (Math.abs(vz) < 1e-6 ? 1 : vz) : 1e9;
+        const fx = tx <= ty && tx <= tz ? 1 : 0;
+        const fy = fx ? 0 : (ty <= tz ? 1 : 0);
+        const fz = fx || fy ? 0 : 1;
+        let ex = pcx + 0.5 + fx * dcx, ey = pcy + 0.5 + fy * dcy, ez = pcz + 0.5 + fz * dcz;
+        if (this._occSolid(ex, ey, ez)) return false;
+        if (moved > 2) {
+          const rx = tx + fx * 1e9, ry = ty + fy * 1e9, rz = tz + fz * 1e9;
+          const gx = rx <= ry && rx <= rz ? 1 : 0;
+          const gy = gx ? 0 : (ry <= rz ? 1 : 0);
+          const gz = gx || gy ? 0 : 1;
+          ex += gx * dcx; ey += gy * dcy; ez += gz * dcz;
+          if (this._occSolid(ex, ey, ez)) return false;
+        }
+      }
+      px = x; py = y; pz = z;
+    }
+    return true;
+  }
+
+  /**
+   * One occupancy sample. Anything outside the volume reads as empty, which is
+   * the same answer `occAt` gives in the shader and the same direction of
+   * failure as everything else here: a ray that leaves the box comes out lit.
+   */
+  _occSolid(x, y, z) {
+    // Math.floor, not a bitwise truncation: `-0.5 | 0` is 0, which would put a
+    // sample half a cell outside the box back inside it and let the edge of the
+    // volume cast a shadow. And the test is positive, so a NaN falls out here
+    // as empty rather than indexing the array with one and reading undefined.
+    const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+    if (!(ix >= 0 && ix < OCC_NI && iy >= 0 && iy < OCC_NJ && iz >= 0 && iz < OCC_NK)) return false;
+    return occupancyData[(iz * OCC_NJ + iy) * OCC_NI + ix] !== 0;
   }
 
   /**
@@ -3711,30 +4059,47 @@ class Game {
    * furthest thing that can read it is 13 away. Three cells of slack costs three
    * cells of margin out of eleven spare and cuts the rebuild rate by about six.
    *
-   * It is also skipped entirely while neither flame is lit, which is most
-   * frames — and that is the same test that switches the shader's march off, so
-   * a torchless daytime frame pays nothing at either end.
+   * It used to be skipped entirely while neither flame is lit. That is no
+   * longer the condition, because the volume is no longer the moving flames'
+   * alone: `_entityLight` marches the same bytes to decide whether a planted
+   * torch reaches an animal, and a planted torch does not care what is in the
+   * player's hand. Leaving the old test in place gave the exactly wrong
+   * behaviour — mobs were correctly shadowed only while you happened to be
+   * carrying a light, and lit through walls the rest of the time.
+   *
+   * So it is now kept up to date while either flame is lit *or* the hand-light
+   * scan found any emitter at all, which is the only condition under which
+   * `_entityLight` can shadow anything. A torchless daytime frame still finds
+   * no emitters and still pays nothing at either end. What the shader is told,
+   * though, is unchanged: uOccActive stays tied to the flames alone, so nothing
+   * about the terrain path moves.
    *
    * ### What it does not cover
    *
-   * A block edited by the player does not invalidate the volume; the next
-   * recentre picks it up. Walling yourself in and expecting the wall to shadow
-   * your own torch before you have moved three cells is the one case that lags,
-   * and it lags by a few steps rather than forever. Refilling on every edit was
-   * rejected because an edit already triggers a relight and a remesh, and this
-   * would be a third pass over the same neighbourhood for a wall you are
-   * standing next to and can see is dark.
+   * It used to say here that an edited block waited for the next recentre. It
+   * no longer waits: `_patchOcclusion` writes the texel as the edit lands, which
+   * costs a scan of the column table rather than a rebuild. That was tolerable
+   * while only the shader read this and stopped being tolerable when
+   * `_entityLight` did — see that method for what the lag actually looked like.
+   *
+   * What is still missed is a block that changes *without* going through
+   * `_applyEdits`: a streamed region arriving at `planet.applyRegions`, or a
+   * save writing `planet.blocks` directly. Both of those bring in terrain the
+   * player is nowhere near, so the volume is recentred long before it matters.
    */
   _updateLightOcclusion() {
     const u = voxelUniforms;
     const blocks = this.planet.blocks;
-    if (!blocks || (u.uHandLightRadius.value <= 0.01 && u.uDropLightRadius.value <= 0.01)) {
+    const flames = u.uHandLightRadius.value > 0.01 || u.uDropLightRadius.value > 0.01;
+    // `_emitters` is refilled by the hand-light scan, which has already run this
+    // frame (the view model asks for it), so this reads the current world.
+    if (!blocks || (!flames && this._emitters.length === 0)) {
       u.uOccActive.value = 0;
       return;
     }
     const p = this.player.position;
     if (!this._occ) {
-      this._occ = { f: 0, i: 0, j: 0, k: 0, ready: false, cols: new Int32Array(OCC_NI * OCC_NJ) };
+      this._occ = { f: 0, i: 0, j: 0, k: 0, gen: 0, ready: false, cols: new Int32Array(OCC_NI * OCC_NJ) };
       this._rebuildOcclusion(this.planet.cellOf(p.x, p.y, p.z, _occCell));
     } else {
       // Asked in the volume's *own* frame rather than in the player's, and that
@@ -3752,7 +4117,9 @@ class Game {
     }
     // Never on the strength of a build that did not finish: uOccActive is the
     // shader's promise that the uniforms and the texture describe a real place.
-    u.uOccActive.value = this._occ.ready ? 1 : 0;
+    // Gated on `flames` as well, so keeping the volume live for the entities
+    // cannot switch on a march for a light that is not burning.
+    u.uOccActive.value = (flames && this._occ.ready) ? 1 : 0;
   }
 
   /**
@@ -3802,13 +4169,90 @@ class Game {
     }
 
     // --- commit ---
-    o.f = f; o.i = oi; o.j = oj; o.k = ok; o.ready = true;
+    // `gen` is part of the commit for the same reason the rest of it is: it is
+    // what tells `_entityLight`'s cache that every shadow answer it is holding
+    // was computed against a volume that has since moved.
+    o.f = f; o.i = oi; o.j = oj; o.k = ok; o.gen++; o.ready = true;
     occupancyTexture.needsUpdate = true;
     const u = voxelUniforms;
     u.uOccN.value.fromArray(FACE_N[f]);
     u.uOccR.value.fromArray(FACE_R[f]);
     u.uOccU.value.fromArray(FACE_U[f]);
     u.uOccOrg.value.set(F * 0.5 - oi, F * 0.5 - oj, -(R_MIN + ok));
+  }
+
+  /**
+   * Carry an edit into the occupancy volume, one cell at a time.
+   *
+   * ### Why this exists now and did not before
+   *
+   * The volume used to be refilled only when the player drifted out of the
+   * middle of it, and an edit was allowed to sit unrepresented until then. That
+   * was defensible while the only thing reading it was the shader's march for
+   * the two moving flames: you had walled yourself in, you were standing next to
+   * the wall, and it went dark a few steps later.
+   *
+   * It is not defensible now that `_entityLight` reads the same bytes, and it
+   * was the larger half of why nothing was shadowed in the running game.
+   * Building a wall between a torch and an animal changed `planet.blocks` and
+   * changed nothing the march could see, so the animal stayed lit — for as long
+   * as the player stood still, which is exactly what a player does while
+   * checking whether a wall works. A test that placed a torch, built a wall and
+   * probed without walking measured *no change whatsoever*, and no amount of
+   * staring at the march explains that, because the march was reading a volume
+   * in which the wall did not exist.
+   *
+   * ### Why a patch and not a rebuild
+   *
+   * Refilling on every edit was rejected once and stays rejected, for the same
+   * reason as before: an edit already costs a relight and a remesh, and a third
+   * full pass over the neighbourhood (2 304 patchColumn calls and 73 728 byte
+   * reads) to change one byte is absurd. What was wrong was the conclusion drawn
+   * from that — the choice is not "rebuild or lag", it is one texel.
+   *
+   * The column lookup is a linear scan of the 2 304 already resolved by the last
+   * rebuild. A col→index map would be O(1) per edit and is the wrong trade: it
+   * would have to be built on every *recentre*, which happens far more often
+   * than an edit, and a column can legitimately appear twice in the table near a
+   * cube corner, where a map would silently keep one of them. The scan is a
+   * couple of microseconds and patches every copy.
+   *
+   * This also retires the shader's own lag, so a wall now shadows a carried
+   * torch on the frame it is placed rather than three cells later.
+   */
+  _patchOcclusion(edits) {
+    const o = this._occ;
+    if (!o || !o.ready) return;
+    // Measured: 2.0 us per cell patched, against 0.26 ms for a whole rebuild.
+    // The scan wins by a hundredfold for the batches this actually sees (a door
+    // is two cells, a slab pair two, a falling stack a handful), and loses for a
+    // batch of hundreds, which nothing produces today but something might. Cross
+    // over to a rebuild well before it can — at the *same* origin, so this stays
+    // a refresh and never becomes a recentre.
+    if (edits.length > 64) {
+      this._rebuildOcclusion({
+        f: o.f, ci: o.i + (OCC_NI >> 1), cj: o.j + (OCC_NJ >> 1), ck: o.k + (OCC_NK >> 1),
+      });
+      return;
+    }
+    const cols = o.cols;
+    const plane = OCC_NI * OCC_NJ;
+    let touched = false;
+    for (const e of edits) {
+      const kk = e.k - o.k;
+      if (kk < 0 || kk >= OCC_NK) continue;
+      const solid = IS_OPAQUE[e.id] ? 255 : 0;
+      const base = kk * plane;
+      for (let n = 0; n < plane; n++) {
+        if (cols[n] === e.col) { occupancyData[base + n] = solid; touched = true; }
+      }
+    }
+    if (!touched) return;
+    occupancyTexture.needsUpdate = true;
+    // Every cached entity shadow answer was computed against the old contents.
+    // `_handLight` would drop them anyway on the editSeq change, but the volume
+    // owning its own invalidation is what keeps that true if it ever stops.
+    o.gen++;
   }
 
   /**

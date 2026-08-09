@@ -784,6 +784,12 @@ class Game {
       this.skills.xpKill(mob.spec, mob.baby > 0);
     };
     this.arrows.onStick = (pos) => this.audio.dig('stone', pos);
+    // An arrow burning up in lava, given the same embers a dropped item gets
+    // there — it is the same event and should not read as two different ones.
+    this.arrows.onBurn = (pos) => {
+      _burnUp.copy(pos).normalize();
+      this.particles.embers(pos, _burnUp, 5, 0.7);
+    };
     this.mobs = new Mobs(this.scene, this.planet, this.drops);
     // Creatures speak for themselves — idle calls, pain and death, all anchored
     // in the world so you can hear which direction the herd is in.
@@ -4377,16 +4383,32 @@ class Game {
   }
 
   /**
-   * The highest liquid cell in this column with open air above it, or -1.
+   * The highest *water* cell in this column with open air above it, or -1.
    *
    * The scan starts *below* the reported surface, not above it: surfaceK counts
    * the top of a lake as the surface, so beginning at surfaceK + 1 starts in the
    * air over the water and never sees the water at all.
+   *
+   * **Water specifically, not R_LIQUID, and the difference was winter melting
+   * the planet's lava.** Lava is a liquid by render class and worldgen lava is
+   * registered as a spring exactly as an ocean is, so the old test handed
+   * `_freezeSome` the top of every open lava pool and it iced them over. That
+   * alone would be odd; what made it destructive is that the thaw can only give
+   * back one thing. Measured on a 7x7x2 lava pool, one winter and one spring:
+   * 49 lava cells became ice, the ice came back as *water*, and that water
+   * quenched the 49 lava cells underneath — a 98-cell pool ending as 49 water
+   * and 49 obsidian, with the obsidian free and the lava gone. Volcano craters
+   * and surface vents are open lava with air above them, so this was reachable
+   * by standing near one for a season.
+   *
+   * The rule is the one `_freezeSome` already states for flow: the pass can
+   * only ever hand back standing water, so it must only ever take standing
+   * water.
    */
   _openWaterK(col) {
     const k0 = Math.max(1, this.planet.surfaceK(col) - 2);
     for (let k = k0; k < Math.min(D - 1, k0 + 10); k++) {
-      if (RENDER_TYPE[this.planet.at(col, k)] !== R_LIQUID) continue;
+      if (this.planet.at(col, k) !== ID.water) continue;
       if (this.planet.at(col, k + 1) === 0) return k;
     }
     return -1;
@@ -6499,7 +6521,15 @@ class Game {
     if (pouring === undefined) return false;
     const target = wet && wet.prevCol >= 0 ? { col: wet.prevCol, k: wet.prevK } : null;
     if (!target) return false;
-    if (this.planet.at(target.col, target.k) !== 0) return false;
+    // Air, or something the liquid would destroy anyway. It used to be air
+    // alone, and the mismatch was visible in a single tuft of grass: the flow
+    // sim washes every non-submerged cross plant and every torch out of its way
+    // (`Water._washes`, the same `DROWNS` flag), so a stream ran straight
+    // through a daisy while the bucket that started the stream refused to be
+    // emptied onto one. Pouring is not gentler than flowing. Nothing is
+    // dropped, for the same reason washing drops nothing.
+    const standing = this.planet.at(target.col, target.k);
+    if (standing !== 0 && !DROWNS[standing]) return false;
     // Pouring at your own feet is allowed on purpose. It's what you'd expect,
     // it's how you break a fall or make a climb, and it can't strand you: the
     // source is a single static cell you can scoop straight back up.

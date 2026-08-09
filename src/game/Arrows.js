@@ -212,6 +212,9 @@ export class Arrows {
       if (a.age > MAX_FLIGHT) { this._remove(i); continue; }
 
       this.step(a, dt, mobs);
+      // Burnt up in lava: gone, and not collectable. Checked before the pose,
+      // since there is nothing left to point anywhere.
+      if (a.burnt) { this._remove(i); continue; }
       if (!a.stuck && !a.hitMob) this._pose(a);
       if (a.hitMob) this._remove(i);
     }
@@ -309,6 +312,20 @@ export class Arrows {
     const inc = len / steps;
     for (let s = 0; s < steps; s++) {
       _probe.copy(a.pos).addScaledVector(_dir, inc);
+      // Lava burns the shaft up. Tested here in the sub-step march and not off
+      // `here` at the top of this method, for the same reason the wall test is:
+      // `here` is one sample per frame, and a full-draw arrow crosses four
+      // cells in a 15fps frame, so a sheet of lava one cell thick was something
+      // an arrow simply flew through — it took the water drag two lines up but
+      // nothing at all from the molten rock. A drop that lands in lava already
+      // burns (`Drops.update`); an arrow is the only other thing in the game
+      // that can be thrown into some.
+      if (this.planet.blockAtWorld?.(_probe.x, _probe.y, _probe.z) === ID.lava) {
+        a.pos.copy(_probe);
+        a.burnt = true;
+        this.onBurn?.(a.pos);
+        return;
+      }
       if (this.planet.isSolidWorld(_probe.x, _probe.y, _probe.z)) {
         // Stop where it entered, not where it would have ended up. Burying the
         // shaft in the block is what makes a stuck arrow read as a stuck arrow

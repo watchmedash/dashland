@@ -2286,8 +2286,11 @@ class Game {
     // the whole break — it grows across the face for the entire dig and the
     // block vanishing is its last frame — so the particles were a second
     // announcement of a thing the player had just watched happen, and they were
-    // the noisier of the two. The Particles class keeps `blockBreak`; footsteps
-    // and embers still go through it.
+    // the noisier of the two.
+    //
+    // `Particles.blockBreak` went with the call: it had no other caller, and an
+    // unreachable method reads as a live one to everybody who meets it later.
+    // Footsteps, embers and bubbles have their own methods and are untouched.
     this.audio.break_(b.sound, center);
     this.stats.mined++;
     // Ripe wheat only. Breaking a green shoot is losing a crop, not harvesting

@@ -223,30 +223,6 @@ export class Particles {
     return null;
   }
 
-  /** Cube-shatter burst when a block breaks, centred on a world position. */
-  blockBreak(center, blockId, count = 26) {
-    const col = BLOCKS[blockId]?.particle || [0.6, 0.6, 0.6];
-    for (let i = 0; i < count; i++) {
-      const p = this._spawn();
-      if (!p) return;
-      p.alive = true;
-      p.pos.set(
-        center.x + (Math.random() - 0.5) * 0.9,
-        center.y + (Math.random() - 0.5) * 0.9,
-        center.z + (Math.random() - 0.5) * 0.9,
-      );
-      const up = _v.copy(p.pos).sub(this.center).normalize();
-      p.vel.set((Math.random() - 0.5) * 4.4, (Math.random() - 0.5) * 4.4, (Math.random() - 0.5) * 4.4)
-        .addScaledVector(up, 2.4 + Math.random() * 2.6);
-      p.rot.setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
-      p.spin.set((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9);
-      p.life = 0;
-      p.maxLife = 0.9 + Math.random() * 0.9;
-      p.size = 0.06 + Math.random() * 0.11;
-      const jitter = 0.82 + Math.random() * 0.36;
-      p.color.setRGB(col[0] * jitter, col[1] * jitter, col[2] * jitter);
-    }
-  }
 
   hitSpark(point, normal, blockId) {
     const col = BLOCKS[blockId]?.particle || [0.6, 0.6, 0.6];

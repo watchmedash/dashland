@@ -1,0 +1,168 @@
+# Mire Root, ripe (rung 4 of 4).
+#
+# cropdata silhouette: "Knotted aerial roots arching out of the mud like little knees."
+# That sentence names an object the packs do not contain, and the recipe it replaces knew
+# it — `nature/Grass_3` -> `Plant_1` -> `Plant_3` is a sedge tuft, and `world/crops.js`'s
+# `rootKnees` was written to bolt six generated cones onto it. Six cones on a grass tuft is
+# still a grass tuft, and in the swamp, where every wild plant is also a dark green tuft,
+# the crop was invisible as a crop.
+#
+# The knee is the plant. So here it is the load-bearing geometry and the foliage is the
+# garnish, which is the opposite of the weighting the sedge recipe had: six arches leave
+# the mud, bend over at a swollen knuckle and come back down, and a sparse fringe of
+# strappy blades stands between them. Two things follow from that and neither is available
+# to a scatter:
+#
+#   - an arch has TWO feet in the mud, which is what makes it read as an arch rather than
+#     as a spike. `rootKnees` could only ever plant one end;
+#   - the knuckle is at the bend, which is where a cypress knee's knot actually is, and it
+#     carries `colors.fruit` — so the crop has three colours instead of the sedge's one.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model mireroot
+  height 0.9
+  style chunky
+
+palette
+  # Wood -> stem: the woody root itself.
+  Wood      #5a4a32
+  Green     #4a6a3e
+  DarkGreen #3a5630
+  # Berry -> fruit: the knots. cropdata's `fruit` here is a warmer brown than the root,
+  # which is what makes a knuckle read as a knuckle and not as a thicker bit of root.
+  Berry     #6a4a2a
+
+skeleton
+  root mud at 0.0
+  # A short woody boss the blades issue from. It is not a stem — the plant has no stem —
+  # it is the crown where the roots converge, and it exists so the blades have somewhere
+  # to be rooted that is not the ground plane.
+  bone crown parent=mud dir=up len=0.22
+
+  # The arches. Each is TWO bones: out-and-up, then over-and-down. Lofting the pair as one
+  # chain is what makes an arch — a single bone can only be a spike, and a spike is what
+  # the generated version was.
+  mirror
+    bone arA1 parent=mud offset=(0.07,0.042,0.05)   dir=side tilt=72 len=0.32
+    bone arA2 parent=arA1 dir=side tilt=-48 len=0.32
+    bone arB1 parent=mud offset=(0.04,0.040,-0.09)  dir=side yaw=74  tilt=70 len=0.28
+    bone arB2 parent=arB1 dir=side yaw=74  tilt=-50 len=0.28
+    bone arC1 parent=mud offset=(-0.03,0.038,0.08)  dir=side yaw=140 tilt=76 len=0.25
+    bone arC2 parent=arC1 dir=side yaw=140 tilt=-44 len=0.25
+  end
+
+  # The blades. Steep, so the plant's width stays inside its tile — see the aspect check.
+  mirror
+    bone bldA parent=crown dir=side tilt=76 len=0.72
+    bone bldB parent=crown dir=side yaw=58  tilt=70 len=0.64
+    bone bldC parent=crown dir=side yaw=126 tilt=79 len=0.58
+  end
+
+parts
+  loft boss bones=mud..crown material=Wood sides=8
+    ring 0.00 w=0.30 d=0.30
+    ring 0.60 w=0.24 d=0.24
+    ring 1.00 w=0.17 d=0.17
+    cap start=flat end=dome
+
+  # The arches. Fat at the feet and WAISTED at the bend — the first cut carried a 0.090
+  # ring through a 60-degree corner and the lint caught the classic loft fold: "the ring
+  # radius 0.046 exceeds the bend reach 0.030 ... the surface doubles back and looks like
+  # missing faces", with four inward-facing triangles per arch to go with it. The fix is
+  # the one the warning names, and it is also better anatomy: the knot below is what a
+  # cypress knee is thick at, and a waisted joint under a swollen knuckle reads as knotted
+  # where a uniform tube reads as bent pipe.
+  #
+  # `refaxis=` on the two arches that run diagonally, for the reason the SPEC gives under
+  # `frame=`: the depth axis is chosen automatically and switches at about 45 degrees of
+  # path tilt, so an arch whose first limb is steep and whose second is shallow gets rings
+  # standing at right angles to each other across the joint. That reads as five inward-
+  # facing triangles in the lint and as a crease in the render. Naming the axis across the
+  # arch's own plane settles it.
+  #
+  # And the turn is capped at 120 degrees. A sharper arch is a better knee and at 144 the
+  # tube genuinely doubles back through itself — the lint says "the path probably folds or
+  # self-intersects" and no `refaxis` fixes that, because it is not a frame problem.
+  mirror
+    loft archA bones=arA1..arA2 material=Wood sides=6 refaxis=(0,0,1)
+      ring 0.00 w=0.115 d=0.115
+      ring 0.34 w=0.078 d=0.078
+      ring 0.50 w=0.048 d=0.048
+      ring 0.66 w=0.078 d=0.078
+      ring 1.00 w=0.105 d=0.105
+      cap start=flat end=flat
+    loft archB bones=arB1..arB2 material=Wood sides=6 refaxis=(0.96,0,-0.28)
+      ring 0.00 w=0.100 d=0.100
+      ring 0.34 w=0.070 d=0.070
+      ring 0.50 w=0.032 d=0.032
+      ring 0.66 w=0.070 d=0.070
+      ring 1.00 w=0.092 d=0.092
+      cap start=flat end=flat
+    loft archC bones=arC1..arC2 material=Wood sides=6 refaxis=(0.64,0,0.77)
+      ring 0.00 w=0.092 d=0.092
+      ring 0.34 w=0.064 d=0.064
+      ring 0.50 w=0.038 d=0.038
+      ring 0.66 w=0.064 d=0.064
+      ring 1.00 w=0.084 d=0.084
+      cap start=flat end=flat
+  end
+
+  # The knots, at the bends. `on=` snaps each onto the arch it belongs to, so it is flush
+  # by construction; the `offset=` only has to aim it outward, because a snap to the
+  # CLOSEST surface point from a spot on the arch's own axis lands wherever it likes.
+  mirror
+    loft knotA bone=arA1 at=1.00 offset=(0.06,0.03,0) dir=up len=0.13 material=Berry on=archA sides=6
+      ring 0.00 w=0.12 d=0.12
+      ring 0.50 w=0.155 d=0.145
+      ring 1.00 w=0.08 d=0.08
+      cap start=dome end=dome
+    loft knotB bone=arB1 at=1.00 offset=(0.02,0.03,0.05) dir=up len=0.11 material=Berry on=archB sides=5
+      ring 0.00 w=0.105 d=0.105
+      ring 0.50 w=0.135 d=0.125
+      ring 1.00 w=0.07 d=0.07
+      cap start=dome end=dome
+  end
+
+  # The fringe. `frame=up` with w WIDE and d THIN — a flat strap lying face-up, the idiom
+  # `cocoa_4.wam` spells out. Few and thin on purpose: this crop's read is the roots, and
+  # a full sedge tuft on top of them is the thing that hid them for three audits.
+  mirror
+    loft bladeA bones=bldA..bldA material=Green frame=up sides=4
+      ring 0.00 w=0.075 d=0.020
+      ring 0.40 w=0.090 d=0.024
+      ring 1.00 w=0.022 d=0.010 tip
+      cap start=flat end=point
+    loft bladeB bones=bldB..bldB material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.070 d=0.020
+      ring 0.40 w=0.084 d=0.022
+      ring 1.00 w=0.020 d=0.010 tip
+      cap start=flat end=point
+    loft bladeC bones=bldC..bldC material=Green frame=up sides=4
+      ring 0.00 w=0.065 d=0.018
+      ring 0.40 w=0.078 d=0.022
+      ring 1.00 w=0.019 d=0.009 tip
+      cap start=flat end=point
+  end
+
+checks
+  # AN ARCH, NOT A SPIKE: both ends of every arch are in the mud, and the middle is well
+  # clear of it. This is the single assertion that separates this model from the six
+  # generated cones it replaces, and it is worth two lines.
+  assert bottom(archA.l) < 0.03
+  assert top(archA.l) > 0.16
+  # The knots sit at the bends, i.e. near the top of the arch rather than at its feet.
+  assert bottom(knotA.l) > top(archA.l) * 0.55
+  # The roots break the plant's outline: they reach further out than the foliage does,
+  # which is what makes them the read.
+  assert xmax(archA.l) > xmax(bladeA.l)
+  # ...and the foliage is still the tallest thing, so the plant reads as a plant.
+  assert top(bladeA.l) > top(archA.l)
+  # Fits its tile: `world/crops.js` scales a family by the larger of the ripe model's
+  # dimensions, so a plant much wider than it is tall arrives short. 0.9 m crop, 1.04 m
+  # tile: anything past about 1.05 here starts costing height.
+  assert width / height < 1.05
+  assert asymmetry(boss) < 0.005
+  # Budget: `clump: 1`.
+  assert tris < 1600
+  measure aspect width / height

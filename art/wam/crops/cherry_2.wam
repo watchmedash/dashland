@@ -1,0 +1,78 @@
+# Cherry Tree, sapling (rung 2 of 4).
+#
+# A short bole, one pair of limbs and three small foliage masses. The rung differs from the
+# one above it in PARTS rather than in scale — no leader, no skirt, no fruit — which is the
+# rule the whole four-source ladder exists for.
+#
+# A TALLER, cleaner stem than `apple_2.wam` and pads rather than domes, so the species
+# split is already legible two rungs below the fruit.
+#
+# See `cherry_4.wam` for the spread and `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model cherry
+  height 3.8
+  style chunky
+
+palette
+  Wood      #5c4028
+  Green     #4f9438
+  DarkGreen #386b28
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.26
+  mirror
+    bone lmA parent=trunk dir=side yaw=24  tilt=26 len=0.13
+    bone lmB parent=trunk dir=side yaw=-64 tilt=32 len=0.12
+  end
+
+parts
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.054 d=0.054
+    ring 0.16 w=0.044 d=0.044
+    ring 1.00 w=0.038 d=0.038
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=lmA..lmA material=Wood sides=5
+      ring 0.00 w=0.030 d=0.030
+      ring 1.00 w=0.015 d=0.015
+      cap start=flat end=dome
+    loft armB bones=lmB..lmB material=Wood sides=5
+      ring 0.00 w=0.027 d=0.027
+      ring 1.00 w=0.014 d=0.014
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft canA bone=lmA at=0.30 dir=side yaw=24 tilt=10 len=0.19 material=Green frame=up sides=6
+      ring 0.00 w=0.070 d=0.044
+      ring 0.30 w=0.168 d=0.094
+      ring 0.72 w=0.176 d=0.098
+      ring 1.00 w=0.074 d=0.044
+      cap start=dome end=dome
+    loft canB bone=lmB at=0.30 dir=side yaw=-64 tilt=14 len=0.17 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.064 d=0.040
+      ring 0.30 w=0.154 d=0.086
+      ring 0.72 w=0.162 d=0.090
+      ring 1.00 w=0.068 d=0.040
+      cap start=dome end=dome
+  end
+  loft canT bone=trunk at=1.00 offset=(0,0.04,0) dir=up len=0.070 material=Green sides=8
+    ring 0.00 w=0.114 d=0.114
+    ring 0.32 w=0.186 d=0.186
+    ring 0.68 w=0.190 d=0.190
+    ring 1.00 w=0.106 d=0.106
+    cap start=dome end=dome
+
+checks
+  assert bottom(bole) < 0.01
+  # Sparser in PARTS, not merely smaller: 10 against the ripe tree's 34.
+  assert parts == 10
+  # `familyScale` takes one scale off the RIPE model for the whole family, so a rung has to
+  # be authored small — and it must not out-top the rung above it or the ordering pass in
+  # `world/crops.js` shrinks it and throws the authored proportions away.
+  assert height in 0.30..0.55
+  assert width / height < 1.50
+  assert asymmetry(bole) < 0.005
+  assert tris < 900

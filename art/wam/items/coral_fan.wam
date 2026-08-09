@@ -1,0 +1,127 @@
+# Sea Fan — the flat one.
+#
+# A gorgonian is a *plane*: it grows across the current so the whole colony can
+# filter it, and that planarity is the entire read. Everything here follows from
+# refusing to round it off.
+#
+# **It is a `web`, not a flattened tube.** A membrane spanning a fan of bones is
+# the one thing `loft` and `sweep` cannot make — squashing a tube to 0.02 depth
+# gives a surface with a visible rolled edge and no way for the panels between
+# ribs to share vertices. `web` builds the whole fan as one grid and skins every
+# vertex to a blend of the ribs it lies between, so the sheet cannot crack apart
+# between spars.
+#
+# **The membrane has `thickness=`, and that is not cosmetic.** A zero-thickness
+# web is emitted as one sheet and marked double-sided — but the double-sidedness
+# lives in the WAM material, and `scripts/export_items.py` rebuilds the glTF
+# with its own material to bake the palette into vertex colours. A single sheet
+# would therefore arrive in the game one-sided and vanish when you swim round
+# it. A closed slab has no side to be wrong about. It costs about sixty
+# triangles and buys the model existing from every angle.
+#
+# **The ribs are mirrored, and that is not cosmetic either.** A rib rooted at the
+# hub and thrown out in +X crosses the centreline lopsidedly, which the lint
+# counts as a broken symmetry claim — correctly, since a sea fan *is* symmetric.
+# Authoring one side inside `mirror` and letting the compiler reflect it is the
+# construct that exists for exactly this, and it also guarantees the two halves
+# match to the vertex, which hand-authoring five ribs never quite does.
+#
+# The colour is the purple end of the gorgonian range rather than the pink the
+# staghorn takes: the three corals have to be told apart at a glance in a dim
+# reef, so they are separated by hue first (pink / purple / gold) and by
+# silhouette second.
+
+model coral_fan
+  height 0.90
+  style chunky
+
+palette
+  Fan   #a05ec4
+  Rib   #7b3f9c
+  Edge  #d8a6ee
+  Foot  #63316f
+
+skeleton
+  root rock at 0.0
+  # The holdfast and the short bare stem above it. A sea fan does not spread
+  # from the ground — it stands clear of the seabed on a stalk first, which is
+  # what stops the fan reading as a leaf lying on the sand.
+  bone stalk parent=rock dir=up pitch=-3 len=0.22
+  # The central spar, and two pairs either side of it. `tilt` on an `up` bone
+  # spreads them within the X/Y plane, so the whole colony stays planar in Z —
+  # the property this model is for.
+  bone spineC parent=stalk dir=up pitch=2 len=0.64
+  mirror
+    bone spineA parent=stalk dir=up tilt=26 pitch=1 len=0.62
+    bone spineB parent=stalk dir=up tilt=54 len=0.56
+  end
+
+parts
+  # The holdfast is an ellipse, not a cone: it is flattened in Z like the rest
+  # of the colony, and it was the one part making the model measure three times
+  # deeper than the fan it carries. A round foot under a planar fan reads as a
+  # fan stuck into a pebble.
+  loft trunk bones=rock..stalk material=Foot frame=fwd sides=6
+    ring 0.00 w=0.30 d=0.13
+    ring 0.30 w=0.15 d=0.080
+    ring 1.00 w=0.085 d=0.055 material=Rib
+    cap start=flat end=flat
+
+  # The spars. Thin round tubes, so the fan has visible structure inside the
+  # membrane instead of being a coloured card.
+  loft ribC bones=spineC..spineC material=Rib sides=4
+    ring 0.00 w=0.070 d=0.066
+    ring 0.55 w=0.046 d=0.044
+    ring 1.00 w=0.022 d=0.020 tip
+    cap start=flat end=point
+  mirror
+    loft ribA bones=spineA..spineA material=Rib sides=4
+      ring 0.00 w=0.064 d=0.060
+      ring 0.55 w=0.042 d=0.040
+      ring 1.00 w=0.020 d=0.018 tip
+      cap start=flat end=point
+    loft ribB bones=spineB..spineB material=Rib sides=4
+      ring 0.00 w=0.058 d=0.054
+      ring 0.55 w=0.038 d=0.036
+      ring 1.00 w=0.018 d=0.016 tip
+      cap start=flat end=point
+
+    # Two panels per side: hub-to-first-spar and first-to-second. One panel
+    # spanning all three would still be one grid, but the outer spar is much
+    # shorter than the inner one and a single scalloped edge across both reads
+    # as a torn sheet rather than as a fan whose outline steps down.
+    web webIn anchor=stalk:1.0 material=Fan thickness=0.022 trailing=scallop scallop=0.06
+      rib bones=spineC..spineC inset=0.05
+      rib bones=spineA..spineA inset=0.05
+    web webOut anchor=stalk:1.0 material=Edge thickness=0.020 trailing=scallop scallop=0.08
+      rib bones=spineA..spineA inset=0.05
+      rib bones=spineB..spineB inset=0.06
+  end
+
+checks
+  assert bottom(trunk) < 0.01
+  # Planar. This is the model's identity and the number that must never drift:
+  # a sea fan a third as deep as it is wide is a bush.
+  assert depth / width < 0.22
+  assert depth / height < 0.22
+  # The fan is held up off the seabed, not lying on it.
+  assert bottom(webIn.l) > 0.14
+  # ...and the colony is much wider than the stalk holding it up.
+  #
+  # Measured on the *model*, not on one panel: `width(part)` is a bounding box
+  # in X, and `webIn` is the inner wedge, which spans only the first 26° of the
+  # fan. Compared against the holdfast the two came out within a thousandth of
+  # each other — a true statement about two things that have nothing to do with
+  # each other, which is the worst kind of check.
+  assert width > width(trunk) * 2.6
+  # Spars step down outward, so the outline is a fan rather than a rectangle.
+  assert top(ribC) > top(ribA.l)
+  assert top(ribA.l) > top(ribB.l)
+  # The membrane is skinned across its ribs rather than welded to one of them.
+  # A render cannot show this and the failure — a fan that moves as a board —
+  # only appears once something animates.
+  assert influences(webIn.l) >= 2
+  assert bonecount(webIn.l) >= 2
+  assert parts == 10
+  assert tris < 900
+  measure flatness depth / width

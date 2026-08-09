@@ -1,0 +1,52 @@
+# Cactus Fruit, second rung (2 of 4). See `cactusfruit_4.wam` for the argument and the rules.
+#
+# TWO PADS AND NO FORK. A prickly pear grows by budding one pad off the rim of another, so
+# the second pad appearing IS the growth event, and the branch is what rung 3 adds.
+
+model cactusfruit
+  height 1.4
+  style chunky
+
+palette
+  # Wood -> stem: the older, darker basal pad.
+  Wood      #4a7a4e
+  Green     #5c8f5a
+  DarkGreen #4a7a4e
+  # Berry -> fruit: the magenta tunas.
+  Berry     #d6395c
+
+skeleton
+  root sand at 0.0
+  bone padA parent=sand dir=up pitch=6 len=0.32
+  bone padB parent=padA dir=up pitch=-28 len=0.28
+
+parts
+  # The pads. Widest at mid-height and narrowed to a neck at both ends, which is what makes
+  # a pad a SEGMENT — the joint between two pads is the whole reason a prickly pear reads as
+  # stacked plates rather than as one lumpy body.
+  loft plateA bones=sand..padA material=Wood frame=side sides=7
+    ring 0.00 w=0.048 d=0.098
+    ring 0.16 w=0.077 d=0.255
+    ring 0.50 w=0.086 d=0.304
+    ring 0.86 w=0.070 d=0.236
+    ring 1.00 w=0.040 d=0.089
+    cap start=flat end=dome
+  loft plateB bones=padB..padB material=Green frame=side sides=7
+    ring 0.00 w=0.042 d=0.089
+    ring 0.16 w=0.072 d=0.236
+    ring 0.50 w=0.081 d=0.285
+    ring 0.86 w=0.065 d=0.216
+    ring 1.00 w=0.037 d=0.078
+    cap start=dome end=dome
+  # THE TUNAS. Standing UP off the rim of the top pads — a prickly pear fruit is a barrel
+  # sitting proud on the edge with a sunken navel, and "crowning the top edge" is the
+  # silhouette line's own phrase. `on=` snaps each to the pad's surface so it is flush by
+  # construction, and the `offset=` aims it at the rim rather than at the flat face, which
+  # is where a snap to the CLOSEST surface point would otherwise put it.
+checks
+  assert width(plateA) / depth(plateA) > 3.0
+  assert bottom(plateB) > 0.14
+  assert bottom(plateA) < 0.02
+  assert top(plateB) < 0.62
+  assert tris < 400
+  measure aspect depth / height

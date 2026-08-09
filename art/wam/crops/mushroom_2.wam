@@ -1,0 +1,72 @@
+# Common Mushroom, middle rung (2 of 3).
+#
+# Three of them and two states: the tallest has opened into a domed cap with a gill band,
+# the other two are still buttons. Rung 1 has no open cap and rung 3 has no closed one, so
+# this rung is a topology of its own rather than an interpolation.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model mushroom
+  height 0.28
+  style smooth
+
+palette
+  Wood      #e0d4b8
+  Green     #c9b894
+  Berry     #9a6a48
+
+skeleton
+  root litter at 0.0
+  bone stalkA parent=litter dir=up pitch=-3 len=0.28
+  bone pinB   parent=litter offset=(0.30,0.010,0.17) dir=up pitch=8 tilt=-12 len=0.14
+  bone pinC   parent=litter offset=(-0.26,0.010,-0.14) dir=up pitch=-6 tilt=10 len=0.10
+
+parts
+  loft stemA bones=stalkA..stalkA material=Wood sides=8
+    ring 0.00 w=0.210 d=0.210
+    ring 0.30 w=0.165 d=0.165
+    ring 1.00 w=0.178 d=0.178
+    cap start=flat end=flat
+  loft stemB bones=pinB..pinB material=Wood sides=6
+    ring 0.00 w=0.165 d=0.165
+    ring 0.40 w=0.130 d=0.130
+    ring 1.00 w=0.138 d=0.138
+    cap start=flat end=flat
+  loft stemC bones=pinC..pinC material=Wood sides=6
+    ring 0.00 w=0.140 d=0.140
+    ring 0.40 w=0.110 d=0.110
+    ring 1.00 w=0.116 d=0.116
+    cap start=flat end=flat
+
+  # Open, with the undercut and the gill band.
+  loft capA bone=stalkA at=1.00 dir=up len=0.26 material=Berry sides=12
+    ring 0.00 w=0.36 d=0.36 material=Green
+    ring 0.14 w=0.50 d=0.50 material=Berry
+    ring 0.46 w=0.53 d=0.53
+    ring 0.80 w=0.42 d=0.42
+    ring 1.00 w=0.16 d=0.16
+    cap start=flat end=dome
+
+  # Still shut.
+  loft pinheadB bone=pinB at=1.00 dir=up len=0.16 material=Berry sides=9
+    ring 0.00 w=0.17 d=0.17
+    ring 0.36 w=0.26 d=0.26
+    ring 0.72 w=0.24 d=0.24
+    ring 1.00 w=0.11 d=0.11
+    cap start=dome end=dome
+  loft pinheadC bone=pinC at=1.00 dir=up len=0.13 material=Berry sides=8
+    ring 0.00 w=0.14 d=0.14
+    ring 0.36 w=0.21 d=0.21
+    ring 0.72 w=0.20 d=0.20
+    ring 1.00 w=0.09 d=0.09
+    cap start=dome end=dome
+
+checks
+  # One open, two shut — the state this rung exists to show.
+  assert width(capA) / width(stemA) > 2.6
+  assert width(pinheadB) / width(stemB) < 2.4
+  assert bottom(stemA) < 0.02
+  # Between its neighbours.
+  assert top(capA) in 0.40..0.68
+  assert tris < 900
+  measure aspect width / height

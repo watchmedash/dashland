@@ -1,0 +1,42 @@
+# Coal — a knobbly black lump.
+#
+# The problem with coal at icon size is that it is the same value as its own
+# shadow, so the silhouette has to do all the work: the rings are rolled against
+# each other so no two facets line up, and a second nub sits on the shoulder to
+# put a step in the outline. `material_arc` runs one paler chipped face down the
+# lit side rather than making it a separate part, which always reads as a slab
+# stuck on.
+
+model coal
+  height 0.3
+  style chunky
+
+palette
+  Coal  #37373f
+  Chip  #56565f
+
+skeleton
+  root base at 0.0
+  bone lump parent=base dir=up pitch=-7 len=0.60
+
+parts
+  loft rock bones=base..lump material=Coal sides=5 shape=squarish
+    ring 0.00 w=0.34 d=0.30 roll=8
+    ring 0.24 w=0.58 d=0.50 roll=32 fwd=0.03
+    ring 0.56 w=0.62 d=0.52 roll=-14 side=-0.04 material_arc=Chip:150-215
+    ring 0.84 w=0.44 d=0.38 roll=18 fwd=-0.03 material_arc=Chip:150-215
+    ring 1.00 w=0.20 d=0.17 roll=40
+    cap start=flat end=flat
+
+  loft nub bone=lump at=0.42 offset=(0.20,0,0.10) dir=side yaw=-34 tilt=22 len=0.20 on=rock material=Coal sides=5 shape=squarish
+    ring 0.00 w=0.24 d=0.22
+    ring 0.55 w=0.26 d=0.23 roll=22
+    ring 1.00 w=0.12 d=0.11 roll=-10
+    cap start=flat end=flat
+
+checks
+  assert bottom(rock) < 0.01
+  # A lump, not a pebble and not a boulder-shaped tower.
+  assert height / width in 0.7..1.3
+  assert parts == 2
+  assert tris < 220

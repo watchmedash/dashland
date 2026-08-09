@@ -1,0 +1,263 @@
+# Cherry Tree, ripe (rung 4 of 4).
+#
+# cropdata silhouette: "Spreading canopy; the blossom stage should be a genuinely beautiful
+# pink moment." Both clauses are geometry here and neither was expressible before: this
+# species drew `nature/CommonTree_2` and `CommonTree_4`, which are the same rounded meadow
+# trees apple drew, and there was no blossom rung anywhere in the ladder.
+#
+# ---- what makes this a cherry and not the apple ---------------------------------
+#
+# Three things, all of them silhouette rather than colour, and all of them the OPPOSITE of
+# `apple_4.wam` on purpose:
+#
+#   - a TALL CLEAN BOLE. 0.46 of the tree against apple's 0.30, and no limb below the fork.
+#   - a WIDE, FLAT, TIERED crown. Apple's crown is a set of upright dome masses and is 0.81
+#     as deep as it is wide; this one is built from HORIZONTAL LENSES lofted along the limbs
+#     — `frame=up` with w wide and d thin — and comes in near 0.40. The lens is why the
+#     limbs are visible between the tiers, which is most of what "spreading" looks like.
+#   - the fruit HANGS ON A STALK, in pairs. A cherry is the one orchard fruit whose pedicel
+#     is longer than the fruit, and a pair of small berries swinging in clear air under a
+#     flat pad is legible from much further away than the same two berries pushed into a
+#     canopy would be. `PRODUCE_SHAPE` calls this crop a `berry` and this is the reason.
+#
+# `wide: 3.4` in the recipe, not apple's 3.2, because a spreading tree genuinely is wider
+# than it is tall and `familyScale` would otherwise scale it by WIDTH and deliver a short
+# cherry. The overhang is the point; orchard trees are allowed it.
+#
+# See `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model cherry
+  height 3.8
+  style chunky
+
+palette
+  Wood      #5c4028
+  Green     #4f9438
+  DarkGreen #3a7028
+  Berry     #d6293f
+
+skeleton
+  root ground at 0.0
+  # TALL and clean — the cherry half of the apple/cherry split.
+  bone trunk parent=ground dir=up len=0.46
+
+  # Limbs leave nearly HORIZONTAL. Apple's leave at 50-64 degrees of elevation; these are at
+  # 18-34, which is what turns a dome into a spread.
+  mirror
+    bone lmA parent=trunk dir=side yaw=22  tilt=24 len=0.30
+    bone lmB parent=trunk dir=side yaw=68  tilt=34 len=0.26
+    bone lmC parent=trunk dir=side yaw=-24 tilt=16 len=0.32
+    bone lmD parent=trunk dir=side yaw=-70 tilt=30 len=0.27
+  end
+  bone lead parent=trunk dir=up len=0.18
+
+parts
+  # A clean pole with very little taper. Apple's bole flares; a cherry's is a column, and the
+  # two are told apart at the base as well as at the top.
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.104 d=0.104
+    ring 0.16 w=0.086 d=0.086
+    ring 1.00 w=0.076 d=0.076
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=lmA..lmA material=Wood sides=6
+      ring 0.00 w=0.058 d=0.058
+      ring 1.00 w=0.024 d=0.024
+      cap start=flat end=dome
+    loft armB bones=lmB..lmB material=Wood sides=6
+      ring 0.00 w=0.052 d=0.052
+      ring 1.00 w=0.022 d=0.022
+      cap start=flat end=dome
+    loft armC bones=lmC..lmC material=Wood sides=6
+      ring 0.00 w=0.056 d=0.056
+      ring 1.00 w=0.023 d=0.023
+      cap start=flat end=dome
+    loft armD bones=lmD..lmD material=Wood sides=6
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.021 d=0.021
+      cap start=flat end=dome
+  end
+  loft armL bones=trunk..lead material=Wood sides=6
+    ring 0.00 w=0.064 d=0.064
+    ring 1.00 w=0.028 d=0.028
+    cap start=flat end=dome
+
+  # ---- the tiers ----------------------------------------------------------------
+  #
+  # A foliage LENS lofted along each limb's own bearing: `frame=up` pins the depth axis to
+  # world up, so `w` is the horizontal span and `d` the thickness. d is a bit over half of w,
+  # which is a flat pad rather than the sphere apple's crown is made of. Getting the pairing
+  # backwards here gives a set of vertical fins, which is the failure `cocoa_4.wam` spells
+  # out for leaves and which reads even worse at this size.
+  mirror
+    loft canA bone=lmA at=0.28 dir=side yaw=22 tilt=8 len=0.40 material=Green frame=up sides=7
+      ring 0.00 w=0.14 d=0.09
+      ring 0.30 w=0.34 d=0.19
+      ring 0.72 w=0.36 d=0.20
+      ring 1.00 w=0.15 d=0.09
+      cap start=dome end=dome
+    loft canB bone=lmB at=0.28 dir=side yaw=68 tilt=14 len=0.34 material=DarkGreen frame=up sides=7
+      ring 0.00 w=0.13 d=0.08
+      ring 0.30 w=0.31 d=0.17
+      ring 0.72 w=0.33 d=0.18
+      ring 1.00 w=0.14 d=0.08
+      cap start=dome end=dome
+    loft canC bone=lmC at=0.28 dir=side yaw=-24 tilt=2 len=0.42 material=DarkGreen frame=up sides=7
+      ring 0.00 w=0.14 d=0.09
+      ring 0.30 w=0.35 d=0.19
+      ring 0.72 w=0.37 d=0.20
+      ring 1.00 w=0.15 d=0.09
+      cap start=dome end=dome
+    loft canD bone=lmD at=0.28 dir=side yaw=-70 tilt=12 len=0.35 material=Green frame=up sides=7
+      ring 0.00 w=0.13 d=0.08
+      ring 0.30 w=0.32 d=0.17
+      ring 0.72 w=0.34 d=0.18
+      ring 1.00 w=0.14 d=0.08
+      cap start=dome end=dome
+  end
+  # One pad over the fork, so the middle of the spread is not a hole seen from underneath.
+  loft canT bone=lead at=1.00 offset=(0,0.02,0) dir=up len=0.10 material=Green sides=8
+    ring 0.00 w=0.30 d=0.30
+    ring 0.34 w=0.42 d=0.42
+    ring 0.70 w=0.40 d=0.40
+    ring 1.00 w=0.22 d=0.22
+    cap start=dome end=dome
+
+  # ---- the fruit, on stalks, in pairs --------------------------------------------
+  #
+  # No `on=` here, deliberately, and it is the one place in the orchard where a fruit is
+  # allowed to hang in clear air: a cherry on a 15 cm pedicel below a flat pad is what the
+  # species looks like, and it puts the fruit against SKY rather than against foliage, which
+  # is worth more at fifty metres than any amount of size.
+  mirror
+    loft pedA bone=lmA at=0.92 offset=(0.02,-0.06,0.02) dir=down len=0.11 material=Wood sides=4
+      ring 0.00 w=0.014 d=0.014
+      ring 1.00 w=0.009 d=0.009
+      cap start=flat end=flat
+    loft chA1 bone=lmA at=0.92 offset=(0.035,-0.185,0.02) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.024 d=0.024
+      ring 0.44 w=0.034 d=0.034
+      ring 1.00 w=0.020 d=0.020
+      cap start=dome end=dome
+    loft chA2 bone=lmA at=0.92 offset=(-0.010,-0.170,0.04) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.022 d=0.022
+      ring 0.44 w=0.032 d=0.032
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft pedB bone=lmB at=0.90 offset=(0.01,-0.06,0.02) dir=down len=0.10 material=Wood sides=4
+      ring 0.00 w=0.013 d=0.013
+      ring 1.00 w=0.008 d=0.008
+      cap start=flat end=flat
+    loft chB1 bone=lmB at=0.90 offset=(0.030,-0.175,0.02) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.023 d=0.023
+      ring 0.44 w=0.033 d=0.033
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft chB2 bone=lmB at=0.90 offset=(-0.012,-0.160,0.04) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.021 d=0.021
+      ring 0.44 w=0.031 d=0.031
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+    loft pedC bone=lmC at=0.94 offset=(0.01,-0.06,0.02) dir=down len=0.12 material=Wood sides=4
+      ring 0.00 w=0.014 d=0.014
+      ring 1.00 w=0.009 d=0.009
+      cap start=flat end=flat
+    loft chC1 bone=lmC at=0.94 offset=(0.032,-0.195,0.02) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.024 d=0.024
+      ring 0.44 w=0.034 d=0.034
+      ring 1.00 w=0.020 d=0.020
+      cap start=dome end=dome
+    loft chC2 bone=lmC at=0.94 offset=(-0.012,-0.180,0.04) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.022 d=0.022
+      ring 0.44 w=0.032 d=0.032
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft pedD bone=lmD at=0.90 offset=(0.01,-0.06,0.02) dir=down len=0.10 material=Wood sides=4
+      ring 0.00 w=0.013 d=0.013
+      ring 1.00 w=0.008 d=0.008
+      cap start=flat end=flat
+    loft chD1 bone=lmD at=0.90 offset=(0.030,-0.175,0.02) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.023 d=0.023
+      ring 0.44 w=0.033 d=0.033
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft chD2 bone=lmD at=0.90 offset=(-0.012,-0.160,0.04) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.021 d=0.021
+      ring 0.44 w=0.031 d=0.031
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+    loft pedE bone=lmA at=0.55 offset=(0.01,-0.05,-0.03) dir=down len=0.1 material=Wood sides=4
+      ring 0.00 w=0.013 d=0.013
+      ring 1.00 w=0.008 d=0.008
+      cap start=flat end=flat
+    loft chE1 bone=lmA at=0.55 offset=(0.03,-0.170,-0.03) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.022 d=0.022
+      ring 0.44 w=0.032 d=0.032
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft chE2 bone=lmA at=0.55 offset=(-0.012,-0.155,-0.01) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.021 d=0.021
+      ring 0.44 w=0.030 d=0.030
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+    loft pedF bone=lmC at=0.58 offset=(0.01,-0.05,-0.03) dir=down len=0.11 material=Wood sides=4
+      ring 0.00 w=0.013 d=0.013
+      ring 1.00 w=0.008 d=0.008
+      cap start=flat end=flat
+    loft chF1 bone=lmC at=0.58 offset=(0.03,-0.180,-0.03) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.022 d=0.022
+      ring 0.44 w=0.032 d=0.032
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft chF2 bone=lmC at=0.58 offset=(-0.012,-0.165,-0.01) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.021 d=0.021
+      ring 0.44 w=0.030 d=0.030
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+    loft pedG bone=lmB at=0.56 offset=(0.01,-0.05,-0.03) dir=down len=0.09 material=Wood sides=4
+      ring 0.00 w=0.013 d=0.013
+      ring 1.00 w=0.008 d=0.008
+      cap start=flat end=flat
+    loft chG1 bone=lmB at=0.56 offset=(0.028,-0.160,-0.03) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.022 d=0.022
+      ring 0.44 w=0.032 d=0.032
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft chG2 bone=lmB at=0.56 offset=(-0.012,-0.145,-0.01) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.021 d=0.021
+      ring 0.44 w=0.030 d=0.030
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+    loft pedH bone=lmD at=0.56 offset=(0.01,-0.05,-0.03) dir=down len=0.09 material=Wood sides=4
+      ring 0.00 w=0.013 d=0.013
+      ring 1.00 w=0.008 d=0.008
+      cap start=flat end=flat
+    loft chH1 bone=lmD at=0.56 offset=(0.028,-0.160,-0.03) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.022 d=0.022
+      ring 0.44 w=0.032 d=0.032
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft chH2 bone=lmD at=0.56 offset=(-0.012,-0.145,-0.01) dir=down len=0.016 material=Berry sides=6
+      ring 0.00 w=0.021 d=0.021
+      ring 0.44 w=0.030 d=0.030
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+  end
+
+checks
+  # A TALL clean bole — the number that separates this species from apple at the base.
+  assert height(bole) / height in 0.44..0.60
+  assert bottom(bole) < 0.01
+  # SPREADING: the crown is much flatter than it is wide. Apple asserts 0.62..1.05 on the
+  # same ratio, so the two files cannot drift into each other without one of them failing.
+  assert (top(canT) - bottom(canA.l)) / (xmax(canA.l) - xmin(canA.r)) < 0.52
+  # Wider than tall, which is the whole of "spreading" and what `wide: 3.4` is paying for.
+  assert width / height in 1.10..1.50
+  # The fruit hangs BELOW the pad it grows under, in clear air, and is not buried in it.
+  assert top(chA1.l) < bottom(canA.l) + 0.02
+  assert bottom(pedA.l) > bottom(chA1.l)
+  assert asymmetry(bole) < 0.005
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 4600
+  measure spread width / height

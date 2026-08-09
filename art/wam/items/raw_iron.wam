@@ -1,0 +1,51 @@
+# Raw iron — ore still in its host rock.
+#
+# The point of a *raw* ore is that it is mostly stone: a dun lump with metal
+# showing in the fractures. So the metal is `material_arc` veins running down
+# two faces of the same loft rather than blobs stuck on the outside — a vein is
+# a stripe *around* the tube, which is exactly what that construct is for, and
+# authoring it as separate parts gives you shiny warts.
+#
+# Held next to `raw_gold`, only the vein colour differs. That is deliberate:
+# they come out of the same rock, and the smelted ingots are where the two
+# metals get different silhouettes.
+
+model raw_iron
+  height 0.3
+  style chunky
+
+palette
+  Stone #6f6a62
+  Vein  #cb9c74
+
+skeleton
+  root base at 0.0
+  bone lump parent=base dir=up pitch=-6 len=0.58
+
+parts
+  # `sides=8` is set by the veins, not by the silhouette: an arc snaps to the
+  # ring's own vertices, so the narrowest stripe the mesh can carry is one
+  # segment — 60° at six sides, which is a painted half, not a vein. Eight sides
+  # buys a 45° stripe, and holding the rolls close together keeps the two veins
+  # running down the lump instead of spiralling round it.
+  loft ore bones=base..lump material=Stone sides=8 shape=squarish
+    ring 0.00 w=0.36 d=0.32 roll=6
+    ring 0.26 w=0.60 d=0.50 roll=10 fwd=0.03 material_arc=Vein:270-315
+    ring 0.60 w=0.62 d=0.52 roll=4 side=-0.03 material_arc=Vein:45-90,Vein:180-225
+    ring 0.86 w=0.42 d=0.34 roll=8 fwd=-0.03
+    ring 1.00 w=0.18 d=0.16 roll=6
+    cap start=flat end=flat
+
+  # A knuckle on the shoulder — the step in the outline that stops a lump from
+  # reading as a ball at hotbar size.
+  loft knuckle bone=lump at=0.46 offset=(-0.20,0,0.10) dir=side yaw=150 tilt=18 len=0.20 on=ore material=Stone sides=5 shape=squarish
+    ring 0.00 w=0.26 d=0.24
+    ring 0.55 w=0.28 d=0.25 roll=20
+    ring 1.00 w=0.13 d=0.12 roll=-8
+    cap start=flat end=flat
+
+checks
+  assert bottom(ore) < 0.01
+  assert height / width in 0.6..1.2
+  assert parts == 2
+  assert tris < 260

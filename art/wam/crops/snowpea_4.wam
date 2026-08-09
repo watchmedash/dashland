@@ -1,0 +1,263 @@
+# Snow Pea, ripe (rung 4 of 4).
+#
+# cropdata silhouette: "Delicate tendrilled vine with flat translucent pods and white
+# flowers."
+#
+# ---- what makes this a snow pea and not the other two trellis vines ---------------
+#
+# All three clauses are shape, and `climbVine` — one generated weave shared by every trellis
+# crop — could express none of them. The species was a grape in a different colour.
+#
+#   - DELICATE. The stem is 0.014 of the plant's height, about 2 cm on a 1.5 m vine, against
+#     grape's 12 cm bole. That number is asserted here and its opposite is asserted in
+#     `grape_4.wam`, so the two cannot drift into one plant.
+#   - TENDRILLED. The upper nodes each throw a `sweep` that curls through 225 degrees into a
+#     tight coil. Nothing else on the farm has one, it is the first thing anybody would name
+#     about a pea, and it is the reason this file uses a sweep at all — a loft cannot spiral.
+#   - FLAT pods. `frame=fwd` pins the ring's depth axis to +Z, so `w` is the broad face and
+#     `d` the thickness: 0.050 against 0.012, a paddle four times as wide as it is thick.
+#     A snow pea is eaten pod and all and the flatness IS the species; the old recipe hung
+#     eleven stretched icosahedra, which is a bean at best.
+#   - WHITE flowers, on the ripe rung as well as the one below it, because the silhouette line
+#     asks for flowers and pods at once. The material is `Snow`, which `roleOf` routes to a
+#     fixed near-white no crop palette can tint — the same trick `greenbean_3.wam` uses, and
+#     the only white available to a WAM crop model.
+#
+# `world/crops.js` still generates and merges the trellis FRAME around this model — the frame
+# belongs to the STYLE — and `ownVine: true` in the recipe is what stops `climbVine` throwing
+# the model away. Without the flag a WAM trellis crop compiles, installs, loads, and is then
+# silently discarded.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model snowpea
+  height 1.5
+  style chunky
+
+palette
+  Wood      #4a8a4e
+  Green     #5e9a70
+  DarkGreen #4a7f5c
+  Berry     #82a44e
+  Snow      #f2f4ee
+
+skeleton
+  root ground at 0.0
+  # A thread, weaving gently. The excursion is 0.20 * sin(30) = 0.100 of the height, i.e.
+  # 15 cm on a 1.5 m crop, well inside `trellisHalfWidth` (TILE_M * 0.34 = 0.355 m, which is
+  # 0.236 here) — so the vine leans on the frame rather than pushing through it.
+  #
+  # The small `pitch` alternation is not decoration. With the weave purely in X the two
+  # mirrored threads crossed each other at every node and the plant rendered as a flat lattice
+  # of diamonds; a few degrees out of plane turns the same weave back into a tangle. It is a
+  # WOBBLE and not hops' corkscrew — that file asserts a spiral depth near its own width, and
+  # this one stays a thread.
+  mirror
+    bone s1 parent=ground offset=(0.015,0,0.026) dir=up tilt=-30 pitch=-10 len=0.20
+    bone s2 parent=s1 dir=up tilt=32  pitch=14  len=0.20
+    bone s3 parent=s2 dir=up tilt=-28 pitch=-13 len=0.19
+    bone s4 parent=s3 dir=up tilt=30  pitch=12  len=0.18
+    bone s5 parent=s4 dir=up tilt=-24 pitch=-9  len=0.16
+  end
+
+parts
+  mirror
+    # THIN. Grape asserts a bole over 0.052 wide and hops a bine it calls a string; this is
+    # thinner than either at every point along it.
+    loft stem bones=s1..s5 material=Wood sides=4
+      ring 0.00 w=0.014 d=0.014
+      ring 0.50 w=0.011 d=0.011
+      ring 1.00 w=0.007 d=0.007
+      cap start=flat end=dome
+  end
+
+  # ---- the leaflets --------------------------------------------------------------
+  #
+  # SMALL and ROUNDED — a pea leaflet is a 6 cm oval, and the whole point of the plant is that
+  # you can see through it. Grape asserts `area > 0.030` on its blade and hops `< 0.024`; this
+  # one asserts under 0.014, which is the third rung of the same ladder.
+  mirror
+    loft lfA1 bone=s1 at=0.80 dir=side yaw=16   tilt=-8 len=0.105 material=Green frame=up sides=5
+      ring 0.00 w=0.016 d=0.007
+      ring 0.30 w=0.062 d=0.012
+      ring 0.72 w=0.066 d=0.011
+      ring 1.00 w=0.040 d=0.006
+      cap start=flat end=dome
+    loft lfA2 bone=s1 at=0.80 dir=side yaw=-74  tilt=-5 len=0.096 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.058 d=0.011
+      ring 0.72 w=0.062 d=0.010
+      ring 1.00 w=0.038 d=0.006
+      cap start=flat end=dome
+    loft lfB1 bone=s2 at=0.78 dir=side yaw=-34  tilt=-9 len=0.105 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.016 d=0.007
+      ring 0.30 w=0.062 d=0.012
+      ring 0.72 w=0.066 d=0.011
+      ring 1.00 w=0.040 d=0.006
+      cap start=flat end=dome
+    loft lfB2 bone=s2 at=0.78 dir=side yaw=112  tilt=-4  len=0.096 material=Green frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.058 d=0.011
+      ring 0.72 w=0.062 d=0.010
+      ring 1.00 w=0.038 d=0.006
+      cap start=flat end=dome
+    loft lfC1 bone=s3 at=0.82 dir=side yaw=28   tilt=-7 len=0.100 material=Green frame=up sides=5
+      ring 0.00 w=0.016 d=0.007
+      ring 0.30 w=0.060 d=0.011
+      ring 0.72 w=0.064 d=0.010
+      ring 1.00 w=0.039 d=0.006
+      cap start=flat end=dome
+    loft lfC2 bone=s3 at=0.82 dir=side yaw=-96  tilt=-3  len=0.094 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.056 d=0.011
+      ring 0.72 w=0.060 d=0.010
+      ring 1.00 w=0.036 d=0.006
+      cap start=flat end=dome
+    loft lfD1 bone=s4 at=0.80 dir=side yaw=-40  tilt=-8 len=0.098 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.058 d=0.011
+      ring 0.72 w=0.062 d=0.010
+      ring 1.00 w=0.038 d=0.006
+      cap start=flat end=dome
+    loft lfD2 bone=s4 at=0.80 dir=side yaw=124  tilt=-4  len=0.092 material=Green frame=up sides=5
+      ring 0.00 w=0.014 d=0.006
+      ring 0.30 w=0.054 d=0.010
+      ring 0.72 w=0.058 d=0.009
+      ring 1.00 w=0.035 d=0.005
+      cap start=flat end=dome
+    loft lfE1 bone=s5 at=0.72 dir=side yaw=34   tilt=-5 len=0.096 material=Green frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.056 d=0.011
+      ring 0.72 w=0.060 d=0.010
+      ring 1.00 w=0.036 d=0.006
+      cap start=flat end=dome
+  end
+
+  # ---- the tendrils --------------------------------------------------------------
+  #
+  # `curl=` is the only bend whose axis is not visible in the source and the one the SPEC says
+  # to reach for when you want a coil, because the world-referenced bends degenerate as the
+  # tangent swings onto their axis. Bends accumulate, so 52 + 55 + 58 + 60 is 225 degrees: a
+  # spiral that comes back over its own root, which is what a pea tendril does when it has
+  # nothing to grip. Spread over five short segments rather than three long ones: at 110
+  # degrees in one 0.022 segment the turn radius fell to the tube's own radius and the lint
+  # reported seven inward-facing triangles per tendril, which is the fold this language warns
+  # about by name.
+  mirror
+    sweep tenA bone=s2 at=0.92 offset=(0.012,0.004,0.012) dir=up yaw=34 material=Wood
+      seg len=0.062 r=0.0060 fwd=16
+      seg len=0.032 r=0.0052 curl=52
+      seg len=0.029 r=0.0045 curl=55
+      seg len=0.026 r=0.0036 curl=58
+      seg len=0.022 r=0.0026 curl=60 tip
+    sweep tenB bone=s3 at=0.94 offset=(0.010,0.004,-0.014) dir=up yaw=-50 material=Wood
+      seg len=0.060 r=0.0058 fwd=14
+      seg len=0.031 r=0.0050 curl=53
+      seg len=0.028 r=0.0043 curl=56
+      seg len=0.025 r=0.0034 curl=59
+      seg len=0.021 r=0.0025 curl=61 tip
+    sweep tenC bone=s5 at=0.88 offset=(0.010,0.004,0.010) dir=up yaw=22 material=Wood
+      seg len=0.058 r=0.0056 fwd=18
+      seg len=0.030 r=0.0048 curl=54
+      seg len=0.027 r=0.0041 curl=57
+      seg len=0.024 r=0.0033 curl=60
+      seg len=0.020 r=0.0024 curl=62 tip
+    sweep tenD bone=s4 at=0.90 offset=(0.010,0.004,0.012) dir=up yaw=-16 material=Wood
+      seg len=0.058 r=0.0056 fwd=12
+      seg len=0.030 r=0.0048 curl=55
+      seg len=0.027 r=0.0041 curl=58
+      seg len=0.024 r=0.0033 curl=61
+      seg len=0.020 r=0.0024 curl=63 tip
+  end
+
+  # ---- the pods ------------------------------------------------------------------
+  #
+  # Flat paddles hanging clear of the leaflets. They swing on `tilt` and never on `pitch`,
+  # deliberately: flatness is measured as bbox width against bbox depth, and a pod pitched
+  # forward puts its own LENGTH into the depth reading — 10 degrees of pitch took the measured
+  # ratio from 4.0 to 1.66 and the check called the paddle a sausage. Tilt swings the pod
+  # inside its own flat plane, where the measurement still means what it says.
+  mirror
+    loft pdA bone=s2 at=0.40 offset=(0.026,-0.014,0.020) dir=down tilt=5 len=0.150 material=Berry frame=fwd sides=5
+      ring 0.00 w=0.018 d=0.009
+      ring 0.14 w=0.064 d=0.012
+      ring 0.52 w=0.070 d=0.013
+      ring 0.84 w=0.060 d=0.011
+      ring 1.00 w=0.014 d=0.006 tip
+      cap start=dome end=point
+    loft pdB bone=s3 at=0.46 offset=(0.024,-0.014,-0.022) dir=down tilt=-4 len=0.142 material=Berry frame=fwd sides=5
+      ring 0.00 w=0.017 d=0.009
+      ring 0.14 w=0.061 d=0.012
+      ring 0.52 w=0.067 d=0.012
+      ring 0.84 w=0.057 d=0.010
+      ring 1.00 w=0.013 d=0.006 tip
+      cap start=dome end=point
+    loft pdC bone=s4 at=0.44 offset=(0.024,-0.014,0.018) dir=down tilt=6 len=0.134 material=Berry frame=fwd sides=5
+      ring 0.00 w=0.016 d=0.008
+      ring 0.14 w=0.058 d=0.011
+      ring 0.52 w=0.064 d=0.012
+      ring 0.84 w=0.054 d=0.010
+      ring 1.00 w=0.012 d=0.005 tip
+      cap start=dome end=point
+  end
+
+  # ---- the flowers ---------------------------------------------------------------
+  #
+  # Two petals each: a broad standard behind and a smaller wing in front, which is the pea
+  # flower's whole silhouette. Small — a flower the size of a pod is an orchid.
+  mirror
+    loft flA1 bone=s3 at=0.62 offset=(0.020,0.006,0.016) dir=side yaw=54 tilt=18 len=0.058 material=Snow frame=up sides=5
+      ring 0.00 w=0.012 d=0.006
+      ring 0.44 w=0.054 d=0.011
+      ring 1.00 w=0.026 d=0.006
+      cap start=flat end=dome
+    loft flA2 bone=s3 at=0.62 offset=(0.026,0.000,0.024) dir=side yaw=54 tilt=-16 len=0.040 material=Snow frame=up sides=5
+      ring 0.00 w=0.010 d=0.005
+      ring 0.44 w=0.049 d=0.010
+      ring 1.00 w=0.018 d=0.005
+      cap start=flat end=dome
+    loft flB1 bone=s4 at=0.60 offset=(0.018,0.006,-0.018) dir=side yaw=-62 tilt=16 len=0.054 material=Snow frame=up sides=5
+      ring 0.00 w=0.011 d=0.006
+      ring 0.44 w=0.049 d=0.010
+      ring 1.00 w=0.024 d=0.006
+      cap start=flat end=dome
+    loft flB2 bone=s4 at=0.60 offset=(0.024,0.000,-0.026) dir=side yaw=-62 tilt=-18 len=0.038 material=Snow frame=up sides=5
+      ring 0.00 w=0.009 d=0.005
+      ring 0.44 w=0.036 d=0.008
+      ring 1.00 w=0.017 d=0.005
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(stem.l) < 0.02
+  # ---- the three numbers that keep snow pea, grape and hops apart -----------------
+  #
+  # 1. DELICATE. The tube is 0.014 at the soil, a fifth of the bole grape asserts over 0.052,
+  #    and the whole weave spans 0.115 — half of what grape's cordons alone cover.
+  assert width(stem.l) < 0.16
+  assert area(lfA1.l) < 0.014
+  # 2. Between the other two on aspect, and clear of both. Measured: hops 0.36, this 0.47,
+  #    grape 0.75 — the three bands below are the three files' own, and they do not touch.
+  assert width / height in 0.42..0.55
+  # 3. TENDRILS, and they are COILS: 0.171 of swept length inside a bounding box under 0.10
+  #    on every axis has curled back on itself rather than waved. `curl` turns about the
+  #    sweep's own transported side axis, so the coil lies in the plane PERPENDICULAR to it
+  #    and the x reading is the tube's own thickness rather than the loop — measure all three
+  #    or the check passes on a straight wire.
+  assert width(tenA.l)  < 0.10
+  assert height(tenA.l) < 0.10
+  assert depth(tenA.l)  < 0.10
+  measure coil height(tenA.l) + depth(tenA.l)
+  # ---- "flat translucent pods and white flowers" ----------------------------------
+  #
+  # FLAT: four times as wide as it is thick. A hop cone reads 1.05 on this measure and a grape
+  # bunch 1.04 — both are solids of revolution and neither can ever pass it.
+  assert width(pdA.l) / depth(pdA.l) > 3.2
+  assert height(pdA.l) / width(pdA.l) in 2.0..3.4
+  # ...hanging clear of the leaflets, which is what stops a green pod reading as more foliage.
+  assert bottom(pdA.l) < bottom(lfB1.l) - 0.06
+  # WHITE, and small: a petal is well under a third of a pod's length.
+  assert height(flA1.l) < 0.06
+  # Budget: footprint 1, so `TRI_BUDGET` = 2600 before the decimator steps in.
+  assert tris < 2300
+  measure podflat width(pdA.l) / depth(pdA.l)

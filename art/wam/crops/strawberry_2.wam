@@ -1,0 +1,101 @@
+# Strawberry, growing (rung 2 of 4).
+#
+# The rosette at full size with NO berries and no runners. See `strawberry_4.wam` for why
+# this crop is in the pilot and for the width-to-height arithmetic in the skeleton.
+
+model strawberry
+  height 0.30
+  style chunky
+
+palette
+  Green     #6cc94a
+  DarkGreen #4f9438
+  Wood      #4f9438
+  Berry     #e8425a
+
+skeleton
+  # The crown sits UP off the soil and the petioles are steep, which is not botany — it is
+  # arithmetic. `familyScale` takes the smaller of (crop height / model height) and (tile
+  # width / model width), so a model with a 6:1 width-to-height ratio gets scaled by its
+  # WIDTH and arrives at half the height cropdata asked for. Measured: the first cut was
+  # 0.34 tall by 1.95 wide in height-fractions, which rendered in-game as a 15 cm flat green
+  # mat on green grass, invisible from three metres — worse than the berry bush it replaced.
+  # A sprawler still has to stand up to be seen.
+  root crown at 0.02
+  # Three petiole pairs, splaying out and up: a strawberry is a rosette that sprawls, so
+  # the leaves lie nearly flat and reach well past the crown.
+  mirror
+    # SHORT petioles. The first cut used 0.62 and rendered as a wire tripod with small
+    # leaflets on the ends — a spider, not a plant. The leaf mass has to start close to the
+    # crown and the leaflets have to be most of the plant's radius.
+    bone petA parent=crown dir=side tilt=64 len=0.34
+    bone petB parent=crown dir=side yaw=74  tilt=58 len=0.31
+    bone petC parent=crown dir=side yaw=142 tilt=62 len=0.32
+  end
+
+parts
+  # Petioles. Thin, and they exist only so the leaflets are held OFF the crown — a rosette
+  # whose leaves start at the centre is a lettuce.
+  mirror
+    loft stalkA bones=petA..petA material=Wood sides=5
+      ring 0.00 w=0.055 d=0.055
+      ring 1.00 w=0.038 d=0.038
+      cap start=dome end=flat
+    loft stalkB bones=petB..petB material=Wood sides=5
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.034 d=0.034
+      cap start=dome end=flat
+    loft stalkC bones=petC..petC material=Wood sides=5
+      ring 0.00 w=0.052 d=0.052
+      ring 1.00 w=0.036 d=0.036
+      cap start=dome end=flat
+  end
+
+  # Trifoliate leaves: three leaflets off the end of every petiole, which is the one thing
+  # about a strawberry leaf anybody could name. `frame=up` with w WIDE and d THIN, so each
+  # leaflet is a flat blade lying face-up.
+  mirror
+    loft lfA1 bone=petA at=1.00 dir=side tilt=-38 len=0.43 material=Green frame=up sides=5
+      ring 0.00 w=0.099 d=0.030
+      ring 0.30 w=0.398 d=0.048
+      ring 0.72 w=0.417 d=0.044
+      ring 1.00 w=0.159 d=0.022
+      cap start=flat end=dome
+    loft lfA2 bone=petA at=1.00 dir=side yaw=48  tilt=-42 len=0.36 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.090 d=0.028
+      ring 0.30 w=0.348 d=0.044
+      ring 0.72 w=0.367 d=0.040
+      ring 1.00 w=0.139 d=0.020
+      cap start=flat end=dome
+    loft lfB1 bone=petB at=1.00 dir=side yaw=74 tilt=-40 len=0.41 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.099 d=0.030
+      ring 0.30 w=0.378 d=0.046
+      ring 0.72 w=0.398 d=0.042
+      ring 1.00 w=0.149 d=0.021
+      cap start=flat end=dome
+    loft lfB2 bone=petB at=1.00 dir=side yaw=118 tilt=-44 len=0.34 material=Green frame=up sides=5
+      ring 0.00 w=0.090 d=0.028
+      ring 0.30 w=0.328 d=0.043
+      ring 0.72 w=0.348 d=0.039
+      ring 1.00 w=0.130 d=0.020
+      cap start=flat end=dome
+    loft lfC1 bone=petC at=1.00 dir=side yaw=142 tilt=-40 len=0.41 material=Green frame=up sides=5
+      ring 0.00 w=0.099 d=0.030
+      ring 0.30 w=0.388 d=0.047
+      ring 0.72 w=0.407 d=0.043
+      ring 1.00 w=0.159 d=0.021
+      cap start=flat end=dome
+  end
+
+checks
+  # Low and sprawling: much wider than tall.
+  # 3:1, not 6:1 — see the note on the crown height above.
+  assert width / height in 1.8..4.2
+  assert bottom(stalkA.l) < 0.14
+  # No berries on this rung: the ripe read is the only place they exist.
+  # Trifoliate: three leaflets off petiole A, and they reach past the petiole itself.
+  assert xmax(lfA1.l) > xmax(stalkA.l)
+  assert asymmetry(stalkA.l) < 0.9
+  # Budget: `clump: 2` stamps this twice per tile against a 2600-triangle rung budget.
+  assert tris < 640
+  measure sprawl width / height

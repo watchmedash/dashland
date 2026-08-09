@@ -1,0 +1,75 @@
+# Apple Tree, sapling (rung 2 of 4).
+#
+# A short bole, one pair of limbs and three small foliage masses. The rung differs from the
+# one above it in PARTS rather than in scale — no leader, no skirt, no fruit — which is the
+# rule the whole four-source ladder exists for.
+#
+# See `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model apple
+  height 4.2
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #4f9438
+  DarkGreen #386b28
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.20
+  mirror
+    bone lmA parent=trunk dir=side yaw=24  tilt=54 len=0.13
+    bone lmB parent=trunk dir=side yaw=-64 tilt=48 len=0.12
+  end
+
+parts
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.062 d=0.062
+    ring 0.20 w=0.048 d=0.048
+    ring 1.00 w=0.042 d=0.042
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=lmA..lmA material=Wood sides=5
+      ring 0.00 w=0.030 d=0.030
+      ring 1.00 w=0.015 d=0.015
+      cap start=flat end=dome
+    loft armB bones=lmB..lmB material=Wood sides=5
+      ring 0.00 w=0.027 d=0.027
+      ring 1.00 w=0.014 d=0.014
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft canA bone=lmA at=1.00 offset=(0.02,0.01,0.02) dir=up len=0.070 material=Green sides=7
+      ring 0.00 w=0.105 d=0.105
+      ring 0.32 w=0.171 d=0.171
+      ring 0.68 w=0.175 d=0.175
+      ring 1.00 w=0.098 d=0.098
+      cap start=dome end=dome
+    loft canB bone=lmB at=1.00 offset=(0.01,0.01,0.02) dir=up len=0.062 material=DarkGreen sides=7
+      ring 0.00 w=0.093 d=0.093
+      ring 0.32 w=0.152 d=0.152
+      ring 0.68 w=0.155 d=0.155
+      ring 1.00 w=0.087 d=0.087
+      cap start=dome end=dome
+  end
+  loft canT bone=trunk at=1.00 offset=(0,0.05,0) dir=up len=0.076 material=Green sides=8
+    ring 0.00 w=0.114 d=0.114
+    ring 0.32 w=0.186 d=0.186
+    ring 0.68 w=0.190 d=0.190
+    ring 1.00 w=0.106 d=0.106
+    cap start=dome end=dome
+
+checks
+  assert bottom(bole) < 0.01
+  # Sparser in PARTS, not merely smaller: 10 against the ripe tree's 34.
+  assert parts == 10
+  # `familyScale` takes one scale off the RIPE model for the whole family, so a rung has to
+  # be authored small — and it must not out-top the rung above it or the ordering pass in
+  # `world/crops.js` shrinks it and throws the authored proportions away.
+  assert height in 0.30..0.50
+  assert width / height < 1.30
+  assert asymmetry(bole) < 0.005
+  assert tris < 900

@@ -1,0 +1,100 @@
+# Sea Grass — the ground cover of a reef.
+#
+# This is the seabed's `tall_grass`: the thing that has to be everywhere, so it
+# is the cheapest model in the set (six flat straps, no stem, 96 triangles) and
+# the one whose job is to be seen two hundred at a time rather than once.
+#
+# **It is short on purpose.** `BlockModels` normalises to a whole cell, so a
+# model authored at head height would arrive a metre tall and the seabed would
+# be a lawn you cannot see over. What is authored here is a squat tuft — wider
+# than it is tall — and `main.js` scales it to about half a cell, which puts it
+# at ankle height on a swimming player and leaves the corals and the kelp behind
+# it visible. That is the whole reason the family has a ground cover: without
+# something low, a reef is objects standing on bare sand.
+#
+# **No stem.** Every blade comes straight out of the seabed at its own angle,
+# which is what separates a grass from a plant: a plant has an axis and a grass
+# is a spray. Giving it a stalk to hang the blades off made it a tiny palm.
+#
+# The blades lean out in four directions rather than in two, and the ones that
+# lean along X carry a root `offset=` in the same direction. That is not
+# styling: the lint counts a part that crosses X=0 unevenly as a broken
+# symmetry claim, and a strap rooted dead on the axis and leaning off it is
+# exactly that. Rooted a blade's own half-width out, it is honestly one-sided.
+# Blades leaning along Z stay centred in X and are symmetric, so they need no
+# offset — the two cases are the only two the lint accepts.
+#
+# Colour sits a step brighter and yellower than `kelp`: sea grass grows in the
+# shallows where there is still light, and a bed of it needs to read against the
+# darker reef rather than merge into it.
+
+model sea_grass
+  height 0.42
+  style chunky
+
+palette
+  Blade #6f9b3e
+  Deep  #47702f
+  Sun   #9cc45c
+
+skeleton
+  root bed at 0.0
+
+parts
+  # Six straps, three lengths, four headings. `frame=up` with a wide `w` and a
+  # thin `d` is the flat-blade idiom — a round section here is chives.
+  loft bladeA bone=bed at=0.0 offset=(-0.055,0,0.02) dir=up pitch=6 tilt=34 len=0.92 material=Blade frame=up sides=4
+    ring 0.00 w=0.09 d=0.022
+    ring 0.34 w=0.20 d=0.026
+    ring 0.78 w=0.16 d=0.022
+    ring 1.00 w=0.05 d=0.014 tip
+    cap start=flat end=point
+  loft bladeB bone=bed at=0.0 offset=(0.058,0,-0.03) dir=up pitch=-4 tilt=-30 len=1.00 material=Deep frame=up sides=4
+    ring 0.00 w=0.09 d=0.022
+    ring 0.34 w=0.21 d=0.026
+    ring 0.78 w=0.17 d=0.022
+    ring 1.00 w=0.05 d=0.014 tip
+    cap start=flat end=point
+  loft bladeC bone=bed at=0.0 offset=(-0.048,0,-0.05) dir=up pitch=-8 tilt=22 len=0.74 material=Sun frame=up sides=4
+    ring 0.00 w=0.08 d=0.020
+    ring 0.34 w=0.18 d=0.024
+    ring 0.78 w=0.14 d=0.020
+    ring 1.00 w=0.04 d=0.012 tip
+    cap start=flat end=point
+  loft bladeD bone=bed at=0.0 offset=(0.050,0,0.05) dir=up pitch=10 tilt=-24 len=0.80 material=Blade frame=up sides=4
+    ring 0.00 w=0.08 d=0.020
+    ring 0.34 w=0.19 d=0.024
+    ring 0.78 w=0.15 d=0.020
+    ring 1.00 w=0.04 d=0.012 tip
+    cap start=flat end=point
+  # The two that lean along Z instead. They stay centred on X — symmetric, and
+  # so exempt from the straddle rule — and they are what stops the tuft reading
+  # as a flat card from the front.
+  loft bladeE bone=bed at=0.0 offset=(0,0,0.05) dir=up pitch=32 tilt=0 len=0.88 material=Deep frame=up sides=4
+    ring 0.00 w=0.09 d=0.022
+    ring 0.34 w=0.20 d=0.026
+    ring 0.78 w=0.16 d=0.022
+    ring 1.00 w=0.05 d=0.014 tip
+    cap start=flat end=point
+  loft bladeF bone=bed at=0.0 offset=(0,0,-0.05) dir=up pitch=-34 tilt=0 len=0.70 material=Sun frame=up sides=4
+    ring 0.00 w=0.08 d=0.020
+    ring 0.34 w=0.18 d=0.024
+    ring 0.78 w=0.14 d=0.020
+    ring 1.00 w=0.04 d=0.012 tip
+    cap start=flat end=point
+
+checks
+  # Rooted in the seabed, all six of them. A blade that starts above the ground
+  # is a blade the player can see under, which is the one thing a ground cover
+  # must never do.
+  assert bottom(bladeA) < 0.02
+  assert bottom(bladeF) < 0.02
+  # Wider than it is tall: this is the check that keeps it a ground cover after
+  # someone lengthens a blade. `BlockModels` scales by height alone, so a tuft
+  # that grows upward grows *everywhere* and stops being the low layer.
+  assert width / height > 0.9
+  assert depth / height > 0.7
+  # Three distinct lengths, so the tuft has a ragged top rather than a hedge cut.
+  assert top(bladeB) > top(bladeC) * 1.15
+  assert parts == 6
+  assert tris < 200

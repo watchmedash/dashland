@@ -1,0 +1,73 @@
+# Husk Cinder — the tier-5 material, and the only one you cannot mine.
+#
+# It comes off a husk rather than out of the ground, so it must not read as ore.
+# The shape is therefore a burnt-through clinker: charred, cracked, snapped,
+# with the crust broken open along two seams that still have heat in them. Those
+# seams are `material_arc` down the same loft rather than a glowing lump stuck
+# on the outside — the arcs are what carry the whole idea and they cost nothing
+# in triangles.
+#
+# The palette is dark base, hot seams, because `ItemModels.js` gives tier 5 the
+# strongest emissive of any tier: a bright orange body would blow out to a flat
+# traffic cone under it, whereas near-black rock with two hot cracks gets to
+# actually glow. Same reasoning as the tier-5 tool look, and the two are seen
+# side by side in the crafting grid.
+#
+# The flake leaning off the shoulder is the silhouette. Coal solves the same
+# black-on-black problem with a nub; a cinder gets a flake instead, because what
+# separates burnt from merely dark is that burnt things break with edges.
+
+model cinder
+  height 0.28
+  style chunky
+
+palette
+  Char  #2e211c
+  Ember #d1451f
+  Hot   #ffb06a
+
+skeleton
+  root base at 0.008
+  bone clinker parent=base dir=up pitch=-6 len=0.62
+
+parts
+  # Sixteen sides, not the eight raw_iron uses, and the rolls are small. Both
+  # are the seams' doing. An arc snaps to ring vertices, so the narrowest stripe
+  # the mesh can carry is one segment — 45° at eight sides, which on a lump this
+  # round is a painted quadrant rather than a crack; sixteen buys 22.5°, and at
+  # twelve the seam was still a broad panel. And a `roll` turns
+  # the ring's own frame, so the arc turns with it: at the ±25° rolls this lump
+  # first had, the two seams corkscrewed round the body and merged into one
+  # orange cap over the top. The irregularity comes from `side=`/`fwd=` offsets
+  # instead, which move the section without spinning the stripe.
+  loft clod bones=base..clinker material=Char sides=16 shape=squarish
+    ring 0.00 w=0.36 d=0.32 roll=4
+    ring 0.24 w=0.60 d=0.52 roll=8 fwd=0.04 material_arc=Ember:247-270
+    ring 0.56 w=0.64 d=0.54 roll=5 side=-0.05 material_arc=Ember:247-270,Hot:67-90
+    ring 0.84 w=0.44 d=0.38 roll=9 fwd=-0.04 material_arc=Hot:67-90
+    ring 1.00 w=0.20 d=0.17 roll=6
+    cap start=flat end=flat
+
+  # `on=clod` rather than a bone off the root: the first version put the flake's
+  # origin inside the lump and 0.4 of length was not enough to get back out, so
+  # the whole part was swallowed and the model was a plain black ball. Snapped to
+  # the surface it starts where the lump ends and every millimetre of it shows.
+  loft spall bone=clinker at=0.44 offset=(0.16,0.02,0.06) dir=side yaw=16 tilt=30 len=0.30 on=clod inset=0.06 material=Char sides=5 shape=box
+    ring 0.00 w=0.24 d=0.12
+    ring 0.26 w=0.34 d=0.13 material_arc=Ember:300-360
+    ring 0.62 w=0.30 d=0.10 side=0.03
+    ring 0.88 w=0.18 d=0.065 side=-0.02
+    ring 1.00 w=0.07 d=0.03
+    cap start=flat end=flat
+
+checks
+  assert bottom(clod) < 0.01
+  # The flake breaks the outline: its tip is outside the lump's own half-width.
+  assert xmax(spall) > width(clod) / 2
+  # A clinker, not a boulder and not a pebble.
+  assert height / width in 0.7..1.4
+  # And a flake is a flake: thin through, and much the smaller of the two.
+  assert depth(spall) < width(spall) / 1.6
+  assert volume(spall) < volume(clod) / 3
+  assert parts == 2
+  assert tris < 300

@@ -1,0 +1,121 @@
+# Brain Coral — the boulder.
+#
+# The third silhouette in the reef set, and the one that does the structural
+# work: the staghorn forks upward and the sea fan stands as a plane, so what is
+# missing is *mass* — something low and heavy that the other two read against.
+# A reef of nothing but spindly things is a thicket.
+#
+# **The grooves are colour, not geometry.** A brain coral is a dome with a
+# meandering labyrinth cut into it, and modelling that as ridges would be a
+# dozen sweeps trying to follow a curved surface — the exact thing `on=` cannot
+# help with, since it snaps to the *closest* point and a groove is a path across
+# one. `material_arc=` paints stripes *around* the tube instead, which costs no
+# triangles beyond the vertex splits at the colour boundaries and cannot come
+# adrift from the surface it is painted on.
+#
+# Two things about those arcs were learned from the render and are not
+# negotiable. **Each arc is exactly one facet wide** — 30° on the twelve-sided
+# dome, 36° on the ten-sided lobe. A 16° arc was the first attempt and it landed
+# inside single facets, which snapped it to their edges and produced scattered
+# square blotches rather than stripes; an arc narrower than a facet has nowhere
+# to be. And **the arcs shift by exactly one facet on alternate rings**, so a
+# stripe steps sideways as it climbs and steps back on the ring above. That
+# zigzag is what turns six vertical bands into a labyrinth; a smooth few-degree
+# drift per ring (the second attempt) reads as a barber's pole. The two groove
+# materials alternate around the dome so the pattern is three-toned rather than
+# stripes on a ball.
+#
+# **Two lobes, not one.** A single dome is a pebble. Real *Diploria* grows as
+# fused heads, so a smaller second dome sits `on=` the first — flush by
+# construction — and breaks the outline where the two meet. The second lobe is
+# deliberately off-centre in both X and Z: put it on the mirror plane and the
+# model reads as one symmetric mound with a bump, which is a pebble again.
+#
+# **It is authored wide.** `BlockModels` scales a model by its height alone, so
+# a squat model arrives *large* — a dome 1.8x wider than it is tall becomes 1.8
+# cells across if it is scaled to a full cell. `main.js` therefore gives this
+# kind a height well under one cell (see MODELLED_PLANTS), and the check below
+# pins the aspect so that number stays the right one.
+#
+# Gold, where the staghorn is pink and the fan purple. Three corals in one reef
+# have to be separable at a glance in water that is already eating the blue end
+# of everything.
+
+model coral_brain
+  height 0.46
+  style smooth
+
+palette
+  Head   #d9a63e
+  Groove #a3781f
+  Ridge  #f0cd74
+  Foot   #7a5a2a
+
+skeleton
+  root rock at 0.0
+  bone head parent=rock dir=up len=0.56
+  # The second lobe. Off the mirror plane on both axes — see the header.
+  bone lobe parent=rock offset=(0.38,0.035,0.14) dir=up pitch=3 tilt=-6 len=0.38
+
+parts
+  # The main head. Widest at a quarter of its height and barely narrower at half
+  # — a brain coral overhangs its own base slightly, which is what makes it read
+  # as grown rather than as a hill of sand.
+  #
+  # `material_arc` angles are measured with 0° on the `w` axis and 90° on `d`,
+  # and every ring shifts its four arcs by a few more degrees than the ring
+  # below. Over the height of the dome that is roughly a sixth of a turn, which
+  # is enough for a stripe to visibly wander without spiralling.
+  loft dome bones=rock..head material=Head sides=12
+    ring 0.00 w=0.62 d=0.56 material=Foot
+    ring 0.16 w=0.86 d=0.78 material=Head material_arc=Groove:0-30,Ridge:60-90,Groove:120-150,Ridge:180-210,Groove:240-270,Ridge:300-330
+    ring 0.40 w=0.94 d=0.86 material_arc=Groove:30-60,Ridge:90-120,Groove:150-180,Ridge:210-240,Groove:270-300,Ridge:330-360
+    ring 0.62 w=0.90 d=0.82 material_arc=Groove:0-30,Ridge:60-90,Groove:120-150,Ridge:180-210,Groove:240-270,Ridge:300-330
+    ring 0.82 w=0.74 d=0.68 material_arc=Groove:30-60,Ridge:90-120,Groove:150-180,Ridge:210-240,Groove:270-300,Ridge:330-360
+    ring 0.94 w=0.48 d=0.44 material_arc=Groove:0-30,Ridge:60-90,Groove:120-150,Ridge:180-210,Groove:240-270,Ridge:300-330
+    ring 1.00 w=0.20 d=0.18 material_arc=Groove:30-60,Ridge:90-120,Groove:150-180,Ridge:210-240,Groove:270-300,Ridge:330-360
+    cap start=flat end=dome
+
+  # The second head. Same construction, two thirds the size, and pushed far
+  # enough out in +X that it sits *entirely* to one side of the mirror plane.
+  #
+  # Two things forced that distance, and both are worth the width it costs. The
+  # lint counts a part straddling X=0 lopsidedly as a broken symmetry claim, and
+  # a lobe half-overlapping the axis is exactly that. And `on=dome`, which was
+  # the first way this was mounted, snaps the part's *origin* onto the dome's
+  # surface — for a lobe rooted at the seabed that meant sinking its foot 0.14
+  # below the ground. Two heads growing from the same rock and overlapping is
+  # the honest description; the fusion comes from the overlap, not from `on=`.
+  loft lump bones=lobe..lobe material=Head sides=10
+    ring 0.00 w=0.40 d=0.36 material=Foot
+    ring 0.18 w=0.58 d=0.52 material=Head material_arc=Ridge:0-36,Groove:72-108,Ridge:144-180,Groove:216-252,Ridge:288-324
+    ring 0.48 w=0.62 d=0.56 material_arc=Ridge:36-72,Groove:108-144,Ridge:180-216,Groove:252-288,Ridge:324-360
+    ring 0.78 w=0.52 d=0.47 material_arc=Ridge:0-36,Groove:72-108,Ridge:144-180,Groove:216-252,Ridge:288-324
+    ring 0.94 w=0.30 d=0.27 material_arc=Ridge:36-72,Groove:108-144,Ridge:180-216,Groove:252-288,Ridge:324-360
+    ring 1.00 w=0.12 d=0.11 material_arc=Ridge:0-36,Groove:72-108,Ridge:144-180,Groove:216-252,Ridge:288-324
+    cap start=flat end=dome
+
+checks
+  # Sits on the seabed on both lobes.
+  assert bottom(dome) < 0.01
+  # A boulder: wide and low. This is the number `main.js` picks the kind's
+  # height against, so it is the one that must not drift.
+  assert width / height in 1.3..2.2
+  # The dome overhangs its own foot rather than tapering from it like a cone.
+  assert width(dome) > 0.85
+  # Two lobes, one clearly smaller, and the small one lower — a second head the
+  # same size as the first is a dumbbell.
+  assert width(lump) < width(dome) * 0.8
+  assert top(lump) < top(dome)
+  # ...and it is genuinely off the mirror plane, which is what stops the model
+  # reading as one symmetric mound.
+  assert x(lump) > 0.08
+  assert abs(z(lump)) > 0.04
+  # The grooves survive. `materials` counts what actually reached the mesh, so
+  # if a `material_arc` is ever mistyped into nothing this fails rather than
+  # quietly rendering a plain gold ball.
+  assert materials == 4
+  assert parts == 2
+  assert tris < 900
+  measure aspect width / height
+  measure lumpfoot bottom(lump)

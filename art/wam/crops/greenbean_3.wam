@@ -1,0 +1,179 @@
+# Green Bean, flowering (rung 3 of 4).
+#
+# The vine of `greenbean_4.wam` at four fifths its height with white flowers where the pods
+# will be. Green bean has four crop stages over four models, so this rung is stage 2 alone.
+#
+# The flowers are the material `Snow`, which `roleOf` routes to a fixed near-white that no
+# crop palette can tint — usually that is there so a tundra plant's snow load does not come
+# out berry-coloured, and here it is exactly right: a runner bean's flower is white, and it
+# is the one colour in this crop that is neither the leaf nor the pod. A ripeness read that
+# changes SHAPE and COLOUR at once is worth more than the half-count, colour-dragged-back
+# trick `world/crops.js` applies to generated fruit, which cannot say "no pods yet" at all.
+#
+# See `greenbean_4.wam` for the twine and `icecapmoss_3.wam` for the naming rules.
+model greenbean
+  height 1.8
+  style chunky
+
+palette
+  Wood      #4f8f33
+  Green     #6cc94a
+  DarkGreen #4e9c35
+  Berry     #2f7d16
+  Snow      #f2f4ee
+
+skeleton
+  root ground at 0.0
+  # Two stems, weaving in opposite phase. `tilt` on an `up` bone moves it toward -X, so the
+  # alternating sign is the zig-zag; the amplitude is kept inside 0.20 of the model's height,
+  # which is exactly `trellisHalfWidth` for a footprint-1 crop (TILE_M * 0.34 / 1.8).
+  mirror
+    bone c1 parent=ground offset=(0.02,0,0.015) dir=up tilt=-36 len=0.184
+    bone c2 parent=c1 dir=up tilt=44  len=0.184
+    bone c3 parent=c2 dir=up tilt=-42 len=0.176
+    bone c4 parent=c3 dir=up tilt=40  len=0.168
+    bone c5 parent=c4 dir=up tilt=-30 len=0.152
+  end
+
+parts
+  mirror
+    # One loft along the whole chain, so the stem is continuous through every kink. Thin —
+    # a bean vine is a string, and a fat one reads as a sapling.
+    loft vine bones=c1..c5 material=Wood sides=5
+      ring 0.00 w=0.030 d=0.030
+      ring 0.50 w=0.022 d=0.022
+      ring 1.00 w=0.014 d=0.014
+      cap start=flat end=dome
+  end
+
+  # ---- the leaves ----------------------------------------------------------------
+  #
+  # Trifoliate, which is what a bean leaf is: three broad blades off one node. `frame=up`
+  # with w WIDE and d THIN — a flat blade lying face-up, the idiom `cocoa_4.wam` spells out.
+  # Kept SMALL on purpose: `world/crops.js` records that at 0.17 of a 1.8 m plant these
+  # became 30 cm arrowheads and buried the pods completely, and burying the pods is the bug.
+  mirror
+    loft lfA1 bone=c1 at=0.90 dir=side yaw=10  tilt=-14 len=0.17 material=Green frame=up sides=5
+      ring 0.00 w=0.020 d=0.010
+      ring 0.30 w=0.115 d=0.020
+      ring 0.74 w=0.120 d=0.018
+      ring 1.00 w=0.048 d=0.010
+      cap start=flat end=dome
+    loft lfA2 bone=c1 at=0.90 dir=side yaw=76  tilt=-8  len=0.15 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+    loft lfB1 bone=c2 at=0.85 dir=side yaw=-38 tilt=-12 len=0.17 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.020 d=0.010
+      ring 0.30 w=0.115 d=0.020
+      ring 0.74 w=0.120 d=0.018
+      ring 1.00 w=0.048 d=0.010
+      cap start=flat end=dome
+    loft lfB2 bone=c2 at=0.85 dir=side yaw=-104 tilt=-6 len=0.14 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.009
+      ring 0.30 w=0.100 d=0.018
+      ring 0.74 w=0.104 d=0.016
+      ring 1.00 w=0.041 d=0.009
+      cap start=flat end=dome
+    loft lfC1 bone=c3 at=0.88 dir=side yaw=22  tilt=-10 len=0.16 material=Green frame=up sides=5
+      ring 0.00 w=0.019 d=0.010
+      ring 0.30 w=0.110 d=0.019
+      ring 0.74 w=0.114 d=0.017
+      ring 1.00 w=0.046 d=0.010
+      cap start=flat end=dome
+    loft lfC2 bone=c3 at=0.88 dir=side yaw=88  tilt=-4  len=0.14 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.018 d=0.009
+      ring 0.30 w=0.100 d=0.018
+      ring 0.74 w=0.104 d=0.016
+      ring 1.00 w=0.041 d=0.009
+      cap start=flat end=dome
+    loft lfD1 bone=c4 at=0.86 dir=side yaw=-30 tilt=-12 len=0.16 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.019 d=0.010
+      ring 0.30 w=0.110 d=0.019
+      ring 0.74 w=0.114 d=0.017
+      ring 1.00 w=0.046 d=0.010
+      cap start=flat end=dome
+    loft lfE1 bone=c5 at=0.80 dir=side yaw=34  tilt=-8  len=0.15 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.105 d=0.019
+      ring 0.74 w=0.109 d=0.017
+      ring 1.00 w=0.044 d=0.010
+      cap start=flat end=dome
+    loft lfA3 bone=c1 at=0.45 dir=side yaw=-52 tilt=-10 len=0.15 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+    loft lfB3 bone=c2 at=0.42 dir=side yaw=64 tilt=-8 len=0.15 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+    loft lfC3 bone=c3 at=0.4 dir=side yaw=-70 tilt=-12 len=0.14 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+    loft lfD2 bone=c4 at=0.42 dir=side yaw=54 tilt=-6 len=0.14 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+    loft lfD3 bone=c4 at=0.86 dir=side yaw=-96 tilt=-4 len=0.13 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+    loft lfE2 bone=c5 at=0.8 dir=side yaw=-40 tilt=-10 len=0.13 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+  end
+
+  # ---- the flowers ---------------------------------------------------------------
+  #
+  # Small, white and where the pods will hang, so the plant tells you where to look one
+  # stage before there is anything to pick.
+  mirror
+    loft flA bone=c2 at=0.34 offset=(0.045,-0.020,0.014) dir=down pitch=14 len=0.030 material=Snow sides=5
+      ring 0.00 w=0.018 d=0.018
+      ring 0.50 w=0.046 d=0.040
+      ring 1.00 w=0.020 d=0.018
+      cap start=dome end=flat
+    loft flB bone=c2 at=0.92 offset=(0.045,-0.020,0.014) dir=down pitch=14 len=0.030 material=Snow sides=5
+      ring 0.00 w=0.018 d=0.018
+      ring 0.50 w=0.046 d=0.040
+      ring 1.00 w=0.020 d=0.018
+      cap start=dome end=flat
+    loft flC bone=c3 at=0.94 offset=(0.044,-0.020,0.014) dir=down pitch=14 len=0.030 material=Snow sides=5
+      ring 0.00 w=0.018 d=0.018
+      ring 0.50 w=0.046 d=0.040
+      ring 1.00 w=0.020 d=0.018
+      cap start=dome end=flat
+    loft flD bone=c4 at=0.9 offset=(0.042,-0.020,0.014) dir=down pitch=14 len=0.030 material=Snow sides=5
+      ring 0.00 w=0.018 d=0.018
+      ring 0.50 w=0.046 d=0.040
+      ring 1.00 w=0.020 d=0.018
+      cap start=dome end=flat
+  end
+
+checks
+  assert bottom(vine.l) < 0.02
+  assert (xmax(vine.l) - xmin(vine.l)) / height > 0.18
+  # WHITE, and small — a flower the size of a pod is an orchid.
+  assert width(flA.l) < 0.06
+  # Sparser in PARTS than the ripe rung: 38 against the ripe rung’s 30 — four flower pairs replace four pod pairs and the ripe rung drops two leaf pairs to make room.
+  assert parts == 38
+  # Must not out-top the ripe rung or the ordering pass shrinks it.
+  assert height in 0.56..0.70
+  assert width / height < 0.85
+  assert tris < 1800

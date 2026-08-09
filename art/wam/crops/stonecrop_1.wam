@@ -1,0 +1,61 @@
+# Stonecrop, first rung (1 of 4). See `stonecrop_4.wam` for the argument and the rules.
+#
+# A three-pair rosette of stubby spoons, tight and steep. What makes this a young sedum
+# rather than a small one is the posture: the leaves have not lain back yet, so the plant
+# is a knuckle rather than a plate.
+
+model stonecrop
+  height 0.30
+  style smooth
+
+palette
+  Wood      #7a8a6a
+  Green     #9ab08a
+  DarkGreen #7f9673
+  Berry     #e0c46a
+
+skeleton
+  root rock at 0.0
+  bone core parent=rock dir=up len=0.10
+  mirror
+    bone lfA parent=core dir=side tilt=40 len=0.20
+    bone lfB parent=core dir=side yaw=62  tilt=52 len=0.18
+    bone lfC parent=core dir=side yaw=128 tilt=64 len=0.16
+  end
+
+parts
+  loft crown bones=rock..core material=Wood sides=8
+    ring 0.00 w=0.18 d=0.18
+    ring 1.00 w=0.15 d=0.15
+    cap start=flat end=flat
+
+  mirror
+    loft leafA bones=lfA..lfA material=Green frame=up sides=5
+      ring 0.00 w=0.090 d=0.064
+      ring 0.42 w=0.140 d=0.098
+      ring 0.80 w=0.144 d=0.100
+      ring 1.00 w=0.084 d=0.060
+      cap start=dome end=dome
+    loft leafB bones=lfB..lfB material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.084 d=0.059
+      ring 0.42 w=0.132 d=0.092
+      ring 0.80 w=0.136 d=0.095
+      ring 1.00 w=0.078 d=0.056
+      cap start=dome end=dome
+    loft leafC bones=lfC..lfC material=Green frame=up sides=5
+      ring 0.00 w=0.078 d=0.055
+      ring 0.42 w=0.122 d=0.086
+      ring 0.80 w=0.126 d=0.088
+      ring 1.00 w=0.072 d=0.052
+      cap start=dome end=dome
+  end
+
+checks
+  # Fleshy, and steep: the outermost leaf still stands at 40 degrees, where the ripe rung's
+  # lies back to 14.
+  assert depth(leafA.l) / height(leafA.l) > 0.55
+  assert top(leafA.l) > 0.20
+  assert bottom(crown) < 0.02
+  assert asymmetry(crown) < 0.005
+  assert tris < 400
+  measure aspect width / height

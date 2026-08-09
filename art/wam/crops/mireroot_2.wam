@@ -1,0 +1,66 @@
+# Mire Root, second rung (2 of 4). See `mireroot_4.wam` for the argument and the rules.
+#
+# The FIRST arch breaks the mud — one mirrored pair, and no knot on it yet. That is the
+# whole of this rung's difference from the one below (which has no arches) and the one
+# above (which has two pairs and a knot).
+
+model mireroot
+  height 0.9
+  style chunky
+
+palette
+  Wood      #5a4a32
+  Green     #4a6a3e
+  DarkGreen #3a5630
+  Berry     #6a4a2a
+
+skeleton
+  root mud at 0.0
+  bone crown parent=mud dir=up len=0.16
+  mirror
+    bone arA1 parent=mud offset=(0.06,0.036,0.04) dir=side tilt=72 len=0.20
+    bone arA2 parent=arA1 dir=side tilt=-48 len=0.20
+  end
+  mirror
+    bone bldA parent=crown dir=side tilt=77 len=0.44
+    bone bldB parent=crown dir=side yaw=62 tilt=71 len=0.37
+  end
+
+parts
+  loft boss bones=mud..crown material=Wood sides=8
+    ring 0.00 w=0.24 d=0.24
+    ring 1.00 w=0.15 d=0.15
+    cap start=flat end=dome
+
+  mirror
+    loft archA bones=arA1..arA2 material=Wood sides=6 refaxis=(0,0,1)
+      ring 0.00 w=0.090 d=0.090
+      ring 0.34 w=0.062 d=0.062
+      ring 0.50 w=0.038 d=0.038
+      ring 0.66 w=0.062 d=0.062
+      ring 1.00 w=0.082 d=0.082
+      cap start=flat end=flat
+  end
+
+  mirror
+    loft bladeA bones=bldA..bldA material=Green frame=up sides=4
+      ring 0.00 w=0.068 d=0.018
+      ring 0.40 w=0.082 d=0.022
+      ring 1.00 w=0.020 d=0.009 tip
+      cap start=flat end=point
+    loft bladeB bones=bldB..bldB material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.062 d=0.017
+      ring 0.40 w=0.075 d=0.021
+      ring 1.00 w=0.019 d=0.009 tip
+      cap start=flat end=point
+  end
+
+checks
+  # An arch, and both its feet are down.
+  assert bottom(archA.l) < 0.04
+  assert top(archA.l) > 0.10
+  assert top(bladeA.l) in 0.40..0.65
+  assert bottom(boss) < 0.02
+  assert asymmetry(boss) < 0.005
+  assert tris < 500
+  measure aspect width / height

@@ -1,0 +1,99 @@
+# Green Bean, climbing (rung 2 of 4).
+#
+# The zig-zag climb established and nothing else: three bone segments instead of five, eight
+# leaves instead of fourteen, no flowers and no pods. Sparser in PARTS, which is the rule the
+# four-source ladder exists for and the reason `tools/cropgeotest.mjs` asserts on it.
+#
+# See `greenbean_4.wam` for the twine and `icecapmoss_3.wam` for the naming rules.
+model greenbean
+  height 1.8
+  style chunky
+
+palette
+  Wood      #4f8f33
+  Green     #6cc94a
+  DarkGreen #4e9c35
+  Berry     #2f7d16
+
+skeleton
+  root ground at 0.0
+  # Two stems, weaving in opposite phase. `tilt` on an `up` bone moves it toward -X, so the
+  # alternating sign is the zig-zag; the amplitude is kept inside 0.20 of the model's height,
+  # which is exactly `trellisHalfWidth` for a footprint-1 crop (TILE_M * 0.34 / 1.8).
+  mirror
+    bone c1 parent=ground offset=(0.02,0,0.015) dir=up tilt=-36 len=0.198
+    bone c2 parent=c1 dir=up tilt=44  len=0.198
+    bone c3 parent=c2 dir=up tilt=-42 len=0.189
+  end
+
+parts
+  mirror
+    # One loft along the whole chain, so the stem is continuous through every kink. Thin —
+    # a bean vine is a string, and a fat one reads as a sapling.
+    loft vine bones=c1..c3 material=Wood sides=5
+      ring 0.00 w=0.030 d=0.030
+      ring 0.50 w=0.022 d=0.022
+      ring 1.00 w=0.014 d=0.014
+      cap start=flat end=dome
+  end
+
+  # ---- the leaves ----------------------------------------------------------------
+  #
+  # Trifoliate, which is what a bean leaf is: three broad blades off one node. `frame=up`
+  # with w WIDE and d THIN — a flat blade lying face-up, the idiom `cocoa_4.wam` spells out.
+  # Kept SMALL on purpose: `world/crops.js` records that at 0.17 of a 1.8 m plant these
+  # became 30 cm arrowheads and buried the pods completely, and burying the pods is the bug.
+  mirror
+    loft lfA1 bone=c1 at=0.90 dir=side yaw=10  tilt=-14 len=0.17 material=Green frame=up sides=5
+      ring 0.00 w=0.020 d=0.010
+      ring 0.30 w=0.115 d=0.020
+      ring 0.74 w=0.120 d=0.018
+      ring 1.00 w=0.048 d=0.010
+      cap start=flat end=dome
+    loft lfA2 bone=c1 at=0.90 dir=side yaw=76  tilt=-8  len=0.15 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+    loft lfB1 bone=c2 at=0.85 dir=side yaw=-38 tilt=-12 len=0.17 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.020 d=0.010
+      ring 0.30 w=0.115 d=0.020
+      ring 0.74 w=0.120 d=0.018
+      ring 1.00 w=0.048 d=0.010
+      cap start=flat end=dome
+    loft lfB2 bone=c2 at=0.85 dir=side yaw=-104 tilt=-6 len=0.14 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.009
+      ring 0.30 w=0.100 d=0.018
+      ring 0.74 w=0.104 d=0.016
+      ring 1.00 w=0.041 d=0.009
+      cap start=flat end=dome
+    loft lfC1 bone=c3 at=0.88 dir=side yaw=22  tilt=-10 len=0.16 material=Green frame=up sides=5
+      ring 0.00 w=0.019 d=0.010
+      ring 0.30 w=0.110 d=0.019
+      ring 0.74 w=0.114 d=0.017
+      ring 1.00 w=0.046 d=0.010
+      cap start=flat end=dome
+    loft lfC2 bone=c3 at=0.88 dir=side yaw=88  tilt=-4  len=0.14 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.018 d=0.009
+      ring 0.30 w=0.100 d=0.018
+      ring 0.74 w=0.104 d=0.016
+      ring 1.00 w=0.041 d=0.009
+      cap start=flat end=dome
+    loft lfA3 bone=c1 at=0.45 dir=side yaw=-52 tilt=-10 len=0.15 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.010
+      ring 0.30 w=0.104 d=0.019
+      ring 0.74 w=0.108 d=0.017
+      ring 1.00 w=0.043 d=0.009
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(vine.l) < 0.02
+  # The ZIG-ZAG is already there — the species read does not wait for the pods.
+  assert (xmax(vine.l) - xmin(vine.l)) / height > 0.18
+  # Sparser in PARTS than the flowering rung: 16 against 38.
+  assert parts == 16
+  assert height in 0.30..0.52
+  assert width / height < 1.35
+  assert tris < 1100

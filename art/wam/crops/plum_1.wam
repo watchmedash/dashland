@@ -1,0 +1,51 @@
+# Plum Tree, seedling (rung 1 of 4).
+#
+# A whip with three leaves. The ladder this replaces used `nature/BushBerries_1` here for
+# all five orchard species at once — a berry bush, which is the wrong plant AND already
+# carries berries, so the first day of a twenty-five-day tree showed fruit.
+#
+# The leaf here is `cocoa_1.wam`'s idiom and not `apple_4.wam`'s foliage mass, because at
+# this size a mass is a green pea and a seedling's whole read is "two leaves on a stick".
+#
+# See `plum_4.wam` for the weeping skeleton and `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model plum
+  height 3.9
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #468a33
+  DarkGreen #34682a
+
+skeleton
+  root ground at 0.0
+  bone whip parent=ground dir=up len=0.11
+
+parts
+  loft stem bones=ground..whip material=Wood sides=6
+    ring 0.00 w=0.020 d=0.020
+    ring 1.00 w=0.013 d=0.013
+    cap start=flat end=flat
+
+  mirror
+    loft leafA bone=whip at=0.62 dir=side tilt=-14 len=0.068 material=Green frame=up sides=5
+      ring 0.00 w=0.010 d=0.006
+      ring 0.28 w=0.052 d=0.014
+      ring 0.72 w=0.048 d=0.013
+      ring 1.00 w=0.018 d=0.007
+      cap start=flat end=dome
+    loft leafB bone=whip at=1.00 dir=side yaw=96 tilt=-24 len=0.060 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.010 d=0.006
+      ring 0.28 w=0.048 d=0.013
+      ring 0.72 w=0.044 d=0.012
+      ring 1.00 w=0.016 d=0.007
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(stem) < 0.01
+  # A seedling: five parts, no limbs, no crown, no fruit.
+  assert parts == 5
+  assert height < 0.16
+  assert tris < 400

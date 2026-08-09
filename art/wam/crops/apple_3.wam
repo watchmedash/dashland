@@ -1,0 +1,102 @@
+# Apple Tree, young and fruitless (rung 3 of 4).
+#
+# `apple_4.wam`'s tree without the skirt limb, without the fruit, and about four fifths its
+# height. Apple has SIX crop stages over four models and `modelIndexFor` maps stages 3 and 4
+# here and stage 5 alone onto the ripe one — so this is how "an orchard tree that is finished
+# growing long before it fruits" is expressed. `world/crops.js`'s own ripeness trick (half
+# the fruit, the colour dragged two-thirds toward the leaf) cannot express "no apples at all",
+# and a tree carrying pale apples for three stages is exactly the tell that made four orchard
+# species read as one for three audits running.
+#
+# See `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model apple
+  height 4.2
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #4f9438
+  DarkGreen #386b28
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.24
+  mirror
+    bone lmA parent=trunk dir=side yaw=24  tilt=56 len=0.28
+    bone lmB parent=trunk dir=side yaw=70  tilt=64 len=0.27
+    bone lmC parent=trunk dir=side yaw=-26 tilt=50 len=0.28
+  end
+  bone lead parent=trunk dir=up len=0.28
+
+parts
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.108 d=0.108
+    ring 0.18 w=0.084 d=0.084
+    ring 0.70 w=0.072 d=0.072
+    ring 1.00 w=0.076 d=0.076
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=lmA..lmA material=Wood sides=6
+      ring 0.00 w=0.056 d=0.056
+      ring 1.00 w=0.024 d=0.024
+      cap start=flat end=dome
+    loft armB bones=lmB..lmB material=Wood sides=6
+      ring 0.00 w=0.052 d=0.052
+      ring 1.00 w=0.022 d=0.022
+      cap start=flat end=dome
+    loft armC bones=lmC..lmC material=Wood sides=6
+      ring 0.00 w=0.054 d=0.054
+      ring 1.00 w=0.023 d=0.023
+      cap start=flat end=dome
+  end
+  loft armL bones=trunk..lead material=Wood sides=6
+    ring 0.00 w=0.068 d=0.068
+    ring 1.00 w=0.026 d=0.026
+    cap start=flat end=dome
+
+  mirror
+    loft canA bone=lmA at=1.00 offset=(0.03,0.02,0.03) dir=up len=0.136 material=Green sides=8
+      ring 0.00 w=0.204 d=0.204
+      ring 0.32 w=0.333 d=0.333
+      ring 0.68 w=0.340 d=0.340
+      ring 1.00 w=0.190 d=0.190
+      cap start=dome end=dome
+    loft canB bone=lmB at=1.00 offset=(0.02,0.02,0.04) dir=up len=0.128 material=DarkGreen sides=8
+      ring 0.00 w=0.192 d=0.192
+      ring 0.32 w=0.314 d=0.314
+      ring 0.68 w=0.320 d=0.320
+      ring 1.00 w=0.179 d=0.179
+      cap start=dome end=dome
+    loft canC bone=lmC at=1.00 offset=(-0.02,0.01,0.04) dir=up len=0.132 material=Green sides=8
+      ring 0.00 w=0.198 d=0.198
+      ring 0.32 w=0.323 d=0.323
+      ring 0.68 w=0.330 d=0.330
+      ring 1.00 w=0.185 d=0.185
+      cap start=dome end=dome
+  end
+  loft canT bone=lead at=1.00 offset=(0,0.02,0) dir=up len=0.136 material=Green sides=8
+    ring 0.00 w=0.204 d=0.204
+    ring 0.32 w=0.333 d=0.333
+    ring 0.68 w=0.340 d=0.340
+    ring 1.00 w=0.190 d=0.190
+    cap start=dome end=dome
+  loft canM bone=lead at=0.42 offset=(0,0,0) dir=up len=0.148 material=DarkGreen sides=8
+    ring 0.00 w=0.222 d=0.222
+    ring 0.32 w=0.363 d=0.363
+    ring 0.68 w=0.370 d=0.370
+    ring 1.00 w=0.208 d=0.208
+    cap start=dome end=dome
+
+checks
+  assert bottom(bole) < 0.01
+  # Sparser in PARTS than the ripe tree, which is what the rung ladder is for: 16 against 34,
+  # and every one the ripe tree adds is an apple or the limb that carries the skirt.
+  assert parts == 16
+  # Must not out-top the ripe rung: `buildModelGeometry` shrinks any rung above 0.86 of the
+  # one after it, which would throw these proportions away.
+  assert height in 0.66..0.80
+  assert width / height < 1.10
+  assert asymmetry(bole) < 0.005
+  assert tris < 2600

@@ -1,0 +1,59 @@
+# Emerald — a cut stone.
+#
+# Green competes with every leaf block in the game, so this one is pushed cold
+# and saturated rather than towards the foliage yellows.
+#
+# The three coloured gems (ruby, sapphire, emerald) share this geometry and
+# differ only in the palette, and that is the point: they are the same *kind* of
+# object, a faceted stone off a jeweller's wheel, and the colour is the whole
+# distinction the player needs. What has to differ is the raw crystals — astral
+# and amethyst are grown points, these are cut — so the shape here is the one no
+# rough crystal has: a brilliant, pointed pavilion under a wide girdle under a
+# flat table.
+#
+# `shape=box` on six sides is what makes the facets flat panels; a round section
+# would make this a spinning top. The girdle is a deliberate double ring 0.06
+# apart so there is a hard horizontal break at the widest point — that edge
+# catching the key light is the single pixel row that says "cut" rather than
+# "pebble" at hotbar size.
+#
+# The girdle sits at 0.70 of the height and the table is two thirds of its
+# width, which is most of what makes this read as a gem the right way up. With
+# the widest point at the middle and a narrow top it was a wine glass: the
+# pavilion has to be the long half and the crown the short one.
+
+model emerald
+  height 0.24
+  style chunky
+
+palette
+  Emerl #2fae52
+  Table #96f0ac
+  Deep  #125227
+
+skeleton
+  # The pavilion's point cap hangs below the first ring, so the root sits a
+  # little clear of the floor rather than on it — at 0.006 the culet went
+  # through the ground plane and the linter said so.
+  root culet at 0.034
+  bone axis parent=culet dir=up pitch=-3 yaw=8 len=0.80
+
+parts
+  loft stone bones=culet..axis material=Emerl sides=6 shape=box
+    ring 0.00 w=0.06 d=0.06 material=Deep
+    ring 0.20 w=0.30 d=0.30
+    ring 0.48 w=0.52 d=0.52
+    ring 0.68 w=0.62 d=0.62 material=Emerl
+    ring 0.74 w=0.62 d=0.62
+    ring 0.90 w=0.46 d=0.46 material=Table
+    ring 1.00 w=0.42 d=0.42
+    cap start=point end=flat
+
+checks
+  assert bottom(stone) < 0.02
+  assert bottom(stone) > -0.005
+  # A cut stone sits low and broad: the pavilion is under half the height and
+  # the girdle is nearly as wide as the whole thing is tall.
+  assert height(stone) / width(stone) in 1.1..1.8
+  assert parts == 1
+  assert tris < 140

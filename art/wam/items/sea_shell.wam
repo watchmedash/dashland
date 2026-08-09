@@ -1,0 +1,112 @@
+# Giant Clam — the thing worth diving for.
+#
+# Every other block in the reef set is scenery or bulk. This one is a *find*:
+# it is what the pearl comes out of, it is placed rarely, and the whole design
+# question is "would a player swimming past at speed notice it and turn round?"
+#
+# **The mantle is the answer, and it is why the shell gapes.** A closed clam is
+# a grey rock on grey sand at a depth where the light is already gone. What
+# catches an eye is the strip of living tissue between the valves, and a real
+# *Tridacna* mantle is electric — turquoise, violet, patterned — for exactly the
+# reason it works here: it is the one saturated thing on the seabed. So the two
+# valves are hinged *open*, and the gap between them is filled by a bright
+# fluted sheet. The valves are chalk; the mantle carries the colour and the
+# block carries a little light to go with it.
+#
+# **The valves are mirrored, not authored twice.** A clam is bilaterally
+# symmetric about the hinge — that is the definition of a bivalve — so `mirror`
+# is the honest construct as well as the cheap one, and it guarantees the two
+# halves match to the vertex.
+#
+# **The ribs are `material_arc`, one facet wide, the brain coral's trick.** A
+# scallop's ribs radiate from the hinge, which is exactly what a stripe running
+# *along* a loft from its narrow end does. Arcs narrower than a facet snap to
+# facet edges and come out as blotches — see `coral_brain.wam`, where that was
+# learned the expensive way — so each is exactly one facet across.
+#
+# **`frame=up` is load bearing.** A valve is a broad shallow bowl: wide across
+# the hinge, shallow through the bulge. Without a pinned frame the rings of a
+# diagonal part flip 90° partway up at the automatic frame's switchover, and the
+# valve turns from a bowl into a paddle standing on edge halfway along itself.
+# With `frame=up`, `d` spans the lean and `w` spans the hinge line, which is
+# what those two numbers are meant to mean here.
+
+model sea_shell
+  height 0.40
+  style smooth
+
+palette
+  Shell  #e2d7c3
+  Ridge  #9b8968
+  Mantle #2fb0c4
+  Violet #6f5bc4
+  Foot   #8f8271
+
+skeleton
+  root sand at 0.0
+  # The hinge is an anchor, not a stalk: both valves and the mantle mount at its
+  # *head* (`at=0.0`), which is the seabed. Hung off its tail instead — the
+  # default — the whole clam floated a sixth of its height above the sand, which
+  # the lint caught and no render angle here would have.
+  #
+  # 34° of gape is a lot for a clam and deliberately so: at the angle a swimmer
+  # sees this from, anything tighter closes the mantle out of sight.
+  bone hinge parent=sand dir=up len=0.16
+  mirror
+    bone valve parent=hinge at=0.0 up=0.055 dir=up tilt=34 len=0.78
+  end
+
+parts
+  # The mantle, first so the valves can be checked against it. A fluted sheet
+  # standing in the gape: wide along the hinge, thin across it, and wavy in
+  # section because a clam's mantle is frilled at its edge. Centred on the
+  # mirror plane, so it is symmetric rather than one-sided.
+  loft mantle bone=hinge at=0.04 dir=up pitch=2 len=0.56 material=Mantle frame=fwd sides=6
+    ring 0.00 w=0.10 d=0.30 material=Violet
+    ring 0.30 w=0.15 d=0.54 material=Mantle
+    ring 0.70 w=0.17 d=0.60 roll=8
+    ring 0.92 w=0.13 d=0.52 roll=-6 material=Violet
+    ring 1.00 w=0.06 d=0.34
+    cap start=flat end=dome
+
+  mirror
+    # One valve. Narrow at the hinge, broadest at two thirds, closing to a
+    # rounded lip — the outline of a cockle seen side-on. The ribs run its whole
+    # length because that is how a shell grows: out from the hinge.
+    #
+    # `d` is a third of `w` and that ratio is the model. The first cut had them
+    # near enough equal and the render was two beans: a shell is a *plate* that
+    # bulges, and the moment the bulge approaches the span it stops being one.
+    loft shell bones=valve..valve material=Shell frame=up sides=12
+      ring 0.00 w=0.20 d=0.10 material=Foot
+      ring 0.16 w=0.48 d=0.15 material=Shell material_arc=Ridge:15-45,Ridge:75-105,Ridge:135-165,Ridge:195-225,Ridge:255-285,Ridge:315-345
+      ring 0.46 w=0.66 d=0.19 material_arc=Ridge:15-45,Ridge:75-105,Ridge:135-165,Ridge:195-225,Ridge:255-285,Ridge:315-345
+      ring 0.72 w=0.72 d=0.21 material_arc=Ridge:15-45,Ridge:75-105,Ridge:135-165,Ridge:195-225,Ridge:255-285,Ridge:315-345
+      ring 0.92 w=0.64 d=0.18 material_arc=Ridge:15-45,Ridge:75-105,Ridge:135-165,Ridge:195-225,Ridge:255-285,Ridge:315-345
+      ring 1.00 w=0.40 d=0.10
+      cap start=flat end=dome
+
+checks
+  # On the seabed, hinge down.
+  assert bottom(shell.l) < 0.06
+  # It gapes. The valves have to be genuinely apart or the mantle — the only
+  # reason this block is findable — is shut inside the shell.
+  #
+  # Stated as the valve's own offset from the hinge and not as `gap()`: the two
+  # valves *meet* at the hinge, by definition, so their closest approach is zero
+  # however wide the clam opens. `abs()` because which side `.l` lands on is the
+  # compiler's business, not this check's.
+  assert abs(x(shell.l)) > 0.14
+  # ...and the mantle stands up in that gap, visible above the hinge and below
+  # the lip of the valves.
+  assert top(mantle) > 0.45
+  assert top(mantle) < top(shell.l)
+  # A clam is wider than it is tall. This is also what `main.js` sizes the kind
+  # against: scaled by height alone, a squat model arrives large.
+  assert width / height in 1.0..1.9
+  # The ribs and the mantle both survive a ring edit.
+  assert materials == 5
+  assert parts == 3
+  assert tris < 700
+  measure gape abs(x(shell.l)) * 2
+  measure aspect width / height

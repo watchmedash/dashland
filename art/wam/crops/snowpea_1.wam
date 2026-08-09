@@ -1,0 +1,51 @@
+# Snow Pea, seedling (rung 1 of 4).
+#
+# A pea comes up as a stout shoot with one pair of rounded leaflets and — this is the whole
+# point of the rung — a tendril already curling between them. Nothing else on the farm has a
+# coil, so the species is legible on the day it is sown: grape's rung 1 is a square-cut woody
+# cutting, hops' is a crown of blunt spears, green bean's is an arched hypocotyl.
+#
+# See `snowpea_4.wam` for the tendrils and `icecapmoss_3.wam` for the naming rules.
+
+model snowpea
+  height 1.5
+  style chunky
+
+palette
+  Wood      #4a8a4e
+  Green     #5e9a70
+  DarkGreen #4a7f5c
+
+skeleton
+  root ground at 0.0
+  bone shoot parent=ground dir=up tilt=-8 len=0.075
+
+parts
+  loft stalk bones=shoot..shoot material=Wood sides=5
+    ring 0.00 w=0.017 d=0.017
+    ring 0.60 w=0.013 d=0.013
+    ring 1.00 w=0.009 d=0.009
+    cap start=flat end=dome
+
+  mirror
+    loft lf bone=shoot at=0.86 dir=side yaw=14 tilt=-6 len=0.062 material=Green frame=up sides=5
+      ring 0.00 w=0.012 d=0.006
+      ring 0.30 w=0.044 d=0.009
+      ring 0.72 w=0.048 d=0.008
+      ring 1.00 w=0.028 d=0.005
+      cap start=flat end=dome
+  end
+
+  sweep ten bone=shoot at=1.00 offset=(0,0.004,0.004) dir=up material=Wood
+    seg len=0.034 r=0.0044 fwd=14
+    seg len=0.020 r=0.0038 curl=54
+    seg len=0.018 r=0.0032 curl=58
+    seg len=0.015 r=0.0022 curl=62 tip
+
+checks
+  assert bottom(stalk) < 0.01
+  # A seedling: four parts, one node, and a coil.
+  assert parts == 4
+  assert height < 0.16
+  assert depth(ten) < 0.07
+  assert tris < 300

@@ -1,0 +1,47 @@
+# Green Bean, seedling (rung 1 of 4).
+#
+# Two seed leaves and a hook. A bean germinates by pushing an arched hypocotyl through the
+# soil and straightening, and the hook is the one thing about the plant anybody would name at
+# this size — so the rung is a SHAPE the ladder never repeats rather than the vine at a
+# twelfth scale.
+#
+# See `greenbean_4.wam` for the twine and `icecapmoss_3.wam` for the naming rules.
+
+model greenbean
+  height 1.8
+  style chunky
+
+palette
+  Wood      #4f8f33
+  Green     #6cc94a
+  DarkGreen #4e9c35
+
+skeleton
+  root ground at 0.0
+  bone h1 parent=ground dir=up len=0.055
+  bone h2 parent=h1 dir=up tilt=-52 len=0.040
+
+parts
+  # The hook. Waisted at the bend for the reason `mireroot_4.wam` records — a ring wider than
+  # the bend reach folds the surface back on itself.
+  loft shoot bones=h1..h2 material=Wood sides=5 refaxis=(0,0,1)
+    ring 0.00 w=0.020 d=0.020
+    ring 0.55 w=0.013 d=0.013
+    ring 1.00 w=0.015 d=0.015
+    cap start=flat end=dome
+
+  mirror
+    loft cotA bone=h2 at=1.00 dir=side tilt=-8 len=0.075 material=Green frame=up sides=5
+      ring 0.00 w=0.014 d=0.008
+      ring 0.30 w=0.062 d=0.014
+      ring 0.74 w=0.064 d=0.012
+      ring 1.00 w=0.026 d=0.007
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(shoot) < 0.01
+  # A seedling: three parts, no chain, no leaves, no flowers, no pods.
+  assert parts == 3
+  assert height < 0.14
+  assert tris < 300

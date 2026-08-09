@@ -1,0 +1,72 @@
+# Seeds — four grains in a loose scatter.
+#
+# The risk with this one is a beige blob: four small objects of the same colour
+# touching each other merge into one silhouette at 46px. Two things keep them
+# apart. They alternate between a warm and a pale tan, so neighbouring grains
+# meet on a colour edge rather than a shading gradient; and no two sit at the
+# same angle or the same height, so the outline is a row of separate humps
+# instead of one lozenge.
+#
+# Each grain is the same six-ring teardrop with a crease running its length
+# (`material_arc` along the top facet), which is what a cereal grain actually looks
+# like and the one detail that survives being 8px across.
+
+model seeds
+  height 0.22
+  style chunky
+
+palette
+  Grain #cb9c4a
+  Pale  #f0dda6
+  Crease #b08842
+
+skeleton
+  root pile at 0.075
+  # Each grain is aimed so its *middle*, not its root, lands near the origin —
+  # a bone offset half its own length backwards and turned to run across the
+  # pile. That is what makes four 0.3-long grains occupy a 0.35 heap instead of
+  # a 0.9 starburst.
+  bone a parent=pile side=0.16 fwd=0.04 dir=fwd yaw=-104 len=0.34
+  bone b parent=pile side=-0.15 fwd=-0.08 up=0.07 dir=fwd yaw=66 len=0.32
+  bone c parent=pile side=0.02 fwd=-0.15 up=0.13 dir=fwd yaw=-8 pitch=-7 len=0.30
+  bone d parent=pile side=-0.06 fwd=0.14 up=0.17 dir=fwd yaw=-152 pitch=5 len=0.28
+
+parts
+  loft ga bones=a..a material=Grain sides=6
+    ring 0.00 w=0.07 d=0.06
+    ring 0.30 w=0.17 d=0.15 material_arc=Crease:60-120
+    ring 0.62 w=0.16 d=0.14 material_arc=Crease:60-120
+    ring 1.00 w=0.05 d=0.04
+    cap start=dome end=point
+
+  loft gb bones=b..b material=Pale sides=6
+    ring 0.00 w=0.07 d=0.06
+    ring 0.30 w=0.16 d=0.14 material_arc=Crease:60-120
+    ring 0.62 w=0.15 d=0.13 material_arc=Crease:60-120
+    ring 1.00 w=0.05 d=0.04
+    cap start=dome end=point
+
+  loft gc bones=c..c material=Pale sides=6
+    ring 0.00 w=0.06 d=0.05
+    ring 0.30 w=0.15 d=0.13 material_arc=Crease:60-120
+    ring 0.62 w=0.14 d=0.12 material_arc=Crease:60-120
+    ring 1.00 w=0.04 d=0.035
+    cap start=dome end=point
+
+  loft gd bones=d..d material=Grain sides=6
+    ring 0.00 w=0.06 d=0.05
+    ring 0.30 w=0.14 d=0.12 material_arc=Crease:60-120
+    ring 0.62 w=0.13 d=0.11 material_arc=Crease:60-120
+    ring 1.00 w=0.04 d=0.035
+    cap start=dome end=point
+
+checks
+  assert bottom(ga) < 0.025
+  # Four grains, all clear of each other: a heap that fuses is one blob.
+  assert parts == 4
+  # A heap, not a starburst: the four grains together are barely wider than one
+  # of them is long, and they stack rather than lying out in a row.
+  assert width < 0.42
+  assert top(gd) > top(ga) * 1.6
+  assert clip(ga, gd) == 0
+  assert tris < 340

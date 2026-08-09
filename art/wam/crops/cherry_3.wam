@@ -1,0 +1,138 @@
+# Cherry Tree, in BLOSSOM (rung 3 of 4).
+#
+# cropdata silhouette: "Spreading canopy; the blossom stage should be a genuinely beautiful
+# pink moment." This file is that clause, and it could not be written until `world/crops.js`
+# grew a fifth material role — see `roleOf`. Every other colour a WAM crop can wear comes
+# from `colors.stem`, `colors.leaf`, `colors.fruit` or the fixed white of snow, and a cherry
+# in `fruit` blossom is a tree covered in cherries, i.e. the stage this one exists to be
+# distinguished from.
+#
+# It is `cherry_4.wam`'s tree at seven eighths the size with the fruit removed and the pads
+# in `Blossom` rather than `Green`. Cherry has SIX crop stages over four models, so
+# `modelIndexFor` gives this rung stages 3 and 4 and the ripe tree stage 5 alone: the tree
+# flowers for two stages and then fruits, which is both the botany and the growth read.
+#
+# The two blossom materials are one role at two luminances, exactly as `Green`/`DarkGreen`
+# are: `bakeModel` keeps each material's brightness relative to the brightest in its own
+# role, so a single flat `Blossom` would give a crown with no shading in it at all.
+#
+# See `cherry_4.wam` for the spread, and `icecapmoss_3.wam` for the naming rules.
+model cherry
+  height 3.8
+  style chunky
+
+palette
+  Wood      #5c4028
+  Green     #4f9438
+  DarkGreen #3a7028
+  # Only the RATIO matters; the pink itself is cropdata's `colors.blossom`.
+  Blossom     #f0b4c6
+  BlossomDeep #cf8ba0
+
+skeleton
+  root ground at 0.0
+  # TALL and clean — the cherry half of the apple/cherry split.
+  bone trunk parent=ground dir=up len=0.403
+
+  # Limbs leave nearly HORIZONTAL. Apple's leave at 50-64 degrees of elevation; these are at
+  # 18-34, which is what turns a dome into a spread.
+  mirror
+    bone lmA parent=trunk dir=side yaw=22  tilt=24 len=0.263
+    bone lmB parent=trunk dir=side yaw=68  tilt=34 len=0.228
+    bone lmC parent=trunk dir=side yaw=-24 tilt=16 len=0.280
+    bone lmD parent=trunk dir=side yaw=-70 tilt=30 len=0.236
+  end
+  bone lead parent=trunk dir=up len=0.158
+
+parts
+  # A clean pole with very little taper. Apple's bole flares; a cherry's is a column, and the
+  # two are told apart at the base as well as at the top.
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.104 d=0.104
+    ring 0.16 w=0.086 d=0.086
+    ring 1.00 w=0.076 d=0.076
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=lmA..lmA material=Wood sides=6
+      ring 0.00 w=0.058 d=0.058
+      ring 1.00 w=0.024 d=0.024
+      cap start=flat end=dome
+    loft armB bones=lmB..lmB material=Wood sides=6
+      ring 0.00 w=0.052 d=0.052
+      ring 1.00 w=0.022 d=0.022
+      cap start=flat end=dome
+    loft armC bones=lmC..lmC material=Wood sides=6
+      ring 0.00 w=0.056 d=0.056
+      ring 1.00 w=0.023 d=0.023
+      cap start=flat end=dome
+    loft armD bones=lmD..lmD material=Wood sides=6
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.021 d=0.021
+      cap start=flat end=dome
+  end
+  loft armL bones=trunk..lead material=Wood sides=6
+    ring 0.00 w=0.064 d=0.064
+    ring 1.00 w=0.028 d=0.028
+    cap start=flat end=dome
+
+  # ---- the tiers ----------------------------------------------------------------
+  #
+  # A foliage LENS lofted along each limb's own bearing: `frame=up` pins the depth axis to
+  # world up, so `w` is the horizontal span and `d` the thickness. d is a bit over half of w,
+  # which is a flat pad rather than the sphere apple's crown is made of. Getting the pairing
+  # backwards here gives a set of vertical fins, which is the failure `cocoa_4.wam` spells
+  # out for leaves and which reads even worse at this size.
+  mirror
+    loft canA bone=lmA at=0.28 dir=side yaw=22 tilt=8 len=0.40 material=Blossom frame=up sides=7
+      ring 0.00 w=0.14 d=0.09
+      ring 0.30 w=0.34 d=0.19
+      ring 0.72 w=0.36 d=0.20
+      ring 1.00 w=0.15 d=0.09
+      cap start=dome end=dome
+    loft canB bone=lmB at=0.28 dir=side yaw=68 tilt=14 len=0.34 material=BlossomDeep frame=up sides=7
+      ring 0.00 w=0.13 d=0.08
+      ring 0.30 w=0.31 d=0.17
+      ring 0.72 w=0.33 d=0.18
+      ring 1.00 w=0.14 d=0.08
+      cap start=dome end=dome
+    loft canC bone=lmC at=0.28 dir=side yaw=-24 tilt=2 len=0.42 material=BlossomDeep frame=up sides=7
+      ring 0.00 w=0.14 d=0.09
+      ring 0.30 w=0.35 d=0.19
+      ring 0.72 w=0.37 d=0.20
+      ring 1.00 w=0.15 d=0.09
+      cap start=dome end=dome
+    loft canD bone=lmD at=0.28 dir=side yaw=-70 tilt=12 len=0.35 material=Blossom frame=up sides=7
+      ring 0.00 w=0.13 d=0.08
+      ring 0.30 w=0.32 d=0.17
+      ring 0.72 w=0.34 d=0.18
+      ring 1.00 w=0.14 d=0.08
+      cap start=dome end=dome
+  end
+  # One pad over the fork, so the middle of the spread is not a hole seen from underneath.
+  loft canT bone=lead at=1.00 offset=(0,0.02,0) dir=up len=0.10 material=Blossom sides=8
+    ring 0.00 w=0.30 d=0.30
+    ring 0.34 w=0.42 d=0.42
+    ring 0.70 w=0.40 d=0.40
+    ring 1.00 w=0.22 d=0.22
+    cap start=dome end=dome
+
+
+checks
+  # A TALL clean bole — the number that separates this species from apple at the base.
+  assert height(bole) / height in 0.44..0.60
+  assert bottom(bole) < 0.01
+  # SPREADING: the crown is much flatter than it is wide. Apple asserts 0.62..1.05 on the
+  # same ratio, so the two files cannot drift into each other without one of them failing.
+  assert (top(canT) - bottom(canA.l)) / (xmax(canA.l) - xmin(canA.r)) < 0.52
+  # Wider than tall, which is the whole of "spreading" and what `wide: 3.4` is paying for.
+  assert width / height in 1.10..1.50
+  # No fruit on this rung at all — 19 parts against the ripe tree's 46.
+  assert parts == 19
+  # ...and it must not out-top the ripe rung, or `buildModelGeometry`'s ordering pass shrinks
+  # it and the seven-eighths authored here is thrown away.
+  assert height in 0.62..0.76
+  assert asymmetry(bole) < 0.005
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 3000
+  measure spread width / height

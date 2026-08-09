@@ -1,0 +1,58 @@
+# Feather — quill and vane.
+#
+# The vane is one loft, not a `web`: a web spans a fan of bones and a feather
+# has exactly one spar, so the membrane construct has nothing to interpolate
+# between. What it needs instead is a section that is wide on one axis and
+# almost nothing on the other, which is a loft with `d` pinned tiny and `frame`
+# named — on this near-vertical path the automatic frame is a coin flip, and the
+# wrong side of it turns the vane edge-on.
+#
+# The quill runs the whole length and sticks out below the vane, because the
+# bare shaft at the bottom is the single cue that separates a feather from a
+# leaf. The vane is deliberately asymmetric about the shaft — the `side=`
+# offsets grow towards the tip — which is what real flight feathers do and what
+# stops this reading as a lozenge.
+
+model feather
+  height 0.4
+  style chunky
+
+palette
+  Vane  #eceadf
+  Barb  #a9b2bd
+  Quill #b6a067
+
+skeleton
+  root calamus at 0.0
+  bone bare  parent=calamus dir=up pitch=-2 len=0.22
+  bone lower parent=bare dir=up pitch=-4 len=0.32
+  bone upper parent=lower dir=up pitch=-11 len=0.36
+
+parts
+  loft shaft bones=calamus..upper material=Quill sides=4
+    ring 0.00 w=0.030 d=0.030
+    ring 0.22 w=0.028 d=0.028
+    ring 0.70 w=0.022 d=0.022
+    ring 1.00 w=0.008 d=0.008
+    cap start=dome end=flat
+
+  loft vane bones=lower..upper material=Vane frame=fwd sides=6
+    ring 0.00 w=0.04 d=0.014
+    ring 0.14 w=0.15 d=0.020 side=0.024
+    ring 0.34 w=0.23 d=0.022 side=0.040
+    ring 0.56 w=0.22 d=0.020 side=0.046
+    ring 0.76 w=0.17 d=0.017 side=0.044 material=Barb
+    ring 0.96 w=0.05 d=0.010 side=0.030
+    cap start=dome end=dome
+
+checks
+  assert bottom(shaft) < 0.01
+  # The bare quill shows below the vane, and the shaft outlives it at the tip.
+  assert bottom(vane) > bottom(shaft) + 0.18
+  assert top(shaft) > top(vane)
+  # A vane: broad on one axis, a wafer on the other. The bound is loose because
+  # `depth()` is a bounding box, and this feather curves through 13° of Z over
+  # its length — most of that reading is the curve, not the thickness.
+  assert depth(vane) < width(vane) / 1.6
+  assert parts == 2
+  assert tris < 260

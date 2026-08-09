@@ -1,0 +1,256 @@
+# Olive Tree, ripe (rung 4 of 4).
+#
+# cropdata silhouette: "Gnarled twisted trunk, silver-green narrow leaves, sparse open
+# canopy." Three nouns, and the recipe this replaces had none of them: `nature/CommonTree_3`
+# and `CommonTree_5` are the SAME meadow trees apple drew, so the gnarl, the leaf and the
+# openness were all being asked of eighteen generated beads in the foliage. Measured in the
+# 2026-08-04 audit, the ripe olive carried no visible fruit at all and read as "a pale-green
+# shade tree" — which is exactly what it was.
+#
+# ---- this is the one crown in the batch that is NOT built from masses -----------
+#
+# `apple_4.wam` says the crown is a set of overlapping foliage masses, and for three of the
+# four species that is right. It is wrong here, because a mass is by construction OPAQUE and
+# the word in this silhouette line is *sparse*. So the olive gets:
+#
+#   - a TWIN GNARLED BOLE. Two leaning stems out of one root, each a three-segment zig-zag
+#     with the segments alternating their lean, and both waisted where they kink. `tilt` on
+#     an `up` bone moves it toward -X, so the left stem leans out on a NEGATIVE tilt — the
+#     sign trap this file would otherwise have hidden.
+#   - small SEPARATED clusters instead of a continuous canopy, with bare branch showing
+#     between them. Ten of them at 0.22 across, against apple's six at 0.42.
+#   - NARROW BLADE leaves — `frame=up`, w wide and d thin, the idiom `cocoa_4.wam` spells
+#     out — hung off the branch ends so the crown's edge is fringed rather than domed. That
+#     fringe is what "silver-green narrow leaves" looks like from underneath, and it is the
+#     only part of the four trees where an individual leaf is modelled at all.
+#
+# `wide: 2.8` in the recipe rather than the old 2.4: an open crown on a leaning twin bole is
+# genuinely wider than a compact one, and at 2.4 `familyScale` was binding on WIDTH and
+# paying for it out of the tree's height.
+#
+# See `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model olive
+  height 3.5
+  style chunky
+
+palette
+  # `colors.stem` for olive is 0x8a7a5c — a pale grey bark, not the brown the other three
+  # wear — and `colors.leaf` a silver-green 0x8fa06a. Those are cropdata's and this palette
+  # only decides which of two materials in a role is the darker.
+  Wood      #8a7a5c
+  Green     #8fa06a
+  DarkGreen #6c7d50
+  Berry     #3a4a26
+
+skeleton
+  # Lifted off the plane: a tilted tube with a flat cap dips its own corner underground.
+  root ground at 0.022
+  # TWIN BOLE, each a zig-zag. A single straight trunk is the other three trees; the fork at
+  # the ground is legible from any angle and at any distance.
+  mirror
+    bone bl1 parent=ground offset=(0.055,0,0.030) dir=up tilt=-17 len=0.18
+    bone bl2 parent=bl1 dir=up tilt=24  len=0.16
+    bone bl3 parent=bl2 dir=up tilt=-22 len=0.16
+    # Branches off the top of each stem. Long and thin, because what has to be visible here
+    # is the WOOD between the leaf clusters.
+    bone brA parent=bl3 dir=side yaw=16  tilt=48 len=0.21
+    bone brB parent=bl3 dir=side yaw=78  tilt=58 len=0.18
+    bone brC parent=bl3 dir=side yaw=-40 tilt=42 len=0.19
+    bone brD parent=bl2 dir=side yaw=-86 tilt=34 len=0.17
+  end
+
+parts
+  mirror
+    # Waisted at every kink — a uniform tube through a bend folds its own surface back, which
+    # `mireroot_4.wam` paid a whole round to learn, and a waist under a swelling is also what
+    # makes a stem read as gnarled rather than as bent pipe.
+    loft stemA bones=bl1..bl3 material=Wood sides=7
+      ring 0.00 w=0.108 d=0.108
+      ring 0.30 w=0.062 d=0.062
+      ring 0.40 w=0.082 d=0.082
+      ring 0.62 w=0.054 d=0.054
+      ring 0.74 w=0.072 d=0.072
+      ring 1.00 w=0.050 d=0.050
+      cap start=flat end=flat
+    loft armA bones=brA..brA material=Wood sides=5
+      ring 0.00 w=0.040 d=0.040
+      ring 1.00 w=0.016 d=0.016
+      cap start=flat end=dome
+    loft armB bones=brB..brB material=Wood sides=5
+      ring 0.00 w=0.036 d=0.036
+      ring 1.00 w=0.015 d=0.015
+      cap start=flat end=dome
+    loft armC bones=brC..brC material=Wood sides=5
+      ring 0.00 w=0.038 d=0.038
+      ring 1.00 w=0.016 d=0.016
+      cap start=flat end=dome
+    loft armD bones=brD..brD material=Wood sides=5
+      ring 0.00 w=0.034 d=0.034
+      ring 1.00 w=0.014 d=0.014
+      cap start=flat end=dome
+  end
+
+  # ---- the sparse crown ----------------------------------------------------------
+  #
+  # Small clusters, one per branch tip and one part way along, with bare wood between them.
+  # Nothing here is big enough to close the crown, and that is the whole instruction.
+  mirror
+    loft canA bone=brA at=1.00 offset=(0.02,0.01,0.02) dir=up len=0.088 material=Green sides=6
+      ring 0.00 w=0.132 d=0.132
+      ring 0.32 w=0.216 d=0.216
+      ring 0.68 w=0.220 d=0.220
+      ring 1.00 w=0.123 d=0.123
+      cap start=dome end=dome
+    loft canA2 bone=brA at=0.52 offset=(0.00,0.03,0.02) dir=up len=0.070 material=DarkGreen sides=6
+      ring 0.00 w=0.105 d=0.105
+      ring 0.32 w=0.172 d=0.172
+      ring 0.68 w=0.175 d=0.175
+      ring 1.00 w=0.098 d=0.098
+      cap start=dome end=dome
+    loft canB bone=brB at=1.00 offset=(0.01,0.01,0.02) dir=up len=0.080 material=DarkGreen sides=6
+      ring 0.00 w=0.120 d=0.120
+      ring 0.32 w=0.196 d=0.196
+      ring 0.68 w=0.200 d=0.200
+      ring 1.00 w=0.112 d=0.112
+      cap start=dome end=dome
+    loft canC bone=brC at=1.00 offset=(0.01,0.01,0.02) dir=up len=0.084 material=Green sides=6
+      ring 0.00 w=0.126 d=0.126
+      ring 0.32 w=0.206 d=0.206
+      ring 0.68 w=0.210 d=0.210
+      ring 1.00 w=0.118 d=0.118
+      cap start=dome end=dome
+    loft canD bone=brD at=1.00 offset=(0.01,0.02,0.02) dir=up len=0.076 material=Green sides=6
+      ring 0.00 w=0.114 d=0.114
+      ring 0.32 w=0.186 d=0.186
+      ring 0.68 w=0.190 d=0.190
+      ring 1.00 w=0.106 d=0.106
+      cap start=dome end=dome
+  end
+
+  # ---- the narrow leaves ---------------------------------------------------------
+  #
+  # `frame=up` with w WIDE and d THIN: a flat blade lying face-up. Long and narrow — five
+  # times as long as it is wide, against the two-and-a-bit of a cocoa leaf — because the
+  # narrowness is named in the silhouette line and is the one thing a foliage cluster cannot
+  # say. They are hung at the ENDS of the branches so the crown's outline is fringed.
+  mirror
+    loft lfA bone=brA at=1.00 dir=side yaw=16 tilt=-26 len=0.22 material=Green frame=up sides=4
+      ring 0.00 w=0.014 d=0.008
+      ring 0.28 w=0.046 d=0.016
+      ring 0.74 w=0.042 d=0.014
+      ring 1.00 w=0.012 d=0.006 tip
+      cap start=flat end=point
+    loft lfA2 bone=brA at=1.00 dir=side yaw=44 tilt=-48 len=0.19 material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.013 d=0.008
+      ring 0.28 w=0.042 d=0.015
+      ring 0.74 w=0.038 d=0.013
+      ring 1.00 w=0.011 d=0.006 tip
+      cap start=flat end=point
+    loft lfB bone=brB at=1.00 dir=side yaw=86 tilt=-30 len=0.20 material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.013 d=0.008
+      ring 0.28 w=0.044 d=0.015
+      ring 0.74 w=0.040 d=0.013
+      ring 1.00 w=0.011 d=0.006 tip
+      cap start=flat end=point
+    loft lfC bone=brC at=1.00 dir=side yaw=-46 tilt=-34 len=0.21 material=Green frame=up sides=4
+      ring 0.00 w=0.013 d=0.008
+      ring 0.28 w=0.045 d=0.016
+      ring 0.74 w=0.041 d=0.014
+      ring 1.00 w=0.011 d=0.006 tip
+      cap start=flat end=point
+    loft lfC2 bone=brC at=1.00 dir=side yaw=-14 tilt=-54 len=0.18 material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.012 d=0.007
+      ring 0.28 w=0.040 d=0.014
+      ring 0.74 w=0.036 d=0.012
+      ring 1.00 w=0.010 d=0.005 tip
+      cap start=flat end=point
+    loft lfD bone=brD at=1.00 dir=side yaw=-92 tilt=-28 len=0.19 material=Green frame=up sides=4
+      ring 0.00 w=0.012 d=0.007
+      ring 0.28 w=0.042 d=0.015
+      ring 0.74 w=0.038 d=0.013
+      ring 1.00 w=0.010 d=0.005 tip
+      cap start=flat end=point
+  end
+
+  # ---- the fruit ----------------------------------------------------------------
+  #
+  # AUDIT 2026-08-06, and this is the THIRD round on the same sentence — "the ripe olive
+  # tree carries no visible fruit at all". Size was never the problem: these are 25 cm on a
+  # 3.5 m tree, twice what the previous recipe shipped, and the photograph still showed
+  # none. `on=` was: it snaps a part to the CLOSEST surface point on the cluster named, and
+  # from an aim inside the crown that is the cluster's inner face, so every olive was
+  # correctly flush with a surface nobody can see.
+  #
+  # So they hang BELOW the clusters in clear air, which is the trick `cherry_4.wam` uses for
+  # the same reason and states there: it puts the fruit against SKY and GROUND rather than
+  # against foliage, and on a crop whose fruit is nearly black that is worth more than any
+  # amount of size. A sparse crown is the one canopy in the orchard where a hanging fruit
+  # cannot be lost, which is the compensation for having less foliage to sit against.
+  mirror
+    loft frA1 bone=brA at=1.00 offset=(0.103,-0.190,0.034) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.024 d=0.024
+      ring 0.42 w=0.054 d=0.054
+      ring 1.00 w=0.020 d=0.020
+      cap start=dome end=dome
+    loft frA2 bone=brA at=1.00 offset=(-0.023,-0.220,0.103) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.023 d=0.023
+      ring 0.42 w=0.040 d=0.040
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft frA3 bone=brA at=0.52 offset=(0.057,-0.200,0.057) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.022 d=0.022
+      ring 0.42 w=0.051 d=0.051
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft frB1 bone=brB at=1.00 offset=(0.023,-0.200,0.092) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.023 d=0.023
+      ring 0.42 w=0.040 d=0.040
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft frB2 bone=brB at=1.00 offset=(0.081,-0.210,0.023) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.022 d=0.022
+      ring 0.42 w=0.051 d=0.051
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+    loft frC1 bone=brC at=1.00 offset=(0.103,-0.190,-0.034) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.023 d=0.023
+      ring 0.42 w=0.053 d=0.053
+      ring 1.00 w=0.019 d=0.019
+      cap start=dome end=dome
+    loft frC2 bone=brC at=1.00 offset=(0.000,-0.220,-0.103) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.022 d=0.022
+      ring 0.42 w=0.051 d=0.051
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+    loft frD2 bone=brD at=1.00 offset=(0.081,-0.210,-0.023) dir=down len=0.030 material=Berry sides=5
+      ring 0.00 w=0.021 d=0.021
+      ring 0.42 w=0.05 d=0.05
+      ring 1.00 w=0.018 d=0.018
+      cap start=dome end=dome
+  end
+
+checks
+  # TWIN BOLE, both feet on the ground and apart from each other at the base.
+  assert bottom(stemA.l) < 0.01
+  assert xmin(stemA.l) > 0.0
+  # GNARLED: the stem is not straight — its top is well off the vertical through its foot.
+  assert (xmax(stemA.l) - xmin(stemA.l)) / height(stemA.l) > 0.26
+  # SPARSE: the biggest foliage cluster is a small fraction of the crown's width, which is
+  # the arithmetic form of "you can see through it". Apple's canA is 0.42 across on a 0.82
+  # crown; this one is under a third of that share.
+  assert width(canA.l) / width < 0.26
+  # NARROW leaves: four times as long as they are wide, and they reach past the cluster, so
+  # the crown's outline is a fringe rather than a dome.
+  assert len(brA.l) > 0
+  assert xmax(lfA.l) > xmax(canA.l)
+  # The fruit is small and dark and there is a lot of it — the opposite lever from apple's.
+  # ...and they hang CLEAR of the cluster they belong to, which is what makes a near-black
+  # fruit legible on a pale crown at all.
+  assert top(frA1.l) < bottom(canA.l) + 0.03
+  assert width(frA1.l) in 0.030..0.060
+  assert width / height in 1.10..1.28
+  assert asymmetry(stemA.l) < 0.9
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 4600
+  measure openness width(canA.l) / width

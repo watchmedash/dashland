@@ -1,0 +1,61 @@
+# Glowcap, first rung (1 of 3).
+#
+# A pin-stage fungus: two unopened buttons on stubby stipes. The rungs of a WAM family
+# differ in PARTS, not in scale — `world/crops.js` takes ONE scale for the whole family
+# off the ripe model, so a juvenile authored as "the ripe model at 40%" would arrive as
+# the ripe model at 40% and the stage ladder would be a zoom. Here the cap has not opened
+# at all: it is an egg with no rim and no gill band, which is the one thing about a young
+# mushroom anybody can name.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model glowcap
+  height 0.35
+  style smooth
+
+palette
+  Wood      #cfeee6
+  Green     #7fc4b8
+  Berry     #5fe8d0
+
+skeleton
+  root soil at 0.0
+  bone budA parent=soil dir=up pitch=-4 len=0.15
+  bone budB parent=soil offset=(0.17,0.008,0.10) dir=up pitch=6 tilt=-9 len=0.10
+
+parts
+  loft stemA bones=budA..budA material=Wood sides=7
+    ring 0.00 w=0.105 d=0.105
+    ring 0.35 w=0.075 d=0.075
+    ring 1.00 w=0.085 d=0.085
+    cap start=flat end=flat
+  loft stemB bones=budB..budB material=Wood sides=6
+    ring 0.00 w=0.085 d=0.085
+    ring 0.35 w=0.060 d=0.060
+    ring 1.00 w=0.068 d=0.068
+    cap start=flat end=flat
+
+  # The buttons. Widest in the MIDDLE and closed at both ends — an egg, not a parasol.
+  # No `Green` band, because an unopened cap has no exposed gills to show.
+  loft budcapA bone=budA at=1.00 dir=up len=0.17 material=Berry sides=10
+    ring 0.00 w=0.16 d=0.16
+    ring 0.34 w=0.30 d=0.30
+    ring 0.70 w=0.28 d=0.28
+    ring 1.00 w=0.13 d=0.13
+    cap start=dome end=dome
+  loft budcapB bone=budB at=1.00 dir=up len=0.12 material=Berry sides=8
+    ring 0.00 w=0.12 d=0.12
+    ring 0.34 w=0.22 d=0.22
+    ring 0.70 w=0.21 d=0.21
+    ring 1.00 w=0.10 d=0.10
+    cap start=dome end=dome
+
+checks
+  # Closed: the cap is barely wider than the stipe carrying it, which is what makes it a
+  # button. The ripe rung asserts the opposite ratio (> 5).
+  assert width(budcapA) / width(stemA) < 3.4
+  assert bottom(stemA) < 0.02
+  # Low. This must stay well under the ripe rung so the family reads as growth.
+  assert top(budcapA) < 0.36
+  assert tris < 500
+  measure aspect width / height

@@ -1,0 +1,36 @@
+# Lotus, growing (rung 2 of 4).
+#
+# Three pads and nothing above the water. Fruit only in the late stages, which for this
+# crop means the stalk itself does not exist yet — a lotus in leaf is a raft, full stop.
+
+model lotus
+  height 0.70
+  style smooth
+
+palette
+  Green     #5aa85e
+  DarkGreen #4a8a4e
+
+skeleton
+  # y=0 is the waterline: `world/crops.js` snaps a paddy plot for this crop to the water
+  # plane exactly, because pads float. So the pads sit at y=0 and the stalk rises from it.
+  root water at 0.0
+
+parts
+  mirror
+    loft padA bone=water at=0.0 offset=(0.34,0.0,0.20) dir=up len=0.05 material=Green sides=16
+      ring 0.00 w=0.42 d=0.42
+      ring 1.00 w=0.46 d=0.46
+      cap start=flat end=flat
+    loft padB bone=water at=0.0 offset=(0.10,0.0,-0.36) dir=up len=0.05 material=DarkGreen sides=16
+      ring 0.00 w=0.34 d=0.34
+      ring 1.00 w=0.38 d=0.38
+      cap start=flat end=flat
+  end
+
+checks
+  assert bottom(padA.l) < 0.01
+  assert height(padA.l) < 0.09
+  # No stalk and no petals exist on this rung: four parts is the whole plant.
+  assert parts == 4
+  assert tris < 500

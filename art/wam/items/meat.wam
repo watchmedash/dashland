@@ -1,0 +1,53 @@
+# Raw meat — a leg joint on the bone.
+#
+# A boneless lump of meat at 46px is a red pebble, so the read is carried by the
+# bone: a pale shaft with a knuckle, sticking out of the top of a heavy teardrop
+# of muscle. That silhouette — fat at the bottom, thin and pale at the top — is
+# legible even when the colour is not, which matters because raw and cooked
+# share it and only the colour tells them apart.
+#
+# The muscle and the shaft are two lofts on one chain rather than one loft with
+# a colour band, because the join has to *step in* sharply where the meat ends;
+# a single tube can only taper through it and that reads as a carrot.
+
+model meat
+  height 0.3
+  style chunky
+
+palette
+  Flesh #bd5a4f
+  Fat   #dc9084
+  Bone  #e6ddc6
+
+skeleton
+  root knuckle at 0.045
+  bone shank parent=knuckle dir=up pitch=-5 len=0.88
+
+parts
+  loft muscle bones=knuckle..shank material=Flesh sides=7
+    ring 0.00 w=0.20 d=0.19
+    ring 0.10 w=0.42 d=0.39
+    ring 0.26 w=0.50 d=0.45
+    ring 0.44 w=0.46 d=0.42
+    ring 0.60 w=0.34 d=0.31 material=Fat
+    ring 0.72 w=0.20 d=0.18
+    cap start=dome end=flat
+
+  # The shaft starts inside the muscle so the two never part company at the
+  # shoulder, and finishes in a knuckle — a bone cut flat reads as a dowel.
+  loft shaft bone=shank at=0.52 dir=up pitch=3 len=0.50 material=Bone sides=6
+    ring 0.00 w=0.15 d=0.14
+    ring 0.30 w=0.12 d=0.11
+    ring 0.62 w=0.11 d=0.10
+    ring 0.80 w=0.17 d=0.16
+    ring 1.00 w=0.13 d=0.12
+    cap start=flat end=dome
+
+checks
+  assert bottom(muscle) < 0.012
+  # The bone clears the meat, and the meat is the mass.
+  assert top(shaft) > top(muscle) + 0.15
+  assert volume(muscle) > volume(shaft) * 3
+  assert width(muscle) / height(muscle) in 0.6..1.1
+  assert parts == 2
+  assert tris < 300

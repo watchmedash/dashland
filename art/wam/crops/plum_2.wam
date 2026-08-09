@@ -1,0 +1,85 @@
+# Plum Tree, sapling (rung 2 of 4).
+#
+# A short bole, one pair of limbs and three small foliage masses. The rung differs from the
+# one above it in PARTS rather than in scale — no leader, no skirt, no fruit — which is the
+# rule the whole four-source ladder exists for.
+#
+# The limbs already ARCH — up steeply, then over and down — so the weeping habit is
+# legible two rungs before the curtains exist. That is the point of a per-rung source: a
+# sapling that is the ripe tree scaled down tells the player nothing about which tree it is.
+#
+# See `plum_4.wam` for the weeping skeleton and `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model plum
+  height 3.9
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #468a33
+  DarkGreen #34682a
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.20
+  mirror
+    bone lmA parent=trunk dir=side yaw=24  tilt=72 len=0.09
+    bone lmA2 parent=lmA dir=side yaw=24  tilt=-24 len=0.11
+    bone lmB parent=trunk dir=side yaw=-64 tilt=76 len=0.08
+    bone lmB2 parent=lmB dir=side yaw=-64 tilt=-20 len=0.10
+  end
+
+parts
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.062 d=0.062
+    ring 0.20 w=0.048 d=0.048
+    ring 1.00 w=0.042 d=0.042
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=lmA..lmA2 material=Wood sides=5 refaxis=(0.41,0,0.91)
+      ring 0.00 w=0.030 d=0.030
+      ring 0.45 w=0.019 d=0.019
+      ring 0.58 w=0.016 d=0.016
+      ring 1.00 w=0.012 d=0.012
+      cap start=flat end=dome
+    loft armB bones=lmB..lmB2 material=Wood sides=5 refaxis=(0.90,0,-0.44)
+      ring 0.00 w=0.027 d=0.027
+      ring 0.45 w=0.017 d=0.017
+      ring 0.58 w=0.015 d=0.015
+      ring 1.00 w=0.011 d=0.011
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft canA bone=lmA2 at=0.85 dir=down pitch=-6 len=0.19 material=Green sides=6
+      ring 0.00 w=0.090 d=0.090
+      ring 0.26 w=0.140 d=0.140
+      ring 0.66 w=0.110 d=0.110
+      ring 1.00 w=0.030 d=0.030 tip
+      cap start=dome end=point
+    loft canB bone=lmB2 at=0.85 dir=down pitch=4 len=0.17 material=DarkGreen sides=6
+      ring 0.00 w=0.082 d=0.082
+      ring 0.26 w=0.128 d=0.128
+      ring 0.66 w=0.100 d=0.100
+      ring 1.00 w=0.028 d=0.028 tip
+      cap start=dome end=point
+  end
+  loft canT bone=trunk at=1.00 offset=(0,0.05,0) dir=up len=0.076 material=Green sides=8
+    ring 0.00 w=0.114 d=0.114
+    ring 0.32 w=0.186 d=0.186
+    ring 0.68 w=0.190 d=0.190
+    ring 1.00 w=0.106 d=0.106
+    cap start=dome end=dome
+
+checks
+  assert bottom(bole) < 0.01
+  # Sparser in PARTS, not merely smaller: 10 against the ripe tree's 34.
+  assert parts == 10
+  # `familyScale` takes one scale off the RIPE model for the whole family, so a rung has to
+  # be authored small — and it must not out-top the rung above it or the ordering pass in
+  # `world/crops.js` shrinks it and throws the authored proportions away.
+  assert height in 0.26..0.48
+  assert width / height < 1.30
+  assert asymmetry(bole) < 0.005
+  assert tris < 900

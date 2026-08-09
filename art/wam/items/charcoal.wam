@@ -1,0 +1,45 @@
+# Charcoal — a charred billet, not a nugget.
+#
+# Coal and charcoal are the same colour and the same stack size, so if they were
+# both lumps the only thing telling them apart in a hotbar would be the label.
+# Charcoal is what is left of a stick, so it keeps the stick's proportions: a
+# short square-sectioned billet, snapped at both ends, with the pale ash edge
+# where the char cracked open. That reads as "burnt wood" at 46px; a second
+# black pebble would not.
+
+model charcoal
+  height 0.34
+  style chunky
+
+palette
+  Char  #3b3630
+  Ash   #7d7267
+
+skeleton
+  root base at 0.0
+  bone billet parent=base dir=up pitch=-9 len=0.78
+
+parts
+  loft stub bones=base..billet material=Char frame=fwd sides=4 shape=box
+    ring 0.00 w=0.15 d=0.14 roll=6 material=Ash
+    ring 0.08 w=0.18 d=0.17 roll=6 material=Char
+    ring 0.38 w=0.19 d=0.18 roll=-9 side=0.02
+    ring 0.70 w=0.185 d=0.17 roll=7 fwd=0.02
+    ring 0.90 w=0.16 d=0.15 roll=-4
+    ring 0.94 w=0.15 d=0.14 roll=-4 material=Ash
+    ring 1.00 w=0.12 d=0.11 roll=-4
+    cap start=flat end=flat
+
+  # One splinter still hanging off the side: the crack that says it was wood.
+  loft splinter bone=billet at=0.55 offset=(0.10,0,0) dir=side yaw=-22 tilt=30 len=0.20 on=stub material=Char frame=up sides=4 shape=box
+    ring 0.00 w=0.10 d=0.09
+    ring 0.60 w=0.09 d=0.08 roll=14
+    ring 1.00 w=0.04 d=0.04 roll=14
+    cap start=flat end=flat
+
+checks
+  assert bottom(stub) < 0.01
+  # Long and squared off, unlike coal's lump.
+  assert height(stub) / width(stub) in 3.0..5.0
+  assert parts == 2
+  assert tris < 200

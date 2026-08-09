@@ -1,0 +1,92 @@
+# Mire Root, third rung (3 of 4). See `mireroot_4.wam` for the argument and the rules.
+#
+# Two pairs of arches and the first KNOT. The knots are `colors.fruit` and they arrive on
+# the top two rungs only, which is this crop's ripeness tell — the same job the generated
+# fruit scatter does for the berry crops, expressed as a part that is only present in the
+# late sources.
+
+model mireroot
+  height 0.9
+  style chunky
+
+palette
+  Wood      #5a4a32
+  Green     #4a6a3e
+  DarkGreen #3a5630
+  Berry     #6a4a2a
+
+skeleton
+  root mud at 0.0
+  bone crown parent=mud dir=up len=0.19
+  mirror
+    bone arA1 parent=mud offset=(0.07,0.040,0.05) dir=side tilt=72 len=0.27
+    bone arA2 parent=arA1 dir=side tilt=-48 len=0.27
+    bone arB1 parent=mud offset=(0.04,0.038,-0.09) dir=side yaw=74 tilt=70 len=0.23
+    bone arB2 parent=arB1 dir=side yaw=74 tilt=-50 len=0.23
+  end
+  mirror
+    bone bldA parent=crown dir=side tilt=76 len=0.60
+    bone bldB parent=crown dir=side yaw=58 tilt=70 len=0.53
+    bone bldC parent=crown dir=side yaw=126 tilt=79 len=0.47
+  end
+
+parts
+  loft boss bones=mud..crown material=Wood sides=8
+    ring 0.00 w=0.27 d=0.27
+    ring 0.60 w=0.22 d=0.22
+    ring 1.00 w=0.16 d=0.16
+    cap start=flat end=dome
+
+  mirror
+    loft archA bones=arA1..arA2 material=Wood sides=6 refaxis=(0,0,1)
+      ring 0.00 w=0.104 d=0.104
+      ring 0.34 w=0.070 d=0.070
+      ring 0.50 w=0.044 d=0.044
+      ring 0.66 w=0.070 d=0.070
+      ring 1.00 w=0.095 d=0.095
+      cap start=flat end=flat
+    loft archB bones=arB1..arB2 material=Wood sides=6 refaxis=(0.96,0,-0.28)
+      ring 0.00 w=0.090 d=0.090
+      ring 0.34 w=0.062 d=0.062
+      ring 0.50 w=0.030 d=0.030
+      ring 0.66 w=0.062 d=0.062
+      ring 1.00 w=0.083 d=0.083
+      cap start=flat end=flat
+  end
+
+  mirror
+    loft knotA bone=arA1 at=1.00 offset=(0.05,0.03,0) dir=up len=0.11 material=Berry on=archA sides=6
+      ring 0.00 w=0.105 d=0.105
+      ring 0.50 w=0.135 d=0.126
+      ring 1.00 w=0.070 d=0.070
+      cap start=dome end=dome
+  end
+
+  mirror
+    loft bladeA bones=bldA..bldA material=Green frame=up sides=4
+      ring 0.00 w=0.072 d=0.019
+      ring 0.40 w=0.086 d=0.023
+      ring 1.00 w=0.021 d=0.010 tip
+      cap start=flat end=point
+    loft bladeB bones=bldB..bldB material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.067 d=0.019
+      ring 0.40 w=0.080 d=0.022
+      ring 1.00 w=0.019 d=0.009 tip
+      cap start=flat end=point
+    loft bladeC bones=bldC..bldC material=Green frame=up sides=4
+      ring 0.00 w=0.062 d=0.017
+      ring 0.40 w=0.074 d=0.021
+      ring 1.00 w=0.018 d=0.009 tip
+      cap start=flat end=point
+  end
+
+checks
+  assert bottom(archA.l) < 0.04
+  assert bottom(knotA.l) > top(archA.l) * 0.55
+  assert top(bladeA.l) in 0.62..0.85
+  assert xmax(archA.l) > xmax(bladeA.l)
+  assert bottom(boss) < 0.02
+  assert asymmetry(boss) < 0.005
+  assert width / height < 1.05
+  assert tris < 1200
+  measure aspect width / height

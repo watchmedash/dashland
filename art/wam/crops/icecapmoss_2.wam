@@ -1,0 +1,48 @@
+# Icecap Moss, growing (rung 2 of 3).
+#
+# The skirt lobes have arrived; the spore capsules have not. That is the whole
+# difference between this rung and the ripe one, and it is exactly the rule
+# FARMING.md asks for — fruit only in the late stages.
+
+model icecapmoss
+  height 0.18
+  style chunky
+
+palette
+  Green     #5fbf95
+  DarkGreen #3f8a6a
+
+skeleton
+  root pad at 0.0
+  bone core parent=pad dir=up len=0.38
+  mirror
+    bone lobeA parent=core at=0.46 dir=side tilt=7  len=0.82
+    bone lobeC parent=core at=0.46 dir=side yaw=-62 tilt=9 len=0.72
+  end
+
+parts
+  loft cushion bones=pad..core material=Green
+    ring 0.00 w=1.20 d=1.20
+    ring 0.45 w=1.42 d=1.42
+    ring 1.00 w=0.78 d=0.78
+    cap start=flat end=dome
+
+  mirror
+    loft lobA bones=lobeA..lobeA material=Green frame=up on=cushion
+      ring 0.00 w=0.62 d=0.34
+      ring 0.55 w=0.80 d=0.42
+      ring 1.00 w=0.56 d=0.28
+      cap start=dome end=dome
+    loft lobC bones=lobeC..lobeC material=DarkGreen frame=up on=cushion
+      ring 0.00 w=0.56 d=0.30
+      ring 0.55 w=0.74 d=0.38
+      ring 1.00 w=0.52 d=0.26
+      cap start=dome end=dome
+  end
+
+checks
+  assert width / height in 2.0..4.5
+  assert bottom(cushion) < 0.02
+  assert xmax(lobA.l) > xmax(cushion)
+  assert parts == 5
+  assert tris < 900

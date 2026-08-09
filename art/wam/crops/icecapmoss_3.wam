@@ -1,0 +1,105 @@
+# Icecap Moss, ripe (rung 3 of 3).
+#
+# cropdata silhouette: "Flat spreading cushion, pale mint, almost luminous against
+# the white." The recipe it replaces borrowed `crops/Lettuce_*` squashed to 0.55 —
+# a flattened lettuce, not a cushion — and the 2026-08-04 audit read it as
+# near-white splayed leaves.
+#
+# MATERIAL NAMES ARE THE INTERFACE. `world/crops.js`'s `roleOf` classifies a model's
+# materials by name into stem / leaf / fruit / snow and then repaints them from
+# `cropdata.colors`. `Green`/`DarkGreen` -> leaf, `Wood` -> stem, `Snow` -> untinted
+# white, anything else -> fruit. So the palette here uses that vocabulary and the hex
+# values only drive WAM's own render sheet — the game overwrites every one of them.
+#
+# NO `textures` SECTION, deliberately. With one, `wam/gltf.py` writes
+# baseColorFactor [1,1,1,1] and puts every colour in the baked atlas — and crops.js
+# has no texture path at all (one shared vertex-colour material, one draw call per
+# crop type), so the model would arrive uniformly white. Without one, each material
+# carries its palette colour as baseColorFactor, which is exactly the shape
+# `bakeModel` already reads off the Quaternius FBX kit.
+#
+# UNITS: every length here is a fraction of `height`, and the `checks` globals
+# (`height`, `width`) are in those same fraction units — so `width / height` is a
+# pure aspect ratio and the metre value in cropdata never appears in this file.
+# `world/crops.js`'s `familyScale` rescales the whole family to `crop.height`
+# anyway; what this file owns is the SHAPE.
+
+model icecapmoss
+  height 0.18
+  style chunky
+
+palette
+  Green     #5fbf95
+  DarkGreen #3f8a6a
+  Berry     #8fe6bd
+
+skeleton
+  root pad at 0.0
+  bone core parent=pad dir=up len=0.42
+  # Six lobes at three lengths, hung off the core a third of the way up so their own
+  # thickness clears the ground. A cushion is a colony of small mounds: one smooth
+  # dome reads as a stone, and six identical lobes read as a flower.
+  mirror
+    bone lobeA parent=core at=0.46 dir=side tilt=7  len=1.02
+    bone lobeB parent=core at=0.46 dir=side yaw=68  tilt=5 len=0.86
+    bone lobeC parent=core at=0.46 dir=side yaw=-62 tilt=9 len=0.94
+  end
+
+parts
+  # The cushion proper. No `frame=` — the path is vertical, so the automatic frame
+  # already spans the section across it; naming `up` here pinned the depth axis ALONG
+  # the path and lint said so. `cap start=flat`, not `dome`: a dome on a ring this
+  # wide bulges a full radius below the root and the whole mound sank 0.3 into the soil.
+  loft cushion bones=pad..core material=Green
+    ring 0.00 w=1.55 d=1.55
+    ring 0.45 w=1.80 d=1.80
+    ring 1.00 w=0.95 d=0.95
+    cap start=flat end=dome
+
+  # The lobes. Each runs out from the middle and sinks into the cushion (`on=cushion`),
+  # so the join is flush by construction rather than by a hand-guessed offset.
+  mirror
+    loft lobA bones=lobeA..lobeA material=Green frame=up on=cushion
+      ring 0.00 w=0.72 d=0.40
+      ring 0.55 w=0.94 d=0.50
+      ring 1.00 w=0.66 d=0.34
+      cap start=dome end=dome
+    loft lobB bones=lobeB..lobeB material=DarkGreen frame=up on=cushion
+      ring 0.00 w=0.62 d=0.34
+      ring 0.55 w=0.84 d=0.44
+      ring 1.00 w=0.58 d=0.30
+      cap start=dome end=dome
+    loft lobC bones=lobeC..lobeC material=Green frame=up on=cushion
+      ring 0.00 w=0.66 d=0.36
+      ring 0.55 w=0.88 d=0.46
+      ring 1.00 w=0.62 d=0.32
+      cap start=dome end=dome
+  end
+
+  # The ripeness tell, and the only part `colors.fruit` lands on: pale spore capsules
+  # standing just proud of the cushion. A cushion with nothing on it has no ripe read
+  # at all, which is what the Lettuce ladder had.
+  mirror
+    sweep capA bone=core at=1.00 offset=(0.26,0,0.16) dir=up material=Berry
+      seg len=0.16 r=0.028 fwd=6
+      seg len=0.06 r=0.075 fwd=3
+      seg len=0.07 r=0.062 fwd=3 tip
+    sweep capB bone=core at=1.00 offset=(0.08,0,-0.22) dir=up material=Berry
+      seg len=0.12 r=0.026 back=7
+      seg len=0.05 r=0.068 back=3
+      seg len=0.06 r=0.056 back=3 tip
+  end
+
+checks
+  # A cushion, not a dome and not a rosette: much wider than it is tall.
+  assert width / height in 2.2..4.5
+  assert bottom(cushion) < 0.02
+  # The lobes have to break the outline, i.e. reach past the central mound.
+  assert xmax(lobA.l) > xmax(cushion)
+  # The spore capsules are the ripe read, so they must clear the cushion.
+  assert top(capA.l) > top(cushion)
+  assert asymmetry(cushion) < 0.005
+  # Budget: `clump: 3` stamps this rung three times per tile, and crops instance
+  # across 12 beds, 12 arbour bays and 329 wild plants.
+  assert tris < 1400
+  measure aspect width / height

@@ -1,0 +1,48 @@
+# Cocoa Tree, seedling (rung 1 of 4).
+#
+# Two leaves on a whip. The old ladder used `nature/BushBerries_1` here — a berry bush,
+# which is the wrong plant AND already carries berries, so the first day of a six-year
+# tree showed fruit.
+#
+# See `cocoa_4.wam` for the anti-palm rules and `icecapmoss_3.wam` for the material naming.
+
+model cocoa
+  height 3.4
+  style chunky
+
+palette
+  Wood      #5c4028
+  Green     #2f7a35
+  DarkGreen #256128
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.11
+
+parts
+  loft bole bones=ground..trunk material=Wood sides=6
+    ring 0.00 w=0.022 d=0.022
+    ring 1.00 w=0.015 d=0.015
+    cap start=flat end=flat
+
+  mirror
+    loft leafA bone=trunk at=0.85 dir=side tilt=8 len=0.13 material=Green frame=up sides=6
+      ring 0.00 w=0.012 d=0.008
+      ring 0.22 w=0.075 d=0.020
+      ring 0.68 w=0.068 d=0.018
+      ring 1.00 w=0.026 d=0.009
+      cap start=flat end=dome
+    loft leafB bone=trunk at=1.00 dir=side yaw=104 tilt=-12 len=0.12 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.012 d=0.008
+      ring 0.22 w=0.070 d=0.019
+      ring 0.68 w=0.062 d=0.017
+      ring 1.00 w=0.024 d=0.009
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(bole) < 0.01
+  # A seedling: five parts, no branches, no pods.
+  assert parts == 5
+  assert height < 0.20
+  assert tris < 400

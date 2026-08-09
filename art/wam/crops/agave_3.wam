@@ -1,0 +1,98 @@
+# Agave, third rung (3 of 4). See `agave_4.wam` for the argument and the rules.
+#
+# THE FULL ROSETTE AND NO SPIKE. This is the rung crop stages 3 and 4 both land on
+# (`modelIndexFor` maps five stages onto four models as 0,1,2,2,3), so it is what an agave
+# looks like for most of its life: twelve thick blades and nothing above them. The spike
+# is a single-stage event and it belongs to rung 4 alone.
+
+model agave
+  height 1.3
+  style chunky
+
+palette
+  # Wood -> stem: the central boss.
+  Wood      #6a8a6a
+  Green     #8aa87e
+  DarkGreen #74906a
+  # Berry -> fruit. Declared but unused on this rung: nothing here flowers, which is the
+  # point of it.
+  Berry     #d4c46a
+
+skeleton
+  root sand at 0.0
+  bone core parent=sand dir=up len=0.10
+
+  # Six mirrored pairs at four elevations. The outer blades lie back almost to horizontal
+  # and the inner ones stand up, which is what gives a rosette a middle — every blade at
+  # one tilt is a starfish.
+  mirror
+    bone blA parent=core dir=side tilt=16 len=0.50
+    bone blB parent=core dir=side yaw=52  tilt=27 len=0.47
+    bone blC parent=core dir=side yaw=104 tilt=21 len=0.49
+    bone blD parent=core dir=side yaw=152 tilt=38 len=0.42
+    bone blE parent=core dir=side yaw=26  tilt=54 len=0.36
+    bone blF parent=core dir=side yaw=128 tilt=62 len=0.32
+  end
+
+parts
+  loft boss bones=sand..core material=Wood sides=8
+    ring 0.00 w=0.26 d=0.26
+    ring 1.00 w=0.20 d=0.20
+    cap start=flat end=flat
+
+  # The blades. `frame=up` with w WIDE and d THICK — an agave leaf is a slab, not a card,
+  # and `d` at roughly half of `w` is what "thick" means as a number. The last ring is a
+  # `tip`, which is the terminal spine every agave has and the reason nobody walks through
+  # one.
+  mirror
+    loft bladeA bones=blA..blA material=Green frame=up sides=5
+      ring 0.00 w=0.150 d=0.075
+      ring 0.30 w=0.185 d=0.090
+      ring 0.72 w=0.140 d=0.066
+      ring 1.00 w=0.020 d=0.012 tip
+      cap start=dome end=point
+    loft bladeB bones=blB..blB material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.140 d=0.070
+      ring 0.30 w=0.175 d=0.085
+      ring 0.72 w=0.132 d=0.062
+      ring 1.00 w=0.019 d=0.011 tip
+      cap start=dome end=point
+    loft bladeC bones=blC..blC material=Green frame=up sides=5
+      ring 0.00 w=0.146 d=0.073
+      ring 0.30 w=0.180 d=0.088
+      ring 0.72 w=0.136 d=0.064
+      ring 1.00 w=0.020 d=0.012 tip
+      cap start=dome end=point
+    loft bladeD bones=blD..blD material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.132 d=0.066
+      ring 0.30 w=0.164 d=0.080
+      ring 0.72 w=0.124 d=0.058
+      ring 1.00 w=0.018 d=0.011 tip
+      cap start=dome end=point
+    loft bladeE bones=blE..blE material=Green frame=up sides=5
+      ring 0.00 w=0.120 d=0.060
+      ring 0.30 w=0.150 d=0.074
+      ring 0.72 w=0.112 d=0.053
+      ring 1.00 w=0.017 d=0.010 tip
+      cap start=dome end=point
+    loft bladeF bones=blF..blF material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.112 d=0.056
+      ring 0.30 w=0.140 d=0.069
+      ring 0.72 w=0.104 d=0.049
+      ring 1.00 w=0.016 d=0.010 tip
+      cap start=dome end=point
+  end
+
+  # The crown of the panicle, so the spike ends in a flower rather than in a stick.
+checks
+  # A rosette with a middle, at full size, and NOTHING above it.
+  assert top(bladeE.l) > top(bladeA.l) + 0.05
+  assert xmax(bladeA.l) > xmax(bladeE.l)
+  assert top(bladeE.l) in 0.30..0.48
+  # Thick blades ending in a spine, same as the ripe rung.
+  assert depth(bladeA.l) / height(bladeA.l) > 0.30
+  assert width(bladeA.l) > 0.40
+  assert bottom(boss) < 0.02
+  assert width / height in 1.6..2.6
+  assert tris < 1100
+  measure aspect width / height

@@ -1,0 +1,78 @@
+# Snow Pea, young vine (rung 2 of 4).
+#
+# Three nodes and one tendril: the plant has found the frame and nothing else has happened
+# yet. Flowers arrive at rung 3 and pods at rung 4, so each rung of this ladder adds a class
+# of part rather than a percentage of size.
+#
+# See `snowpea_4.wam` for the tendrils and the flat pod, and `icecapmoss_3.wam` for the
+# material-name and no-`textures` rules.
+
+model snowpea
+  height 1.5
+  style chunky
+
+palette
+  Wood      #4a8a4e
+  Green     #5e9a70
+  DarkGreen #4a7f5c
+
+skeleton
+  root ground at 0.0
+  mirror
+    bone s1 parent=ground offset=(0.014,0,0.020) dir=up tilt=-26 pitch=-10 len=0.17
+    bone s2 parent=s1 dir=up tilt=28  pitch=12  len=0.17
+    bone s3 parent=s2 dir=up tilt=-24 pitch=-10 len=0.15
+  end
+
+parts
+  mirror
+    loft stem bones=s1..s3 material=Wood sides=4
+      ring 0.00 w=0.012 d=0.012
+      ring 0.50 w=0.010 d=0.010
+      ring 1.00 w=0.006 d=0.006
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft lfA1 bone=s1 at=0.78 dir=side yaw=18  tilt=-8 len=0.092 material=Green frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.056 d=0.011
+      ring 0.72 w=0.060 d=0.010
+      ring 1.00 w=0.036 d=0.006
+      cap start=flat end=dome
+    loft lfA2 bone=s1 at=0.78 dir=side yaw=-78 tilt=-5 len=0.086 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.014 d=0.006
+      ring 0.30 w=0.052 d=0.010
+      ring 0.72 w=0.056 d=0.009
+      ring 1.00 w=0.034 d=0.005
+      cap start=flat end=dome
+    loft lfB1 bone=s2 at=0.80 dir=side yaw=-36 tilt=-9 len=0.092 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.056 d=0.011
+      ring 0.72 w=0.060 d=0.010
+      ring 1.00 w=0.036 d=0.006
+      cap start=flat end=dome
+    loft lfC1 bone=s3 at=0.70 dir=side yaw=30  tilt=-6 len=0.086 material=Green frame=up sides=5
+      ring 0.00 w=0.014 d=0.006
+      ring 0.30 w=0.052 d=0.010
+      ring 0.72 w=0.056 d=0.009
+      ring 1.00 w=0.034 d=0.005
+      cap start=flat end=dome
+  end
+
+  mirror
+    sweep tenA bone=s3 at=0.92 offset=(0.010,0.004,0.010) dir=up yaw=28 material=Wood
+      seg len=0.056 r=0.0054 fwd=16
+      seg len=0.029 r=0.0046 curl=52
+      seg len=0.026 r=0.0040 curl=55
+      seg len=0.023 r=0.0032 curl=58
+      seg len=0.019 r=0.0023 curl=60 tip
+  end
+
+checks
+  assert bottom(stem.l) < 0.02
+  # Climbing, one tendril, nothing hanging: twelve parts against rung 3's thirty.
+  assert parts == 12
+  assert depth(tenA.l) < 0.10
+  assert height < 0.62
+  assert tris < 900

@@ -1,0 +1,41 @@
+# Stick — the crafting staple.
+#
+# At 46px this is a brown diagonal and nothing else, so the whole job is the
+# silhouette: a slight kink partway up and one snapped-off side twig, which is
+# what separates "stick" from "dowel". The pale ring at the top is the break —
+# a stick has one end that was torn off a branch and it is the only cue that
+# says which way up the thing is.
+
+model stick
+  height 0.5
+  style chunky
+
+palette
+  Bark  #7d5730
+  Wood  #c49a5e
+
+skeleton
+  root butt at 0.0
+  bone lower parent=butt dir=up pitch=-5 len=0.46
+  bone upper parent=lower dir=up pitch=7 yaw=6 len=0.44
+
+parts
+  loft rod bones=butt..upper material=Bark sides=6
+    ring 0.00 w=0.115 d=0.110 material=Wood
+    ring 0.06 w=0.110 d=0.105 material=Bark
+    ring 0.34 w=0.100 d=0.095
+    ring 0.62 w=0.094 d=0.089
+    ring 0.90 w=0.083 d=0.078
+    ring 0.95 w=0.080 d=0.075 material=Wood
+    ring 1.00 w=0.070 d=0.065
+    cap start=flat end=flat
+
+  sweep twig bone=lower at=0.78 offset=(0.02,0,0) dir=side yaw=-30 tilt=26 on=rod material=Bark sides=5
+    seg len=0.105 r=0.044 up=10
+    seg len=0.085 r=0.024 up=16 tip
+
+checks
+  assert bottom(rod) < 0.01
+  assert parts == 2
+  assert height / width in 3.0..6.0
+  assert tris < 260

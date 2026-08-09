@@ -1,0 +1,227 @@
+# Plum Tree, ripe (rung 4 of 4).
+#
+# cropdata silhouette: "Slightly weeping canopy, dark purple fruit, pale spring blossom
+# stage." This species drew `nature/Willow_3` and `Willow_5` — the swamp willows the wild
+# flora scatters — with generated purple beads thrown at them, and the audit's complaint was
+# never the fruit: it was that apple, cherry, plum and olive were four fruit colours on the
+# same tree.
+#
+# ---- weeping is a SKELETON, not a droop applied to a canopy ----------------------
+#
+# The limb is TWO bones: one leaving the fork steeply upward, one turning over and running
+# out and DOWN. That is `mireroot_4.wam`'s arch idiom used at tree scale, and it is the only
+# way to get a limb whose highest point is in the middle of its own span — a single bone can
+# only be a straight ray, so a canopy hung on one is a dome with the foliage moved down,
+# which is a smaller dome.
+#
+# The foliage then hangs off the DESCENDING half as vertical teardrops, wide at the top and
+# collapsing to a point: a curtain. Set against `apple_4.wam`'s spheres and `cherry_4.wam`'s
+# horizontal lenses, all three read differently at a distance where no fruit is visible at
+# all, which is the whole brief.
+#
+# The arch is capped at about 95 degrees of turn. `mireroot_4.wam` records what a sharper
+# one costs — at 144 the tube doubles back through itself and the lint says so — and a
+# `refaxis=` naming the arch's own plane is what keeps the rings from standing at right
+# angles to each other across the joint, which is the other failure that file paid for.
+#
+# See `apple_4.wam` for the orchard construction and `icecapmoss_3.wam` for the naming rules.
+
+model plum
+  height 3.9
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #468a33
+  DarkGreen #34682a
+  Berry     #5c2a6a
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.52
+
+  # Each limb arches: up steeply, then over and out and down.
+  mirror
+    bone aA1 parent=trunk dir=side yaw=20  tilt=72 len=0.28
+    bone aA2 parent=aA1  dir=side yaw=20  tilt=-22 len=0.34
+    bone aB1 parent=trunk dir=side yaw=74  tilt=76 len=0.25
+    bone aB2 parent=aB1  dir=side yaw=74  tilt=-18 len=0.30
+    bone aC1 parent=trunk dir=side yaw=-30 tilt=68 len=0.27
+    bone aC2 parent=aC1  dir=side yaw=-30 tilt=-26 len=0.277
+    bone aD1 parent=trunk dir=side yaw=-78 tilt=78 len=0.24
+    bone aD2 parent=aD1  dir=side yaw=-78 tilt=-20 len=0.244
+  end
+  # A stub leader purely so the crown cap has a bone it visually attaches to; the lint is
+  # right that hosting it on `trunk` skins it to the wrong thing.
+  bone lead parent=trunk dir=up len=0.14
+
+parts
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.128 d=0.128
+    ring 0.16 w=0.100 d=0.100
+    ring 0.72 w=0.086 d=0.086
+    ring 1.00 w=0.090 d=0.090
+    cap start=flat end=flat
+
+  # The arches. Waisted at the turn for the reason `mireroot_4.wam` spells out — a ring
+  # wider than the bend reach doubles the surface back and shows as missing faces — and
+  # `refaxis=` naming the arch's own plane on the three that run diagonally.
+  mirror
+    loft archA bones=aA1..aA2 material=Wood sides=6 refaxis=(0.34,0,0.94)
+      ring 0.00 w=0.072 d=0.072
+      ring 0.42 w=0.046 d=0.046
+      ring 0.58 w=0.040 d=0.040
+      ring 1.00 w=0.026 d=0.026
+      cap start=flat end=dome
+    loft archB bones=aB1..aB2 material=Wood sides=6 refaxis=(0.96,0,-0.28)
+      ring 0.00 w=0.066 d=0.066
+      ring 0.42 w=0.042 d=0.042
+      ring 0.58 w=0.036 d=0.036
+      ring 1.00 w=0.024 d=0.024
+      cap start=flat end=dome
+    loft archC bones=aC1..aC2 material=Wood sides=6 refaxis=(0.50,0,0.87)
+      ring 0.00 w=0.070 d=0.070
+      ring 0.42 w=0.044 d=0.044
+      ring 0.58 w=0.038 d=0.038
+      ring 1.00 w=0.025 d=0.025
+      cap start=flat end=dome
+    loft archD bones=aD1..aD2 material=Wood sides=6 refaxis=(0.98,0,-0.21)
+      ring 0.00 w=0.064 d=0.064
+      ring 0.42 w=0.040 d=0.040
+      ring 0.58 w=0.035 d=0.035
+      ring 1.00 w=0.023 d=0.023
+      cap start=flat end=dome
+  end
+
+  # ---- the curtains -------------------------------------------------------------
+  #
+  # A teardrop hanging off the descending limb: fattest near the top, collapsing to a point.
+  # `cap end=point` over a `tip` ring rather than a dome, which is the one place in the
+  # orchard a lance point is wanted — a curtain that ends in a ball reads as a hanging
+  # lantern, and four of them read as a wind chime.
+  mirror
+    loft canA1 bone=aA2 at=0.14 dir=down pitch=-6 len=0.504 material=Green sides=7
+      ring 0.00 w=0.217 d=0.217
+      ring 0.26 w=0.210 d=0.210
+      ring 0.66 w=0.168 d=0.168
+      ring 1.00 w=0.042 d=0.042 tip
+      cap start=dome end=point
+    loft canA2 bone=aA2 at=1.00 dir=down pitch=4 len=0.351 material=DarkGreen sides=7
+      ring 0.00 w=0.284 d=0.284
+      ring 0.26 w=0.189 d=0.189
+      ring 0.66 w=0.147 d=0.147
+      ring 1.00 w=0.035 d=0.035 tip
+      cap start=dome end=point
+    loft canB1 bone=aB2 at=0.14 dir=down pitch=-4 len=0.347 material=DarkGreen sides=7
+      ring 0.00 w=0.206 d=0.206
+      ring 0.26 w=0.196 d=0.196
+      ring 0.66 w=0.154 d=0.154
+      ring 1.00 w=0.035 d=0.035 tip
+      cap start=dome end=point
+    loft canB2 bone=aB2 at=1.00 dir=down pitch=6 len=0.407 material=Green sides=7
+      ring 0.00 w=0.268 d=0.268
+      ring 0.26 w=0.175 d=0.175
+      ring 0.66 w=0.140 d=0.140
+      ring 1.00 w=0.035 d=0.035 tip
+      cap start=dome end=point
+    loft canC1 bone=aC2 at=0.14 dir=down pitch=-6 len=0.463 material=DarkGreen sides=7
+      ring 0.00 w=0.217 d=0.217
+      ring 0.26 w=0.203 d=0.203
+      ring 0.66 w=0.161 d=0.161
+      ring 1.00 w=0.042 d=0.042 tip
+      cap start=dome end=point
+    loft canC2 bone=aC2 at=1.00 dir=down pitch=4 len=0.332 material=Green sides=7
+      ring 0.00 w=0.284 d=0.284
+      ring 0.26 w=0.182 d=0.182
+      ring 0.66 w=0.147 d=0.147
+      ring 1.00 w=0.035 d=0.035 tip
+      cap start=dome end=point
+    loft canD1 bone=aD2 at=0.14 dir=down pitch=-4 len=0.32 material=Green sides=7
+      ring 0.00 w=0.195 d=0.195
+      ring 0.26 w=0.189 d=0.189
+      ring 0.66 w=0.147 d=0.147
+      ring 1.00 w=0.035 d=0.035 tip
+      cap start=dome end=point
+    loft canD2 bone=aD2 at=1.00 dir=down pitch=6 len=0.379 material=DarkGreen sides=7
+      ring 0.00 w=0.251 d=0.251
+      ring 0.26 w=0.168 d=0.168
+      ring 0.66 w=0.133 d=0.133
+      ring 1.00 w=0.035 d=0.035 tip
+      cap start=dome end=point
+  end
+  # A cap over the crown of the arches, so the middle of the tree is foliage and not a fork
+  # of bare wood seen through a ring of curtains.
+  loft canT bone=lead at=1.00 offset=(0,0.0,0) dir=up len=0.14 material=Green sides=8
+    ring 0.00 w=0.36 d=0.36
+    ring 0.36 w=0.48 d=0.48
+    ring 0.72 w=0.44 d=0.44
+    ring 1.00 w=0.24 d=0.24
+    cap start=dome end=dome
+
+  # ---- the fruit ----------------------------------------------------------------
+  #
+  # Plums are OVAL, and stretched along their own hanging axis rather than the sphere every
+  # other orchard fruit in this batch is. `on=` sinks each into the curtain it belongs to.
+  # 0.056 of 3.9 m is a 22 cm plum, which is absurd botany and is the size the audit had to
+  # ask for twice: `r: 0.019` was a 7 cm fruit on a canopy 4 m across, under two pixels from
+  # the far side of the garden.
+  mirror
+    loft frA bone=aA2 at=0.42 offset=(0.10,-0.14,0.06) dir=down len=0.050 material=Berry on=canA1 inset=0.006 sides=6
+      ring 0.00 w=0.032 d=0.032
+      ring 0.40 w=0.062 d=0.062
+      ring 1.00 w=0.028 d=0.028
+      cap start=dome end=dome
+    loft frB bone=aA2 at=0.94 offset=(0.08,-0.16,0.04) dir=down len=0.050 material=Berry on=canA2 inset=0.006 sides=6
+      ring 0.00 w=0.030 d=0.030
+      ring 0.40 w=0.060 d=0.060
+      ring 1.00 w=0.027 d=0.027
+      cap start=dome end=dome
+    loft frC bone=aB2 at=0.14 offset=(0.06,-0.22,0.26) dir=down len=0.050 material=Berry on=canB1 inset=0.006 sides=6
+      ring 0.00 w=0.030 d=0.030
+      ring 0.40 w=0.061 d=0.061
+      ring 1.00 w=0.027 d=0.027
+      cap start=dome end=dome
+    loft frD bone=aB2 at=0.96 offset=(0.03,-0.17,0.09) dir=down len=0.050 material=Berry on=canB2 inset=0.006 sides=6
+      ring 0.00 w=0.029 d=0.029
+      ring 0.40 w=0.058 d=0.058
+      ring 1.00 w=0.026 d=0.026
+      cap start=dome end=dome
+    loft frE bone=aC2 at=0.44 offset=(0.11,-0.14,-0.05) dir=down len=0.050 material=Berry on=canC1 inset=0.006 sides=6
+      ring 0.00 w=0.031 d=0.031
+      ring 0.40 w=0.062 d=0.062
+      ring 1.00 w=0.028 d=0.028
+      cap start=dome end=dome
+    loft frF bone=aC2 at=0.94 offset=(0.09,-0.16,-0.04) dir=down len=0.050 material=Berry on=canC2 inset=0.006 sides=6
+      ring 0.00 w=0.029 d=0.029
+      ring 0.40 w=0.059 d=0.059
+      ring 1.00 w=0.026 d=0.026
+      cap start=dome end=dome
+    loft frG bone=aD2 at=0.14 offset=(0.08,-0.22,-0.26) dir=down len=0.050 material=Berry on=canD1 inset=0.006 sides=6
+      ring 0.00 w=0.029 d=0.029
+      ring 0.40 w=0.059 d=0.059
+      ring 1.00 w=0.026 d=0.026
+      cap start=dome end=dome
+    loft frH bone=aD2 at=0.96 offset=(0.02,-0.20,-0.18) dir=down len=0.050 material=Berry on=canD2 inset=0.006 sides=6
+      ring 0.00 w=0.028 d=0.028
+      ring 0.40 w=0.057 d=0.057
+      ring 1.00 w=0.025 d=0.025
+      cap start=dome end=dome
+  end
+
+checks
+  assert bottom(bole) < 0.01
+  # WEEPING, and this is the assertion that separates this file from the other three: every
+  # limb's HIGHEST point is inside its own span rather than at its tip, which is what an arch
+  # is and what a straight ray cannot be.
+  assert top(archA.l) > y(aA2.tail) + 0.04
+  # ...and the foliage hangs BELOW the wood that carries it, by most of a curtain's length.
+  assert bottom(canA1.l) < y(aA2.tail) - 0.20
+  # The curtains reach down past the fork, so the crown is a hanging skirt rather than a hat.
+  assert bottom(canA2.l) < top(bole)
+  # Fruit big enough to see, and in the foliage rather than beside it.
+  assert width(frA.l) in 0.040..0.085
+  assert width / height < 1.22
+  assert asymmetry(bole) < 0.005
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 4600
+  measure weep (y(aA2.tail) - bottom(canA1.l)) / height

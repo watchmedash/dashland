@@ -1,0 +1,121 @@
+# Bleached Coral — the same colony, dead.
+#
+# A reef where every head is in flower reads as a toy. What makes one look like
+# a place is that some of it has died: rubble at the edges, a bleached colony
+# among the live ones, the odd broken arm. This is that block, and it is
+# deliberately the *same shape* as `coral_branch.wam` rather than a new
+# silhouette — the point is recognition. You are meant to see the staghorn you
+# already know and register that this one has gone.
+#
+# Three edits carry the whole difference and none of them is a new part:
+#
+#  - **The palette.** Live coral is pink because of the algae living in it;
+#    bleached coral is the bare aragonite skeleton, so every material goes to a
+#    dead chalk-grey with the faintest warm cast left in it. The pale growing
+#    tips that say "this is growing" are the first thing to go: `Tip` here is
+#    barely lighter than the trunk, where on the live model it is nearly white.
+#  - **A snapped arm.** `armB` loses its tapered tip segment and ends on a flat
+#    cap at full thickness — a break, not a growth point. One is enough; two
+#    reads as damage rather than as death.
+#  - **One fork fewer.** The live colony forks twice; this one keeps a single
+#    fork, so the outline is sparser without becoming a different plant.
+#
+# Everything else — the vase bend on every arm, the rooting rules, the
+# one-sided/symmetric arrangement the centreline lint requires — is inherited
+# unchanged from the live model, and the checks below are the live model's with
+# the two removed parts taken out. If that file's geometry is ever retuned, this
+# one should be retuned to match: they are meant to be the same coral.
+
+model coral_dead
+  height 0.80
+  style chunky
+
+palette
+  # Bare skeleton. The three live materials keep their roles — trunk, upper
+  # branch, tip — so the banding still reads as structure, but the range between
+  # them is a fifth of what it was. That flatness *is* the deadness.
+  Coral #c4bdad
+  Rose  #d3cdbf
+  Tip   #e0dbcf
+  Foot  #8f8a7d
+
+skeleton
+  root rock at 0.0
+  bone stump parent=rock dir=up pitch=-2 len=0.26
+
+parts
+  # The stump. Short, fat and darker than everything on it: a staghorn's base is
+  # a crust cemented to the rock, and the height it does not use is height the
+  # branches get instead.
+  loft base bones=rock..stump material=Foot sides=7
+    ring 0.00 w=0.30 d=0.28
+    ring 0.22 w=0.22 d=0.21
+    ring 0.70 w=0.19 d=0.18 material=Coral
+    ring 1.00 w=0.17 d=0.16
+    cap start=flat end=flat
+
+  # Five primaries. Each leaves the stump leaning out and bends back toward
+  # vertical over its length, which is what gives the colony its vase outline
+  # instead of a starburst — and it is why the last segment of every one of
+  # these carries `up=`.
+  sweep armA bone=stump at=0.55 offset=(-0.10,0,0.02) dir=up tilt=38 material=Coral
+    seg len=0.14 r=0.055 up=6
+    seg len=0.13 r=0.046 up=20
+    seg len=0.12 r=0.036 up=26 material=Rose
+    seg len=0.08 r=0.020 up=18 material=Tip tip
+  # The broken one. No `tip` and no taper on the last segment: it ends flat at
+  # very nearly its full thickness, which is what a snapped branch looks like
+  # and what no amount of recolouring can say on its own.
+  sweep armB bone=stump at=0.80 offset=(0.10,0,-0.03) dir=up tilt=-30 material=Coral
+    seg len=0.15 r=0.052 up=8
+    seg len=0.13 r=0.045 up=18
+  sweep armC bone=stump at=0.65 offset=(0,0,0.10) dir=up pitch=34 material=Coral
+    seg len=0.13 r=0.050 up=6
+    seg len=0.13 r=0.041 up=20
+    seg len=0.11 r=0.031 up=24 material=Rose
+    seg len=0.07 r=0.017 up=16 material=Tip tip
+  sweep armD bone=stump at=0.90 offset=(0,0,-0.09) dir=up pitch=-28 material=Coral
+    seg len=0.12 r=0.047 up=8
+    seg len=0.12 r=0.038 up=22
+    seg len=0.10 r=0.028 up=26 material=Rose
+    seg len=0.07 r=0.016 up=14 material=Tip tip
+  # The leader: shorter lean, so it goes up the middle and is the tallest thing
+  # in the colony. Centred on X, so symmetric rather than one-sided.
+  sweep armE bone=stump at=1.00 dir=up pitch=10 material=Coral
+    seg len=0.16 r=0.058 up=2
+    seg len=0.15 r=0.046 up=8
+    seg len=0.13 r=0.034 up=10 material=Rose
+    seg len=0.09 r=0.019 up=6 material=Tip tip
+
+  # The one surviving fork. Rooted `on=` its parent branch so it is flush by
+  # construction rather than by a coordinate I would have had to solve.
+  sweep forkA bone=stump at=0.55 offset=(-0.26,0.30,0.04) dir=up tilt=62 on=armA material=Rose
+    seg len=0.10 r=0.030 up=18
+    seg len=0.09 r=0.022 up=24
+    seg len=0.06 r=0.014 up=18 material=Tip tip
+
+checks
+  # Cemented to the rock, and the stump is the widest thing at the bottom.
+  assert bottom(base) < 0.01
+  assert width(base) > 0.25
+  # A colony, not a candelabra: the leader is tallest, and every primary clears
+  # the stump it grows out of by a good margin.
+  assert top(armE) > top(armA)
+  assert top(armE) > top(armC)
+  assert top(armA) > top(base) * 2.0
+  # It still forks once. If this fails the last second-order branch has been
+  # lost and the model is spokes.
+  assert top(forkA) > top(armA) * 0.85
+  # Vase, not starburst: the colony is taller than it is wide. This is the check
+  # the trailing `up=` bends on every arm exist to satisfy, and it is also what
+  # keeps `BlockModels` (which scales by height alone) from delivering a coral
+  # twice as wide as its own cell.
+  assert height > width
+  assert height > depth
+  assert width / height in 0.45..0.95
+  # The snapped arm, asserted rather than eyeballed: it has to stay visibly
+  # shorter than the leader and stubbier than the arms that still have tips.
+  assert top(armB) < top(armE) * 0.8
+  assert parts == 7
+  assert tris < 900
+  measure spread width / height

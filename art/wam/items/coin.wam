@@ -1,0 +1,88 @@
+# Coin — a struck disc.
+#
+# Authored standing on its rim, not lying flat, because `render/ItemModels.js`
+# normalises every model by its Y extent: a disc lying in the XZ plane would be
+# scaled up by its own thickness and come out the size of a dinner plate. Stood
+# up, the Y extent *is* the diameter and the numbers mean what they say.
+#
+# The loft therefore runs **along the coin's axis** — one bone pointing +Z, one
+# ring per step of the edge profile — and not bottom rim to top rim. Lofting up
+# the face was the obvious reading of "standing on its rim" and it is what made
+# this model look like a hex nut: the circle was then traced by the *ring list*,
+# so the outline had as many corners as there were rings (nine), and the widest
+# ring was 0.80 against a height of 1.00, i.e. an oval a quarter taller than it
+# was wide, which no `checks` line caught because the old one allowed 1.0..1.5.
+# Along the axis every ring is a face circle whose `w` and `d` are the same
+# number — it cannot go oval — and roundness is bought with `sides=`, not with
+# a hand-tabulated table of chords that has to be right to two decimals.
+#
+# `sides=20` because a coin is seen face on more than anything else, and that is
+# the view where the silhouette polygon shows: eight sides is a stop sign at
+# hand distance. Sections stay `round` (the default). The old file forced
+# `shape=box` to stop a round section putting a vertex at the middle of the face
+# and ridging it — a real failure, but one that belonged to the across-the-disc
+# loft. Here the section *is* the face outline, and `_superellipse` samples on
+# the half step anyway, so no vertex ever lands on an axis.
+#
+# The rim is chamfered rather than cut square: 0.84 of the diameter at the face,
+# out to full at the rim, in two steps. Edge on, a hard cylinder is a rectangle
+# and reads as a checker or a washer; the chamfer gives the edge two lit facets,
+# which is the whole of what says "struck metal" at this size. `Shine` sits on
+# the chamfer for the same reason — it is the part of a coin that catches light.
+#
+# The boss is the struck device, and there is one on each side. It is the only
+# thing here that is not rotationally symmetric, so without both the coin was a
+# blank washer from whichever side the fist happened to turn to the camera.
+
+model coin
+  height 0.16
+  style chunky
+
+palette
+  Gold  #d9a52b
+  Shine #ffe58a
+  Rim   #9c6f1a
+
+skeleton
+  # Head half a diameter up and half a thickness back, so the disc sits on the
+  # ground and straddles z=0 — the faces land at ±0.07 and the bosses can be
+  # placed on the bone's own ends.
+  root rim at (0,0.5,-0.07)
+  bone disc parent=rim dir=fwd len=0.14
+
+parts
+  loft blank bones=rim..disc material=Gold frame=up sides=20
+    ring 0.00 w=0.84 d=0.84                 # flat face, chamfer starts here
+    ring 0.22 w=0.97 d=0.97 material=Shine
+    ring 0.38 w=1.00 d=1.00 material=Rim    # the rim band proper
+    ring 0.62 w=1.00 d=1.00 material=Shine
+    ring 0.78 w=0.97 d=0.97 material=Gold
+    ring 1.00 w=0.84 d=0.84
+    cap start=flat end=flat
+
+  # `on=blank` lands the base on the face plane rather than trusting offset
+  # arithmetic; it needs no `inset=`, because the bone end is already on that
+  # surface and `snap_on` leaves an origin it finds there flush. `cap start=none`
+  # drops the disc that would sit inside the coin — 16 triangles nobody can see.
+  loft boss_f bone=disc at=1.0 dir=fwd len=0.036 on=blank material=Shine sides=8
+    ring 0.00 w=0.34 d=0.34
+    ring 1.00 w=0.26 d=0.26
+    cap start=none end=flat
+
+  loft boss_b bone=disc at=0.0 dir=back len=0.036 on=blank material=Shine sides=8
+    ring 0.00 w=0.34 d=0.34
+    ring 1.00 w=0.26 d=0.26
+    cap start=none end=flat
+
+checks
+  assert bottom(blank) < 0.01
+  # Round, not oval — the two in-plane extents of a circle are the same number,
+  # and this is the assertion the hex-nut version was missing.
+  assert width(blank) == height(blank) +- 0.02
+  # ...and a wafer through the axis: a coin, not a checker.
+  assert depth(blank) < width(blank) / 5
+  # The device stands proud of the face on both sides.
+  assert zmax(boss_f) > zmax(blank)
+  assert zmin(boss_b) < zmin(blank)
+  assert parts == 3
+  assert tris < 320

@@ -1,0 +1,68 @@
+# Hops, young bine (rung 2 of 4).
+#
+# Four turns and nothing hanging: the plant is all climb at this stage, which is what a hop
+# yard looks like in early summer. The ropes and everything on them arrive at rung 3, so the
+# rungs differ in PARTS rather than in scale.
+#
+# See `hops_4.wam` for the corkscrew and `icecapmoss_3.wam` for the naming rules.
+
+model hops
+  height 2.2
+  style chunky
+
+palette
+  Wood      #5a8a34
+  Green     #5c9c38
+  DarkGreen #477d2c
+
+skeleton
+  root ground at 0.0
+  mirror
+    bone c1 parent=ground offset=(0.012,0,0.008) dir=up tilt=-12 len=0.115
+    bone c2 parent=c1 dir=up pitch=20  len=0.115
+    bone c3 parent=c2 dir=up tilt=28   len=0.115
+    bone c4 parent=c3 dir=up pitch=-28 len=0.115
+  end
+
+parts
+  mirror
+    loft bine bones=c1..c4 material=Wood sides=5
+      ring 0.00 w=0.021 d=0.021
+      ring 0.50 w=0.016 d=0.016
+      ring 1.00 w=0.010 d=0.010
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft lfA bone=c1 at=0.70 dir=side yaw=30   tilt=-20 len=0.115 material=Green frame=up sides=5
+      ring 0.00 w=0.017 d=0.009
+      ring 0.28 w=0.082 d=0.015
+      ring 0.68 w=0.096 d=0.013
+      ring 1.00 w=0.054 d=0.009
+      cap start=flat end=dome
+    loft lfB bone=c2 at=0.72 dir=side yaw=-104 tilt=-16 len=0.110 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.016 d=0.008
+      ring 0.28 w=0.078 d=0.014
+      ring 0.68 w=0.092 d=0.012
+      ring 1.00 w=0.052 d=0.008
+      cap start=flat end=dome
+    loft lfC bone=c3 at=0.66 dir=side yaw=72   tilt=-24 len=0.110 material=Green frame=up sides=5
+      ring 0.00 w=0.016 d=0.008
+      ring 0.28 w=0.078 d=0.014
+      ring 0.68 w=0.092 d=0.012
+      ring 1.00 w=0.052 d=0.008
+      cap start=flat end=dome
+    loft lfD bone=c4 at=0.62 dir=side yaw=-44  tilt=-18 len=0.105 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.016 d=0.008
+      ring 0.28 w=0.074 d=0.014
+      ring 0.68 w=0.088 d=0.012
+      ring 1.00 w=0.050 d=0.008
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(bine.l) < 0.02
+  # Climbing and nothing else: ten parts against rung 3's twenty-six.
+  assert parts == 10
+  assert height < 0.60
+  assert tris < 800

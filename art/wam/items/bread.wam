@@ -1,0 +1,46 @@
+# Bread — a slashed bâtard loaf.
+#
+# The three cuts across the top are the whole identity: a plain rounded lump of
+# this colour is a potato. They are authored as short `material_arc` bands
+# confined to the top of the tube — a pair of rings 0.05 apart, the first
+# carrying the arc and the second dropping it — which is the only way to get a
+# mark that runs *across* the loaf but does not wrap all the way round it.
+#
+# `frame=up` matters here: the loaf runs along +Z, the axis where the automatic
+# depth frame flips, and the arcs are measured from that frame — without it the
+# slashes end up on the side of the loaf instead of the top.
+
+model bread
+  height 0.3
+  style chunky
+
+palette
+  Crust #a4642a
+  Bake  #8f5420
+  Cut   #edc180
+
+skeleton
+  root heel at 0.10
+  bone loaf parent=heel dir=fwd len=0.70
+
+parts
+  loft boule bones=heel..loaf material=Crust frame=up sides=8
+    ring 0.00 w=0.10 d=0.10 up=-0.02
+    ring 0.10 w=0.28 d=0.24 wbot=0.30 dbot=0.20
+    ring 0.22 w=0.33 d=0.27 wbot=0.35 dbot=0.22 material_arc=Cut:45-135
+    ring 0.32 w=0.34 d=0.27 wbot=0.36 dbot=0.22
+    ring 0.44 w=0.35 d=0.28 wbot=0.37 dbot=0.22 material_arc=Cut:45-135
+    ring 0.54 w=0.35 d=0.28 wbot=0.37 dbot=0.22
+    ring 0.66 w=0.33 d=0.27 wbot=0.35 dbot=0.22 material_arc=Cut:45-135
+    ring 0.76 w=0.32 d=0.26 wbot=0.34 dbot=0.21
+    ring 0.90 w=0.24 d=0.20 wbot=0.26 dbot=0.17
+    ring 1.00 w=0.09 d=0.09 up=-0.02
+    cap start=dome end=dome
+
+checks
+  assert bottom(boule) < 0.02
+  # A loaf, not a bun and not a baguette.
+  assert depth(boule) / width(boule) in 1.6..2.4
+  assert width(boule) / height(boule) in 1.0..1.6
+  assert parts == 1
+  assert tris < 340

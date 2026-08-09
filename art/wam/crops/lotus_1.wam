@@ -1,0 +1,29 @@
+# Lotus, sprout (rung 1 of 4).
+#
+# One pad. The smallest thing that can still be recognised as this crop from above.
+
+model lotus
+  height 0.70
+  style smooth
+
+palette
+  Green     #5aa85e
+  DarkGreen #4a8a4e
+
+skeleton
+  # y=0 is the waterline: `world/crops.js` snaps a paddy plot for this crop to the water
+  # plane exactly, because pads float. So the pads sit at y=0 and the stalk rises from it.
+  root water at 0.0
+
+parts
+  mirror
+    loft padA bone=water at=0.0 offset=(0.16,0.0,0.06) dir=up len=0.04 material=Green sides=14
+      ring 0.00 w=0.28 d=0.28
+      ring 1.00 w=0.31 d=0.31
+      cap start=flat end=flat
+  end
+
+checks
+  assert bottom(padA.l) < 0.01
+  assert parts == 2
+  assert tris < 240

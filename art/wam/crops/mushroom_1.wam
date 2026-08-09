@@ -1,0 +1,56 @@
+# Common Mushroom, first rung (1 of 3).
+#
+# Two pinheads in the litter. The cap has not opened, so there is no rim, no undercut and
+# no gill band anywhere on this rung — the rungs of a WAM family differ in PARTS, and a
+# juvenile authored as "the ripe model, smaller" makes the stage ladder a zoom, which is
+# exactly what the pack ladder this replaces did.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model mushroom
+  height 0.28
+  style smooth
+
+palette
+  Wood      #e0d4b8
+  Green     #c9b894
+  Berry     #9a6a48
+
+skeleton
+  root litter at 0.0
+  bone pinA parent=litter dir=up pitch=-4 len=0.13
+  bone pinB parent=litter offset=(0.26,0.008,0.15) dir=up pitch=7 tilt=-10 len=0.09
+
+parts
+  loft stemA bones=pinA..pinA material=Wood sides=7
+    ring 0.00 w=0.190 d=0.190
+    ring 0.40 w=0.150 d=0.150
+    ring 1.00 w=0.160 d=0.160
+    cap start=flat end=flat
+  loft stemB bones=pinB..pinB material=Wood sides=6
+    ring 0.00 w=0.150 d=0.150
+    ring 0.40 w=0.118 d=0.118
+    ring 1.00 w=0.126 d=0.126
+    cap start=flat end=flat
+
+  # Closed buttons: widest in the middle, shut at both ends.
+  loft pinheadA bone=pinA at=1.00 dir=up len=0.20 material=Berry sides=10
+    ring 0.00 w=0.20 d=0.20
+    ring 0.36 w=0.31 d=0.31
+    ring 0.72 w=0.29 d=0.29
+    ring 1.00 w=0.13 d=0.13
+    cap start=dome end=dome
+  loft pinheadB bone=pinB at=1.00 dir=up len=0.15 material=Berry sides=8
+    ring 0.00 w=0.16 d=0.16
+    ring 0.36 w=0.24 d=0.24
+    ring 0.72 w=0.22 d=0.22
+    ring 1.00 w=0.10 d=0.10
+    cap start=dome end=dome
+
+checks
+  # Closed: barely wider than the stalk under it. The ripe rung asserts the cap overhangs.
+  assert width(pinheadA) / width(stemA) < 2.4
+  assert bottom(stemA) < 0.02
+  assert top(pinheadA) < 0.36
+  assert tris < 500
+  measure aspect width / height

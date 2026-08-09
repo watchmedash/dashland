@@ -1,0 +1,175 @@
+# Squash, ripe (rung 4 of 4).
+#
+# cropdata silhouette: "Crooked-neck gourd, pale yellow, lying among broad lobed leaves."
+#
+# ---- why this could not be tuned into existence ---------------------------------
+#
+# `world/crops.js` recorded the diagnosis on 2026-08-04 and it is worth keeping: "no crooked
+# neck — true by construction. `gourdGeometry` is a supersphere, and a supersphere is
+# radially symmetric about its own axis, so no setting of `aspect`, `lobes` or `boxy` can
+# ever produce a NECK." The fix that shipped after it swapped in `produce/buttersquash01`, a
+# two-lobed bottle gourd, and the audit's verdict on that was "the neck is legible up close
+# only" — which is the honest result of hanging a 30 cm prop in the middle of a 2x2 leaf
+# sprawl and hoping.
+#
+# A neck is a BEND, and a bend is two bones. The gourd here is one loft along a two-bone
+# chain: the first lies almost flat on the soil and carries the bulb, the second turns up
+# through fifty degrees and carries the neck, narrowing the whole way. That silhouette — a
+# fat end on the ground with a thin hook rising off it — is legible from directly above,
+# which is the angle a mound crop is actually looked at from and the one a radially
+# symmetric fruit has nothing to offer at all.
+#
+# The leaves are the other half. A squash leaf is BROAD and LOBED, and a lobe is expressible
+# as a ring profile: the blade's width goes 0.42 / 0.30 / 0.46 / 0.34 along its length
+# instead of swelling once and tapering, so the outline scallops in and out. Three flat
+# ovals would have been cheaper and would read as a lily.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model squash
+  height 0.65
+  style chunky
+
+palette
+  Wood      #4a7a2e
+  Green     #6aa83e
+  DarkGreen #4e8230
+  Berry     #e0b93c
+
+skeleton
+  root crown at 0.055
+  # Petioles. Shallow and long — a mound crop SPRAWLS, and the leaves have to reach most of
+  # the way across the 2x2 the style gives it.
+  mirror
+    bone ptA parent=crown dir=side yaw=18  tilt=34 len=0.229
+    bone ptB parent=crown dir=side yaw=72  tilt=26 len=0.264
+    bone ptC parent=crown dir=side yaw=-34 tilt=40 len=0.211
+    bone ptD parent=crown dir=side yaw=-86 tilt=22 len=0.246
+  end
+
+  # A short central hub, so the `mound` loft has a symmetric chain to run along — a central
+  # part lofted to one side of a mirrored pair is lopsided by construction, and the lint
+  # says so in as many words.
+  bone hub parent=crown dir=up len=0.06
+
+  # THE GOURD. Two bones: the bulb lying on the soil, then the neck turning up off it.
+  # `tilt` is the elevation of a `side` bone, so 6 degrees is "lying down" and 50 is the
+  # crook. Not mirrored — there is one squash on the plant and cropdata says so.
+  bone gd1 parent=crown offset=(-0.16,0.08,0.22) dir=side yaw=-118 tilt=4  len=0.26
+  bone gd2 parent=gd1 dir=side yaw=-118 tilt=52 len=0.20
+
+parts
+  loft mound bones=crown..hub material=Wood sides=6
+    ring 0.00 w=0.11 d=0.11
+    ring 1.00 w=0.055 d=0.055
+    cap start=dome end=dome
+  mirror
+    loft stalkA bones=ptA..ptA material=Wood sides=5
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.033 d=0.033
+      cap start=dome end=flat
+  end
+
+  mirror
+    loft stalkB bones=ptB..ptB material=Wood sides=5
+      ring 0.00 w=0.048 d=0.048
+      ring 1.00 w=0.032 d=0.032
+      cap start=dome end=flat
+    loft stalkC bones=ptC..ptC material=Wood sides=5
+      ring 0.00 w=0.046 d=0.046
+      ring 1.00 w=0.030 d=0.030
+      cap start=dome end=flat
+    loft stalkD bones=ptD..ptD material=Wood sides=5
+      ring 0.00 w=0.044 d=0.044
+      ring 1.00 w=0.029 d=0.029
+      cap start=dome end=flat
+  end
+
+  # ---- the lobed leaves ----------------------------------------------------------
+  #
+  # `frame=up` with w WIDE and d THIN — a flat blade lying face-up, the idiom `cocoa_4.wam`
+  # spells out. The width then SCALLOPS along the blade instead of swelling once, which is
+  # the lobing, and it costs nothing: the same four rings either way.
+  mirror
+    loft lfA bone=ptA at=1.00 dir=side yaw=18 tilt=-16 len=0.352 material=Green frame=up sides=6
+      ring 0.00 w=0.10 d=0.030
+      ring 0.24 w=0.44 d=0.052
+      ring 0.46 w=0.31 d=0.046
+      ring 0.72 w=0.48 d=0.050
+      ring 1.00 w=0.20 d=0.026
+      cap start=flat end=dome
+    loft lfB bone=ptB at=1.00 dir=side yaw=72 tilt=-10 len=0.387 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.10 d=0.030
+      ring 0.24 w=0.47 d=0.054
+      ring 0.46 w=0.33 d=0.048
+      ring 0.72 w=0.51 d=0.052
+      ring 1.00 w=0.21 d=0.027
+      cap start=flat end=dome
+    loft lfC bone=ptC at=1.00 dir=side yaw=-34 tilt=-20 len=0.334 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.09 d=0.028
+      ring 0.24 w=0.42 d=0.050
+      ring 0.46 w=0.29 d=0.044
+      ring 0.72 w=0.45 d=0.048
+      ring 1.00 w=0.19 d=0.025
+      cap start=flat end=dome
+    loft lfD bone=ptD at=1.00 dir=side yaw=-86 tilt=-8 len=0.370 material=Green frame=up sides=6
+      ring 0.00 w=0.10 d=0.029
+      ring 0.24 w=0.45 d=0.052
+      ring 0.46 w=0.31 d=0.046
+      ring 0.72 w=0.49 d=0.050
+      ring 1.00 w=0.20 d=0.026
+      cap start=flat end=dome
+    # Two leaves held UP over the crown. A sprawl with every blade flat on the soil reads as
+    # a puddle from eye level; the crop needs some height at the middle to be a plant.
+    loft lfE bone=ptA at=0.30 dir=side yaw=44 tilt=48 len=0.264 material=Green frame=up sides=6
+      ring 0.00 w=0.08 d=0.026
+      ring 0.24 w=0.34 d=0.046
+      ring 0.46 w=0.24 d=0.040
+      ring 0.72 w=0.37 d=0.044
+      ring 1.00 w=0.15 d=0.022
+      cap start=flat end=dome
+  end
+
+  # ---- the crooked neck ----------------------------------------------------------
+  #
+  # One loft along the two-bone chain. Waisted where it turns, for the reason
+  # `mireroot_4.wam` records — a ring wider than the bend reach folds the surface back and
+  # the lint calls it out — and here the waist is also the anatomy: the bulb ends and the
+  # neck begins at exactly that ring.
+  loft gourd bones=gd1..gd2 material=Berry sides=8 refaxis=(0.47,0,0.88)
+    ring 0.00 w=0.14 d=0.14
+    ring 0.16 w=0.25 d=0.25
+    ring 0.36 w=0.27 d=0.27
+    ring 0.56 w=0.15 d=0.15
+    ring 0.74 w=0.11 d=0.11
+    ring 1.00 w=0.085 d=0.085
+    cap start=dome end=dome
+  # The peduncle: a short woody stub on the neck's end, which is the tell that says this is
+  # a picked-by-the-stalk fruit and not an egg lying in the leaves.
+  loft peduncle bone=gd2 at=1.00 dir=up pitch=22 len=0.055 material=Wood on=gourd sides=5
+    ring 0.00 w=0.055 d=0.055
+    ring 1.00 w=0.040 d=0.040
+    cap start=flat end=flat
+
+checks
+  # A CROOKED NECK: the far end of the gourd is high and the bulb is on the soil, and the
+  # two are a real vertical distance apart. This is the assertion a supersphere cannot pass
+  # and is the whole reason this file exists.
+  assert (top(gourd) - bottom(gourd)) / height(gourd) > 0.95
+  assert bottom(gourd) < 0.06
+  assert y(gd2.tail) > y(gd1.tail) + 0.10
+  # ...and the neck is genuinely thinner than the bulb it grows off.
+  assert width(peduncle) < 0.5 * 0.27
+  # The gourd is the biggest single object on the plot and is NOT buried in the foliage.
+  assert top(gourd) > 0.20
+  # Broad LOBED leaves: much wider than the petiole that carries them, and long.
+  assert width(lfA.l) > 0.30
+  # A sprawl: much wider than tall, and `wide: 1.35` in the recipe is what pays for it.
+  assert width / height in 2.0..3.2
+  # ...in BOTH ground axes: `familyScale` caps on the larger of the two, so a plant that is
+  # modest in x and enormous in z arrives short.
+  assert depth / height < 3.30
+  assert bottom(mound) < 0.06
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 3400
+  measure sprawl width / height

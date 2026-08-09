@@ -1,0 +1,99 @@
+# Glowcap, ripe (rung 3 of 3).
+#
+# cropdata silhouette: "Translucent teal cap that EMITS LIGHT at night — a real light
+# source, not just emissive." The light half is `world/crops.js`'s job (glowcap gets its
+# own emissive material and a pooled PointLight); this file owns the half that is a SHAPE,
+# and the shape it replaces was `nature/Mushroom_1..4` — the same four models the common
+# mushroom uses, so the game's rarest, most expensive fungus and its 22-gold starter were
+# the same object in two colours.
+#
+# What separates them here is proportion and posture. A glowcap is a LAMP: a long slender
+# stipe holding a broad thin parasol clear of the litter, because a light source that sits
+# on the ground lights nothing. The common mushroom (see `mushroom_3.wam`) is the opposite
+# — squat, thick-stemmed, cap barely above the soil.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model glowcap
+  height 0.35
+  style smooth
+
+palette
+  # Wood -> stem: cropdata's `stem` is the palest teal in the crop, which is the stipe.
+  Wood      #cfeee6
+  # Green -> leaf: the gill skirt under the cap, a shade down from the cap itself.
+  Green     #7fc4b8
+  # Berry -> fruit: the cap. The brightest colour cropdata gives this crop, and the one
+  # the emissive material lifts at night.
+  Berry     #5fe8d0
+
+skeleton
+  root soil at 0.0
+  # Three stipes at three heights and no `mirror` block: a fungal colony is not symmetric,
+  # and the lint only polices symmetry on parts that straddle the axis, so a one-sided
+  # arrangement is the author's business. Different heights are what makes a cluster read
+  # as a cluster rather than as one mushroom drawn three times.
+  bone stipeA parent=soil dir=up pitch=-3 len=0.74
+  bone stipeB parent=soil offset=(0.30,0.012,0.16) dir=up pitch=7 tilt=-11 len=0.46
+  bone stipeC parent=soil offset=(-0.27,0.010,-0.19) dir=up pitch=-6 tilt=9 len=0.33
+
+parts
+  # The stipes. Waisted — narrow at the middle, flared at the base and again under the cap
+  # — because a straight cylinder reads as a peg. The base flare is also what seats it in
+  # the litter without a separate part.
+  loft stemA bones=stipeA..stipeA material=Wood sides=8
+    ring 0.00 w=0.150 d=0.150
+    ring 0.16 w=0.092 d=0.092
+    ring 0.72 w=0.082 d=0.082
+    ring 1.00 w=0.112 d=0.112
+    cap start=flat end=flat
+  loft stemB bones=stipeB..stipeB material=Wood sides=7
+    ring 0.00 w=0.120 d=0.120
+    ring 0.18 w=0.072 d=0.072
+    ring 1.00 w=0.090 d=0.090
+    cap start=flat end=flat
+  loft stemC bones=stipeC..stipeC material=Wood sides=6
+    ring 0.00 w=0.100 d=0.100
+    ring 0.20 w=0.060 d=0.060
+    ring 1.00 w=0.076 d=0.076
+    cap start=flat end=flat
+
+  # The caps. A parasol, not a dome: the widest ring is a fifth of the way up and the
+  # surface then falls away to a low apex, so the rim overhangs and casts the plant's
+  # silhouette outward. The first band is `Green` — `material=` on a ring bands the tube
+  # ALONG its length, so ring 0 to ring 0.17 is the underside skirt where the gills are,
+  # and it costs no extra part. A separate gill disc under the cap is exactly the geometry
+  # WAM's lint calls "buried entirely inside another part".
+  loft capA bone=stipeA at=1.00 dir=up len=0.19 material=Berry sides=14
+    ring 0.00 w=0.26 d=0.26 material=Green
+    ring 0.17 w=0.86 d=0.86 material=Berry
+    ring 0.58 w=0.74 d=0.74
+    ring 1.00 w=0.26 d=0.26
+    cap start=flat end=dome
+  loft capB bone=stipeB at=1.00 dir=up len=0.13 material=Berry sides=12
+    ring 0.00 w=0.20 d=0.20 material=Green
+    ring 0.17 w=0.60 d=0.60 material=Berry
+    ring 0.58 w=0.52 d=0.52
+    ring 1.00 w=0.19 d=0.19
+    cap start=flat end=dome
+  loft capC bone=stipeC at=1.00 dir=up len=0.10 material=Berry sides=10
+    ring 0.00 w=0.16 d=0.16 material=Green
+    ring 0.17 w=0.44 d=0.44 material=Berry
+    ring 0.58 w=0.38 d=0.38
+    ring 1.00 w=0.15 d=0.15
+    cap start=flat end=dome
+
+checks
+  # A lamp on a stalk: the cap is held well clear of the ground, which is the whole
+  # difference from the common mushroom and the reason the light reads.
+  assert bottom(capA) / height > 0.62
+  assert bottom(stemA) < 0.02
+  # The parasol overhangs its own stipe by a wide margin.
+  assert width(capA) / width(stemA) > 5
+  # A colony at three heights, not one mushroom stamped three times.
+  assert top(capA) > top(capB) + 0.10
+  assert top(capB) > top(capC) + 0.05
+  # Budget: `clump: 1`, so this is the whole per-tile cost.
+  assert tris < 1600
+  measure aspect width / height
+  measure capspan width(capA)

@@ -1,0 +1,123 @@
+# Azure Bloom — a nodding bell.
+#
+# Three flowers on one tile of grass need three silhouettes, not three colours.
+# The crimson bloom is an upright teardrop and the sun daisy is a flat radiating
+# plate, so this one is the third thing a flower can be: a bell hanging off a
+# crooked neck. At ankle height in the world, colour is most of what you get,
+# but the nod is what tells you which flower it is when the sun is behind it.
+#
+# The nod is two bones, not one. A single bone at the full angle puts the bell
+# on a straight diagonal spar — a windsock. Breaking it at 48° and then 118°
+# gives the stem a shoulder, which is what a bellflower's peduncle actually does
+# and what stops the head reading as something the stalk is pointing at.
+#
+# Those numbers are **world-referenced and do not accumulate**. `dir=up
+# pitch=48` means "world up, tipped 48° forward", not "48° on top of whatever my
+# parent did" — this was first written as 42 then 73 in the belief they summed
+# to 115, and the bell came out with an elevation of +17°, i.e. still pointing
+# up. `elevation(bell) < -20` in the checks is that mistake made permanent: it
+# is the one number that says the flower nods, and it cannot be satisfied by
+# accident.
+#
+# The bell is one loft along one bone, deliberately: a loft can only bend where
+# a bone bends, and lofting through the neck→bell joint at 118° with a ring
+# 0.38 wide is exactly the fold the compiler warns about — the surface doubles
+# back on itself and the head gets holes. Starting the loft *at* the joint costs
+# nothing, because the neck is inside the stem loft anyway.
+#
+# `Pale` is the mouth of the bell and nothing else. That colour (#f0f0fa, the
+# tile's centre) is the inside of the flower, and the inside of a downward-facing
+# bell is not visible — but the rim band and the end cap are, from anywhere
+# below the head, which at ankle height is where the player's eye is not. It
+# reads instead as the pale lip the texture draws, and it costs one ring.
+
+model flower_blue
+  height 0.40
+  style chunky
+
+palette
+  Petal #4c74d8
+  Deep  #33509c
+  Pale  #f0f0fa
+  Stem  #40682c
+  Leaf  #507e34
+
+skeleton
+  root soil at 0.0
+  bone stalk parent=soil dir=up pitch=-3 len=0.74
+  bone neck  parent=stalk dir=up pitch=48 len=0.13
+  bone nod   parent=neck  dir=up pitch=118 len=0.26
+  mirror
+    bone side parent=stalk at=0.20 dir=up tilt=27 pitch=6 yaw=-30 len=0.28
+    bone leaf parent=stalk at=0.18 dir=side tilt=-6 yaw=-28 len=0.25
+  end
+
+parts
+  # The stem runs all the way through the neck, so the crook is one continuous
+  # tube. The compiler inserts a ring at the stalk→neck joint on its own; the
+  # rings here only have to describe the taper.
+  loft stem bones=soil..neck material=Stem sides=4
+    ring 0.00 w=0.075 d=0.072
+    ring 0.08 w=0.042 d=0.040
+    ring 0.62 w=0.034 d=0.032
+    ring 1.00 w=0.030 d=0.028
+    cap start=flat end=flat
+
+  # Widening toward the mouth: 0.06 at the calyx, 0.38 at the rim, then in a
+  # touch so the lip is a lip and not the widest thing on the model. The
+  # alternating rolls on a `squarish` section are the fused petals.
+  loft bell bones=nod..nod material=Petal sides=8 shape=squarish frame=up
+    ring 0.00 w=0.07 d=0.07 material=Deep
+    ring 0.26 w=0.21 d=0.20 roll=14 material=Petal
+    ring 0.60 w=0.32 d=0.31 roll=-19
+    ring 0.88 w=0.38 d=0.37 roll=21
+    ring 1.00 w=0.33 d=0.32 roll=-8 material=Pale
+    cap start=flat end=flat
+
+  mirror
+    loft sidestem bones=side..side material=Stem sides=4
+      ring 0.00 w=0.032 d=0.030
+      ring 1.00 w=0.024 d=0.023
+      cap start=flat end=flat
+
+    # Buds nod too, on the same 100°-odd from vertical, or the clump reads as
+    # one bellflower growing out of two of something else.
+    loft bud bone=side at=1.0 dir=fwd pitch=14 len=0.17 on=sidestem material=Petal sides=6 shape=squarish
+      ring 0.00 w=0.07 d=0.07 material=Deep
+      ring 0.32 w=0.16 d=0.15 roll=16 material=Petal
+      ring 0.78 w=0.19 d=0.18 roll=-21
+      ring 1.00 w=0.15 d=0.14 roll=10 material=Deep
+      cap start=flat end=flat
+
+    loft blade bones=leaf..leaf material=Leaf sides=4 frame=up
+      ring 0.00 w=0.030 d=0.020
+      ring 0.35 w=0.090 d=0.026
+      ring 0.75 w=0.072 d=0.022
+      ring 1.00 w=0.020 d=0.012
+      cap start=flat end=point
+  end
+
+checks
+  assert bottom(stem) < 0.01
+  # The nod, stated as the thing it is: the bell hangs forward of the stalk it
+  # grows on, and its mouth is the lowest part of the head. Both halves matter —
+  # a bell that leans forward but still opens sideways is a trumpet.
+  #
+  # The bone is `nod` and the part is `bell` because they may not share a name.
+  # Both are legal `checks` names, the bone wins the lookup, and a bone resolves
+  # to its *head* — so `z(bell)` quietly measured where the head begins instead
+  # of where its mass sits, read 0.058 against a bbox centre of 0.203, and this
+  # assertion failed on a model that was already right.
+  assert z(bell) > z(stem) + 0.10
+  assert elevation(nod) < -20
+  # ...and it still hangs above the leaves, not into them.
+  assert bottom(bell) > top(blade.l)
+  # The head is the widest thing on the model and the stalk is a wire.
+  assert width(bell) > width(stem) * 3
+  assert bottom(bell) > top(bud.l)
+  # Y stays the long axis. A head that hangs forward buys depth at the expense
+  # of height, and `render/ItemModels.js` divides by the Y extent — the crab
+  # claw's problem, and it takes the crab claw's assertion.
+  assert height / depth in 1.15..2.2
+  assert parts == 8
+  assert tris < 600

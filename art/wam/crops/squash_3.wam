@@ -1,0 +1,139 @@
+# Squash, flowering (rung 3 of 4).
+#
+# The sprawl of `squash_4.wam` at four fifths the size, with a big trumpet FLOWER where the
+# gourd will be instead of a small pale gourd. Squash has four crop stages over four models,
+# so this rung is stage 3 alone and the fruiting one stage 4 alone.
+#
+# The flower is `Berry`, i.e. `colors.fruit`, and that is not a compromise: cropdata's fruit
+# colour here is 0xe0b93c, a pale yellow, which is what a squash blossom actually is. It also
+# means the ripeness read is a change of SHAPE rather than of colour — a trumpet becomes a
+# crooked gourd — which is the one thing `world/crops.js`'s generated-fruit ripeness trick
+# (half the count, the colour dragged back toward the leaf) cannot express.
+#
+# See `squash_4.wam` for the neck and `icecapmoss_3.wam` for the naming rules.
+model squash
+  height 0.65
+  style chunky
+
+palette
+  Wood      #4a7a2e
+  Green     #6aa83e
+  DarkGreen #4e8230
+  Berry     #e0b93c
+
+skeleton
+  root crown at 0.032
+  # Petioles. Shallow and long — a mound crop SPRAWLS, and the leaves have to reach most of
+  # the way across the 2x2 the style gives it.
+  mirror
+    bone ptA parent=crown dir=side yaw=18  tilt=34 len=0.188
+    bone ptB parent=crown dir=side yaw=72  tilt=26 len=0.216
+    bone ptC parent=crown dir=side yaw=-34 tilt=40 len=0.173
+    bone ptD parent=crown dir=side yaw=-86 tilt=22 len=0.202
+  end
+
+  # A short central hub, so the `mound` loft has a symmetric chain to run along — a central
+  # part lofted to one side of a mirrored pair is lopsided by construction, and the lint
+  # says so in as many words.
+  bone hub parent=crown dir=up len=0.049
+
+  # The flower stalk. One, off-axis, not mirrored — the gourd that replaces it is one gourd.
+  bone fl parent=crown offset=(-0.14,0.02,0.19) dir=up pitch=30 len=0.100
+
+parts
+  loft mound bones=crown..hub material=Wood sides=6
+    ring 0.00 w=0.11 d=0.11
+    ring 1.00 w=0.055 d=0.055
+    cap start=dome end=dome
+  mirror
+    loft stalkA bones=ptA..ptA material=Wood sides=5
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.033 d=0.033
+      cap start=dome end=flat
+  end
+
+  mirror
+    loft stalkB bones=ptB..ptB material=Wood sides=5
+      ring 0.00 w=0.048 d=0.048
+      ring 1.00 w=0.032 d=0.032
+      cap start=dome end=flat
+    loft stalkC bones=ptC..ptC material=Wood sides=5
+      ring 0.00 w=0.046 d=0.046
+      ring 1.00 w=0.030 d=0.030
+      cap start=dome end=flat
+    loft stalkD bones=ptD..ptD material=Wood sides=5
+      ring 0.00 w=0.044 d=0.044
+      ring 1.00 w=0.029 d=0.029
+      cap start=dome end=flat
+  end
+
+  # ---- the lobed leaves ----------------------------------------------------------
+  #
+  # `frame=up` with w WIDE and d THIN — a flat blade lying face-up, the idiom `cocoa_4.wam`
+  # spells out. The width then SCALLOPS along the blade instead of swelling once, which is
+  # the lobing, and it costs nothing: the same four rings either way.
+  mirror
+    loft lfA bone=ptA at=1.00 dir=side yaw=18 tilt=-16 len=0.289 material=Green frame=up sides=6
+      ring 0.00 w=0.10 d=0.030
+      ring 0.24 w=0.44 d=0.052
+      ring 0.46 w=0.31 d=0.046
+      ring 0.72 w=0.48 d=0.050
+      ring 1.00 w=0.20 d=0.026
+      cap start=flat end=dome
+    loft lfB bone=ptB at=1.00 dir=side yaw=72 tilt=-10 len=0.317 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.10 d=0.030
+      ring 0.24 w=0.47 d=0.054
+      ring 0.46 w=0.33 d=0.048
+      ring 0.72 w=0.51 d=0.052
+      ring 1.00 w=0.21 d=0.027
+      cap start=flat end=dome
+    loft lfC bone=ptC at=1.00 dir=side yaw=-34 tilt=-20 len=0.274 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.09 d=0.028
+      ring 0.24 w=0.42 d=0.050
+      ring 0.46 w=0.29 d=0.044
+      ring 0.72 w=0.45 d=0.048
+      ring 1.00 w=0.19 d=0.025
+      cap start=flat end=dome
+    loft lfD bone=ptD at=1.00 dir=side yaw=-86 tilt=-8 len=0.303 material=Green frame=up sides=6
+      ring 0.00 w=0.10 d=0.029
+      ring 0.24 w=0.45 d=0.052
+      ring 0.46 w=0.31 d=0.046
+      ring 0.72 w=0.49 d=0.050
+      ring 1.00 w=0.20 d=0.026
+      cap start=flat end=dome
+    # Two leaves held UP over the crown. A sprawl with every blade flat on the soil reads as
+    # a puddle from eye level; the crop needs some height at the middle to be a plant.
+    loft lfE bone=ptA at=0.30 dir=side yaw=44 tilt=48 len=0.216 material=Green frame=up sides=6
+      ring 0.00 w=0.08 d=0.026
+      ring 0.24 w=0.34 d=0.046
+      ring 0.46 w=0.24 d=0.040
+      ring 0.72 w=0.37 d=0.044
+      ring 1.00 w=0.15 d=0.022
+      cap start=flat end=dome
+  end
+
+  # ---- the blossom ---------------------------------------------------------------
+  #
+  # A trumpet: narrow at the stalk, flaring hard at the mouth, open at the end. `cap end=none`
+  # is what makes it a trumpet rather than a bud — a closed flower is a yellow egg.
+  loft bloom bone=fl at=1.00 dir=up pitch=30 len=0.13 material=Berry sides=7
+    ring 0.00 w=0.05 d=0.05
+    ring 0.42 w=0.11 d=0.11
+    ring 0.78 w=0.19 d=0.19
+    ring 1.00 w=0.26 d=0.26
+    cap start=flat end=none
+
+checks
+  # A TRUMPET: the mouth is much wider than the throat, and it is held clear of the leaves.
+  assert width(bloom) > 0.20
+  assert top(bloom) > 0.16
+  assert top(bloom) < 0.33
+  # Sparser in PARTS than the ripe rung — no gourd, no peduncle.
+  assert parts == 20
+  # Must not out-top the ripe rung, or the ordering pass shrinks it.
+  assert height in 0.20..0.34
+  assert width / height in 2.2..3.9
+  assert depth / height < 4.0
+  assert bottom(mound) < 0.06
+  assert tris < 2600
+  measure sprawl width / height

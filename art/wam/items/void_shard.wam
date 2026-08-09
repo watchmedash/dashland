@@ -1,0 +1,43 @@
+# Void shard — a broken piece of something, not a grown crystal.
+#
+# Every other gem in the set is either a cut stone (ruby's brilliant) or a grown
+# point (astral's prism, amethyst's druse), and both of those are *tidy*. A void
+# shard has to be the one that is neither, or it is a fourth purple lozenge. So
+# this is a single blade-shaped splinter with no symmetry at all: the section is
+# a lens rather than a prism, the `side=` offsets walk the profile off its own
+# axis on the way up, and the tip is snapped square instead of pointed.
+#
+# The pale material is on the *broken* faces, via an arc down one side, which is
+# the same logic as flint's fresh break — the colour edge tells you the shape is
+# a fracture rather than a facet.
+
+model void_shard
+  height 0.26
+  style chunky
+
+palette
+  Void #3a1f66
+  Edge #6b3fbf
+  Glow #c9a4ff
+
+skeleton
+  root stub at 0.008
+  bone blade parent=stub dir=up pitch=-6 yaw=12 len=0.84
+
+parts
+  loft splinter bones=stub..blade material=Void frame=fwd sides=6 material_arc=Edge:40-130
+    ring 0.00 w=0.26 d=0.14
+    ring 0.14 w=0.40 d=0.17 side=0.02
+    ring 0.38 w=0.42 d=0.15 side=0.05
+    ring 0.62 w=0.30 d=0.11 side=0.03 material_arc=Glow:40-130
+    ring 0.86 w=0.20 d=0.075 side=-0.03 material_arc=Glow:40-130
+    ring 1.00 w=0.10 d=0.04 side=-0.06
+    cap start=flat end=flat
+
+checks
+  assert bottom(splinter) < 0.015
+  # A blade: tall, broad on one axis, a wafer on the other.
+  assert depth(splinter) < width(splinter) / 1.8
+  assert height / width in 1.5..2.8
+  assert parts == 1
+  assert tris < 160

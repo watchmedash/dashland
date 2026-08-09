@@ -45,8 +45,10 @@ pumpkin.
 ## Raw materials and reef life — original models, authored in WAM
 
 Not third-party art: forty-three models written for this project as `.wam`
-source in `wam/items/`, compiled by the toolchain in `wam/`, under the same
-licence as the rest of the game. See `wam/SPEC.md`.
+source in `art/wam/items/`, compiled by the toolchain in `wam/`, under the same
+licence as the rest of the game. The art is ours and lives with the game; the
+toolchain is upstream's and is only cloned here. See `wam/SPEC.md` for the
+language and `art/wam/README.md` for how a model is built.
 
 The nine most recent are the reef — the three living corals, the bleached one,
 kelp, sea grass, the sponge cluster, the giant clam and the pearl it drops. All

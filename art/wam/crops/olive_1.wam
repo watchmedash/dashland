@@ -1,0 +1,49 @@
+# Olive Tree, seedling (rung 1 of 4).
+#
+# A leaning whip with narrow blade leaves. Even here the species is legible: the stem is not
+# vertical and the leaf is a lance rather than the little spade the other three seedlings
+# carry, which is `olive_4.wam`'s "gnarled" and "narrow" arriving on day one.
+#
+# See `olive_4.wam` for the gnarl and `icecapmoss_3.wam` for the naming rules.
+
+model olive
+  height 3.5
+  style chunky
+
+palette
+  Wood      #8a7a5c
+  Green     #8fa06a
+  DarkGreen #6c7d50
+
+skeleton
+  root ground at 0.0
+  bone whip parent=ground dir=up tilt=-9 len=0.13
+
+parts
+  loft stem bones=ground..whip material=Wood sides=6
+    ring 0.00 w=0.021 d=0.021
+    ring 1.00 w=0.013 d=0.013
+    cap start=flat end=flat
+
+  mirror
+    loft leafA bone=whip at=0.58 dir=side tilt=-4 len=0.075 material=Green frame=up sides=4
+      ring 0.00 w=0.008 d=0.005
+      ring 0.28 w=0.026 d=0.010
+      ring 0.74 w=0.023 d=0.009
+      ring 1.00 w=0.007 d=0.004 tip
+      cap start=flat end=point
+    loft leafB bone=whip at=1.00 dir=side yaw=98 tilt=6 len=0.068 material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.008 d=0.005
+      ring 0.28 w=0.024 d=0.009
+      ring 0.74 w=0.021 d=0.008
+      ring 1.00 w=0.006 d=0.004 tip
+      cap start=flat end=point
+  end
+
+checks
+  assert bottom(stem) < 0.01
+  assert parts == 5
+  assert height < 0.18
+  # NARROW even at this size: four times as long as it is wide.
+  assert len(whip) > 0
+  assert tris < 400

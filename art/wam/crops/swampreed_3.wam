@@ -1,0 +1,143 @@
+# Swamp Reed, ripe (rung 3 of 3).
+#
+# cropdata silhouette: "Tall straight canes with a dark brown cattail head. Cheap, fast,
+# good early income." What shipped was `crops/Bamboo_1..3` at `clump: 5` with a generated
+# `ear` on top — and the file's own comment admitted the shape problem: "the bamboo canes
+# had nothing on top, so this read as bamboo". A bamboo cane is jointed, tapers in steps
+# and carries its leaves in fans at the nodes. A reed is a single smooth unjointed stem
+# with strap leaves sheathing it from the base. At five metres those are different plants,
+# and the cattail on top was being asked to carry the whole species read on its own.
+#
+# Three canes are in the MODEL rather than in `clump`, for the reason `lotus_4.wam` gives:
+# a clump of one model is N identical copies in a ring, and a reed bed is canes of
+# different heights sharing a root mass. `clump` drops from 5 to 3 and each stamp is a
+# three-cane stool, so a tile still fills.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model swampreed
+  height 1.6
+  style chunky
+
+palette
+  # Wood -> stem: cropdata's `stem` for this crop is a green, not a brown. The cane.
+  Wood      #6a8a4a
+  Green     #86a85a
+  DarkGreen #6f9048
+  # Berry -> fruit: the cattail head, the one brown thing on the plant.
+  Berry     #8a6a3a
+
+skeleton
+  root mud at 0.0
+  # NARROW. `world/crops.js` scales a family by whichever of the ripe model's dimensions is
+  # larger against its tile, and this crop is 1.6 m tall on a 1.04 m tile — so anything past
+  # about 0.45 of aspect starts costing height, and height is the entire point of a reed.
+  # The canes therefore lean by a few degrees, not by twenty.
+  bone caneA parent=mud offset=(0.105,0,0.03)  dir=up pitch=-2 tilt=3  len=0.86
+  bone caneB parent=mud offset=(-0.098,0,0.075) dir=up pitch=4  tilt=-4 len=0.72
+  bone caneC parent=mud offset=(0.062,0,-0.115) dir=up pitch=-5 tilt=4  len=0.60
+
+parts
+  # The canes. Smooth and barely tapered — no nodes, which is the whole anti-bamboo move.
+  loft stemA bones=caneA..caneA material=Wood sides=6
+    ring 0.00 w=0.052 d=0.052
+    ring 0.50 w=0.040 d=0.040
+    ring 1.00 w=0.030 d=0.030
+    cap start=flat end=flat
+  loft stemB bones=caneB..caneB material=Wood sides=6
+    ring 0.00 w=0.046 d=0.046
+    ring 0.50 w=0.035 d=0.035
+    ring 1.00 w=0.027 d=0.027
+    cap start=flat end=flat
+  loft stemC bones=caneC..caneC material=Wood sides=5
+    ring 0.00 w=0.040 d=0.040
+    ring 0.50 w=0.031 d=0.031
+    ring 1.00 w=0.024 d=0.024
+    cap start=flat end=flat
+
+  # Strap leaves, sheathing the canes from LOW DOWN and standing almost as tall as they do.
+  # That is the other half of the anti-bamboo read: bamboo carries its foliage in fans at
+  # the top, a reed carries it as long straps from the base. `frame=up` with w wide and d
+  # thin is the flat-blade idiom from `cocoa_4.wam`.
+  #
+  # Every leaf leans AWAY from the model axis, and the sign is the opposite of the obvious
+  # one: `tilt` rotates about +Z, so a POSITIVE tilt on an `up` bone moves it toward -X.
+  # Got backwards, each leaf crosses the centreline from a cane that does not, and the lint
+  # reports three parts "straddling the centerline lopsidedly" - which is real, because a
+  # part that crosses the axis is claiming to be symmetric.
+  loft leafA1 bone=caneA at=0.06 dir=up pitch=8  tilt=-15 len=0.66 material=Green frame=up sides=4
+    ring 0.00 w=0.055 d=0.016
+    ring 0.45 w=0.075 d=0.020
+    ring 1.00 w=0.016 d=0.008 tip
+    cap start=flat end=point
+  loft leafA2 bone=caneA at=0.14 dir=up pitch=-6 tilt=-9 len=0.58 material=DarkGreen frame=up sides=4
+    ring 0.00 w=0.050 d=0.015
+    ring 0.45 w=0.070 d=0.019
+    ring 1.00 w=0.015 d=0.008 tip
+    cap start=flat end=point
+  loft leafB1 bone=caneB at=0.08 dir=up pitch=12 tilt=15 len=0.56 material=DarkGreen frame=up sides=4
+    ring 0.00 w=0.048 d=0.015
+    ring 0.45 w=0.066 d=0.018
+    ring 1.00 w=0.014 d=0.007 tip
+    cap start=flat end=point
+  loft leafB2 bone=caneB at=0.18 dir=up pitch=-9 tilt=8 len=0.48 material=Green frame=up sides=4
+    ring 0.00 w=0.044 d=0.014
+    ring 0.45 w=0.062 d=0.017
+    ring 1.00 w=0.013 d=0.007 tip
+    cap start=flat end=point
+  loft leafC1 bone=caneC at=0.10 dir=up pitch=-13 tilt=-13 len=0.46 material=Green frame=up sides=4
+    ring 0.00 w=0.042 d=0.014
+    ring 0.45 w=0.058 d=0.017
+    ring 1.00 w=0.013 d=0.007 tip
+    cap start=flat end=point
+
+  # THE CATTAILS. A fat blunt sausage with a thin spike of dead flower above it — the spike
+  # is what makes the head read as a cattail rather than as a sausage on a stick, and it is
+  # what the generated `ear` (a swollen cylinder and nothing else) could not add. Each sits
+  # ON its cane's tip, so the tail continues the stem instead of being stuck beside it.
+  loft headA bone=caneA at=1.00 dir=up len=0.26 material=Berry sides=8
+    ring 0.00 w=0.030 d=0.030
+    ring 0.10 w=0.088 d=0.088
+    ring 0.82 w=0.086 d=0.086
+    ring 1.00 w=0.034 d=0.034
+    cap start=dome end=dome
+  loft spikeA bone=caneA at=1.00 offset=(0,0.26,0) dir=up len=0.13 material=Wood sides=4
+    ring 0.00 w=0.026 d=0.026
+    ring 1.00 w=0.008 d=0.008 tip
+    cap start=flat end=point
+  loft headB bone=caneB at=1.00 dir=up len=0.22 material=Berry sides=8
+    ring 0.00 w=0.026 d=0.026
+    ring 0.10 w=0.078 d=0.078
+    ring 0.82 w=0.076 d=0.076
+    ring 1.00 w=0.030 d=0.030
+    cap start=dome end=dome
+  loft spikeB bone=caneB at=1.00 offset=(0,0.22,0) dir=up len=0.11 material=Wood sides=4
+    ring 0.00 w=0.023 d=0.023
+    ring 1.00 w=0.007 d=0.007 tip
+    cap start=flat end=point
+
+checks
+  # Tall and narrow. This is the check that protects the crop's whole identity: at 1.6 m on
+  # a 1.04 m tile, aspect past ~0.45 makes `familyScale` bind on WIDTH and the reed arrives
+  # short. `wide: 1.15` on the recipe buys the margin this sits inside.
+  assert width / height < 0.52
+  # A cattail is FAT and BLUNT, and that is asserted as absolute size rather than against
+  # the cane: `width(part)` is a bounding box, and a leaning 0.86-long cane measures its
+  # own LEAN rather than its thickness. The first cut compared the two and read 1.01 for a
+  # head three times the cane's diameter.
+  assert width(headA) in 0.075..0.14
+  assert width(headA) > width(spikeA) * 2.5
+  assert width(headA) / height(headA) > 0.28
+  # ...and it is on TOP of the cane, not beside it.
+  assert bottom(headA) > 0.70
+  assert top(spikeA) > top(headA)
+  # Straps, not fans: the lowest leaf starts near the mud and reaches most of the way up.
+  assert bottom(leafA1) < 0.14
+  assert top(leafA1) > 0.55
+  # Three canes at three heights.
+  assert top(stemA) > top(stemB) + 0.08
+  assert top(stemB) > top(stemC) + 0.08
+  assert bottom(stemA) < 0.02
+  # Budget: `clump: 3`.
+  assert tris < 800
+  measure aspect width / height

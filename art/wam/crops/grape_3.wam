@@ -1,0 +1,119 @@
+# Grape, in flower (rung 3 of 4).
+#
+# The trained vine of `grape_4.wam` at four fifths its height, with small GREEN PANICLES where
+# the bunches will hang. A grape flower is a tight green spray on the same spur the bunch will
+# grow from, so this rung tells the player where to look one stage before there is anything to
+# pick — and it does it by changing SHAPE and SIZE, not by the half-count colour-drag
+# `world/crops.js` applies to generated fruit, which cannot say "not yet" at all.
+#
+# Fewer canes than the ripe rung as well as smaller ones: one cane per cordon rather than two,
+# which is a topology difference the ladder never repeats.
+#
+# See `grape_4.wam` for the candelabra and `icecapmoss_3.wam` for the naming rules.
+
+model grape
+  height 2.0
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #4e8a30
+  DarkGreen #3d7026
+
+skeleton
+  root ground at 0.0
+  bone t1 parent=ground dir=up tilt=7  len=0.20
+  bone t2 parent=t1     dir=up tilt=-11 len=0.17
+
+  mirror
+    bone cord parent=t2 dir=side tilt=8 len=0.150
+    bone cnA parent=cord at=0.70 dir=up tilt=-6 len=0.30
+  end
+
+parts
+  loft bole bones=t1..t2 material=Wood sides=6
+    ring 0.00 w=0.054 d=0.054
+    ring 0.34 w=0.044 d=0.044
+    ring 0.70 w=0.041 d=0.041
+    ring 1.00 w=0.035 d=0.035
+    cap start=flat end=flat
+
+  mirror
+    loft arm bones=cord..cord material=Wood sides=5
+      ring 0.00 w=0.032 d=0.032
+      ring 1.00 w=0.022 d=0.022
+      cap start=flat end=dome
+    loft caneA bones=cnA..cnA material=Wood sides=5
+      ring 0.00 w=0.022 d=0.022
+      ring 0.55 w=0.016 d=0.016
+      ring 1.00 w=0.011 d=0.011
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft lfA1 bone=cnA at=0.26 dir=side yaw=22  tilt=-18 len=0.15 material=Green frame=up sides=5
+      ring 0.00 w=0.026 d=0.012
+      ring 0.26 w=0.124 d=0.021
+      ring 0.66 w=0.142 d=0.019
+      ring 1.00 w=0.086 d=0.011
+      cap start=flat end=dome
+    loft lfA2 bone=cnA at=0.54 dir=side yaw=-72 tilt=-24 len=0.14 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.024 d=0.011
+      ring 0.26 w=0.118 d=0.020
+      ring 0.66 w=0.136 d=0.018
+      ring 1.00 w=0.082 d=0.011
+      cap start=flat end=dome
+    loft lfA3 bone=cnA at=0.82 dir=side yaw=46  tilt=-12 len=0.14 material=Green frame=up sides=5
+      ring 0.00 w=0.024 d=0.011
+      ring 0.26 w=0.118 d=0.020
+      ring 0.66 w=0.136 d=0.018
+      ring 1.00 w=0.082 d=0.011
+      cap start=flat end=dome
+    loft lfA4 bone=cnA at=0.98 dir=side yaw=-136 tilt=-30 len=0.13 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.023 d=0.011
+      ring 0.26 w=0.112 d=0.019
+      ring 0.66 w=0.130 d=0.017
+      ring 1.00 w=0.078 d=0.010
+      cap start=flat end=dome
+    loft lfC1 bone=cord at=0.42 dir=side yaw=104 tilt=-20 len=0.13 material=Green frame=up sides=5
+      ring 0.00 w=0.023 d=0.011
+      ring 0.26 w=0.112 d=0.019
+      ring 0.66 w=0.130 d=0.017
+      ring 1.00 w=0.078 d=0.010
+      cap start=flat end=dome
+  end
+
+  # ---- the panicles --------------------------------------------------------------
+  #
+  # Green, and a third the width of a ripe bunch. Same hanging position, so the plant's
+  # composition does not jump when it ripens — only the object does.
+  mirror
+    loft pnA bone=cord at=0.38 offset=(0,-0.014,0.026) dir=down pitch=8 len=0.11 material=DarkGreen sides=5
+      ring 0.00 w=0.016 d=0.015
+      ring 0.16 w=0.038 d=0.036
+      ring 0.44 w=0.032 d=0.030
+      ring 0.72 w=0.026 d=0.025
+      ring 1.00 w=0.010 d=0.010 tip
+      cap start=dome end=point
+    loft pnB bone=cord at=0.84 offset=(0,-0.014,-0.028) dir=down pitch=-6 len=0.10 material=DarkGreen sides=5
+      ring 0.00 w=0.015 d=0.014
+      ring 0.16 w=0.035 d=0.033
+      ring 0.44 w=0.030 d=0.028
+      ring 0.72 w=0.024 d=0.023
+      ring 1.00 w=0.009 d=0.009 tip
+      cap start=dome end=point
+  end
+
+checks
+  assert bottom(bole) < 0.02
+  # The candelabra is already built at this rung — cordon and all — which is what makes the
+  # ripening read as one plant changing rather than two plants swapped.
+  assert elevation(cord.l) < 22
+  # NOT YET: a panicle is under half the width the ripe rung asserts for a bunch (> 0.085).
+  assert width(pnA.l) < 0.045
+  assert top(pnA.l) < bottom(lfA1.l)
+  # Must not out-top the ripe rung, or `buildModelGeometry`'s ordering pass shrinks the whole
+  # thing by 14% — the ripe rung measures 0.83 and the cap is 0.86 of it.
+  assert height < 0.71
+  assert tris < 1400
+  measure rung3 height

@@ -1,0 +1,55 @@
+# Astral crystal — the tier-4 material.
+#
+# A six-sided prism with a shouldered point, which is the one gem shape that
+# stays a gem at 46px: parallel sides give it a hard vertical silhouette, and
+# the shoulder puts a bright horizontal facet break right where the eye lands.
+# `shape=box` on six sides is what makes the facets flat panels instead of a
+# barrel — a smooth prism reads as a bottle.
+#
+# The second, shorter shard leaning off the base is the whole reason this is a
+# model and not a lozenge: a single spike is a tooth, two spikes of different
+# heights out of one root is a crystal cluster.
+
+model crystal
+  height 0.34
+  style chunky
+
+palette
+  Astral #6fc3ee
+  Core   #a9e4fb
+  Deep   #3d84ad
+
+skeleton
+  root seat at 0.036
+  bone spire parent=seat dir=up pitch=-3 len=0.86
+  bone shard parent=seat dir=up pitch=8 yaw=-14 tilt=-26 len=0.50
+
+parts
+  loft main bones=seat..spire material=Astral sides=6 shape=box
+    ring 0.00 w=0.18 d=0.18 material=Deep
+    ring 0.10 w=0.26 d=0.26 material=Astral
+    ring 0.66 w=0.27 d=0.27
+    ring 0.76 w=0.21 d=0.21 material=Core
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+
+  loft spur bones=seat..shard material=Astral sides=6 shape=box
+    ring 0.00 w=0.13 d=0.13 material=Deep
+    ring 0.14 w=0.17 d=0.17 material=Astral
+    ring 0.70 w=0.18 d=0.18
+    ring 0.80 w=0.14 d=0.14 material=Core
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+
+checks
+  # The spur's root, not the spire's, is the lowest point of the cluster — it
+  # leans out of the seat and its cap reaches under the main prism's base.
+  assert bottom(spur) < 0.012
+  assert bottom(main) < 0.05
+  # The spur is a companion, not a twin: clearly shorter and clearly thinner.
+  assert top(spur) < top(main) * 0.72
+  assert volume(spur) < volume(main) / 2
+  # A prism, not a lozenge.
+  assert height(main) / width(main) in 2.4..4.0
+  assert parts == 2
+  assert tris < 220

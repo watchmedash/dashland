@@ -1,0 +1,164 @@
+# Glowcap — a clump of three, one leader and two buttons.
+#
+# The block is an `R_CROSS` and its tile (`TextureGen.mushroom`) draws *three*
+# stalks, so the model is three. That is the flower clump's reasoning and it
+# applies harder here: a lone mushroom on a stalk is a nail, and what says
+# "fungus" at any size is a group of them at different stages out of one patch.
+#
+# **The overhang is the model.** Everything else could be wrong and it would
+# still read as a mushroom if the cap sticks out past the stalk by a mile, so
+# the hood is 0.74 wide over a 0.115 stalk — six and a half times — and the
+# widest ring is at 0.22 of the hood's own length, i.e. low, near the rim. A cap
+# whose widest point is halfway up is a berry on a stick. The `assert` on that
+# ratio is the one number in the checks that is not negotiable.
+#
+# The gill face is a real surface, not a painted disc: `cap start=flat` on a
+# hood whose first ring is 0.34 wide gives an actual underside you can stand
+# beneath and look up at, and the band from 0.00 to 0.22 wraps that disc round
+# and *up* over the lower lip of the rim. That lip is why the glow is visible in
+# profile and not only from below — at ankle height in the world, straight-up is
+# the one angle nobody has.
+#
+# Two things the language fought over, both inherited from the flowers:
+#
+#  - `on=` snaps to the **closest** point on the named surface. The hood mounts
+#    at `stalk` tail with `on=stem`, which is the top of the stem and therefore
+#    correct; the skirt deliberately has **no** `on=`, because it mounts at 0.60
+#    *up the side* of the stem and the closest surface point from there is the
+#    stem's flank — the ruff would have grown sideways out of the stalk.
+#  - a bone and a part may not share a name and the bone wins the `checks`
+#    lookup, resolving to its *head*. Hence bone `stalk` / part `stem`, and
+#    bones `bud` / parts `budstem` + `button`.
+#
+# Colour comes from the two places the block already defines itself. The purples
+# are `TextureGen.mushroom`'s own — #9260c4 and #ce9ef0 are the two it mixes
+# between, and #e0d6c6 is its stalk — so the item and the tile are the same
+# plant. `Gill` is not from the tile: it is the block's own `lightColor`
+# ([0.6, 0.85, 0.7] = #99d9b2) lifted a couple of steps so it reads as a source
+# rather than a surface. The tile has no colour for the underside because a
+# billboard has no underside, and inventing a purple one would have put the
+# model at odds with the green light the block actually casts.
+
+model mushroom
+  height 0.42
+  style chunky
+
+palette
+  Cap   #9260c4
+  Crown #ce9ef0
+  Gill  #b6efd0
+  Stem  #e0d6c6
+
+skeleton
+  root soil at 0.0
+  bone stalk parent=soil dir=up pitch=-3 len=0.72
+  mirror
+    # Buttons come out of the same soil rather than off the leader's stalk —
+    # mushrooms are separate fruiting bodies, and branching them made the clump
+    # read as one plant with limbs. `yaw` as well as `tilt` for the flower's
+    # reason: a mirrored pair reflects across X=0 and keeps its z, so tilt alone
+    # leaves all three bodies coplanar and the clump vanishes edge-on.
+    #
+    # `tilt` is **negative** to lean outward. On an `up` bone +tilt tips it
+    # toward −X, i.e. back over the leader: written as +22 the two buttons
+    # crossed under the hood and their reach measured 0.12 against a 0.20 head
+    # offset — the bones travelled inward further than they were placed out.
+    # `up=` lifts the head just enough that the tilted start cap does not cut
+    # through y=0; without it the lint reports the clump 0.026 underground.
+    bone bud parent=soil side=0.16 up=0.018 dir=up tilt=-17 pitch=5 yaw=62 len=0.34
+  end
+
+parts
+  # Straight-sided and barely tapered: a mushroom stalk is a column, and the
+  # conical stem the flowers use made this one look like a sapling. The flare at
+  # the foot is the mycelium base and is also what the model stands on when it
+  # is lying on the ground as a drop.
+  loft stem bones=soil..stalk material=Stem sides=6
+    ring 0.00 w=0.21 d=0.20
+    ring 0.10 w=0.125 d=0.120
+    ring 0.55 w=0.112 d=0.108
+    ring 0.90 w=0.120 d=0.115
+    ring 1.00 w=0.115 d=0.110
+    cap start=flat end=flat
+
+  # The veil ruff. Cheap (six sides, three bands) and it is the whole difference
+  # between a stalk and a peg in silhouette — the one horizontal break in an
+  # otherwise unbroken vertical.
+  loft skirt bone=stalk at=0.60 dir=up len=0.09 material=Crown sides=6
+    ring 0.00 w=0.13 d=0.13
+    ring 0.30 w=0.34 d=0.33
+    ring 0.72 w=0.26 d=0.25
+    ring 1.00 w=0.11 d=0.11
+    cap start=flat end=flat
+
+  # Ten sides, where the flowers' heads take six or eight: this is the one part
+  # of the model whose outline is a circle seen from below and from above both,
+  # and at eight the rim was a visible octagon at icon size. No `roll=` and no
+  # `squarish` either — those exist to break a smooth spheroid into petals, and
+  # a cap is *supposed* to be a smooth dome. The read comes from the overhang.
+  loft hood bone=stalk at=1.0 dir=up len=0.30 on=stem material=Cap sides=10
+    ring 0.00 w=0.34 d=0.34 material=Gill   # the gill face, deep under the rim
+    ring 0.14 w=0.66 d=0.66
+    ring 0.22 w=0.74 d=0.74 material=Cap    # the rim — the widest thing here
+    ring 0.58 w=0.64 d=0.64
+    ring 0.86 w=0.42 d=0.42 material=Crown
+    ring 1.00 w=0.16 d=0.16
+    cap start=flat end=flat
+
+  mirror
+    loft budstem bones=bud..bud material=Stem sides=5
+      ring 0.00 w=0.14 d=0.135
+      ring 0.16 w=0.085 d=0.082
+      ring 1.00 w=0.078 d=0.075
+      cap start=flat end=flat
+
+    # A button is the cap before the veil tears: a closed knob with the rim
+    # still tucked in against the stalk. Giving it the leader's overhang would
+    # have made three of the same mushroom at three sizes, which is a size
+    # gradient and not a life cycle — and the flat wide hood only means
+    # something if there is something un-flared next to it.
+    loft button bone=bud at=1.0 dir=up pitch=-5 len=0.22 on=budstem material=Cap sides=8
+      ring 0.00 w=0.16 d=0.16 material=Gill
+      ring 0.16 w=0.28 d=0.28 material=Cap
+      ring 0.52 w=0.32 d=0.32
+      ring 0.84 w=0.24 d=0.23
+      ring 1.00 w=0.09 d=0.09
+      cap start=flat end=flat
+  end
+
+checks
+  assert bottom(stem) < 0.01
+  # The overhang, stated as the thing the whole model is for. If this ever fails
+  # the cap has been narrowed to fit something and the block is a nail again.
+  #
+  # 3.5 and not the 6.5 the shaft is actually narrower by: `width(stem)` is a
+  # bounding box, so it measures the flared foot, which is the widest part of
+  # the stem by a factor of nearly two. There is no expression for "the part's
+  # width up there", so the bound is set against what is measurable and the real
+  # margin is comfortably larger than the number says.
+  assert width(hood) > width(stem) * 3.5
+  # ...and the cap is a plate, not a ball: wider than it is tall by a good
+  # margin, which is what stops the dome creeping down over the stalk.
+  assert width(hood) > height(hood) * 1.8
+  # A leader with buttons under it, same hierarchy as the flower clumps.
+  assert bottom(hood) > top(button.l)
+  assert width(hood) > width(button.l) * 1.8
+  # The buttons break the leader's outline rather than hiding beneath it.
+  # Horizontal reach and not `abs(x)`: they are yawed off the mirror plane on
+  # purpose, so half of the offset is in z (see the skeleton).
+  assert (x(button.l) * x(button.l) + z(button.l) * z(button.l)) ** 0.5 > width(stem)
+  # The ruff clears the stalk it rides on, or it is not visible at all.
+  assert width(skirt) > width(stem) * 1.5
+  assert top(skirt) < bottom(hood)
+  # Y stays the long axis. A clump this wide is exactly the daisy's problem:
+  # `render/ItemModels.js` normalises on the Y extent, so a squat glowcap comes
+  # out of the fist and the toolbar slot bigger than everything beside it.
+  assert height / width in 1.1..1.9
+  assert height / depth in 1.1..1.9
+  # Reported, not policed: how far off the mirror plane the buttons actually
+  # sit. It is the number the `yaw` in the skeleton exists to move, and it is
+  # small and hard-won — `yaw` only turns the *tilt* component of an `up` bone,
+  # so it takes 62° there to buy 0.08 here.
+  measure buttonz z(button.l)
+  assert parts == 7
+  assert tris < 700

@@ -1,0 +1,60 @@
+# Glowcap, middle rung (2 of 3).
+#
+# One cap has opened — flared, with the gill band showing — and a second is still a
+# button beside it. That mid-state is the whole reason this rung exists: rung 1 has no
+# open cap anywhere and rung 3 has no closed one.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model glowcap
+  height 0.35
+  style smooth
+
+palette
+  Wood      #cfeee6
+  Green     #7fc4b8
+  Berry     #5fe8d0
+
+skeleton
+  root soil at 0.0
+  bone stipeA parent=soil dir=up pitch=-3 len=0.46
+  bone budB   parent=soil offset=(0.22,0.010,0.13) dir=up pitch=7 tilt=-10 len=0.17
+
+parts
+  loft stemA bones=stipeA..stipeA material=Wood sides=8
+    ring 0.00 w=0.130 d=0.130
+    ring 0.18 w=0.084 d=0.084
+    ring 0.74 w=0.076 d=0.076
+    ring 1.00 w=0.100 d=0.100
+    cap start=flat end=flat
+  loft stemB bones=budB..budB material=Wood sides=6
+    ring 0.00 w=0.095 d=0.095
+    ring 0.35 w=0.066 d=0.066
+    ring 1.00 w=0.074 d=0.074
+    cap start=flat end=flat
+
+  # Opened, but not to the ripe rung's span: rim at 0.58 against 0.86.
+  loft capA bone=stipeA at=1.00 dir=up len=0.15 material=Berry sides=12
+    ring 0.00 w=0.22 d=0.22 material=Green
+    ring 0.19 w=0.58 d=0.58 material=Berry
+    ring 0.60 w=0.50 d=0.50
+    ring 1.00 w=0.20 d=0.20
+    cap start=flat end=dome
+
+  # Still closed.
+  loft budcapB bone=budB at=1.00 dir=up len=0.13 material=Berry sides=8
+    ring 0.00 w=0.13 d=0.13
+    ring 0.34 w=0.24 d=0.24
+    ring 0.70 w=0.23 d=0.23
+    ring 1.00 w=0.11 d=0.11
+    cap start=dome end=dome
+
+checks
+  # One open, one closed — the state this rung exists to show.
+  assert width(capA) / width(stemA) > 4
+  assert width(budcapB) / width(stemB) < 3.6
+  assert bottom(stemA) < 0.02
+  # Between the two neighbouring rungs: taller than the buttons, shorter than the colony.
+  assert top(capA) in 0.40..0.80
+  assert tris < 800
+  measure aspect width / height

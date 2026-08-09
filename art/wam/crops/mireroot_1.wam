@@ -1,0 +1,49 @@
+# Mire Root, first rung (1 of 4). See `mireroot_4.wam` for the argument and the rules.
+#
+# NO ARCHES AT ALL. The knees are what this crop is, so the young plant is the one rung
+# where they have not appeared: a woody boss in the mud with three blades out of it. The
+# rungs of a WAM family differ in PARTS, not in scale.
+
+model mireroot
+  height 0.9
+  style chunky
+
+palette
+  Wood      #5a4a32
+  Green     #4a6a3e
+  DarkGreen #3a5630
+  Berry     #6a4a2a
+
+skeleton
+  root mud at 0.0
+  bone crown parent=mud dir=up len=0.12
+  mirror
+    bone bldA parent=crown dir=side tilt=78 len=0.26
+    bone bldB parent=crown dir=side yaw=64 tilt=72 len=0.21
+  end
+
+parts
+  loft boss bones=mud..crown material=Wood sides=8
+    ring 0.00 w=0.20 d=0.20
+    ring 1.00 w=0.13 d=0.13
+    cap start=flat end=dome
+
+  mirror
+    loft bladeA bones=bldA..bldA material=Green frame=up sides=4
+      ring 0.00 w=0.060 d=0.017
+      ring 0.40 w=0.072 d=0.020
+      ring 1.00 w=0.018 d=0.008 tip
+      cap start=flat end=point
+    loft bladeB bones=bldB..bldB material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.054 d=0.016
+      ring 0.40 w=0.066 d=0.019
+      ring 1.00 w=0.016 d=0.008 tip
+      cap start=flat end=point
+  end
+
+checks
+  assert top(bladeA.l) < 0.40
+  assert bottom(boss) < 0.02
+  assert asymmetry(boss) < 0.005
+  assert tris < 300
+  measure aspect width / height

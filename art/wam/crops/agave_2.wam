@@ -1,0 +1,74 @@
+# Agave, second rung (2 of 4). See `agave_4.wam` for the argument and the rules.
+#
+# Five blade pairs, and the outer two have begun to lie back — so the rosette has a middle
+# for the first time. Still no spike.
+
+model agave
+  height 1.3
+  style chunky
+
+palette
+  Wood      #6a8a6a
+  Green     #8aa87e
+  DarkGreen #74906a
+  Berry     #d4c46a
+
+skeleton
+  root sand at 0.0
+  bone core parent=sand dir=up len=0.08
+  mirror
+    bone blA parent=core dir=side tilt=24 len=0.34
+    bone blB parent=core dir=side yaw=54  tilt=34 len=0.31
+    bone blC parent=core dir=side yaw=106 tilt=28 len=0.33
+    bone blD parent=core dir=side yaw=150 tilt=46 len=0.27
+    bone blE parent=core dir=side yaw=28  tilt=60 len=0.23
+  end
+
+parts
+  loft boss bones=sand..core material=Wood sides=8
+    ring 0.00 w=0.21 d=0.21
+    ring 1.00 w=0.17 d=0.17
+    cap start=flat end=flat
+
+  mirror
+    loft bladeA bones=blA..blA material=Green frame=up sides=5
+      ring 0.00 w=0.118 d=0.058
+      ring 0.30 w=0.145 d=0.071
+      ring 0.72 w=0.110 d=0.052
+      ring 1.00 w=0.017 d=0.010 tip
+      cap start=dome end=point
+    loft bladeB bones=blB..blB material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.110 d=0.054
+      ring 0.30 w=0.137 d=0.067
+      ring 0.72 w=0.103 d=0.049
+      ring 1.00 w=0.016 d=0.010 tip
+      cap start=dome end=point
+    loft bladeC bones=blC..blC material=Green frame=up sides=5
+      ring 0.00 w=0.114 d=0.056
+      ring 0.30 w=0.141 d=0.069
+      ring 0.72 w=0.106 d=0.050
+      ring 1.00 w=0.017 d=0.010 tip
+      cap start=dome end=point
+    loft bladeD bones=blD..blD material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.102 d=0.050
+      ring 0.30 w=0.127 d=0.062
+      ring 0.72 w=0.096 d=0.045
+      ring 1.00 w=0.015 d=0.009 tip
+      cap start=dome end=point
+    loft bladeE bones=blE..blE material=Green frame=up sides=5
+      ring 0.00 w=0.094 d=0.046
+      ring 0.30 w=0.117 d=0.057
+      ring 0.72 w=0.088 d=0.041
+      ring 1.00 w=0.014 d=0.008 tip
+      cap start=dome end=point
+  end
+
+checks
+  # A middle: the inner blades stand up and the outer ones lie back.
+  assert top(bladeE.l) > top(bladeA.l) + 0.03
+  assert xmax(bladeA.l) > xmax(bladeE.l)
+  assert top(bladeE.l) in 0.20..0.36
+  assert depth(bladeA.l) / height(bladeA.l) > 0.30
+  assert bottom(boss) < 0.02
+  assert tris < 700
+  measure aspect width / height

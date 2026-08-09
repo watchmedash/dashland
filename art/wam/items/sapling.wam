@@ -1,0 +1,77 @@
+# Sapling — a seedling with its root ball.
+#
+# The block form is a cross-shaped billboard, which is why the dropped and held
+# item was a flat card: there is no cube to fall back on. What a sapling needs
+# in 3D is the read that the billboard gets for free from its silhouette — thin
+# stem, top-heavy tuft — so the whole model is three leaf masses on one stem and
+# nothing else.
+#
+# Three, not one. A single blob on a stick is a lollipop; a crown with two lower
+# tufts pushed out to either side gives the outline the stepped, uneven edge
+# that says foliage. They are `squarish` and rolled against each other so no two
+# facets line up — the same trick coal uses, for the same reason: at 46px a
+# smooth green sphere is a pea.
+#
+# The stem flares at the bottom into a dark root ball. That is the cue that this
+# is a thing you plant rather than a twig with leaves on it, and it also gives
+# the model a base wide enough to stand on when it is lying on the ground.
+
+model sapling
+  height 0.36
+  style chunky
+
+palette
+  Bark  #6b4a2c
+  Leaf  #4f8a35
+  Shade #33632a
+  Root  #4a3520
+
+skeleton
+  root soil at 0.0
+  bone stem parent=soil dir=up pitch=-3 len=0.50
+  bone crown parent=stem dir=up pitch=4 yaw=-6 len=0.22
+  mirror
+    bone twig parent=stem at=0.58 dir=side tilt=20 yaw=-14 len=0.30
+  end
+
+parts
+  loft trunk bones=soil..crown material=Bark sides=5
+    ring 0.00 w=0.13 d=0.12 material=Root
+    ring 0.07 w=0.15 d=0.14
+    ring 0.16 w=0.075 d=0.072 material=Bark
+    ring 0.55 w=0.058 d=0.055
+    ring 1.00 w=0.040 d=0.038
+    cap start=flat end=flat
+
+  loft canopy bone=crown at=1.0 dir=up pitch=-4 len=0.40 on=trunk material=Leaf sides=6 shape=squarish
+    ring 0.00 w=0.28 d=0.26 roll=10 material=Shade
+    ring 0.24 w=0.48 d=0.44 roll=-18 material=Leaf
+    ring 0.60 w=0.50 d=0.45 roll=26 fwd=0.02
+    ring 0.86 w=0.36 d=0.33 roll=-12
+    ring 1.00 w=0.14 d=0.13 roll=8
+    cap start=flat end=flat
+
+  mirror
+    loft tuft bones=twig..twig material=Leaf sides=5 shape=squarish
+      ring 0.00 w=0.07 d=0.07 material=Bark
+      ring 0.28 w=0.26 d=0.24 roll=14 material=Leaf
+      ring 0.66 w=0.28 d=0.25 roll=-22
+      ring 0.88 w=0.22 d=0.20 roll=16 material=Shade
+      ring 1.00 w=0.09 d=0.08
+      cap start=flat end=flat
+  end
+
+checks
+  assert bottom(trunk) < 0.01
+  # Top-heavy, like the billboard it replaces: the crown is the widest thing in
+  # the model and it sits in the upper half.
+  assert bottom(canopy) > 0.42
+  assert width(canopy) > width(trunk) * 2.5
+  # The side tufts break the crown's outline rather than hiding under it. This
+  # is the tuft's *reach*, not its centroid: the twig is rooted on the stem, so
+  # half of every tuft is always inboard and its centre of mass never clears the
+  # canopy however far out the tip goes.
+  assert xmax(tuft.l) > width(canopy) / 2
+  assert top(canopy) > top(tuft.l)
+  assert parts == 4
+  assert tris < 420

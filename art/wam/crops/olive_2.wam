@@ -1,0 +1,57 @@
+# Olive Tree, sapling (rung 2 of 4).
+#
+# The TWIN STEM already exists at this rung — two leaning shoots out of one root — because
+# that fork is the olive's whole identity and a sapling that is a single vertical stick is
+# indistinguishable from apple's, cherry's and plum's. One cluster and one lance leaf per
+# stem, no branch layer, no fruit: sparser in PARTS than the rung above it, which is what
+# the four-source ladder exists for.
+#
+# See `olive_4.wam` for the gnarl and `icecapmoss_3.wam` for the naming rules.
+
+model olive
+  height 3.5
+  style chunky
+
+palette
+  Wood      #8a7a5c
+  Green     #8fa06a
+  DarkGreen #6c7d50
+
+skeleton
+  root ground at 0.012
+  mirror
+    bone bl1 parent=ground offset=(0.026,0,0.014) dir=up tilt=-18 len=0.10
+    bone bl2 parent=bl1 dir=up tilt=22 len=0.09
+  end
+
+parts
+  mirror
+    loft stemA bones=bl1..bl2 material=Wood sides=6
+      ring 0.00 w=0.046 d=0.046
+      ring 0.46 w=0.026 d=0.026
+      ring 0.58 w=0.034 d=0.034
+      ring 1.00 w=0.024 d=0.024
+      cap start=flat end=flat
+    loft canA bone=bl2 at=1.00 offset=(0.00,0.02,0.01) dir=up len=0.062 material=Green sides=6
+      ring 0.00 w=0.093 d=0.093
+      ring 0.32 w=0.152 d=0.152
+      ring 0.68 w=0.155 d=0.155
+      ring 1.00 w=0.087 d=0.087
+      cap start=dome end=dome
+    loft lfA bone=bl2 at=1.00 dir=side yaw=22 tilt=-18 len=0.13 material=DarkGreen frame=up sides=4
+      ring 0.00 w=0.010 d=0.006
+      ring 0.28 w=0.032 d=0.012
+      ring 0.74 w=0.029 d=0.011
+      ring 1.00 w=0.008 d=0.005 tip
+      cap start=flat end=point
+  end
+
+checks
+  assert bottom(stemA.l) < 0.01
+  # Twin stem, and the two feet are apart at the base.
+  assert xmin(stemA.l) > 0.0
+  # Sparser in PARTS than the ripe tree: 6 against 44.
+  assert parts == 6
+  assert height in 0.24..0.42
+  assert width / height < 1.45
+  assert tris < 700

@@ -1,0 +1,56 @@
+# Sulfur — a brittle crust, not an ore.
+#
+# The other yellow thing in the hotbar is raw gold, so sulfur must not be a lump
+# with veins in it: that is the ore idiom and it would put two dun rocks with
+# yellow stripes next to each other. Sulfur is native — it grows *as* the
+# mineral — so the whole body is the colour and the shape does the separating.
+#
+# What it gets instead is a crust: a low, splayed mass with a rim of blunt
+# crystal facets standing off one shoulder. `shape=box` on the facets and
+# `squarish` on the mass is the difference that reads at icon size — the base is
+# a rounded clod and the growth on it has hard parallel edges, which is what
+# brittle looks like when you only have twelve pixels for it.
+#
+# The pale material sits on the crystal, not on the mass, because sulfur's
+# giveaway is that the crystalline faces are much brighter than the powdery
+# body they sit in.
+
+model sulfur
+  height 0.26
+  style chunky
+
+palette
+  Sulfur #c8b420
+  Bright #f4e668
+  Dull   #8d7c16
+
+skeleton
+  root bed at 0.010
+  bone mass parent=bed dir=up pitch=-5 len=0.48
+  bone spike parent=bed side=0.06 up=0.16 dir=up pitch=6 yaw=-20 tilt=-24 len=0.46
+
+parts
+  loft crust bones=bed..mass material=Sulfur sides=6 shape=squarish
+    ring 0.00 w=0.40 d=0.36 roll=8 material=Dull
+    ring 0.20 w=0.66 d=0.58 roll=26 fwd=0.03 material=Sulfur
+    ring 0.58 w=0.62 d=0.54 roll=-16 side=-0.04
+    ring 0.86 w=0.40 d=0.34 roll=18 fwd=-0.03
+    ring 1.00 w=0.18 d=0.16 roll=34
+    cap start=flat end=flat
+
+  loft facet bones=spike..spike material=Bright sides=4 shape=box
+    ring 0.00 w=0.22 d=0.20 material=Sulfur
+    ring 0.22 w=0.26 d=0.24 material=Bright
+    ring 0.72 w=0.25 d=0.23
+    ring 0.90 w=0.20 d=0.18
+    ring 1.00 w=0.09 d=0.08
+    cap start=flat end=flat
+
+checks
+  assert bottom(crust) < 0.01
+  # A crust: it spreads rather than stacks, and the facet stands proud of it.
+  assert height / width in 0.7..1.2
+  assert top(facet) > top(crust)
+  assert volume(facet) < volume(crust) / 2
+  assert parts == 2
+  assert tris < 260

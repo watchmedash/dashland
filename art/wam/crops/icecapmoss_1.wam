@@ -1,0 +1,49 @@
+# Icecap Moss, sprout (rung 1 of 3).
+#
+# The stage ladder is ONE SOURCE PER RUNG rather than one model thinned at runtime,
+# because "sparser" for a cushion moss is a different set of parts, not a smaller
+# copy of the same set: a young cushion is a single mound with no skirt lobes and no
+# spore capsules at all. `world/crops.js` already enforces the other half of the
+# contract — it shrinks any rung that out-tops the one above it, so these three files
+# only have to differ in PARTS, not in absolute size.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules; they apply to
+# every rung.
+
+model icecapmoss
+  height 0.18
+  style chunky
+
+palette
+  Green     #5fbf95
+  DarkGreen #3f8a6a
+
+skeleton
+  root pad at 0.0
+  bone core parent=pad dir=up len=0.30
+  mirror
+    bone lobeA parent=core at=0.50 dir=side tilt=8 len=0.50
+  end
+
+parts
+  loft cushion bones=pad..core material=Green
+    ring 0.00 w=0.80 d=0.80
+    ring 0.45 w=0.92 d=0.92
+    ring 1.00 w=0.52 d=0.52
+    cap start=flat end=dome
+
+  mirror
+    loft lobA bones=lobeA..lobeA material=DarkGreen frame=up on=cushion
+      ring 0.00 w=0.40 d=0.24
+      ring 0.55 w=0.50 d=0.30
+      ring 1.00 w=0.34 d=0.20
+      cap start=dome end=dome
+  end
+
+checks
+  assert width / height in 2.0..4.5
+  assert bottom(cushion) < 0.02
+  # A sprout carries no ripe read: no capsules exist here at all, which is what makes
+  # the ladder a growth rather than a scale-up.
+  assert parts == 3
+  assert tris < 500

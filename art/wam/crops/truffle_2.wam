@@ -1,0 +1,122 @@
+# Truffle, ripe (rung 2 of 2).
+#
+# cropdata silhouette: "Barely visible — a dark lump breaking the leaf litter. Rewards
+# knowing where to look." What shipped was `crops/PalmTree_Crop` — a COCONUT — sunk into
+# the soil, which is the right size and the right darkness and the wrong object: a coconut
+# is a smooth ellipsoid, and the whole of a truffle's identity is that it is not smooth.
+# It is a warty, pitted, irregular tuber. Photographed at eye level the pack recipe reads
+# as three polished brown pebbles lying on a lawn.
+#
+# There is a second thing the coconut could not do and it is in the silhouette line: the
+# lump has to be BREAKING the litter, which means there has to be litter for it to break.
+# A dark ball on bare ground reads as a dropped object; a dark ball shouldering aside a few
+# leaves reads as something dug up. So the model carries its own litter — four flat leaf
+# flakes lying around and partly under the tuber, in `colors.leaf`, which for this crop
+# cropdata sets to a dark leaf-mould brown rather than to anything green.
+#
+# `sink: true` comes OFF this recipe. The pack model was authored straddling its own origin
+# and needed the soil to hide half of it; this one is authored sitting ON y=0 as a dome
+# already a third buried by its own profile, so the ordinary floor-seating is correct and
+# the crop no longer depends on a modelling accident in a coconut.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model truffle
+  height 0.12
+  style chunky
+
+palette
+  # Wood -> stem: the disturbed soil ring.
+  Wood      #4a3a2a
+  # Green -> leaf: leaf mould. cropdata's `leaf` for this crop is a brown, not a green.
+  Green     #5a4632
+  # Berry -> fruit: the tuber itself, and the darkest thing on the plant.
+  Berry     #2f2418
+
+skeleton
+  root soil at 0.0
+  # A low boss for the tuber to be lofted along, plus knuckle bones for the warts. The
+  # tuber is a dome and a dome is a two-ring loft on a very short vertical path.
+  bone body parent=soil dir=up len=0.52
+
+parts
+  # The tuber. Widest below the middle and flattening off on top — a cobble half in the
+  # ground, not a ball resting on it. `cap start=flat` for the reason `icecapmoss_3.wam`
+  # records: a dome cap on a ring this wide bulges a full radius below the root and sinks
+  # the whole lump out of sight.
+  loft tuber bones=soil..body material=Berry sides=10
+    ring 0.00 w=1.42 d=1.24
+    ring 0.34 w=1.74 d=1.52
+    ring 0.72 w=1.48 d=1.30
+    ring 1.00 w=0.90 d=0.80
+    cap start=flat end=dome
+
+  # The warts. Each is a stub run out from inside the body and snapped onto its surface by
+  # `on=`, so it is flush by construction — this is the whole reason to author a truffle
+  # rather than scatter spheres onto a coconut, and it is also what stops the lint's
+  # "buried entirely inside another part" from firing, since `on=` sinks by a known depth
+  # rather than by a guess.
+  loft wartA bone=body at=0.50 offset=(0.70,0,0) dir=side tilt=20  len=0.34 material=Berry on=tuber sides=6
+    ring 0.00 w=0.42 d=0.42
+    ring 0.55 w=0.46 d=0.44
+    ring 1.00 w=0.22 d=0.22
+    cap start=dome end=dome
+  loft wartB bone=body at=0.70 offset=(-0.30,0,0.56) dir=side yaw=118 tilt=34 len=0.30 material=Berry on=tuber sides=6
+    ring 0.00 w=0.36 d=0.36
+    ring 0.55 w=0.40 d=0.38
+    ring 1.00 w=0.19 d=0.19
+    cap start=dome end=dome
+  loft wartC bone=body at=0.50 offset=(-0.44,0,-0.48) dir=side yaw=228 tilt=10 len=0.32 material=Berry on=tuber sides=6
+    ring 0.00 w=0.38 d=0.38
+    ring 0.55 w=0.42 d=0.40
+    ring 1.00 w=0.20 d=0.20
+    cap start=dome end=dome
+  loft wartD bone=body at=0.64 offset=(0.38,0,-0.52) dir=side yaw=306 tilt=40 len=0.26 material=Berry on=tuber sides=5
+    ring 0.00 w=0.30 d=0.30
+    ring 0.55 w=0.34 d=0.32
+    ring 1.00 w=0.16 d=0.16
+    cap start=dome end=dome
+
+  # The litter. Flat flakes lying almost level with the ground, tucked in against the
+  # tuber so the lump reads as pushing them aside. `frame=up` with w WIDE and d THIN is
+  # the flat-blade idiom `cocoa_4.wam` spells out.
+  loft leafA bone=soil at=0.0 offset=(0.90,0.010,0.34) dir=side yaw=18 tilt=6 len=0.62 material=Green frame=up sides=5
+    ring 0.00 w=0.20 d=0.030
+    ring 0.35 w=0.66 d=0.040
+    ring 0.75 w=0.60 d=0.036
+    ring 1.00 w=0.22 d=0.022
+    cap start=flat end=dome
+  loft leafB bone=soil at=0.0 offset=(-0.82,0.010,0.52) dir=side yaw=152 tilt=4 len=0.58 material=Green frame=up sides=5
+    ring 0.00 w=0.18 d=0.030
+    ring 0.35 w=0.60 d=0.038
+    ring 0.75 w=0.54 d=0.034
+    ring 1.00 w=0.20 d=0.020
+    cap start=flat end=dome
+  loft leafC bone=soil at=0.0 offset=(-0.30,0.010,-0.92) dir=side yaw=250 tilt=7 len=0.54 material=Green frame=up sides=5
+    ring 0.00 w=0.17 d=0.030
+    ring 0.35 w=0.56 d=0.038
+    ring 0.75 w=0.50 d=0.034
+    ring 1.00 w=0.19 d=0.020
+    cap start=flat end=dome
+
+  # A low ring of turned soil, so the tuber sits in a scrape rather than on a lawn.
+  loft scrape bone=soil at=0.0 dir=up len=0.09 material=Wood sides=10
+    ring 0.00 w=2.30 d=2.10
+    ring 1.00 w=1.70 d=1.55
+    cap start=flat end=none
+
+checks
+  # A lump, not a ball: much wider than it is tall, and flat-topped.
+  assert width(tuber) / height(tuber) in 2.0..3.4
+  assert bottom(tuber) < 0.02
+  # Warty. Every wart has to break the tuber's own outline — a wart that does not is a
+  # wart nobody can see, which is what scattering spheres onto a coconut produced.
+  assert xmax(wartA) > xmax(tuber)
+  assert top(wartB) > top(tuber) * 0.55
+  # The litter lies flat and reaches past the lump, so the lump is breaking THROUGH it.
+  assert height(leafA) < 0.10
+  assert xmax(leafA) > xmax(tuber)
+  # Low overall. This crop is 12 cm tall in cropdata and is supposed to be hard to spot.
+  assert top(tuber) < 0.85
+  assert tris < 900
+  measure aspect width / height

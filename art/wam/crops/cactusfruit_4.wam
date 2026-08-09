@@ -1,0 +1,153 @@
+# Cactus Fruit, ripe (rung 4 of 4, reached by crop stage 5 alone).
+#
+# cropdata silhouette: "Ribbed paddle segments with vivid magenta fruit crowning the top
+# edge." The recipe it replaces is `nature/Cactus_1..3` then `CactusFlowers_5/4` — the
+# pack's barrel cactus, which is a fluted COLUMN. A column and a paddle are the two
+# families of cactus and they do not resemble each other: measured in the audit the ripe
+# plant is 1.04 m tall and 0.08 m wide, a green stick. Every noun in the silhouette line
+# is missing, including the plural.
+#
+# So: four paddles on a branching chain, and the fruit standing UP on the top edge of the
+# upper two, which is where a prickly pear's fruit actually grows and is what "crowning"
+# means. Two construction notes:
+#
+#   - THE WHOLE PLANT LEANS IN Z, NOT IN X. Every paddle is aimed with `pitch`, so nothing
+#     crosses the model's own centreline and the lint's "straddles the centerline but is
+#     lopsided" never fires — which it does for any tilted central part, and correctly, a
+#     part that crosses the axis is claiming to be symmetric.
+#   - `frame=side` pins the ring's depth axis to X, so `d` is the paddle's BROAD span and
+#     `w` its thickness. That is the reverse of the leaf idiom in `cocoa_4.wam` and it is
+#     the only pairing that works here: the automatic frame switches at about 45 degrees of
+#     path tilt, and a chain of paddles leaning 30 degrees apart sits right on that switch.
+#
+# The ribs cropdata names are NOT modelled. A prickly pear's ribs are shallow flutes about
+# a centimetre deep on a 40 cm pad, and at the distance a farm is looked at from they are
+# below the pixel; spending rings on them buys nothing and costs the triangle budget the
+# fruit needs. The word that carries the read is PADDLE, and that is what is built.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model cactusfruit
+  height 1.4
+  style chunky
+
+palette
+  # Wood -> stem: the older, darker basal pad.
+  Wood      #4a7a4e
+  Green     #5c8f5a
+  DarkGreen #4a7a4e
+  # Berry -> fruit: the magenta tunas.
+  Berry     #d6395c
+
+skeleton
+  root sand at 0.0
+  bone padA parent=sand dir=up pitch=6 len=0.40
+  bone padB parent=padA dir=up pitch=-28 len=0.36
+  bone padC parent=padB dir=up pitch=32 len=0.32
+  # The branch. A prickly pear forks, and a single stack of pads reads as a totem.
+  bone padD parent=padA dir=up pitch=-56 len=0.30
+  bone padE parent=padB dir=up pitch=54 len=0.27
+
+parts
+  # The pads. Widest at mid-height and narrowed to a neck at both ends, which is what makes
+  # a pad a SEGMENT — the joint between two pads is the whole reason a prickly pear reads as
+  # stacked plates rather than as one lumpy body.
+  loft plateA bones=sand..padA material=Wood frame=side sides=7
+    ring 0.00 w=0.055 d=0.114
+    ring 0.16 w=0.088 d=0.296
+    ring 0.50 w=0.098 d=0.353
+    ring 0.86 w=0.080 d=0.274
+    ring 1.00 w=0.046 d=0.103
+    cap start=flat end=dome
+  loft plateB bones=padB..padB material=Green frame=side sides=7
+    ring 0.00 w=0.048 d=0.103
+    ring 0.16 w=0.082 d=0.274
+    ring 0.50 w=0.092 d=0.331
+    ring 0.86 w=0.074 d=0.251
+    ring 1.00 w=0.042 d=0.091
+    cap start=dome end=dome
+  loft plateC bones=padC..padC material=Green frame=side sides=7
+    ring 0.00 w=0.044 d=0.091
+    ring 0.16 w=0.076 d=0.251
+    ring 0.50 w=0.086 d=0.308
+    ring 0.86 w=0.068 d=0.228
+    ring 1.00 w=0.038 d=0.080
+    cap start=dome end=dome
+  loft plateD bones=padD..padD material=DarkGreen frame=side sides=7
+    ring 0.00 w=0.042 d=0.091
+    ring 0.16 w=0.072 d=0.239
+    ring 0.50 w=0.082 d=0.285
+    ring 0.86 w=0.064 d=0.217
+    ring 1.00 w=0.036 d=0.080
+    cap start=dome end=dome
+
+  loft plateE bones=padE..padE material=Green frame=side sides=7
+    ring 0.00 w=0.040 d=0.086
+    ring 0.16 w=0.068 d=0.228
+    ring 0.50 w=0.078 d=0.274
+    ring 0.86 w=0.060 d=0.205
+    ring 1.00 w=0.034 d=0.076
+    cap start=dome end=dome
+
+  # THE TUNAS. Standing UP off the rim of the top pads — a prickly pear fruit is a barrel
+  # sitting proud on the edge with a sunken navel, and "crowning the top edge" is the
+  # silhouette line's own phrase. `on=` snaps each to the pad's surface so it is flush by
+  # construction, and the `offset=` aims it at the rim rather than at the flat face, which
+  # is where a snap to the CLOSEST surface point would otherwise put it.
+  loft tunaA bone=padC at=1.00 offset=(0,0.02,0.10) dir=up pitch=-14 len=0.15 material=Berry on=plateC sides=7
+    ring 0.00 w=0.055 d=0.055
+    ring 0.30 w=0.090 d=0.090
+    ring 0.80 w=0.086 d=0.086
+    ring 1.00 w=0.062 d=0.062
+    cap start=dome end=flat
+  loft tunaB bone=padC at=0.92 offset=(0,0.02,-0.13) dir=up pitch=16 len=0.13 material=Berry on=plateC sides=7
+    ring 0.00 w=0.050 d=0.050
+    ring 0.30 w=0.082 d=0.082
+    ring 0.80 w=0.078 d=0.078
+    ring 1.00 w=0.056 d=0.056
+    cap start=dome end=flat
+  loft tunaC bone=padD at=1.00 offset=(0,0.02,-0.09) dir=up pitch=10 len=0.14 material=Berry on=plateD sides=7
+    ring 0.00 w=0.052 d=0.052
+    ring 0.30 w=0.086 d=0.086
+    ring 0.80 w=0.082 d=0.082
+    ring 1.00 w=0.058 d=0.058
+    cap start=dome end=flat
+  loft tunaD bone=padB at=0.94 offset=(0,0.02,0.14) dir=up pitch=-20 len=0.12 material=Berry on=plateB sides=6
+    ring 0.00 w=0.046 d=0.046
+    ring 0.30 w=0.076 d=0.076
+    ring 0.80 w=0.072 d=0.072
+    ring 1.00 w=0.052 d=0.052
+    cap start=dome end=flat
+
+checks
+  # PADDLES: each pad is far broader than it is thick, and that ratio is the entire
+  # difference from the barrel cactus this replaces. Note which axis is which: `frame=side`
+  # pins the DEPTH axis of the ring to world X, so `d` in the ring table becomes the part's
+  # `width()` and `w` becomes its `depth()`. Written the other way round this check reads
+  # 0.25 on a pad that is four to one.
+  assert width(plateA) / depth(plateA) > 3.0
+  # SEGMENTS: the pads are separate objects stacked end to end, so each one starts above
+  # the middle of the one below it.
+  assert bottom(plateB) > 0.14
+  assert bottom(plateC) > bottom(plateB)
+  # It FORKS, both ways. A single stack is a totem pole.
+  assert zmin(plateD) < zmin(plateA)
+  assert zmax(plateE) > zmax(plateA)
+  # THE FRUIT CROWNS THE TOP EDGE: above the pad it grows from, and above every other pad.
+  assert bottom(tunaA) > 0.55
+  assert top(tunaA) > top(plateC) - 0.02
+  # ...and big enough to see. 0.09 of a 1.4 m plant is a 13 cm fruit, which is life-size
+  # for a tuna and roughly three times the size the audit could not find on the orchard.
+  assert width(tunaA) in 0.07..0.14
+  assert bottom(plateA) < 0.02
+  # Tall and narrow enough that `familyScale` binds on HEIGHT rather than on width: a
+  # 1.4 m crop on a 1.04 m tile allows about 0.53 at the default width cap, and this sits
+  # well inside it, so the recipe needs no `wide` at all. The first cut had the pads WIDER
+  # than they were long (0.56 across on a 0.36 segment) and read as a stack of boulders;
+  # a prickly pear pad is an egg with its long axis along the branch, and that is also
+  # what makes the necks between segments visible.
+  assert width / height < 0.45
+  assert depth / height < 0.45
+  # Budget: `clump: 1`.
+  assert tris < 1800
+  measure aspect depth / height

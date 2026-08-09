@@ -1,0 +1,56 @@
+# Swamp Reed, first rung (1 of 3). See `swampreed_3.wam` for the argument and the rules.
+#
+# NO CANES. A reed's first year is a fan of strap leaves straight out of the mud; the cane
+# is what rung 2 adds and the cattail is what rung 3 adds, so the three rungs are three
+# topologies rather than one plant at three scales.
+
+model swampreed
+  height 1.6
+  style chunky
+
+palette
+  Wood      #6a8a4a
+  Green     #86a85a
+  DarkGreen #6f9048
+  Berry     #8a6a3a
+
+skeleton
+  root mud at 0.0
+
+parts
+  # Straight out of the mud, so these are free rays off the root rather than lofts on
+  # canes that do not exist yet. Each leans away from the centreline: `tilt` rotates about
+  # +Z, so a POSITIVE tilt on an `up` bone moves it toward -X, and getting that backwards
+  # is what makes a part straddle the axis and trip the lint.
+  loft leafA bone=mud at=0.0 offset=(0.045,0,0.02)   dir=up pitch=6   tilt=-13 len=0.36 material=Green frame=up sides=4
+    ring 0.00 w=0.044 d=0.014
+    ring 0.45 w=0.060 d=0.017
+    ring 1.00 w=0.013 d=0.007 tip
+    cap start=flat end=point
+  loft leafB bone=mud at=0.0 offset=(0.038,0,-0.03)  dir=up pitch=-9  tilt=-20 len=0.30 material=DarkGreen frame=up sides=4
+    ring 0.00 w=0.040 d=0.013
+    ring 0.45 w=0.055 d=0.016
+    ring 1.00 w=0.012 d=0.006 tip
+    cap start=flat end=point
+  loft leafC bone=mud at=0.0 offset=(-0.042,0,0.035) dir=up pitch=11  tilt=17  len=0.28 material=Green frame=up sides=4
+    ring 0.00 w=0.038 d=0.012
+    ring 0.45 w=0.052 d=0.015
+    ring 1.00 w=0.011 d=0.006 tip
+    cap start=flat end=point
+  loft leafD bone=mud at=0.0 offset=(-0.036,0,-0.04) dir=up pitch=-13 tilt=24  len=0.23 material=DarkGreen frame=up sides=4
+    ring 0.00 w=0.034 d=0.011
+    ring 0.45 w=0.047 d=0.014
+    ring 1.00 w=0.010 d=0.005 tip
+    cap start=flat end=point
+
+checks
+  # A fan, and a low one: this has to sit well under the caned rungs so the family reads
+  # as growth rather than as a zoom.
+  assert top(leafA) < 0.42
+  assert bottom(leafA) < 0.02
+  # A juvenile is allowed to be relatively broader than the ripe plant: `familyScale` takes
+  # its one scale off the RIPE model alone, so only `swampreed_3.wam`'s aspect can cost the
+  # family height. This bound only says the fan is not a mat.
+  assert width / height < 0.90
+  assert tris < 220
+  measure aspect width / height

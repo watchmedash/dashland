@@ -1,0 +1,131 @@
+# Stonecrop, third rung (3 of 4). See `stonecrop_4.wam` for the argument and the rules.
+#
+# The colony is complete and NOTHING HAS FLOWERED. The corymb is this crop's ripeness tell
+# and it exists on rung 4 alone, which is how a WAM family expresses "fruit only in the
+# late stages" without a generated scatter.
+
+model stonecrop
+  height 0.30
+  style smooth
+
+palette
+  Wood      #7a8a6a
+  Green     #9ab08a
+  DarkGreen #7f9673
+  Berry     #e0c46a
+
+skeleton
+  root rock at 0.0
+  bone core parent=rock dir=up len=0.16
+
+  # The central rosette: five mirrored pairs, outer lying back, inner standing up.
+  mirror
+    bone lfA parent=core dir=side tilt=14 len=0.44
+    bone lfB parent=core dir=side yaw=48  tilt=26 len=0.41
+    bone lfC parent=core dir=side yaw=100 tilt=20 len=0.43
+    bone lfD parent=core dir=side yaw=146 tilt=40 len=0.36
+    bone lfE parent=core dir=side yaw=24  tilt=58 len=0.30
+  end
+
+  # The satellites. A `mirror` block reflects the offset too, so one pair of bones gives
+  # two whole rosettes standing away from the middle — which is exactly the colony the
+  # silhouette line asks for and is a thing `clump` cannot express, because `clump` stamps
+  # the SAME model N times and would give three identical plants in a ring.
+  mirror
+    bone satL parent=rock offset=(0.32,0,0.50) dir=up len=0.10
+    bone sfA parent=satL dir=side tilt=18 len=0.30
+    bone sfB parent=satL dir=side yaw=72  tilt=30 len=0.27
+    bone sfC parent=satL dir=side yaw=144 tilt=24 len=0.28
+    bone sfD parent=satL dir=side yaw=216 tilt=46 len=0.23
+  end
+
+parts
+  loft crown bones=rock..core material=Wood sides=8
+    ring 0.00 w=0.26 d=0.26
+    ring 1.00 w=0.20 d=0.20
+    cap start=flat end=flat
+  mirror
+    loft satcrown bones=satL..satL material=Wood sides=6
+      ring 0.00 w=0.18 d=0.18
+      ring 1.00 w=0.14 d=0.14
+      cap start=flat end=flat
+  end
+
+  # FLESHY SPOONS. Widest and thickest two-thirds of the way out, rounded at the end. The
+  # `d`-to-`w` ratio is the whole species read against agave, which is the same
+  # construction with `d` at half of `w` and a `tip` on the last ring.
+  mirror
+    loft leafA bones=lfA..lfA material=Green frame=up sides=6
+      ring 0.00 w=0.115 d=0.080
+      ring 0.42 w=0.185 d=0.130
+      ring 0.80 w=0.190 d=0.132
+      ring 1.00 w=0.110 d=0.078
+      cap start=dome end=dome
+    loft leafB bones=lfB..lfB material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.108 d=0.076
+      ring 0.42 w=0.175 d=0.122
+      ring 0.80 w=0.180 d=0.125
+      ring 1.00 w=0.104 d=0.074
+      cap start=dome end=dome
+    loft leafC bones=lfC..lfC material=Green frame=up sides=6
+      ring 0.00 w=0.112 d=0.078
+      ring 0.42 w=0.180 d=0.126
+      ring 0.80 w=0.185 d=0.129
+      ring 1.00 w=0.107 d=0.076
+      cap start=dome end=dome
+    loft leafD bones=lfD..lfD material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.100 d=0.070
+      ring 0.42 w=0.162 d=0.113
+      ring 0.80 w=0.166 d=0.116
+      ring 1.00 w=0.096 d=0.068
+      cap start=dome end=dome
+    loft leafE bones=lfE..lfE material=Green frame=up sides=6
+      ring 0.00 w=0.092 d=0.064
+      ring 0.42 w=0.148 d=0.104
+      ring 0.80 w=0.152 d=0.106
+      ring 1.00 w=0.088 d=0.062
+      cap start=dome end=dome
+  end
+
+  mirror
+    loft sleafA bones=sfA..sfA material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.086 d=0.060
+      ring 0.42 w=0.138 d=0.097
+      ring 0.80 w=0.142 d=0.099
+      ring 1.00 w=0.082 d=0.058
+      cap start=dome end=dome
+    loft sleafB bones=sfB..sfB material=Green frame=up sides=5
+      ring 0.00 w=0.080 d=0.056
+      ring 0.42 w=0.128 d=0.090
+      ring 0.80 w=0.132 d=0.092
+      ring 1.00 w=0.076 d=0.054
+      cap start=dome end=dome
+    loft sleafC bones=sfC..sfC material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.082 d=0.058
+      ring 0.42 w=0.132 d=0.092
+      ring 0.80 w=0.136 d=0.095
+      ring 1.00 w=0.078 d=0.055
+      cap start=dome end=dome
+    loft sleafD bones=sfD..sfD material=Green frame=up sides=5
+      ring 0.00 w=0.072 d=0.050
+      ring 0.42 w=0.116 d=0.081
+      ring 0.80 w=0.120 d=0.084
+      ring 1.00 w=0.068 d=0.048
+      cap start=dome end=dome
+  end
+
+  # THE CORYMB. A flat plate of florets, held on stalks that all reach the SAME height —
+  # which is what makes a corymb flat-topped and is the shape word in cropdata's line.
+  # One central floret plus a mirrored pair at each of two bearings gives five heads on a
+  # disc about two-thirds of the rosette's own span.
+
+checks
+  # Rosettes, plural, and no flower anywhere.
+  assert xmax(satcrown.l) > xmax(crown)
+  assert top(sleafA.l) < top(leafE.l)
+  assert top(leafE.l) > top(leafA.l) + 0.03
+  assert depth(leafA.l) / height(leafA.l) > 0.55
+  assert bottom(crown) < 0.02
+  assert asymmetry(crown) < 0.005
+  assert tris < 1100
+  measure aspect width / height

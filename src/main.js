@@ -374,8 +374,8 @@ for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID
  *
  * Kelp is the exception at 1.0: it is the one block authored as a *tile* rather
  * than as an organism, a single segment of a stalk that stacks, so it has to
- * fill its cell exactly or a run of them is a dashed line. See `wam/items/
- * kelp.wam`.
+ * fill its cell exactly or a run of them is a dashed line. See
+ * `art/wam/items/kelp.wam`.
  */
 const MODELLED_PLANTS = {
   flower_red: 0.62, flower_blue: 0.62, flower_gold: 0.62, mushroom: 0.62,

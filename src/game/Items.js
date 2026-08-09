@@ -127,7 +127,7 @@ const MATERIALS = [
   // no smelt and no recipe — so its whole supply is "how many clams have you
   // found on the seabed", which is the point: the reef needed a reason to be
   // swum down to rather than looked at. `crystal` is the model art it is
-  // closest to, but it has its own (`wam/items/pearl.wam`); these two colours
+  // closest to, but it has its own (`art/wam/items/pearl.wam`); these two colours
   // are only the fallback sprite's, for the frame before the model lands.
   { name: 'pearl', label: 'Pearl', color: '#e8e6dd', shine: '#ffffff' },
   // Husks only. Nothing in the ground yields cinder, and husks only walk after

@@ -15,6 +15,13 @@ dist/
 # submodule pointer and clone as an empty folder. The game does not need it to
 # run: the compiled models it loads are in `public/models/wam/`, which ARE
 # committed.
+#
+# Our own `.wam` sources are NOT in here — they are in `art/wam/`, tracked
+# normally. They used to live inside this clone, which meant every model the
+# project has ever authored was untracked by both repositories at once: this
+# one ignores the folder, and the clone belongs to somebody else. The compiled
+# output was safe and the source that made it was not. Nothing of ours goes
+# back in here; see `art/wam/README.md`.
 # Anchored, and it has to be. Bare `wam` matches a directory of that name at
 # *any* depth, so it also swallowed `public/models/wam/` — the one thing this
 # comment says is committed. The models already in there were force-added

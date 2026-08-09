@@ -1,0 +1,110 @@
+# Lotus, budding (rung 3 of 4).
+#
+# The rung below ripe: the raft is full but the flower is a CLOSED BUD on a shorter
+# stalk. That is the ripeness tell for this crop — same parts, one whorl angle apart —
+# and it is authored rather than faked by `world/crops.js`'s "half count, colour dragged
+# back toward the leaf" rule, which cannot close a flower.
+#
+# See `lotus_4.wam` for the composition rules and `icecapmoss_3.wam` for the material
+# naming.
+
+model lotus
+  height 0.70
+  style smooth
+
+palette
+  Green     #5aa85e
+  DarkGreen #4a8a4e
+  Wood      #4a8a4e
+  Berry     #f0a8c4
+
+skeleton
+  # y=0 is the waterline: `world/crops.js` snaps a paddy plot for this crop to the water
+  # plane exactly, because pads float. So the pads sit at y=0 and the stalk rises from it.
+  root water at 0.0
+  bone stalk parent=water dir=up len=0.70
+  # Eight petals in two whorls. `mirror` authors four and reflects them, so the flower is
+  # symmetric by construction rather than by eight hand-typed yaw values that drift.
+  mirror
+    # Two whorls: A and C stand up around the centre, B and D splay out under them. All
+    # four at one tilt gave a closed tulip — the render showed a bud, not a bloom.
+    bone petA parent=stalk dir=side tilt=80 len=0.24
+    bone petB parent=stalk dir=side yaw=48  tilt=78 len=0.24
+    bone petC parent=stalk dir=side yaw=96  tilt=80 len=0.23
+    bone petD parent=stalk dir=side yaw=142 tilt=77 len=0.23
+  end
+
+parts
+  # Six pads, as free vertical rays off the root rather than as bones: a pad is a disc, and
+  # a disc is a loft two rings tall on a very short up-axis, not a tube running out sideways.
+  # `sides=16` overrides `style` for these alone — a pad is the one part of this plant whose
+  # OUTLINE is the read, and an octagon reads as a coaster.
+  mirror
+    loft padA bone=water at=0.0 offset=(0.50,0.0,0.30) dir=up len=0.05 material=Green sides=16
+      ring 0.00 w=0.60 d=0.60
+      ring 1.00 w=0.64 d=0.64
+      cap start=flat end=flat
+    loft padB bone=water at=0.0 offset=(0.64,0.0,-0.36) dir=up len=0.05 material=DarkGreen sides=16
+      ring 0.00 w=0.52 d=0.52
+      ring 1.00 w=0.56 d=0.56
+      cap start=flat end=flat
+    loft padC bone=water at=0.0 offset=(0.18,0.0,0.72) dir=up len=0.05 material=Green sides=16
+      ring 0.00 w=0.46 d=0.46
+      ring 1.00 w=0.50 d=0.50
+      cap start=flat end=flat
+  end
+
+  # The stalk. Thin and straight — what makes the bloom read as one thing standing out of
+  # the water is the gap between it and the pads, and a fat stalk closes that gap visually.
+  loft stem bones=water..stalk material=Wood sides=6
+    ring 0.00 w=0.055 d=0.055
+    ring 0.70 w=0.045 d=0.045
+    ring 1.00 w=0.060 d=0.060
+    cap start=flat end=flat
+
+  # The receptacle the petals sit in, so the flower has a centre instead of a hole.
+  loft cup bone=stalk at=1.0 dir=up len=0.10 material=DarkGreen
+    ring 0.00 w=0.09 d=0.09
+    ring 0.60 w=0.15 d=0.15
+    ring 1.00 w=0.12 d=0.12
+    cap start=dome end=flat
+
+  # The petals. `frame=up` and then d WIDE, w THIN: a lotus petal stands on edge around the
+  # centre, so its broad axis is the vertical one and its thin axis is tangential. Getting
+  # that pair the wrong way round gives a flower of flat paddles lying face-up, which is a
+  # daisy.
+  mirror
+    loft petalA bones=petA..petA material=Berry frame=up sides=6
+      ring 0.00 w=0.045 d=0.10
+      ring 0.35 w=0.070 d=0.26
+      ring 0.75 w=0.055 d=0.22
+      ring 1.00 w=0.020 d=0.06 tip
+      cap start=flat end=point
+    loft petalB bones=petB..petB material=Berry frame=up sides=6
+      ring 0.00 w=0.042 d=0.09
+      ring 0.35 w=0.066 d=0.24
+      ring 0.75 w=0.050 d=0.20
+      ring 1.00 w=0.018 d=0.05 tip
+      cap start=flat end=point
+    loft petalC bones=petC..petC material=Berry frame=up sides=6
+      ring 0.00 w=0.044 d=0.10
+      ring 0.35 w=0.068 d=0.25
+      ring 0.75 w=0.052 d=0.21
+      ring 1.00 w=0.019 d=0.05 tip
+      cap start=flat end=point
+    loft petalD bones=petD..petD material=Berry frame=up sides=6
+      ring 0.00 w=0.040 d=0.09
+      ring 0.35 w=0.062 d=0.23
+      ring 0.75 w=0.048 d=0.19
+      ring 1.00 w=0.017 d=0.05 tip
+      cap start=flat end=point
+  end
+
+checks
+  assert bottom(cup) > top(padA.l) + 0.40
+  assert bottom(padA.l) < 0.01
+  # A bud, not a bloom: the flower is TALLER than it is wide. The ripe rung inverts this,
+  # which is the whole difference between the two models.
+  assert (top(petalA.l) - bottom(petalA.l)) > (xmax(petalB.l) - xmin(petalB.r)) * 0.75
+  assert tris < 2300
+  measure budspan xmax(petalB.l) - xmin(petalB.r)

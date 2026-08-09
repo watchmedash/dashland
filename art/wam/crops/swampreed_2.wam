@@ -1,0 +1,62 @@
+# Swamp Reed, second rung (2 of 3). See `swampreed_3.wam` for the argument and the rules.
+#
+# Two canes are up and neither has flowered: no cattail anywhere on this rung, which is
+# the ripeness tell for a crop whose whole distinguishing feature is the head.
+
+model swampreed
+  height 1.6
+  style chunky
+
+palette
+  Wood      #6a8a4a
+  Green     #86a85a
+  DarkGreen #6f9048
+  Berry     #8a6a3a
+
+skeleton
+  root mud at 0.0
+  bone caneA parent=mud offset=(0.095,0,0.03)   dir=up pitch=-2 tilt=3  len=0.56
+  bone caneB parent=mud offset=(-0.090,0,0.065) dir=up pitch=4  tilt=-4 len=0.44
+
+parts
+  loft stemA bones=caneA..caneA material=Wood sides=6
+    ring 0.00 w=0.048 d=0.048
+    ring 0.50 w=0.037 d=0.037
+    ring 1.00 w=0.028 d=0.028
+    cap start=flat end=dome
+  loft stemB bones=caneB..caneB material=Wood sides=6
+    ring 0.00 w=0.042 d=0.042
+    ring 0.50 w=0.032 d=0.032
+    ring 1.00 w=0.025 d=0.025
+    cap start=flat end=dome
+
+  loft leafA1 bone=caneA at=0.06 dir=up pitch=8  tilt=-15 len=0.48 material=Green frame=up sides=4
+    ring 0.00 w=0.050 d=0.015
+    ring 0.45 w=0.068 d=0.018
+    ring 1.00 w=0.015 d=0.007 tip
+    cap start=flat end=point
+  loft leafA2 bone=caneA at=0.16 dir=up pitch=-6 tilt=-9 len=0.40 material=DarkGreen frame=up sides=4
+    ring 0.00 w=0.046 d=0.014
+    ring 0.45 w=0.063 d=0.017
+    ring 1.00 w=0.014 d=0.007 tip
+    cap start=flat end=point
+  loft leafB1 bone=caneB at=0.08 dir=up pitch=12 tilt=15 len=0.38 material=DarkGreen frame=up sides=4
+    ring 0.00 w=0.044 d=0.014
+    ring 0.45 w=0.060 d=0.017
+    ring 1.00 w=0.013 d=0.007 tip
+    cap start=flat end=point
+  loft leafB2 bone=caneB at=0.20 dir=up pitch=-9 tilt=8 len=0.32 material=Green frame=up sides=4
+    ring 0.00 w=0.040 d=0.013
+    ring 0.45 w=0.055 d=0.016
+    ring 1.00 w=0.012 d=0.006 tip
+    cap start=flat end=point
+
+checks
+  # Caned but not headed: the tallest thing on the plant is a bare cane tip.
+  assert top(stemA) in 0.45..0.70
+  assert bottom(stemA) < 0.02
+  assert top(stemA) > top(stemB) + 0.08
+  assert bottom(leafA1) < 0.12
+  assert width / height < 0.90
+  assert tris < 400
+  measure aspect width / height

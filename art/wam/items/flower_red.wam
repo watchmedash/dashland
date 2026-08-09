@@ -1,0 +1,127 @@
+# Crimson Bloom — a tulip and two buds on one root.
+#
+# The block this replaces is an `R_CROSS`, and its tile (`TextureGen.flower`)
+# draws *three* stems, not one. That matters more than it looks: a single bloom
+# on a single stalk is a lollipop at any size, and the thing that made the
+# billboard read as a flower patch was the clump. So the model is a clump —
+# one tall bloom flanked by two shorter buds off the same root — and it is the
+# silhouette, not the colour, that does the work at 32px.
+#
+# The head is **closed**. The obvious tulip is an open cup, and an open cup is a
+# loft with `cap end=none`: a single-sided surface, so from above you see
+# straight through the petals into nothing, and from below you see the inside of
+# the far wall. Zero-thickness surfaces are only double-sided when they are a
+# `web`, and a `web` has to span real bones. A closed teardrop costs the same
+# triangles, reads from every yaw a spinning drop can reach, and needs no
+# special material.
+#
+# What replaces the missing cup interior is `Pale` at the very top plus the
+# `stamen` nub: the flower's heart peeking out from between the petal tips is
+# the cue the texture spends its centre blob on. Without it the bloom is a red
+# egg.
+#
+# The alternating `roll=` on a `squarish` section is the sapling's trick and is
+# here for the same reason — it breaks the loft's own facets out of alignment so
+# the head reads as overlapping petals rather than as a smooth spheroid. A round
+# section at this size is a berry.
+
+model flower_red
+  height 0.40
+  style chunky
+
+palette
+  Petal #cc2e3a
+  Deep  #93202b
+  Pale  #fadc78
+  Stem  #40682c
+  Leaf  #507e34
+
+skeleton
+  root soil at 0.0
+  bone stalk parent=soil dir=up pitch=-4 len=0.58
+  bone cup   parent=stalk dir=up pitch=-6 len=0.08
+  mirror
+    # The buds branch low so their heads land well under the main bloom — a
+    # clump has a tallest flower, and three heads at one height is a hedge.
+    # `yaw` as well as `tilt` because a mirrored pair reflects across X=0 and so
+    # keeps its z: with tilt alone the whole clump is coplanar — it came out
+    # 0.62 wide by 0.39 deep — and edge-on it is one stalk. The yaw swings both
+    # buds off that plane and the two extents come out within 0.02 of each other.
+    bone side parent=stalk at=0.26 dir=up tilt=40 pitch=7 yaw=34 len=0.34
+    bone leaf parent=stalk at=0.22 dir=side tilt=-8 yaw=-26 len=0.24
+  end
+
+parts
+  loft stem bones=soil..cup material=Stem sides=4
+    ring 0.00 w=0.075 d=0.072       # a flare at the base, so it stands on soil
+    ring 0.09 w=0.042 d=0.040
+    ring 0.60 w=0.034 d=0.032
+    ring 1.00 w=0.030 d=0.028
+    cap start=flat end=flat
+
+  loft bloom bone=cup at=1.0 dir=up len=0.30 on=stem material=Petal sides=8 shape=squarish
+    ring 0.00 w=0.10 d=0.10 material=Deep
+    ring 0.20 w=0.26 d=0.25 roll=13 material=Petal
+    ring 0.55 w=0.36 d=0.35 roll=-21
+    ring 0.82 w=0.30 d=0.29 roll=17
+    ring 0.95 w=0.15 d=0.14 roll=-11 material=Deep
+    ring 1.00 w=0.06 d=0.06
+    cap start=flat end=flat
+
+  # The heart, standing proud of the petal tips.
+  #
+  # Not `on=bloom`, which is what this was first: `on=` snaps to the *closest*
+  # point on the named surface, and the closest point on a 0.30-tall bloom to
+  # the mount at its foot is its own base ring — the nub landed there, pointing
+  # up through the inside, and the lint caught it as a part buried in another.
+  # The bloom is lofted straight up from `cup.tail`, so the offset that puts the
+  # base just under the closing ring is simply the loft's own length less a
+  # little, and it is exact.
+  loft stamen bone=cup at=1.0 offset=(0,0.275,0) dir=up len=0.075 material=Pale sides=6
+    ring 0.00 w=0.09 d=0.09
+    ring 0.70 w=0.07 d=0.07
+    ring 1.00 w=0.04 d=0.04
+    cap start=none end=flat
+
+  mirror
+    loft sidestem bones=side..side material=Stem sides=4
+      ring 0.00 w=0.032 d=0.030
+      ring 1.00 w=0.024 d=0.023
+      cap start=flat end=flat
+
+    # A bud is the bloom before it opens: narrower, no pale heart, and it keeps
+    # the Deep collar so the two reads are obviously the same plant.
+    loft bud bone=side at=1.0 dir=up pitch=-4 len=0.20 on=sidestem material=Petal sides=6 shape=squarish
+      ring 0.00 w=0.09 d=0.09 material=Deep
+      ring 0.28 w=0.21 d=0.20 roll=15 material=Petal
+      ring 0.70 w=0.22 d=0.21 roll=-19
+      ring 1.00 w=0.07 d=0.07 roll=12
+      cap start=flat end=flat
+
+    # Leaves are lofts and not `web`s on purpose: a web needs its own rib bones
+    # and buys a surface that is one triangle thick, which at ankle height in
+    # the world disappears edge-on. A flattened loft is always solid.
+    loft blade bones=leaf..leaf material=Leaf sides=4 frame=up
+      ring 0.00 w=0.030 d=0.020
+      ring 0.35 w=0.090 d=0.026
+      ring 0.75 w=0.070 d=0.022
+      ring 1.00 w=0.020 d=0.012
+      cap start=flat end=point
+
+checks
+  assert bottom(stem) < 0.01
+  # A clump with a leader: the bloom is the top of the model and the buds sit
+  # clear underneath it. This is the assertion that fails first if the side
+  # stalks are ever lengthened to "balance" the silhouette.
+  assert bottom(bloom) > top(bud.l)
+  assert top(stamen) > top(bloom)
+  # ...and the buds break the leader's outline rather than hiding behind it.
+  # Horizontal reach and not `abs(x)`: the side stalks are yawed off the mirror
+  # plane on purpose (see the skeleton), so half their offset is in z and an
+  # x-only test reads them as tucked in when they are not.
+  assert (x(bud.l) * x(bud.l) + z(bud.l) * z(bud.l)) ** 0.5 > width(bloom) / 2
+  # The head is the widest thing here, and by a margin: a bloom no wider than
+  # its own stalk is a bulrush.
+  assert width(bloom) > width(stem) * 2.5
+  assert parts == 9
+  assert tris < 600

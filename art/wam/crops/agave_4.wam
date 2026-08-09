@@ -1,0 +1,173 @@
+# Agave, ripe (rung 4 of 4, reached by crop stage 5 alone).
+#
+# cropdata silhouette: "Rosette of thick spiked blades; a tall flower spike shoots up at
+# the final stage." The recipe it replaces was `nature/Cactus_1` then `Plant_1` three times
+# with `rosette: { spike: true }` — `world/crops.js` throwing the pack model away and
+# generating a rosette outright, because `Plant_1` is a grass tuft. Photographed, the whole
+# agave row is four pale spiky tufts about 20 cm across on a 1.3 m crop, 232 triangles for
+# a plant with a two-tile footprint, and the flower spike the silhouette line ends on is
+# nowhere in the model or the recipe.
+#
+# Both halves are geometry here. THE BLADES ARE THICK, which is the word cropdata uses and
+# the one thing a generated blade card cannot be: each is a keeled slab about half as deep
+# as it is wide, ending in a real terminal spine. And THE SPIKE EXISTS, on this rung only —
+# `modelIndexFor` maps five crop stages onto four models as 0,1,2,2,3, so rung 4 is reached
+# by the ripe stage alone and the flower is a genuine final-stage event rather than
+# something that fades in over two rungs.
+#
+# The spike is also what makes this crop worth its two tiles: it is the only thing on the
+# desert farm that breaks the horizon.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model agave
+  height 1.3
+  style chunky
+
+palette
+  # Wood -> stem: the flower stalk and the central boss.
+  Wood      #6a8a6a
+  Green     #8aa87e
+  DarkGreen #74906a
+  # Berry -> fruit: the flower clusters up the spike.
+  Berry     #d4c46a
+
+skeleton
+  root sand at 0.0
+  bone core parent=sand dir=up len=0.10
+
+  # Six mirrored pairs at four elevations. The outer blades lie back almost to horizontal
+  # and the inner ones stand up, which is what gives a rosette a middle — every blade at
+  # one tilt is a starfish.
+  mirror
+    bone blA parent=core dir=side tilt=16 len=0.50
+    bone blB parent=core dir=side yaw=52  tilt=27 len=0.47
+    bone blC parent=core dir=side yaw=104 tilt=21 len=0.49
+    bone blD parent=core dir=side yaw=152 tilt=38 len=0.42
+    bone blE parent=core dir=side yaw=26  tilt=54 len=0.36
+    bone blF parent=core dir=side yaw=128 tilt=62 len=0.32
+  end
+
+  # The spike. Nearly vertical and very long: this is a plant that flowers once and dies,
+  # and the flower stalk is several times the rosette.
+  bone spike parent=core dir=up pitch=2 len=0.88
+
+parts
+  loft boss bones=sand..core material=Wood sides=8
+    ring 0.00 w=0.26 d=0.26
+    ring 1.00 w=0.20 d=0.20
+    cap start=flat end=flat
+
+  # The blades. `frame=up` with w WIDE and d THICK — an agave leaf is a slab, not a card,
+  # and `d` at roughly half of `w` is what "thick" means as a number. The last ring is a
+  # `tip`, which is the terminal spine every agave has and the reason nobody walks through
+  # one.
+  mirror
+    loft bladeA bones=blA..blA material=Green frame=up sides=5
+      ring 0.00 w=0.150 d=0.075
+      ring 0.30 w=0.185 d=0.090
+      ring 0.72 w=0.140 d=0.066
+      ring 1.00 w=0.020 d=0.012 tip
+      cap start=dome end=point
+    loft bladeB bones=blB..blB material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.140 d=0.070
+      ring 0.30 w=0.175 d=0.085
+      ring 0.72 w=0.132 d=0.062
+      ring 1.00 w=0.019 d=0.011 tip
+      cap start=dome end=point
+    loft bladeC bones=blC..blC material=Green frame=up sides=5
+      ring 0.00 w=0.146 d=0.073
+      ring 0.30 w=0.180 d=0.088
+      ring 0.72 w=0.136 d=0.064
+      ring 1.00 w=0.020 d=0.012 tip
+      cap start=dome end=point
+    loft bladeD bones=blD..blD material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.132 d=0.066
+      ring 0.30 w=0.164 d=0.080
+      ring 0.72 w=0.124 d=0.058
+      ring 1.00 w=0.018 d=0.011 tip
+      cap start=dome end=point
+    loft bladeE bones=blE..blE material=Green frame=up sides=5
+      ring 0.00 w=0.120 d=0.060
+      ring 0.30 w=0.150 d=0.074
+      ring 0.72 w=0.112 d=0.053
+      ring 1.00 w=0.017 d=0.010 tip
+      cap start=dome end=point
+    loft bladeF bones=blF..blF material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.112 d=0.056
+      ring 0.30 w=0.140 d=0.069
+      ring 0.72 w=0.104 d=0.049
+      ring 1.00 w=0.016 d=0.010 tip
+      cap start=dome end=point
+  end
+
+  # The stalk. Thin, so the flowers on it read as separate objects rather than as bulges.
+  loft pole bones=core..spike material=Wood sides=6
+    ring 0.00 w=0.075 d=0.075
+    ring 0.55 w=0.050 d=0.050
+    ring 1.00 w=0.032 d=0.032
+    cap start=flat end=dome
+
+  # The flower clusters: short lateral arms up the top half of the stalk, each ending in a
+  # blunt head. A panicle, which is what an agave's inflorescence actually is, and what
+  # gives the spike a candelabra outline instead of a broom handle.
+  mirror
+    loft armA bone=spike at=0.50 dir=side tilt=34 len=0.13 material=Wood sides=4
+      ring 0.00 w=0.030 d=0.030
+      ring 1.00 w=0.020 d=0.020
+      cap start=flat end=flat
+    loft armB bone=spike at=0.70 dir=side yaw=96 tilt=38 len=0.12 material=Wood sides=4
+      ring 0.00 w=0.028 d=0.028
+      ring 1.00 w=0.019 d=0.019
+      cap start=flat end=flat
+    loft armC bone=spike at=0.88 dir=side yaw=42 tilt=44 len=0.10 material=Wood sides=4
+      ring 0.00 w=0.026 d=0.026
+      ring 1.00 w=0.018 d=0.018
+      cap start=flat end=flat
+    loft headA bone=spike at=0.50 offset=(0.108,0.073,0) dir=up len=0.10 material=Berry sides=6
+      ring 0.00 w=0.070 d=0.070
+      ring 0.45 w=0.105 d=0.100
+      ring 1.00 w=0.060 d=0.058
+      cap start=dome end=dome
+    loft headB bone=spike at=0.70 offset=(-0.010,0.074,0.094) dir=up len=0.09 material=Berry sides=6
+      ring 0.00 w=0.064 d=0.064
+      ring 0.45 w=0.096 d=0.092
+      ring 1.00 w=0.055 d=0.053
+      cap start=dome end=dome
+    loft headC bone=spike at=0.88 offset=(0.053,0.070,0.048) dir=up len=0.08 material=Berry sides=6
+      ring 0.00 w=0.058 d=0.058
+      ring 0.45 w=0.088 d=0.084
+      ring 1.00 w=0.050 d=0.048
+      cap start=dome end=dome
+  end
+
+  # The crown of the panicle, so the spike ends in a flower rather than in a stick.
+  loft crown bone=spike at=1.00 dir=up len=0.11 material=Berry sides=7
+    ring 0.00 w=0.055 d=0.055
+    ring 0.45 w=0.120 d=0.120
+    ring 1.00 w=0.048 d=0.048
+    cap start=dome end=dome
+
+checks
+  # THE SPIKE IS THE SILHOUETTE. It has to be most of the plant's height and it has to
+  # stand well clear of the rosette, or it is a bud rather than a flower spike.
+  assert top(crown) > 0.94
+  assert top(crown) / top(bladeE.l) > 2.4
+  # Thick blades: `d` is a real fraction of `w` at every ring, which is the word cropdata
+  # uses and the one thing a generated leaf CARD could never be.
+  assert depth(bladeA.l) / height(bladeA.l) > 0.30
+  # ...and they end in a spine, i.e. the tip is a fraction of the widest section.
+  assert width(bladeA.l) > 0.40
+  # A rosette has a middle: the inner blades stand up and the outer ones lie back.
+  assert top(bladeE.l) > top(bladeA.l) + 0.05
+  assert xmax(bladeA.l) > xmax(bladeE.l)
+  assert bottom(boss) < 0.02
+  assert asymmetry(pole) < 0.006
+  # Fits its plot. Footprint 2 on a 1.04 m tile, so the width cap is generous here — but a
+  # rosette 1.3 times its own height still arrives short, and short is the failure this
+  # crop already had.
+  assert width / height < 1.10
+  # Budget: `clump: 1`, footprint 2, so `TRI_BUDGET * 2` = 5200.
+  assert tris < 2600
+  measure aspect width / height
+  measure spikeratio top(crown) / top(bladeE.l)

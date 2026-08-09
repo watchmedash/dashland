@@ -1,0 +1,141 @@
+# Snow Pea, in flower (rung 3 of 4).
+#
+# Four nodes of the vine instead of five, with the white flowers up and nothing hanging yet.
+# The pods arrive at rung 4 and the plant is otherwise the same species — a ripeness read that
+# adds a whole class of PART rather than recolouring the one that is already there, which is
+# the only kind `world/crops.js` cannot fake for a model that owns its own vine.
+#
+# See `snowpea_4.wam` for the tendrils and the flat pod, and `icecapmoss_3.wam` for the
+# material-name and no-`textures` rules.
+
+model snowpea
+  height 1.5
+  style chunky
+
+palette
+  Wood      #4a8a4e
+  Green     #5e9a70
+  DarkGreen #4a7f5c
+  Snow      #f2f4ee
+
+skeleton
+  root ground at 0.0
+  mirror
+    bone s1 parent=ground offset=(0.015,0,0.024) dir=up tilt=-28 pitch=-10 len=0.19
+    bone s2 parent=s1 dir=up tilt=30  pitch=13  len=0.19
+    bone s3 parent=s2 dir=up tilt=-26 pitch=-12 len=0.18
+    bone s4 parent=s3 dir=up tilt=28  pitch=10  len=0.16
+  end
+
+parts
+  mirror
+    loft stem bones=s1..s4 material=Wood sides=4
+      ring 0.00 w=0.013 d=0.013
+      ring 0.50 w=0.010 d=0.010
+      ring 1.00 w=0.007 d=0.007
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft lfA1 bone=s1 at=0.80 dir=side yaw=16   tilt=-8 len=0.100 material=Green frame=up sides=5
+      ring 0.00 w=0.016 d=0.007
+      ring 0.30 w=0.060 d=0.011
+      ring 0.72 w=0.064 d=0.010
+      ring 1.00 w=0.039 d=0.006
+      cap start=flat end=dome
+    loft lfA2 bone=s1 at=0.80 dir=side yaw=-74  tilt=-5 len=0.092 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.056 d=0.011
+      ring 0.72 w=0.060 d=0.010
+      ring 1.00 w=0.036 d=0.006
+      cap start=flat end=dome
+    loft lfB1 bone=s2 at=0.78 dir=side yaw=-34  tilt=-9 len=0.100 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.016 d=0.007
+      ring 0.30 w=0.060 d=0.011
+      ring 0.72 w=0.064 d=0.010
+      ring 1.00 w=0.039 d=0.006
+      cap start=flat end=dome
+    loft lfB2 bone=s2 at=0.78 dir=side yaw=112  tilt=-4 len=0.092 material=Green frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.056 d=0.011
+      ring 0.72 w=0.060 d=0.010
+      ring 1.00 w=0.036 d=0.006
+      cap start=flat end=dome
+    loft lfC1 bone=s3 at=0.82 dir=side yaw=28   tilt=-7 len=0.096 material=Green frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.058 d=0.011
+      ring 0.72 w=0.062 d=0.010
+      ring 1.00 w=0.037 d=0.006
+      cap start=flat end=dome
+    loft lfC2 bone=s3 at=0.82 dir=side yaw=-96  tilt=-3 len=0.090 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.014 d=0.006
+      ring 0.30 w=0.054 d=0.010
+      ring 0.72 w=0.058 d=0.009
+      ring 1.00 w=0.035 d=0.005
+      cap start=flat end=dome
+    loft lfD1 bone=s4 at=0.74 dir=side yaw=-40  tilt=-8 len=0.092 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.015 d=0.007
+      ring 0.30 w=0.056 d=0.011
+      ring 0.72 w=0.060 d=0.010
+      ring 1.00 w=0.036 d=0.006
+      cap start=flat end=dome
+  end
+
+  mirror
+    sweep tenA bone=s2 at=0.92 offset=(0.012,0.004,0.012) dir=up yaw=34 material=Wood
+      seg len=0.060 r=0.0058 fwd=16
+      seg len=0.031 r=0.0050 curl=52
+      seg len=0.028 r=0.0043 curl=55
+      seg len=0.025 r=0.0035 curl=58
+      seg len=0.021 r=0.0025 curl=60 tip
+    sweep tenB bone=s4 at=0.90 offset=(0.010,0.004,-0.014) dir=up yaw=-50 material=Wood
+      seg len=0.058 r=0.0056 fwd=14
+      seg len=0.030 r=0.0048 curl=53
+      seg len=0.027 r=0.0041 curl=56
+      seg len=0.024 r=0.0033 curl=59
+      seg len=0.020 r=0.0024 curl=61 tip
+  end
+
+  # The flowers are what this rung is FOR, so there are more of them than the ripe rung
+  # carries and they sit where the pods will hang.
+  mirror
+    loft flA1 bone=s2 at=0.56 offset=(0.020,0.006,0.016) dir=side yaw=54 tilt=18 len=0.058 material=Snow frame=up sides=5
+      ring 0.00 w=0.012 d=0.006
+      ring 0.44 w=0.054 d=0.011
+      ring 1.00 w=0.026 d=0.006
+      cap start=flat end=dome
+    loft flA2 bone=s2 at=0.56 offset=(0.026,0.000,0.024) dir=side yaw=54 tilt=-16 len=0.040 material=Snow frame=up sides=5
+      ring 0.00 w=0.010 d=0.005
+      ring 0.44 w=0.038 d=0.009
+      ring 1.00 w=0.018 d=0.005
+      cap start=flat end=dome
+    loft flB1 bone=s3 at=0.58 offset=(0.018,0.006,-0.018) dir=side yaw=-62 tilt=16 len=0.054 material=Snow frame=up sides=5
+      ring 0.00 w=0.011 d=0.006
+      ring 0.44 w=0.049 d=0.010
+      ring 1.00 w=0.024 d=0.006
+      cap start=flat end=dome
+    loft flB2 bone=s3 at=0.58 offset=(0.024,0.000,-0.026) dir=side yaw=-62 tilt=-18 len=0.038 material=Snow frame=up sides=5
+      ring 0.00 w=0.009 d=0.005
+      ring 0.44 w=0.036 d=0.008
+      ring 1.00 w=0.017 d=0.005
+      cap start=flat end=dome
+    loft flC1 bone=s4 at=0.50 offset=(0.018,0.006,0.016) dir=side yaw=44 tilt=20 len=0.052 material=Snow frame=up sides=5
+      ring 0.00 w=0.011 d=0.006
+      ring 0.44 w=0.047 d=0.010
+      ring 1.00 w=0.023 d=0.006
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(stem.l) < 0.02
+  # Still the same species one rung down: thread, coils and a see-through canopy.
+  assert width / height in 0.40..0.58
+  assert depth(tenA.l) < 0.10
+  assert area(lfA1.l) < 0.014
+  # NOT YET: no `Berry` material anywhere on this rung, so nothing can be read as a pod.
+  assert materials == 4
+  # Must not out-top the ripe rung, or `buildModelGeometry`'s ordering pass shrinks the whole
+  # thing by 14% — the ripe rung measures 0.87 and the cap is 0.86 of it.
+  assert height < 0.74
+  assert tris < 1500
+  measure rung3 height

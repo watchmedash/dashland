@@ -1,0 +1,58 @@
+# Truffle, first rung (1 of 2).
+#
+# Truffle has only two crop stages, so this is the whole of "not ready yet" and it has to
+# be legible as such from above, which is the only angle a player will ever see it from.
+# What it is: the litter and the scrape with the tuber barely started — a small smooth
+# nodule, no warts at all. The warts arriving IS the ripeness tell, and they are the one
+# part a scatter could never have added only at the top of the ladder.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model truffle
+  height 0.12
+  style chunky
+
+palette
+  Wood      #4a3a2a
+  Green     #5a4632
+  Berry     #2f2418
+
+skeleton
+  root soil at 0.0
+  bone body parent=soil dir=up len=0.24
+
+parts
+  # Small, smooth and low.
+  loft tuber bones=soil..body material=Berry sides=10
+    ring 0.00 w=0.72 d=0.64
+    ring 0.40 w=0.86 d=0.76
+    ring 1.00 w=0.50 d=0.44
+    cap start=flat end=dome
+
+  loft leafA bone=soil at=0.0 offset=(0.72,0.010,0.28) dir=side yaw=18 tilt=6 len=0.54 material=Green frame=up sides=5
+    ring 0.00 w=0.18 d=0.030
+    ring 0.35 w=0.58 d=0.038
+    ring 0.75 w=0.52 d=0.034
+    ring 1.00 w=0.19 d=0.020
+    cap start=flat end=dome
+  loft leafB bone=soil at=0.0 offset=(-0.66,0.010,0.42) dir=side yaw=152 tilt=4 len=0.50 material=Green frame=up sides=5
+    ring 0.00 w=0.16 d=0.030
+    ring 0.35 w=0.52 d=0.036
+    ring 0.75 w=0.47 d=0.032
+    ring 1.00 w=0.17 d=0.020
+    cap start=flat end=dome
+
+  loft scrape bone=soil at=0.0 dir=up len=0.07 material=Wood sides=10
+    ring 0.00 w=1.80 d=1.65
+    ring 1.00 w=1.35 d=1.24
+    cap start=flat end=none
+
+checks
+  # Smooth and small: no warts on this rung, and the tuber barely clears its own scrape.
+  assert top(tuber) < 0.40
+  assert bottom(tuber) < 0.02
+  assert width(tuber) / height(tuber) in 2.0..3.6
+  # The litter still reaches past it, so what is visible is mostly litter.
+  assert xmax(leafA) > xmax(tuber)
+  assert tris < 400
+  measure aspect width / height

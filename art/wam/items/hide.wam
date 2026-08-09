@@ -1,0 +1,58 @@
+# Hide — a pelt rolled and tied.
+#
+# A flat pelt is the obvious model and the wrong one: laid out it is a brown
+# rectangle from the front and a brown line from the side, so it changes shape
+# completely as the hand swings. Rolled, it is a bundle from every angle.
+#
+# Three cues make it a hide and not a log: the roll is soft-edged and slightly
+# barrelled rather than a straight cylinder, the pale flesh side shows at the
+# cut end, and a cord is tied round the middle. The cord is a separate loft with
+# a bigger radius than the roll under it rather than a colour band, because a
+# painted stripe has no silhouette and this one needs to pinch the bundle.
+
+model hide
+  height 0.34
+  style chunky
+
+palette
+  Hide  #98673a
+  Flesh #d8bd92
+  Cord  #4e3a24
+
+skeleton
+  root cut at 0.148
+  bone roll parent=cut dir=fwd len=0.74
+
+parts
+  loft pelt bones=cut..roll material=Hide sides=8
+    ring 0.00 w=0.26 d=0.26 material=Flesh
+    ring 0.06 w=0.28 d=0.28 material=Hide
+    ring 0.30 w=0.31 d=0.30
+    ring 0.52 w=0.30 d=0.29
+    ring 0.74 w=0.31 d=0.30
+    ring 0.94 w=0.28 d=0.28
+    ring 1.00 w=0.25 d=0.25 material=Flesh
+    cap start=flat end=flat
+
+  # A loose flap of the outer edge, so the roll has an end rather than a seam.
+  loft flap bone=roll at=0.90 offset=(0,0.14,0) dir=back pitch=-18 len=0.34 on=pelt material=Hide frame=side sides=4
+    ring 0.00 w=0.26 d=0.05
+    ring 0.55 w=0.25 d=0.045
+    ring 1.00 w=0.20 d=0.035
+    cap start=flat end=flat
+
+  loft cord bones=cut..roll material=Cord sides=8
+    ring 0.40 w=0.29 d=0.285
+    ring 0.44 w=0.355 d=0.35
+    ring 0.50 w=0.355 d=0.35
+    ring 0.54 w=0.29 d=0.285
+    cap start=none end=none
+
+checks
+  assert bottom(pelt) < 0.01
+  # A bundle: long, round in section, and the cord stands proud of the roll.
+  assert depth(pelt) / width(pelt) in 2.0..3.2
+  assert width(pelt) == height(pelt) +- 0.02
+  assert width(cord) > width(pelt) * 1.02
+  assert parts == 3
+  assert tris < 340

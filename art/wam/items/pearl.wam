@@ -1,0 +1,70 @@
+# Pearl — the reef's one carried treasure.
+#
+# The simplest model in the set and the one with the least room to be clever: a
+# pearl is a sphere, and any silhouette that is not a sphere is not a pearl.
+# Everything interesting has to happen in the colour, and there are two things
+# to say with it.
+#
+# **Nacre is not white.** A pearl reads as *lustre* — a pale body with a warm
+# shadow side and a cool bloom where the light lands. Modelled as one flat
+# white the thing is a golf ball, and at toolbar size a golf ball is a full
+# stop. So the sphere carries three bands up its height (`Shade` low, `Nacre`
+# through the middle, `Bloom` at the crown) and a single `material_arc` stripe
+# of `Sheen` running down one side, which is the specular streak a round
+# reflective object has and a flat-shaded low-poly one otherwise cannot.
+#
+# **The stripe is a whole facet wide.** Twelve sides, so 30° — an arc narrower
+# than a facet snaps to that facet's edges and lands as a blotch instead of a
+# stripe. That is the same rule `coral_brain.wam` and `sea_shell.wam` are built
+# on, and it is the only real constraint on the arcs in this file.
+#
+# Slightly taller than it is wide, on purpose: `render/ItemModels.js` normalises
+# every model by its **Y** extent, so a model that is fattest across the
+# equator arrives in the fist and the icon grid a touch larger than its
+# neighbours. Half a percent of ovoid costs nothing and keeps it in the family.
+
+model pearl
+  height 0.13
+  style smooth
+
+palette
+  Nacre #ecebe4
+  Bloom #ffffff
+  Sheen #d8e6f2
+  Shade #c3bfb2
+
+skeleton
+  # Lifted off y=0 by the amount the start cap bulges below its own first ring.
+  # A `dome` cap is a hemisphere on the *outside* of the ring it closes, so a
+  # sphere authored from y=0 hangs a thirtieth of itself through the floor —
+  # which the lint reports and which matters here for one reason: `Drops` lays a
+  # dropped item on the ground, and a pearl embedded in the sand is a pearl you
+  # cannot see.
+  root air at 0.04
+  bone core parent=air dir=up len=0.96
+
+parts
+  loft bead bones=air..core material=Nacre sides=12
+    ring 0.00 w=0.20 d=0.20 material=Shade
+    ring 0.06 w=0.44 d=0.44
+    ring 0.14 w=0.64 d=0.64
+    ring 0.30 w=0.86 d=0.86 material=Nacre material_arc=Sheen:60-90
+    ring 0.52 w=0.94 d=0.94 material_arc=Sheen:60-90
+    ring 0.74 w=0.84 d=0.84 material_arc=Sheen:60-90
+    ring 0.88 w=0.66 d=0.66 material=Bloom
+    ring 0.96 w=0.42 d=0.42
+    ring 1.00 w=0.20 d=0.20
+    cap start=dome end=dome
+
+checks
+  # Round. Both ways, because a pearl that has drifted into an egg or a lozenge
+  # in either axis has stopped being one.
+  assert width / depth == 1.0 +- 0.02
+  assert height / width in 1.0..1.2
+  # The lustre survives a ring edit — all four materials have to reach the mesh
+  # or this is a white ball again.
+  assert materials == 4
+  assert parts == 1
+  assert tris < 260
+  assert bottom(bead) > -0.01
+  measure roundness height / width

@@ -1,0 +1,124 @@
+# Hops, in burr (rung 3 of 4).
+#
+# Six turns of the bine instead of eight, and the ropes carry BURRS — the small green
+# pre-cones a hop plant sets a week before the papery ones. Two to a rope rather than three,
+# a third the length of a ripe cone, and `Green` rather than `Berry`, so the rung says "not
+# yet" in shape, size and colour at once. `world/crops.js`'s half-count colour-drag applies
+# only to generated fruit and could not have said any of it.
+#
+# See `hops_4.wam` for the corkscrew and `icecapmoss_3.wam` for the naming rules.
+
+model hops
+  height 2.2
+  style chunky
+
+palette
+  Wood      #5a8a34
+  Green     #5c9c38
+  DarkGreen #477d2c
+
+skeleton
+  root ground at 0.0
+  mirror
+    bone c1 parent=ground offset=(0.014,0,0.010) dir=up tilt=-12 len=0.122
+    bone c2 parent=c1 dir=up pitch=20  len=0.122
+    bone c3 parent=c2 dir=up tilt=30   len=0.122
+    bone c4 parent=c3 dir=up pitch=-30 len=0.122
+    bone c5 parent=c4 dir=up tilt=-30  len=0.122
+    bone c6 parent=c5 dir=up pitch=30  len=0.122
+
+    bone rA parent=c4 at=0.65 dir=down pitch=14 len=0.16
+    bone rB parent=c6 at=0.55 dir=down pitch=-14 len=0.15
+  end
+
+parts
+  mirror
+    loft bine bones=c1..c6 material=Wood sides=5
+      ring 0.00 w=0.024 d=0.024
+      ring 0.50 w=0.018 d=0.018
+      ring 1.00 w=0.011 d=0.011
+      cap start=flat end=dome
+    loft ropeA bones=rA..rA material=Wood sides=4
+      ring 0.00 w=0.012 d=0.012
+      ring 1.00 w=0.007 d=0.007
+      cap start=flat end=dome
+    loft ropeB bones=rB..rB material=Wood sides=4
+      ring 0.00 w=0.011 d=0.011
+      ring 1.00 w=0.006 d=0.006
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft lfA bone=c2 at=0.60 dir=side yaw=24   tilt=-18 len=0.125 material=Green frame=up sides=5
+      ring 0.00 w=0.018 d=0.009
+      ring 0.28 w=0.088 d=0.016
+      ring 0.68 w=0.104 d=0.014
+      ring 1.00 w=0.058 d=0.009
+      cap start=flat end=dome
+    loft lfB bone=c3 at=0.85 dir=side yaw=-98  tilt=-24 len=0.115 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.017 d=0.009
+      ring 0.28 w=0.082 d=0.015
+      ring 0.68 w=0.096 d=0.013
+      ring 1.00 w=0.054 d=0.009
+      cap start=flat end=dome
+    loft lfC bone=c4 at=0.55 dir=side yaw=64   tilt=-14 len=0.125 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.018 d=0.009
+      ring 0.28 w=0.088 d=0.016
+      ring 0.68 w=0.104 d=0.014
+      ring 1.00 w=0.058 d=0.009
+      cap start=flat end=dome
+    loft lfD bone=c5 at=0.80 dir=side yaw=-40  tilt=-28 len=0.115 material=Green frame=up sides=5
+      ring 0.00 w=0.017 d=0.009
+      ring 0.28 w=0.082 d=0.015
+      ring 0.68 w=0.096 d=0.013
+      ring 1.00 w=0.054 d=0.009
+      cap start=flat end=dome
+    loft lfE bone=c6 at=0.55 dir=side yaw=132  tilt=-20 len=0.115 material=Green frame=up sides=5
+      ring 0.00 w=0.017 d=0.009
+      ring 0.28 w=0.082 d=0.015
+      ring 0.68 w=0.096 d=0.013
+      ring 1.00 w=0.054 d=0.009
+      cap start=flat end=dome
+    loft lfF bone=c1 at=0.70 dir=side yaw=-56 tilt=-22 len=0.115 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.017 d=0.009
+      ring 0.28 w=0.082 d=0.015
+      ring 0.68 w=0.096 d=0.013
+      ring 1.00 w=0.054 d=0.009
+      cap start=flat end=dome
+  end
+
+  mirror
+    loft brA1 bone=rA at=0.30 dir=down pitch=4 len=0.030 material=Green sides=5
+      ring 0.00 w=0.010 d=0.010
+      ring 0.42 w=0.026 d=0.025
+      ring 1.00 w=0.009 d=0.009 tip
+      cap start=dome end=point
+    loft brA2 bone=rA at=0.78 dir=down pitch=-5 len=0.028 material=Green sides=5
+      ring 0.00 w=0.009 d=0.009
+      ring 0.42 w=0.024 d=0.023
+      ring 1.00 w=0.008 d=0.008 tip
+      cap start=dome end=point
+    loft brB1 bone=rB at=0.34 dir=down pitch=5 len=0.028 material=Green sides=5
+      ring 0.00 w=0.009 d=0.009
+      ring 0.42 w=0.024 d=0.023
+      ring 1.00 w=0.008 d=0.008 tip
+      cap start=dome end=point
+    loft brB2 bone=rB at=0.82 dir=down pitch=-4 len=0.026 material=Green sides=5
+      ring 0.00 w=0.009 d=0.009
+      ring 0.42 w=0.023 d=0.022
+      ring 1.00 w=0.008 d=0.008 tip
+      cap start=dome end=point
+  end
+
+checks
+  assert bottom(bine.l) < 0.02
+  # Still a corkscrew, still narrow: the species reads the same one stage down.
+  assert depth(bine.l) / width(bine.l) in 0.55..1.70
+  assert width / height < 0.52
+  # NOT YET: a burr is well under half the ripe cone's 0.033 width.
+  assert width(brA1.l) < 0.030
+  # Must not out-top the ripe rung, or `buildModelGeometry`'s ordering pass shrinks the whole
+  # thing by 14% — the ripe rung measures 0.89 and the cap is 0.86 of it.
+  assert height < 0.76
+  assert tris < 1600
+  measure rung3 height

@@ -1,0 +1,126 @@
+# Crab claw — a pincer on a stub of arm.
+#
+# The drop this replaces was a drumstick, which is what every "meat" item in the
+# game already is. A claw is the one crab part nobody mistakes for anything
+# else, and it survives being shrunk: two hooks and the hole between them is a
+# silhouette, not a texture, so it still reads at 32px in a toolbar slot.
+#
+# **The hole is the whole model, and it has to be a *horizontal* split.** A
+# dropped item spins about +Y, so a gap that opens fore-and-aft — which is what
+# you get from the obvious construction, a claw standing on end with its two
+# jaws forking upward — is edge-on to the camera twice a turn and the claw is a
+# lump for half its spin. That is the same failure hide.wam is written around.
+# Splitting the jaws vertically instead is the one arrangement no amount of yaw
+# can close: `checks` asserts it as a plane, `ymin(jaw_up) > ymax(jaw_lo)`.
+#
+# Paying for that costs the pose: the pincer has to aim roughly *forward* for
+# its jaws to stack up and down, so the model is an L — arm rising, wrist
+# breaking forward, claw reaching out. The arm is not decoration, it is what
+# keeps Y the long axis, which `render/ItemModels.js` needs because it
+# normalises every model by its Y extent. A claw modelled reaching forward with
+# no arm under it would be scaled to fit its own thickness.
+#
+# What the vertical split does *not* fix is foreshortening: dead ahead and dead
+# behind, the claw points at the camera and the palm hides its own jaws. That is
+# inherent to anything longer than it is thick, and neither attempt to dodge it
+# was worth keeping. Splaying the jaws sideways (`yaw=±13` on the sweeps) moved
+# each tip 0.03 off the centreline — not enough to clear the palm's outline, and
+# it cost two "part straddles the centerline but is lopsided" warnings. Yawing
+# the whole claw off the arm 30° only *rotates* the good zone; it is still the
+# same 180° of the turn, just no longer centred on the two side views, and it
+# breaks the model's symmetry for nothing. Left square and symmetric.
+#
+# The two jaws converge instead of running parallel: 0.30 between the roots
+# where they leave the palm, 0.15 of clear air at the tips (`gap`, every
+# compile). A constant-width gape is an alligator, and tips
+# that actually meet are a closed lump — the hooked, almost-shut pincer is the
+# shape that says crab. They are `sweep`s and not lofts for exactly that hook:
+# the curl is the point, and a loft can only bend where a bone bends.
+#
+# The palm is a flat blade — `frame=up` so its `d` is reliably the up/down span,
+# `w` the thickness — because the propodus is deep and thin, and because that
+# depth is what holds the two jaw roots far enough apart for the gap to survive
+# `on=` sinking them into the surface. Dark tips: the last two segments of each
+# jaw are `Tip`, which at icon size is the cue that reads before the shape does.
+
+model crab_claw
+  height 0.24
+  style chunky
+
+palette
+  Shell #c9552c
+  Pale  #f0d3a8
+  Tip   #5e2a1b
+  Joint #a8401f
+
+skeleton
+  root wrist at 0.0
+  # The arm is 0.40 to the claw's 0.34 because the first version was 0.30 and
+  # the model came out 0.63 tall by 0.66 deep — normalising that by Y oversizes
+  # it, and the whole L reads as a boomerang rather than something with a
+  # handle. Length here is the cheapest way to buy back the vertical.
+  bone arm  parent=wrist dir=up pitch=4 len=0.40
+  # 58° off vertical: the claw reaches out, not up. Everything downstream of
+  # this number is the vertical split, so it is the one to edit if the gap ever
+  # stops reading.
+  bone palm parent=arm dir=up pitch=58 len=0.34
+
+parts
+  # `material_arc` and not a second part: the pale underside of a crab claw has
+  # no silhouette of its own, and authored as a slab it read as a stripe stuck
+  # on the outside. 0° is +w (the flat of the blade), 90° is +d (up), so
+  # 215-325 is the underside.
+  loft armseg bones=wrist..arm material=Shell frame=fwd sides=6
+    ring 0.00 w=0.14 d=0.15 material=Joint
+    ring 0.14 w=0.17 d=0.18 material=Shell
+    ring 0.72 w=0.15 d=0.16
+    ring 1.00 w=0.19 d=0.20 material=Joint    # the elbow knuckle
+    cap start=flat end=flat
+
+  loft hand bones=palm..palm material=Shell frame=up sides=8 material_arc=Pale:215-325
+    ring 0.00 w=0.13 d=0.17
+    ring 0.25 w=0.19 d=0.30
+    ring 0.55 w=0.20 d=0.36
+    ring 0.85 w=0.17 d=0.34
+    ring 1.00 w=0.13 d=0.30
+    cap start=dome end=flat
+
+  # The fixed finger, off the bottom of the palm's front face, sweeping up
+  # toward the other one. `on=hand` lands it on that face rather than trusting
+  # the offset — the offset is only there to say *which* face.
+  sweep jaw_lo bone=palm at=1.00 offset=(0,-0.17,0.02) dir=up pitch=74 on=hand material=Shell sides=6
+    seg len=0.09 r=0.055
+    seg len=0.08 r=0.042 up=8
+    seg len=0.07 r=0.030 up=10 material=Tip
+    seg len=0.05 r=0.014 up=8 tip
+
+  # The movable finger, hinged high on the palm and hooking down over the other.
+  # It starts barely above horizontal and ends pointing *below* it, which is
+  # what closes the gape from 0.30 at the roots to 0.12 at the tips.
+  sweep jaw_up bone=palm at=0.90 offset=(0,0.16,-0.01) dir=up pitch=76 on=hand material=Shell sides=6
+    seg len=0.09 r=0.058
+    seg len=0.09 r=0.044 down=10
+    seg len=0.08 r=0.030 down=12 material=Tip
+    seg len=0.05 r=0.013 down=8 tip
+
+checks
+  assert bottom(armseg) < 0.01
+  # The load-bearing one. A horizontal plane separates the two jaws, so the gap
+  # between them is open from every yaw the drop spin can reach — see the header.
+  assert ymin(jaw_up) > ymax(jaw_lo) + 0.03
+  assert gap(jaw_up, jaw_lo) > 0.03
+  measure gape ymin(jaw_up) - ymax(jaw_lo)
+  # An L, not a spike: the claw reaches forward off a rising arm. `elevation` of
+  # the palm is what puts the jaws one above the other in the first place.
+  assert elevation(arm) > 80
+  assert elevation(palm) in 18..40
+  # ...but Y still wins, because ItemModels normalises on the Y extent and an
+  # L that reaches further than it rises comes out oversized in the fist. Not a
+  # generous margin, and it is not meant to be: this claw is 0.75 by 0.68.
+  assert height / depth in 1.05..1.5
+  # A deep, thin propodus. The depth is not cosmetic — it is the distance
+  # between the two jaw roots, and the gap is what is left of it at the tips.
+  assert width(hand) < height(hand) / 1.4
+  assert width(hand) > width(jaw_up)
+  assert parts == 4
+  assert tris < 400

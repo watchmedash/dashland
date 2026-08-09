@@ -1,0 +1,81 @@
+# Wheat — a cut sheaf of three stalks.
+#
+# One stalk is a straw; three splayed from a common butt is a harvest, and the
+# splay is what gives the icon a shape other than a vertical line. The ears use
+# alternating ring widths so the loft's own segmentation reads as grain — a
+# smooth spindle on a stick reads as a cattail, and the two ears leaning out
+# past the silhouette of the middle one are what stop the sheaf from looking
+# like one fat stalk.
+#
+# The awns are two sweeps rather than a fan of six: at hotbar size any more
+# than that merges into a fuzzy halo and costs triangles for nothing.
+
+model wheat
+  height 0.44
+  style chunky
+
+palette
+  Straw #c9a24e
+  Grain #e6c264
+  Husk  #bd9440
+
+skeleton
+  root butt at 0.0
+  bone stemc parent=butt dir=up pitch=-3 len=0.52
+  bone earc  parent=stemc dir=up pitch=2 len=0.34
+  mirror
+    bone stems parent=butt dir=up tilt=15 pitch=5 len=0.46
+    bone ears  parent=stems dir=up tilt=7 len=0.28
+  end
+
+parts
+  loft strawc bones=butt..stemc material=Straw sides=4
+    ring 0.00 w=0.030 d=0.030
+    ring 0.50 w=0.026 d=0.026
+    ring 1.00 w=0.022 d=0.022
+    cap start=flat end=flat
+
+  loft headc bones=earc..earc material=Grain sides=5
+    ring 0.00 w=0.030 d=0.030
+    ring 0.14 w=0.090 d=0.086 material=Husk
+    ring 0.30 w=0.076 d=0.072 material=Grain
+    ring 0.46 w=0.094 d=0.090 material=Husk
+    ring 0.62 w=0.074 d=0.070 material=Grain
+    ring 0.80 w=0.078 d=0.074 material=Husk
+    ring 1.00 w=0.014 d=0.014 material=Grain
+    cap start=flat end=point
+
+  sweep awnc bone=earc at=1.0 dir=up yaw=20 material=Straw sides=3
+    seg len=0.10 r=0.010 back=8
+    seg len=0.09 r=0.004 back=14 tip
+
+  mirror
+    loft straws bones=butt..stems material=Straw sides=4
+      ring 0.00 w=0.028 d=0.028
+      ring 0.50 w=0.024 d=0.024
+      ring 1.00 w=0.020 d=0.020
+      cap start=flat end=flat
+
+    loft heads bones=ears..ears material=Grain sides=5
+      ring 0.00 w=0.028 d=0.028
+      ring 0.16 w=0.082 d=0.078 material=Husk
+      ring 0.34 w=0.068 d=0.064 material=Grain
+      ring 0.52 w=0.084 d=0.080 material=Husk
+      ring 0.72 w=0.066 d=0.062 material=Grain
+      ring 1.00 w=0.014 d=0.014 material=Husk
+      cap start=flat end=point
+
+    sweep awns bone=ears at=1.0 dir=up tilt=16 material=Straw sides=3
+      seg len=0.09 r=0.009 back=10
+      seg len=0.08 r=0.004 back=16 tip
+  end
+
+checks
+  assert bottom(strawc) < 0.01
+  # The sheaf splays: the outer ears clear the middle one's shoulder.
+  assert abs(x(heads.l)) > width(headc) / 2
+  # Ears are the top third and nothing else.
+  assert bottom(headc) > top(strawc) - 0.02
+  assert top(headc) > top(heads.l)
+  assert parts == 9
+  assert tris < 700

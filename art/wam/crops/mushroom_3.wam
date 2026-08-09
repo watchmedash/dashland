@@ -1,0 +1,130 @@
+# Common Mushroom, ripe (rung 3 of 3).
+#
+# cropdata silhouette: "Classic domed cap on a pale stalk, in small clumps." All three
+# clauses were missing from what this replaces. `nature/Mushroom_1..4` is the same ladder
+# `glowcap` was using, so the 22-gold starter crop and the 175-gold rarity were the same
+# object; the caps are shallow cones rather than domes; and `clump: 1` planted ONE of them
+# per tile, which is not a clump.
+#
+# All three are answered here and the third is answered in the SOURCE rather than in the
+# recipe, for the reason `lotus_4.wam` spells out: `clump` stamps N copies of one model
+# around the plot centre, so a clump built that way is N identical mushrooms in a ring.
+# A real clump is one colony of DIFFERENT mushrooms sharing a base, which only the model
+# can express — five here, at five heights, with the caps at four different spans.
+#
+# The dome is the other half. Read against `glowcap_3.wam`, which is the same construction
+# tuned to the opposite silhouette: this cap's widest ring is halfway up and the profile
+# is convex, so it reads as a bun; the glowcap's is a fifth of the way up with a straight
+# fall, so it reads as a parasol. Same three materials, two species.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model mushroom
+  height 0.28
+  style smooth
+
+palette
+  # Wood -> stem. cropdata's `stem` is the pale cream of the stalk.
+  Wood      #e0d4b8
+  # Green -> leaf: the gill band under the cap rim.
+  Green     #c9b894
+  # Berry -> fruit: the brown cap, and the only saturated colour on the plant.
+  Berry     #9a6a48
+
+skeleton
+  root litter at 0.0
+  # Five, no `mirror`: a colony is not symmetric and a mirrored one reads as a pattern.
+  bone stalkA parent=litter dir=up pitch=-3 len=0.38
+  bone stalkB parent=litter offset=(0.34,0.012,0.20)  dir=up pitch=8  tilt=-14 len=0.33
+  bone stalkC parent=litter offset=(-0.31,0.012,0.14) dir=up pitch=-5 tilt=12  len=0.27
+  bone stalkD parent=litter offset=(0.30,0.010,-0.40) dir=up pitch=-11 tilt=-6 len=0.21
+  bone stalkE parent=litter offset=(-0.27,0.008,-0.26) dir=up pitch=4 tilt=8   len=0.14
+
+parts
+  # Thick stalks. A field mushroom's stem is a fat column about a third the width of its
+  # own cap — the slender stipe belongs to the glowcap and is what separates the two at a
+  # glance, before either colour arrives.
+  loft stemA bones=stalkA..stalkA material=Wood sides=8
+    ring 0.00 w=0.230 d=0.230
+    ring 0.28 w=0.180 d=0.180
+    ring 1.00 w=0.195 d=0.195
+    cap start=flat end=flat
+  loft stemB bones=stalkB..stalkB material=Wood sides=7
+    ring 0.00 w=0.190 d=0.190
+    ring 0.28 w=0.150 d=0.150
+    ring 1.00 w=0.162 d=0.162
+    cap start=flat end=flat
+  loft stemC bones=stalkC..stalkC material=Wood sides=7
+    ring 0.00 w=0.170 d=0.170
+    ring 0.28 w=0.132 d=0.132
+    ring 1.00 w=0.142 d=0.142
+    cap start=flat end=flat
+  loft stemD bones=stalkD..stalkD material=Wood sides=6
+    ring 0.00 w=0.145 d=0.145
+    ring 0.28 w=0.112 d=0.112
+    ring 1.00 w=0.120 d=0.120
+    cap start=flat end=flat
+  loft stemE bones=stalkE..stalkE material=Wood sides=6
+    ring 0.00 w=0.120 d=0.120
+    ring 0.28 w=0.092 d=0.092
+    ring 1.00 w=0.098 d=0.098
+    cap start=flat end=flat
+
+  # The caps. Convex and widest at mid-height, with the rim tucked back under itself at
+  # ring 0 so the dome overhangs the gills — that undercut is what a bun silhouette is,
+  # and a cone drawn from a wide base up to a point (which is what the pack ships) has no
+  # undercut at all.
+  loft capA bone=stalkA at=1.00 dir=up len=0.34 material=Berry sides=14
+    ring 0.00 w=0.44 d=0.44 material=Green
+    ring 0.14 w=0.62 d=0.62 material=Berry
+    ring 0.46 w=0.66 d=0.66
+    ring 0.80 w=0.52 d=0.52
+    ring 1.00 w=0.20 d=0.20
+    cap start=flat end=dome
+  loft capB bone=stalkB at=1.00 dir=up len=0.24 material=Berry sides=12
+    ring 0.00 w=0.36 d=0.36 material=Green
+    ring 0.14 w=0.50 d=0.50 material=Berry
+    ring 0.46 w=0.54 d=0.54
+    ring 0.80 w=0.42 d=0.42
+    ring 1.00 w=0.16 d=0.16
+    cap start=flat end=dome
+  loft capC bone=stalkC at=1.00 dir=up len=0.21 material=Berry sides=12
+    ring 0.00 w=0.31 d=0.31 material=Green
+    ring 0.14 w=0.44 d=0.44 material=Berry
+    ring 0.46 w=0.47 d=0.47
+    ring 0.80 w=0.37 d=0.37
+    ring 1.00 w=0.14 d=0.14
+    cap start=flat end=dome
+  loft capD bone=stalkD at=1.00 dir=up len=0.17 material=Berry sides=10
+    ring 0.00 w=0.25 d=0.25 material=Green
+    ring 0.14 w=0.36 d=0.36 material=Berry
+    ring 0.46 w=0.38 d=0.38
+    ring 0.80 w=0.30 d=0.30
+    ring 1.00 w=0.12 d=0.12
+    cap start=flat end=dome
+  loft capE bone=stalkE at=1.00 dir=up len=0.13 material=Berry sides=9
+    ring 0.00 w=0.20 d=0.20 material=Green
+    ring 0.14 w=0.28 d=0.28 material=Berry
+    ring 0.46 w=0.30 d=0.30
+    ring 0.80 w=0.24 d=0.24
+    ring 1.00 w=0.10 d=0.10
+    cap start=flat end=dome
+
+checks
+  # A DOME, not a cone: a bun is about half as tall as it is wide. A cone drawn from a wide
+  # base to a point lands in the same band, so this is paired with the undercut below.
+  assert height(capA) / width(capA) in 0.35..0.62
+  # Squat: the cap sits low. `glowcap_3.wam` asserts > 0.62 for the same ratio, which is
+  # the numeric form of "these are two different fungi".
+  assert bottom(capA) / height < 0.55
+  # Fat stalk. The glowcap's is over five times narrower than its cap; this one is under
+  # four, and that ratio is the species read.
+  assert width(capA) / width(stemA) < 4.0
+  assert bottom(stemA) < 0.02
+  # Five heights, so the colony is a colony.
+  assert top(capA) > top(capB) + 0.06
+  assert top(capD) > top(capE) + 0.03
+  # Budget: `clump: 1` — the clump is inside the model.
+  assert tris < 2100
+  measure aspect width / height
+  measure capdome height(capA) / width(capA)

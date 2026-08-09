@@ -1,0 +1,41 @@
+# Flint — a struck flake.
+#
+# Flint is the one stone in the set whose identity is a *shape*: a flat flake
+# with a thick striking platform at one end and a feather edge at the other,
+# which is what comes off a core when you hit it. So the section is deliberately
+# lens-like — `d` (the thickness) collapses towards the tip while `w` stays
+# broad — and the whole thing is tilted so the icon shows the flat face rather
+# than the edge, where it would vanish.
+#
+# The pale material band is the fresh conchoidal break; the darker body is the
+# weathered cortex it came out of.
+
+model flint
+  height 0.3
+  style chunky
+
+palette
+  Flint #4a505a
+  Break #79828f
+
+skeleton
+  root heel at 0.006
+  bone flake parent=heel dir=up pitch=-4 len=0.74
+
+parts
+  loft shard bones=heel..flake material=Flint frame=fwd sides=6 material_arc=Break:44-136
+    ring 0.00 w=0.30 d=0.15
+    ring 0.16 w=0.50 d=0.17 side=0.02
+    ring 0.40 w=0.52 d=0.14 side=0.04
+    ring 0.66 w=0.34 d=0.10 side=-0.01
+    ring 0.88 w=0.20 d=0.06 side=-0.04
+    ring 1.00 w=0.07 d=0.025 side=-0.05
+    cap start=flat end=flat
+
+checks
+  assert bottom(shard) < 0.01
+  # A flake: broad, tall, and thin — the thickness is the smallest axis by far.
+  assert depth(shard) < width(shard) / 1.7
+  assert height / width in 1.2..2.2
+  assert parts == 1
+  assert tris < 160

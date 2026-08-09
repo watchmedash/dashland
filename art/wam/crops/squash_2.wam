@@ -1,0 +1,96 @@
+# Squash, vine (rung 2 of 4).
+#
+# The sprawl starting: true lobed leaves instead of `squash_1.wam`'s round cotyledons, on
+# real petioles, and nothing else. No flower, no gourd — the rung differs in PARTS, which is
+# why there are four sources rather than one model at four scales.
+#
+# See `squash_4.wam` for the neck and `icecapmoss_3.wam` for the naming rules.
+model squash
+  height 0.65
+  style chunky
+
+palette
+  Wood      #4a7a2e
+  Green     #6aa83e
+  DarkGreen #4e8230
+  Berry     #e0b93c
+
+skeleton
+  root crown at 0.022
+  # Petioles. Shallow and long — a mound crop SPRAWLS, and the leaves have to reach most of
+  # the way across the 2x2 the style gives it.
+  mirror
+    bone ptA parent=crown dir=side yaw=18  tilt=60 len=0.117
+    bone ptB parent=crown dir=side yaw=72  tilt=52 len=0.134
+    bone ptC parent=crown dir=side yaw=-34 tilt=66 len=0.107
+    bone ptD parent=crown dir=side yaw=-86 tilt=48 len=0.125
+  end
+
+  # A short central hub, so the `mound` loft has a symmetric chain to run along — a central
+  # part lofted to one side of a mirrored pair is lopsided by construction, and the lint
+  # says so in as many words.
+  bone hub parent=crown dir=up len=0.030
+
+
+parts
+  loft mound bones=crown..hub material=Wood sides=6
+    ring 0.00 w=0.11 d=0.11
+    ring 1.00 w=0.055 d=0.055
+    cap start=dome end=dome
+  mirror
+    loft stalkA bones=ptA..ptA material=Wood sides=5
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.033 d=0.033
+      cap start=dome end=flat
+  end
+
+  mirror
+    loft stalkB bones=ptB..ptB material=Wood sides=5
+      ring 0.00 w=0.048 d=0.048
+      ring 1.00 w=0.032 d=0.032
+      cap start=dome end=flat
+    loft stalkD bones=ptD..ptD material=Wood sides=5
+      ring 0.00 w=0.044 d=0.044
+      ring 1.00 w=0.029 d=0.029
+      cap start=dome end=flat
+  end
+
+  # ---- the lobed leaves ----------------------------------------------------------
+  #
+  # `frame=up` with w WIDE and d THIN — a flat blade lying face-up, the idiom `cocoa_4.wam`
+  # spells out. The width then SCALLOPS along the blade instead of swelling once, which is
+  # the lobing, and it costs nothing: the same four rings either way.
+  mirror
+    loft lfA bone=ptA at=1.00 dir=side yaw=18 tilt=18 len=0.179 material=Green frame=up sides=6
+      ring 0.00 w=0.10 d=0.030
+      ring 0.24 w=0.44 d=0.052
+      ring 0.46 w=0.31 d=0.046
+      ring 0.72 w=0.48 d=0.050
+      ring 1.00 w=0.20 d=0.026
+      cap start=flat end=dome
+    loft lfB bone=ptB at=1.00 dir=side yaw=72 tilt=24 len=0.197 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.10 d=0.030
+      ring 0.24 w=0.47 d=0.054
+      ring 0.46 w=0.33 d=0.048
+      ring 0.72 w=0.51 d=0.052
+      ring 1.00 w=0.21 d=0.027
+      cap start=flat end=dome
+    loft lfD bone=ptD at=1.00 dir=side yaw=-86 tilt=26 len=0.188 material=Green frame=up sides=6
+      ring 0.00 w=0.10 d=0.029
+      ring 0.24 w=0.45 d=0.052
+      ring 0.46 w=0.31 d=0.046
+      ring 0.72 w=0.49 d=0.050
+      ring 1.00 w=0.20 d=0.026
+      cap start=flat end=dome
+    # Two leaves held UP over the crown. A sprawl with every blade flat on the soil reads as
+    # a puddle from eye level; the crop needs some height at the middle to be a plant.
+  end
+
+checks
+  assert bottom(mound) < 0.05
+  # Sparser in PARTS than the flowering rung: 13 against 20.
+  assert parts == 13
+  assert height in 0.10..0.26
+  assert width / height < 3.4
+  assert tris < 1400
+  measure sprawl width / height

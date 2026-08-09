@@ -1,0 +1,67 @@
+# Grape, first-year cane (rung 2 of 4).
+#
+# A vine's second year is one whip: no cordon, no fruiting spurs, a single shoot running up
+# the frame with a handful of leaves on it. That is a genuinely different TOPOLOGY from the
+# trained candelabra above it — the horizontal arms are the thing that arrives at rung 3 —
+# rather than the ripe plant at a smaller scale, which is what the ladder must never be.
+#
+# See `grape_4.wam` for the candelabra and `icecapmoss_3.wam` for the naming rules.
+
+model grape
+  height 2.0
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #4e8a30
+  DarkGreen #3d7026
+
+skeleton
+  root ground at 0.0
+  bone t1 parent=ground dir=up tilt=6   len=0.19
+  bone t2 parent=t1     dir=up tilt=-12 len=0.17
+  bone t3 parent=t2     dir=up tilt=9   len=0.15
+
+parts
+  # Half woody at the base, green at the tip — one loft, tapering hard, so the whip reads as
+  # this year's growth rather than as a trunk.
+  loft whip bones=t1..t3 material=Wood sides=5
+    ring 0.00 w=0.040 d=0.040
+    ring 0.45 w=0.026 d=0.026
+    ring 1.00 w=0.012 d=0.012
+    cap start=flat end=dome
+
+  mirror
+    loft lfA bone=t1 at=0.86 dir=side yaw=28  tilt=-20 len=0.14 material=Green frame=up sides=5
+      ring 0.00 w=0.024 d=0.011
+      ring 0.26 w=0.118 d=0.020
+      ring 0.66 w=0.136 d=0.018
+      ring 1.00 w=0.082 d=0.011
+      cap start=flat end=dome
+    loft lfB bone=t2 at=0.52 dir=side yaw=-84 tilt=-16 len=0.13 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.023 d=0.011
+      ring 0.26 w=0.112 d=0.019
+      ring 0.66 w=0.130 d=0.017
+      ring 1.00 w=0.078 d=0.010
+      cap start=flat end=dome
+    loft lfC bone=t3 at=0.44 dir=side yaw=52  tilt=-26 len=0.13 material=Green frame=up sides=5
+      ring 0.00 w=0.023 d=0.011
+      ring 0.26 w=0.112 d=0.019
+      ring 0.66 w=0.130 d=0.017
+      ring 1.00 w=0.078 d=0.010
+      cap start=flat end=dome
+    loft lfD bone=t3 at=0.90 dir=side yaw=-146 tilt=-12 len=0.12 material=DarkGreen frame=up sides=5
+      ring 0.00 w=0.022 d=0.010
+      ring 0.26 w=0.106 d=0.018
+      ring 0.66 w=0.122 d=0.016
+      ring 1.00 w=0.074 d=0.010
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(whip) < 0.02
+  # ONE stem and no arms: nine parts against rung 3's nineteen. If a cordon ever appears here
+  # the ladder has stopped growing anything.
+  assert parts == 9
+  assert height < 0.60
+  assert tris < 700

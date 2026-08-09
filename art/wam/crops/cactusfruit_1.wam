@@ -1,0 +1,44 @@
+# Cactus Fruit, first rung (1 of 4). See `cactusfruit_4.wam` for the argument and the rules.
+#
+# ONE PAD. Small, upright and alone — this is the whole plant at stage 1 and it is a
+# different topology from every rung above it, which is the rule a WAM family is built on.
+
+model cactusfruit
+  height 1.4
+  style chunky
+
+palette
+  # Wood -> stem. Declared but unused: a first-year pad is new growth, so it wears
+  # `colors.leaf` rather than the older basal pad's darker stem colour.
+  Wood      #4a7a4e
+  Green     #5c8f5a
+  DarkGreen #4a7a4e
+  # Berry -> fruit: the magenta tunas.
+  Berry     #d6395c
+
+skeleton
+  root sand at 0.0
+  bone padA parent=sand dir=up pitch=4 len=0.26
+
+parts
+  # The pads. Widest at mid-height and narrowed to a neck at both ends, which is what makes
+  # a pad a SEGMENT — the joint between two pads is the whole reason a prickly pear reads as
+  # stacked plates rather than as one lumpy body.
+  loft plateA bones=sand..padA material=Green frame=side sides=7
+    ring 0.00 w=0.043 d=0.082
+    ring 0.16 w=0.069 d=0.213
+    ring 0.50 w=0.076 d=0.254
+    ring 0.86 w=0.062 d=0.197
+    ring 1.00 w=0.036 d=0.074
+    cap start=flat end=dome
+  # THE TUNAS. Standing UP off the rim of the top pads — a prickly pear fruit is a barrel
+  # sitting proud on the edge with a sunken navel, and "crowning the top edge" is the
+  # silhouette line's own phrase. `on=` snaps each to the pad's surface so it is flush by
+  # construction, and the `offset=` aims it at the rim rather than at the flat face, which
+  # is where a snap to the CLOSEST surface point would otherwise put it.
+checks
+  assert width(plateA) / depth(plateA) > 3.0
+  assert bottom(plateA) < 0.02
+  assert top(plateA) < 0.34
+  assert tris < 220
+  measure aspect depth / height

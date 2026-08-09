@@ -47,7 +47,7 @@ const PACKS = {
   // 4cm-tall disc came out twenty times too wide. Food is as often flat as it is
   // upright, so the longest axis is what gets fitted instead.
   food:    { atlas: 'food/Textures/colormap.png', tint: false, nearest: true, ext: 'glb', fitMax: true },
-  // Ours, authored in WAM (see `wam/items/*.wam`). No atlas at all: the palette
+  // Ours, authored in WAM (see `art/wam/items/*.wam`). No atlas at all: the palette
   // is baked per vertex, which is what lets a four-colour model still be one
   // merged geometry and one material like everything else here. `flat` is the
   // other half of the look — the source meshes ship no normals precisely so
@@ -779,7 +779,7 @@ export function glowTop(material, loY, hiY) {
  * other entry sits 0.34 away in linear RGB and the tolerance is 0.22.
  *
  * `hex` goes through THREE.Color, which converts sRGB to the linear working
- * space — the same conversion `scripts/export_items.py` bakes into COLOR_0, so
+ * space — the same conversion `art/wam/scripts/export_items.py` bakes into COLOR_0, so
  * the two land on the same numbers. Comparing the authored hex against a
  * *linear* fragment without it puts the key colour a long way from anything on
  * the model and nothing glows at all.

@@ -1,0 +1,188 @@
+# Cocoa Tree, mature and unripe (rung 3 of 4).
+#
+# Identical to `cocoa_4.wam` except that the pods do not exist. Cocoa has SIX crop stages
+# over four models, and `modelIndexFor` maps stage 5 alone onto the last one — so this is
+# how "fruit only in the late stages" is expressed for a tree whose canopy stops changing
+# long before it fruits. `world/crops.js`'s own ripeness trick (half the fruit count, the
+# colour dragged two-thirds back toward the leaf) cannot express "no pods at all", and a
+# cocoa carrying pale pods for three stages is exactly the tell that made the audit call
+# five orchard species indistinguishable.
+
+model cocoa
+  height 3.4
+  style chunky
+
+palette
+  Wood      #5c4028
+  Green     #2f7a35
+  DarkGreen #256128
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.60
+  # TWO whorls, and that is the whole anti-palm move. A palm's leaves all issue from one
+  # point at the very top; the first version of this file had one whorl and rendered as a
+  # palm with a shorter frond. A lower tier at 0.62 up the bole gives the crown vertical
+  # depth and leaves foliage against the trunk, which is what a cocoa looks like.
+  mirror
+    bone brA parent=trunk dir=side tilt=42 len=0.20
+    bone brB parent=trunk dir=side yaw=62  tilt=52 len=0.17
+    bone brC parent=trunk dir=side yaw=126 tilt=36 len=0.19
+    bone brD parent=trunk at=0.62 dir=side yaw=32  tilt=26 len=0.15
+    bone brE parent=trunk at=0.62 dir=side yaw=158 tilt=20 len=0.14
+  end
+
+parts
+  # The bole. Slim and near-parallel: a cocoa trunk is a pole, and taper is what makes a
+  # trunk read as a conifer.
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.088 d=0.088
+    ring 0.20 w=0.070 d=0.070
+    ring 0.80 w=0.058 d=0.058
+    ring 1.00 w=0.052 d=0.052
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=brA..brA material=Wood sides=6
+      ring 0.00 w=0.046 d=0.046
+      ring 1.00 w=0.022 d=0.022
+      cap start=flat end=dome
+    loft armB bones=brB..brB material=Wood sides=6
+      ring 0.00 w=0.042 d=0.042
+      ring 1.00 w=0.020 d=0.020
+      cap start=flat end=dome
+    loft armC bones=brC..brC material=Wood sides=6
+      ring 0.00 w=0.044 d=0.044
+      ring 1.00 w=0.021 d=0.021
+      cap start=flat end=dome
+  end
+
+  # The leaves. Each is a free ray off its own branch at an ABSOLUTE elevation (`tilt` is
+  # a world angle, not one relative to the branch), spread from +24 above horizontal down
+  # to -68. All of them drooping gave a flat parasol of spikes, which is a palm; a few held
+  # up over the middle is what domes the crown.
+  #
+  # Tips are rounded (`cap end=dome` over a narrow last ring) rather than `tip`-collapsed.
+  # A lance point on every leaf turned the silhouette into a starburst — sixteen sharp
+  # spikes read as an agave from any distance at which the pods are not yet visible.
+  #
+  # `frame=up` and then w WIDE, d THIN: a leaf is a flat blade lying face-up, which is the
+  # exact opposite of the lotus petal in `lotus_4.wam` and the reason that file spells the
+  # pairing out. Getting it backwards here gives a crown of vertical fins.
+  mirror
+    loft leafA1 bone=brA at=1.00 dir=side yaw=-14 tilt=24 len=0.34 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.215 d=0.055
+      ring 0.68 w=0.202 d=0.050
+      ring 1.00 w=0.073 d=0.024
+      cap start=flat end=dome
+    loft leafA2 bone=brA at=0.55 dir=side yaw=12 tilt=4 len=0.40 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.240 d=0.055
+      ring 0.68 w=0.226 d=0.050
+      ring 1.00 w=0.082 d=0.024
+      cap start=flat end=dome
+    loft leafA3 bone=brA at=1.00 dir=side yaw=-4 tilt=-34 len=0.42 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.238 d=0.055
+      ring 0.68 w=0.224 d=0.050
+      ring 1.00 w=0.081 d=0.024
+      cap start=flat end=dome
+    loft leafA4 bone=brA at=1.00 dir=side yaw=28 tilt=-64 len=0.36 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.220 d=0.055
+      ring 0.68 w=0.207 d=0.050
+      ring 1.00 w=0.075 d=0.024
+      cap start=flat end=dome
+    loft leafB1 bone=brB at=1.00 dir=side yaw=48 tilt=18 len=0.32 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.208 d=0.055
+      ring 0.68 w=0.196 d=0.050
+      ring 1.00 w=0.071 d=0.024
+      cap start=flat end=dome
+    loft leafB2 bone=brB at=0.60 dir=side yaw=74 tilt=-2 len=0.38 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.235 d=0.055
+      ring 0.68 w=0.221 d=0.050
+      ring 1.00 w=0.080 d=0.024
+      cap start=flat end=dome
+    loft leafB3 bone=brB at=1.00 dir=side yaw=56 tilt=-40 len=0.40 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.232 d=0.055
+      ring 0.68 w=0.218 d=0.050
+      ring 1.00 w=0.079 d=0.024
+      cap start=flat end=dome
+    loft leafB4 bone=brB at=1.00 dir=side yaw=90 tilt=-68 len=0.34 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.212 d=0.055
+      ring 0.68 w=0.199 d=0.050
+      ring 1.00 w=0.072 d=0.024
+      cap start=flat end=dome
+    loft leafC1 bone=brC at=1.00 dir=side yaw=110 tilt=20 len=0.33 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.210 d=0.055
+      ring 0.68 w=0.197 d=0.050
+      ring 1.00 w=0.071 d=0.024
+      cap start=flat end=dome
+    loft leafC2 bone=brC at=0.58 dir=side yaw=138 tilt=-6 len=0.39 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.238 d=0.055
+      ring 0.68 w=0.224 d=0.050
+      ring 1.00 w=0.081 d=0.024
+      cap start=flat end=dome
+    loft leafC3 bone=brC at=1.00 dir=side yaw=122 tilt=-38 len=0.41 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.234 d=0.055
+      ring 0.68 w=0.220 d=0.050
+      ring 1.00 w=0.080 d=0.024
+      cap start=flat end=dome
+    loft leafC4 bone=brC at=1.00 dir=side yaw=154 tilt=-66 len=0.35 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.216 d=0.055
+      ring 0.68 w=0.203 d=0.050
+      ring 1.00 w=0.073 d=0.024
+      cap start=flat end=dome
+    loft leafD1 bone=brD at=1.00 dir=side yaw=24 tilt=-18 len=0.34 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.205 d=0.055
+      ring 0.68 w=0.193 d=0.050
+      ring 1.00 w=0.070 d=0.024
+      cap start=flat end=dome
+    loft leafD2 bone=brD at=1.00 dir=side yaw=52 tilt=-46 len=0.31 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.192 d=0.055
+      ring 0.68 w=0.180 d=0.050
+      ring 1.00 w=0.065 d=0.024
+      cap start=flat end=dome
+    loft leafE1 bone=brE at=1.00 dir=side yaw=150 tilt=-16 len=0.33 material=Green frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.200 d=0.055
+      ring 0.68 w=0.188 d=0.050
+      ring 1.00 w=0.068 d=0.024
+      cap start=flat end=dome
+    loft leafE2 bone=brE at=1.00 dir=side yaw=176 tilt=-44 len=0.30 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.030 d=0.020
+      ring 0.22 w=0.188 d=0.055
+      ring 0.68 w=0.177 d=0.050
+      ring 1.00 w=0.064 d=0.024
+      cap start=flat end=dome
+  end
+
+checks
+  # Not a palm: the crown starts on a whorl partway up, so there is bole ABOVE the lowest
+  # branch as well as below it, and the leaves do not all issue from one point.
+  assert height(bole) / height > 0.45
+  assert bottom(armA.l) / height < 0.85
+  # A pole, not a cone.
+  assert width(bole) / height(bole) < 0.20
+  assert bottom(bole) < 0.01
+  # No pods on this rung at all: 39 parts, where the ripe one has 45.
+  assert parts == 39
+  # Leaves hang.
+  assert bottom(leafA4.l) < top(armA.l)
+  # ...and some are held ABOVE the branch they grow from, which is what a palm cannot do.
+  assert top(leafA1.l) > top(armA.l)
+  assert asymmetry(bole) < 0.005
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 4200
+  measure crownspan xmax(leafA1.l) - xmin(leafA1.r)

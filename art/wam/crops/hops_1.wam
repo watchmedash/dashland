@@ -1,0 +1,56 @@
+# Hops, crown (rung 1 of 4).
+#
+# Hops comes up from a rhizome, not from a seed: a tight crown of four thick blunt spears
+# pushing straight out of the soil, with the first leaf pair only just unrolled. That is a
+# different object from grape's square-cut cutting and from green bean's arched hypocotyl, so
+# the three trellis species are told apart on the day they are planted as well as on the day
+# they are picked.
+#
+# See `hops_4.wam` for the corkscrew and `icecapmoss_3.wam` for the naming rules.
+
+model hops
+  height 2.2
+  style chunky
+
+palette
+  Wood      #5a8a34
+  Green     #5c9c38
+  DarkGreen #477d2c
+
+skeleton
+  root ground at 0.0
+  mirror
+    bone sA parent=ground offset=(0.016,0,0.010)  dir=up tilt=-14 len=0.090
+    bone sB parent=ground offset=(0.022,0,-0.018) dir=up tilt=-24 pitch=-12 len=0.066
+  end
+
+parts
+  mirror
+    # BLUNT: a hop spear is a fat shoot with a rounded tip, not a taper. `cap end=dome` on a
+    # barely-tapering loft is the whole read at this size.
+    loft spearA bones=sA..sA material=Wood sides=5
+      ring 0.00 w=0.026 d=0.026
+      ring 0.60 w=0.022 d=0.022
+      ring 1.00 w=0.017 d=0.017
+      cap start=flat end=dome
+    loft spearB bones=sB..sB material=Wood sides=5
+      ring 0.00 w=0.022 d=0.022
+      ring 0.60 w=0.019 d=0.019
+      ring 1.00 w=0.014 d=0.014
+      cap start=flat end=dome
+    loft lf bone=sA at=0.92 dir=side yaw=22 tilt=-16 len=0.062 material=Green frame=up sides=5
+      ring 0.00 w=0.012 d=0.007
+      ring 0.28 w=0.050 d=0.011
+      ring 0.68 w=0.058 d=0.010
+      ring 1.00 w=0.032 d=0.006
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(spearA.l) < 0.01
+  # A crown: six parts, four spears and one leaf pair, no chain and nothing hanging.
+  assert parts == 6
+  assert height < 0.16
+  # BLUNT — the tip is over half the width of the base. A taper here is a seedling.
+  assert width(spearA.l) > 0.024
+  assert tris < 340

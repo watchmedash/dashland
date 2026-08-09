@@ -1,0 +1,120 @@
+# Kelp — one segment of a stalk that stacks into a water column.
+#
+# Unlike every other plant in `wam/items/`, this model is not a whole organism:
+# the block is one cell of a kelp stalk and a stalk is four to nine of them in a
+# vertical run, so what is authored here is a *tile*. Two consequences drive the
+# whole shape.
+#
+# **The seam has to be hidden by foliage, not by the stipe.** `BlockModels`
+# normalises a model to exactly one cell and stands its foot on the cell floor,
+# so two stacked segments meet exactly at y=1 — and then the sway shader pulls
+# them apart again, because the bend is pinned at each instance's own root and
+# is strongest at its own head (see `applyInstancedSway`). A continuous stipe
+# would visibly break at every joint. So the stipe is thin and dark and the
+# blades are what the eye follows: the topmost blade reaches the ceiling of the
+# cell and the lowest starts at the floor, so at every joint there is foliage
+# from the segment above and the segment below overlapping across it.
+#
+# **It cannot lean far.** A stalk is a stack of identical stamps, so any lean is
+# cumulative — five segments leaning 15° is a stalk lying on its side, and the
+# spin `main.js` gives each cell (derived from the cell index) would make that
+# stalk a corkscrew. The stipe therefore ends up almost exactly over where it
+# started: it bows out and comes back, which reads as water moving through it
+# and stacks straight. `assert` on the tip's offset from the axis is what keeps
+# that true after the next edit.
+#
+# Colour is the deep-water end of the foliage palette rather than the meadow's:
+# a kelp bed sits under ten metres of water where everything is already blue, so
+# the greens are pulled toward olive and the shaded material is nearly black.
+# The pale tips are the one bright thing on the plant and they exist so the
+# silhouette does not read as a single flat mass in a dark ocean.
+
+model kelp
+  height 1.0
+  style chunky
+
+palette
+  Stipe #4a6b32
+  Blade #5f8a3a
+  Deep  #35502a
+  Sun   #8fb254
+
+skeleton
+  root holdfast at 0.0
+  # A bow, not a lean: +pitch tips an `up` bone forward, so the second bone
+  # takes the same magnitude back the other way and the tip returns to the axis.
+  bone stipeA parent=holdfast dir=up pitch=7 len=0.46
+  bone stipeB parent=stipeA dir=up pitch=-7 len=0.54
+
+parts
+  # The stipe. Five sides and thin — at one metre a kelp stalk is a cord, and
+  # anything thicker reads as bamboo. The flare at the foot is the holdfast,
+  # which is also what gives a segment something to sit flush on the one below.
+  loft stem bones=holdfast..stipeB material=Stipe sides=5
+    ring 0.00 w=0.085 d=0.080 material=Deep
+    ring 0.07 w=0.048 d=0.045 material=Stipe
+    ring 0.55 w=0.040 d=0.038
+    ring 1.00 w=0.034 d=0.032
+    cap start=flat end=flat
+
+  # Blades. `frame=up` with w wide and d thin is the flat-strap idiom: a kelp
+  # blade is a ribbon, and a round tube here would be a bean stalk.
+  #
+  # They alternate sides and climb the stipe, and the two extremes are load
+  # bearing rather than decorative — `bladeFoot` starts at the very bottom of
+  # the cell and `bladeCrown` finishes at the very top, so a stacked run has
+  # overlapping foliage across every joint. The checks below assert exactly
+  # that, because it is the one property of this model that is not visible in
+  # its own render sheet.
+  loft bladeFoot bone=stipeA at=0.02 offset=(-0.034,0,0) dir=up pitch=0 tilt=36 len=0.58 material=Deep frame=up sides=4
+    ring 0.00 w=0.055 d=0.016
+    ring 0.30 w=0.230 d=0.022
+    ring 0.75 w=0.200 d=0.020
+    ring 1.00 w=0.075 d=0.014
+    cap start=flat end=dome
+  loft bladeLow bone=stipeA at=0.34 offset=(0,0,-0.030) dir=up pitch=-30 tilt=0 len=0.60 material=Blade frame=up sides=4
+    ring 0.00 w=0.058 d=0.017
+    ring 0.30 w=0.250 d=0.023
+    ring 0.75 w=0.215 d=0.021
+    ring 1.00 w=0.080 d=0.015
+    cap start=flat end=dome
+  loft bladeMid bone=stipeB at=0.20 offset=(0.034,0,0) dir=up pitch=0 tilt=-32 len=0.62 material=Blade frame=up sides=4
+    ring 0.00 w=0.056 d=0.017
+    ring 0.30 w=0.240 d=0.023
+    ring 0.75 w=0.210 d=0.021
+    ring 1.00 w=0.078 d=0.015
+    cap start=flat end=dome
+  loft bladeHigh bone=stipeB at=0.52 offset=(0,0,0.030) dir=up pitch=30 tilt=0 len=0.54 material=Sun frame=up sides=4
+    ring 0.00 w=0.052 d=0.016
+    ring 0.30 w=0.215 d=0.022
+    ring 0.75 w=0.185 d=0.020
+    ring 1.00 w=0.070 d=0.014
+    cap start=flat end=dome
+  # The crown blade is the tallest thing in the model and it is deliberately
+  # near-vertical: it is what covers the joint with the segment above.
+  loft bladeCrown bone=stipeB at=0.86 offset=(-0.032,0,0) dir=up pitch=4 tilt=14 len=0.30 material=Sun frame=up sides=4
+    ring 0.00 w=0.048 d=0.015
+    ring 0.30 w=0.190 d=0.021
+    ring 0.75 w=0.165 d=0.019
+    ring 1.00 w=0.062 d=0.013
+    cap start=flat end=dome
+
+checks
+  # Sits on the floor of its cell, and the foliage reaches both faces of it.
+  assert bottom(stem) < 0.01
+  assert bottom(bladeFoot) < 0.10
+  assert top(bladeCrown) > 0.93
+  # Stacks straight. The tip of the stipe has to come back over its own root or
+  # a run of these corkscrews away from vertical — this is the check the two
+  # opposed pitches in the skeleton exist to satisfy.
+  assert abs(z(stipeB.tail)) < 0.06
+  assert abs(x(stipeB.tail)) < 0.03
+  # A cord, not a cane: the stipe is thin against the blades that hang off it.
+  assert width(bladeLow) > width(stem) * 0.9
+  # Narrow overall — a stalk that fills its cell tangentially would merge with
+  # the one in the next column into a green wall.
+  assert width / height < 0.62
+  assert depth / height < 0.75
+  assert parts == 6
+  assert tris < 420
+  measure tipoff (x(stipeB.tail) ** 2 + z(stipeB.tail) ** 2) ** 0.5

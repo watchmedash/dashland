@@ -1,0 +1,131 @@
+# Sun Daisy — a radiating head on a clump.
+#
+# The one of the three whose identity is the *head*, so the head is built the
+# expensive way: six petals laid out around a dark eye, rather than the single
+# tapered loft the other two use. Six and not five or eight — five reads as odd
+# and unfinished when the disc is this small, eight merges into a wheel at 32px
+# and costs a third more triangles for it.
+#
+# They are authored as three `mirror` pairs at yaw ±30, ±90, ±150, which lands
+# them exactly 60° apart. Written out as six central bones instead, each petal
+# would be a part straddling X=0 lopsidedly and the lint would say so six times;
+# a mirrored pair is exempt because being one-sided is the point of it.
+#
+# `frame=up` on every petal is load-bearing. A petal is a nearly horizontal ray,
+# which is precisely where the automatic depth axis switches from forward to up,
+# so without it the six sections stand at right angles to each other for no
+# reason the source shows. Named, `d` is reliably the petal's thickness and `w`
+# its width, and a petal is a wide thin thing — 0.115 across by 0.038 through.
+#
+# The eye is a squat ten-sided loft along its own short vertical bone, the same
+# construction the coin uses and for the same reason: a disc lofted *across*
+# instead of along traces its outline with the ring list and comes out a
+# polygon with as many corners as there are rings.
+
+model flower_gold
+  height 0.40
+  style chunky
+
+palette
+  Petal #f6c02c
+  Deep  #d19a1c
+  Eye   #784e18
+  Stem  #40682c
+  Leaf  #507e34
+
+skeleton
+  root soil at 0.0
+  bone stalk parent=soil dir=up pitch=-3 len=0.82
+  bone eye   parent=stalk dir=up len=0.05
+  mirror
+    # The petals leave from 0.4 up the eye — its widest band — so their roots
+    # are buried in the disc and there is no seam to line up by hand.
+    bone pa parent=eye at=0.4 dir=fwd yaw=30  pitch=-19 len=0.21
+    bone pb parent=eye at=0.4 dir=fwd yaw=90  pitch=-14 len=0.22
+    bone pc parent=eye at=0.4 dir=fwd yaw=150 pitch=-19 len=0.21
+    bone side parent=stalk at=0.24 dir=up tilt=28 pitch=6 yaw=32 len=0.34
+    bone leaf parent=stalk at=0.20 dir=side tilt=-6 yaw=-24 len=0.26
+  end
+
+parts
+  loft stem bones=soil..eye material=Stem sides=4
+    ring 0.00 w=0.075 d=0.072
+    ring 0.08 w=0.042 d=0.040
+    ring 0.60 w=0.034 d=0.032
+    ring 0.94 w=0.030 d=0.028
+    ring 1.00 w=0.030 d=0.028
+    cap start=flat end=flat
+
+  loft disc bones=eye..eye material=Eye sides=10
+    ring 0.00 w=0.19 d=0.19
+    ring 0.55 w=0.24 d=0.24
+    ring 1.00 w=0.16 d=0.16
+    cap start=flat end=flat
+
+  mirror
+    loft petal_a bones=pa..pa material=Petal sides=4 frame=up
+      ring 0.00 w=0.055 d=0.030 material=Deep
+      ring 0.25 w=0.115 d=0.038 material=Petal
+      ring 0.72 w=0.105 d=0.034
+      ring 1.00 w=0.028 d=0.016
+      cap start=flat end=point
+
+    loft petal_b bones=pb..pb material=Petal sides=4 frame=up
+      ring 0.00 w=0.055 d=0.030 material=Deep
+      ring 0.25 w=0.120 d=0.038 material=Petal
+      ring 0.72 w=0.108 d=0.034
+      ring 1.00 w=0.028 d=0.016
+      cap start=flat end=point
+
+    loft petal_c bones=pc..pc material=Petal sides=4 frame=up
+      ring 0.00 w=0.055 d=0.030 material=Deep
+      ring 0.25 w=0.115 d=0.038 material=Petal
+      ring 0.72 w=0.105 d=0.034
+      ring 1.00 w=0.028 d=0.016
+      cap start=flat end=point
+
+    loft sidestem bones=side..side material=Stem sides=4
+      ring 0.00 w=0.032 d=0.030
+      ring 1.00 w=0.024 d=0.023
+      cap start=flat end=flat
+
+    # An unopened head: a closed knob, no petals and no eye. Six petals on each
+    # of these would triple the head cost of the model for something that is
+    # eight pixels across in the world.
+    loft bud bone=side at=1.0 dir=up pitch=-6 len=0.16 on=sidestem material=Petal sides=6 shape=squarish
+      ring 0.00 w=0.08 d=0.08 material=Deep
+      ring 0.30 w=0.18 d=0.17 roll=16 material=Petal
+      ring 0.72 w=0.19 d=0.18 roll=-20
+      ring 1.00 w=0.06 d=0.06 roll=12
+      cap start=flat end=flat
+
+    loft blade bones=leaf..leaf material=Leaf sides=4 frame=up
+      ring 0.00 w=0.030 d=0.020
+      ring 0.35 w=0.095 d=0.026
+      ring 0.75 w=0.075 d=0.022
+      ring 1.00 w=0.020 d=0.012
+      cap start=flat end=point
+  end
+
+checks
+  assert bottom(stem) < 0.01
+  # The head is a plate, not a ball: six petals radiating out from a disc that
+  # is barely thicker than they are. If this ever fails the petals have been
+  # pitched up into a cup and the daisy has become the tulip.
+  assert width(petal_b.l) > height(petal_b.l) * 2
+  # The eye is inside the ring of petals and stays smaller than it — the dark
+  # centre is a dot, and when it stops being one the flower reads as a berry.
+  assert width(disc) < width(petal_b.l) * 1.6
+  assert top(disc) < top(petal_a.l) + 0.03
+  # Petals actually radiate: the a/c pair sit forward of the b pair, which is
+  # the whole point of laying them out at 60° instead of in a row.
+  assert z(petal_a.l) > z(petal_b.l)
+  # Leader over buds, same as the other two blooms.
+  assert bottom(disc) > top(bud.l)
+  # Taller than it is wide, which for a daisy is not automatic: the head is a
+  # horizontal plate 0.49 across and the stalk is the only thing buying back the
+  # vertical. `render/ItemModels.js` normalises on the Y extent, so a squat
+  # daisy comes out of the fist and the toolbar slot bigger than the other two.
+  assert height > width * 1.5
+  assert parts == 14
+  assert tris < 700

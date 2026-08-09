@@ -1,0 +1,120 @@
+# Cocoa Tree, sapling (rung 2 of 4).
+#
+# A sapling: a short bole, ONE whorl, and four leaves. The lower tier and half the crown
+# do not exist yet, so the plant is sparser in parts rather than merely smaller — which is
+# the rule `tools/cropgeotest.mjs` asserts on for the procedural ladder and the reason the
+# stage ladder is one WAM source per rung rather than one model scaled down.
+
+model cocoa
+  height 3.4
+  style chunky
+
+palette
+  Wood      #5c4028
+  Green     #2f7a35
+  DarkGreen #256128
+
+skeleton
+  root ground at 0.0
+  bone trunk parent=ground dir=up len=0.34
+  # TWO whorls, and that is the whole anti-palm move. A palm's leaves all issue from one
+  # point at the very top; the first version of this file had one whorl and rendered as a
+  # palm with a shorter frond. A lower tier at 0.62 up the bole gives the crown vertical
+  # depth and leaves foliage against the trunk, which is what a cocoa looks like.
+  mirror
+    bone brA parent=trunk dir=side tilt=42 len=0.13
+    bone brB parent=trunk dir=side yaw=62  tilt=52 len=0.11
+    bone brC parent=trunk dir=side yaw=126 tilt=36 len=0.12
+  end
+
+parts
+  # The bole. Slim and near-parallel: a cocoa trunk is a pole, and taper is what makes a
+  # trunk read as a conifer.
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.053 d=0.053
+    ring 0.20 w=0.042 d=0.042
+    ring 0.80 w=0.035 d=0.035
+    ring 1.00 w=0.031 d=0.031
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=brA..brA material=Wood sides=6
+      ring 0.00 w=0.029 d=0.029
+      ring 1.00 w=0.014 d=0.014
+      cap start=flat end=dome
+    loft armB bones=brB..brB material=Wood sides=6
+      ring 0.00 w=0.026 d=0.026
+      ring 1.00 w=0.012 d=0.012
+      cap start=flat end=dome
+    loft armC bones=brC..brC material=Wood sides=6
+      ring 0.00 w=0.027 d=0.027
+      ring 1.00 w=0.013 d=0.013
+      cap start=flat end=dome
+  end
+
+  # The leaves. Each is a free ray off its own branch at an ABSOLUTE elevation (`tilt` is
+  # a world angle, not one relative to the branch), spread from +24 above horizontal down
+  # to -68. All of them drooping gave a flat parasol of spikes, which is a palm; a few held
+  # up over the middle is what domes the crown.
+  #
+  # Tips are rounded (`cap end=dome` over a narrow last ring) rather than `tip`-collapsed.
+  # A lance point on every leaf turned the silhouette into a starburst — sixteen sharp
+  # spikes read as an agave from any distance at which the pods are not yet visible.
+  #
+  # `frame=up` and then w WIDE, d THIN: a leaf is a flat blade lying face-up, which is the
+  # exact opposite of the lotus petal in `lotus_4.wam` and the reason that file spells the
+  # pairing out. Getting it backwards here gives a crown of vertical fins.
+  mirror
+    loft leafA2 bone=brA at=0.55 dir=side yaw=12 tilt=4 len=0.22 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.017 d=0.020
+      ring 0.22 w=0.132 d=0.055
+      ring 0.68 w=0.124 d=0.050
+      ring 1.00 w=0.045 d=0.024
+      cap start=flat end=dome
+    loft leafA3 bone=brA at=1.00 dir=side yaw=-4 tilt=-34 len=0.23 material=Green frame=up sides=6
+      ring 0.00 w=0.017 d=0.020
+      ring 0.22 w=0.131 d=0.055
+      ring 0.68 w=0.123 d=0.050
+      ring 1.00 w=0.045 d=0.024
+      cap start=flat end=dome
+    loft leafB2 bone=brB at=0.60 dir=side yaw=74 tilt=-2 len=0.21 material=Green frame=up sides=6
+      ring 0.00 w=0.017 d=0.020
+      ring 0.22 w=0.129 d=0.055
+      ring 0.68 w=0.122 d=0.050
+      ring 1.00 w=0.044 d=0.024
+      cap start=flat end=dome
+    loft leafB3 bone=brB at=1.00 dir=side yaw=56 tilt=-40 len=0.22 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.017 d=0.020
+      ring 0.22 w=0.128 d=0.055
+      ring 0.68 w=0.120 d=0.050
+      ring 1.00 w=0.043 d=0.024
+      cap start=flat end=dome
+    loft leafC2 bone=brC at=0.58 dir=side yaw=138 tilt=-6 len=0.21 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.017 d=0.020
+      ring 0.22 w=0.131 d=0.055
+      ring 0.68 w=0.123 d=0.050
+      ring 1.00 w=0.045 d=0.024
+      cap start=flat end=dome
+
+  end
+
+checks
+  # Not a palm: the crown starts on a whorl partway up, so there is bole ABOVE the lowest
+  # branch as well as below it, and the leaves do not all issue from one point.
+  assert height(bole) / height > 0.45
+  assert bottom(armA.l) / height < 0.85
+  # A pole, not a cone, and a crown that is not already full size — `familyScale` takes one
+  # scale off the RIPE model for the whole family, so a rung has to be authored small.
+  assert (xmax(leafA2.l) - xmin(leafA2.r)) < 0.62
+  assert width(bole) / height(bole) < 0.20
+  assert bottom(bole) < 0.01
+  # No pods on this rung at all: 39 parts, where the ripe one has 45.
+  assert parts == 17
+  # Leaves hang.
+  assert bottom(leafA3.l) < top(armA.l)
+  # ...and some are held ABOVE the branch they grow from, which is what a palm cannot do.
+  assert top(leafA2.l) > bottom(armA.l)
+  assert asymmetry(bole) < 0.005
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 1400
+  measure crownspan xmax(leafA2.l) - xmin(leafA2.r)

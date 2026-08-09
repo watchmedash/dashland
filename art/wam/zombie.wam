@@ -1,0 +1,332 @@
+model zombie
+  height 1.82
+  style chunky
+
+palette
+  flesh   #8b9678
+  flesh2  #71805f
+  rot     #3f4a34
+  gore    #4a2b28
+  bone    #bdb69a
+  cloth   #4c5a63
+  pants   #3b382f
+  cloth2  #35322a
+  blood   #6d211a
+  hair    #2b2721
+  nail    #b9b49a
+
+skeleton
+  root pelvis at 0.512
+  bone spine1 parent=pelvis dir=up pitch=12 len=0.12
+  bone spine2 parent=spine1 dir=up pitch=20 len=0.13
+  bone neck   parent=spine2 dir=up pitch=38 roll=-7 len=0.06
+  bone skull  parent=neck dir=up pitch=-24 yaw=10 roll=8 len=0.13
+  bone jaw    parent=skull at=0.13 dir=fwd pitch=62 len=0.078
+
+  # --- right arm: thrown forward and up, the one that reaches for you
+  bone clavicle.r parent=spine2 at=0.95 side=-0.03 dir=side tilt=8 len=0.09
+  bone upperarm.r parent=clavicle.r dir=down pitch=-60 tilt=-34 len=0.17
+  bone forearm.r  parent=upperarm.r dir=down pitch=-84 yaw=-10 len=0.16
+  bone hand.r     parent=forearm.r dir=down pitch=-100 len=0.055
+  # clawed digits, splayed and half-curled
+  bone f1.r parent=hand.r side=-0.019 dir=fwd pitch=16 yaw=-9 len=0.042
+  bone f2.r parent=hand.r side=-0.006 dir=fwd pitch=10 yaw=-3 len=0.047
+  bone f3.r parent=hand.r side=0.007  dir=fwd pitch=12 yaw=3 len=0.044
+  bone f4.r parent=hand.r side=0.019  dir=fwd pitch=18 yaw=9 len=0.036
+  bone th.r parent=hand.r at=0.35 side=-0.024 up=-0.004 dir=fwd pitch=30 yaw=-42 len=0.038
+
+  # --- left arm: dead weight, shoulder dropped, elbow half-collapsed
+  bone clavicle.l parent=spine2 at=0.88 side=0.03 dir=side tilt=-22 len=0.09
+  bone upperarm.l parent=clavicle.l dir=down pitch=-22 tilt=10 len=0.17
+  bone forearm.l  parent=upperarm.l dir=down pitch=-58 yaw=-10 len=0.16
+  bone hand.l     parent=forearm.l dir=down pitch=-74 len=0.055
+  # limp hand: digits hang slack, barely curled
+  bone f1.l parent=hand.l side=0.019  dir=down pitch=-52 yaw=7 len=0.042
+  bone f2.l parent=hand.l side=0.006  dir=down pitch=-48 yaw=2 len=0.047
+  bone f3.l parent=hand.l side=-0.007 dir=down pitch=-50 yaw=-3 len=0.044
+  bone f4.l parent=hand.l side=-0.019 dir=down pitch=-56 yaw=-8 len=0.036
+  bone th.l parent=hand.l at=0.35 side=0.024 up=-0.004 dir=down pitch=-68 yaw=36 len=0.038
+
+  # --- legs: right steps out, left drags stiff behind
+  bone thigh.r parent=pelvis side=-0.065 dir=down tilt=-3 pitch=-14 len=0.245
+  bone shin.r  parent=thigh.r dir=down pitch=14 len=0.23
+  bone foot.r  parent=shin.r dir=fwd pitch=2 len=0.10
+
+  bone thigh.l parent=pelvis side=0.065 dir=down tilt=4 pitch=4 len=0.245
+  bone shin.l  parent=thigh.l dir=down pitch=2 len=0.23
+  bone foot.l  parent=shin.l dir=fwd pitch=6 yaw=8 len=0.10
+
+parts
+  loft hips bones=pelvis..spine1 frame=fwd material=pants
+    ring 0.00 w=0.255 d=0.205
+    ring 0.45 w=0.268 d=0.208
+    ring 1.00 w=0.248 d=0.188
+    cap start=dome end=none
+
+  loft torso bones=spine1..spine2 frame=fwd sides=16 material=flesh
+    ring 0.00 w=0.245 d=0.185
+    ring 0.20 w=0.255 d=0.188 material_arc=gore:60-120
+    ring 0.34 w=0.262 d=0.19 material=cloth
+    ring 0.48 w=0.27 d=0.193 material=cloth material_arc=gore:76-104
+    ring 0.60 w=0.278 d=0.195 material=cloth material_arc=gore:76-104
+    ring 0.72 w=0.286 d=0.192 material=cloth material_arc=gore:76-104
+    ring 0.86 w=0.282 d=0.188 material=cloth
+    ring 1.00 w=0.284 d=0.182 material=cloth2
+    cap start=none end=dome
+
+  loft neckcol bones=neck..neck frame=fwd material=flesh2
+    ring 0.00 w=0.10 d=0.10
+    ring 1.00 w=0.085 d=0.085
+    cap start=none end=none
+
+  # --- head: long gaunt cranium, narrow cheeks, dark matted scalp
+  loft head bones=skull..skull frame=fwd sides=12 material=flesh
+    ring 0.00 w=0.098 d=0.10
+    ring 0.14 w=0.104 d=0.124 material_arc=rot:66-114     # shadowed open mouth
+    ring 0.28 w=0.126 d=0.148                             # gaunt cheek
+    ring 0.46 w=0.148 d=0.158                             # brow line
+    ring 0.68 w=0.150 d=0.152
+    ring 0.86 w=0.128 d=0.128 material=hair
+    ring 1.00 w=0.072 d=0.074
+    cap start=dome end=dome
+
+  loft jawpart bones=jaw..jaw frame=up material=rot
+    ring 0.00 w=0.098 d=0.05
+    ring 0.40 w=0.094 d=0.044 material=flesh2
+    ring 1.00 w=0.07 d=0.034
+    cap start=none end=dome
+
+  loft brow bone=skull at=0.50 offset=(0,0.022,0.050) dir=fwd len=0.026 frame=up material=flesh2
+    ring 0.00 w=0.120 d=0.046
+    ring 1.00 w=0.104 d=0.030
+    cap start=dome end=dome
+
+  loft nose bone=skull at=0.29 offset=(0,0.002,0.068) dir=fwd len=0.014 frame=up material=flesh
+    ring 0.00 w=0.030 d=0.024
+    ring 1.00 w=0.020 d=0.014
+    cap start=none end=dome
+
+  mirror
+    # hollow sockets, sunk flush into the face by construction
+    attach socket bone=skull at=0.38 offset=(0.042,-0.008,0.054) kind=sphere w=0.034 d=0.030 h=0.034 size=0.024 material=rot on=head inset=0.014
+    attach eyeball bone=skull at=0.38 offset=(0.042,-0.008,0.061) kind=eye size=0.013 material=bone on=socket inset=0.004
+  end
+
+  # --- arms (authored per side: the pose is deliberately lopsided)
+  loft arm.r bones=upperarm.r..forearm.r frame=up material=flesh
+    ring 0.00 w=0.108 d=0.108                         # sleeve torn clean off
+    ring 0.22 w=0.092 d=0.092
+    ring 0.45 w=0.082 d=0.082
+    ring 0.55 w=0.079 d=0.079
+    ring 1.00 w=0.058 d=0.058
+    cap start=dome end=none
+
+  loft arm.l bones=upperarm.l..forearm.l frame=up material=flesh
+    ring 0.00 w=0.108 d=0.108 material=cloth
+    ring 0.40 w=0.086 d=0.086
+    ring 0.52 w=0.080 d=0.080 material=flesh
+    ring 1.00 w=0.056 d=0.056
+    cap start=dome end=none
+
+  loft palm.r bones=hand.r..hand.r frame=up material=flesh2
+    ring 0.00 w=0.066 d=0.048
+    ring 1.00 w=0.060 d=0.038 material=blood
+    cap start=none end=dome
+
+  loft palm.l bones=hand.l..hand.l frame=up material=flesh2
+    ring 0.00 w=0.064 d=0.046
+    ring 1.00 w=0.058 d=0.036
+    cap start=none end=dome
+
+  loft dig1.r bones=f1.r..f1.r frame=up sides=6 material=flesh2
+    ring 0.00 w=0.017 d=0.017
+    ring 0.70 w=0.014 d=0.014
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+  loft dig2.r bones=f2.r..f2.r frame=up sides=6 material=flesh2
+    ring 0.00 w=0.018 d=0.018
+    ring 0.70 w=0.015 d=0.015
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+  loft dig3.r bones=f3.r..f3.r frame=up sides=6 material=flesh2
+    ring 0.00 w=0.017 d=0.017
+    ring 0.70 w=0.014 d=0.014
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+  loft dig4.r bones=f4.r..f4.r frame=up sides=6 material=flesh2
+    ring 0.00 w=0.015 d=0.015
+    ring 0.70 w=0.012 d=0.012
+    ring 1.00 w=0.007 d=0.007 material=nail
+    cap start=none end=point
+  loft thumb.r bones=th.r..th.r frame=up sides=6 material=flesh2
+    ring 0.00 w=0.019 d=0.019
+    ring 0.70 w=0.015 d=0.015
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+
+  loft dig1.l bones=f1.l..f1.l frame=up sides=6 material=flesh2
+    ring 0.00 w=0.017 d=0.017
+    ring 0.70 w=0.014 d=0.014
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+  loft dig2.l bones=f2.l..f2.l frame=up sides=6 material=flesh2
+    ring 0.00 w=0.018 d=0.018
+    ring 0.70 w=0.015 d=0.015
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+  loft dig3.l bones=f3.l..f3.l frame=up sides=6 material=flesh2
+    ring 0.00 w=0.017 d=0.017
+    ring 0.70 w=0.014 d=0.014
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+  loft dig4.l bones=f4.l..f4.l frame=up sides=6 material=flesh2
+    ring 0.00 w=0.015 d=0.015
+    ring 0.70 w=0.012 d=0.012
+    ring 1.00 w=0.007 d=0.007 material=nail
+    cap start=none end=point
+  loft thumb.l bones=th.l..th.l frame=up sides=6 material=flesh2
+    ring 0.00 w=0.019 d=0.019
+    ring 0.70 w=0.015 d=0.015
+    ring 1.00 w=0.008 d=0.008 material=nail
+    cap start=none end=point
+
+  # --- legs
+  loft leg.r bones=thigh.r..shin.r frame=fwd material=pants
+    ring 0.00 w=0.128 d=0.135
+    ring 0.50 w=0.115 d=0.12
+    ring 0.72 w=0.098 d=0.10 material=flesh           # trouser torn at the shin
+    ring 1.00 w=0.082 d=0.085
+    cap start=dome end=none
+
+  loft leg.l bones=thigh.l..shin.l frame=fwd material=pants
+    ring 0.00 w=0.128 d=0.135
+    ring 0.50 w=0.113 d=0.118
+    ring 1.00 w=0.080 d=0.083
+    cap start=dome end=none
+
+  loft footpart.r bones=foot.r..foot.r frame=up material=cloth2
+    ring 0.00 w=0.095 d=0.085
+    ring 1.00 w=0.085 d=0.065
+    cap start=dome end=dome
+
+  loft footpart.l bones=foot.l..foot.l frame=up material=cloth2
+    ring 0.00 w=0.095 d=0.085
+    ring 1.00 w=0.085 d=0.065
+    cap start=dome end=dome
+
+textures
+  texture flesh base=#8b9678
+    gradient axis=v from=-0.14 to=0.14
+    noise scale=0.09 amount=0.16          # blotchy rot
+    spots scale=0.05 amount=0.12 color=#5d6a45
+    ao amount=0.22
+  texture flesh2 base=#71805f
+    noise scale=0.07 amount=0.14
+    ao amount=0.24
+  texture rot base=#3f4a34
+    noise scale=0.05 amount=0.16
+    ao amount=0.32
+  texture gore base=#4a2b28
+    noise scale=0.035 amount=0.20
+    ao amount=0.30
+  texture hair base=#2b2721
+    streaks along=v amount=0.16
+    noise scale=0.05 amount=0.10
+  texture pants base=#3b382f
+    gradient axis=v from=-0.10 to=0.06
+    streaks along=v amount=0.10
+    noise scale=0.10 amount=0.09
+    ao amount=0.24
+  texture cloth base=#4c5a63
+    gradient axis=v from=-0.12 to=0.08
+    streaks along=v amount=0.12           # worn fabric grain
+    noise scale=0.11 amount=0.10
+    ao amount=0.24
+  texture cloth2 base=#35322a
+    streaks along=v amount=0.10
+    ao amount=0.22
+  texture blood base=#6d211a
+    noise scale=0.04 amount=0.18
+    gradient axis=along from=0.10 to=-0.18
+  texture bone base=#bdb69a
+    noise scale=0.03 amount=0.08
+    ao amount=0.26
+
+animations
+  anim idle loop dur=4.2
+    ch spine1 pitch 0%=0 50%=2 100%=0
+    ch spine2 roll 0%=2 50%=-2 100%=2
+    ch skull  yaw 0%=-5 40%=4 100%=-5
+    ch skull  roll 0%=0 50%=4 100%=0
+    ch jaw    pitch 0%=0 60%=6 100%=0
+    ch upperarm.r pitch 0%=0 50%=5 100%=0
+    ch upperarm.l pitch 0%=4 50%=-3 100%=4
+    ch forearm.l  pitch 0%=3 50%=-4 100%=3
+
+  # lopsided shuffle: the right leg strides, the stiff left one is hauled after it
+  anim shamble loop dur=2.2
+    ch thigh.r pitch 0%=-20 50%=14 100%=-20
+    ch shin.r  pitch 0%=6 50%=8 65%=36 80%=40 95%=12 100%=6
+    ch foot.r  pitch 0%=-4 50%=8 75%=-6 100%=-4
+    ch thigh.l pitch 0%=5 30%=-3 50%=-4 100%=5
+    ch shin.l  pitch 0%=3 12%=26 26%=34 40%=12 50%=4 100%=3
+    ch foot.l  pitch 0%=5 22%=-14 45%=-2 100%=5
+    ch spine2 roll 0%=5 50%=-5 100%=5
+    ch spine1 pitch 0%=2 50%=-2 100%=2
+    ch skull  roll 0%=6 50%=-2 100%=6
+    ch upperarm.r pitch 0%=6 50%=-6 100%=6
+    ch upperarm.l pitch 0%=-6 50%=6 100%=-6
+    ch forearm.l  pitch 0%=4 50%=-6 100%=4
+
+  anim lunge dur=0.9
+    ch spine2 pitch 0%=0 40%=-8 70%=12 100%=4
+    ch skull pitch 0%=0 40%=-10 70%=8 100%=4
+    ch jaw pitch 0%=0 35%=16 70%=-4 100%=2
+    ch upperarm.r pitch 0%=0 40%=24 70%=-30 100%=-18
+    ch forearm.r pitch 0%=0 40%=20 70%=-24 100%=-14
+    ch upperarm.l pitch 0%=0 40%=10 70%=-26 100%=-18
+    ch forearm.l pitch 0%=0 45%=8 75%=-18 100%=-12
+
+checks
+  # ground and stance
+  assert bottom(footpart.l) < 0.02
+  assert bottom(footpart.r) < 0.02
+  assert lowest(shamble) > -0.03
+  assert lowest(lunge) > -0.03
+  # proportion
+  assert height / len(skull) in 5..9
+  assert width / height in 0.25..0.55
+  assert volume(head) < volume(torso)
+  # the head reads as a head, not an insect
+  assert top(brow) < top(head)                      # brow on the face, not the crown
+  assert zmax(brow) > zmax(head) - 0.012            # ...and out front
+  assert zmax(nose) > zmax(brow)                    # nose is the frontmost feature
+  assert zmax(jawpart) > zmax(head) - 0.02          # chin not swallowed by the skull
+  assert ymax(jawpart) < ymax(head)
+  assert x(socket.l) < xmax(head) - 0.012           # sockets on the face, not the sides
+  assert z(socket.l) > z(skull)                     # ...facing forward
+  # the pose: lopsided, one arm thrown out ahead
+  assert z(palm.r) > zmax(torso)
+  assert x(palm.r) < -0.03                          # reach does not cross the face
+  assert y(hand.r) > y(hand.l)                      # right arm raised, left hangs
+  assert z(palm.r) > z(palm.l)
+  assert z(skull) > z(pelvis)                       # hunched forward
+  # animation
+  assert slide(footpart.r, shamble) < 0.03          # no moonwalk on the striding leg
+  # the left foot is *meant* to scrape: it is the dragged leg, so a hard 0 here
+  # would mean the drag stopped reading. Bounded, not forbidden.
+  assert slide(footpart.l, shamble) in 0.02..0.12
+  assert swing(thigh.r, shamble) in 20..60
+  assert swing(thigh.l, shamble) < 25               # the dragged leg barely swings
+  assert travel(hand.r, lunge) > 0.10               # the grab actually grabs
+  # fingers exist, reach past the palm, and are splayed apart
+  assert zmax(dig2.r) > zmax(palm.r)
+  assert dist(f1.r.tail, f4.r.tail) > 0.035         # digits fanned, not fused
+  assert bottom(dig2.l) < bottom(palm.l)            # left digits hang slack
+  assert gap(dig1.r, dig2.r) > 0.001
+  # rigging and budget
+  assert influences(torso) >= 2
+  assert influences(head) >= 1
+  assert tris < 6000
+  measure headheights height / len(skull)
+  measure shoulderdrop y(clavicle.r) - y(clavicle.l)

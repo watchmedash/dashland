@@ -1,0 +1,108 @@
+# Sea Sponge — a barrel sponge, and the reef's harvestable bulk.
+#
+# The corals are scenery you are meant to leave alone; this is the one you swim
+# down to *take*. So it has two jobs the corals do not: it has to be findable
+# from a distance, and it has to look like a thing that comes away in one piece
+# rather than a colony you would be breaking.
+#
+# **It is orange.** Not a hue chosen for realism — barrel sponges are as often
+# brown — but for separation. Ten metres of water eats the red end of everything
+# first, so a reef seen from the surface is pink coral going grey, purple fan
+# going navy and gold boulder going olive. A saturated burnt orange is the only
+# thing in the set that still reads as *not blue* at depth, which is what makes
+# a sponge the thing your eye lands on when you are deciding whether to dive.
+#
+# **The opening is the read.** What separates a barrel sponge from a rock is
+# that it is a vessel: a thick wall, a lip, and a dark hole down the middle. The
+# hole is not modelled as a cavity — an inner tube inside an outer one is a part
+# buried inside another part, which the lint rejects and which renders nothing
+# from any angle a player will ever have. It is the flat end cap, coloured with
+# `Throat` and set a little below the rim by a narrow last ring, so from above
+# and from any angle steeper than the lip you look into darkness. Below that
+# angle you see the lip standing proud, which is the other half of the same cue.
+#
+# **Three of them, not one.** A single barrel is a bucket. Sponges recruit in
+# clusters, and two smaller barrels beside the main one turn a container into an
+# organism. Both sit fully to one side of the mirror plane — a part straddling
+# X=0 unevenly is a broken symmetry claim as far as the lint is concerned, and
+# it is right, because these are not symmetric.
+
+model sea_sponge
+  height 0.62
+  style smooth
+
+palette
+  Skin   #c2582c
+  Rim    #e8874f
+  Throat #3d1a10
+  Foot   #8c3a1e
+
+skeleton
+  root rock at 0.0
+  bone barrel parent=rock dir=up pitch=-2 len=0.94
+  # The two companions, each fully off the mirror plane. `up=` lifts their feet
+  # a touch so a tilted foot ring does not cut below the seabed.
+  bone budA parent=rock offset=(0.27,0.02,0.11) dir=up pitch=4 tilt=-7 len=0.52
+  bone budB parent=rock offset=(-0.24,0.02,-0.15) dir=up pitch=-5 tilt=6 len=0.38
+
+parts
+  # The main barrel. Waisted — narrow at the foot, fullest at two thirds, then
+  # drawn back in to the rim — because a straight-sided tube is a pipe. The
+  # last two rings are the wall thickness seen edge-on: `Rim` on the lip, then a
+  # sharp step in to the dark cap, which is the mouth.
+  #
+  # No ring is round and no two rings agree. `w` and `d` differ by up to a fifth
+  # and `roll=` turns each section against the one below it, which is the
+  # sapling's canopy trick used for the opposite purpose: there it breaks a
+  # sphere into foliage, here it stops a stack of circles reading as a thrown
+  # pot. The first version had matched w/d all the way up and the render was
+  # three terracotta jars.
+  loft body bones=rock..barrel material=Skin sides=10
+    ring 0.00 w=0.46 d=0.40 material=Foot
+    ring 0.12 w=0.36 d=0.39 roll=12 material=Skin
+    ring 0.38 w=0.47 d=0.42 roll=-14
+    ring 0.66 w=0.50 d=0.55 roll=16
+    ring 0.90 w=0.47 d=0.43 roll=-10
+    ring 0.97 w=0.49 d=0.46 material=Rim
+    ring 1.00 w=0.35 d=0.32 material=Throat
+    cap start=flat end=flat
+
+  loft budOne bones=budA..budA material=Skin sides=8
+    ring 0.00 w=0.31 d=0.27 material=Foot
+    ring 0.14 w=0.25 d=0.27 roll=15 material=Skin
+    ring 0.44 w=0.31 d=0.28 roll=-18
+    ring 0.68 w=0.33 d=0.36 roll=14
+    ring 0.96 w=0.31 d=0.29 material=Rim
+    ring 1.00 w=0.22 d=0.21 material=Throat
+    cap start=flat end=flat
+
+  loft budTwo bones=budB..budB material=Skin sides=8
+    ring 0.00 w=0.25 d=0.22 material=Foot
+    ring 0.14 w=0.20 d=0.22 roll=-16 material=Skin
+    ring 0.68 w=0.28 d=0.25 roll=18
+    ring 0.96 w=0.25 d=0.24 material=Rim
+    ring 1.00 w=0.17 d=0.16 material=Throat
+    cap start=flat end=flat
+
+checks
+  # All three stand on the seabed.
+  assert bottom(body) < 0.02
+  assert bottom(budOne) < 0.03
+  assert bottom(budTwo) < 0.03
+  # Waisted, not conical: the widest point is above the foot. If this ever
+  # inverts the model has become a pile of sand.
+  assert width(body) > 0.48
+  # A cluster with a clear leader — three barrels of one size is a battery.
+  assert top(body) > top(budOne) * 1.4
+  assert top(budOne) > top(budTwo)
+  # Upright. `BlockModels` scales by height, so a sponge as wide as it is tall
+  # would arrive a full cell across and grow into its neighbours.
+  assert height > width
+  assert width / height in 0.6..0.95
+  # The mouth survives. `Throat` only exists on the three top rings, so if a
+  # ring edit ever drops it this fails rather than quietly capping the barrels
+  # in skin and turning them into fingers.
+  assert materials == 4
+  assert parts == 3
+  assert tris < 700
+  measure aspect width / height

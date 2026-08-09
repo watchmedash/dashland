@@ -1,0 +1,63 @@
+# Amethyst — a geode cluster.
+#
+# Astral crystal is already a two-spike prism, so the amethyst cannot just be
+# that model in purple: at 46px two lilac lozenges and two cyan lozenges are the
+# same picture. What makes an amethyst an amethyst is that it grows in a druse —
+# a crust of many short points all rising off one base, not one dominant spire.
+# So this is three prisms with far less height spread than the crystal's, fanned
+# to three different yaws so the outline is a jagged comb rather than a spike.
+#
+# The points are stubbier than the astral spire for the same reason (a druse
+# crystal is wide for its length), and the palette runs dark at the roots to
+# pale at the tips, which is the one thing everybody recognises about amethyst.
+
+model amethyst
+  height 0.30
+  style chunky
+
+palette
+  Amethyst #9a5ad8
+  Tip      #dcb6ff
+  Root     #4e2b74
+
+skeleton
+  root druse at 0.03
+  bone tall parent=druse dir=up pitch=-4 yaw=10 len=0.74
+  bone mid  parent=druse dir=up pitch=6 yaw=-30 tilt=-22 len=0.58
+  bone low  parent=druse dir=up pitch=-9 yaw=120 tilt=25 len=0.44
+
+parts
+  loft point_a bones=druse..tall material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.22 d=0.22 material=Root
+    ring 0.14 w=0.30 d=0.30 material=Amethyst
+    ring 0.68 w=0.31 d=0.31
+    ring 0.80 w=0.24 d=0.24 material=Tip
+    ring 1.00 w=0.03 d=0.03
+    cap start=flat end=point
+
+  loft point_b bones=druse..mid material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.18 d=0.18 material=Root
+    ring 0.16 w=0.25 d=0.25 material=Amethyst
+    ring 0.70 w=0.26 d=0.26
+    ring 0.82 w=0.20 d=0.20 material=Tip
+    ring 1.00 w=0.03 d=0.03
+    cap start=flat end=point
+
+  loft point_c bones=druse..low material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.15 d=0.15 material=Root
+    ring 0.18 w=0.21 d=0.21 material=Amethyst
+    ring 0.72 w=0.22 d=0.22
+    ring 0.84 w=0.17 d=0.17 material=Tip
+    ring 1.00 w=0.03 d=0.03
+    cap start=flat end=point
+
+checks
+  assert bottom(point_a) < 0.05
+  # A druse, not a spire cluster: the three points are close in height, which is
+  # what separates this silhouette from the astral crystal's one-big-one-small.
+  assert top(point_b) > top(point_a) * 0.55
+  assert top(point_c) > top(point_a) * 0.35
+  # Stubby: each point is wide for its length compared with the astral prism.
+  assert height(point_a) / width(point_a) in 1.6..3.2
+  assert parts == 3
+  assert tris < 260

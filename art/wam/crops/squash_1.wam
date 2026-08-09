@@ -1,0 +1,45 @@
+# Squash, seedling (rung 1 of 4).
+#
+# Two seed leaves on a stub. A cucurbit's cotyledons are the one thing about it anybody would
+# recognise at this size — plain rounded paddles, nothing like the deeply lobed true leaves
+# that arrive one rung later — so the ladder changes SHAPE on the first step rather than just
+# scale, which is the rule the four-source ladder exists for.
+#
+# See `squash_4.wam` for the neck and `icecapmoss_3.wam` for the naming rules.
+
+model squash
+  height 0.65
+  style chunky
+
+palette
+  Wood      #4a7a2e
+  Green     #6aa83e
+  DarkGreen #4e8230
+
+skeleton
+  root crown at 0.0
+  bone stem parent=crown dir=up len=0.075
+
+parts
+  loft shoot bones=crown..stem material=Wood sides=6
+    ring 0.00 w=0.042 d=0.042
+    ring 1.00 w=0.030 d=0.030
+    cap start=flat end=flat
+
+  mirror
+    loft cotA bone=stem at=1.00 dir=side tilt=10 len=0.14 material=Green frame=up sides=5
+      ring 0.00 w=0.030 d=0.014
+      ring 0.30 w=0.150 d=0.026
+      ring 0.74 w=0.156 d=0.024
+      ring 1.00 w=0.086 d=0.014
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(shoot) < 0.01
+  # A seedling: three parts, two cotyledons, no petioles, no lobes, no fruit.
+  assert parts == 3
+  assert height < 0.14
+  # ROUNDED, not lobed: the blade swells once and does not scallop back.
+  assert width(cotA.l) > 0.13
+  assert tris < 300

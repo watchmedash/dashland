@@ -1,0 +1,53 @@
+# Grape, rooted cutting (rung 1 of 4).
+#
+# A vine is not sown, it is struck: a length of last year's wood pushed into the ground, cut
+# off square at the top, with one bud breaking. The flat sawn top is the whole read at this
+# size and it is a shape the ladder never repeats — green bean's seedling is an arched
+# hypocotyl and hops' is a crown of blunt shoots, so the three species are told apart on the
+# day they are planted as well as on the day they are picked.
+#
+# See `grape_4.wam` for the candelabra and `icecapmoss_3.wam` for the naming rules.
+
+model grape
+  height 2.0
+  style chunky
+
+palette
+  Wood      #6b4a2c
+  Green     #4e8a30
+
+skeleton
+  root ground at 0.0
+  bone stub  parent=ground dir=up tilt=5 len=0.075
+  bone shoot parent=stub   dir=up tilt=-26 len=0.050
+
+parts
+  # Square-cut both ends: `cap end=flat` is the pruning cut, and it is the difference between
+  # a cutting and a seedling.
+  loft cutting bones=stub..stub material=Wood sides=6
+    ring 0.00 w=0.038 d=0.038
+    ring 1.00 w=0.036 d=0.036
+    cap start=flat end=flat
+
+  loft bud bones=shoot..shoot material=Wood sides=5
+    ring 0.00 w=0.017 d=0.017
+    ring 1.00 w=0.010 d=0.010
+    cap start=flat end=dome
+
+  mirror
+    loft lf bone=shoot at=0.94 dir=side yaw=18 tilt=-14 len=0.058 material=Green frame=up sides=5
+      ring 0.00 w=0.012 d=0.007
+      ring 0.28 w=0.052 d=0.012
+      ring 0.68 w=0.058 d=0.011
+      ring 1.00 w=0.034 d=0.006
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(cutting) < 0.01
+  # A cutting: four parts, no chain, no arms, no fruit.
+  assert parts == 4
+  assert height < 0.15
+  # WOODY even here — the stub is thicker than the whole snow pea plant's stem ever gets.
+  assert width(cutting) > 0.03
+  assert tris < 260

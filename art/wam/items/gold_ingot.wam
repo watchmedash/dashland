@@ -1,0 +1,44 @@
+# Gold ingot — a cast bar.
+#
+# Same cast bar as the iron one, warmer and a shade brighter so the two never
+# get confused in a row of hotbar slots.
+#
+# The whole read is the trapezoid: a bar wider at the base than at the top with
+# both ends draughted, because that is the shape a mould releases from. Squarish
+# sections rather than round, so the flat-shaded top face catches the key light
+# as one bright band and the sides fall away dark — which is what makes a grey
+# object legible at 46px without an outline.
+#
+# `frame=up` is load-bearing: the bar runs along +Z, which is exactly the
+# diagonal where the automatic depth axis flips, and without it the end rings
+# stand at right angles to the middle ones.
+
+model gold_ingot
+  height 0.4
+  style chunky
+
+palette
+  Iron  #dcae3a
+  Dark  #a87c1e
+
+skeleton
+  root base at 0.068
+  bone bar parent=base dir=fwd len=0.62
+
+parts
+  loft ingot bones=base..bar material=Iron frame=up sides=4 shape=box
+    ring 0.00 w=0.20 d=0.11 wtop=0.16 wbot=0.20
+    ring 0.10 w=0.26 d=0.135 wtop=0.20 wbot=0.26
+    ring 0.50 w=0.27 d=0.135 wtop=0.21 wbot=0.27
+    ring 0.90 w=0.26 d=0.135 wtop=0.20 wbot=0.26
+    ring 1.00 w=0.20 d=0.11 wtop=0.16 wbot=0.20
+    cap start=flat end=flat
+
+checks
+  assert bottom(ingot) < 0.01
+  assert bottom(ingot) > -0.01
+  # A bar, not a slab and not a rod.
+  assert depth(ingot) / width(ingot) in 1.9..2.9
+  assert width(ingot) / height(ingot) in 1.4..2.4
+  assert parts == 1
+  assert tris < 120

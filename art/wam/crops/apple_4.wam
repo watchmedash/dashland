@@ -1,0 +1,220 @@
+# Apple Tree, ripe (rung 4 of 4).
+#
+# cropdata silhouette: "Rounded canopy on a short trunk, fruit dotted through the leaves
+# and visible from distance."
+#
+# ---- why the orchard is one job and not four ------------------------------------
+#
+# Apple, cherry, plum and olive drew `nature/CommonTree_1..5` and `Willow_3/5` — the same
+# five meshes the WILD FLORA plants across the meadow, handed out two at a time. Four
+# species were therefore one species in four fruit colours, and three audits running said
+# so. Fruit colour cannot fix it: at the distance an orchard is looked at from, a 20 cm
+# apple is a few pixels and the CANOPY is the whole frame.
+#
+# So the four share this file's construction and differ in the four things that actually
+# separate a fruit tree at fifty metres, every one of them named in somebody's silhouette
+# line:
+#
+#   apple   a ROUNDED dome on a short forked bole   (this file)
+#   cherry  a WIDE, FLAT, tiered spread on a tall clean bole
+#   plum    a WEEPING crown — limbs arch up and the foliage hangs BELOW them
+#   olive   a GNARLED twin bole under a SPARSE crown of narrow blades, not masses
+#
+# Read the four `_4` files side by side; the skeletons are meant to be compared.
+#
+# ---- the crown is built from MASSES, not from leaves ----------------------------
+#
+# A tree at 4.2 m carrying individually modelled leaves is either a triangle budget
+# nobody has (footprint 2 buys 5,200) or leaves so big they read as banana fronds — which
+# is exactly what the first cut of this file did with `cocoa_4.wam`'s leaf idiom scaled
+# up. A canopy is a set of overlapping FOLIAGE MASSES: a short loft with a fat middle ring
+# and dome caps at both ends, about 70 triangles, placed at an explicit offset from a limb
+# tip. The dome caps are what make a mass read as foliage rather than as a barrel; a
+# `flat` cap anywhere in the crown shows as a disc from underneath, which is where the
+# player stands.
+#
+# Olive is the deliberate exception and says so in its own file.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model apple
+  height 4.2
+  style chunky
+
+palette
+  # Only the RATIO between two materials in one role survives into the game: `bakeModel`
+  # takes cropdata's colour for the role and modulates it by this value's luminance
+  # relative to the brightest material in the same role. So DarkGreen has to be a real step
+  # under Green or the crown is one flat green, and Berry's own hex is irrelevant — the
+  # apple is `colors.fruit` whatever is written here.
+  Wood      #6b4a2c
+  Green     #4f9438
+  DarkGreen #386b28
+  Berry     #e0442e
+
+skeleton
+  root ground at 0.0
+  # SHORT. cropdata says so, and it is the apple's half of the apple/cherry split: the
+  # cherry's bole is half again as long and carries no branch below the crown.
+  bone trunk parent=ground dir=up len=0.30
+
+  # Three limb pairs off the fork plus one lower pair, all leaving at a steep angle and
+  # ending inside the crown. `tilt` is the elevation, `yaw` the bearing.
+  mirror
+    bone lmA parent=trunk dir=side yaw=24  tilt=56 len=0.34
+    bone lmB parent=trunk dir=side yaw=70  tilt=64 len=0.33
+    bone lmC parent=trunk dir=side yaw=-26 tilt=50 len=0.34
+    bone lmD parent=trunk at=0.86 dir=side yaw=-74 tilt=34 len=0.32
+  end
+  # The leader. A fruit tree that forks and stops has a hole in the middle of its crown,
+  # which from underneath is a ring of foliage round a patch of sky.
+  bone lead parent=trunk dir=up len=0.40
+
+parts
+  # The bole. Real taper — an apple trunk is a stout, flaring thing and the taper is most
+  # of what distinguishes it from the cherry's clean pole.
+  loft bole bones=ground..trunk material=Wood sides=8
+    ring 0.00 w=0.150 d=0.150
+    ring 0.18 w=0.116 d=0.116
+    ring 0.70 w=0.098 d=0.098
+    ring 1.00 w=0.104 d=0.104
+    cap start=flat end=flat
+
+  mirror
+    loft armA bones=lmA..lmA material=Wood sides=6
+      ring 0.00 w=0.072 d=0.072
+      ring 1.00 w=0.030 d=0.030
+      cap start=flat end=dome
+    loft armB bones=lmB..lmB material=Wood sides=6
+      ring 0.00 w=0.066 d=0.066
+      ring 1.00 w=0.028 d=0.028
+      cap start=flat end=dome
+    loft armC bones=lmC..lmC material=Wood sides=6
+      ring 0.00 w=0.068 d=0.068
+      ring 1.00 w=0.029 d=0.029
+      cap start=flat end=dome
+    loft armD bones=lmD..lmD material=Wood sides=5
+      ring 0.00 w=0.052 d=0.052
+      ring 1.00 w=0.024 d=0.024
+      cap start=flat end=dome
+  end
+  loft armL bones=trunk..lead material=Wood sides=6
+    ring 0.00 w=0.088 d=0.088
+    ring 1.00 w=0.034 d=0.034
+    cap start=flat end=dome
+
+  # ---- the crown ----------------------------------------------------------------
+  #
+  # Masses at the limb tips, a lower skirt pair, and three over the leader. Placed by
+  # explicit `offset=` from the bone tip rather than by another layer of bones, because the
+  # crown's shape is the thing being authored here and a list of offsets is the shape
+  # written down.
+  mirror
+    loft canA bone=lmA at=1.00 offset=(0.04,0.02,0.04) dir=up len=0.168 material=Green sides=8
+      ring 0.00 w=0.252 d=0.252
+      ring 0.32 w=0.412 d=0.412
+      ring 0.68 w=0.42 d=0.42
+      ring 1.00 w=0.235 d=0.235
+      cap start=dome end=dome
+    loft canB bone=lmB at=1.00 offset=(0.02,0.02,0.05) dir=up len=0.156 material=DarkGreen sides=8
+      ring 0.00 w=0.234 d=0.234
+      ring 0.32 w=0.382 d=0.382
+      ring 0.68 w=0.39 d=0.39
+      ring 1.00 w=0.218 d=0.218
+      cap start=dome end=dome
+    loft canC bone=lmC at=1.00 offset=(-0.03,0.01,0.05) dir=up len=0.16 material=Green sides=8
+      ring 0.00 w=0.24 d=0.24
+      ring 0.32 w=0.392 d=0.392
+      ring 0.68 w=0.4 d=0.4
+      ring 1.00 w=0.224 d=0.224
+      cap start=dome end=dome
+    # The skirt. A dome that stops level with the fork is a lollipop; an apple crown hangs
+    # down past the lowest branch and that lower edge is most of the "rounded" read.
+    loft canD bone=lmD at=1.00 offset=(-0.01,-0.10,0.03) dir=up len=0.144 material=DarkGreen sides=8
+      ring 0.00 w=0.216 d=0.216
+      ring 0.32 w=0.353 d=0.353
+      ring 0.68 w=0.36 d=0.36
+      ring 1.00 w=0.202 d=0.202
+      cap start=dome end=dome
+  end
+  loft canT bone=lead at=1.00 offset=(0,0.02,0) dir=up len=0.168 material=Green sides=8
+      ring 0.00 w=0.252 d=0.252
+      ring 0.32 w=0.412 d=0.412
+      ring 0.68 w=0.42 d=0.42
+      ring 1.00 w=0.235 d=0.235
+      cap start=dome end=dome
+  loft canM bone=lead at=0.42 offset=(0,0,0) dir=up len=0.184 material=DarkGreen sides=8
+      ring 0.00 w=0.276 d=0.276
+      ring 0.32 w=0.451 d=0.451
+      ring 0.68 w=0.46 d=0.46
+      ring 1.00 w=0.258 d=0.258
+      cap start=dome end=dome
+
+  # ---- the fruit ----------------------------------------------------------------
+  #
+  # `on=` snaps each apple to the closest point on the mass named and sinks it, so it sits
+  # IN the foliage rather than floating beside it — "dotted through the leaves" is the
+  # silhouette line and a ball hanging in clear air beside a canopy is the other thing.
+  # The `offset=` only has to aim; the snap decides where it lands.
+  #
+  # 0.048 of 4.2 m is a 20 cm apple, which is what the previous recipe already shipped and
+  # is deliberately twice life size: `r: 0.024` reads as a small number and it is a
+  # fraction of a TALL TREE. Under about 15 cm nothing is visible from the far side of the
+  # garden, which is the only distance this crop is ever seen from.
+  mirror
+    loft frA bone=lmA at=1.00 offset=(0.16,-0.10,0.06) dir=down len=0.030 material=Berry on=canA sides=6
+      ring 0.00 w=0.038 d=0.038
+      ring 0.42 w=0.058 d=0.058
+      ring 1.00 w=0.030 d=0.030
+      cap start=dome end=dome
+    loft frB bone=lmA at=1.00 offset=(-0.02,-0.16,0.14) dir=down len=0.030 material=Berry on=canA sides=6
+      ring 0.00 w=0.036 d=0.036
+      ring 0.42 w=0.056 d=0.056
+      ring 1.00 w=0.028 d=0.028
+      cap start=dome end=dome
+    loft frC bone=lmB at=1.00 offset=(0.02,-0.30,0.06) dir=down len=0.030 material=Berry sides=6
+      ring 0.00 w=0.036 d=0.036
+      ring 0.42 w=0.057 d=0.057
+      ring 1.00 w=0.029 d=0.029
+      cap start=dome end=dome
+    loft frD bone=lmC at=1.00 offset=(-0.15,-0.09,0.08) dir=down len=0.030 material=Berry on=canC sides=6
+      ring 0.00 w=0.037 d=0.037
+      ring 0.42 w=0.057 d=0.057
+      ring 1.00 w=0.029 d=0.029
+      cap start=dome end=dome
+    loft frE bone=lmD at=1.00 offset=(-0.04,-0.14,0.10) dir=down len=0.030 material=Berry on=canD sides=6
+      ring 0.00 w=0.035 d=0.035
+      ring 0.42 w=0.055 d=0.055
+      ring 1.00 w=0.027 d=0.027
+      cap start=dome end=dome
+    loft frF bone=lead at=0.42 offset=(0.20,0.02,0.10) dir=down len=0.030 material=Berry on=canM sides=6
+      ring 0.00 w=0.036 d=0.036
+      ring 0.42 w=0.056 d=0.056
+      ring 1.00 w=0.028 d=0.028
+      cap start=dome end=dome
+    loft frG bone=lead at=1.00 offset=(0.10,-0.04,0.20) dir=down len=0.030 material=Berry on=canT sides=6
+      ring 0.00 w=0.034 d=0.034
+      ring 0.42 w=0.054 d=0.054
+      ring 1.00 w=0.027 d=0.027
+      cap start=dome end=dome
+  end
+
+checks
+  # A SHORT trunk under a DEEP crown — the apple/cherry split, asserted rather than eyeballed.
+  assert height(bole) / height in 0.28..0.42
+  assert bottom(bole) < 0.01
+  # Rounded: the crown is nearly as deep as it is wide. A flat spread is the cherry.
+  assert height(canM) > 0.20
+  assert (top(canT) - bottom(canD)) / (xmax(canA.l) - xmin(canA.r)) in 0.62..1.05
+  # The crown hangs past the fork, which is the lower half of "rounded".
+  assert bottom(canD) < top(bole)
+  # Fruit big enough to see from across the garden, and IN the foliage rather than beside it.
+  assert width(frA.l) in 0.035..0.070
+  assert xmax(frA.l) < xmax(canA.l) + 0.03
+  # Fits the tile it overhangs: `wide: 3.2` on a 4.2 m crop allows 1.18 of height.
+  assert width / height < 1.10
+  assert parts == 34
+  assert asymmetry(bole) < 0.005
+  # Budget: footprint 2, so `TRI_BUDGET * 2` = 5200 before the decimator steps in.
+  assert tris < 4600
+  measure crown (xmax(canA.l) - xmin(canA.r)) / height

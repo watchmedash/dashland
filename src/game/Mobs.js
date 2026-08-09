@@ -3809,7 +3809,20 @@ export class Mobs {
     mob.hurtT = 0.25;
     if (this.onSound) this.onSound(mob.health <= 0 ? 'death' : 'hurt', mob);
     if (mob.health <= 0) {
-      this._die(mob, mob.baby > 0 ? [] : mob.spec.drops);
+      // Nothing drops, for the same reason predation leaves nothing: a body the
+      // player did not put down is not a payout. Every caller of this is the
+      // world killing something — a fall, lava, a cactus — and animals walk into
+      // all three on their own all day. Spilling the full table here made the
+      // ground quietly fill with hide and meat nobody hunted for, and it read as
+      // a kill being credited to whatever happened to be chasing at the time: a
+      // deer bolting from a tiger into a cactus died with its drops on the floor,
+      // which looks exactly like the tiger killing it and paying out.
+      //
+      // It also closes the cheaper version of the same exploit — shoving animals
+      // off a ledge, or mining the block under one, was a way to farm meat
+      // without ever winning a fight. `hurt()` is the path with a player behind
+      // it, and that one still pays.
+      this._die(mob, []);
       return true;
     }
     return false;
@@ -3817,7 +3830,8 @@ export class Mobs {
 
   /**
    * Kill a mob: spill its drops, then either play the death clip or remove it
-   * at once. `drops` can be overridden — a calf leaves nothing behind.
+   * at once. `drops` can be overridden — a calf leaves nothing behind, and so
+   * does anything the world killed rather than the player.
    */
   _die(mob, drops = mob.spec.drops) {
     const dieClip = mob.spec.clips.die;

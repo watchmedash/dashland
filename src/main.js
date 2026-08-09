@@ -4593,13 +4593,6 @@ class Game {
   }
 
   /**
-   * Fill an empty bucket from a water cell, or pour a full one into the open
-   * cell in front of whatever was hit. Water here is a static source block —
-   * the world has no flow simulation — so pouring places exactly one cell,
-   * which is also what makes this safe to add without liquid physics.
-   * @returns {boolean} true if the bucket did something
-   */
-  /**
    * One click of the rod: cast if the line is out of the water, strike if it
    * is in, and reel in empty-handed if you struck too early or too late.
    */
@@ -4740,6 +4733,18 @@ class Game {
     this.ui.setHint('');
   }
 
+  /**
+   * Fill an empty bucket from a spring, or pour a full one into the open cell
+   * in front of whatever was hit.
+   *
+   * The docstring that used to sit here — detached from this function, above
+   * `_rodClick` — said water was a static block and the world had no flow
+   * simulation. That stopped being true when `Water.js` arrived, and it was the
+   * reasoning behind letting any water cell fill a bucket, which is the bug
+   * fixed below.
+   *
+   * @returns {boolean} true if the bucket did something
+   */
   _useBucket(heldSlot) {
     const empty = heldSlot.item === itemIdOf('bucket');
     // A ray that stops on liquid, which the normal interaction ray does not.
@@ -4749,8 +4754,24 @@ class Game {
 
     if (empty) {
       if (!wet || wet.id !== ID.water) return false;
+      const key = this.water.key(wet.col, wet.k);
+      // Only a spring fills a bucket. Flowing water shares the block id with
+      // standing water — the difference is the level, not the block — so this
+      // used to accept the far end of a trickle and hand back a full bucket.
+      // Since pouring makes a permanent spring, that turned one bucket into
+      // unlimited springs: pour, let it run six cells, scoop the trickle, and
+      // you are up one source with the original still running. Water that never
+      // drains and can be multiplied is a planet under water.
+      if (!this.water.sources.has(key)) {
+        this.ui.setHint('Too shallow to scoop');
+        return false;
+      }
       this._applyEdits([{ col: wet.col, k: wet.k, id: 0 }]);
-      this.water.sources.delete(this.water.key(wet.col, wet.k));
+      this.water.sources.delete(key);
+      // Belt and braces: a source has no level entry, so this normally does
+      // nothing. It matters if one is ever left behind, because a stale level
+      // on a dry cell reads as flowing water to everything that asks.
+      this.water.level.delete(key);
       this.water.onEdit(wet.col, wet.k);
       this.inventory.consumeHeld(1);
       this.inventory.add(itemIdOf('water_bucket'), 1);

@@ -1916,6 +1916,20 @@ function modelExtents(root, scale) {
     // browser's neck reaches well past what its body dimensions suggest, and
     // guessing left its head free to pass through leaves.
     tall: Math.max(1, Math.ceil(box.max.y - 0.001)),
+    /**
+     * How far the drawn body hangs *below* its own origin.
+     *
+     * Zero for every land animal, because those exports put the origin at the
+     * feet — see `footOffset` in MobModels, which is this number by another
+     * name. The fish pack does not: its models are centred on the body, so a
+     * clownfish is drawn 0.17 cells below the height the physics thinks it is
+     * at and a shark 0.55. Everything in this file treats `ck` as the bottom of
+     * the body, so a fish held exactly on the seabed by the floor clamp was
+     * drawn with a fifth of itself inside the sand — and the shark with half.
+     * Recorded here so the swimmer's floor clamp can hold the *body* off the
+     * bed rather than the origin.
+     */
+    belly: Math.max(0, -box.min.y),
   };
 }
 
@@ -2485,6 +2499,7 @@ export class Mobs {
       // origin, which is exactly here and nowhere else.
       baseHalfW: ext.halfW,
       baseHalfL: ext.halfL,
+      baseBelly: ext.belly,
       baseHeight: spec.height * sizeJitter,
       get radius() { return Math.max(this.halfW, this.halfL); },
       love: 0,             // seconds left willing to breed
@@ -3485,12 +3500,48 @@ export class Mobs {
     // amphibian that has swum in, and a land animal that has ended up in the
     // river and is heading for the bank.
     const afloat = !!mob.spec.aquatic || !!mob.swimming || !!mob.wading;
+    /** ...and the narrower question: is this body *only* ever in the water? */
+    const aquaticBody = !!mob.spec.aquatic;
     for (let n = 0; n < 9; n++) {
       const lw = FOOT_OFF[n * 2] * hw;      // across the body
       const ll = FOOT_OFF[n * 2 + 1] * hl;  // along the body
       const oi = cw * ll - sw * lw;
       const oj = sw * ll + cw * lw;
       const col = this._colOf(f, ci + oi, cj + oj);
+      // A fish is asked a different question from everything else here, and it
+      // has to be, because every test below this is measured from the *bed*.
+      //
+      // `_groundK` reports the highest solid at or below the animal's feet and
+      // the water rule, the step rules and the headroom loop are all written
+      // relative to it. For a walker that is exactly right — the bed is what it
+      // is standing on. For a swimmer twenty layers above the seabed it is the
+      // wrong height entirely: the headroom loop samples the water just above
+      // the sand, and the only thing standing between a fish and a wall was
+      // "is the block one above the bed wet". Measured, that permitted three
+      // shapes it should have refused, and the middle one is every sloping
+      // seabed on the planet:
+      //
+      //   - a one-layer shelf at the fish's own layer, water above and below;
+      //   - a bed that steps up to exactly the fish's own layer (cost 0, so the
+      //     fish swims into the sand and the floor clamp then lifts it out at
+      //     MOB_MAX_RISE a frame — a fish climbing a staircase of seabed at
+      //     sixty layers a second, drawn inside the rock the whole way);
+      //   - a column that is *air* at the fish's layer, so long as it was wet
+      //     down at the bed — i.e. an air pocket, or the dry side of a shore.
+      //
+      // So a swimmer gets the one test that is actually true of it: is there
+      // rock where its body is, and is where its body is water. Only `aquatic`
+      // takes this branch. A wading deer or a paddling crab keeps the bed-
+      // relative rules below, which are what let it read a bank as a one-layer
+      // step and climb out of the river; a fish never climbs out of anything.
+      if (aquaticBody) {
+        const kLo = hereK + 1, kHi = hereK + tall;
+        if (this._aquaticCost(col, kLo, kHi)) { cost++; continue; }
+        // ...and it stays in the water. Lava is named rather than left to the
+        // liquid test for the same reason it is named below.
+        if (!p.liquidAt(col, kLo) || p.at(col, kLo) === ID.lava) cost++;
+        continue;
+      }
       const gk = this._groundK(col, hereK + 1, !!mob.spec.climbs);
       if (gk < 0) { cost++; continue; }
       // Nothing walks into lava, whatever else it is willing to walk into.
@@ -3562,6 +3613,68 @@ export class Mobs {
       }
     }
     return cost;
+  }
+
+  /**
+   * Is there rock in the layers a swimming body occupies in this column?
+   *
+   * The whole of a fish's collision, and deliberately the whole of it: no
+   * ground, no step, no water. A body in open water is not standing on
+   * anything, so "two things cannot be in the same place" is the only rule
+   * left that means anything, and every other rule in _footprintCost is
+   * measured from a bed that may be twenty layers down.
+   *
+   * Ladders and open doors are excluded exactly as they are everywhere else —
+   * a flooded doorway is a way through for a fish too.
+   *
+   * @returns {number} 1 if the span is blocked, 0 if it is clear
+   */
+  _aquaticCost(col, kLo, kHi) {
+    const p = this.planet;
+    for (let k = kLo; k <= kHi; k++) {
+      const b = p.at(col, k);
+      if (IS_SOLID[b] && !isPassable(b, p.facingAt(col, k))) return 1;
+    }
+    return 0;
+  }
+
+  /**
+   * The vertical half of a swimmer's collision, which did not exist.
+   *
+   * Horizontal movement goes through _walkStep and is tested; the rise and
+   * fall is `c.ck += vel.k * dt` and was tested by nothing but the centre-
+   * column ceiling probe below it, which asks about one column out of the nine
+   * the body covers. A fish rising under the lip of an overhang, or through a
+   * gap narrower than itself, went in side-first with its centre in clear
+   * water and the probe none the wiser.
+   *
+   * Sampled over the same nine points the horizontal test uses, and refused
+   * only when the destination is *worse* than where the body already is —
+   * the same rule _walkStep runs on, and for the same reason: a fish that
+   * arrived overlapping (a player built round it, a block was placed under it)
+   * has to keep the move that gets it out.
+   *
+   * @returns {boolean} true if the body must not move to `nk`
+   */
+  _swimBlocked(mob, nk, ck) {
+    const c = mob.cell;
+    const cw = Math.cos(mob.heading), sw = Math.sin(mob.heading);
+    const at = (h) => {
+      const kLo = Math.floor(h + 0.02);
+      const kHi = kLo + mob.tall - 1;
+      let n = 0;
+      for (let i = 0; i < 9; i++) {
+        const lw = FOOT_OFF[i * 2] * mob.halfW;
+        const ll = FOOT_OFF[i * 2 + 1] * mob.halfL;
+        const col = this._colOf(c.f, c.ci + (cw * ll - sw * lw), c.cj + (sw * ll + cw * lw));
+        n += this._aquaticCost(col, kLo, kHi);
+      }
+      return n;
+    };
+    // Same layer either side of the step: nothing can have changed, and this is
+    // the overwhelming majority of frames.
+    if (Math.floor(nk + 0.02) === Math.floor(ck + 0.02)) return false;
+    return at(nk) > at(ck);
   }
 
   /**
@@ -3747,8 +3860,29 @@ export class Mobs {
     const c = mob.cell;
     const costHere = this._footprintCost(c.f, c.ci, c.cj, here, mob, mob.heading);
     const ok = (cost) => cost === 0 || cost < costHere;
-    const okI = ok(this._footprintCost(c.f, ni, c.cj, here, mob, mob.heading));
-    const okJ = ok(this._footprintCost(c.f, c.ci, nj, here, mob, mob.heading));
+    const costI = this._footprintCost(c.f, ni, c.cj, here, mob, mob.heading);
+    const costJ = this._footprintCost(c.f, c.ci, nj, here, mob, mob.heading);
+    let okI = ok(costI);
+    let okJ = ok(costJ);
+    // The corner. Resolving the axes separately is what lets a body slide along
+    // a wall instead of stopping dead, and the cost of it is that the diagonal
+    // the two moves add up to is never tested: at an inside corner each axis
+    // alone is clear water and the cell they meet in is stone, so the body cuts
+    // straight through the corner block.
+    //
+    // Only a swimmer takes this test. On the ground the diagonal is covered by
+    // something a fish does not have — a walker's destination has to be ground
+    // it can stand on, and the corner block's *top* is what it would be
+    // standing on, so the step rules catch it. The land move is also the one
+    // that has been tuned against half the animals on the planet, and the
+    // elephant that has just been widened leans on the wall slide to get itself
+    // out of dense forest; narrowing what it may do is not part of this fix.
+    if (okI && okJ && mob.spec.aquatic
+      && !ok(this._footprintCost(c.f, ni, nj, here, mob, mob.heading))) {
+      // Keep the axis that is cheaper on its own, so the body still slides
+      // along the corner rather than stopping in front of it.
+      if (costI <= costJ) okJ = false; else okI = false;
+    }
     if (okI) c.ci = ni;
     if (okJ) c.cj = nj;
     // Hop when the way *forward* is barred, not only when both axes are.
@@ -4461,6 +4595,10 @@ export class Mobs {
     mob.halfW = Math.min(capW, mob.baseHalfW * mob.grown);
     mob.halfL = Math.min(capL, mob.baseHalfL * mob.grown);
     mob.tall = Math.max(1, Math.ceil(mob.baseHeight * mob.grown - 0.001));
+    // Grows with the rest of it. `?? 0` for a body restored from a save written
+    // before this existed, where zero is also the right answer for every
+    // species that had one — see `belly` in modelExtents.
+    mob.belly = (mob.baseBelly ?? 0) * mob.grown;
   }
 
   /**
@@ -5588,7 +5726,15 @@ export class Mobs {
       } else this._walkStep(mob, ni, nj, here, fr, player);
 
       const prevCk = c.ck;
-      c.ck += mob.vel.k * dt;
+      // A swimmer's rise and fall is checked against the terrain, and it was
+      // not — see _swimBlocked. Only `aquatic` pays for this: a flier has open
+      // sky above it and a wading animal is held at the water line by
+      // buoyancy, so neither has ever had a way to climb into rock.
+      if (spec.aquatic && mob.vel.k !== 0) {
+        const nk = c.ck + mob.vel.k * dt;
+        if (this._swimBlocked(mob, nk, c.ck)) mob.vel.k = 0;
+        else c.ck = nk;
+      } else c.ck += mob.vel.k * dt;
       const col = this._colOf(c.f, c.ci, c.cj);
 
       // Ceiling. There was none at all, so an animal under an overhang pushed
@@ -5664,8 +5810,14 @@ export class Mobs {
         // above — so it still runs on the walking clamp and has always had the
         // cap. Nothing about it changes here; the two branches simply agree on
         // the number now.
-        if (floor >= 0 && c.ck < floor) {
-          c.ck = crossed ? floor : Math.min(floor, c.ck + MOB_MAX_RISE);
+        // `+ mob.belly` because a fish is drawn from its middle, not its feet:
+        // holding the origin at the surface buries the bottom half of the body
+        // in the bed. Zero for everything the pack authors from the feet, i.e.
+        // for every land animal and every flier, so this branch is unchanged
+        // for them — see `belly` in modelExtents.
+        const rest = floor + mob.belly;
+        if (floor >= 0 && c.ck < rest) {
+          c.ck = crossed ? rest : Math.min(rest, c.ck + MOB_MAX_RISE);
           mob.vel.k = Math.max(0, mob.vel.k);
         }
         mob.grounded = false;

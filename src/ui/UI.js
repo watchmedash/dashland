@@ -190,6 +190,7 @@ export class UI {
     this.kiln = null;                 // active kiln state object
     this.shop = null;                 // the merchant being traded with
     this._nameTimer = null;
+    this._critTimer = null;
     this._cursorXY = { x: 0, y: 0 };
 
     this.el = {
@@ -1817,6 +1818,26 @@ export class UI {
     this._drawT = t;
     el.classList.add('drawing');
     el.style.setProperty('--draw-scale', (2.4 - 1.4 * t).toFixed(3));
+  }
+
+  /**
+   * A critical hit just landed: flash the sight.
+   *
+   * Retriggerable, which is the only fiddly part — a CSS animation does not
+   * restart because the class went on again while it was already running, so
+   * the class comes off, the layout is read back to force the reflow, and it
+   * goes on again. Without that, crit-crit-crit at speed animates once.
+   *
+   * The timer is cleared per call rather than left to pile up, so a fast second
+   * crit cannot have the first one's timeout strip its class mid-flash.
+   */
+  critHit() {
+    const el = this.el.crosshair;
+    clearTimeout(this._critTimer);
+    el.classList.remove('crit');
+    void el.offsetWidth;
+    el.classList.add('crit');
+    this._critTimer = setTimeout(() => el.classList.remove('crit'), 300);
   }
 
   /**

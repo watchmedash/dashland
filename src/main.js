@@ -93,6 +93,96 @@ const CRATE_SLOTS = 27;
 const ATTACK_PERIOD = 0.62;
 
 /**
+ * What a critical hit is worth. Minecraft's number, and it survives this game's
+ * ladder for the reasons below.
+ *
+ * The swords run 4.5 wood / 6 stone / 7.5 iron / 9 astral, and a bow at full
+ * draw does 8.5. A crit lifts those to 6.75 / 9 / 11.25 / 13.5, so an iron
+ * sword landed on the way down beats a perfect shot by a third and an astral
+ * one by a bit under two thirds — which sounds like it buries the bow until you
+ * count in time rather than in blows. A full-weight swing needs the whole
+ * ATTACK_PERIOD back, and a crit needs it to come back *inside* the falling
+ * half of a jump, which is 0.32s of a 0.65s hop at GRAVITY 26 and a jump of
+ * 8.4. Perfect jump-crit rhythm is therefore about one 13.5 per 0.65s, against
+ * one 9 per 0.62s for standing and swinging: ~21 dps against ~14.5, a 40%
+ * reward for timing, at three cells of reach, inside the swing of whatever you
+ * are hitting. The bow's 8.5 is bought at 1.0s of draw from anywhere on the
+ * planet with nothing able to reach back — the bow was never competing on
+ * damage per second and does not start now. It also keeps the two mechanics
+ * from being the same mechanic: see `bowShot`, a fully drawn bow is already its
+ * own crit, which is exactly why arrows do not get this on top (Minecraft makes
+ * the same call, and for the same reason).
+ */
+const CRIT_MULT = 1.5;
+
+/**
+ * How fast you must be going down for a blow to count as falling, in layers/s.
+ *
+ * The same threshold `Player.update` uses to decide a fall has begun, on
+ * purpose: one definition of "descending" for the mechanic that pays you and
+ * the mechanic that hurts you, so a player cannot be falling far enough to take
+ * damage yet not far enough to crit, or the reverse.
+ */
+const CRIT_FALL_SPEED = -0.2;
+
+/**
+ * How much of the swing must be back before a crit is possible.
+ *
+ * Not 1.0, which one slow frame can miss for reasons the player cannot see —
+ * 0.9 is ~60ms of grace on a 0.62s recharge. This is a hard threshold on a
+ * quantity that is otherwise a smooth ramp, which is normally the mistake the
+ * knockback made (see the note in `_interact`), but the argument is different
+ * here: a crit is a discrete *event* with its own burst and its own sound, not
+ * a hidden coefficient. There is nothing to be confused by — either the sparks
+ * fired or they did not. And without it, holding the button through a long fall
+ * would crit on every one of the six swings that fall is worth, at a third of
+ * weight each, turning the fanfare into strobe.
+ */
+const CRIT_CHARGE = 0.9;
+
+/**
+ * Does this blow crit, and by how much? Returns 1 (no change) or CRIT_MULT.
+ *
+ * Exported and pure so the rule can be driven from a test harness, the way
+ * `bowShot` is: the interesting part of this mechanic is the state matrix, and
+ * `main.js` builds a whole game the moment it is imported, so the alternative
+ * is a second copy of the conditions that can drift from the one that ships.
+ *
+ * The condition is *falling*, not airborne. Gating on `!grounded` alone would
+ * make the mechanic "hold jump": you would crit on the way up as well, at which
+ * point every player simply never touches the ground and the timing this is
+ * supposed to reward stops existing. At the apex of a jump `vel.k` passes
+ * through zero and there is deliberately no crit — the top of a hop is not a
+ * fall, and a window that opened there would be the same "hold jump" strategy
+ * with one extra frame of patience.
+ *
+ * The exclusions:
+ *   grounded   standing still is the baseline the multiplier is measured from
+ *   inWater    sinking is not falling; you are also weightless, which is the
+ *              whole reason `miningDrag` taxes a swing made adrift. This covers
+ *              lava too — `inWater` is true in it — and burning to death while
+ *              being denied a crit is the correct amount of sympathy.
+ *   onLadder   climbing down is a controlled descent at a fixed 2.75 cells/s
+ *              that you can hold indefinitely, which is a free permanent crit
+ *              and the ladder equivalent of holding jump.
+ * There is nothing to ride in this game, so there is no mount case to exclude;
+ * if one ever lands it belongs in this list beside the ladder, for the same
+ * reason — a descent you get to hold is not a fall you had to time.
+ *
+ * @param {object} p the player — reads `grounded`, `inWater`, `onLadder`, `vel.k`
+ * @param {number} charge 0..1 swing weight, as `_interact` computes it
+ */
+export function critMultiplier(p, charge) {
+  if (!p || !p.vel) return 1;
+  if (p.grounded || p.inWater || p.onLadder) return 1;
+  // Written as a positive test so that a NaN velocity — which no code path
+  // should produce, but a physics bug might — fails closed to "no crit".
+  if (!(p.vel.k <= CRIT_FALL_SPEED)) return 1;
+  if (!(charge >= CRIT_CHARGE)) return 1;
+  return CRIT_MULT;
+}
+
+/**
  * Bar restored per point of nourishment.
  *
  * At 0.09 anything above 11 nourishment overflowed a full bar, which quietly
@@ -4777,13 +4867,45 @@ class Game {
         // with no shove behind it, which makes timing worth something without
         // punishing the player for touching the button.
         const charge = Math.min(1, this.attackT / ATTACK_PERIOD);
-        const dmg = (held?.damage ?? 1) * (0.3 + 0.7 * charge);
+        // The one place the crit is applied, so it cannot be applied twice: the
+        // multiplier goes into `dmg` and nothing downstream of `hurt` knows a
+        // crit happened. It multiplies the *charged* number rather than the
+        // weapon's base, which is why it needs no separate rule about hurried
+        // swings — see CRIT_CHARGE, which will not let one crit anyway.
+        const crit = critMultiplier(this.player, charge);
+        const dmg = (held?.damage ?? 1) * (0.3 + 0.7 * charge) * crit;
         this.attackT = 0;
         this.player.swing();
         this.viewModel.punch();
         // soft flesh impact at the animal, not a grass footstep at your feet.
         // The species' own hurt/death cry comes from Mobs via onSound.
-        this.audio.mobHit(mobHit.mob.pos);
+        //
+        // A crit lands the same thump harder and puts a bright tick on top of
+        // it. Half the point of this feature is that it can be *perceived* — a
+        // 50% damage change that looks and sounds identical to a normal hit is
+        // indistinguishable from no feature at all, which is precisely the
+        // report that asked for it ("jumping and hitting has same damage same
+        // as just hitting"). Three channels, none of them a new asset: the
+        // heavier flesh impact, a short bright tick over it, and the spark
+        // burst below. `ui()` is the existing blip voice — high and short here,
+        // so it reads as the edge going in rather than as a menu.
+        this.audio.mobHit(mobHit.mob.pos, crit > 1 ? 1.5 : 1);
+        if (crit > 1) {
+          this.audio.ui(1480);
+          // At the chest rather than at the feet: `mob.pos` is the base of the
+          // body, and a burst down there is half swallowed by the ground. Sized
+          // off the grown height the same way `knockMass` is, so a burst on a
+          // calf is not floating above its head.
+          const m = mobHit.mob;
+          const h = m.baseHeight ? m.baseHeight * m.grown : m.spec.height;
+          _v1.copy(m.pos).addScaledVector(this.player.up, h * 0.55);
+          this.particles.critSpark(_v1, this.player.up);
+          // And on the sight, which is where the eye already is in first person.
+          // It is not redundant with the sparks: the two carry each other,
+          // because the crosshair is hidden entirely in the third-person views
+          // and the burst can land behind your own shoulder in them.
+          this.ui.critHit();
+        }
         // Shove scales with the swing, rather than switching on at 85%.
         //
         // The damage above is already a smooth 0.3..1 ramp on the same charge;

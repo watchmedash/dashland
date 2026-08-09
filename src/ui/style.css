@@ -200,6 +200,26 @@ button.primary:hover { filter: brightness(1.06); }
   transform: translate(-50%, -50%) scale(var(--draw-scale, 1));
   transition: none;
 }
+/* A critical hit landed: the sight snaps open and flares warm, then settles
+   back to the 1.35 of `.active` — which is on whenever you are aiming at the
+   creature you just hit, so the animation ends exactly where the static rule
+   would have left it and there is no jump at the end. An animation rather than
+   a transition because it has to be able to play again immediately (see
+   `UI.critHit`), and last in the file so it wins over both states above. Warm
+   amber, matching the spark burst at the other end of the swing: one hit, two
+   places to notice it. */
+#crosshair.crit { animation: crit-flash .3s cubic-bezier(.2, .9, .3, 1); }
+@keyframes crit-flash {
+  0% {
+    transform: translate(-50%, -50%) scale(2.3);
+    filter: drop-shadow(0 0 7px rgba(255, 216, 140, .95)) brightness(1.7);
+  }
+  55% {
+    transform: translate(-50%, -50%) scale(1.2);
+    filter: drop-shadow(0 0 4px rgba(255, 216, 140, .55)) brightness(1.3);
+  }
+  100% { transform: translate(-50%, -50%) scale(1.35); filter: none; }
+}
 
 /* top-right status chips */
 #status-bar { position: absolute; top: 7px; right: 8px; display: flex; gap: 3px; align-items: center; }

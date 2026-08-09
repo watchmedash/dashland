@@ -301,6 +301,52 @@ export class Particles {
     }
   }
 
+  /**
+   * The burst behind a critical hit: a short, sharp shell of bright shards
+   * thrown off whatever you just landed on.
+   *
+   * Deliberately not a recoloured `hitSpark`. That one is *block* debris — it
+   * takes the block's own particle colour, sprays along a surface normal and
+   * lives up to 0.8s, so a crit dressed in it would read as "you chipped
+   * something" and would be a different colour on every creature. A crit is not
+   * a material event; it is a hit that went in harder, so the shards are always
+   * the same warm white, always thrown outward in every direction from the body
+   * rather than off a face, and are gone inside a third of a second. Short is
+   * the point: the burst has to be legible in the same instant as the thump and
+   * then get out of the way of the fight.
+   *
+   * Costs nothing new — it is the existing debris pool, twelve of nine hundred
+   * slots, and `_spawn` returning null when the pool is full is already handled
+   * the way every other emitter here handles it: the burst is simply smaller.
+   *
+   * @param {THREE.Vector3} pos centre of the burst — the creature's chest
+   * @param {THREE.Vector3} up local up, for the lift that keeps the shards from
+   *   spraying into the ground
+   */
+  critSpark(pos, up, count = 12) {
+    for (let i = 0; i < count; i++) {
+      const p = this._spawn();
+      if (!p) return;
+      p.alive = true;
+      p.pos.copy(pos);
+      p.pos.x += (Math.random() - 0.5) * 0.3;
+      p.pos.y += (Math.random() - 0.5) * 0.3;
+      p.pos.z += (Math.random() - 0.5) * 0.3;
+      // An even spray in every direction, normalised so the speed is the speed
+      // and not an artefact of which corner of the cube the vector landed in.
+      let dx = Math.random() * 2 - 1, dy = Math.random() * 2 - 1, dz = Math.random() * 2 - 1;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const sp = 3.4 + Math.random() * 2.6;
+      p.vel.set(dx / len * sp, dy / len * sp, dz / len * sp);
+      p.vel.addScaledVector(up, 1.8);
+      p.rot.setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
+      p.spin.set((Math.random() - 0.5) * 22, (Math.random() - 0.5) * 22, (Math.random() - 0.5) * 22);
+      p.life = 0; p.maxLife = 0.24 + Math.random() * 0.16;
+      p.size = 0.022 + Math.random() * 0.03;
+      p.color.setRGB(1.0, 0.88 + Math.random() * 0.1, 0.58 + Math.random() * 0.14);
+    }
+  }
+
   /** A few bubbles rising past the player's face while submerged. */
   bubbles(pos, up, count = 3) {
     for (let i = 0; i < count; i++) {

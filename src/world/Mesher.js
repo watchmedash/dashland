@@ -401,6 +401,34 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
   const aoData = [0, 0, 0, 0];
   // per-corner surface height (fraction of the cell); 1 for everything but water
   const cornerTop = [1, 1, 1, 1];
+  /**
+   * How much of the wave a liquid vertex takes, per corner: 1 on the free
+   * surface, 0 on the bed and everywhere inside the body.
+   *
+   * The shader used to displace every water vertex equally, which moved the
+   * whole body of water through the terrain instead of rippling the top of it.
+   * Hi is the corner at the cell's brim (level k+1), Lo the one at its floor
+   * (level k); the side faces need both because they span the two.
+   *
+   * The four column sets a corner is made of are resolved once into cornerCols
+   * and shared with cornerTop, which is what guarantees the two agree — and
+   * what guarantees no seam. Every quantity here is a function of the corner
+   * and the level and nothing else, so two faces meeting at a corner always
+   * compute the same number, whichever cell they belong to.
+   */
+  const cornerWaveHi = [0, 0, 0, 0], cornerWaveLo = [0, 0, 0, 0];
+  const cornerCols = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+  // Per-vertex wave amount for the quad being emitted, and whether to use it.
+  const waveAmt = [1, 1, 1, 1];
+  let useWaveAmt = false;
+  /**
+   * How much cell a liquid surface needs above the floor before it takes the
+   * full sink. The shader's swell bottoms out 0.16 of a cell below the brim, so
+   * a film of flowing water thinner than that would be pushed through its own
+   * floor and z-fight the block underneath. Scaling by top/0.2 caps the sink at
+   * four fifths of whatever height the film actually has.
+   */
+  const WAVE_HEADROOM = 0.2;
   let liquidDepth = 0, liquidShore = 0;
   // per-corner water depth, so the shallow-to-deep gradient and the foam band
   // interpolate across the surface instead of stepping block by block
@@ -446,6 +474,35 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
       sum += liquidTop(c, k); n++;
     }
     return n ? sum / n : 1;
+  };
+
+  /**
+   * How much of the free surface a corner is, at boundary level L.
+   *
+   * A vertex is on the free surface where there is liquid immediately below it
+   * and something that is not liquid immediately above: that is the face the
+   * wind acts on, and it is the only water in the world that should move. Of
+   * the up-to-four columns meeting at this corner, only the ones that hold
+   * liquid below the level have an opinion; the fraction of those that are open
+   * above it is the answer. No liquid below at all means this corner is not
+   * water and the value is 0.
+   *
+   * A fraction rather than a flag on purpose. Where a flowing surface steps
+   * down, one column is open above the level and its neighbour is not, and a
+   * flag would move one of the two quads meeting there and not the other. The
+   * average is the same number on both sides, so the sheet stays welded — the
+   * same argument, over the same four columns, that liquidCornerTop is built
+   * on.
+   */
+  const liquidCornerWave = (cols4, L) => {
+    let below = 0, open = 0;
+    for (let q = 0; q < 4; q++) {
+      const c = cols4[q];
+      if (RENDER_TYPE[at(c, L - 1)] !== R_LIQUID) continue;
+      below++;
+      if (RENDER_TYPE[at(c, L)] !== R_LIQUID) open++;
+    }
+    return below ? open / below : 0;
   };
 
   /** How many liquid layers sit at and below (col, k). 0 if not liquid. */
@@ -541,7 +598,12 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
       g.nrm.push3(_n[0], _n[1], _n[2]);
       g.tan.push3(_t[0], _t[1], _t[2]);
       g.uv.push2(uv[(c + uvRot) & 3][0], uv[(c + uvRot) & 3][1]);
-      g.aux.push4(layer, AO_CURVE[aoData[c]], cornerData[c][0], wave === 0 ? 0 : wave + 0.99);
+      // The fraction of aux.w is how much of the wave this vertex takes and the
+      // integer part is which wave it is, so the amount is scaled by 0.99 and
+      // never reaches 1: a full-strength water vertex at 3.0 would floor to 3
+      // and come out as lava.
+      g.aux.push4(layer, AO_CURVE[aoData[c]], cornerData[c][0],
+        wave === 0 ? 0 : wave + (useWaveAmt ? waveAmt[c] * 0.99 : 0.99));
       g.blk.push3(cornerData[c][1], cornerData[c][2], cornerData[c][3]);
       if (useCornerDepth) g.tint.push3(liquidCorner[c], tint[1], 0);
       else g.tint.push3(tint[0], tint[1], tint[2]);
@@ -549,6 +611,13 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
     g.idxb.quad(v0);
     g.verts += 4;
     useCornerDepth = false;
+    useWaveAmt = false;
+  };
+
+  /** Load the four per-vertex wave amounts for the quad about to be emitted. */
+  const setWave = (a, b, c, d) => {
+    waveAmt[0] = a; waveAmt[1] = b; waveAmt[2] = c; waveAmt[3] = d;
+    useWaveAmt = true;
   };
 
   for (let i = i0; i < i1; i++) {
@@ -681,10 +750,20 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
         const cellLo = 0;
 
         if (rt === R_LIQUID) {
-          cornerTop[0] = liquidCornerTop([col, nMi, nMj, nMiMj], k);
-          cornerTop[1] = liquidCornerTop([col, nPi, nMj, nPiMj], k);
-          cornerTop[2] = liquidCornerTop([col, nPi, nPj, nPiPj], k);
-          cornerTop[3] = liquidCornerTop([col, nMi, nPj, nMiPj], k);
+          // corners (i,j) (i+1,j) (i+1,j+1) (i,j+1), each with the four columns
+          // that meet there — the same sets cornerTop has always used, hoisted
+          // so the wave amounts are built from exactly the same geometry.
+          const cc = cornerCols;
+          cc[0][0] = col; cc[0][1] = nMi; cc[0][2] = nMj; cc[0][3] = nMiMj;
+          cc[1][0] = col; cc[1][1] = nPi; cc[1][2] = nMj; cc[1][3] = nPiMj;
+          cc[2][0] = col; cc[2][1] = nPi; cc[2][2] = nPj; cc[2][3] = nPiPj;
+          cc[3][0] = col; cc[3][1] = nMi; cc[3][2] = nPj; cc[3][3] = nMiPj;
+          for (let c = 0; c < 4; c++) {
+            cornerTop[c] = liquidCornerTop(cc[c], k);
+            cornerWaveHi[c] = liquidCornerWave(cc[c], k + 1)
+              * Math.min(1, cornerTop[c] / WAVE_HEADROOM);
+            cornerWaveLo[c] = liquidCornerWave(cc[c], k);
+          }
         } else {
           const t = IS_SLAB[id] ? (slabUp ? 1 : 0.5) : 1;
           cornerTop[0] = t; cornerTop[1] = t; cornerTop[2] = t; cornerTop[3] = t;
@@ -731,6 +810,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
               for (let q = 0; q < 4; q++) sum += depthOf(cols[c][q], k);
               liquidCorner[c] = Math.min(1, (sum / 4) / 6);
             }
+            setWave(cornerWaveHi[0], cornerWaveHi[1], cornerWaveHi[2], cornerWaveHi[3]);
           }
           emit(grp, id, capTile(id, dirF, true), biomeId,
             cornerAt(f, i, j, k + cornerTop[0], _c0), cornerAt(f, i + 1, j, k + cornerTop[1], _c1),
@@ -756,6 +836,9 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
             cornerLight(cols[c], [below, below, below, below], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           }
+          if (rt === R_LIQUID) {
+            setWave(cornerWaveLo[0], cornerWaveLo[3], cornerWaveLo[2], cornerWaveLo[1]);
+          }
           emit(grp, id, capTile(id, dirF, false), biomeId,
             cornerAt(f, i, j, kk, _c0), cornerAt(f, i, j + 1, kk, _c1),
             cornerAt(f, i + 1, j + 1, kk, _c2), cornerAt(f, i + 1, j, kk, _c3),
@@ -774,6 +857,9 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
           setC(0, nbMj, k - 1); setC(1, nbPj, k - 1); setC(2, nbPj, k + 1); setC(3, nbMj, k + 1);
+          if (rt === R_LIQUID) {
+            setWave(cornerWaveLo[1], cornerWaveLo[2], cornerWaveHi[2], cornerWaveHi[1]);
+          }
           emit(grp, id, sideTile(id, 0, dirF), biomeId,
             cornerAt(f, i + 1, j, k + cellLo, _c0), cornerAt(f, i + 1, j + 1, k + cellLo, _c1),
             cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c2),
@@ -790,6 +876,9 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
           setC(0, nbPj, k - 1); setC(1, nbMj, k - 1); setC(2, nbMj, k + 1); setC(3, nbPj, k + 1);
+          if (rt === R_LIQUID) {
+            setWave(cornerWaveLo[3], cornerWaveLo[0], cornerWaveHi[0], cornerWaveHi[3]);
+          }
           emit(grp, id, sideTile(id, 1, dirF), biomeId,
             cornerAt(f, i, j + 1, k + cellLo, _c0), cornerAt(f, i, j, k + cellLo, _c1),
             cornerAt(f, i, j, k + cornerTop[0], _c2),
@@ -807,6 +896,9 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
           setC(0, nbPi, k - 1); setC(1, nbMi, k - 1); setC(2, nbMi, k + 1); setC(3, nbPi, k + 1);
+          if (rt === R_LIQUID) {
+            setWave(cornerWaveLo[2], cornerWaveLo[3], cornerWaveHi[3], cornerWaveHi[2]);
+          }
           emit(grp, id, sideTile(id, 2, dirF), biomeId,
             cornerAt(f, i + 1, j + 1, k + cellLo, _c0), cornerAt(f, i, j + 1, k + cellLo, _c1),
             cornerAt(f, i, j + 1, k + cornerTop[3], _c2),
@@ -823,6 +915,9 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
           setC(0, nbMi, k - 1); setC(1, nbPi, k - 1); setC(2, nbPi, k + 1); setC(3, nbMi, k + 1);
+          if (rt === R_LIQUID) {
+            setWave(cornerWaveLo[0], cornerWaveLo[1], cornerWaveHi[1], cornerWaveHi[0]);
+          }
           emit(grp, id, sideTile(id, 3, dirF), biomeId,
             cornerAt(f, i, j, k + cellLo, _c0), cornerAt(f, i + 1, j, k + cellLo, _c1),
             cornerAt(f, i + 1, j, k + cornerTop[1], _c2),

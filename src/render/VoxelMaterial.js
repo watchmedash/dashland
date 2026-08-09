@@ -216,11 +216,40 @@ const COMMON_VERT_BODY = /* glsl */`
     transformed += tang * sway * 0.13 * wAmt * uWind;
     transformed -= up * abs(sway) * 0.02 * wAmt * uWind;
   } else if (wType > 1.5 && wType < 2.5) {
-    // water: gentle radial swell
+    // water: gentle radial swell, hanging *below* the brim of its cell.
+    //
+    // Two things were wrong with this and they had the same symptom — water
+    // moving through the blocks it meets.
+    //
+    // The swell was symmetric, so half the time the surface stood above the top
+    // of its own cell. A shoreline is a water cell at level k beside a land
+    // cell at k+1, and the surface quad's corner vertex is *shared* with that
+    // land column, so the crest drove the sheet 8 cm up the inside of the beach
+    // block and the trough pulled it back down again: water climbing and
+    // draining off a solid face, in sync with the wave. At the crest it was
+    // also exactly level with any block whose top is at the waterline, which is
+    // a coplanar pair for the depth test to argue about.
+    //
+    // And every water vertex moved, not just the surface ones — the bottom edge
+    // of a water column's wall was displaced by the same amount as its top, so
+    // the whole body of water slid up and down through the seabed rather than
+    // rippling on top of it.
+    //
+    // So: wAmt now says how much of the free surface this vertex is (the mesher
+    // works it out per corner; the bed and the interior are 0, and it blends
+    // rather than steps, so nothing can tear), and the swell is biased entirely
+    // negative. WATER_SINK 0.09 with WATER_SWELL 0.067 over a swell that runs
+    // to +-1.05 puts the surface between 2 and 16 cm below the brim: never
+    // level with a neighbour's top face, never inside the cell above, and 14 cm
+    // of peak-to-peak motion against the 15.8 it had before, so it reads the
+    // same. Sitting a little under the brim is also simply what water looks
+    // like — the block it fills is never quite full.
+    const float WATER_SWELL = 0.067;
+    const float WATER_SINK = 0.09;
     float h = sin(uTime * 1.05 + wp.x * 0.62 + wp.z * 0.48) * 0.5
             + sin(uTime * 1.63 - wp.z * 0.71 + wp.y * 0.39) * 0.35
             + sin(uTime * 2.31 + wp.x * 0.29 - wp.y * 0.55) * 0.2;
-    transformed += up * h * 0.075;
+    transformed += up * (h * WATER_SWELL - WATER_SINK) * wAmt;
   } else if (wType > 2.5 && wType < 3.5) {
     // lava: a slow, heavy swell.
     //
@@ -229,9 +258,14 @@ const COMMON_VERT_BODY = /* glsl */`
     // opaque, which is a description of a block. It is a liquid and has to read
     // as one. Molten rock is viscous, so this is a longer wavelength at a third
     // of water's speed and half its amplitude: not a ripple, a heave.
+    //
+    // Biased below the brim and tapered by wAmt for exactly the reasons water
+    // is, at its own scale: a lava lake meets a cliff the same way a lake does.
+    const float LAVA_SWELL = 0.036;
+    const float LAVA_SINK = 0.05;
     float h = sin(uTime * 0.40 + wp.x * 0.30 + wp.z * 0.23) * 0.6
             + sin(uTime * 0.58 - wp.z * 0.36 + wp.y * 0.18) * 0.4;
-    transformed += up * h * 0.042;
+    transformed += up * (h * LAVA_SWELL - LAVA_SINK) * wAmt;
   } else if (wType > 3.5) {
     // leaves: subtle whole-canopy sway
     float ph = dot(wp, vec3(0.33, 0.51, 0.27));
@@ -1242,10 +1276,48 @@ const LAVA_EMISSIVE = /* glsl */`
   }
 `;
 
+/**
+ * The mining crack, on the one cell being mined and on nothing else.
+ *
+ * This used to be a *sphere* around the cell centre — distance < 0.95 — and a
+ * sphere of that radius is far larger than a cell. A cell is one unit radially
+ * and (r * PI/2) / F across, which is 0.954 units at the waterline, so the
+ * nearest point of a neighbour's top face sits 0.69 away and a third of that
+ * neighbour's face came out cracked. It failed at the other end too: at the
+ * terrain ceiling a cell is 1.18 across and its own corners are 0.97 out, so
+ * near the top of a mountain the sphere clipped the corners off the block you
+ * were actually hitting.
+ *
+ * cellOffset answers the question the test was always trying to ask — which
+ * cell is this fragment in — exactly, in cell units, and correctly across a
+ * cube seam. The bound is a half cell per axis with a hair of slack, and the
+ * slack is not for float error: a quad is flat and the cell it bounds is
+ * curved, so the middle of a face sags inward by r * (1 - cos(PI/4F)) — 9.8e-4
+ * of a cell at the terrain ceiling, measured over every face of a cell at both
+ * ends of the radial range. 0.502 clears that with room for the GPU's atan, and
+ * costs at most 2 mm of the neighbour's face along the edge the two already
+ * share, which is under a pixel from any range you can mine from.
+ *
+ * The distance guard stays, demoted to what it is good at: rejecting the whole
+ * rest of the screen before anything pays for four atan calls. 1.9 clears the
+ * largest cell's half diagonal (0.97) with room for a swaying plant, and the
+ * outer test is uniform, so a frame in which nothing is being mined costs
+ * exactly what it did before.
+ *
+ * Known and deliberate: a cross plant's billboard is 0.52 units of half width
+ * against a 0.477 half cell, and the wind sway moves it further, so the outer
+ * sliver of a *swaying* tuft does not take the crack. Those are one-hit blocks
+ * whose overlay is on screen for a couple of frames. A door is two cells and
+ * only the half you are hitting cracks now, which is what "exactly this cell"
+ * means.
+ */
 const BREAK_FRAG = /* glsl */`
-  if (uBreakStage >= 0.0 && distance(vWorld, uBreakPos) < 0.95) {
-    vec4 cr = texture(uCrack, vec3(fract(vTexUv), uBreakStage));
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, cr.rgb, cr.a * 0.92);
+  if (uBreakStage >= 0.0 && distance(vWorld, uBreakPos) < 1.9) {
+    vec3 dCell = cellOffset(vWorld, uBreakPos);
+    if (all(lessThanEqual(abs(dCell), vec3(0.502)))) {
+      vec4 cr = texture(uCrack, vec3(fract(vTexUv), uBreakStage));
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, cr.rgb, cr.a * 0.92);
+    }
   }
 `;
 

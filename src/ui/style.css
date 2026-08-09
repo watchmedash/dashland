@@ -192,6 +192,14 @@ button.primary:hover { filter: brightness(1.06); }
 #crosshair i:nth-child(4) { top: 50%; right: 0; height: 1.5px; width: 5px; margin-top: -.75px; }
 #crosshair b { position: absolute; left: 50%; top: 50%; width: 2px; height: 2px; margin: -1px 0 0 -1px; border-radius: 50%; background: rgba(255, 255, 255, .5); }
 #crosshair.active { transform: translate(-50%, -50%) scale(1.35); }
+/* Drawing a bow: the sight closes from 2.4x down to 1x as the shot charges. The
+   transition is off because the value is written every frame — see
+   `UI.setCrosshairDraw` — and easing a per-frame value only adds lag. Placed
+   after `.active` so a drawn bow aimed at a creature still tightens. */
+#crosshair.drawing {
+  transform: translate(-50%, -50%) scale(var(--draw-scale, 1));
+  transition: none;
+}
 
 /* top-right status chips */
 #status-bar { position: absolute; top: 7px; right: 8px; display: flex; gap: 3px; align-items: center; }

@@ -37,6 +37,12 @@ baked line-up.
 torch, bucket and sword. The four tool tiers share one model each and are tinted
 per tier.
 
+The bow (`bow_A_withString`) and the arrow (`arrow_A`) come from the same
+Fantasy Weapons Bits pack and share its `weapons_bits_texture.png` atlas — the
+one the sword was already using — so the pair cost no new texture. Neither is
+tinted: they are wood and cord, with nothing on them that a tool tier applies
+to.
+
 ## Produce — Fruits and Vegetables by **Squareish Design**
 
 [squareishdesign.com](https://squareishdesign.com) — **CC0**. The apple and the

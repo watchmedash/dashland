@@ -280,6 +280,129 @@ for (const [tName, t] of Object.entries(ARMOUR_TIERS)) {
   }
 }
 
+// --- ranged -----------------------------------------------------------------
+
+/**
+ * The bow and its ammunition.
+ *
+ * **Appended here, at the very end, and that is the whole of the rule.** Ids are
+ * what saves store, and `MATERIALS` is added *before* the tool and armour loops
+ * — so a new entry pushed onto that array would renumber every tool and every
+ * piece of armour in every existing save. Anything new goes after the last
+ * `add()` in this file, however thematically it belongs somewhere in the middle.
+ *
+ * The bow carries a `tool` block for exactly two of its effects: durability
+ * (`Inventory.damageHeld` only wears an item with one) and the pose lookup in
+ * `render/ItemModels.js`, which keys off `tool.kind` before it falls back to the
+ * name. Tier 0 keeps it out of the metal-tint path — a KayKit bow is wood and
+ * cord and has no head to re-colour — exactly as the fishing rod is.
+ *
+ * `bow: {...}` is the flag `main.js` tests to decide that the use button draws
+ * rather than places, and it holds the numbers the draw is made of, so the
+ * charge curve, the muzzle speed and the damage are all readable in one place
+ * beside the item they belong to rather than as loose constants in the input
+ * handler.
+ *
+ *  - `draw`  seconds of held button to reach full charge.
+ *  - `min`   the fraction of that below which the shot is refused outright: no
+ *            arrow leaves the bow and none is spent. A tap is a mistake, and the
+ *            kindest thing to do with a mistake is nothing.
+ *  - `speed` cells/s at zero power and at full power. The curve between them is
+ *            `power()` below.
+ *  - `dmg`   the same, in the health units `Mobs.hurt` takes. Full draw sits at
+ *            8.5, which is deliberately read off the sword ladder rather than
+ *            picked: `damage` there is `3 + 1.5 * tier`, so iron is 7.5 and
+ *            astral is 9. A perfectly drawn bow beats the best weapon you can
+ *            dig your way to at the iron stage and loses to the one two tiers
+ *            above it — worth carrying, never a replacement for closing the
+ *            distance. (The first draft said 9 and was tested against a comment
+ *            claiming astral was 10.5; 10.5 is cinder. The test caught it.)
+ */
+export const BOW_ID = add({
+  name: 'bow', label: 'Bow', stack: 1, art: 'rod',
+  color: '#8a6a3a', shine: '#c9a86a',
+  tool: { kind: 'bow', tier: 0, speed: 1, durability: 260 },
+  bow: { draw: 1.0, min: 0.25, speed: [20, 64], dmg: [2, 8.5] },
+  ammo: 'arrow',
+});
+
+export const ARROW_ID = add({
+  name: 'arrow', label: 'Arrow', art: 'stick',
+  color: '#8a6a3a', shine: '#c9a86a',
+});
+
+/**
+ * How much of a bow's power a given fraction of the draw is worth.
+ *
+ * Quadratic-leaning rather than linear, and deliberately Minecraft's own curve:
+ * `(t² + 2t) / 3`. It reaches 1 at t = 1 exactly, and its slope there is 4/3 —
+ * so the last tenth of the draw is worth noticeably more than the first, which
+ * is what makes holding the button all the way down feel like a decision rather
+ * than a formality. At the minimum draw of 0.25 it is 0.1875: a hurried shot
+ * carries under a fifth of the punch, travels 28 cells/s and does 3.3 damage.
+ *
+ * Exported because both `main.js` (which fires) and the tests (which check the
+ * ladder) have to agree on one function, not on two copies of an expression.
+ *
+ * @param {number} t draw fraction, 0..1. Clamped, so a caller that has not
+ *   clamped its own clock cannot produce a shot stronger than a full draw.
+ */
+export function bowPower(t) {
+  const c = t < 0 ? 0 : t > 1 ? 1 : t;
+  return (c * c + 2 * c) / 3;
+}
+
+/**
+ * Speed (cells/s) and damage for a shot released at draw fraction `t`, or null
+ * when the draw was too short to loose at all.
+ *
+ * One function so that "did it fire?", "how fast?" and "how hard?" cannot
+ * disagree: the caller either gets a shot or gets nothing, and there is no
+ * intermediate state where an arrow is spent on a shot that was refused.
+ *
+ * @param {object} def the bow's item definition
+ * @returns {{power:number, speed:number, damage:number}|null}
+ */
+export function bowShot(def, t) {
+  const b = def?.bow;
+  if (!b || t < b.min) return null;
+  const p = bowPower(t);
+  return {
+    power: p,
+    speed: b.speed[0] + (b.speed[1] - b.speed[0]) * p,
+    damage: b.dmg[0] + (b.dmg[1] - b.dmg[0]) * p,
+  };
+}
+
+/**
+ * One frame of the draw, as a pure function of the frame.
+ *
+ * This is three lines and it lives here, away from the input handler, because
+ * it is the only part of the mechanic with a state machine in it and therefore
+ * the only part that can be subtly wrong in a way nobody sees. The interesting
+ * case is not "the button went up" — it is *why* it went up. A screen opened, a
+ * tab lost pointer lock, the bow left your hand, the last arrow was spent: all
+ * of those clear `armed`, and none of them should put an arrow in the ceiling.
+ * Losing pointer lock in particular clears the whole button array (see
+ * `Input._onLockChange`), so a build that fired on any release fires on every
+ * alt-tab.
+ *
+ * Pulled out so a test can drive it a frame at a time — the caller in `main.js`
+ * cannot be, since that module builds a game the moment it is imported.
+ *
+ * @param {number} t the draw so far, 0..1
+ * @param {{armed:boolean, down:boolean, dt:number, drawTime:number}} f
+ * @returns {{t:number, fire:number}} the new draw, and the fraction to loose at
+ *   — 0 for "nothing leaves the bow this frame"
+ */
+export function bowDrawStep(t, { armed, down, dt, drawTime }) {
+  if (armed && down) return { t: Math.min(1, t + dt / Math.max(1e-6, drawTime)), fire: 0 };
+  // Only a release that was still *able* to shoot is a shot. Everything else
+  // that ends a draw drops it, and drops it for free.
+  if (t > 0) return { t: 0, fire: armed ? t : 0 };
+  return { t: 0, fire: 0 };
+}
+
 /**
  * The points in a pile of armour, which is now the only question anyone asks
  * about it: `Skills.redeemArmour` turns this into the tree it was replaced by.

@@ -62,144 +62,218 @@ const ARM_NODE = { right: 'arm-right', left: 'arm-left' };
  *    change that is, by the player's own description, the same change to all of
  *    them.
  *
- * **What Minecraft is, measured rather than remembered.** Its first-person
- * `handheld` display transform is `rotation [0, -90, 25]`, `translation
- * [1.13, 3.2, 1.13]`, `scale [0.68, 0.68, 0.68]` — a tool rolled a quarter turn
- * to present its flat, tipped 25 degrees on screen, and pushed down-right and
- * *away* from the eye. Three properties come out of that and they are what is
- * copied here, in this order of confidence:
+ * **What Minecraft is, taken from its numbers rather than from anyone's words.**
+ * Five passes over this file were spent on adjectives — forward, back, leaning,
+ * sideways — and each one moved the family somewhere the next report called by
+ * the same name. So none of the constants below is an adjective any more. Every
+ * one of them is either a figure lifted straight out of Minecraft or the
+ * solution of an equation stated in screen terms, and the outcome of each is
+ * measured, in degrees and in NDC, in the note that carries it.
  *
- *   1. the item is **large in frame** — Minecraft's held tool is the single
- *      biggest thing on screen after the world itself;
- *   2. it sits **low and to the right**, its handle running off the bottom
- *      corner rather than floating clear of it;
- *   3. it is **tipped away from the camera at the top**, so you are looking at
- *      the tool's face and not down its length;
- *   4. and the arm is a **stub** — a forearm's worth of limb entering the
- *      corner, not a whole arm reaching across the view.
+ * The three figures lifted, and where each lands:
  *
- * Measured through the real glTF at 16:9, this table was at a mean of 1.87% of
- * the frame with the tools between 1.06% (bow) and 2.15% (axe), and the whole
- * family's mean lean was +7.3 degrees — barely off square to the camera. That
- * is the "could be bigger" and the "should be leaning backwards" in numbers.
+ *   - `ItemInHandRenderer.applyItemArmTransform` translates the held item by
+ *     **(0.56, -0.52, -0.72)** blocks in the eye's own frame, at a default fov
+ *     of **70** — which is this camera's fov exactly. That is `REST`: the fist
+ *     is put on that point to four decimal places.
+ *   - the `item/handheld` display transform's **scale 0.68** on a 16x16 sprite
+ *     whose art runs corner to corner. That is `HELD_SCALE`.
+ *   - its **rotation [0, -90, 25]** — from which only the 25 survives, as the
+ *     angle the long axis makes on screen, for the reason set out on
+ *     `HAND_TILT`: the other two turns describe a card and we are not holding
+ *     cards.
+ *
+ * And the composition those produce, which is what a screenshot is judged on:
+ *
+ *   1. the item's long axis lies **on the screen diagonal, head high and to the
+ *      right**, foot low and to the left;
+ *   2. its **face is turned toward the camera**, so the object is readable —
+ *      this is the one place a solid model must part company with Minecraft,
+ *      whose card is drawn exactly edge-on and whose legibility comes from its
+ *      being a picture in the first place;
+ *   3. it sits **low in the bottom right**, large, and cropped by the right
+ *      edge;
+ *   4. and the arm is a **stub** entering the bottom-right corner, not a limb
+ *      reaching across the view.
+ *
+ * Measured through the real glTF at 16:9 across all 106 posed items, this table
+ * went from a mean 3.40% of the frame to 4.00%, and over the 48 items flat
+ * enough for "edge-on" to mean anything the mean angle of the flat to the view
+ * axis went 39.3 to 37.5 degrees, with the pickaxe — the worst in the game at
+ * 86.7, six degrees off invisible — coming back to 60.2.
  */
 
 /**
  * How much bigger everything in the fist is drawn, over its authored `height`.
  *
- * 1.30 linear, so 1.69x the covered area: the tools go from 1.1-2.2% of the
- * frame to 1.8-3.6%, and the mean over all 106 posed items from 1.87% to 3.16%.
- * A single multiplier rather than a pass over the table because the ask is a
- * single one ("everything at hand could be bigger"), and because the table's
- * *relative* sizing is already deliberate and hard-won — an apple is meant to be
- * smaller than a pickaxe, and any per-item pass would relitigate 106 decisions
- * to answer one sentence.
+ * **Solved against Minecraft's scale, not chosen.** Minecraft draws a held tool
+ * at `scale 0.68` on a sprite one block square, and the art on those sprites
+ * runs corner to corner with about a pixel of margin — so the tool is drawn
+ * `0.68 * 14 * sqrt(2) / 16 = 0.842` blocks long, and the eye is a block and a
+ * bit from it. This table's longest item is the pickaxe at `height` 0.54, so
+ *
+ *     HELD_SCALE = 0.842 / 0.54 = 1.559
+ *
+ * is the multiplier at which our biggest tool is drawn exactly as long, in view
+ * units, as Minecraft's. Everything else keeps its place in the table's relative
+ * sizing, which is deliberate and hard-won — an apple is meant to be smaller
+ * than a pickaxe, and Minecraft's answer to that (every item the same 16x16
+ * card) is the one part of its sizing worth *not* copying.
+ *
+ * Measured through the real glTF at 16:9, over all 106 posed items: mean
+ * coverage 3.40% -> 4.00% of the frame, and the pickaxe's long axis 1.36 -> 1.57
+ * in NDC, against the 1.85 that Minecraft's 0.842 blocks subtend at its own
+ * distance. It is drawn a little shorter than Minecraft's because ours is
+ * anchored at the grip and Minecraft's at the card's centre, so the near end
+ * sits nearer the eye; the head — which is the end the composition is built on —
+ * lands where Minecraft's lands. See `REST`.
  *
  * Applied in `_setMesh`, which is the one funnel every held mesh goes through —
  * authored model, generated cube and fallback sprite alike — so a block in the
  * hand grows with a pickaxe rather than being forgotten.
  */
-const HELD_SCALE = 1.30;
+const HELD_SCALE = 1.56;
 
 /**
- * The carry tilt: a view-space rotation laid over every held item's own pose.
+ * The carry tilt: a view-space rotation laid over every held item's own pose,
+ * and the whole of the item's orientation on screen.
  *
- * `x` is the lean, and it is the one axis in this file that has been signed
- * wrong twice, so the convention is stated first and the evidence after it.
- * Measured as the item's long axis out of the screen plane, **positive when the
- * top tips away from the camera**, which is the sense the player has used
- * consistently from their first report onwards: a shovel at -22.6 was "leaning
- * back to the player" and a torch at +15.8 was the "lean forward" they wanted
- * instead. Untilted, the family sits at:
+ * **It is stated ZYX, and that is the load-bearing part of this constant.** In
+ * that order the matrix is `Rz . Ry . Rx`, so the roll is the *last* turn and is
+ * therefore a roll about the view axis — the axis the camera looks down. Which
+ * makes the three numbers separable, and separable is what six revisions of a
+ * single XYZ triple never were:
  *
- *     rod    +0.9    torch  +15.4    sword +27.3    pick +33.4
- *     bucket +4.2    shovel +26.1    stick +15.7    axe  +44.5
- *     mean of all 106  +14.2
+ *     x, y   set the angle of the item's flat to the view axis, and the angle
+ *            of its long axis out of the screen plane;
+ *     z      sets the angle of the long axis *on screen*, and nothing else. A
+ *            rotation about the view axis cannot change either of the other two
+ *            (checked: the pickaxe's flat and out-of-plane figures are identical
+ *            to eight decimal places at z = 0 and at z = -0.805).
  *
- * **The previous value, -0.21, added +12 degrees to every one of those and was
- * pointed the wrong way.** It read "everything hand held should be leaning
- * backwards" as more of what the family already did, taking the tools to
- * +12..+56 and the mean to +24.9 — further *forward*, by the same convention the
- * same player had used to ask for the shovel to stop leaning back. The next
- * report was "the tools are still leaning forward", which is the same sentence a
- * third time.
+ * **The three metrics, defined, because five reports were lost in the words.**
+ * Every figure below is measured off the real glTF through this exact chain.
  *
- * +0.70 rad reverses it: **-40 degrees on every item**, so the tools land at
+ *  - *screen angle*: the long axis projected to the screen, in degrees
+ *    clockwise from straight up, taken head-end first. +25 is the head a
+ *    quarter-turn's-worth to the right of vertical, foot down and to the left.
+ *  - *out of plane*: how far the long axis leaves the screen plane. 0 is the
+ *    item drawn at its full length; 90 is the item pointing at the eye.
+ *  - *flat to the view axis*: the angle between the plate normal — the model's
+ *    thinnest principal axis — and the view axis. 0 is the face square to the
+ *    camera, 90 is edge-on. **This is the metric that catches edge-on and
+ *    silhouette area is not**: forcing the pickaxe exactly edge-on for a control
+ *    reads 90.0 here while its covered area goes *up*, 4.50% face-on to 5.41%.
+ *    Never judge this by area again.
  *
- *     pick   -6.1    shovel -14.0    torch  -24.5    axe    +5.9
- *     sword -11.4    bucket -35.9    rod    -35.8    mean   -21.7
+ * The thin axis only means anything when it is thinner than the middle one, so
+ * every family figure quoted is over the 48 items whose third principal sigma is
+ * under 0.6 of their second. A torch is 0.99 — a round pole with no face to
+ * lose, however it is turned — and letting shapes like that into the average is
+ * how a fit gets talked into sacrificing the tools to the fruit.
  *
- * — every long tool the player named now tips its top toward the eye, and the
- * axe, which is the family's outlier at +44.5 untilted, comes back to square.
+ * **Where the numbers come from.** Minecraft's `item/handheld` first-person
+ * transform is `rotation [0, -90, 25]` on a generated card. Reproduced, that
+ * card's long axis leans +-45 degrees, its on-screen roll is 25 degrees, and its
+ * flat sits at exactly 90 degrees to the view axis. Only the middle figure
+ * transfers: the +-45 is an artefact of which way the sprite's own diagonal runs
+ * and says nothing about a mesh, and the 90 is the one property that must *not*
+ * be copied, because a card drawn edge-on is still a picture and a pickaxe drawn
+ * edge-on is a stick. So:
  *
- * **What Minecraft measures, in the same terms, and why it cannot arbitrate the
- * sign.** Its first-person `handheld` transform is `rotation [0, -90, 25]` on a
- * generated quad — a one-pixel slab in the model's XY plane whose long axis is
- * the *texture's* diagonal. Reproduced (`Rz.Ry.Rx`, which is the order that puts
- * the 25 degrees on screen rather than leaving the tool dead upright):
+ *     z = -0.805    the roll that puts the family's long axes on Minecraft's
+ *                   25 degrees, head high and to the right. Solved, as the
+ *                   weighted circular mean of the ten long-handled items' own
+ *                   screen angles minus 25, not dialled.
+ *     x = 0.240     the attitude that turns the family's faces toward the
+ *     y = 0.440     camera. Solved as a two-dimensional search minimising, over
+ *                   21 weighted items, the flat's angle to the view axis and the
+ *                   long axis's angle out of the screen plane, with a hard wall
+ *                   past 60 degrees so that no single item can be traded toward
+ *                   edge-on to flatter an average.
  *
- *     long axis   lean +-45.0 deg      roll -25.0 deg (top falls left)
- *     the flat    90.0 deg to the view axis — exactly edge-on
+ * What that lands, against the shipped `(0.70, 0, -0.13)` XYZ:
  *
- * The lean is +45 or -45 depending only on which way the sprite's diagonal runs,
- * so "like how minecraft does it" fixes the *magnitude* — a hard 45-degree tip,
- * three times what this family had — and says nothing about the direction. The
- * player's words are the only thing that can, and they have said the same thing
- * three times. The magnitude is not copied all the way either: Minecraft's item
- * is a card and is drawn exactly edge-on, and every model here is a real mesh
- * that would lose its silhouette doing that.
+ *     item     screen angle      out of plane        flat to view axis
+ *     pick     -9.4 -> +22.7     6.1 -> 11.5         86.7 -> 60.2
+ *     axe     -13.9 -> +12.7     5.9 -> 19.9         52.6 -> 29.6
+ *     shovel   -3.0 -> +31.9    14.0 ->  7.2         32.2 ->  8.6
+ *     sword   -14.8 -> +20.4    11.4 ->  4.3         37.8 ->  9.0
+ *     torch    -4.8 -> +34.8    24.5 ->  3.1         24.8 -> 28.6
+ *     rod     -27.8 -> +22.8    35.9 -> 22.7         42.4 -> 61.0
+ *     stick   -10.6 -> +29.8    23.8 ->  4.8         38.9 ->  6.6
+ *     bow     (its long axis is a stave, not a handle) 53.8 -> 64.5
  *
- * **Edge-on, measured as the flat's angle to the view axis and not as covered
- * area** — the area metric was already shown not to detect it. Nothing here
- * crosses over, and the item nearest to it is nearest to it already:
+ * Every one of those eight carried its head high and to the **left** before, by
+ * between 3 and 28 degrees. That is the thing five rounds of adjectives were
+ * circling and never named: the family was composed on the wrong diagonal.
  *
- *     pick    80.3 -> 86.7   axe    61.6 -> 52.6   crystal 72.9 -> 77.9
- *     shovel  45.1 -> 32.2   sword  43.4 -> 37.8   apple   59.8 -> 70.2
- *     torch   28.4 -> 24.8   coral   78.8 -> 76.2
- *
- * The tools the player looks at most come *back* toward face-on, because the old
- * sign was rotating them past square. The pickaxe is the one that goes the other
- * way, and it is the one item this metric cannot fail cleanly on: its plate ratio
- * is 0.14 and its authored pose already presented it at 80 degrees, which is to
- * say the shipped build has always drawn a pickaxe very nearly edge-on and the
- * player has never once mentioned it. 86.7 is not a new failure mode, it is six
- * degrees more of a thing that was already true; the poses that would be at risk
- * are plate-like items sitting near face-on, and none of those move past 78.
- *
- * The shovel's own constraints are untouched, and structurally so: `POSE.shovel`
- * is not edited, its grip fraction is a fact about the model, and "two thirds
- * above the fist" is measured along the item's own long axis (70%, before and
- * after), which no rotation of the fist can change.
- *
- * `z` is the smaller half. Every long item in the table leans its top *toward*
- * the middle of the screen — pick -19, sword -24, torch -12, stick -17 degrees
- * of on-screen roll, negative meaning the top falls to the left — which is the
- * item's share of "not pointing in the middle". -0.13 rad brings each of them 7
- * degrees back toward upright-and-right without flipping any of them past
- * vertical, so the family keeps the diagonal it is composed on and simply stops
- * closing across the crosshair.
+ * **The two costs, stated rather than buried.** The rod goes 42.4 -> 61.0 and
+ * the carried bow 53.8 -> 64.5, and they lose because they want the opposite
+ * yaw from the pickaxe — the three of them trade almost one for one along `y`.
+ * The pickaxe is weighted three times either of them and started 26 degrees
+ * worse than either ends up, the bow's covered area *doubles* over the same
+ * change (0.82% -> 1.67%) and its drawn pose is untouched (see `DRAW.aim`), and
+ * nothing here is within 25 degrees of edge-on. Across the whole 106, the count
+ * of items past 75 degrees is unchanged at three — but it is no longer the
+ * pickaxe, the sea grape and the coral fan (86.7, 86.2, 76.2, all now 52-60);
+ * it is a lollypop, a berry cluster and a lingonberry.
  *
  * Applied to the mesh in `_setMesh`, i.e. **about the item's own grip**, which
  * is where the origin already is (`loadGeometry` puts it there) and is what a
  * wrist does. Not applied to `this.hand`, which would tilt the nocked arrow with
- * it; and not applied to `armPivot`, which would take the arm along.
+ * it; and not applied to `armPivot`, which would take the arm along. It is
+ * *pre*-multiplied there, so it is a turn of the screen rather than a turn of
+ * the tool in the fist — see the note at that line.
  */
-const HAND_TILT = new THREE.Euler(0.70, 0, -0.13);
+const HAND_TILT = new THREE.Euler(0.24, 0.44, -0.805, 'ZYX');
 
 // Where the shoulder sits in view space. The hand hangs off the far end of the
 // limb, so these are the hand rest points pushed back down the arm: hand ≈
 // shoulder plus the limb vector.
 //
-// **Moved right and back for the composition above, and solved rather than
-// dialled.** The limb is shorter and no longer angles inward (see
-// `ARM_REST_ROT`), and both of those move the fist on their own, so `REST` is
-// whatever puts the fist at a chosen point: the target is (0.50, -0.44, -0.72),
-// which is the old (0.40, -0.40, -0.72) taken 0.10 units right and 0.04 down at
-// **the same depth**. Depth is held fixed on purpose — the item is already 1.30x
-// bigger, and pulling the fist toward the eye as well would have compounded two
-// size changes into one that nobody asked for.
-const REST = new THREE.Vector3(0.50, -0.576, -0.365);
-const REST_EMPTY = new THREE.Vector3(0.56, -0.636, -0.285);
+// **The fist is put on Minecraft's own hand point, exactly.**
+// `ItemInHandRenderer.applyItemArmTransform` translates the held item by
+// **(0.56, -0.52, -0.72)** blocks in the eye's frame, and Minecraft's default
+// field of view is 70 degrees, which is this camera's to the degree — so that
+// triple is not an analogy, it is the same measurement in the same units seen
+// through the same lens, and it can simply be adopted.
+//
+// `REST` is therefore solved rather than stated: the fist lands at
+// `REST + Rx(ARM_REST_ROT.x) . HAND_LOCAL`, so
+//
+//     REST = (0.56, -0.52, -0.72) - (0, 0.1362, -0.3549) = (0.56, -0.656, -0.365)
+//
+// and the measured fist comes out at (0.5600, -0.5198, -0.7199). It was
+// (0.50, -0.44, -0.72): 0.06 units to the right and 0.08 down, at the same
+// depth, which is Minecraft's own composition — the item low in the bottom right
+// with its handle running off the corner.
+//
+// What it does to the frame, measured through the real glTF at 16:9 with the
+// tilt and scale above, as the head end of each tool in NDC (the composition is
+// built on the head, which is the end held high and to the right):
+//
+//     pick  (0.84,  0.07)    sword (0.84,  0.27)    torch (1.02,  0.12)
+//     axe   (0.54,  0.04)    rod   (1.17,  0.60)    stick (0.81, -0.25)
+//
+// against (1.00, 0.14) for Minecraft's own card taken through its display
+// transform — head high, hard against the right edge, a little above the middle.
+// The pickaxe's rightmost point reaches 1.84 in NDC, so it is cropped by the
+// right edge as Minecraft's is.
+//
+// The one cost is the arm: the fist is 0.08 lower, so the stand-in limb's
+// visible wedge in the bottom-right corner goes from 1.98% of the frame to
+// 0.93%, entering at NDC y -0.82. That is the direction the composition asks for
+// — "a stub coming up from the corner, not a limb across the screen" — but it is
+// the number to move first if the hand ever reads as missing.
+const REST = new THREE.Vector3(0.56, -0.656, -0.365);
+// The empty fist takes the same 0.06 to the right and **none of the 0.08 down**,
+// and that asymmetry is measured rather than sloppy: with nothing in it this
+// hand already shows only 0.66% of the frame, and 0.08 lower takes it to 0.00 —
+// the limb leaves the frame entirely and a bare-handed punch is played by an
+// invisible arm. There is no item here for the drop to compose, so there is
+// nothing to buy with it.
+const REST_EMPTY = new THREE.Vector3(0.62, -0.636, -0.285);
 
 // Fist position in arm-local space. The counter-rotation cancels the arm's rest
 // tilt: an item's own pose is then expressed in view space, the way it reads on
@@ -240,7 +314,7 @@ const ARM_REST_ROT = new THREE.Euler(0.34, 0, 0);
 // mirror is the shoulder's x and nothing else. Pitch never changed sign: both
 // arms hang at the same angle below the eye. There is no separate REST_EMPTY
 // here because an empty offhand draws nothing at all; see `setOffhand`.
-const OFF_REST = new THREE.Vector3(-0.50, -0.576, -0.365);
+const OFF_REST = new THREE.Vector3(-0.56, -0.656, -0.365);
 const OFF_ARM_REST_ROT = new THREE.Euler(0.34, 0, 0);
 
 /**

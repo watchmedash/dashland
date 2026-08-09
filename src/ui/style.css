@@ -217,11 +217,117 @@ button.primary:hover { filter: brightness(1.06); }
   position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
   display: flex; flex-direction: column; align-items: center; gap: 3px;
 }
-/* --- vitals (top-left) --------------------------------------------------- */
+/* --- minimap (top-left) --------------------------------------------------
+   The disc takes the top-left corner and the vitals move down under it. They
+   were there first, but a health bar is read peripherally and a map is read by
+   looking at it, so the map gets the corner and the bars keep their edge. */
+#minimap {
+  position: absolute; top: 8px; left: 8px;
+  width: 148px; height: 148px; border-radius: 50%;
+  background: rgba(6, 9, 16, .55);
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, .8), 0 0 0 3px rgba(6, 9, 16, .35);
+  /* The canvas is square and the frame is round, so the corners have to be
+     cut somewhere. Clipping here rather than on the canvas keeps the clip
+     still while the canvas spins inside it. */
+  overflow: hidden;
+}
+#mm-canvas {
+  position: absolute; left: 50%; top: 50%;
+  /* Two pixels of overscan on each side. The backing store is 81px upscaled
+     1.9x, and drawn at the exact size the outermost sampled row lands *on* the
+     rim, where the browser's bilinear filter has nothing beyond it to blend
+     with — which leaves a hairline of half-transparent edge all the way round,
+     and a visible corner whenever the canvas is turned 45°. */
+  width: 152px; height: 152px; margin: -76px 0 0 -76px; padding: 0;
+  transform-origin: 50% 50%;
+}
+/* Vignette, so the map fades into its own frame instead of ending at a hard
+   circle — and so the player marker at the centre always has contrast under
+   it whatever biome is there. */
+#minimap::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(0, 0, 0, .34) 0%, rgba(0, 0, 0, 0) 34%, rgba(0, 0, 0, 0) 62%, rgba(6, 9, 16, .72) 100%);
+  pointer-events: none;
+}
+/* Where north is. It orbits the rim rather than sitting at the top, because on
+   a sphere the top of a heading-up map is not north and never was. */
+#mm-north {
+  position: absolute; left: 50%; top: 50%;
+  font: 700 10px/1 var(--font); letter-spacing: .06em;
+  color: var(--accent-2);
+  text-shadow: 0 0 4px rgba(0, 0, 0, .95), 0 1px 2px rgba(0, 0, 0, .9);
+  pointer-events: none;
+}
+/* The player: a chevron, always pointing at the top of the disc, because the
+   disc is what turns. */
+#mm-me {
+  position: absolute; left: 50%; top: 50%;
+  width: 0; height: 0; margin: -7px 0 0 -5px;
+  border: 5px solid transparent; border-bottom: 9px solid #fff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
+  pointer-events: none;
+}
+
+/* --- compass (top centre) ------------------------------------------------
+   A strip of headings that slides under a fixed notch. Everything on it is
+   built once and positioned absolutely; turning costs one transform on the
+   track, which the compositor can do without touching layout. */
+#compass {
+  position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+  width: 320px; pointer-events: none;
+  transition: opacity .25s linear;
+}
+.cmp-win {
+  position: relative; height: 26px; overflow: hidden;
+  /* Feather both ends, so a letter arrives and leaves rather than popping in
+     at the edge of a box. */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
+}
+.cmp-track { position: absolute; left: 0; top: 0; height: 100%; will-change: transform; }
+.cmp-track i, .cmp-track b {
+  position: absolute; transform: translateX(-50%);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
+}
+.cmp-track i {
+  top: 9px; width: 1px; height: 6px;
+  background: rgba(255, 255, 255, .42);
+}
+.cmp-track b {
+  top: 6px; font: 700 12px/1 var(--font); letter-spacing: .08em;
+  color: rgba(255, 255, 255, .92);
+}
+.cmp-track b.inter { font-size: 9.5px; font-weight: 600; top: 8px; color: rgba(255, 255, 255, .58); }
+.cmp-notch {
+  position: absolute; left: 50%; top: 0;
+  width: 0; height: 0; margin-left: -4px;
+  border: 4px solid transparent; border-top: 6px solid var(--accent-2);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .9));
+}
+/* Inside the polar cap there is no bearing to show, so the strip is replaced
+   by the reason there isn't one. */
+.cmp-polar {
+  display: none; position: absolute; left: 0; right: 0; top: 7px;
+  text-align: center; font: 600 10px/1 var(--font);
+  letter-spacing: .07em; text-transform: uppercase;
+  color: rgba(255, 255, 255, .5); text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
+}
+#compass.polar { opacity: 1 !important; }
+#compass.polar .cmp-win, #compass.polar .cmp-notch { display: none; }
+#compass.polar .cmp-polar { display: block; }
+
+/* --- vitals (top-left, under the map) ------------------------------------ */
 #vitals {
-  position: absolute; top: 7px; left: 8px;
+  position: absolute; top: 164px; left: 8px;
   display: flex; flex-direction: column; gap: 5px;
 }
+/* ...and back in the corner when there is no map above them. Driven off a
+   class on #hud rather than off the map's own `hidden`, because a sibling
+   cannot be selected backwards in CSS and the map is genuinely absent — it is
+   `display: none`, so it occupies nothing to be laid out under. */
+#hud.no-map #vitals { top: 7px; }
 .vital { display: flex; align-items: center; gap: 7px; }
 .vital.hidden { display: none; }
 .vital .v-ico {

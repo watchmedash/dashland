@@ -109,6 +109,57 @@ const CAM_PAD = 0.32;
 /** Nearer than this and there is no third person left to have; fall back. */
 const THIRD_MIN = 0.55;
 
+/**
+ * Vertical fov at full zoom, in degrees.
+ *
+ * 22 against the default 75 is 3.4x by angle and 3.9x by the tangent that
+ * actually decides how large a thing draws — a decent pair of binoculars, and
+ * enough to tell a husk from a cow across a valley, which is the whole reason
+ * to hold the key. Much under 15 and the sway of ordinary standing makes it
+ * unusable; much over 30 and it is not worth a key at all.
+ */
+export const ZOOM_FOV = 22;
+/**
+ * How fast the zoom comes on and goes off, as an exponential rate per second.
+ *
+ * This is only the first of two lags: the result feeds `updateCamera`, whose
+ * own fov filter runs at 8/s, and the two cascade. Measured on the pair at
+ * 60fps, full zoom is 86% there at 0.30s and 94% at 0.40s — deliberate rather
+ * than snappy, because it is a glass being raised and not a rifle being
+ * shouldered, and because the same curve has to carry the fov back down when
+ * something jumps you.
+ */
+const ZOOM_RATE = 16;
+
+/**
+ * One step of the zoom ramp. Pure, so the curve can be checked without a
+ * camera.
+ *
+ * The `min(1, ...)` is not decoration: `dt` is clamped to 0.1 by the frame loop
+ * but ZOOM_RATE * 0.1 is 1.6, and without the clamp a single long frame would
+ * carry the ramp 60% *past* the target and then oscillate back.
+ */
+export function stepZoom(zoom, want, dt) {
+  return zoom + ((want ? 1 : 0) - zoom) * Math.min(1, ZOOM_RATE * dt);
+}
+
+/**
+ * What to multiply mouse look by at this fov, so a given movement of the hand
+ * still slides the picture by the same fraction of the screen.
+ *
+ * The ratio of the *tangents*, not of the angles. What a mouse movement is
+ * worth is how far it drags the image, and the image lives on the tangent
+ * plane. The angle ratio is the version that looks obviously right and is not:
+ * measured against "does the same flick sweep the same fraction of the screen",
+ * it comes out 15% fast at full zoom, where this comes out 0.5% — and 15% is
+ * enough to make aiming feel broken rather than merely mistuned. At 22 against
+ * 75 this is 0.2533.
+ */
+export function lookScaleFor(fov, baseFov) {
+  const t = (deg) => Math.tan(deg * Math.PI / 360);
+  return t(fov) / t(baseFov);
+}
+
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
@@ -1001,6 +1052,23 @@ export class Player {
     return out;
   }
 
+  /**
+   * A world tangential vector as (i, j) components in this frame — the public
+   * face of the solve above.
+   *
+   * The minimap needs it. That map is drawn on a grid of column offsets, i.e.
+   * in cell space, so "which way on the map is the player facing" and "where on
+   * its rim does north sit" are both this question. Going through the Gram
+   * solve rather than a pair of dot products matters here for the same reason
+   * it matters for movement: ea and eb are not orthogonal away from a face
+   * centre, and a plain projection skews the answer by up to a few degrees near
+   * a cube corner — visible as a map that is subtly rotated off the way you are
+   * looking, which is worse than no map.
+   */
+  tangentToCell(v, out = { i: 0, j: 0 }) {
+    return this._toCellVelocity(v.x, v.y, v.z, out);
+  }
+
   /** Cell-space tangential velocity back into world space. */
   _toWorldVelocity(out = _v3) {
     const fr = this.frame;
@@ -1030,8 +1098,9 @@ export class Player {
    *   moves: `eye`, `lookDir` and therefore reach, mining and the crosshair are
    *   unchanged in every mode — you interact from the body, not from wherever
    *   the camera happens to have been pushed to.
+   * @param {number} zoom 0..1, already eased by the caller — see `stepZoom`.
    */
-  updateCamera(camera, dt, baseFov, allowBob = true, view = VIEW_FIRST) {
+  updateCamera(camera, dt, baseFov, allowBob = true, view = VIEW_FIRST, zoom = 0) {
     const targetEye = this.crouching ? CROUCH_EYE : EYE;
     this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, 12 * dt);
 
@@ -1079,7 +1148,11 @@ export class Player {
     camera.quaternion.setFromRotationMatrix(_m);
     if (b > 0.001) camera.rotateZ(Math.cos(this.bob) * 0.011 * b);
 
-    const targetFov = baseFov + this.fovBoost * 6;
+    // The sprint kick is faded out as the zoom comes in rather than added to
+    // it. Six degrees on a 75-degree view is a lean forward; the same six on a
+    // 22-degree one is a 27% error in the magnification, and you can be
+    // sprinting the moment you raise the glass.
+    const targetFov = THREE.MathUtils.lerp(baseFov + this.fovBoost * 6, ZOOM_FOV, zoom);
     if (Math.abs(camera.fov - targetFov) > 0.01) {
       camera.fov += (targetFov - camera.fov) * Math.min(1, 8 * dt);
       camera.updateProjectionMatrix();

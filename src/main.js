@@ -2,7 +2,9 @@
 
 import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
-import { Player, VIEW_FIRST, VIEW_COUNT } from './player/Player.js';
+import {
+  Player, VIEW_FIRST, VIEW_COUNT, stepZoom, lookScaleFor,
+} from './player/Player.js';
 import { ViewModel } from './player/ViewModel.js';
 import {
   PlayerCharacter, playerModelUrls, characterUrl, DEFAULT_CHARACTER,
@@ -397,6 +399,17 @@ const NIGHT_OUTDOORS = 180;
 const DEFAULT_SETTINGS = {
   fov: 75, sensitivity: 1.0, renderScale: 1,
   volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: false,
+  // The two navigation aids, both on.
+  //
+  // On by default because they are the answer to a problem this planet has and
+  // a flat world does not: it is a ball with no landmarks, no skyline and no
+  // straight lines, and the fastest way to lose a base you spent an evening on
+  // is to walk over one hill. Neither costs a frame — the compass writes one
+  // transform and the map redraws only when you have changed column — so
+  // neither has to earn its place the way an expensive option does, and a HUD
+  // element that starts switched off behind a menu is one most players never
+  // learn exists.
+  minimap: true, compass: true,
   // Minutes for one full day and night, or 0 to follow the device clock.
   //
   // 0 is the default: the planet keeps your hours, so its evening is your
@@ -405,12 +418,12 @@ const DEFAULT_SETTINGS = {
   // needs a torch, and sees none of the night. The slider is still there for
   // anyone who would rather have a short game cycle.
   dayMinutes: 0,
-  // Which camera F5 last left you in.
+  // Which camera V last left you in.
   //
   // A setting rather than part of the save, because it is a preference about
   // how you like to look at the game and not a fact about a planet: a player
   // who plays in third person wants third person in the next world too, and
-  // storing it per world would ask them to press F5 again on every New Game.
+  // storing it per world would ask them to press V again on every New Game.
   view: VIEW_FIRST,
 };
 
@@ -657,6 +670,17 @@ class Game {
     /** Seconds since the last swing landed, for the attack rhythm. */
     this.attackT = ATTACK_PERIOD;
     this.damageFlash = 0;
+    /**
+     * The spyglass, on C: 0 is the normal view and 1 is fully narrowed.
+     *
+     * Hold rather than toggle. Zoom is something you do *to* look at one thing
+     * — a shape on a ridge, whether that is a merchant or a husk — and then
+     * stop doing; and it is exactly the state you need to be out of instantly
+     * when the thing turns out to be hunting you. A toggle would leave the
+     * player at 22° of view with something in swinging range and a key press
+     * between them and being able to see it.
+     */
+    this.zoom = 0;
     this.breath = 1;
     this.energy = 1;      // nourishment: gates health regeneration
     this.eating = 0;      // seconds held on a food item
@@ -2729,9 +2753,28 @@ class Game {
    * keeps the finished hand and third person never shows a fist floating in
    * front of your own face.
    */
+  /**
+   * Whether there are hands on the screen: first person, and not down the
+   * glass.
+   *
+   * A pickaxe filling a third of the frame is drawn by the view model's own
+   * camera at a fixed 70°, so it does *not* narrow with the world — hold C and
+   * the hand stays exactly the size it was while everything behind it grows
+   * four-fold, which reads as the pickaxe suddenly being enormous. Lowering it
+   * is what a spyglass does anyway.
+   *
+   * The threshold is early on purpose. There is no fade available here — the
+   * arms are either rendered or they are not — so the cut is put at the very
+   * start of the ramp, where the fov is already moving and there is something
+   * else to look at. Coming back it is the last thing to return.
+   */
+  _syncViewModel() {
+    this.viewModel.enabled = this.viewMode === VIEW_FIRST && this.zoom < 0.1;
+  }
+
   _cycleView() {
     this.viewMode = (this.viewMode + 1) % VIEW_COUNT;
-    this.viewModel.enabled = this.viewMode === VIEW_FIRST;
+    this._syncViewModel();
     if (this.viewMode === VIEW_FIRST) this.character.hide();
     // No toast. The screen has just changed camera — you can see which view you
     // are in, and a caption naming it is the game telling you what you are
@@ -2749,7 +2792,14 @@ class Game {
   }
 
   _frozenUpdate(dt) {
-    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob, this.viewMode);
+    // Let the glass down while the game is paused or the death screen is up.
+    // Losing the pointer lock clears the key set, so `_update` would never see
+    // C released — pause while zoomed and you came back still zoomed, with no
+    // key held to explain it.
+    this.zoom = stepZoom(this.zoom, false, dt);
+    this._syncViewModel();
+    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob,
+      this.viewMode, this.zoom);
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
       this.inventory.held().item, this.inventory.offhand.item);
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
@@ -2826,9 +2876,25 @@ class Game {
       if (input.pressed('KeyF')) this.swapOffhand();
 
       if (input.locked && (input.mouseDX || input.mouseDY)) {
-        this.player.look(input.mouseDX, input.mouseDY, input.sensitivity * this.settings.sensitivity, input.invertY);
+        // Scaled down by however far in the camera actually is, so the same
+        // movement of the hand slides the picture by the same fraction of the
+        // screen at any zoom. Read off `camera.fov` rather than off `this.zoom`
+        // so it tracks the transition rather than jumping at the ends of it —
+        // that is one frame behind, which is invisible, and it is also correct
+        // for the sprint kick for free.
+        const scale = lookScaleFor(this.camera.fov, this.settings.fov);
+        this.player.look(input.mouseDX, input.mouseDY,
+          input.sensitivity * this.settings.sensitivity * scale, input.invertY);
       }
     }
+
+    // The spyglass. First person only: narrowing the fov with the camera three
+    // and a half cells behind your own shoulders fills the screen with your own
+    // back, and there is no aim point out there to narrow *onto*. Held through
+    // `act`, so a key still down when the inventory opens does not leave you
+    // zoomed inside a menu.
+    this.zoom = stepZoom(this.zoom, act.down('KeyC') && this.viewMode === VIEW_FIRST, dt);
+    this._syncViewModel();
     /**
      * The invariant, enforced rather than hoped for: the player never moves
      * through ground that has not been built.
@@ -2954,7 +3020,8 @@ class Game {
     this.shelter += (this._skyExposure() - this.shelter) * Math.min(1, dt * 3.5);
     this.particles.setWeather(this.weather.type, this.weather.precip * this.shelter, this.player.headInWater);
 
-    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob, this.viewMode);
+    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob,
+      this.viewMode, this.zoom);
     // After the camera, because the body hides itself when the camera has been
     // pulled in on top of it and it needs this frame's distance to know.
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
@@ -5040,6 +5107,11 @@ class Game {
   _updateHud(biomeId) {
     this.ui.updateVitals(this.player.health, this.player.maxHealth, this.breath, this.player.stamina, this.energy);
     this.ui.updateStatus(this.timeOfDay(), biomeId, this.weather.label, this.seasons);
+    // Both read the planet's own tables and the player's tangent frame, and
+    // neither writes anything back — so they go here with the rest of the
+    // readouts rather than into the simulation above.
+    this.ui.updateCompass(this.player);
+    this.ui.updateMinimap(this.planet, this.player);
 
     if (this.ui.debugOn) {
       const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;

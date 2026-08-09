@@ -57,6 +57,49 @@ const _east = new THREE.Vector3();
 const _north = new THREE.Vector3();
 const _zenith = new THREE.Vector3();
 
+/**
+ * How near a pole the reference axis has to swap, as |up·Y|.
+ *
+ * Exported because it is not a detail of the sun: it is the exact latitude at
+ * which the frame below stops being one frame and becomes two. See
+ * `compassFrame`.
+ */
+export const POLAR_REF_SWAP = 0.95;
+
+/**
+ * The local compass frame standing at `up`: which way is east, which way is
+ * north. Writes into the two vectors given and returns how much of a frame it
+ * is (see below).
+ *
+ * This is the planet's *only* definition of north, and it is not decoration —
+ * `setSolarTime` builds the sun's entire arc out of the `east` this hands back,
+ * so the sun rises due east and sets due west by construction rather than by
+ * agreement. Anything that wants to show a bearing has to come through here.
+ * Two copies of these three lines is precisely how a compass ends up pointing
+ * somewhere the sky contradicts, and on a planet with no landmarks the sun is
+ * the only thing a player can check it against.
+ *
+ * North is the world +Y axis dropped into the tangent plane. That axis is not
+ * arbitrary either: `WorldGen.climate` bands temperature on `Math.abs(dy)` and
+ * nothing else, so the snowfields genuinely are at ±Y and "north is where it
+ * gets cold" is true on this planet.
+ *
+ * @returns {number} |Y × up| — the sine of the angle down from the pole. 1 at
+ *   the equator, 0 at either pole. It is a measure of how much of an answer
+ *   this is: at 0 there is no north to point at, and because of the `ref` swap
+ *   above the frame is also *discontinuous* somewhere inside the polar cap —
+ *   at |up.y| = POLAR_REF_SWAP with the player over ±X the east vector flips a
+ *   full 180°. The sun barely shows it (the arc is anchored differently and
+ *   moves slowly); a compass strip would jump end to end. So a caller drawing a
+ *   bearing must read this and give up well before it reaches zero.
+ */
+export function compassFrame(up, east, north) {
+  const ref = Math.abs(up.y) > POLAR_REF_SWAP ? _refX : _refY;
+  east.crossVectors(ref, up).normalize();
+  north.crossVectors(up, east).normalize();
+  return Math.hypot(up.x, up.z);
+}
+
 const SKY_KEYS = [
   // elevation, zenith, horizon, sun, fog, ambient, sunIntensity
   { e: -1.00, zen: 0x03050f, hor: 0x070a18, sun: 0x0a0e1e, fog: 0x070a16, amb: 0x0a1024, si: 0.00 },
@@ -690,9 +733,7 @@ export class Sky {
 
     const th = (f - 0.25) * Math.PI * 2;      // 0 at sunrise, π/2 at noon
     // a compass frame that varies smoothly as the player walks
-    const ref = Math.abs(up.y) > 0.95 ? _refX : _refY;
-    _east.crossVectors(ref, up).normalize();
-    _north.crossVectors(up, _east).normalize();
+    compassFrame(up, _east, _north);
     // tilt the arc off the zenith so the sun tracks across the sky rather than
     // straight overhead
     const tilt = 0.36;

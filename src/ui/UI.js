@@ -12,6 +12,9 @@ import {
 import {
   CharacterPicker, CHARACTER_IDS, GRID_COLS, GRID_ROWS, characterUrl,
 } from '../player/Character.js';
+import { BIOME_COLORS, R_SEA, F, cidx } from '../world/Constants.js';
+import { patchColumn } from '../world/Sphere.js';
+import { compassFrame, POLAR_REF_SWAP } from '../render/Sky.js';
 
 const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands'];
 
@@ -31,6 +34,150 @@ const CRUMB = (on) => pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 
 const BUBBLE = (on) => pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8.6' fill='${on ? '#79c8f0' : '#223040'}' stroke='rgba(0,0,0,.45)' stroke-width='1.4'/><circle cx='9' cy='9' r='2.4' fill='rgba(255,255,255,.6)'/></svg>`);
 // Stamina had no glyph — it was a bare 2px sliver with nothing to name it.
 const STAMINA_ICON = pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13.4 2.2 4.6 13.6h5.3l-1.1 8.2 9-11.6h-5.4l1-8z' fill='#ffcf6b' stroke='rgba(0,0,0,.5)' stroke-width='1.3' stroke-linejoin='round'/></svg>`);
+
+// --- minimap ----------------------------------------------------------------
+
+/**
+ * Samples across the map, and the column stride between them.
+ *
+ * Odd, so the player sits *on* a sample rather than between four of them — a
+ * map whose centre pixel is not where you are standing is a map that lies about
+ * the one thing it definitely knows.
+ *
+ * 81 columns at a stride of one covers ±40 columns, and a column at sea level
+ * is 0.955 world units across (`cellArc(282)`), so the disc is about 77 units
+ * wide: a couple of minutes' walk, big enough to hold a whole lake or the near
+ * side of a mountain and small enough that the biome you are standing in is
+ * still recognisably a shape rather than a colour. It also upscales to the
+ * 148px tile by under 2x, which is the difference between a map and a blur.
+ *
+ * Measured, because a per-frame budget was the reason not to use a second
+ * camera: one full sample pass is 0.35ms (60 passes across all six faces,
+ * warm). That is the entire cost of the feature and it is not paid per frame —
+ * see `updateMinimap` — which works out at 2.8ms per second of *sprinting* and
+ * nothing at all while you stand still.
+ */
+const MAP_SAMPLES = 81;
+const MAP_STEP = 1;
+const MAP_RADIUS = ((MAP_SAMPLES - 1) / 2) * MAP_STEP;
+/**
+ * Shortest gap between two redraws, in ms.
+ *
+ * The map's content depends on nothing but which column you are standing in —
+ * `colHeight` and `colBiome` are worldgen's own tables and no block you place
+ * ever changes them — so the redraw trigger is simply "the centre column
+ * changed". Sprinting crosses 6.8 columns a second, which would be 6.8 half-
+ * millisecond spikes a second; this caps it at eight, and because the map is
+ * 81 columns wide a fifth of a second of walking moves the picture by 1% of its
+ * own width.
+ */
+const MAP_REDRAW_MS = 120;
+/** Radius of the visible disc, and where the north pip sits on it, in px. */
+const MAP_SIZE = 148;
+const MAP_RIM = 61;
+
+/**
+ * How much to lift the biome palette for the map.
+ *
+ * `BIOME_COLORS` are tints the mesher multiplies into an albedo tile, not
+ * colours anything was ever meant to be painted with directly — taken raw they
+ * come out as a set of muddy midtones with no separation between plains,
+ * woodland and meadow. A 1/1.3 gamma pulls them apart without inventing a
+ * second palette that would then have to be kept in step with the world's.
+ */
+const MAP_GAMMA = 1 / 1.3;
+
+// --- compass ----------------------------------------------------------------
+
+/** Pixels per degree on the strip, and half the visible window. */
+const CMP_PX = 3.2;
+const CMP_HALF = 160;
+/**
+ * Where the compass gives up, as |Y × up| — see `compassFrame`, which is where
+ * this number's meaning lives.
+ *
+ * Fully lit down to 31° from the pole and gone by 18°, which is exactly where
+ * the sky's own frame swaps its reference axis. That swap is not a rounding
+ * detail: standing over ±X and crossing it, east flips a full 180°, so a strip
+ * that carried on through it would swing end to end for one step sideways. The
+ * honest reading is that a bearing *relative to the pole* does not exist at the
+ * pole, so inside the cap there is no strip — only the word.
+ *
+ * Both ends are derived from POLAR_REF_SWAP rather than written down, so the
+ * compass can never end up drawing on the far side of the discontinuity if the
+ * sky ever moves it — with the dark end held a further half a percent short of
+ * it. That margin is not decoration: `polar` comes back from a hypot of a
+ * normalised vector and this constant from a square root of a product, so a
+ * threshold sitting exactly on the flip resolved by floating-point luck and
+ * measured as still 2.7e-16 lit *at* the discontinuity. Half a percent is a
+ * degree of latitude, and it makes "dark before the flip" true by arithmetic
+ * rather than by rounding.
+ */
+export const POLAR_HIDE = Math.sqrt(1 - (POLAR_REF_SWAP * 0.995) ** 2);
+export const POLAR_FULL = Math.sqrt(1 - (POLAR_REF_SWAP * 0.9) ** 2);
+
+/** Scratch for the navigation HUD, which runs once a frame. */
+const _east = new THREE.Vector3();
+const _north = new THREE.Vector3();
+const _cellF = { i: 0, j: 0 };
+const _cellN = { i: 0, j: 0 };
+
+/**
+ * The player's heading as a bearing in degrees, 0 due north and 90 due east,
+ * plus how much of a frame that bearing came out of.
+ *
+ * Pulled out of the HUD as a plain function so it can be checked against the
+ * sun without a browser: `Sky.setSolarTime` builds the sunrise direction out of
+ * the same `east` this reads, so "the sun rises at 090" is a property that can
+ * be asserted rather than eyeballed. `east` and `north` are written through for
+ * the caller — the minimap's north pip wants the vector, not the angle.
+ *
+ * @param {THREE.Vector3} up radial, unit
+ * @param {THREE.Vector3} forward the player's tangential heading, unit
+ */
+export function bearingOf(up, forward, east = _east, north = _north) {
+  const polar = compassFrame(up, east, north);
+  const deg = (Math.atan2(forward.dot(east), forward.dot(north)) * 180 / Math.PI + 360) % 360;
+  return { deg, polar };
+}
+
+/** How lit the compass is at this distance from the pole, 0..1. */
+export const compassLit = (polar) =>
+  Math.max(0, Math.min(1, (polar - POLAR_HIDE) / (POLAR_FULL - POLAR_HIDE)));
+
+/**
+ * The columns the map samples around (f, i, j), row-major, `dj` outer.
+ *
+ * `patchColumn` rather than a walk with `colNeighbor`, and rather than any
+ * arithmetic at all on a column index — the seams are real and index arithmetic
+ * across one is a bug this codebase has already paid for. Of the two safe
+ * options it is the right one here for the reason its own comment gives: it
+ * extends the *centre's* face coordinates outward and resolves them through
+ * world space, so a patch this wide stays one continuous sheet, where a walk
+ * re-anchors into each new face's axes and peels the far side of the patch off
+ * sideways.
+ *
+ * That is not a hunch, it is the measurement that decided it. Over every face,
+ * every edge and all eight cube corners, at this radius: walking loses up to
+ * 49% of its 6561 samples to duplicates (worst at a cube corner — half the map
+ * would be the same column drawn twice), and this loses 6%. What it costs
+ * instead is reach: past a cube edge the centre's extended coordinates and the
+ * neighbour's own drift apart, so the far corner of the patch stretches to
+ * 1.14x its ideal angle. A map being a seventh generous about distance near a
+ * seam is what every flat projection of a sphere does; a map folded back on
+ * itself is not a map. It also can never leave the grid — `patchColumn`
+ * resolves through `dirToFace`, which by construction lands on a real face.
+ */
+export function mapColumns(f, i, j, out = new Int32Array(MAP_SAMPLES * MAP_SAMPLES)) {
+  const N = MAP_SAMPLES;
+  for (let sy = 0; sy < N; sy++) {
+    const dj = (sy - MAP_RADIUS) * MAP_STEP;
+    for (let sx = 0; sx < N; sx++) {
+      out[sy * N + sx] = patchColumn(f, i, j, (sx - MAP_RADIUS) * MAP_STEP, dj);
+    }
+  }
+  return out;
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,8 +222,296 @@ export class UI {
     this._chosen = null;
     this._cgKey = (e) => this._characterKey(e);
 
+    this._buildNavigation();
     this._bind();
     this._buildSlots();
+  }
+
+  // --- navigation: the minimap and the compass ------------------------------
+
+  /**
+   * Build the minimap, the compass strip, their two settings rows and their
+   * line in the Controls sheet.
+   *
+   * Every other piece of chrome in this game is in `index.html` and this is
+   * deliberately not, which wants explaining rather than hiding: this change
+   * was scoped to the UI, player and main modules and the markup file belongs
+   * to nobody, so putting a hundred lines of `<i>` in it was a merge waiting to
+   * happen. Nothing here is dynamic — it is all built once and never rebuilt —
+   * so a later pass can lift it into the markup verbatim and delete this
+   * method, and it should.
+   */
+  _buildNavigation() {
+    const hud = $('hud');
+
+    // ---- minimap -----------------------------------------------------------
+    const map = document.createElement('div');
+    map.id = 'minimap';
+    map.className = 'hidden';
+    const cv = document.createElement('canvas');
+    cv.id = 'mm-canvas';
+    // The backing store is one pixel per sampled column and the CSS box is
+    // 148px, so the browser's own bilinear filter does the upscale. Drawing at
+    // 148x148 directly would mean either 148 columns of samples (three times
+    // the work for detail finer than the terrain has) or nearest-neighbour
+    // blocks the size of a fingernail.
+    cv.width = MAP_SAMPLES;
+    cv.height = MAP_SAMPLES;
+    const north = document.createElement('b');
+    north.id = 'mm-north';
+    north.textContent = 'N';
+    const me = document.createElement('i');
+    me.id = 'mm-me';
+    map.append(cv, north, me);
+    hud.appendChild(map);
+
+    this._mmCtx = cv.getContext('2d');
+    this._mmImage = this._mmCtx.createImageData(MAP_SAMPLES, MAP_SAMPLES);
+    // Reused between passes rather than reallocated: the colour of a sample
+    // depends on its neighbours' heights, so the whole field has to be gathered
+    // before any of it can be shaded.
+    this._mmH = new Float32Array(MAP_SAMPLES * MAP_SAMPLES);
+    this._mmB = new Uint8Array(MAP_SAMPLES * MAP_SAMPLES);
+    this._mmCols = new Int32Array(MAP_SAMPLES * MAP_SAMPLES);
+    /** Centre column of the picture currently on the canvas, or -1 for none. */
+    this._mmCol = -1;
+    this._mmAt = 0;
+    this._mmTurn = null;
+
+    // ---- compass -----------------------------------------------------------
+    const cmp = document.createElement('div');
+    cmp.id = 'compass';
+    cmp.className = 'hidden';
+    const win = document.createElement('div');
+    win.className = 'cmp-win';
+    const track = document.createElement('div');
+    track.className = 'cmp-track';
+    // Three turns of marks, so the window never runs off either end and the
+    // strip never has to jump to rewrap. The window is 100° wide and the
+    // translate below keeps the middle turn under it, which leaves 310° of
+    // slack on each side — the wrap happens 260° away from anything visible.
+    const CARDINAL = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW' };
+    for (let turn = -1; turn <= 1; turn++) {
+      for (let a = 0; a < 360; a += 15) {
+        const label = CARDINAL[a];
+        const e = document.createElement(label ? 'b' : 'i');
+        if (label) e.textContent = label;
+        e.className = a % 90 === 0 ? 'card' : label ? 'inter' : 'tick';
+        e.style.left = `${(turn * 360 + a + 360) * CMP_PX}px`;
+        track.appendChild(e);
+      }
+    }
+    win.appendChild(track);
+    const notch = document.createElement('u');
+    notch.className = 'cmp-notch';
+    const polar = document.createElement('span');
+    polar.className = 'cmp-polar';
+    polar.textContent = 'No bearing — the pole is underfoot';
+    cmp.append(win, notch, polar);
+    hud.appendChild(cmp);
+
+    this._cmpTrack = track;
+    this._cmpTurn = null;
+
+    this.el.minimap = map;
+    this.el.mmNorth = north;
+    this.el.compass = cmp;
+    this.el.cmpPolar = polar;
+
+    // ---- the two settings rows ---------------------------------------------
+    // Inserted before the credits, which is where the last checkbox ends and
+    // the reading matter begins.
+    const settings = document.querySelector('#settings .settings');
+    const credits = settings?.querySelector('.note.credits');
+    const check = (id, text, hint) => {
+      const l = document.createElement('label');
+      l.className = 'row';
+      l.innerHTML = `<input id="${id}" type="checkbox" /> ${text}`
+        + (hint ? `<small>${hint}</small>` : '');
+      settings.insertBefore(l, credits);
+    };
+    // Not guarded. `syncSettings` reads both of these by id on every open, so a
+    // missing settings panel has to be a throw here rather than two checkboxes
+    // that quietly never exist.
+    check('set-minimap', 'Minimap', 'The disc top-left. It has no global north — it turns with you.');
+    check('set-compass', 'Compass', 'Bearings across the top. North is where the sun says it is.');
+
+    // ---- the Controls sheet ------------------------------------------------
+    const grid = document.querySelector('.controls-grid');
+    if (grid) {
+      const row = document.createElement('div');
+      row.innerHTML = '<kbd>C</kbd><span>Hold to zoom in on what you are looking at</span>';
+      // After V, which is the other line about what the camera is doing.
+      const v = [...grid.children].find((d) => d.querySelector('kbd')?.textContent === 'V');
+      grid.insertBefore(row, v ? v.nextSibling : null);
+    }
+  }
+
+  /**
+   * The compass strip: where the player is facing, as a bearing.
+   *
+   * There is no yaw to read here and there could not be — `player.forward` is a
+   * world vector living in a tangent plane that is different at every point on
+   * the planet, so a "yaw" is only ever an angle against a local basis and says
+   * nothing about which way you are walking. The bearing is rebuilt from the
+   * sky's own east/north frame instead, which is the same frame the sun's arc
+   * is constructed from, so the strip and the sunrise cannot disagree. See
+   * `compassFrame`.
+   */
+  updateCompass(player) {
+    const el = this.el.compass;
+    if (this.game.settings.compass === false) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+
+    const { deg, polar } = bearingOf(player.up, player.forward);
+    // Fade rather than cut, so walking into the cap is a compass quietly
+    // giving up over about ten seconds of travel instead of a HUD element
+    // blinking out from under you.
+    const lit = compassLit(polar);
+    el.style.opacity = lit.toFixed(2);
+    el.classList.toggle('polar', lit <= 0);
+    if (lit <= 0) return;
+
+    // Quantised to a tenth of a degree before the compare. Written every frame
+    // it is a style recalc sixty times a second for a strip that has not moved,
+    // and standing still still jitters the bearing in the last decimal.
+    const turn = Math.round(deg * 10);
+    if (turn === this._cmpTurn) return;
+    this._cmpTurn = turn;
+    this._cmpTrack.style.transform =
+      `translateX(${(CMP_HALF - (deg + 360) * CMP_PX).toFixed(1)}px)`;
+  }
+
+  /**
+   * The minimap.
+   *
+   * Drawn into a canvas by sampling worldgen's own per-column tables, not by
+   * rendering the scene a second time from above. A second camera is a whole
+   * extra pass over the terrain every frame on a game already sitting at 56-60
+   * fps with a 1.6 GB heap, to show a top-down view of ground the player has
+   * mostly not built anything on; this costs half a millisecond and only when
+   * you have actually walked somewhere.
+   *
+   * Heading-up rather than north-up, which is what makes it worth having on a
+   * sphere: the map turns with you, and the north the compass is using is
+   * marked on the rim rather than nailed to the top. So the two agree — they
+   * are reading the same frame — without the map being useless in the polar cap
+   * where that frame runs out.
+   *
+   * The rotation is CSS on the canvas element, not a transform on the drawing.
+   * The picture is only redrawn when the centre column changes; turning on the
+   * spot must therefore cost a `transform` write and nothing else.
+   */
+  updateMinimap(planet, player) {
+    const el = this.el.minimap;
+    const c = player.cell;
+    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
+    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
+    const col = cidx(c.f, i, j);
+    // colHeight is filled in one go before any voxel arrives, so a zero here
+    // means the world has not handed its tables over yet — not sea level.
+    const on = this.game.settings.minimap !== false && planet.colHeight[col] > 0;
+    el.classList.toggle('hidden', !on);
+    // The vitals sit under the map when there is one and in the corner when
+    // there is not; #hud carries the flag because the map is display:none and
+    // therefore cannot push anything.
+    this.el.hud.classList.toggle('no-map', !on);
+    if (!on) return;
+
+    const now = performance.now();
+    if (col !== this._mmCol && now - this._mmAt >= MAP_REDRAW_MS) {
+      this._mmCol = col;
+      this._mmAt = now;
+      this._paintMinimap(planet, c.f, i, j);
+    }
+
+    // Which way is the player facing, in the sample grid's own axes: the grid
+    // is (di, dj) offsets, so this is the same question as "what are forward's
+    // cell components".
+    player.tangentToCell(player.forward, _cellF);
+    // Image space has y downward, so this angle is clockwise from the +i axis
+    // on screen; bringing it to the top of the disc is a quarter turn back.
+    const face = Math.atan2(_cellF.j, _cellF.i);
+    const spin = -face - Math.PI / 2;
+    const q = Math.round(spin * 500);
+    if (q !== this._mmTurn) {
+      this._mmTurn = q;
+      this._mmCtx.canvas.style.transform = `rotate(${(spin * 180 / Math.PI).toFixed(2)}deg)`;
+    }
+
+    // The north pip, on the rim, out of the same call the compass made — which
+    // is what guarantees the two cannot end up pointing different ways.
+    // `bearingOf` fills `_north` on the way past; the angle it returns is the
+    // compass's business, not the map's.
+    const lit = compassLit(bearingOf(player.up, player.forward, _east, _north).polar);
+    const pip = this.el.mmNorth;
+    pip.style.opacity = lit.toFixed(2);
+    if (lit > 0) {
+      player.tangentToCell(_north, _cellN);
+      const at = Math.atan2(_cellN.j, _cellN.i) + spin;
+      pip.style.transform = `translate(-50%,-50%) translate(${(Math.cos(at) * MAP_RIM).toFixed(1)}px,${(Math.sin(at) * MAP_RIM).toFixed(1)}px)`;
+    }
+  }
+
+  /**
+   * Sample the columns around (f, i, j) and paint them.
+   *
+   * Two passes because relief shading needs the neighbours' heights, and the
+   * neighbours are not known until the whole field has been gathered — see
+   * `mapColumns` for why the gather is done the way it is.
+   */
+  _paintMinimap(planet, f, i, j) {
+    const N = MAP_SAMPLES;
+    const H = this._mmH;
+    const B = this._mmB;
+    const heights = planet.colHeight;
+    const biomes = planet.colBiome;
+    const cols = mapColumns(f, i, j, this._mmCols);
+
+    for (let n = 0; n < cols.length; n++) {
+      H[n] = heights[cols[n]];
+      B[n] = biomes[cols[n]];
+    }
+
+    const d = this._mmImage.data;
+    for (let sy = 0; sy < N; sy++) {
+      for (let sx = 0; sx < N; sx++) {
+        const n = sy * N + sx;
+        const h = H[n];
+        const bc = BIOME_COLORS[B[n]] || BIOME_COLORS[2];
+        let r, g, b;
+        if (h < R_SEA) {
+          // Under the sea. Deeper is darker, which is the only cue on the map
+          // that tells a shallow bay you can wade apart from open ocean.
+          const w = bc.water;
+          const k = 1 - Math.min(1, (R_SEA - h) / 16) * 0.55;
+          r = w[0] * k; g = w[1] * k; b = w[2] * k;
+        } else {
+          // Relief, from the slope across this sample. The light is fixed to
+          // the sample grid rather than to north, so it turns with the map —
+          // correct-looking is not the point, legibility is, and a light that
+          // stayed put would leave a whole quadrant of the disc unshaded
+          // whenever you happened to be facing along it.
+          const l = H[n + (sx > 0 ? -1 : 0)];
+          const rt = H[n + (sx < N - 1 ? 1 : 0)];
+          const u = H[n - (sy > 0 ? N : 0)];
+          const dn = H[n + (sy < N - 1 ? N : 0)];
+          const slope = (l - rt) + (u - dn);
+          const k = Math.max(0.5, Math.min(1.55, 1 + slope * 0.20))
+            // A gentle altitude ramp under the relief, so a plateau reads as
+            // high ground even where it is flat enough to cast no slope at all.
+            * (0.92 + Math.min(1, (h - R_SEA) / 46) * 0.26);
+          const gc = bc.grass;
+          r = gc[0] * k; g = gc[1] * k; b = gc[2] * k;
+        }
+        const o = n * 4;
+        d[o] = Math.min(255, 255 * r ** MAP_GAMMA);
+        d[o + 1] = Math.min(255, 255 * g ** MAP_GAMMA);
+        d[o + 2] = Math.min(255, 255 * b ** MAP_GAMMA);
+        d[o + 3] = 255;
+      }
+    }
+    this._mmCtx.putImageData(this._mmImage, 0, 0);
   }
 
   // --- wiring ---------------------------------------------------------------
@@ -123,6 +558,11 @@ export class UI {
     bind('set-bob', 'change', (e) => { s.bob = e.target.checked; g.persistSettings(); });
     bind('set-invert', 'change', (e) => { s.invertY = e.target.checked; g.input.invertY = e.target.checked; g.persistSettings(); });
     bind('set-autojump', 'change', (e) => { s.autoJump = e.target.checked; g.player.autoJump = e.target.checked; g.persistSettings(); });
+    // Nothing to push anywhere: both are read by `updateMinimap` /
+    // `updateCompass` on the next frame, which is also what puts the element
+    // back or takes it away.
+    bind('set-minimap', 'change', (e) => { s.minimap = e.target.checked; g.persistSettings(); });
+    bind('set-compass', 'change', (e) => { s.compass = e.target.checked; g.persistSettings(); });
 
     window.addEventListener('mousemove', (e) => {
       this._cursorXY = { x: e.clientX, y: e.clientY };
@@ -146,6 +586,8 @@ export class UI {
     $('set-bob').checked = s.bob;
     $('set-invert').checked = s.invertY;
     $('set-autojump').checked = !!s.autoJump;
+    $('set-minimap').checked = s.minimap !== false;
+    $('set-compass').checked = s.compass !== false;
   }
 
   // --- loading + menu -------------------------------------------------------

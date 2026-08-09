@@ -82,6 +82,21 @@ export const DIFFICULTIES = [
 ];
 export const DEFAULT_DIFFICULTY = 'normal';
 
+/**
+ * What dying costs, as two buttons in the same segmented bar difficulty uses.
+ *
+ * One control for the bag and the ladder together, because that is the one
+ * sentence the player said. The labels name the outcome and stop: "Lose all" is
+ * the game as it has always been, "Keep all" is Minecraft's keepInventory with
+ * the xp included. No caption underneath saying which is which; the caption
+ * above is "On death" and the two words after it are the whole rule.
+ */
+export const DEATH_RULES = [
+  { key: 'lose', label: 'Lose all' },
+  { key: 'keep', label: 'Keep all' },
+];
+export const DEFAULT_ON_DEATH = 'lose';
+
 // Scratch for the pack bearing, which runs once a frame.
 const _dir = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -381,6 +396,7 @@ export class UI {
     /** The New Game answers, until Begin sends them. */
     this._loadout = [...DEFAULT_LOADOUT];
     this._difficulty = DEFAULT_DIFFICULTY;
+    this._deathRule = DEFAULT_ON_DEATH;
     /** Resolver of the confirm currently on screen, or null. */
     this._cfResolve = null;
     this._cfKey = (e) => this._confirmKey(e);
@@ -985,6 +1001,7 @@ export class UI {
     // `setIcons` has not run when the UI is first constructed.
     this._buildKit();
     this._buildDifficulty();
+    this._buildDeathRule();
     this.el.chargen.classList.remove('hidden');
     this.characterPickerReady(false);
     this._syncCharacterName();
@@ -1014,7 +1031,7 @@ export class UI {
   // --- what you bring, and how hard it hits back ----------------------------
 
   /**
-   * The three answers this screen exists to collect, as one object.
+   * The answers this screen exists to collect, as one object.
    *
    * Sent to `newGame` when the slot is claimed and to `beginWorld` when the
    * player commits, so the game side can read it at whichever of the two points
@@ -1027,13 +1044,15 @@ export class UI {
    * caller that stashed the array itself would find it changing under them the
    * next time somebody pressed a tile.
    *
-   * @returns {{character: string, loadout: string[], difficulty: string}}
+   * @returns {{character: string, loadout: string[], difficulty: string,
+   *   deathRule: string}}
    */
   newGameChoice() {
     return {
       character: this._chosen || CHARACTER_IDS[0],
       loadout: [...this._loadout],
       difficulty: this._difficulty,
+      deathRule: this._deathRule,
     };
   }
 
@@ -1149,6 +1168,58 @@ export class UI {
     const bar = this.el.cgDiff;
     if (!bar) return;
     for (const b of bar.children) b.classList.toggle('on', b.dataset.key === this._difficulty);
+  }
+
+  /**
+   * The same bar again, for what a death costs.
+   *
+   * The row is built here rather than written into index.html, and that is not a
+   * preference: it is the same `.cg-pick` / `.cg-cap` / `.seg` markup the
+   * difficulty row already is, cloned once and cached, so it inherits the menu's
+   * existing styling exactly and adds no rule to the stylesheet. Idempotent —
+   * the picker is opened once per New Game and the row is made on the first of
+   * those and reused after.
+   */
+  _deathRuleBar() {
+    if (this._cgDeath) return this._cgDeath;
+    const after = this.el.cgDiff?.parentElement;
+    if (!after?.parentElement) return null;
+    const row = document.createElement('div');
+    row.className = 'cg-pick';
+    const cap = document.createElement('span');
+    cap.className = 'cg-cap';
+    cap.textContent = 'On death';
+    const bar = document.createElement('div');
+    bar.className = 'seg';
+    bar.id = 'cg-death';
+    row.append(cap, bar);
+    after.parentElement.insertBefore(row, after.nextSibling);
+    this._cgDeath = bar;
+    return bar;
+  }
+
+  _buildDeathRule() {
+    const bar = this._deathRuleBar();
+    if (!bar) return;
+    bar.innerHTML = '';
+    for (const d of DEATH_RULES) {
+      const b = document.createElement('button');
+      b.textContent = d.label;
+      b.dataset.key = d.key;
+      b.onclick = () => {
+        this._deathRule = d.key;
+        this._syncDeathRule();
+        this.game.audio.ui(560);
+      };
+      bar.appendChild(b);
+    }
+    this._syncDeathRule();
+  }
+
+  _syncDeathRule() {
+    const bar = this._cgDeath;
+    if (!bar) return;
+    for (const b of bar.children) b.classList.toggle('on', b.dataset.key === this._deathRule);
   }
 
   /**

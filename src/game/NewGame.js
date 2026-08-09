@@ -65,6 +65,54 @@ export function mobDamageScale(name) {
   return MOB_DAMAGE_SCALE[normalizeDifficulty(name)];
 }
 
+// --- what a death costs ------------------------------------------------------
+//
+// One switch, not two, and that is the decision worth defending. The player
+// asked for "you lose all your stuff and xp" against "like keepInventory", which
+// is one sentence with one answer in it, and the two halves are the same
+// promise: everything you were carrying when you died is where you left it.
+// Splitting it into a bag switch and a ladder switch would offer four worlds, of
+// which two ("keep the pickaxe, lose the levels") are a rule nobody asked for
+// and nobody would be able to state back afterwards. A New Game screen is read
+// once, in about four seconds, by someone who has not played yet.
+//
+// It is also the only split that would need explaining, and the screen has one
+// caption per control and no prose to explain it in.
+
+export const DEFAULT_ON_DEATH = 'lose';
+
+/** The two, in the order they are offered. */
+export const DEATH_RULES = Object.freeze(['lose', 'keep']);
+
+/**
+ * Anything that is not `keep` becomes `lose` — which covers a save written
+ * before this existed, where the field is simply absent, and `lose` is exactly
+ * the game those saves were played under.
+ */
+export function normalizeDeathRule(name) {
+  return name === 'keep' ? 'keep' : DEFAULT_ON_DEATH;
+}
+
+/** Whether this world lets you wake up with everything still on you. */
+export function keepsOnDeath(name) {
+  return normalizeDeathRule(name) === 'keep';
+}
+
+/**
+ * The `Skills.ON_DEATH` mode a world runs under.
+ *
+ * `keep` is the module's own do-nothing mode, so the skill tree needs no new
+ * concept for this. `lose` defers to whatever the module's default is rather
+ * than naming `'wipe'` here, so the dial in Skills.js — wipe, unlearn, toll —
+ * stays the one place the harshness of a losing world is set.
+ *
+ * @param {string} rule the world's rule
+ * @param {string} harsh `Skills.ON_DEATH`, passed in so this module stays pure
+ */
+export function skillDeathMode(rule, harsh) {
+  return keepsOnDeath(rule) ? 'keep' : harsh;
+}
+
 /**
  * The picked keys, cleaned up — or nothing at all if there are too many.
  *

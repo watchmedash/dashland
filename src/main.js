@@ -39,6 +39,7 @@ import { Water } from './game/Water.js';
 import { Save } from './game/Save.js';
 import {
   DEFAULT_DIFFICULTY, normalizeDifficulty, mobDamageScale, normalizeLoadout, loadoutStacks,
+  DEFAULT_ON_DEATH, normalizeDeathRule, keepsOnDeath, skillDeathMode,
 } from './game/NewGame.js';
 import {
   ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, armourPoints,
@@ -659,6 +660,15 @@ class Game {
     this.difficulty = DEFAULT_DIFFICULTY;
     /** The loadout keys picked for this world, in pick order. */
     this.loadout = [];
+    /**
+     * What a death costs on this planet: 'lose' or 'keep'.
+     *
+     * The third New Game answer, and a rule of the world in exactly the sense
+     * difficulty is. Never assigned directly — `_setDeathRule` is what keeps
+     * `skills.onDeath` agreeing with it, and the two disagreeing is the one way
+     * this feature can break silently.
+     */
+    this.deathRule = DEFAULT_ON_DEATH;
     this.worldReady = false;
     /** The character picker is up and the world behind it must wait. */
     this._choosing = false;
@@ -1113,6 +1123,23 @@ class Game {
   /** What a mob's blow is multiplied by before it reaches the player. */
   get mobDamageMul() { return mobDamageScale(this.difficulty); }
 
+  /** Whether this world lets you keep the bag and the ladder through a death. */
+  get keepsOnDeath() { return keepsOnDeath(this.deathRule); }
+
+  /**
+   * Set the world's death rule, and the skill tree's with it.
+   *
+   * The single door, because the rule is stored in two places that must never
+   * disagree: `this.deathRule` is what the save carries and what `_die` reads
+   * for the bag, and `skills.onDeath` is what the tree reads for the ladder. The
+   * mapping is `skillDeathMode`, so a losing world still runs under whatever
+   * `ON_DEATH` says a losing world is.
+   */
+  _setDeathRule(rule) {
+    this.deathRule = normalizeDeathRule(rule);
+    this.skills.onDeath = skillDeathMode(this.deathRule, ON_DEATH);
+  }
+
   _resetWorld() {
     // Both are world state, and both are set again by whichever path is opening
     // a world — `newGame` from the choices, `_placeEntities` from the save. The
@@ -1120,6 +1147,7 @@ class Game {
     // next one, on the paths that set neither (`abandonNewGame`).
     this.difficulty = DEFAULT_DIFFICULTY;
     this.loadout = [];
+    this._setDeathRule(DEFAULT_ON_DEATH);
     this.planet.clearMeshes();
     // The mirror is reused rather than reallocated — it is 85MB, and two of
     // them alive at once while the old one is collected is a stall you can see.
@@ -1233,8 +1261,8 @@ class Game {
    *   holding a planet) on the slot screen. Nothing is written here: the slot
    *   is only claimed, and the world that was in it survives until the first
    *   autosave lands on it.
-   * @param {{character?: string, loadout?: string[], difficulty?: string}} [opts]
-   *   the answers from the New Game screen. Every one of them is optional and
+   * @param {{character?: string, loadout?: string[], difficulty?: string,
+   *   deathRule?: string}} [opts] the answers from the New Game screen. Every one of them is optional and
    *   every one of them has a default that is exactly today's behaviour, because
    *   this is called from more than one place. A `character` here means the
    *   screen already asked who you are, so the carousel is skipped; without one
@@ -1245,6 +1273,7 @@ class Game {
     this.saveSlot = slot | 0;
     this.difficulty = normalizeDifficulty(opts.difficulty);
     this.loadout = normalizeLoadout(opts.loadout);
+    this._setDeathRule(opts.deathRule);
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
     this.ui.progress(0, 'Igniting the core');
@@ -1271,7 +1300,7 @@ class Game {
    * been the whole time.
    */
   /**
-   * @param {{loadout?: string[], difficulty?: string}} [opts] the other two
+   * @param {{loadout?: string[], difficulty?: string, deathRule?: string}} [opts] the other
    *   answers, for a screen that collects them alongside the face rather than
    *   before it. Only what is passed is taken, so a caller that answered in
    *   `newGame` and a caller that answers here both work and neither wipes the
@@ -1282,6 +1311,7 @@ class Game {
     this._choosing = false;
     if (opts.difficulty !== undefined) this.difficulty = normalizeDifficulty(opts.difficulty);
     if (opts.loadout !== undefined) this.loadout = normalizeLoadout(opts.loadout);
+    if (opts.deathRule !== undefined) this._setDeathRule(opts.deathRule);
     this.ui.closeCharacterPicker();
     this.character.setCharacter(id || DEFAULT_CHARACTER);
     // Not awaited. A character that is not the one preloaded at boot is a
@@ -1668,6 +1698,10 @@ class Game {
       // `_beginGrace`, which a load never reaches.
       this.difficulty = normalizeDifficulty(save.difficulty);
       this.loadout = normalizeLoadout(save.loadout);
+      // Same story: a save written before the question was asked carries no
+      // field, and `normalizeDeathRule` reads that as 'lose', which is the game
+      // every such planet has been played under.
+      this._setDeathRule(save.deathRule);
       this._refreshWards();
       this._pendingSave = null;
     } else {
@@ -1997,17 +2031,25 @@ class Game {
     // exempts it from the despawn clock. What you were *wearing* stays on you:
     // you respawn at a bed that may be a long way from your body, and sending
     // you back for it with nothing on is how a setback becomes a spiral.
+    //
+    // Unless this planet was started as a keep world, in which case none of it
+    // leaves the bag at all and there is no body to walk back to. The whole of
+    // the setting's inventory half is this branch: nothing is dropped, so
+    // nothing has to be recovered, and `deathSite` stays null so the HUD does
+    // not point at a pile that is not there.
     _v1.copy(this.player.position).addScaledVector(this.player.up, 0.6);
     let dropped = 0;
-    // The offhand goes with the rest. It is carried, not worn — a torch in your
-    // left hand is your torch in the same sense the one in your right is, and a
-    // slot that quietly kept its contents through a death would be the one
-    // place on the character worth stuffing your diamonds into.
-    for (const s of [...this.inventory.slots, this.inventory.offhand]) {
-      if (s.empty) continue;
-      this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count, s.wear, null, true);
-      s.clear();
-      dropped++;
+    if (!this.keepsOnDeath) {
+      // The offhand goes with the rest. It is carried, not worn — a torch in
+      // your left hand is your torch in the same sense the one in your right
+      // is, and a slot that quietly kept its contents through a death would be
+      // the one place on the character worth stuffing your diamonds into.
+      for (const s of [...this.inventory.slots, this.inventory.offhand]) {
+        if (s.empty) continue;
+        this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count, s.wear, null, true);
+        s.clear();
+        dropped++;
+      }
     }
     this.deathSite = dropped ? { pos: _v1.clone(), at: this.playtime } : null;
     // See `_tickNightOut`: a night you did not live through does not count.
@@ -2024,7 +2066,8 @@ class Game {
    * lava, fire and cactus. Starving cannot kill (`_tickVitals` floors health at
    * 1), so there is no fourth path to miss.
    *
-   * What is taken is entirely `ON_DEATH` in Skills.js; this end only reconciles
+   * What is taken is entirely `skills.onDeath` — the world's own rule, set by
+   * `_setDeathRule` from the New Game answer; this end only reconciles
    * the body, tells the player, and writes it down.
    *
    * @returns {string} a short phrase for the death screen, or '' if nothing
@@ -2042,8 +2085,8 @@ class Game {
     // already up, and the write is the same one the ninety-second autosave does.
     this.saveGame(false);
     if (!lost || !(lost.level > 0 || lost.spent > 0 || lost.xp > 0)) return '';
-    if (ON_DEATH === 'unlearn') return `Skills unlearned, ${lost.spent} points back`;
-    if (ON_DEATH === 'toll') {
+    if (lost.mode === 'unlearn') return `Skills unlearned, ${lost.spent} points back`;
+    if (lost.mode === 'toll') {
       return lost.level > 0
         ? `Lost ${lost.xp} XP and ${lost.level} level${lost.level > 1 ? 's' : ''}`
         : `Lost ${lost.xp} XP`;
@@ -2246,6 +2289,11 @@ class Game {
       // summary so the menu can say so without opening the world.
       difficulty: this.difficulty,
       loadout: this.loadout,
+      // Beside difficulty and for the same reason: what dying costs is a rule of
+      // this planet and has to be true of whoever loads it. Not inside `player`,
+      // and not inside `player.skills` — the tree reads it, but it is not the
+      // tree's to remember.
+      deathRule: this.deathRule,
       playtime: this.playtime,
       dayT: +this.dayT.toFixed(5),
       season: this.seasons.toJSON(),

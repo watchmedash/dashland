@@ -486,7 +486,10 @@ export const MARKS = {
 // reads them.
 
 /**
- * What a death takes. Change this ONE line to soften the mechanic.
+ * What a death takes in a world that takes anything, and the default for one
+ * that has not been told. The per-world answer is `skills.onDeath`, which New
+ * Game now sets; this line is still where the *harshness* of a losing world
+ * lives, and changing it is still all it takes to soften the mechanic.
  *
  *   'wipe'    xp, levels and every point spent. You wake at level 0 with an
  *             untouched tree. The default, and the strongest reading.
@@ -502,6 +505,9 @@ export const MARKS = {
  * @type {'wipe'|'unlearn'|'toll'|'keep'}
  */
 export const ON_DEATH = 'wipe';
+
+/** The modes `onDeath` will accept. Anything else falls back to `ON_DEATH`. */
+const MODES = new Set(['wipe', 'unlearn', 'toll', 'keep']);
 
 /** Fraction of xp kept under 'toll'. 0.7 is "you lost about three levels". */
 export const DEATH_XP_KEPT = 0.7;
@@ -621,6 +627,22 @@ export class Skills {
     this.bonus = 0;
     /** Whether the one-time armour conversion has already been taken. */
     this.converted = false;
+
+    /**
+     * What a death takes *in this world*, one of `ON_DEATH`'s four modes.
+     *
+     * A field rather than the module constant because the New Game screen now
+     * asks, so the answer is a fact about a planet and two planets in the same
+     * browser may disagree. `ON_DEATH` stays as the default and as the dial for
+     * how harsh a losing world is; see `skillDeathMode` in NewGame.js, which is
+     * what maps the player's answer onto it.
+     *
+     * Deliberately not in `toJSON`/`fromJSON`. It is world state, saved beside
+     * `difficulty` at the top level of the payload and set on this object by
+     * whichever path opens a world, so the tree does not carry a second,
+     * disagreeable copy of it.
+     */
+    this.onDeath = ON_DEATH;
 
     /**
      * XP earned by doing things, under the weights at the top of this file.
@@ -961,17 +983,21 @@ export class Skills {
    *   what was lost, or null if nothing was
    */
   die() {
-    if (ON_DEATH === 'keep') return null;
+    // `this.onDeath` rather than the constant: the world decides, and a value
+    // nobody recognises falls back to the module default rather than to the
+    // most forgiving reading of it.
+    const mode = MODES.has(this.onDeath) ? this.onDeath : ON_DEATH;
+    if (mode === 'keep') return null;
     const lost = {
-      mode: ON_DEATH,
+      mode,
       level: this.xpLevel,
       points: this.points,
       spent: this.spent,
       xp: this.totalXp,
     };
 
-    if (ON_DEATH === 'wipe' || ON_DEATH === 'toll') {
-      const keep = ON_DEATH === 'toll' ? clamp(DEATH_XP_KEPT, 0, 1) : 0;
+    if (mode === 'wipe' || mode === 'toll') {
+      const keep = mode === 'toll' ? clamp(DEATH_XP_KEPT, 0, 1) : 0;
       this.xp = Math.floor(this.xp * keep);
       this.legacy = Math.floor(this.legacy * keep);
       // Derived, so it is not enough to zero it: the loss has to be remembered
@@ -979,7 +1005,7 @@ export class Skills {
       const shed = this.survive - Math.floor(this.survive * keep);
       this.surviveLost += shed;
       this.survive -= shed;
-      if (ON_DEATH === 'wipe') this.bonus = 0;
+      if (mode === 'wipe') this.bonus = 0;
       this.legacyLive = false;
       this._level();
     }
@@ -987,7 +1013,7 @@ export class Skills {
     // The tree itself. Not touched by 'toll' — see the flag: a player who is
     // three levels poorer keeps what they had already bought, and `available`
     // is allowed to report the shortfall honestly rather than repossess it.
-    if (ON_DEATH === 'wipe' || ON_DEATH === 'unlearn') this.reset();
+    if (mode === 'wipe' || mode === 'unlearn') this.reset();
     else this._apply();
 
     // So the caller's next `observe` does not announce the new, smaller balance

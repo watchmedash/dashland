@@ -751,6 +751,59 @@ float caustic(vec2 p, float t) {
   float v = abs(a * 0.333) * abs(b * 0.5);
   return pow(1.0 - clamp(v, 0.0, 1.0), 5.0);
 }
+
+/**
+ * Signed offset of a world point from a cell centre, measured in cells.
+ *
+ * This is the same exact inverse of the cubesphere mapping that occFrame uses,
+ * with one difference: the face basis is not a uniform, it is derived from the
+ * cell centre itself, so it needs nothing from the CPU beyond the centre that
+ * uBreakPos already carries. The mapping is
+ *
+ *     ci = (2F/PI) * atan(dot(d, R), dot(d, N))
+ *
+ * for that face's own N and R, and it is exact rather than a local tangent
+ * approximation. Both points are measured in the *break cell's* frame, which
+ * stays valid past a cube seam because the extended face coordinates are what
+ * patchColumn uses on the CPU as well. Only the difference of the two angles is
+ * ever formed, so nothing depends on the F/2 offset and there is no
+ * cancellation against a coordinate that runs to 464.
+ *
+ * The ratios are scale invariant, so neither vector is normalised. The radial
+ * component is a plain difference of lengths, because one cell is exactly one
+ * unit radially everywhere.
+ *
+ * A cell's own geometry lands in [-0.5, 0.5] on every axis, exactly. Every
+ * corner of a quad is a grid corner or a grid corner scaled radially, and every
+ * interior point of a quad is a positive combination of its corners, which the
+ * atan ratio turns into a weighted mean of the corners' own tangents - so a
+ * face never leaves the cell it belongs to, and touches the boundary only along
+ * the edge it shares with its neighbour.
+ */
+vec3 cellOffset(vec3 p, vec3 cen) {
+  vec3 rel = p - uPlanetCenter;
+  vec3 c = cen - uPlanetCenter;
+  vec3 m = abs(c);
+  vec3 N, R, U;
+  if (m.x >= m.y && m.x >= m.z) {
+    N = vec3(c.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+    R = vec3(0.0, 0.0, -N.x);
+    U = vec3(0.0, 1.0, 0.0);
+  } else if (m.y >= m.z) {
+    N = vec3(0.0, c.y >= 0.0 ? 1.0 : -1.0, 0.0);
+    R = vec3(1.0, 0.0, 0.0);
+    U = vec3(0.0, 0.0, -N.y);
+  } else {
+    N = vec3(0.0, 0.0, c.z >= 0.0 ? 1.0 : -1.0);
+    R = vec3(N.z, 0.0, 0.0);
+    U = vec3(0.0, 1.0, 0.0);
+  }
+  float nc = dot(c, N), nr = dot(c, R), nu = dot(c, U);
+  float pn = dot(rel, N), pr = dot(rel, R), pu = dot(rel, U);
+  return vec3(OCC_ANG * (atan(pr, pn) - atan(nr, nc)),
+              OCC_ANG * (atan(pu, pn) - atan(nu, nc)),
+              length(rel) - length(c));
+}
 `;
 
 /**

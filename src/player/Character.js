@@ -24,7 +24,7 @@
 
 import * as THREE from 'three';
 import * as MobModels from '../game/MobModels.js';
-import { hasModel } from '../render/ItemModels.js';
+import { hasModel, heldModel } from '../render/ItemModels.js';
 import { HEIGHT as PLAYER_HEIGHT } from './Player.js';
 
 /**
@@ -135,6 +135,18 @@ const HAND_LOCAL = {
  * first, which is the whole point of writing the scale down.
  */
 const HAND_ITEM_SIZE = 0.9;
+
+/**
+ * Model units per unit of a first-person pose's `height`.
+ *
+ * An authored pose sizes an item for the view model's camera, where a pickaxe
+ * is 0.46 and an apple 0.24 — the ratio between them is the part worth keeping,
+ * since it is what stops a held apple reading as a beach ball. Only the overall
+ * scale has to change for a camera standing behind the body instead of inside
+ * it, so this is one factor applied to all of them, pinned to the pickaxe: at
+ * 0.46 it lands on HAND_ITEM_SIZE, the length the generic path was tuned to.
+ */
+const HELD_POSE_SCALE = HAND_ITEM_SIZE / 0.46;
 
 /**
  * How much of the holding pose survives the gait.
@@ -658,12 +670,17 @@ export class PlayerCharacter {
     const cache = this._itemCache[which];
     let holder = cache.get(id);
     if (holder === undefined) {
-      holder = this._buildItem(id);
+      holder = this._buildItem(id, which);
       // An item whose art is still in flight gets the factory's stand-in and is
       // deliberately NOT cached, so the next equip asks again and picks up the
       // real model. Caching it would mean the first torch you ever hold is a
       // flat sprite for the rest of the session. `null` — an id with no
       // definition at all — is cached, because that never resolves.
+      //
+      // `_adoptPosed` normally gets there first, swapping the model in as soon
+      // as it lands without waiting for an equip at all. This is still what
+      // makes that safe rather than redundant: a stand-in that is never cached
+      // cannot outlive the load however the two race.
       if (holder === null || !hasModel(id) || holder.userData.modelled) {
         cache.set(id, holder);
       } else {
@@ -674,6 +691,124 @@ export class PlayerCharacter {
   }
 
   /**
+   * The same item, in the same grip, as the first-person view gives it — or
+   * null for anything without authored art.
+   *
+   * The generic path below builds a held item out of the *world* mesh: it
+   * centres the art on its own bounding box and turns it end over end. That is
+   * the right thing for a cube of dirt and wrong for everything that was
+   * modelled, because `ItemModels` already carries a hand-authored pose per
+   * item — a rotation chosen so the tool reads as gripped, and a `grip`
+   * fraction that moves the geometry's origin to the point where the fist
+   * actually closes on it. First person uses all of that. Third person used
+   * none of it, so a pickaxe you were holding correctly at the shaft in first
+   * person was held by the middle of its own bounding box, at a rotation
+   * nothing chose, the moment the camera pulled back. Every modelled item was
+   * wrong in the same way, which is why it read as "third person holds things
+   * wrong" rather than as one bad tool.
+   *
+   * `heldModel` hands back a clone with that pose baked into its transform, so
+   * the work here is only to carry it across two differences between the views:
+   *
+   * - **Frame.** A view-model pose is expressed in view space, where the camera
+   *   looks down -Z and `ViewModel`'s hand group has cancelled the arm's rest
+   *   tilt — so the authored rotation is read straight off the screen. Here the
+   *   item hangs off the `arm-*` node, whose limb runs down its own -Y (the same
+   *   fact the generic path's half turn is about) and which the `holding-*` clip
+   *   swings to the body's forward, +Z.
+   *
+   *   A quarter turn about X takes -Z to -Y and so lines the long axis up, but
+   *   it pins only two axes: the roll about the limb is still free, and getting
+   *   it wrong is a pickaxe held with its head facing backwards rather than an
+   *   obviously broken transform. It has to be pinned by the observer, not by
+   *   the limb. **The camera and the body do not face the same way**: the body
+   *   is built with its forward at +Z and a three camera looks down -Z, so a
+   *   direction on screen becomes a direction on the body by flipping *both*
+   *   horizontal axes — Ry(π) — which is why `holder` takes the same two turns
+   *   `ViewModel._tryArms` gives the arm it lifts out of this very rig.
+   *
+   *   The quarter turn alone was 180° out about the limb axis, measured against
+   *   both chains built out of the real constants: every item came out rolled
+   *   half a turn, +Y off by 112° for the pickaxe, 174° for the apple. With
+   *   Rx(π/2)Ry(π) the item's own axes land on the first-person ones to within
+   *   floating point, for every pose in the table and for either hand.
+   * - **Position.** `pose.pos` is deliberately dropped. It nudges an item clear
+   *   of the arm *in the first-person frame* — screen framing, not grip — and
+   *   carrying it over would push the item off the fist here. With the origin
+   *   already at the grip and the anchor already at the hand, zero is correct.
+   *
+   * Scale keeps the relative sizing the pose table encodes, rather than fitting
+   * every item to one length the way the generic path does: an apple is meant
+   * to be smaller in the hand than a pickaxe, and normalising both to the same
+   * longest axis is what makes a held apple look like a beach ball.
+   */
+  _buildPosedItem(itemId, onReady) {
+    const posed = heldModel(itemId, onReady ? (m) => onReady(this._wearPose(m)) : null);
+    return posed ? this._wearPose(posed) : null;
+  }
+
+  /**
+   * The holder around one posed clone — the whole of the frame change.
+   *
+   * Both hands take it unmirrored, which is the answer to a question worth
+   * writing down because `HAND_LOCAL` *is* mirrored a few lines up. That offset
+   * is mirrored because the pack mirrors the arm *geometry* while leaving the
+   * node alone, so the two limbs' centre lines sit either side of their own
+   * origins. The node's axes are not mirrored, `holding-left` is the same
+   * quaternion as `holding-right`, and `ViewModel` puts an offhand item at the
+   * pose's rotation exactly as it does a main-hand one. So the two hands want
+   * the same roll, and giving the left one a mirrored turn would be the offhand
+   * holding its torch upside down. Measured, not assumed: both hands land on
+   * the first-person orientation to within floating point.
+   */
+  _wearPose(posed) {
+    posed.position.set(0, 0, 0);
+
+    const holder = new THREE.Group();
+    holder.userData.modelled = true;
+    // XYZ order: Rx then Ry. See `_buildPosedItem` for what each turn is for.
+    holder.rotation.set(Math.PI / 2, Math.PI, 0);
+    holder.scale.setScalar(HELD_POSE_SCALE);
+    holder.add(posed);
+    return holder;
+  }
+
+  /**
+   * A model that finished loading after the item was already in the fist.
+   *
+   * `heldModel` answers null until the GLB lands, so the first time a player
+   * ever equips a pickaxe the posed path cannot run and the generic path hands
+   * back the drop factory's sprite. `setHeld` deliberately does not cache that
+   * stand-in, so a *re-equip* picks up the real model — but on its own that
+   * means the first pickaxe you ever hold stays a flat card until you press a
+   * hotbar key twice, which is a second or two of the exact bug this file is
+   * fixing. `ViewModel` has always swapped itself in through `_adoptModel`;
+   * this is the same handshake for the body.
+   *
+   * The hand is captured with the request rather than looked up, for the reason
+   * `ViewModel._adoptModel` gives: between asking and answering the same item
+   * may have moved to the other fist, and `heldItem` alone cannot tell.
+   *
+   * Nothing is disposed here — the stand-in's geometry is the drop factory's
+   * shared sprite plane, and freeing it takes every drop in the world with it.
+   * See the long note in `setHeld`; detaching is the whole of the release.
+   */
+  _adoptPosed(which, itemId, holder) {
+    const cache = this._itemCache[which];
+    // Already resolved by an earlier equip's callback — this one is a duplicate
+    // request from a second equip made while the same load was still in flight.
+    if (cache.has(itemId)) return;
+    cache.set(itemId, holder);
+    // Cached either way, but only swapped in if that hand is still holding it.
+    if (this.heldItem[which] !== itemId) return;
+    const anchor = this.hands[which];
+    if (!anchor) return;
+    const stale = this._transient[which];
+    if (stale) { anchor.remove(stale); this._transient[which] = null; }
+    anchor.add(holder);
+  }
+
+  /**
    * Wrap an item's world mesh so it sits in the fist at a sensible size.
    *
    * The wrapper exists because the mesh's own transform is not ours to write:
@@ -681,7 +816,14 @@ export class PlayerCharacter {
    * cube paths, and posing it in place would pose it for the drop lying on the
    * ground too.
    */
-  _buildItem(itemId) {
+  _buildItem(itemId, which) {
+    // An item with authored art is posed the way the first-person view poses
+    // it. See `_buildPosedItem` for why this is not the generic path. The
+    // callback is what makes the *first* equip of an item catch up on its own
+    // once the GLB lands, rather than waiting for the player to re-equip it.
+    const posed = this._buildPosedItem(itemId, (h) => this._adoptPosed(which, itemId, h));
+    if (posed) return posed;
+
     const mesh = this.itemFactory(itemId);
     if (!mesh) return null;
 

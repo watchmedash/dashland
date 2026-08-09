@@ -3347,6 +3347,18 @@ export class Mobs {
    * places it matters: a stalker standing in waist-high grass is visible, and a
    * stalker behind a trunk is not.
    *
+   * Everything IS_SOLID says yes to fills its whole cell here, including the
+   * ones that visibly do not — a fence, a pane of glass, a slab. That is the
+   * same notion of solid the footprint test, the pathing and the ground scans
+   * all use, and a second one just for sight lines would be a second thing to
+   * keep in step. What it costs, measured: one course of fence or one lower
+   * slab still lets a blow through (the head-to-head ray clears it, 26 blows in
+   * 30s, exactly the open-ground rate), but two courses of either stop one, and
+   * so does a glass wall. Two stacked lower slabs leave a real 0.5-cell gap at
+   * head height and are read as closed. All three are deliberate builds a
+   * player put up to stand behind, so reading them as cover is at worst
+   * generous in the direction shelter is supposed to work.
+   *
    * The step and the end margin are arguments because there are now two
    * calibrations of the same walk and only one walk should exist. A sighting
    * runs tens of cells and can afford to be coarse; a blow runs one or two and
@@ -3415,16 +3427,42 @@ export class Mobs {
    * per swing, not per frame — plus once per predator bite. Measured in the
    * harness: see the report.
    *
+   * The step and skip are arguments for the same reason `_lineOfSight` takes
+   * them: the three-ray shape is the right question at both ranges, and only
+   * the sampling wants to differ. A blow is one to three cells and marches at
+   * BLOW_STEP; an *acquisition* — the prey search reaches 20 cells, the fright
+   * ring 11, the night stalk 26 — would be a seventy-sample march per ray at
+   * that spacing, so `_sightClear` walks it at LOS_STEP instead. Nothing is
+   * lost by the coarser walk: `_lineOfSight`'s own clamp guarantees at least
+   * three samples on any line, which is what stops a one-cell wall falling
+   * between two of them on a short one.
+   *
    * @param {number} th the target's full height, in cells.
    */
-  _blowClear(mob, pos, up, th) {
+  _blowClear(mob, pos, up, th, step = BLOW_STEP, skip = BLOW_SKIP) {
     const sh = mob.spec.height;
     for (let n = 0; n < BLOW_RAYS.length; n += 2) {
       _ptA.copy(mob.pos).addScaledVector(mob.up, sh * BLOW_RAYS[n]);
       _ptB.copy(pos).addScaledVector(up, th * BLOW_RAYS[n + 1]);
-      if (this._lineOfSight(_ptA, _ptB, BLOW_STEP, BLOW_SKIP)) return true;
+      if (this._lineOfSight(_ptA, _ptB, step, skip)) return true;
     }
     return false;
+  }
+
+  /**
+   * The same three rays, at sighting range and sighting cost.
+   *
+   * Every place a body *chooses* something — the prey search, the fright scan,
+   * the night stalk's roll — as opposed to swinging at something it has already
+   * chosen. Measured before this existed: a fox behind six blocks of stone held
+   * a rabbit as prey on 3350 frames of 3600 and paced the wall for the whole
+   * minute, a bunny bolted from a tiger it could not see on 1444 frames of
+   * 3600, and a tiger telegraphed a night stalk at a player sealed in a stone
+   * pocket for two solid minutes — every one of those numbers identical to the
+   * same pair on open ground, i.e. the wall was doing nothing at all.
+   */
+  _sightClear(mob, pos, up, th) {
+    return this._blowClear(mob, pos, up, th, LOS_STEP, 0.4);
   }
 
   /**
@@ -5352,6 +5390,28 @@ export class Mobs {
 
     // Close the distance, then stop and swing. Walking into the player would
     // shove them around — _separate already pushes bodies apart.
+    //
+    // Centre to centre, and it stays that way. The arithmetic was looked at
+    // again because it is the real geometric cause of "their reach is longer
+    // than one block": a husk pressed to one face of a wall settles with its
+    // centre 0.05 outside it (the footprint test cares about the cell the
+    // centre is in, not the radius) and the player's own half-width is 0.34, so
+    // through one block the two centres can legally be 1.39 apart against a
+    // reach of 1.25 + 0.576 = 1.826.
+    //
+    // Measuring from body *surfaces* instead was the obvious answer and is the
+    // wrong one — it makes the reach longer, not shorter. Subtracting the
+    // target's radius as well as the swinger's puts the husk at 1.25 + 0.576 +
+    // PLAYER_RADIUS = 2.166, i.e. further through the wall than before. And the
+    // other direction, cutting the effective reach under 1.39 so no wall can be
+    // spanned at all, breaks blows that are plainly legitimate: measured, a
+    // player standing on a husk's head is 1.78 away and a player up a one-block
+    // step is 1.62, and both would stop landing.
+    //
+    // So the distance is left alone and the line is clipped at the first solid
+    // cell instead — `_blowClear`, below and again at the contact frame. That
+    // is the only test that can tell 1.39-through-stone from 1.39-in-the-open,
+    // because they are the same number.
     const reach = spec.reach + mob.radius;
     // Close enough is not the same as able to. A body one block away through a
     // wall is inside every reach in the table, and swinging at the wall would
@@ -5668,7 +5728,28 @@ export class Mobs {
       // down, which is the outcome the water and air rules also produce.
       if ((o.climbTo !== null || o.perchT > 0) && !mob.spec.climbs) continue;
       const d = mob.pos.distanceToSquared(o.pos);
-      if (d < bestD) { bestD = d; best = o; }
+      if (d >= bestD) continue;
+      // And terrain is the fourth wall, the one the three above are all
+      // instances of. Water, air and a canopy were each written down because a
+      // hunter that picks something it cannot get to spends the whole
+      // PREY_GIVE_UP window looking stupid; a block of stone does exactly the
+      // same and had no rule. Measured: a fox with a rabbit six blocks of stone
+      // away held it as prey on 3350 frames of 3600 and stayed in 'chase' for
+      // 3470 of them, which is one minute of a fox walking into a wall.
+      //
+      // Last of all the tests on purpose. It is the only one that touches the
+      // voxels, and putting it behind the distance improvement means it is
+      // asked once per candidate that is actually winning rather than once per
+      // animal on the planet — typically one or two marches per search, and a
+      // search is one per PREY_PERIOD (1.6s) per hungry carnivore with nothing
+      // yet chosen.
+      //
+      // Only the *choice* is gated. A hunt already under way is not re-tested,
+      // exactly as `_hunt` keeps a target it has committed to: prey that breaks
+      // line of sight behind a boulder should be chased round it, and the bite
+      // at the end of that chase is refused by `_blowClear` in `_stalk` anyway.
+      if (!this._sightClear(mob, o.pos, o.up, o.spec.height)) continue;
+      bestD = d; best = o;
     }
     return best;
   }
@@ -5855,7 +5936,22 @@ export class Mobs {
       // three cells is deeper into its own small ring than a tiger at five is
       // into a wide one, and the fox is the one to step away from first.
       const u = 1 - Math.sqrt(d2) / comfort;
-      if (u > depth) { depth = u; worst = t; }
+      if (u <= depth) continue;
+      // ...and it has to be able to see the thing. A wall between them is the
+      // whole point of a wall, and without this a penned herd bolted from a
+      // predator on the far side of the fence: measured at 1444 bolt frames of
+      // 3600 through six blocks of stone, which is the identical number the
+      // same pair produce on open ground.
+      //
+      // Behind the `u > depth` test so it costs one march per candidate that is
+      // actually the worst so far, and the loop only reaches here for a threat
+      // already inside the comfort ring — usually none, so usually no march at
+      // all. The scan itself is one per SPOOK_PERIOD (0.75s) per animal.
+      //
+      // `depth` drives the panic override as well as the choice, so a threat
+      // behind a wall correctly contributes no panic either.
+      if (!this._sightClear(mob, t.pos, t.up, t.spec.height)) continue;
+      depth = u; worst = t;
     }
 
     const step = SPOOK_PERIOD;
@@ -5983,6 +6079,21 @@ export class Mobs {
       if (this.prowlRest > 0 || this.prowlT > 0) return false;
       this.prowlT = PROWL_PERIOD;
       if (Math.random() >= PROWL_CHANCE) return false;
+      // ...on somebody it can see. This is the third blind acquisition and the
+      // loudest of them: measured before the test, a tiger outside a sealed
+      // 1x1x2 stone pocket telegraphed at the player inside it for 2880 frames
+      // and held them as a target for 4306, growling every PROWL_GROWL through
+      // solid rock. `_blowClear` refused every blow, so it cost no health at
+      // all — it just meant the one thing in the game a shelter is for did not
+      // work, which is the report.
+      //
+      // Here rather than in `eligible` above because `eligible` is evaluated
+      // every frame for every big cat and this is a march of up to PROWL_RANGE
+      // (26 cells). Behind the roll it runs at most once per PROWL_PERIOD for
+      // the whole planet. The roll is still spent — `prowlT` is reset above —
+      // so a blocked cat does not burn PROWL_REST and the next period tries
+      // again, which is what "one roll per period" already means.
+      if (!this._sightClear(mob, player.position, player.up, PLAYER_HEIGHT)) return false;
       this.prowlRest = PROWL_REST;
       mob.prowl = PROWL_TELL;
       mob.growlT = 0;

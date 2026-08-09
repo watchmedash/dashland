@@ -201,6 +201,14 @@ export class Player {
     this.cell.cj = (rem % F) + 0.5;
     this.cell.ck = k + 1.02;
     this.vel.i = 0; this.vel.j = 0; this.vel.k = 0;
+    // Arriving somewhere is not falling. `fallStart` is only ever cleared
+    // inside `update`, and `update` does not run while you are dead — so it
+    // froze at whatever it held when you died and was still there on the
+    // first frame after respawning. Die past the top of any hop on a mountain,
+    // respawn at a bed by the sea, and the game billed you for the altitude
+    // difference: enough to kill you again on arrival and spill the inventory
+    // you had just come back for.
+    this.fallStart = null;
     this._sync();
     const ref = Math.abs(this.up.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
     this.forward.copy(ref).sub(_a.copy(this.up).multiplyScalar(ref.dot(this.up))).normalize();
@@ -211,6 +219,7 @@ export class Player {
     worldToCell(v.x, v.y, v.z, this.cell);
     this.vel.i = 0; this.vel.j = 0; this.vel.k = 0;
     this.knockT = 0;
+    this.fallStart = null;      // same reason as `spawnAtColumn`
     this._sync();
   }
 

@@ -253,7 +253,12 @@ function faceVisible(a, b) {
   // shell and removes the majority of foliage triangles.
   if (IS_LEAF[a] && IS_LEAF[b]) return false;
   if (ga === GROUP_TRANSPARENT && b === a) return false;
-  if (ga === GROUP_LIQUID && GROUP[b] === GROUP_LIQUID) return false;
+  // `b === a`, like the line above it. Testing only the *group* culled the face
+  // between water and lava as well, and those two genuinely do end up touching:
+  // the flow sim refuses to let water enter a lava cell, so a bucket poured near
+  // a mantle pool leaves them side by side. Neither cell drew the shared quad,
+  // which left a hole straight through into the inside of the pool.
+  if (ga === GROUP_LIQUID && GROUP[b] === GROUP_LIQUID && b === a) return false;
   return true;
 }
 

@@ -2023,27 +2023,48 @@ export class Mobs {
    * @param {object} player
    * @param {number} surplus how many are over the night budget
    */
-  _bedDown(player, surplus) {
-    if (surplus <= 0) return;
-    let want = Math.min(surplus, NIGHT_BED_PER_TICK);
-    let far = -1, farD = NIGHT_BED_DIST;
+  _bedDown(player, landSurplus, airSurplus) {
+    // Two budgets, counted separately, because they are separate budgets.
+    //
+    // This took one number — the two surpluses added together — and then chose
+    // what to remove by distance alone, which was wrong twice over.
+    //
+    // It let a flier surplus be paid for with land animals. The land top-up
+    // runs four lines earlier and fills its own budget exactly, so the land term
+    // is always zero at this point; any surplus is bees, and the furthest body
+    // is usually one of the land animals the top-up has just placed out in the
+    // far ring. The result was a spawn/despawn treadmill — animals created and
+    // retired within seconds of each other, about one a second, until the flier
+    // count ground down. That is what a monkey spawned for a test being gone
+    // moments later actually was.
+    //
+    // And the sum was signed, so a night with no bees at all — `air - airCap`
+    // of -7 — quietly raised the land ceiling by seven and held it there.
+    let land = Math.max(0, landSurplus | 0);
+    let air = Math.max(0, airSurplus | 0);
+    if (land + air <= 0) return;
+    let want = Math.min(land + air, NIGHT_BED_PER_TICK);
     while (want > 0) {
-      far = -1; farD = NIGHT_BED_DIST;
+      let far = -1, farD = NIGHT_BED_DIST, farFlier = false;
       for (let n = 0; n < this.list.length; n++) {
         const m = this.list[n];
         const s = m.spec;
         if (s.hostile || s.trader || s.aquatic) continue;
+        // Only from a category that is actually over its own budget.
+        const flier = !!s.flies;
+        if (flier ? air <= 0 : land <= 0) continue;
         // `state === 'flee'` and not a `fleeing` flag — there is no such flag,
         // and a guard naming one would have read as protection while doing
         // nothing at all.
         if (m.dying > 0 || m.baby > 0) continue;
         if (m.state === 'flee' || m.state === 'chase' || m.target) continue;
         const d = m.pos.distanceTo(player.position);
-        if (d > farD) { farD = d; far = n; }
+        if (d > farD) { farD = d; far = n; farFlier = flier; }
       }
       if (far < 0) return;         // nothing far enough; try again next tick
       this._release(this.list[far]);
       this.list.splice(far, 1);
+      if (farFlier) air--; else land--;
       want--;
     }
   }

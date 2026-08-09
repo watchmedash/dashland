@@ -5744,6 +5744,12 @@ class Game {
       case 'any': return true;
       case 'soil': return !!hit && this.farming.canTill(hit.id);
       case 'seed': return !!hit && this.farming.canPlant(hit.col, hit.k);
+      // The same source `_tickBow` counts and `_loose` spends, so "the bow
+      // claimed the click" and "the bow can actually draw" cannot disagree.
+      case 'bow': {
+        const ammo = itemIdOf(ITEMS[slot.item]?.ammo || '');
+        return !!ammo && this.inventory.countWithOffhand(ammo) > 0;
+      }
       default: return false;
     }
   }
@@ -5923,11 +5929,17 @@ class Game {
       this.ui.setHint(text ? `"${text}"` : 'A blank sign');
     } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
       this.ui.setHint(`<kbd>RMB</kbd> ${hit.id === ID.bench ? 'Craft' : 'Smelt'}`);
-    } else if (needTool || dragHint || tillHint) {
+    } else if (needTool || dragHint || tillHint || this.bow.hint) {
       // Both can be true — a wrong tool on a wet seam is the worst case in the
       // game and the one most likely to be read as broken — so neither hides
       // the other.
-      this.ui.setHint([needTool, dragHint, tillHint].filter(Boolean).join(', '));
+      //
+      // `bow.hint` is in the list because the bow's own branch below is no
+      // longer guaranteed to run: an empty quiver hands the click to the
+      // offhand, and "Out of arrows" is exactly the message that must survive
+      // that — it is the reason the player is about to be placing a torch with
+      // a bow in their hand.
+      this.ui.setHint([needTool, dragHint, tillHint, this.bow.hint].filter(Boolean).join(', '));
     } else this.ui.setHint(null);
 
     const m = this.mining;
@@ -5986,7 +5998,17 @@ class Game {
     // bare-hand speed, and a pick block refuses to drop for anything that is
     // not a pickaxe, so a fist and a bow are refused by the same line. The old
     // early return cited a flat wrong-tool multiplier that no longer exists.
-    if (bowHeld) { this.eating = 0; this.ui.setHint(this.bow.hint || null); return; }
+    // `heldItem` and not `bowHeld`: the two differ in exactly one state and it
+    // is the one that was reported. `bowHeld` is `active()`'s answer — the main
+    // hand unless it is empty — and it is right for the melee branch above,
+    // which is about what your arm is encumbered with. Down here the subject is
+    // the right button, and the right button has already resolved which hand is
+    // speaking (line ~5899). A bow with an empty quiver no longer claims (see
+    // `useKind`), so the acting hand is the offhand, and returning on `bowHeld`
+    // meant a torch in the left hand was refused by a bow that was doing
+    // nothing. When the bow *is* the acting hand this is the same early return
+    // it has always been.
+    if (heldItem?.bow) { this.eating = 0; this.ui.setHint(this.bow.hint || null); return; }
 
     // --- eating: hold RMB on any food ---
     //

@@ -22,24 +22,36 @@ const NON_EMPTY = () => true;
  * act over the top of it.
  *
  *  - `'any'`  the item is the action and the cell has no say: it places, it is
- *             food, it draws, it carries a liquid, it fishes. The main hand
- *             holding one of these is never talked over, which is what stops a
- *             torch in the left hand from being a second chance at a placement
- *             the right hand just refused.
+ *             food, it carries a liquid, it fishes. The main hand holding one of
+ *             these is never talked over, which is what stops a torch in the
+ *             left hand from being a second chance at a placement the right hand
+ *             just refused.
  *  - `'soil'` a shovel: it tills, and only where there is soil.
  *  - `'seed'` seeds: they sow, and only into farmland with room above.
+ *  - `'bow'`  a bow: it draws, and only with something to shoot.
  *  - `'none'` nothing. A pickaxe, an axe, a sword, an ingot, an empty hand.
  *             This is the set the offhand can act over.
  *
+ * **The bow is conditional and it took a bug report to notice.** It was `'any'`
+ * on the reading that drawing is the bow's own business and no cell has a say in
+ * it — which is true, and is also not the question. The question is whether the
+ * hand has anything to *do*, and a bow with an empty quiver does not: it is the
+ * one item in the game whose right button can be pressed all day for no effect
+ * at all. Claiming anyway made "holding torch in left hand can still not place
+ * it even though right hand item is not working" a literally accurate report,
+ * because the bow both claimed the click and then returned early from it. The
+ * ammunition is to a bow exactly what soil is to a shovel, so it is spelled the
+ * same way: named here, resolved against the world in `_hasUse`.
+ *
  * @param {number} item an item id
- * @returns {'any'|'soil'|'seed'|'none'}
+ * @returns {'any'|'soil'|'seed'|'bow'|'none'}
  */
 export function useKind(item) {
   const def = ITEMS[item];
   if (!item || !def) return 'none';
   if (def.block !== undefined) return 'any';
   if (def.food) return 'any';
-  if (def.bow) return 'any';
+  if (def.bow) return 'bow';
   if (def.carries || def.name === 'bucket') return 'any';
   if (def.tool?.kind === 'rod') return 'any';
   if (def.tool?.kind === 'shovel') return 'soil';

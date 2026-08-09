@@ -104,19 +104,72 @@ const HELD_SCALE = 1.30;
 /**
  * The carry tilt: a view-space rotation laid over every held item's own pose.
  *
- * `x` is the lean, and the sign is worth stating because it is the one axis the
- * player named twice from opposite ends. Measured as the item's long axis out of
- * the screen plane, **positive when the top tips away from the camera**, the
- * family sat at:
+ * `x` is the lean, and it is the one axis in this file that has been signed
+ * wrong twice, so the convention is stated first and the evidence after it.
+ * Measured as the item's long axis out of the screen plane, **positive when the
+ * top tips away from the camera**, which is the sense the player has used
+ * consistently from their first report onwards: a shovel at -22.6 was "leaning
+ * back to the player" and a torch at +15.8 was the "lean forward" they wanted
+ * instead. Untilted, the family sits at:
  *
- *     torch, shovel  +15.5      bow  +0.7      the food kit  0..+16
- *     sword          +27.4      bucket +4.2    mean of all 106  +7.3
- *     pick           +34.1
- *     axe            +37.8
+ *     rod    +0.9    torch  +15.4    sword +27.3    pick +33.4
+ *     bucket +4.2    shovel +26.1    stick +15.7    axe  +44.5
+ *     mean of all 106  +14.2
  *
- * -0.21 rad about view X adds **+12 degrees to every one of them**, which is
- * "leaning backwards" done once. It takes the mean to +19 and the tool band to
- * +13..+50, against Minecraft's own 25-degree tip.
+ * **The previous value, -0.21, added +12 degrees to every one of those and was
+ * pointed the wrong way.** It read "everything hand held should be leaning
+ * backwards" as more of what the family already did, taking the tools to
+ * +12..+56 and the mean to +24.9 — further *forward*, by the same convention the
+ * same player had used to ask for the shovel to stop leaning back. The next
+ * report was "the tools are still leaning forward", which is the same sentence a
+ * third time.
+ *
+ * +0.70 rad reverses it: **-40 degrees on every item**, so the tools land at
+ *
+ *     pick   -6.1    shovel -14.0    torch  -24.5    axe    +5.9
+ *     sword -11.4    bucket -35.9    rod    -35.8    mean   -21.7
+ *
+ * — every long tool the player named now tips its top toward the eye, and the
+ * axe, which is the family's outlier at +44.5 untilted, comes back to square.
+ *
+ * **What Minecraft measures, in the same terms, and why it cannot arbitrate the
+ * sign.** Its first-person `handheld` transform is `rotation [0, -90, 25]` on a
+ * generated quad — a one-pixel slab in the model's XY plane whose long axis is
+ * the *texture's* diagonal. Reproduced (`Rz.Ry.Rx`, which is the order that puts
+ * the 25 degrees on screen rather than leaving the tool dead upright):
+ *
+ *     long axis   lean +-45.0 deg      roll -25.0 deg (top falls left)
+ *     the flat    90.0 deg to the view axis — exactly edge-on
+ *
+ * The lean is +45 or -45 depending only on which way the sprite's diagonal runs,
+ * so "like how minecraft does it" fixes the *magnitude* — a hard 45-degree tip,
+ * three times what this family had — and says nothing about the direction. The
+ * player's words are the only thing that can, and they have said the same thing
+ * three times. The magnitude is not copied all the way either: Minecraft's item
+ * is a card and is drawn exactly edge-on, and every model here is a real mesh
+ * that would lose its silhouette doing that.
+ *
+ * **Edge-on, measured as the flat's angle to the view axis and not as covered
+ * area** — the area metric was already shown not to detect it. Nothing here
+ * crosses over, and the item nearest to it is nearest to it already:
+ *
+ *     pick    80.3 -> 86.7   axe    61.6 -> 52.6   crystal 72.9 -> 77.9
+ *     shovel  45.1 -> 32.2   sword  43.4 -> 37.8   apple   59.8 -> 70.2
+ *     torch   28.4 -> 24.8   coral   78.8 -> 76.2
+ *
+ * The tools the player looks at most come *back* toward face-on, because the old
+ * sign was rotating them past square. The pickaxe is the one that goes the other
+ * way, and it is the one item this metric cannot fail cleanly on: its plate ratio
+ * is 0.14 and its authored pose already presented it at 80 degrees, which is to
+ * say the shipped build has always drawn a pickaxe very nearly edge-on and the
+ * player has never once mentioned it. 86.7 is not a new failure mode, it is six
+ * degrees more of a thing that was already true; the poses that would be at risk
+ * are plate-like items sitting near face-on, and none of those move past 78.
+ *
+ * The shovel's own constraints are untouched, and structurally so: `POSE.shovel`
+ * is not edited, its grip fraction is a fact about the model, and "two thirds
+ * above the fist" is measured along the item's own long axis (70%, before and
+ * after), which no rotation of the fist can change.
  *
  * `z` is the smaller half. Every long item in the table leans its top *toward*
  * the middle of the screen — pick -19, sword -24, torch -12, stick -17 degrees
@@ -131,7 +184,7 @@ const HELD_SCALE = 1.30;
  * wrist does. Not applied to `this.hand`, which would tilt the nocked arrow with
  * it; and not applied to `armPivot`, which would take the arm along.
  */
-const HAND_TILT = new THREE.Euler(-0.21, 0, -0.13);
+const HAND_TILT = new THREE.Euler(0.70, 0, -0.13);
 
 // Where the shoulder sits in view space. The hand hangs off the far end of the
 // limb, so these are the hand rest points pushed back down the arm: hand ≈

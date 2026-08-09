@@ -387,9 +387,13 @@ const float NIGHT_OPEN_GAIN = 3.0;
  *
  * 1.2 roughly doubles that shade while moving a sunlit meadow about a tenth,
  * because the meadow's ambient is a ninth of its total and its direct term is
- * untouched. Gated on `openSky` so it is exactly zero in a cave, in a sealed
- * room and under a slab roof, and faded out by `uNight` so it cannot brighten
+ * untouched. Gated on openSky so it is exactly zero in a cave, in a sealed
+ * room and under a slab roof, and faded out by uNight so it cannot brighten
  * dusk.
+ *
+ * No backticks in this comment, and none anywhere below: this block lives
+ * inside a GLSL template literal, so a backtick ends the shader source mid
+ * sentence and the file stops parsing as JavaScript.
  */
 const float DAY_SHADE_GAIN = 1.2;
 

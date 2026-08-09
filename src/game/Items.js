@@ -292,6 +292,14 @@ const TIER_LABEL = Object.fromEntries(
 export function harvestHint(blockId, toolItem) {
   const b = BLOCKS[blockId];
   if (!b || b.hardness < 0 || !b.tier) return null;
+  // Nothing to promise for a block that yields nothing however good the tool.
+  // The planet core is the only one: it is tier 4 and reads as "Needs an Astral
+  // Pickaxe", which is a requirement that does not exist — the core is refused
+  // by `_breakBlock` outright and its mining bar never moves. A player could
+  // spend the crystal on that pick, come back, and find the hint gone and the
+  // block still inert, having been told a price for something that is not for
+  // sale.
+  if (!b.drop || !itemIdOf(b.drop)) return null;
   const held = toolItem?.tool?.tier ?? 0;
   if (held >= b.tier) return null;
   const tier = TIER_LABEL[b.tier] ?? `tier ${b.tier}`;

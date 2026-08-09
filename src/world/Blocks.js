@@ -175,7 +175,14 @@ function block(o) {
     hardness: o.hardness ?? 1,
     tool: o.tool ?? null,          // 'pick' | 'axe' | 'shovel' | null
     tier: o.tier ?? 0,             // minimum tool tier required for a drop
-    drop: o.drop ?? o.name,
+    // `null` means "drops nothing", and has to be spelled out: `??` falls back
+    // on null as readily as on undefined, so `drop: null` quietly meant "drops
+    // itself". Five blocks declare it and four are saved by something else —
+    // leaves and tall grass are special-cased before the lookup, the core's
+    // name is not an item — which left glass, alone, handing back a glass block
+    // when punched with bare hands. `computeDrops` has always had the `if
+    // (!name) return []` this needs; it simply never saw a null to act on.
+    drop: o.drop === null ? null : (o.drop ?? o.name),
     dropCount: o.dropCount ?? 1,
     tint: o.tint ?? null,          // biome-tintable (grass/leaves)
     particle: o.particle ?? [0.55, 0.55, 0.55],

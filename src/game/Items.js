@@ -851,8 +851,20 @@ export const UNDERWATER_MINING = 3;
  * rounding. A tenth of a percent of drift is inaudible on dirt and is 0.008s of
  * a diver's breath, but it is drift that means nothing, and a number that means
  * nothing is a number nobody can check.
+ *
+ * **`axe` moved from 7/15 to 2/3, and moved so that nothing changes.** The
+ * timber column was the one family in the game measurably *softer* than
+ * Minecraft — an oak log was 1.4 against Minecraft's 2.0 and a plank 1.2
+ * against 2.0 — so the trunks and the planks were put on Minecraft's own
+ * numbers (see `log_oak` in `Blocks.js`). That is a 1.43x on every wooden block
+ * in the game, hands included, and hands are again the column that must not
+ * move: 7/15 x 1.43 would have taken a bare-handed oak log from 4.50s to
+ * 6.43s, which is 2.1x Minecraft's 3.00s for the one job every player does in
+ * their first minute. 2/3 is exactly 7/15 x (2.0/1.4), so a fist on an oak log
+ * is **4.50s before and after** and the whole of the change lands on the axe
+ * column, which is where the measurement said the gap was.
  */
-const HAND_HARD = { pick: 1 / 3, axe: 7 / 15, shovel: 5 / 6 };
+const HAND_HARD = { pick: 1 / 3, axe: 2 / 3, shovel: 5 / 6 };
 
 /**
  * What a hand — or, now, the wrong tool — is worth on this block.
@@ -924,7 +936,45 @@ export function miningTime(blockId, toolItem, submerged = false) {
   // the note on `TIERS` for the rebalance this is the arithmetic half of, and
   // `HAND_HARD` for why the change is invisible on the bare-hands column.
   const base = b.hardness * 1.5;
-  const penalty = b.tier > (toolItem?.tool?.tier ?? 0) ? 3.2 : 1;
+  /**
+   * The under-tier penalty, and **the tier it is measured against is the tier
+   * of a tool that is actually the right kind.**
+   *
+   * This read `b.tier > (toolItem?.tool?.tier ?? 0)`, and that is one of the two
+   * faults the "breaking blocks are so easy" report is actually about. It let
+   * the *kind* of the tool be forgotten while the *tier* of it was still
+   * counted, so any high-tier tool of the wrong kind bought its way past a gate
+   * it could not harvest through:
+   *
+   *   iron ore, bare hands    48.96s   (hand speed, and the 3.2x for tier 0)
+   *   iron ore, stone AXE     15.30s   (hand speed, and no penalty at all)
+   *
+   * A stone axe drops nothing from an iron seam — `computeDrops` refuses it on
+   * the kind, before it ever looks at the tier — and it broke the block **3.2x
+   * faster than a fist**. That is a straight violation of the rule the file is
+   * built on, that *the wrong tool is exactly a bare hand*, and it applied to
+   * every one of the 380-odd block/tool pairs where a gated block meets a tool
+   * of the wrong family: every ore, every deep stone, obsidian, the hearth, the
+   * kiln, the metal blocks, slate and its cut shapes. Those are precisely the
+   * blocks a player spends the mid-game on, and precisely the ones a player
+   * with a full hotbar is most likely to hit with whatever is already in hand.
+   *
+   * `kindCounts` is the same split `handSpeed` makes and the same one
+   * `computeDrops` makes: a block that names a tool only counts a tool of that
+   * kind, and a block that names none (glass, a giant clam, the reef) has no
+   * wrong kind at all, so any tool counts for its gate. That second half is
+   * load-bearing rather than tidy — the clam is tier 1 with no `tool`, and
+   * making every tool wrong for it would put a pearl dive at 2.88s a shell,
+   * 25.9s adrift, which is three lungfuls for one clam.
+   *
+   * 3.2 rather than Minecraft's 10/3 is left where it stood. It is not what was
+   * broken here, and it is already applied on top of a hand speed Minecraft
+   * does not have — a bare hand on iron ore is 48.96s here against 15s there —
+   * so there is no parity argument for making it larger.
+   */
+  const kindCounts = !b.tool || toolItem?.tool?.kind === b.tool;
+  const effTier = kindCounts ? (toolItem?.tool?.tier ?? 0) : 0;
+  const penalty = b.tier > effTier ? 3.2 : 1;
   // Three, not Minecraft's five. Five turns a lake bed into a chore rather than
   // a decision, and the breath meter is already applying its own pressure.
   const water = submerged ? UNDERWATER_MINING : 1;

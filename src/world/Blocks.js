@@ -250,9 +250,9 @@ const MASONRY = [
   // The one row the tier column exists for. See above.
   ['slate', 'Slate', 'slate', 3.0, 'pick', 1],
   ['tuff', 'Tuff', 'tuff', 2.0, 'pick', 0],
-  ['planks', 'Oak', 'planks', 1.2, 'axe', 0],
-  ['planks_birch', 'Birch', 'planks_birch', 1.2, 'axe', 0],
-  ['planks_pine', 'Pine', 'planks_pine', 1.2, 'axe', 0],
+  ['planks', 'Oak', 'planks', 2.0, 'axe', 0],
+  ['planks_birch', 'Birch', 'planks_birch', 2.0, 'axe', 0],
+  ['planks_pine', 'Pine', 'planks_pine', 2.0, 'axe', 0],
   ['mossy_stone_brick', 'Mossy Brick', 'mossy_stone_brick', 2.4, 'pick', 0],
   ['snow_brick', 'Snow Brick', 'snow_brick', 0.7, 'shovel', 0],
   ['packed_ice', 'Packed Ice', 'packed_ice', 1.0, 'pick', 0],
@@ -277,19 +277,44 @@ export const BLOCKS = [
   block({ name: 'ice', label: 'Ice', render: R_GLASS, all: 'ice', opaque: false, hardness: 0.6, tool: 'pick', particle: [0.72, 0.85, 0.95], sound: 'glass' }),
   block({ name: 'water', label: 'Water', render: R_LIQUID, all: 'water', solid: false, opaque: false, hardness: -1, particle: [0.2, 0.42, 0.68], sound: 'water' }),
 
-  block({ name: 'log_oak', label: 'Oak Log', top: 'log_oak_top', side: 'log_oak', bottom: 'log_oak_top', axis: true, hardness: 1.4, tool: 'axe', particle: [0.42, 0.31, 0.19], sound: 'wood', fuel: 6 }),
+  // **Timber is 2.0, up from 1.4, and it is the one family that was genuinely
+  // softer than Minecraft.**
+  //
+  // The mining rebalance before this one moved the tool ladder and left the
+  // hardness column alone except for three ordering fixes, on the finding that
+  // the column was not where the fault was. That finding was right about rock
+  // and soil and wrong about wood, because nobody had driven the two tables
+  // side by side. Doing that — the real `miningTime` against Minecraft's real
+  // formula, every block, every rung — puts stone and soil and ore at 1.0x to
+  // 2.1x Minecraft and timber *below* it:
+  //
+  //   oak log / wooden axe    1.05s vs 1.50s = 0.70x
+  //   oak log / cinder axe    0.25s vs 0.33s = 0.75x
+  //   planks  / wooden axe    0.90s vs 1.50s = 0.60x
+  //
+  // A log was 1.4 against Minecraft's 2.0 and a plank 1.2 against 2.0, and
+  // chopping is the single most repeated action in the first ten minutes of a
+  // world — so the one family the player meets first was also the only one
+  // running at two thirds speed. Both go onto Minecraft's own numbers, which is
+  // what the whole column claims to be denominated in.
+  //
+  // The bare-hands column does not move: `HAND_HARD.axe` went 7/15 -> 2/3 in
+  // the same change, which is exactly 2.0/1.4, so a fist on an oak log is 4.50s
+  // before and after and every second of the slowdown lands on the axe. See the
+  // note on HAND_HARD in `Items.js`.
+  block({ name: 'log_oak', label: 'Oak Log', top: 'log_oak_top', side: 'log_oak', bottom: 'log_oak_top', axis: true, hardness: 2.0, tool: 'axe', particle: [0.42, 0.31, 0.19], sound: 'wood', fuel: 6 }),
   // Leaves drop nothing through the block table: computeDrops special-cases
   // them into a lottery of sapling, apple and stick well before it reads this.
   // The three species-specific sapling names that used to sit here — one per
   // leaf — resolved to no item at all, since only a single generic `sapling`
   // exists. Harmless only because nothing reached them.
   block({ name: 'leaves_oak', label: 'Oak Leaves', render: R_GLASS, all: 'leaves_oak', opaque: false, hardness: 0.25, tint: 'foliage', drop: null, dropCount: 0, particle: [0.28, 0.44, 0.18], sound: 'grass' }),
-  block({ name: 'log_birch', label: 'Birch Log', top: 'log_birch_top', side: 'log_birch', bottom: 'log_birch_top', axis: true, hardness: 1.4, tool: 'axe', particle: [0.82, 0.8, 0.72], sound: 'wood', fuel: 6 }),
+  block({ name: 'log_birch', label: 'Birch Log', top: 'log_birch_top', side: 'log_birch', bottom: 'log_birch_top', axis: true, hardness: 2.0, tool: 'axe', particle: [0.82, 0.8, 0.72], sound: 'wood', fuel: 6 }),
   block({ name: 'leaves_birch', label: 'Birch Leaves', render: R_GLASS, all: 'leaves_birch', opaque: false, hardness: 0.25, tint: 'foliage', drop: null, dropCount: 0, particle: [0.42, 0.55, 0.2], sound: 'grass' }),
-  block({ name: 'log_pine', label: 'Pine Log', top: 'log_pine_top', side: 'log_pine', bottom: 'log_pine_top', axis: true, hardness: 1.4, tool: 'axe', particle: [0.3, 0.22, 0.14], sound: 'wood', fuel: 6 }),
+  block({ name: 'log_pine', label: 'Pine Log', top: 'log_pine_top', side: 'log_pine', bottom: 'log_pine_top', axis: true, hardness: 2.0, tool: 'axe', particle: [0.3, 0.22, 0.14], sound: 'wood', fuel: 6 }),
   block({ name: 'leaves_pine', label: 'Pine Needles', render: R_GLASS, all: 'leaves_pine', opaque: false, hardness: 0.25, tint: 'foliage_dark', drop: null, dropCount: 0, particle: [0.16, 0.32, 0.18], sound: 'grass' }),
 
-  block({ name: 'planks', label: 'Planks', all: 'planks', hardness: 1.2, tool: 'axe', particle: [0.62, 0.46, 0.28], sound: 'wood', fuel: 4 }),
+  block({ name: 'planks', label: 'Planks', all: 'planks', hardness: 2.0, tool: 'axe', particle: [0.62, 0.46, 0.28], sound: 'wood', fuel: 4 }),
   block({ name: 'cobblestone', label: 'Cobblestone', all: 'cobblestone', hardness: 2.4, tool: 'pick', particle: [0.44, 0.44, 0.46], sound: 'stone' }),
   block({ name: 'stone_brick', label: 'Stone Bricks', all: 'stone_brick', hardness: 2.4, tool: 'pick', particle: [0.5, 0.5, 0.52], sound: 'stone' }),
   block({ name: 'brick', label: 'Bricks', all: 'brick', hardness: 2.4, tool: 'pick', particle: [0.6, 0.3, 0.24], sound: 'stone' }),
@@ -323,13 +348,30 @@ export const BLOCKS = [
   // relative to its own world, than a *gold ore*. No adjustment to the tool
   // ladder can fix a block that is in the wrong place on the scale.
   //
-  // 14 and not 50: at 50 an iron pick — the tier that gates it — would be 18
-  // seconds a block, and Minecraft can afford that because it has an efficiency
-  // enchantment and a beacon and this planet has neither. 14 puts it at 5.0s
-  // with the pick that unlocks it and 2.5s with the best pick in the game,
-  // which is 2.3x granite and 6.4x cobblestone: plainly the hardest thing you
-  // can dig, and still a thing you would build a wall out of.
-  block({ name: 'obsidian', label: 'Obsidian', all: 'obsidian', hardness: 14, tool: 'pick', tier: 3, particle: [0.12, 0.1, 0.18], sound: 'stone' }),
+  // **28, up from 14**, and the reason is that 14 was measured and found to be
+  // the softest thing in the table relative to Minecraft by a long way. Driving
+  // the real `miningTime` against Minecraft's real formula, tier for tier:
+  //
+  //   soil, stone, ore     1.0x - 2.1x Minecraft   (already at or above)
+  //   obsidian / iron       5.0s vs 12.5s = 0.40x
+  //   obsidian / astral     3.5s vs  9.4s = 0.37x
+  //   obsidian / cinder     2.5s vs  8.3s = 0.30x
+  //
+  // Every other family in the game is *harder* than the game it is measured
+  // against, and the block whose whole identity is "you will stand here for a
+  // while" was a third of it. The 14 was chosen against a fear — that 50 would
+  // be 18 seconds with the iron pick that gates it — and that fear is sound;
+  // Minecraft can afford 50 because it has an efficiency enchantment and a
+  // beacon and this planet has neither. But the answer to "50 is too far" was
+  // never "half of what it should be".
+  //
+  // 28 is picked so the three rungs that can lift it land on whole numbers:
+  // **10.0s with the iron pick that unlocks it, 7.0s with astral, 5.0s with
+  // cinder.** That is 0.80x Minecraft at the gating tier rather than 0.40x, it
+  // is still well short of the 17.9s that made 50 unaffordable, and it is 2.5x
+  // granite and 6.5x cobblestone — plainly the hardest thing you can dig, and
+  // still a thing you would build a wall out of.
+  block({ name: 'obsidian', label: 'Obsidian', all: 'obsidian', hardness: 28, tool: 'pick', tier: 3, particle: [0.12, 0.1, 0.18], sound: 'stone' }),
   block({ name: 'core', label: 'Planet Core', all: 'core', hardness: 24, tool: 'pick', tier: 4, drop: null, light: 8, lightColor: [1.0, 0.55, 0.25], particle: [1, 0.6, 0.2], sound: 'stone' }),
   // What the planet gives you for coming all the way down.
   //
@@ -362,7 +404,7 @@ export const BLOCKS = [
   // you there. Iron is what you have when you arrive.
   block({
     name: 'hearth', label: 'Planet Hearth', all: 'hearth',
-    hardness: 14, tool: 'pick', tier: 3, light: 15, lightColor: [1.0, 0.72, 0.36],
+    hardness: 28, tool: 'pick', tier: 3, light: 15, lightColor: [1.0, 0.72, 0.36],
     particle: [1, 0.7, 0.3], sound: 'stone',
   }),
 
@@ -395,9 +437,9 @@ export const BLOCKS = [
   block({ name: 'gold_block', label: 'Gold Block', all: 'gold_block', hardness: 4, tool: 'pick', tier: 3, particle: [0.95, 0.8, 0.3], sound: 'metal' }),
   block({ name: 'crystal_block', label: 'Crystal Block', render: R_GLASS, all: 'crystal_block', opaque: false, hardness: 2, tool: 'pick', light: 10, lightColor: [0.5, 0.8, 1.0], particle: [0.55, 0.8, 1], sound: 'glass' }),
   block({ name: 'lantern', label: 'Lantern', all: 'lantern', hardness: 0.6, light: 14, lightColor: [1.0, 0.78, 0.45], particle: [1, 0.8, 0.45], sound: 'metal' }),
-  block({ name: 'crate', label: 'Crate', top: 'crate', side: 'crate', hardness: 1.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
+  block({ name: 'crate', label: 'Crate', top: 'crate', side: 'crate', hardness: 2.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
 
-  block({ name: 'bench', label: 'Workbench', top: 'bench_top', side: 'bench_side', bottom: 'planks', hardness: 1.4, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
+  block({ name: 'bench', label: 'Workbench', top: 'bench_top', side: 'bench_side', bottom: 'planks', hardness: 2.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
   block({ name: 'kiln', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', particle: [0.45, 0.44, 0.46], sound: 'stone' }),
   block({ name: 'kiln_lit', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front_lit', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', light: 12, lightColor: [1.0, 0.62, 0.28], particle: [0.9, 0.5, 0.2], sound: 'stone' }),
   // Not `directional`: that flag drives the generic "face the player" placement
@@ -422,7 +464,7 @@ export const BLOCKS = [
   // Somewhere to write "mine, 40 down" before you forget which shaft it was.
   block({
     name: 'sign', label: 'Sign', render: R_SIGN, all: 'sign',
-    directional: true, opaque: false, hardness: 0.4, tool: 'axe',
+    directional: true, opaque: false, hardness: 1.0, tool: 'axe',
     particle: [0.62, 0.46, 0.28], sound: 'wood', fuel: 4,
   }),
   // The only way to draw a line on the ground that a body respects but your eye
@@ -430,14 +472,14 @@ export const BLOCKS = [
   // why every garden built so far has been a stone box.
   block({
     name: 'fence', label: 'Fence', render: R_FENCE, all: 'fence',
-    opaque: false, hardness: 0.5, tool: 'axe',
+    opaque: false, hardness: 2.0, tool: 'axe',
     particle: [0.58, 0.42, 0.25], sound: 'wood', fuel: 5,
   }),
   // A shelter you can walk out of. Until now the only way to seal a doorway was
   // to fill it in and mine it out again every dawn.
   block({
     name: 'door', label: 'Door', render: R_DOOR, top: 'door_top', side: 'door',
-    bottom: 'door_top', directional: true, opaque: false, hardness: 0.9,
+    bottom: 'door_top', directional: true, opaque: false, hardness: 3.0,
     tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 8,
   }),
 
@@ -501,10 +543,10 @@ export const BLOCKS = [
   // One plank per species. The tool and bench recipes stay on oak `planks`, so
   // birch and pine planks each carry a 1:1 recipe back to it — a player who
   // spawns in a pine forest must never be locked out of a pickaxe.
-  block({ name: 'planks_birch', label: 'Birch Planks', all: 'planks_birch', hardness: 1.2, tool: 'axe', particle: [0.82, 0.72, 0.54], sound: 'wood', fuel: 4 }),
-  block({ name: 'planks_pine', label: 'Pine Planks', all: 'planks_pine', hardness: 1.2, tool: 'axe', particle: [0.44, 0.34, 0.24], sound: 'wood', fuel: 4 }),
-  block({ name: 'planks_dark', label: 'Charred Planks', all: 'planks_dark', hardness: 1.2, tool: 'axe', particle: [0.32, 0.24, 0.18], sound: 'wood', fuel: 4 }),
-  block({ name: 'planks_grey', label: 'Weathered Planks', all: 'planks_grey', hardness: 1.2, tool: 'axe', particle: [0.58, 0.55, 0.5], sound: 'wood', fuel: 4 }),
+  block({ name: 'planks_birch', label: 'Birch Planks', all: 'planks_birch', hardness: 2.0, tool: 'axe', particle: [0.82, 0.72, 0.54], sound: 'wood', fuel: 4 }),
+  block({ name: 'planks_pine', label: 'Pine Planks', all: 'planks_pine', hardness: 2.0, tool: 'axe', particle: [0.44, 0.34, 0.24], sound: 'wood', fuel: 4 }),
+  block({ name: 'planks_dark', label: 'Charred Planks', all: 'planks_dark', hardness: 2.0, tool: 'axe', particle: [0.32, 0.24, 0.18], sound: 'wood', fuel: 4 }),
+  block({ name: 'planks_grey', label: 'Weathered Planks', all: 'planks_grey', hardness: 2.0, tool: 'axe', particle: [0.58, 0.55, 0.5], sound: 'wood', fuel: 4 }),
 
   // --- earth ---------------------------------------------------------------
   block({ name: 'coarse_dirt', label: 'Coarse Dirt', all: 'coarse_dirt', hardness: 0.65, tool: 'shovel', particle: [0.42, 0.34, 0.24], sound: 'soil' }),
@@ -549,11 +591,19 @@ export const BLOCKS = [
   // strictly better pickaxe on top of that. A block that is gated harder and
   // breaks faster teaches the player that the gate is decoration.
   //
-  // 18 puts it at 4.5s with the astral pick that unlocks it, against obsidian's
-  // 5.0s with the iron one that unlocks obsidian: each is the wall at the end
-  // of its own tier, and each takes about the same five seconds to get through
-  // with the tool you had to earn to try. With a cinder pick it is 3.2s.
-  block({ name: 'voidstone_ore', label: 'Voidstone', all: 'voidstone_ore', hardness: 18, tool: 'pick', tier: 4, drop: 'void_shard', dropCount: 2, light: 5, lightColor: [0.55, 0.3, 0.95], particle: [0.45, 0.24, 0.75], sound: 'glass' }),
+  // **32, up from 18**, and it moves because obsidian moved. The rule this
+  // block is written to is a coupling, not a number: it is the wall at the end
+  // of *its* tier exactly as obsidian is the wall at the end of the one below,
+  // so it has to stay above obsidian or the gate is decoration again. Obsidian
+  // went 14 -> 28 on the Minecraft measurement (see the note there); at 18 this
+  // would have ended up **softer than the block it is meant to be the reward
+  // past**, which is the precise fault the 7 -> 18 correction existed to fix.
+  //
+  // 32 puts it at 8.0s with the astral pick that unlocks it, against obsidian's
+  // 10.0s with the iron one that unlocks obsidian: each is the wall at the end
+  // of its own tier, and each is about ten seconds' work with the tool you had
+  // to earn to try. With a cinder pick it is 5.7s.
+  block({ name: 'voidstone_ore', label: 'Voidstone', all: 'voidstone_ore', hardness: 32, tool: 'pick', tier: 4, drop: 'void_shard', dropCount: 2, light: 5, lightColor: [0.55, 0.3, 0.95], particle: [0.45, 0.24, 0.75], sound: 'glass' }),
 
   block({ name: 'deep_coal_ore', label: 'Deep Coal Ore', all: 'deep_coal_ore', hardness: 3.6, tool: 'pick', tier: 1, drop: 'coal', dropCount: 2, particle: [0.24, 0.24, 0.26], sound: 'stone' }),
   block({ name: 'deep_copper_ore', label: 'Deep Copper Ore', all: 'deep_copper_ore', hardness: 3.6, tool: 'pick', tier: 1, drop: 'raw_copper', dropCount: 2, particle: [0.72, 0.44, 0.26], sound: 'stone' }),
@@ -626,7 +676,7 @@ export const BLOCKS = [
   ].flatMap(([base, label, bark, rings, particle]) => [1, 2].map((ax) => block({
     name: `${base}_${ax === 1 ? 'i' : 'j'}`, label,
     top: rings, side: bark, bottom: rings,
-    fixedAxis: ax, hardness: 1.2, tool: 'axe', drop: base,
+    fixedAxis: ax, hardness: 1.7, tool: 'axe', drop: base,
     particle, sound: 'wood', fuel: 6,
   }))),
 

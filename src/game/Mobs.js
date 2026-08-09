@@ -1156,11 +1156,19 @@ const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 //
 //   fox        4.35   just under a walk — you *can* stroll away from a fox, and
 //                     its damage note says exactly that, so now it is true
-//   husk       4.50   reels in a walking player slowly; a sprint sheds it
+//   husk       3.84   comfortably under a walk: you can always leave one, but
+//                     you cannot dawdle. (This read 4.50 for a long time, off
+//                     the 1.50 the husk's own spec note explains it no longer
+//                     has. See `speed` on the husk.)
 //   dog        4.65   as the fox, but it keeps up
 //   polar/cat  4.80
 //   lion       5.40
-//   tiger      5.70   the fastest thing with teeth. Walking away no longer works
+//   tiger      5.70   the fastest thing with teeth that can reach you, and
+//                     walking away no longer works. Not the fastest thing with
+//                     teeth full stop — that is the piranha at 5.85, and the
+//                     shark is 5.55; neither has `fights`, so neither is on
+//                     this ladder, and both are on the wrong side of the
+//                     shoreline in any case.
 //   bee        6.30   the fastest thing full stop, and it has 3hp
 //   elephant   3.00   deliberately below a walk: its whole lesson is the single
 //                     blow, and "walking away always works" is what makes that
@@ -1174,14 +1182,80 @@ const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 //
 // On the prey side FLEE is deliberately well under CHASE, so a committed hunter
 // genuinely runs its dinner down instead of relying on the flee timer lapsing.
-// Every flee speed also stays under the player's sprint, and every one of them
-// bar the bee's 4.62 stays under the player's *walk* — the fastest bolt on four
-// legs is the bunny at 4.07 and a strolling player still gains on it. A cow you
-// cannot reach is a cow you cannot farm.
+// Every flee speed stays under the player's sprint, and every one of them on
+// four legs stays under the player's *walk* — the fastest is the bunny at 4.07
+// and a strolling player still gains on it. A cow you cannot reach is a cow you
+// cannot farm. The two exceptions are both airborne and both deliberate: the
+// bee bolts at 4.62 and the parrot at 5.72, so a bird that has decided to leave
+// is gone unless you sprint. (5.72 is over a walk, which the earlier version of
+// this note did not say; it is a consequence of the parrot's 2.60 amble, which
+// exists so that a bird at canopy height reads as flying rather than hovering,
+// and it costs nothing — a parrot is not something you catch on foot.)
 /** A committed chase, as a multiple of the wander pace. */
 const CHASE_SPEED = 3.0;
 /** A bolt. Lower than a chase on purpose — see the ladder above. */
 const FLEE_SPEED = 2.2;
+
+/**
+ * ...and the same thing again for a hunt, where the ladder above does not apply.
+ *
+ * Everything in the ladder is priced against the player: a fox chases at 4.35
+ * because a fox is a thing you can stroll away from. Predation was reading the
+ * same number and it does not mean the same thing there, because a fox is not
+ * chasing the player, it is chasing a bunny that bolts at 1.85 x FLEE_SPEED =
+ * 4.07. Measured, a fox closed on a bunny at 0.28 cells/s and a dog at 0.58,
+ * against a PREY_GIVE_UP of twelve seconds — so neither could take one from
+ * beyond about four cells, and the fox then needed four bites at BITE_PERIOD to
+ * finish a 4hp rabbit. "Carnivores hunt the herd" was true of the big cats and
+ * of nothing small. A fox that cannot catch a rabbit is not a predator, it is a
+ * fox-shaped animation that runs behind rabbits.
+ *
+ * A flat multiplier cannot fix it: a fox ambles at 1.45 and a bunny at 1.85, so
+ * any number that is the same for both leaves the fox behind. The pace is
+ * therefore taken from the animal being chased — a hunter runs at whatever its
+ * dinner is running at, plus a margin — which is both the honest description of
+ * a chase and, usefully, self-limiting:
+ *
+ *   - it only ever raises the pace of a hunter whose prey is fast relative to
+ *     it. A lion on a cow, a shark on a fish, a piranha on anything: the flee
+ *     speed is already well under CHASE_SPEED x the hunter's own amble, so the
+ *     clamp holds them at exactly the 3.0 they run at today and not one of
+ *     those pairings changes at all;
+ *   - it is bounded by a ceiling, which matters twice over. It keeps the
+ *     fastest hunt on the planet at about 5.5 cells/s — under the bee's 6.3,
+ *     which is the speed the movement code is sized against (see _throwStep on
+ *     why a step per frame is safe at that pace and not at any pace) — and it
+ *     keeps the run clip legal: the rate is M/2 against a clamp of 2.2, so 4.0
+ *     is the largest multiplier that does not skate.
+ *
+ * The kill RATE is untouched by any of this, which is the point of doing it
+ * here rather than by loosening PREY_GIVE_UP or PREY_REST. A carnivore still
+ * eats once per PREY_REST and nothing else has moved; what changes is that the
+ * hunts it spends that clock on can now succeed, which is what the note at the
+ * top of this block already claimed was true.
+ */
+const PREY_CLOSE = 1.6;         // cells/second a hunter aims to gain on its prey
+const PREY_CHASE_MAX = 4.0;     // ...and the most it may multiply its amble by
+/**
+ * Bites to bring prey down, and why predation does not use the damage ladder.
+ *
+ * `spec.damage` is a price on fighting the *player* — a fox does 1 because a
+ * fox is meant to be a nuisance you can walk away from mid-bite. Spending that
+ * number on a rabbit made the smallest hunters unable to finish what they had
+ * caught: four bites at BITE_PERIOD is six seconds of a fox standing on a
+ * rabbit inside a twelve-second give-up window that is also paying for the
+ * chase. The old expression was `spec.damage ?? 4`, and the fallback was its
+ * own bug — the cat has no `fights` and so no damage, which handed the one
+ * animal on the planet that explicitly does not fight the biggest bite in the
+ * table, twice the dog's. There is now nothing to fall back to.
+ *
+ * So a hunt lands in a fixed number of bites whatever is doing the biting, and
+ * the chase between them — which is what BITE_PERIOD exists to produce — is
+ * still there, twice. A hunter that hits harder than that still hits harder:
+ * the max keeps a tiger's bite a tiger's bite rather than capping it at half a
+ * deer.
+ */
+const PREY_BITES = 2;
 
 const SPECIES = {
   // --- large grazers ---
@@ -1266,7 +1340,12 @@ const SPECIES = {
     // and the pair were indistinguishable at any distance.
     label: 'Fox', h: 0.58, hp: 6, spd: 1.45, shy: 0.8, turn: 4.5, accel: 8.0,
     diet: 'carnivore', idleMin: 1.5, idleMax: 4, drops: HIDE_MEAT,
-    eats: ['bunny', 'chick', 'parrot'],
+    // No parrot. It was on this list and could never be taken off it: a parrot
+    // `flies`, and _findPrey refuses any flier to a hunter that does not, for
+    // the reason written out there. A list entry that the gate below it can
+    // never admit is worse than no entry — it reads as a fox that hunts birds
+    // and produces a fox that does not.
+    eats: ['bunny', 'chick'],
     // The bottom of the ladder, and it has to actually be the bottom. At 2 per
     // blow on a 0.85s swing a fox was doing 90% of a husk's damage, which makes
     // the smallest thing that fights you and the thing that hunts you at night
@@ -1277,10 +1356,17 @@ const SPECIES = {
   cat: pet('cat', {
     // A hunter of chicks and nothing else, and no threat to the player — a cat
     // that fought back would be comedy rather than danger, which is why it gets
-    // a diet but no `fights`.
+    // a diet but no `fights`. That used to leak: predation read `damage ?? 4`,
+    // so the one animal here with no damage at all bit prey for twice what the
+    // dog does. It is `_preyBite` that decides now, off the prey, and this spec
+    // can go on saying nothing about damage — which is what it means.
     label: 'Cat', h: 0.46, hp: 6, spd: 1.60, shy: 0.9, turn: 5.5, accel: 10.0,
     diet: 'carnivore', idleMin: 1.2, idleMax: 4, drops: [['hide', 1, 1]],
-    eats: ['chick', 'bee', 'bunny'],
+    // No bee, for the reason the fox has no parrot — and this is the pairing
+    // _findPrey's own flier rule was written about, so the list was left saying
+    // something the code had already decided against. A cat still takes chicks
+    // and bunnies, which is the whole of what a cat is for here.
+    eats: ['chick', 'bunny'],
   }),
   koala: pet('koala', {
     label: 'Koala', h: 0.56, hp: 6, spd: 0.80, shy: 0.5, turn: 2.4, accel: 4.0,
@@ -1974,6 +2060,54 @@ const SHORE_PULL = 16;   // and this far is as far as one will look for it
 /** How high in the surface layer a floating body rides, in cells. */
 const WADE_RIDE = 0.25;
 /**
+ * ...and where standing in water stops and being in the drink begins.
+ *
+ * "Husks are not chasing me in water" — and they were not, at any depth at all,
+ * because two rules together made every wet column on the planet a wall to
+ * anything that walks:
+ *
+ *   1. `_footprintCost` (and `_stepTo` behind it) treated liquid as solid for
+ *      any land body, with an exemption for one that is already `wading`. That
+ *      exemption cannot be reached from dry land — `wading` is only true of a
+ *      body that is *in* the water — so a walker could be in water it had been
+ *      knocked into and could never choose to enter any. A husk stopped dead at
+ *      the water line of a puddle.
+ *   2. `wading` itself meant "touching water", so the moment a body did end up
+ *      in an inch of it, the get-out-of-the-water override took the frame: it
+ *      floated at WADE_RIDE, dropped to a paddle, forgot what it was doing and
+ *      swam for the bank.
+ *
+ * Between them, standing in water was a complete defence against the one thing
+ * on this planet that comes for you unasked — and, with the door fault above,
+ * the second of two ways to make the night stop applying by standing somewhere.
+ * That is a bigger change to what a torch is worth than any number in this file.
+ *
+ * The line drawn here is depth, and it is drawn per body rather than as a
+ * constant, because "can I stand up in this" is a question about the animal:
+ * a husk is 1.72 and a chick is 0.26, and one number cannot mean the same thing
+ * to both. Water no deeper than WADE_STAND of the body's drawn height is
+ * something it stands in — feet on the bed, walking, hunting, footprint rules
+ * exactly as on land, and no more special than tall grass. Deeper than that it
+ * is out of its depth: it floats, it wants the bank, and everything the swim
+ * code already does takes over unchanged.
+ *
+ * 0.72 puts the line for a husk at 1.24 cells, i.e. it will walk into a
+ * one-block ford or shallows and not into a two-block channel — chest-deep on
+ * it, head clear. For the wildlife the effect is almost nothing, which is the
+ * point of scaling it: at one block of water the only species tall enough to
+ * wade are the ones a player would expect to (cow, deer, lion, tiger, polar,
+ * husk and up), and a chick still treats a puddle as a wall. The ceiling stops
+ * a giraffe deciding a four-deep river is a paddle.
+ *
+ * Deep water therefore stays a refuge, and that is deliberate: _hunt already
+ * holds a hostile on the bank when the player is genuinely swimming (see
+ * `_playerAfloat`), and the two lines now agree instead of one of them being
+ * unreachable. What is no longer a refuge is ankle depth.
+ */
+const WADE_STAND = 0.72;
+/** ...and the most water anything walks into, however tall it is. */
+const WADE_STAND_MAX = 2.0;
+/**
  * How far above itself a floating body may haul itself out onto, in cells.
  *
  * The one number that says what "getting out of the water" means, and it is
@@ -2113,6 +2247,67 @@ const footCaps = (drawnHeight) => ({
   capW: Math.min(FOOT_HALF_MAX, Math.max(FOOT_HALF_W_MIN, drawnHeight * FOOT_W_PER_H)),
   capL: Math.min(FOOT_HALF_MAX, Math.max(FOOT_HALF_L_MIN, drawnHeight * FOOT_L_PER_H)),
 });
+
+/**
+ * How much narrower the ground a body needs is than the body you can see.
+ *
+ * Two different questions were being answered with one number, and that is why
+ * nothing could walk through a door.
+ *
+ *   - "how close may the player get before they are inside the mesh" — the
+ *     silhouette, and the box measured off the model is exactly right for it.
+ *     That is `radius`, and it is what the giants report was about.
+ *   - "will this body fit through that gap" — the ground it needs, which is not
+ *     the silhouette. `modelExtents` measures the whole drawn AABB in the rest
+ *     pose, adds a margin for limb swing, and every one of those cells then has
+ *     to be clear terrain. An animal is not a box: shoulders, ears, antlers, a
+ *     tail and a swinging foreleg all sit inside that width and none of them is
+ *     stopped by a door frame.
+ *
+ * Measured, the second reading of the box was refusing a one-block doorway to
+ * 24 of the 41 species — including the husk, at 0.58 against the 0.50 a
+ * one-cell gap allows. A husk that cannot come through a door is a night threat
+ * that stops applying to anyone standing in a hut, and that is a change to what
+ * torches and shelter are worth that nobody chose. The comment at
+ * FOOT_HALF_W_MIN still claimed 0.47 "lets a fox or a deer take a doorway",
+ * which had been false since that flat cap became a floor under a height-scaled
+ * one: the cap it belongs to now reads 0.95 for a husk and never binds.
+ *
+ * The size of the allowance is not a guess — the player is the calibration. The
+ * husk and the player wear the same character rig, that mesh measures 0.58 half
+ * a width here, and the player's own hand-tuned collision half-width is
+ * PLAYER_RADIUS, 0.34. So the game already walks that body through the world at
+ * 0.59 of its drawn box, has done for as long as there has been a player, and
+ * nobody has ever reported a shoulder in a wall. 0.56 is a shade tighter than
+ * the allowance the player gets, and it is the number rather than 0.59 because
+ * of where the two land: at 0.56 a cow and a polar bear take a doorway and at
+ * 0.59 they are refused by half a hundredth, which is the kind of line that
+ * reads as a bug from the far side of a fence.
+ *
+ * Across the body only. Length is left honest, because the two are not the same
+ * claim: a snout in a wall is what the footprint test was written for (see
+ * modelExtents on the woolly), an animal walks forwards into walls far more
+ * often than sideways, and the doorway question is entirely about width.
+ *
+ * The cost, stated: a wide body may now bring its flank about 0.4 cells nearer
+ * a wall face than its drawn edge — for most species nearer 0.25, which is the
+ * same overlap the player has always had. That is the price of a door that the
+ * things a door is for can actually use, and it is paid in the direction where
+ * it is least often seen.
+ *
+ * Nothing about the giants moves. `radius` is taken from the drawn width, so
+ * _separate keeps the exclusion ring the elephant and giraffe were given, and
+ * both still need a three-cell gap to walk down after the tuck (1.02 and 1.06
+ * against the 1.00 a two-cell gap allows) exactly as the note above intends.
+ *
+ * Not the fish. Every word above is about a body with limbs that fold and a
+ * gait that swings them, and a fish has neither: its drawn box is its body,
+ * held rigid, and the only rule it has is that rock and it cannot be in the
+ * same place. Shrinking that would be shrinking the hull for no reason and
+ * against the seabed clamp, which is measured in the same units.
+ */
+const FOOT_TUCK = 0.56;
+const tuckW = (spec, drawn) => (spec.aquatic ? drawn : drawn * FOOT_TUCK);
 
 /**
  * Horizontal half-extents of a built model, in cells, along its own axes.
@@ -2794,6 +2989,12 @@ export class Mobs {
       // guessed from the spec, and kept as a length and a width rather than one
       // radius — see modelExtents.
       ...ext,
+      // Two widths, and which one a piece of code wants is the whole of
+      // FOOT_TUCK: `drawW` is the body you can see and `halfW` is the ground it
+      // needs. Everything that samples the terrain reads `halfW`; `radius`, and
+      // through it every body-against-body distance in the file, reads `drawW`.
+      drawW: ext.halfW,
+      halfW: tuckW(spec, ext.halfW),
       // The same numbers again, kept so a predator that eats its way larger can
       // scale its body without re-measuring. Re-measuring is not an option once
       // the animal is in the world: modelExtents reads a *world-space* box, and
@@ -2803,7 +3004,7 @@ export class Mobs {
       baseHalfL: ext.halfL,
       baseBelly: ext.belly,
       baseHeight: spec.height * sizeJitter,
-      get radius() { return Math.max(this.halfW, this.halfL); },
+      get radius() { return Math.max(this.drawW, this.halfL); },
       love: 0,             // seconds left willing to breed
       breedCooldown: 0,    // rest before breeding again
       baby: 0,             // seconds left as a calf; 0 means fully grown
@@ -3528,6 +3729,35 @@ export class Mobs {
   }
 
   /** Layer of the water surface at or above k — where a fish must stop rising. */
+  /**
+   * How deep water may be before this body is out of its depth, in cells.
+   *
+   * Off the drawn height rather than `tall`, which is that height rounded up
+   * into whole blocks of headroom: a husk and a cow both need two, and they are
+   * not the same animal in water. See WADE_STAND.
+   */
+  _wadeDepth(mob) {
+    const h = (mob.baseHeight ?? mob.spec.height) * (mob.grown ?? 1);
+    return Math.min(WADE_STAND_MAX, h * WADE_STAND);
+  }
+
+  /**
+   * Is the water over `gk` in this column shallow enough for `mob` to stand up
+   * in — i.e. is this a ford rather than the drink?
+   *
+   * Counted in whole layers, because water is: one block of it is one deep.
+   * `wade` is passed in rather than recomputed because the caller asks this of
+   * up to nine columns in a row and the answer does not vary between them.
+   */
+  _fordable(col, gk, wade) {
+    if (wade <= 0) return false;
+    // No bed under it at all: whatever this body is doing, it is not standing.
+    if (gk < 0) return false;
+    if (!this.planet.liquidAt(col, gk + 1)) return true;   // not wet at all
+    if (this.planet.at(col, gk + 1) === ID.lava) return false;
+    return this._waterTop(col, gk + 1) - gk <= wade;
+  }
+
   _waterTop(col, k) {
     let top = k;
     while (top + 1 < D && this.planet.liquidAt(col, top + 1)) top++;
@@ -3857,6 +4087,11 @@ export class Mobs {
     const afloat = !!mob.spec.aquatic || !!mob.swimming || !!mob.wading;
     /** ...and the narrower question: is this body *only* ever in the water? */
     const aquaticBody = !!mob.spec.aquatic;
+    // How deep a wet column may be and still be ground to this body — see
+    // WADE_STAND. Read once for all nine samples, and only for the bodies the
+    // water rule below actually applies to.
+    const wade = (aquaticBody || mob.spec.flies || mob.spec.amphibious || afloat)
+      ? 0 : this._wadeDepth(mob);
     for (let n = 0; n < 9; n++) {
       const lw = FOOT_OFF[n * 2] * hw;      // across the body
       const ll = FOOT_OFF[n * 2 + 1] * hl;  // along the body
@@ -3921,8 +4156,17 @@ export class Mobs {
       // A flier is not walking, so water is not a wall to it. Without this a
       // bee or a parrot treated a lake exactly as a land animal does and turned
       // back at the shore — which is why nothing ever flew over open water.
+      //
+      // ...and neither is a ford a wall. `!mob.wading` was the only way past
+      // this line for a walker and it is unreachable from dry land, so nothing
+      // that walks could ever choose to put a foot in water however shallow —
+      // see WADE_STAND for what that cost the night. `_fordable` is the same
+      // question asked of the depth instead of the flag, and it still says no
+      // to lava, to anything out of its depth, and to every body too small to
+      // stand in what is there.
       if (mob.spec.aquatic ? !wet
-        : (wet && !mob.spec.flies && !mob.spec.amphibious && !mob.wading)) {
+        : (wet && !mob.spec.flies && !mob.spec.amphibious && !mob.wading
+           && !this._fordable(col, gk, wade))) {
         cost++; continue;
       }
       // The step rules, which are about *walking* and so do not apply to
@@ -5057,8 +5301,11 @@ export class Mobs {
     if (p.at(col, gk + 1) === ID.lava) return -1;  // and never through lava
     const wet = p.liquidAt(col, gk + 1);
     // Same exemption as the footprint test — the pathfinder has to agree with
-    // it or a flier plans a route round a lake it is perfectly able to cross.
-    if (mob.spec.aquatic ? !wet : (wet && !mob.spec.flies && !mob.spec.amphibious)) return -1;
+    // it or a flier plans a route round a lake it is perfectly able to cross,
+    // and a husk plans one round the ford it is standing in.
+    if (mob.spec.aquatic ? !wet
+      : (wet && !mob.spec.flies && !mob.spec.amphibious
+         && !this._fordable(col, gk, this._wadeDepth(mob)))) return -1;
     for (let h = 1; h <= mob.tall; h++) {
       const above = p.at(col, gk + h);
       if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) return -1;
@@ -5162,7 +5409,12 @@ export class Mobs {
   _setGrowth(mob, grown) {
     mob.grown = Math.min(GROW_MAX, Math.max(1, grown));
     const { capW, capL } = footCaps(mob.baseHeight * mob.grown);
-    mob.halfW = Math.min(capW, mob.baseHalfW * mob.grown);
+    // The drawn width first, because that is what the cap is written against,
+    // and the footprint from it — see FOOT_TUCK. A body restored from a save
+    // written before `drawW` existed comes through here too, so the two can
+    // never be left disagreeing.
+    mob.drawW = Math.min(capW, mob.baseHalfW * mob.grown);
+    mob.halfW = tuckW(mob.spec, mob.drawW);
     mob.halfL = Math.min(capL, mob.baseHalfL * mob.grown);
     mob.tall = Math.max(1, Math.ceil(mob.baseHeight * mob.grown - 0.001));
     // Grows with the rest of it. `?? 0` for a body restored from a save written
@@ -5603,6 +5855,35 @@ export class Mobs {
    *
    * @returns {boolean} true if it is stalking, so wandering stands down
    */
+  /**
+   * How fast this hunter runs at the animal it is chasing, as a multiple of its
+   * own amble. See PREY_CLOSE for the whole argument.
+   *
+   * Off the prey's *species* pace rather than its current speed on purpose: a
+   * bolt is what it will be doing the moment it notices, and steering a chase
+   * by what the prey happens to be doing this frame would have the hunter slow
+   * to a walk every time its dinner paused, which is a hunter that never
+   * arrives and looks like one that has changed its mind.
+   */
+  _huntPace(mob) {
+    const prey = mob.prey;
+    if (!prey) return CHASE_SPEED;
+    const flee = prey.spec.speed * FLEE_SPEED;
+    return clamp((flee + PREY_CLOSE) / mob.spec.speed, CHASE_SPEED, PREY_CHASE_MAX);
+  }
+
+  /**
+   * What one bite takes off this particular animal. See PREY_BITES.
+   *
+   * `spec.health` and not the individual's current health, so the count is
+   * bites-to-kill from full and a wounded animal dies sooner rather than the
+   * hunt stretching to the same two bites however hurt it already was.
+   */
+  _preyBite(mob, prey) {
+    const own = mob.spec.damage ?? 0;
+    return Math.max(1, own, Math.ceil((prey.spec.health ?? 4) / PREY_BITES));
+  }
+
   _stalk(mob, dt) {
     const spec = mob.spec;
     if (!spec.preyOn) return false;
@@ -5693,9 +5974,9 @@ export class Mobs {
      *
      * Contact used to end the animal outright, whatever it was: a lion reaching
      * a deer removed it on the frame it touched it, so predation had no middle
-     * and nothing ever got away. Now the lunge costs the prey the hunter's own
-     * damage, and a deer with health left bolts — so a kill takes two or three
-     * passes and the chase is the part you watch.
+     * and nothing ever got away. Now the lunge costs the prey PREY_BITES-worth
+     * of itself, and one with health left bolts — so a kill takes two passes
+     * and the chase is the part you watch.
      *
      * Health is decremented here rather than through `_damage` on purpose. That
      * calls `_die`, which splices the list, and this runs inside the update
@@ -5703,7 +5984,7 @@ export class Mobs {
      * comment above is about. The `_kills` list exists precisely so a death is
      * collected after the loop, so a fatal bite goes there exactly as before.
      */
-    prey.health -= spec.damage ?? 4;
+    prey.health -= this._preyBite(mob, prey);
     prey.hurtT = 0.25;
     if (prey.health > 0) {
       if (this.onSound) this.onSound('hurt', prey);
@@ -5712,6 +5993,12 @@ export class Mobs {
       prey.state = 'flee';
       prey.stateT = 2.5;
       prey.speedNow = prey.spec.speed * FLEE_SPEED;
+      // PREY_GIVE_UP measures a hunt that is getting nowhere, and a hunter with
+      // its teeth in something is not getting nowhere. Without this the window
+      // has to pay for the closing run AND for every bite after it, so the
+      // slowest hunters were timed out mid-meal — which is the one moment a
+      // predator visibly gives up that no player would read as a decision.
+      mob.preyChase = 0;
       mob.preyT = PREY_PERIOD;
       mob.state = 'chase';
       mob.stateT = 0.6;
@@ -6338,10 +6625,17 @@ export class Mobs {
       // has settled and one that is visibly still trying to leave.
       const swimPace = (mob.swimWant === null && mob.swimAlong !== null)
         ? SWIM_CIRCLE : SWIM_SPEED;
+      // A hunt is the one chase whose pace is not the ladder's — see
+      // PREY_CLOSE. `prey` alone is not enough to tell one apart: a courting
+      // animal also chases (see _court), and a hunter that has been hit drops
+      // its meal for the player without necessarily clearing `prey` on the
+      // same frame, so both are excluded rather than assumed.
+      const onPrey = chasing && !!mob.prey && mob.love <= 0 && mob.target !== 'player';
       const targetSpeed = moving
         ? spec.speed * (mob.wading ? swimPace
           : fleeing ? FLEE_SPEED
           : mob.creep ? PROWL_SPEED
+          : onPrey ? this._huntPace(mob)
           : chasing ? CHASE_SPEED : 1) : 0;
 
       // What the body is standing in, read once for everything that wants it:
@@ -6380,7 +6674,17 @@ export class Mobs {
        * escape, no animation but the idle. A condition of the body rather than
        * a species flag, because it is not a way of life, it is an accident.
        */
-      const wading = !swimming && !spec.flies && inWater;
+      //
+      // ...but only once it is out of its depth. `wading` used to mean "in
+      // contact with water", and everything hanging off it — the float to the
+      // surface, the paddle, the swim for the bank that overrides every other
+      // decision this body has made — then fired in an inch of it. A husk that
+      // put a foot in a stream stopped chasing and struck out for the shore.
+      // Standing in shallow water is not an accident that has befallen an
+      // animal; it is walking, with water round its legs. See WADE_STAND.
+      const wading = !swimming && !spec.flies && inWater
+        && !this._fordable(bodyCol, this._groundK(bodyCol, feetK, !!spec.climbs),
+          this._wadeDepth(mob));
       mob.wading = wading;
       // A bee was a walker with a hop, which is a bee doing an impression of a
       // rabbit. Flight is the same shape as the fish's buoyancy below: hold a

@@ -1893,10 +1893,61 @@ export class WorldGen {
       savanna: { h: [5, 7], log: ID.log_oak, leaf: ID.leaves_oak, rad: 3.3, shape: 'flat' },
     }[kind];
 
+    /**
+     * How big *this* tree is, as one multiplier on both trunk and crown.
+     *
+     * The bands above are three to five values wide — an oak was exactly 6, 7
+     * or 8 — and, worse, `rad` was a constant per kind, so every oak on the
+     * planet wore an identical crown. That is the half that was actually
+     * missing: two trees of different heights under the same canopy read as
+     * the same tree at two distances, which is what "almost same height trees"
+     * is describing even though height is not really the culprit.
+     *
+     * Three modes rather than one wide band. Widening the band alone makes the
+     * extremes exactly as common as the middle, which is neither a forest nor
+     * a nursery; a wood reads as grown when most of it sits in a believable
+     * middle and the eye can pick out the odd runt and the odd giant standing
+     * in it.
+     */
+    const pick = rng();
+    const size = pick < 0.13 ? 0.34 + rng() * 0.22        // sapling / young tree
+      : pick > 0.92 ? 1.26 + rng() * 0.24                 // giant
+        : 0.78 + rng() * 0.38;                            // the everyday spread
+
+    /**
+     * The crown follows the trunk, damped — and the damping is a correctness
+     * constraint rather than taste. DECOR_MARGIN is 6, so nothing a column
+     * decides may reach more than six columns from it. Pine is widest at 3.0;
+     * 3.0 * 1.22 plus the cone's own +0.4 rounds to five columns. Raising
+     * either number without raising DECOR_MARGIN buys a straight edge of
+     * missing leaves down every region boundary.
+     */
+    const rad = cfg.rad * (0.55 + 0.45 * Math.min(size, 1.5));
+
     // never let a canopy run off the top of the column
-    const room = Math.max(3, D - 2 - k0 - Math.ceil(cfg.rad));
-    const h = Math.min(room, cfg.h[0] + Math.floor(rng() * (cfg.h[1] - cfg.h[0] + 1)));
+    const room = Math.max(3, D - 2 - k0 - Math.ceil(rad));
+    const span = cfg.h[0] + Math.floor(rng() * (cfg.h[1] - cfg.h[0] + 1));
+    const h = Math.max(2, Math.min(room, Math.round(span * size)));
     for (let n = 0; n < h; n++) set(col, k0 + n, cfg.log, true);
+
+    /**
+     * A young tree is not a scale model of an old one. The crown profile below
+     * hangs three courses under the treetop, which on a two- or three-block
+     * trunk swallows the trunk whole and puts leaves in the dirt — so a sapling
+     * gets its own shape: a tuft on a stick, corners mostly clipped so it does
+     * not read as a cube.
+     */
+    if (h <= 3) {
+      const tk = k0 + h - 1;
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          if (di && dj && rng() < 0.6) continue;
+          set(at(di, dj), tk, cfg.leaf);
+        }
+      }
+      set(col, tk + 1, cfg.leaf);
+      return;
+    }
 
     /**
      * A canopy as a stack of discs, one per layer, with the radius given as a
@@ -1916,15 +1967,18 @@ export class WorldGen {
      */
     const crown = (ckTop, profile, ragged) => {
       for (let n = 0; n < profile.length; n++) {
-        const rad = cfg.rad * profile[n];
-        if (rad <= 0) continue;
-        const ri = Math.ceil(rad);
+        // `r` is this layer's radius; `rad` is the whole tree's. Using the
+        // latter inside the loop would give every course the full width and
+        // turn the crown into a cylinder.
+        const r = rad * profile[n];
+        if (r <= 0) continue;
+        const ri = Math.ceil(r);
         const ck = ckTop - (profile.length - 1 - n);
         for (let di = -ri; di <= ri; di++) {
           for (let dj = -ri; dj <= ri; dj++) {
             const d = Math.hypot(di, dj);
-            if (d > rad + (rng() - 0.5) * ragged) continue;
-            if (d > rad * 0.72 && rng() < ragged * 0.5) continue;
+            if (d > r + (rng() - 0.5) * ragged) continue;
+            if (d > r * 0.72 && rng() < ragged * 0.5) continue;
             set(at(di, dj), ck, cfg.leaf);
           }
         }
@@ -1936,21 +1990,21 @@ export class WorldGen {
       const levels = Math.floor(h * 0.65);
       for (let l = 0; l <= levels; l++) {
         const t = l / levels;
-        const rad = cfg.rad * (1 - t * 0.82) + 0.4;
-        const ri = Math.ceil(rad);
+        const r = rad * (1 - t * 0.82) + 0.4;
+        const ri = Math.ceil(r);
         for (let di = -ri; di <= ri; di++)
           for (let dj = -ri; dj <= ri; dj++) {
-            if (Math.hypot(di, dj) > rad) continue;
+            if (Math.hypot(di, dj) > r) continue;
             set(at(di, dj), top - l, cfg.leaf);
           }
       }
       set(col, top + 1, cfg.leaf);
     } else if (cfg.shape === 'flat') {
-      const ri = Math.ceil(cfg.rad);
+      const ri = Math.ceil(rad);
       for (let dk = 0; dk <= 1; dk++)
         for (let di = -ri; di <= ri; di++)
           for (let dj = -ri; dj <= ri; dj++) {
-            if (Math.hypot(di, dj) > cfg.rad - dk * 0.8) continue;
+            if (Math.hypot(di, dj) > rad - dk * 0.8) continue;
             if (rng() < 0.15) continue;
             set(at(di, dj), top + dk, cfg.leaf);
           }

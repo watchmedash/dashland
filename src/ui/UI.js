@@ -4,11 +4,13 @@ import * as THREE from 'three';
 import { BLOCKS } from '../world/Blocks.js';
 import { ITEMS } from '../game/Items.js';
 import { Slot, HOTBAR, TOTAL } from '../game/Inventory.js';
-import { BRANCHES, MARKS, XP_SOURCES, MAX_LEVEL, MAX_POINTS } from '../game/Skills.js';
+import { BRANCHES } from '../game/Skills.js';
 import { findRecipe, availableRecipes, craftFromInventory } from '../game/Recipes.js';
+import { itemIdOf } from '../game/Items.js';
 import {
   COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest,
 } from '../game/Trade.js';
+import * as Character from '../player/Character.js';
 import { CharacterPicker, CHARACTER_IDS, characterUrl } from '../player/Character.js';
 import { Save } from '../game/Save.js';
 import { BIOME_COLORS, R_SEA, F, cidx } from '../world/Constants.js';
@@ -16,6 +18,69 @@ import { patchColumn } from '../world/Sphere.js';
 import { compassFrame, POLAR_REF_SWAP } from '../render/Sky.js';
 
 const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands'];
+
+/**
+ * Who the fifteen are, if `Character.js` has not said yet.
+ *
+ * The names belong to the character module and are imported from it through
+ * the namespace above rather than as a named binding, because a missing named
+ * export is a *build* error in rollup and this file must not be the thing that
+ * fails while that one is being written. This table is the fallback, keyed by
+ * the same ids, and it is only ever read for an id the module did not name.
+ * Delete it once `CHARACTER_NAMES` is landed and complete.
+ */
+const FALLBACK_NAMES = {
+  a: 'Ama', b: 'Bran', c: 'Cass', e: 'Elu', f: 'Fen',
+  g: 'Gale', h: 'Hob', i: 'Isa', j: 'Juno', k: 'Kite',
+  m: 'Mira', n: 'Nell', p: 'Pike', q: 'Quill', r: 'Rook',
+};
+
+/** Whatever this character is called, by whoever is willing to say. */
+export function characterName(id) {
+  const key = String(id || CHARACTER_IDS[0]);
+  return Character.CHARACTER_NAMES?.[key] || FALLBACK_NAMES[key] || key.toUpperCase();
+}
+
+/**
+ * What a player may bring with them, and the keys the game side turns into
+ * stacks.
+ *
+ * One list, exported, because the alternative is the picker knowing a set of
+ * strings and the world builder knowing the same set again. `items` is
+ * `[itemName, count]` pairs in `Items.js`'s own naming, so the game side
+ * resolves them with `itemIdOf` and never has to agree with this file about
+ * anything but a key.
+ *
+ * The torches are in here rather than granted unconditionally: they were the
+ * one fixed thing every new planet started with, and the whole point of the
+ * screen is that the player decides instead.
+ */
+export const LOADOUT_OPTIONS = [
+  { key: 'torches', label: 'Torches', items: [['torch', 6]] },
+  { key: 'pick', label: 'Pickaxe', items: [['stone_pick', 1]] },
+  { key: 'axe', label: 'Axe', items: [['stone_axe', 1]] },
+  { key: 'shovel', label: 'Shovel', items: [['stone_shovel', 1]] },
+  { key: 'sword', label: 'Sword', items: [['stone_sword', 1]] },
+  { key: 'bow', label: 'Bow', items: [['bow', 1], ['arrow', 16]] },
+  { key: 'rod', label: 'Rod', items: [['fishing_rod', 1]] },
+  { key: 'bread', label: 'Bread', items: [['bread', 5]] },
+  { key: 'planks', label: 'Planks', items: [['planks', 16]] },
+  { key: 'coal', label: 'Coal', items: [['coal', 8]] },
+];
+
+/** How many of the above one player may take. */
+export const LOADOUT_MAX = 3;
+
+/** What Begin sends if the player touches nothing: exactly today's six torches. */
+export const DEFAULT_LOADOUT = ['torches'];
+
+/** Mob damage, and nothing else. The game side owns what the keys are worth. */
+export const DIFFICULTIES = [
+  { key: 'easy', label: 'Easy' },
+  { key: 'normal', label: 'Normal' },
+  { key: 'hard', label: 'Hard' },
+];
+export const DEFAULT_DIFFICULTY = 'normal';
 
 // Scratch for the pack bearing, which runs once a frame.
 const _dir = new THREE.Vector3();
@@ -43,22 +108,76 @@ const STAMINA_ICON = pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2
  * map whose centre pixel is not where you are standing is a map that lies about
  * the one thing it definitely knows.
  *
- * 81 columns at a stride of one covers ±40 columns, and a column at sea level
- * is 0.955 world units across (`cellArc(282)`), so the disc is about 77 units
- * wide: a couple of minutes' walk, big enough to hold a whole lake or the near
- * side of a mountain and small enough that the biome you are standing in is
- * still recognisably a shape rather than a colour. It also upscales to the
- * 148px tile by under 2x, which is the difference between a map and a blur.
+ * Raised from 81 with the frame going square, and the arithmetic is worth
+ * writing down because the two changes are the same change. The canvas is now
+ * drawn `MAP_CANVAS_PCT` wider than the window it turns inside, so the window
+ * only ever shows `1 / 1.48` of it: at 81 samples the *visible* map would have
+ * shrunk from 77 world units across to 52, which is a map of your own feet.
+ * 115 columns at a stride of one covers ±57, and a column at sea level is 0.955
+ * world units across (`cellArc(282)`), so the frame still shows about 74 units
+ * — the same couple of minutes' walk it always did. It also still upscales by
+ * under 2x, which is the difference between a map and a blur.
  *
  * Measured, because a per-frame budget was the reason not to use a second
- * camera: one full sample pass is 0.35ms (60 passes across all six faces,
- * warm). That is the entire cost of the feature and it is not paid per frame —
- * see `updateMinimap` — which works out at 2.8ms per second of *sprinting* and
+ * camera: one full sample pass was 0.35ms at 81 (60 passes across all six
+ * faces, warm), and the field is 2.0x the samples, so call it 0.7ms. That is
+ * the entire cost of the feature and it is not paid per frame —
+ * see `updateMinimap` — which works out at 5.6ms per second of *sprinting* and
  * nothing at all while you stand still.
  */
-const MAP_SAMPLES = 81;
+const MAP_SAMPLES = 115;
 const MAP_STEP = 1;
 const MAP_RADIUS = ((MAP_SAMPLES - 1) / 2) * MAP_STEP;
+
+/**
+ * How wide the canvas is drawn, as a fraction of the frame it turns inside.
+ *
+ * The map is a square now, and a square window onto a picture that rotates
+ * under it has one hard geometric requirement: the frame's own corners are
+ * `sqrt(2)/2` of its width from the centre, so at 45 degrees a canvas drawn at
+ * 100% has run out before the corner has. Anything under `sqrt(2)` clips, and
+ * it clips as two empty triangles sweeping round the frame as you turn, which
+ * is the exact failure a round frame was hiding.
+ *
+ * 1.48 is that bound plus six points, and the spare is not slack for its own
+ * sake: drawn at the exact size the outermost sampled row lands *on* the visible
+ * edge, where the bilinear upscale has nothing beyond it to blend with, and a
+ * hairline of half-transparent pixels appears along it.
+ *
+ * The same number is written once in the stylesheet, on `#mm-canvas`, as a
+ * percentage of the frame — so shrinking the frame in a media query cannot
+ * break the coverage. `mapCoversRotation` is the assertion that ties the two
+ * together, and it is checked without a DOM.
+ */
+export const MAP_CANVAS_PCT = 1.48;
+
+/** Does a canvas `pct` of the frame across still cover it at every angle? */
+export const mapCoversRotation = (pct = MAP_CANVAS_PCT) => pct >= Math.SQRT2;
+
+/**
+ * Where the north pip sits on a square frame, at angle `at` from the centre.
+ *
+ * On the old disc this was `cos`/`sin` times a radius and every direction was
+ * the same distance out. A square has no single radius: the pip has to ride
+ * the inside of the frame, which means projecting the unit direction onto the
+ * square by dividing by whichever of `|cos|`/`|sin|` is larger. Due north puts
+ * it at the middle of an edge, north-east in a corner, and it slides between
+ * the two as the map turns rather than orbiting inside the frame and leaving a
+ * visible gap along the edges.
+ *
+ * @param {number} at radians, 0 along +x, y downward as in image space
+ * @param {number} half half the frame's inner width, in px
+ * @returns {{x: number, y: number}}
+ */
+export function northPip(at, half) {
+  const c = Math.cos(at);
+  const s = Math.sin(at);
+  const m = Math.max(Math.abs(c), Math.abs(s));
+  if (m < 1e-9) return { x: 0, y: 0 };
+  const k = half / m;
+  return { x: c * k, y: s * k };
+}
+
 /**
  * Shortest gap between two redraws, in ms.
  *
@@ -67,13 +186,18 @@ const MAP_RADIUS = ((MAP_SAMPLES - 1) / 2) * MAP_STEP;
  * ever changes them — so the redraw trigger is simply "the centre column
  * changed". Sprinting crosses 6.8 columns a second, which would be 6.8 half-
  * millisecond spikes a second; this caps it at eight, and because the map is
- * 81 columns wide a fifth of a second of walking moves the picture by 1% of its
- * own width.
+ * 115 columns wide a fifth of a second of walking moves the picture by under 1%
+ * of its own width.
  */
 const MAP_REDRAW_MS = 120;
-/** Radius of the visible disc, and where the north pip sits on it, in px. */
-const MAP_SIZE = 148;
-const MAP_RIM = 61;
+/**
+ * Half the frame's inner width, in px, which is where the north pip rides.
+ *
+ * Read off the element rather than written down would be one layout read per
+ * frame for a box that never moves; the stylesheet's frame is 152px and the
+ * pip is inset far enough to keep the glyph inside its own corner ticks.
+ */
+const MAP_RIM = 62;
 
 /**
  * How much to lift the biome palette for the map.
@@ -245,13 +369,21 @@ export class UI {
       recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeEmpty: $('recipe-empty'),
       pause: $('pause'), settings: $('settings'), controls: $('controls'), death: $('death'),
       deathCause: $('death-cause'),
-      slots: $('slots'), slotList: $('slot-list'),
-      slotsTitle: $('slots-title'), slotsHint: $('slots-hint'),
+      slots: $('slots'), slotList: $('slot-list'), slotsTitle: $('slots-title'),
       chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgStatus: $('cg-status'),
-      cgWho: $('cg-who'), cgCount: $('cg-count'),
+      cgWho: $('cg-who'), cgKit: $('cg-kit'), cgDiff: $('cg-diff'),
       skills: $('skills'), skPoints: $('sk-points'), skSub: $('sk-sub'),
-      skTree: $('sk-tree'), skEarned: $('sk-earned'), skMarks: $('sk-marks'),
+      skTree: $('sk-tree'),
+      confirm: $('confirm'), cfTitle: $('cf-title'), cfBody: $('cf-body'),
+      cfYes: $('cf-yes'), cfNo: $('cf-no'),
     };
+
+    /** The New Game answers, until Begin sends them. */
+    this._loadout = [...DEFAULT_LOADOUT];
+    this._difficulty = DEFAULT_DIFFICULTY;
+    /** Resolver of the confirm currently on screen, or null. */
+    this._cfResolve = null;
+    this._cfKey = (e) => this._confirmKey(e);
 
     /** Built the first time New Game is pressed, and kept — see `CharacterPicker.close`. */
     this._picker = null;
@@ -290,10 +422,10 @@ export class UI {
     const cv = document.createElement('canvas');
     cv.id = 'mm-canvas';
     // The backing store is one pixel per sampled column and the CSS box is
-    // 148px, so the browser's own bilinear filter does the upscale. Drawing at
-    // 148x148 directly would mean either 148 columns of samples (three times
-    // the work for detail finer than the terrain has) or nearest-neighbour
-    // blocks the size of a fingernail.
+    // `MAP_CANVAS_PCT` of the 152px frame, so the browser's own bilinear filter
+    // does the upscale. Drawing at the display size directly would mean either
+    // 225 columns of samples (four times the work for detail finer than the
+    // terrain has) or nearest-neighbour blocks the size of a fingernail.
     cv.width = MAP_SAMPLES;
     cv.height = MAP_SAMPLES;
     const north = document.createElement('b');
@@ -345,7 +477,9 @@ export class UI {
     notch.className = 'cmp-notch';
     const polar = document.createElement('span');
     polar.className = 'cmp-polar';
-    polar.textContent = 'No bearing, the pole is underfoot';
+    // One word. The strip is gone and the reason it is gone is a fact about
+    // spheres, not something a HUD owes the player a sentence about.
+    polar.textContent = 'Pole';
     cmp.append(win, notch, polar);
     hud.appendChild(cmp);
 
@@ -411,14 +545,20 @@ export class UI {
    * you have actually walked somewhere.
    *
    * Heading-up rather than north-up, which is what makes it worth having on a
-   * sphere: the map turns with you, and the north the compass is using is
-   * marked on the rim rather than nailed to the top. So the two agree — they
-   * are reading the same frame — without the map being useless in the polar cap
+   * sphere: the map turns with you, and the north the compass is using rides
+   * the frame rather than being nailed to the top. So the two agree — they are
+   * reading the same frame — without the map being useless in the polar cap
    * where that frame runs out.
    *
    * The rotation is CSS on the canvas element, not a transform on the drawing.
    * The picture is only redrawn when the centre column changes; turning on the
    * spot must therefore cost a `transform` write and nothing else.
+   *
+   * The frame is square, and that is a geometry problem rather than a
+   * `border-radius` one: a square window onto a turning picture shows empty
+   * corners unless the picture covers the window's *diagonal*. See
+   * `MAP_CANVAS_PCT`, which is where the coverage lives, and `northPip`, which
+   * is how a pip rides a square instead of orbiting a circle.
    */
   updateMinimap(planet, player) {
     const el = this.el.minimap;
@@ -448,7 +588,7 @@ export class UI {
     // cell components".
     player.tangentToCell(player.forward, _cellF);
     // Image space has y downward, so this angle is clockwise from the +i axis
-    // on screen; bringing it to the top of the disc is a quarter turn back.
+    // on screen; bringing it to the top of the frame is a quarter turn back.
     const face = Math.atan2(_cellF.j, _cellF.i);
     const spin = -face - Math.PI / 2;
     const q = Math.round(spin * 500);
@@ -457,17 +597,19 @@ export class UI {
       this._mmCtx.canvas.style.transform = `rotate(${(spin * 180 / Math.PI).toFixed(2)}deg)`;
     }
 
-    // The north pip, on the rim, out of the same call the compass made — which
-    // is what guarantees the two cannot end up pointing different ways.
+    // The north pip, on the frame, out of the same call the compass made —
+    // which is what guarantees the two cannot end up pointing different ways.
     // `bearingOf` fills `_north` on the way past; the angle it returns is the
     // compass's business, not the map's.
     const lit = compassLit(bearingOf(player.up, player.forward, _east, _north).polar);
-    const pip = this.el.mmNorth;
-    pip.style.opacity = lit.toFixed(2);
+    const pipEl = this.el.mmNorth;
+    pipEl.style.opacity = lit.toFixed(2);
     if (lit > 0) {
       player.tangentToCell(_north, _cellN);
       const at = Math.atan2(_cellN.j, _cellN.i) + spin;
-      pip.style.transform = `translate(-50%,-50%) translate(${(Math.cos(at) * MAP_RIM).toFixed(1)}px,${(Math.sin(at) * MAP_RIM).toFixed(1)}px)`;
+      const p = northPip(at, MAP_RIM);
+      pipEl.style.transform =
+        `translate(-50%,-50%) translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px)`;
     }
   }
 
@@ -544,7 +686,11 @@ export class UI {
     $('mm-controls').onclick = () => this.openControls();
     document.querySelector('[data-close-slots]').onclick = () => this.closeSlots();
 
-    $('cg-begin').onclick = () => g.beginWorld(this._chosen);
+    // The id first, so today's `beginWorld(id)` is untouched, and the whole
+    // choice second. The game side reads the second argument once it is ready
+    // to act on the loadout and the difficulty; until then this is the same
+    // call it always was.
+    $('cg-begin').onclick = () => g.beginWorld(this._chosen, this.newGameChoice());
     $('cg-back').onclick = () => g.abandonNewGame();
     $('cg-prev').onclick = () => this.stepCharacter(-1);
     $('cg-next').onclick = () => this.stepCharacter(1);
@@ -564,11 +710,13 @@ export class UI {
     // something away — and unconfirmed it sits one mis-click from a build a
     // player spent an evening on. The points all come back, which is why this
     // is a confirm and not a second screen.
-    $('sk-reset').onclick = () => {
-      if (g.skills.spent > 0 && window.confirm('Unlearn every skill and take all your points back?')) {
-        g.resetSkills();
-      }
+    $('sk-reset').onclick = async () => {
+      if (g.skills.spent <= 0) return;
+      if (await this.confirm({ title: 'Unlearn everything', yes: 'Unlearn' })) g.resetSkills();
     };
+
+    this.el.cfYes.onclick = () => this._settleConfirm(true);
+    this.el.cfNo.onclick = () => this._settleConfirm(false);
     document.querySelector('[data-close-settings]').onclick = () => this.closeSettings();
     document.querySelector('[data-close-controls]').onclick = () => this.closeControls();
 
@@ -613,6 +761,65 @@ export class UI {
     $('set-compass').checked = s.compass !== false;
   }
 
+  // --- the game's own yes/no ------------------------------------------------
+
+  /**
+   * Ask, in the game's own voice, and resolve to what was pressed.
+   *
+   * Every `window.confirm` is gone through here. Three reasons, in order of how
+   * much they cost the player: a browser dialog drops pointer lock and hands
+   * the mouse back to the desktop, which on a game you play with the cursor
+   * hidden reads as a crash; it cannot be styled, so the one moment the game
+   * asks before destroying something is the one moment it stops looking like a
+   * game; and it blocks the main thread, so the world behind it stops on the
+   * frame the dialog opened.
+   *
+   * The wording rule is the same as everywhere else: `title` names the act and
+   * `body` states the facts. Nothing here explains what deleting means.
+   *
+   * @param {{title: string, body?: string, yes?: string, danger?: boolean}} ask
+   * @returns {Promise<boolean>}
+   */
+  confirm(ask) {
+    // A second question raised while one is up cancels the first rather than
+    // stacking. Two of these on screen is a state with no correct answer.
+    this._settleConfirm(false);
+    this.el.cfTitle.textContent = ask.title;
+    this.el.cfBody.textContent = ask.body || '';
+    this.el.cfBody.classList.toggle('hidden', !ask.body);
+    this.el.cfYes.textContent = ask.yes || 'Yes';
+    this.el.cfYes.classList.toggle('danger', !!ask.danger);
+    this.el.confirm.classList.remove('hidden');
+    window.addEventListener('keydown', this._cfKey, true);
+    this.el.cfNo.focus();
+    return new Promise((resolve) => { this._cfResolve = resolve; });
+  }
+
+  get confirmOpen() { return !this.el.confirm.classList.contains('hidden'); }
+
+  _settleConfirm(answer) {
+    const resolve = this._cfResolve;
+    if (!resolve) return;
+    this._cfResolve = null;
+    window.removeEventListener('keydown', this._cfKey, true);
+    this.el.confirm.classList.add('hidden');
+    resolve(answer);
+  }
+
+  /**
+   * Escape is no, Enter is yes.
+   *
+   * Captured, like the picker's keys, so neither reaches `Input` — Escape in
+   * particular would otherwise both dismiss this and pause the game behind it.
+   */
+  _confirmKey(e) {
+    if (e.key === 'Escape') this._settleConfirm(false);
+    else if (e.key === 'Enter') this._settleConfirm(true);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
   // --- loading + menu -------------------------------------------------------
 
   progress(p, label) {
@@ -651,10 +858,7 @@ export class UI {
    */
   openSlots(mode) {
     this._slotMode = mode;
-    this.el.slotsTitle.textContent = mode === 'new' ? 'Where to Keep It' : 'Continue';
-    this.el.slotsHint.textContent = mode === 'new'
-      ? 'Pick a slot for the new planet. A slot that already holds one will ask first.'
-      : 'Pick a planet to go back to.';
+    this.el.slotsTitle.textContent = mode === 'new' ? 'New Game' : 'Continue';
     this._paintSlots();
     this.el.slots.classList.remove('hidden');
     window.addEventListener('keydown', this._slotKey, true);
@@ -694,7 +898,7 @@ export class UI {
       const num = `Slot ${i + 1}`;
       if (meta) {
         open.innerHTML = `<b>${num}</b>`
-          + `<span class="slot-who">${this._characterName(meta.character)}</span>`
+          + `<span class="slot-who">${characterName(meta.character)}</span>`
           + `<span class="slot-when">Day ${meta.day || 1}, ${playedFor(meta.playtime)} played</span>`
           + `<span class="slot-ago">Saved ${agoText(meta.savedAt)}</span>`;
       } else {
@@ -707,7 +911,6 @@ export class UI {
         const del = document.createElement('button');
         del.className = 'slot-del';
         del.textContent = 'Delete';
-        del.title = `Delete the planet in slot ${i + 1}`;
         del.onclick = (e) => { e.stopPropagation(); this._deleteSlot(i, meta); };
         row.appendChild(del);
       }
@@ -724,13 +927,18 @@ export class UI {
    * act that destroys an old one. It has to be said in words, with the slot
    * named, before anything is claimed.
    */
-  _pickSlot(i, meta) {
+  async _pickSlot(i, meta) {
     if (this._slotMode === 'new') {
-      if (meta && !window.confirm(
-        `Slot ${i + 1} holds a planet: ${this._characterName(meta.character)}, day ${meta.day || 1}.`
-        + '\n\nStarting a new planet here will replace it. This cannot be undone.')) return;
+      if (meta && !await this.confirm({
+        title: `Replace slot ${i + 1}`,
+        body: `${characterName(meta.character)}, day ${meta.day || 1}`,
+        yes: 'Replace',
+        danger: true,
+      })) return;
       this.closeSlots();
-      this.game.newGame(i);
+      // The third argument is sent even when nothing has been picked yet, so
+      // there is one shape of call and one default — see `newGameChoice`.
+      this.game.newGame(i, this.newGameChoice());
       return;
     }
     if (!meta) return;
@@ -738,22 +946,20 @@ export class UI {
     this.game.continueGame(i);
   }
 
-  _deleteSlot(i, meta) {
-    if (!window.confirm(
-      `Delete the planet in slot ${i + 1}: ${this._characterName(meta.character)}, day ${meta.day || 1}?`
-      + '\n\nThis cannot be undone.')) return;
-    Save.erase(i).then(() => {
-      this._paintSlots();
-      // The main menu is behind this screen and its Continue button may have
-      // just become the last thing pointing at nothing.
-      this.el.mmContinue.disabled = !Save.hasSave();
-      this.game.audio.ui(320);
+  async _deleteSlot(i, meta) {
+    const ok = await this.confirm({
+      title: `Delete slot ${i + 1}`,
+      body: `${characterName(meta.character)}, day ${meta.day || 1}`,
+      yes: 'Delete',
+      danger: true,
     });
-  }
-
-  /** A character id as something a player can read. */
-  _characterName(id) {
-    return id ? `Character ${String(id).toUpperCase()}` : 'Character A';
+    if (!ok) return;
+    await Save.erase(i);
+    this._paintSlots();
+    // The main menu is behind this screen and its Continue button may have
+    // just become the last thing pointing at nothing.
+    this.el.mmContinue.disabled = !Save.hasSave();
+    this.game.audio.ui(320);
   }
 
   // --- the New Game character picker ----------------------------------------
@@ -775,6 +981,10 @@ export class UI {
       this.el.cgCanvas.style.aspectRatio = '1 / 1';
     }
     this._chosen = CHARACTER_IDS.includes(selected) ? selected : CHARACTER_IDS[0];
+    // Built here rather than in the constructor: the tiles carry item icons and
+    // `setIcons` has not run when the UI is first constructed.
+    this._buildKit();
+    this._buildDifficulty();
     this.el.chargen.classList.remove('hidden');
     this.characterPickerReady(false);
     this._syncCharacterName();
@@ -795,10 +1005,119 @@ export class UI {
 
   get characterPickerOpen() { return !this.el.chargen.classList.contains('hidden'); }
 
-  /** The line under the wall: worldgen's progress, told as a sentence. */
+  /** Worldgen's progress, as one word. */
   characterPickerReady(ready) {
-    this.el.cgStatus.textContent = ready ? 'Your planet is ready' : 'Shaping your planet…';
+    this.el.cgStatus.textContent = ready ? 'Ready' : 'Shaping';
     this.el.cgStatus.classList.toggle('ready', !!ready);
+  }
+
+  // --- what you bring, and how hard it hits back ----------------------------
+
+  /**
+   * The three answers this screen exists to collect, as one object.
+   *
+   * Sent to `newGame` when the slot is claimed and to `beginWorld` when the
+   * player commits, so the game side can read it at whichever of the two points
+   * suits it and there is never a call without one. Both are given the same
+   * shape and the same defaults; only `beginWorld` is guaranteed to carry the
+   * player's actual picks, because the picks are made after `newGame` starts
+   * the terrain.
+   *
+   * `loadout` is a copy. It is held on this object between the two calls and a
+   * caller that stashed the array itself would find it changing under them the
+   * next time somebody pressed a tile.
+   *
+   * @returns {{character: string, loadout: string[], difficulty: string}}
+   */
+  newGameChoice() {
+    return {
+      character: this._chosen || CHARACTER_IDS[0],
+      loadout: [...this._loadout],
+      difficulty: this._difficulty,
+    };
+  }
+
+  /**
+   * The tiles.
+   *
+   * Icon and name, and no line saying what any of them is for: a pickaxe is a
+   * pickaxe. The count rides the corner of the tile rather than the label,
+   * because "Torches" is the thing and "6" is a detail about it.
+   */
+  _buildKit() {
+    const kit = this.el.cgKit;
+    if (!kit) return;
+    kit.innerHTML = '';
+    for (const opt of LOADOUT_OPTIONS) {
+      const b = document.createElement('button');
+      b.className = 'cg-opt';
+      b.dataset.key = opt.key;
+      const [name, count] = opt.items[0];
+      if (this.icons) {
+        const img = document.createElement('img');
+        img.src = this.icons.item(itemIdOf(name));
+        img.alt = '';
+        b.appendChild(img);
+      }
+      if (count > 1) {
+        const q = document.createElement('span');
+        q.className = 'qty';
+        q.textContent = count;
+        b.appendChild(q);
+      }
+      b.appendChild(document.createTextNode(opt.label));
+      b.onclick = () => this._toggleKit(opt.key);
+      kit.appendChild(b);
+    }
+    this._syncKit();
+  }
+
+  /**
+   * Take a tile or put it back.
+   *
+   * A full loadout refuses a fourth rather than dropping the oldest. Silently
+   * swapping one out is the version where a player picks a sword and watches
+   * their torches vanish with no way to know why.
+   */
+  _toggleKit(key) {
+    const at = this._loadout.indexOf(key);
+    if (at >= 0) this._loadout.splice(at, 1);
+    else if (this._loadout.length < LOADOUT_MAX) this._loadout.push(key);
+    else { this.game.audio.ui(240); return; }
+    this._syncKit();
+    this.game.audio.ui(at >= 0 ? 380 : 620);
+  }
+
+  _syncKit() {
+    const kit = this.el.cgKit;
+    if (!kit) return;
+    kit.classList.toggle('full', this._loadout.length >= LOADOUT_MAX);
+    for (const b of kit.children) b.classList.toggle('on', this._loadout.includes(b.dataset.key));
+  }
+
+  /** Three buttons in a bar. A segmented control needs no caption per option. */
+  _buildDifficulty() {
+    const bar = this.el.cgDiff;
+    if (!bar) return;
+    bar.innerHTML = '';
+    for (const d of DIFFICULTIES) {
+      const b = document.createElement('button');
+      b.textContent = d.label;
+      b.dataset.key = d.key;
+      b.onclick = () => {
+        this._difficulty = d.key;
+        this._syncDifficulty();
+        this.game.audio.ui(560);
+      };
+      bar.appendChild(b);
+    }
+    this._syncDifficulty();
+  }
+
+  _syncDifficulty() {
+    const bar = this.el.cgDiff;
+    if (!bar) return;
+    for (const b of bar.children) b.classList.toggle('on', b.dataset.key === this._difficulty);
   }
 
   /**
@@ -825,11 +1144,16 @@ export class UI {
     this.game.audio.ui(560);
   }
 
-  /** The name under the figure, and where you are in the ring. */
+  /**
+   * The name under the figure.
+   *
+   * The name, and nothing else. There used to be a "2 of 15" beside it, which
+   * is a fact about the list rather than about the person: it told a player
+   * their position in an array they never asked to be in, and the arrows either
+   * side already say there are more.
+   */
   _syncCharacterName() {
-    const at = Math.max(0, CHARACTER_IDS.indexOf(this._chosen));
-    this.el.cgWho.textContent = `Character ${CHARACTER_IDS[at].toUpperCase()}`;
-    this.el.cgCount.textContent = `${at + 1} of ${CHARACTER_IDS.length}`;
+    this.el.cgWho.textContent = characterName(this._chosen);
   }
 
   /**
@@ -849,7 +1173,7 @@ export class UI {
     if (step !== undefined) {
       this.stepCharacter(step);
     } else if (e.key === 'Enter') {
-      this.game.beginWorld(this._chosen);
+      this.game.beginWorld(this._chosen, this.newGameChoice());
     } else if (e.key === 'Escape') {
       this.game.abandonNewGame();
     } else {
@@ -1141,16 +1465,15 @@ export class UI {
     this.el.recipeCount.textContent = options.length || '';
     this.el.recipeCount.classList.toggle('hidden', options.length === 0);
     this.el.recipeEmpty.classList.toggle('hidden', options.length > 0);
-    this.el.recipeEmpty.textContent = hasTable
-      ? 'Gather materials to see what you can make.'
-      : 'Gather materials, or stand at a workbench for the bigger recipes.';
+    // Two words, and the second one only when the bench would change the
+    // answer. What a workbench is for is not this label's job.
+    this.el.recipeEmpty.textContent = hasTable ? 'Nothing yet' : 'Nothing yet, without a bench';
 
     list.innerHTML = '';
     for (const { recipe, cost } of options) {
       const def = ITEMS[recipe.out];
       const row = document.createElement('div');
       row.className = 'recipe-row';
-      row.title = `Craft ${def.label}`;
 
       const img = document.createElement('img');
       img.src = this.icons.item(recipe.out);
@@ -1205,10 +1528,10 @@ export class UI {
     // A bow is a weapon and has no tier — it is not on the mining ladder and
     // does not become a better bow by being made of iron. Printing "tier 0"
     // beside it invited the question of where tiers 1-5 were.
-    if (def.bow) sub = `Weapon · ${def.tool.durability - slot.wear}/${def.tool.durability}`;
-    else if (def.tool) sub = `${def.tool.kind === 'sword' ? 'Weapon' : 'Tool'} · tier ${def.tool.tier} · ${def.tool.durability - slot.wear}/${def.tool.durability}`;
-    else if (def.block !== undefined) sub = 'Placeable block';
-    else if (def.food) sub = `Food · restores ${def.food}`;
+    if (def.bow) sub = `Weapon, ${def.tool.durability - slot.wear}/${def.tool.durability}`;
+    else if (def.tool) sub = `${def.tool.kind === 'sword' ? 'Weapon' : 'Tool'}, tier ${def.tool.tier}, ${def.tool.durability - slot.wear}/${def.tool.durability}`;
+    else if (def.block !== undefined) sub = 'Block';
+    else if (def.food) sub = `Food, ${def.food}`;
     else if (def.fuel) sub = 'Fuel';
     this.el.tooltip.innerHTML = `${def.label}${sub ? `<em>${sub}</em>` : ''}`;
     this.el.tooltip.classList.remove('hidden');
@@ -1231,7 +1554,7 @@ export class UI {
     this.shop = kind === 'shop' ? state || null : null;
     this.el.screenTitle.textContent =
       kind === 'bench' ? 'Workbench' : kind === 'kiln' ? 'Kiln'
-        : kind === 'shop' ? 'Wandering Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
+        : kind === 'shop' ? 'Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
     this.el.screenTop.innerHTML = '';
     this.craftSlots = null; this.craftMap = null; this.kilnSlots = null;
     this.crateSlots = null; this.offhandEl = null;
@@ -1282,9 +1605,11 @@ export class UI {
       this.craftSlots.push(d);
       this.craftMap.push(inv.craft[gi]);
     });
+    // Drawn in CSS, not typed. It was the one glyph on this screen that is not
+    // on a keyboard, and its shape depended on whichever font the browser fell
+    // back to.
     const arrow = document.createElement('div');
     arrow.className = 'craft-arrow';
-    arrow.textContent = '→';
     const outWrap = document.createElement('div');
     outWrap.className = 'craft-out';
     this.craftOut = document.createElement('div');
@@ -1436,8 +1761,8 @@ export class UI {
       c.append(h, list, empty);
       return { c, list, empty };
     };
-    const wares = column('For Sale', 'The pack is empty. Try the next one along.');
-    const goods = column('Your Goods', 'Nothing to sell. Everything you find has a price.');
+    const wares = column('For Sale', 'Nothing');
+    const goods = column('Your Goods', 'Nothing');
 
     // The errand goes above the counter, because it is the reason to have
     // walked over here rather than one more line of stock.
@@ -1472,8 +1797,8 @@ export class UI {
     const text = document.createElement('span');
     text.className = 'errand-text';
     text.innerHTML = req.done
-      ? `<b>Thank you.</b> That is exactly what I needed.`
-      : `<b>Wanted:</b> ${req.count} x ${def?.label ?? '?'} <em>(you have ${have})</em>`;
+      ? '<b>Thank you</b>'
+      : `<b>Wanted</b> ${req.count} x ${def?.label ?? '?'} <em>(you have ${have})</em>`;
 
     const tag = document.createElement('span');
     tag.className = 'shop-price';
@@ -1527,7 +1852,7 @@ export class UI {
     tag.append(coin, document.createTextNode(String(price)));
 
     row.append(img, name, have, tag);
-    row.title = 'Click for one, shift-click for ten';
+    row.title = 'Click 1, shift-click 10';
     row.addEventListener('click', (e) => onClick(e.shiftKey ? 10 : 1));
     return row;
   }
@@ -1549,7 +1874,7 @@ export class UI {
       purse.appendChild(float);
     }
     const left = mob?.purse?.coins ?? 0;
-    float.textContent = `trader has ${left}`;
+    float.textContent = `trader ${left}`;
     float.classList.toggle('low', left < 40);
     this._refreshErrand();
 
@@ -1592,10 +1917,10 @@ export class UI {
           this.toast(`Sold ${sold} x ${ITEMS[item].label}`, COIN_ITEM, 1400);
           // Say so when the purse is what stopped the sale, or it reads as a bug.
           if (sold < n && mob?.purse && mob.purse.coins < sellPriceOf(item)) {
-            this.toast('The merchant is out of coin', COIN_ITEM, 2200);
+            this.toast('Out of coin', COIN_ITEM, 2200);
           }
         } else if (mob?.purse && before < sellPriceOf(item)) {
-          this.toast('The merchant is out of coin', COIN_ITEM, 2200);
+          this.toast('Out of coin', COIN_ITEM, 2200);
           g.audio.ui(240);
         } else g.audio.ui(240);
         this.refresh();
@@ -1608,11 +1933,16 @@ export class UI {
   /**
    * The skill tree, on K.
    *
-   * Its own overlay rather than a tab of the inventory screen, for two reasons.
-   * The inventory screen is built around slots you drag things between and
-   * there is nothing here to drag; and this is the screen you open to *read*
-   * — six branches, six prices and a reason each is or is not available — which
-   * wants the whole width rather than the column the worn armour used to have.
+   * Its own overlay rather than a tab of the inventory screen: that screen is
+   * built around slots you drag things between and there is nothing here to
+   * drag.
+   *
+   * One column. It used to be two, with an aside listing every source of XP and
+   * every unearned first, and that aside was the screen apologising for the
+   * game: a player who can read a table of weights does not have to go and find
+   * out what the planet pays for, which is the part that was worth doing. The
+   * numbers still exist in `Skills.js`, where a rule belongs, and the tree is
+   * now the whole of what K opens.
    *
    * Rebuilt from scratch on every refresh. It is thirty-odd elements, it is
    * only ever repainted when a point is spent or earned, and the alternative is
@@ -1639,13 +1969,10 @@ export class UI {
 
     this.el.skPoints.textContent = left;
     this.el.skPoints.classList.toggle('none', left <= 0);
-    // All three parts of the balance. "8 points" on its own does not say whether
-    // the tree has been touched, and neither half says how much of a lifetime's
-    // earning that is — 8 of a possible 76 is a very different sentence from 8
-    // with nothing left to find, and the tree costs 91, so the last number is
-    // also the quiet statement that it can never all be bought.
-    this.el.skSub.textContent = `${left === 1 ? '1 point' : `${left} points`} to spend`
-      + ` · ${sk.spent} spent · ${sk.points} of ${MAX_POINTS} in this life`;
+    // The number, and the word for what it is. It used to carry the spend and
+    // the lifetime total beside it, which is two more numbers than the question
+    // "can I afford this row" has ever needed.
+    this.el.skSub.textContent = left === 1 ? 'point' : 'points';
 
     const tree = this.el.skTree;
     tree.innerHTML = '';
@@ -1690,18 +2017,16 @@ export class UI {
         // "Not enough points" is the one refusal that is about the player's
         // balance rather than about the branch, and it is the one they can do
         // something about — so it still shows the price.
-        if (s.blocked === 'Not enough points') buy.textContent = `Learn · ${s.cost}`;
+        if (s.blocked === 'Not enough points') buy.textContent = `Learn ${s.cost}`;
         buy.classList.toggle('short', s.blocked === 'Not enough points');
       } else {
-        buy.textContent = `Learn · ${s.cost}`;
+        buy.textContent = `Learn ${s.cost}`;
         buy.onclick = () => this.game.buySkill(s.key);
       }
 
       row.append(head, blurb, buy);
       tree.appendChild(row);
     }
-
-    this._paintEarned();
   }
 
   /**
@@ -1715,10 +2040,10 @@ export class UI {
    * it as "0 of 22 blocks" and then mined a thousand expecting linear pay.
    *
    * There is one number now and it says what it is. The bar fills toward the
-   * next level, the shortfall is stated in xp, and the head says outright that
-   * each level costs 5% more than the last — so the diminishing return is
-   * something the screen tells you before you feel it, rather than a discovery
-   * that reads as the game having cheated.
+   * next level and the shortfall is stated in xp. The line that used to sit
+   * beside the level, saying each one costs 5% more than the last, has gone
+   * with the aside: the curve is something a player feels, and a menu that
+   * announces its own arithmetic is a menu explaining the game to itself.
    */
   _xpBar(sk) {
     const p = sk.xpProgress();
@@ -1727,8 +2052,7 @@ export class UI {
 
     const head = document.createElement('div');
     head.className = 'xp-head';
-    head.innerHTML = `<b>Level ${p.level}</b><span>of ${MAX_LEVEL} · `
-      + `${p.maxed ? 'every level earned' : 'each costs 5% more than the last'}</span>`;
+    head.innerHTML = `<b>Level ${p.level}</b>`;
 
     const bar = document.createElement('div');
     bar.className = 'xp-bar';
@@ -1740,74 +2064,11 @@ export class UI {
     foot.className = 'xp-foot';
     const total = `${p.xp.toLocaleString('en-GB')} xp`;
     foot.innerHTML = p.maxed
-      ? `<span>${total}</span><em>Nothing left to level</em>`
-      : `<span>${total}</span><em>${p.toNext.toLocaleString('en-GB')} xp to level ${p.level + 1}`
-        + `, worth 1 point</em>`;
+      ? `<span>${total}</span><em>Maxed</em>`
+      : `<span>${total}</span><em>${p.toNext.toLocaleString('en-GB')} to next</em>`;
 
     box.append(head, bar, foot);
     return box;
-  }
-
-  /**
-   * What pays xp, and what is still out there.
-   *
-   * The weights, in the model's own words and order, because the second half of
-   * "earning points is confusing" was that the game never said what it wanted.
-   * A player who can see that a husk is 22 and a block of dirt is nothing knows
-   * what to go and do; a player looking at `Blocks mined 0/22` does not.
-   */
-  _paintEarned() {
-    const sk = this.game.skills;
-
-    const earned = this.el.skEarned;
-    earned.innerHTML = '';
-    const lead = document.createElement('p');
-    lead.className = 'earn-lead';
-    lead.textContent = 'Every level is one skill point. XP, per thing done:';
-    earned.appendChild(lead);
-    for (const src of XP_SOURCES) {
-      const row = document.createElement('div');
-      row.className = `earn-row${src.value === '0' ? ' nil' : ''}`;
-      row.innerHTML = `<span>${src.label}<em>${src.detail}</em></span>`
-        + `<b>${src.value === '0' ? '-' : src.value}</b>`;
-      earned.appendChild(row);
-    }
-    if (sk.bonus > 0) {
-      const row = document.createElement('div');
-      row.className = 'earn-row bonus';
-      row.innerHTML = '<span>Armour, converted<em>one-off, already taken</em></span>'
-        + `<b>+${sk.bonus} pts</b>`;
-      earned.appendChild(row);
-    }
-
-    const marks = this.el.skMarks;
-    marks.innerHTML = '';
-    let got = 0, gotXp = 0, allXp = 0;
-    for (const key in MARKS) {
-      allXp += MARKS[key].xp;
-      if (sk.marks.has(key)) { got++; gotXp += MARKS[key].xp; }
-    }
-    const sum = document.createElement('p');
-    sum.className = 'earn-lead';
-    sum.textContent = `${got} of ${Object.keys(MARKS).length} done`
-      + ` · ${gotXp} of ${allXp} XP · paid once, and only once`;
-    marks.appendChild(sum);
-
-    for (const key in MARKS) {
-      const m = MARKS[key];
-      const has = sk.marks.has(key);
-      const row = document.createElement('div');
-      row.className = `mark-row${has ? ' got' : ''}`;
-      // The old row swapped the hint for the label on earning it, which meant
-      // the two states differed only in wording and colour — an unearned mark
-      // read exactly like an earned one to anyone not comparing. Now the name
-      // is always there, the second line says either what to do or that it is
-      // done, and a tick or an empty ring says which without relying on colour.
-      row.innerHTML = `<i class="mk">${has ? '✓' : ''}</i>`
-        + `<span>${m.label}<em>${has ? 'Earned' : m.hint}</em></span>`
-        + `<b>${has ? '' : '+'}${m.xp}</b>`;
-      marks.appendChild(row);
-    }
   }
 
   // --- HUD updates ----------------------------------------------------------

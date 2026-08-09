@@ -1650,15 +1650,12 @@ class Game {
       // are holding six torches.
       const t = this.timeOfDay();
       const dark = t < 0.25 || t > 0.75;
-      this.ui.toast('You wake on a small, quiet world.', 0, 4200);
       setTimeout(() => {
         if (dark) {
-          this.ui.toast('Night already. Plant a torch, light keeps the dark out.',
-            itemIdOf('torch'), 5200);
-          setTimeout(() => this.ui.toast('Punch a tree while it lasts.',
-            itemIdOf('log_oak'), 5000), 5600);
+          this.ui.toast('Plant a torch', itemIdOf('torch'), 5200);
+          setTimeout(() => this.ui.toast('Punch a tree', itemIdOf('log_oak'), 5000), 5600);
         } else {
-          this.ui.toast('Punch a tree to begin.', itemIdOf('log_oak'), 5000);
+          this.ui.toast('Punch a tree', itemIdOf('log_oak'), 5000);
         }
       }, 4600);
     }
@@ -1825,7 +1822,7 @@ class Game {
     // standing at 30 health down to the 20 they now have room for.
     this._applySkills();
     this.audio.ui(420);
-    this.ui.toast('Everything unlearned. Your points are back.', 0, 3200);
+    this.ui.toast('Points refunded', 0, 3200);
     this.ui.refreshSkills();
   }
 
@@ -5158,14 +5155,14 @@ class Game {
       // Reading is looking: no key to press and nothing to open, so a row of
       // signs can be read by sweeping across them.
       const text = this.signs.get(hit.col * D + hit.k);
-      this.ui.setHint(text ? `“${text}”` : 'A blank sign');
+      this.ui.setHint(text ? `"${text}"` : 'A blank sign');
     } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
       this.ui.setHint(`<kbd>RMB</kbd> ${hit.id === ID.bench ? 'Craft' : 'Smelt'}`);
     } else if (needTool || dragHint) {
       // Both can be true — a wrong tool on a wet seam is the worst case in the
       // game and the one most likely to be read as broken — so neither hides
       // the other.
-      this.ui.setHint([needTool, dragHint].filter(Boolean).join(' · '));
+      this.ui.setHint([needTool, dragHint].filter(Boolean).join(', '));
     } else this.ui.setHint(null);
 
     const m = this.mining;
@@ -5261,7 +5258,7 @@ class Game {
       }
       this._tickFishing(dt);
       if (this.fishing) {          // holding the line: nothing else to do
-        this.ui.setHint(this.fishing.bite > 0 ? 'A bite! Click.' : 'Waiting…');
+        this.ui.setHint(this.fishing.bite > 0 ? 'A bite, click' : 'Waiting');
         return;
       }
     } else if (this.fishing) {

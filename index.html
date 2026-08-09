@@ -17,7 +17,7 @@
       <h1>MOJA<em>ZER</em></h1>
       <p class="tagline">A tiny planet, entirely yours.</p>
       <div class="bar"><div class="bar-fill" id="load-fill"></div></div>
-      <p class="status" id="load-status">Waking the void…</p>
+      <p class="status" id="load-status">Waking the void</p>
     </div>
   </div>
 
@@ -37,26 +37,27 @@
 
   <!-- ── save slots ──────────────────────────────────────────
        One screen for both Continue and New Game: the same ten rows, and only
-       what a click on one of them means changes. UI.js fills the list. -->
+       what a click on one of them means changes. UI.js fills the list. The
+       explanatory line that used to sit above the list is gone; the title says
+       which mood the screen is in and the rows say the rest. -->
   <div id="slots" class="overlay hidden">
     <div class="panel slots-panel">
       <header>
         <h2 id="slots-title">Continue</h2>
         <button class="ghost" data-close-slots>Back <kbd>Esc</kbd></button>
       </header>
-      <p class="slots-hint" id="slots-hint"></p>
       <div class="slot-list" id="slot-list"></div>
     </div>
   </div>
 
-  <!-- ── who wakes up here (new game) ────────────────────────
+  <!-- ── character select (new game) ─────────────────────────
        Sits above the loading screen, not instead of it: the planet is already
        being generated behind this, so choosing costs no time at all. One
-       character at a time, with the arrows either side of it. -->
+       character at a time, with the arrows either side of it. A heading and a
+       name, and nothing else. -->
   <div id="chargen" class="hidden">
     <div class="chargen-card">
-      <h2>Who Wakes Up Here</h2>
-      <p class="tagline">This one is yours for this planet. Or just begin.</p>
+      <h2>Select Character</h2>
       <div class="chargen-stage">
         <canvas id="cg-canvas"></canvas>
         <!-- The chevrons are drawn in CSS, not typed. A glyph here would be one
@@ -65,9 +66,21 @@
         <button id="cg-prev" class="cg-arrow prev" aria-label="Previous character"><i></i></button>
         <button id="cg-next" class="cg-arrow next" aria-label="Next character"><i></i></button>
       </div>
-      <p class="cg-name"><b id="cg-who">Character A</b><span id="cg-count">1 of 15</span></p>
+      <p class="cg-name"><b id="cg-who">Ama</b></p>
+      <!-- What you bring, and how hard the planet hits back. Both are built by
+           UI.js from `LOADOUT_OPTIONS` and `DIFFICULTIES`, which are the same
+           two lists the game side imports to turn a key into stacks and a
+           multiplier. One caption each, no prose. -->
+      <div class="cg-pick">
+        <span class="cg-cap">Bring</span>
+        <div class="cg-kit" id="cg-kit"></div>
+      </div>
+      <div class="cg-pick">
+        <span class="cg-cap">Difficulty</span>
+        <div class="seg" id="cg-diff"></div>
+      </div>
       <div class="chargen-foot">
-        <p class="status" id="cg-status">Shaping your planet…</p>
+        <p class="status" id="cg-status">Shaping</p>
         <div class="chargen-actions">
           <button id="cg-back">Back</button>
           <button id="cg-begin" class="primary">Begin</button>
@@ -108,10 +121,10 @@
       <!-- Offhand to the left of the hotbar, in its own frame: the same cell in
            the same glass, but it is not the tenth hotbar slot and a shared
            frame would claim it was. It hangs off the row rather than sitting in
-           it — see the stylesheet — because the hotbar is centred on the
+           it, see the stylesheet, because the hotbar is centred on the
            crosshair and must stay there. -->
       <div id="bar-row">
-        <div id="offhand-bar"><div id="offhand" class="slot" title="Offhand, F to swap"></div></div>
+        <div id="offhand-bar"><div id="offhand" class="slot" title="Offhand"></div></div>
         <div id="hotbar"></div>
       </div>
       <!-- Pinned to the top edge of the bottom cluster rather than to the
@@ -150,7 +163,7 @@
         <aside class="recipe-panel" id="recipe-panel">
           <h3>Can Craft <span id="recipe-count"></span></h3>
           <div id="recipe-list"></div>
-          <p class="recipe-empty" id="recipe-empty">Gather materials to see what you can make.</p>
+          <p class="recipe-empty" id="recipe-empty">Nothing yet</p>
         </aside>
       </div>
     </div>
@@ -159,36 +172,23 @@
   <div id="tooltip" class="hidden"></div>
 
   <!-- ── growth ──────────────────────────────────────────────
-       The skill tree, on K. Its own overlay rather than a tab of the inventory
-       screen: there is nothing here to drag, and six branches with their prices
-       and their reasons want the width the worn-armour column used to take.
-       UI.js builds every row from `skills.summary()`, so the branches, their
-       costs and their prerequisites are stated once, in Skills.js. -->
+       The skill tree, on K, and nothing else. It used to carry an aside listing
+       where XP comes from and which firsts were still unearned, which is a
+       manual bolted to a menu: the tree is the screen, and what pays XP is
+       something the planet tells you by paying you. UI.js builds every row from
+       `skills.summary()`. -->
   <div id="skills" class="overlay hidden">
     <div class="panel skills-panel">
       <header>
         <h2>Growth</h2>
         <button class="ghost" data-close-skills>Close <kbd>K</kbd></button>
       </header>
-      <div class="skills-body">
-        <div class="skills-left">
-          <div class="skills-bar">
-            <span class="skill-points" id="sk-points">0</span>
-            <p class="skill-sub" id="sk-sub">-</p>
-            <button class="ghost" id="sk-reset">Unlearn everything</button>
-          </div>
-          <div class="skill-tree" id="sk-tree"></div>
-        </div>
-        <aside class="skills-side">
-          <h3>Where XP comes from</h3>
-          <div id="sk-earned"></div>
-          <h3>Firsts</h3>
-          <div id="sk-marks"></div>
-          <p class="note">Every point comes from a level, and levels come from XP.
-            All of it is lost when you die: your XP, your levels, and every skill
-            you bought. Staying alive is the skill.</p>
-        </aside>
+      <div class="skills-bar">
+        <span class="skill-points" id="sk-points">0</span>
+        <p class="skill-sub" id="sk-sub">points</p>
+        <button class="ghost" id="sk-reset">Unlearn everything</button>
       </div>
+      <div class="skill-tree" id="sk-tree"></div>
     </div>
   </div>
 
@@ -210,10 +210,8 @@
   <div id="settings" class="overlay hidden">
     <div class="panel">
       <header><h2>Settings</h2><button class="ghost" data-close-settings>Back</button></header>
-      <!-- Grouped, and stripped of prose. Every setting here used to carry a
-           sentence explaining itself; four headings do that job for the whole
-           screen, and the two that are still not obvious from their name keep a
-           six-word hint. Nothing was removed. -->
+      <!-- Grouped, and stripped of prose. Four headings do for the whole screen
+           what a sentence under each row was doing badly. -->
       <div class="settings">
         <h3 class="set-head">Mouse</h3>
         <label>Sensitivity <span class="val" id="sens-val">1.00</span>
@@ -230,10 +228,8 @@
         </label>
 
         <h3 class="set-head">Picture</h3>
-        <label class="row"><input id="set-post" type="checkbox" checked /> Softer light and shadow
-          <small>Turn off if the game runs rough.</small></label>
-        <label class="row"><input id="set-bob" type="checkbox" checked /> Head movement while walking
-          <small>Turn off if it makes you queasy.</small></label>
+        <label class="row"><input id="set-post" type="checkbox" checked /> Softer light and shadow</label>
+        <label class="row"><input id="set-bob" type="checkbox" checked /> Head movement while walking</label>
         <label class="row"><input id="set-minimap" type="checkbox" checked /> Minimap</label>
         <label class="row"><input id="set-compass" type="checkbox" checked /> Compass</label>
 
@@ -241,7 +237,8 @@
         <label class="row"><input id="set-autojump" type="checkbox" /> Step up onto ledges automatically</label>
 
         <!-- Folded away. Credits are owed and are not what anyone opened this
-             screen for. -->
+             screen for. The wording is attribution, not explanation, which is
+             why it is the one block of prose left on the screen. -->
         <details class="credits">
           <summary>Credits</summary>
           <ul class="credit-list">
@@ -268,13 +265,7 @@
   <div id="controls" class="overlay hidden">
     <div class="panel">
       <header><h2>Controls</h2><button class="ghost" data-close-controls>Back</button></header>
-      <!-- Keys and what they do, and nothing else. This page used to carry
-           several hundred words of prose about farming, seasons, fences, the
-           hearth, husks, crates and the merchant, which is a manual filed under
-           the wrong heading: a player opens Controls to find one binding. The
-           four headings are what replaced it. The six right-click lines are
-           gathered under one so the eye reads them as a set rather than as six
-           near-identical rows. -->
+      <!-- Keys and what they do, and nothing else. -->
       <h3 class="ctl-head">Move</h3>
       <div class="controls-grid">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>
@@ -285,18 +276,18 @@
 
       <h3 class="ctl-head">Hands</h3>
       <div class="controls-grid">
-        <div><kbd>LMB</kbd><span>Mine (hold)</span></div>
+        <div><kbd>LMB</kbd><span>Mine</span></div>
         <div><kbd>RMB</kbd><span>Place or use</span></div>
-        <div><kbd>Ctrl</kbd>+<kbd>RMB</kbd><span>Lay a log along the way you face</span></div>
+        <div><kbd>Ctrl</kbd>+<kbd>RMB</kbd><span>Lay a log lengthways</span></div>
         <div><kbd>1</kbd>..<kbd>9</kbd><span>Hotbar</span></div>
         <div><kbd>Wheel</kbd><span>Cycle hotbar</span></div>
-        <div><kbd>F</kbd><span>Swap held item with the left hand</span></div>
-        <div><kbd>Q</kbd><span>Drop held item</span></div>
+        <div><kbd>F</kbd><span>Swap hands</span></div>
+        <div><kbd>Q</kbd><span>Drop</span></div>
       </div>
 
       <h3 class="ctl-head">Right click on</h3>
       <div class="controls-grid">
-        <div><kbd>RMB</kbd><span>Food, to eat (hold)</span></div>
+        <div><kbd>RMB</kbd><span>Food, to eat</span></div>
         <div><kbd>RMB</kbd><span>A merchant, to trade</span></div>
         <div><kbd>RMB</kbd><span>A crate, to open it</span></div>
         <div><kbd>RMB</kbd><span>A bed, to set home</span></div>
@@ -307,11 +298,11 @@
       <h3 class="ctl-head">Screens</h3>
       <div class="controls-grid">
         <div><kbd>E</kbd><span>Inventory</span></div>
-        <div><kbd>K</kbd><span>Growth, spend skill points</span></div>
+        <div><kbd>K</kbd><span>Growth</span></div>
         <div><kbd>Shift</kbd>+<kbd>Click</kbd><span>Move a whole stack</span></div>
         <div><kbd>Shift</kbd>+<kbd>Click</kbd><span>Craft as many as you can</span></div>
-        <div><kbd>V</kbd><span>Camera: first person, behind, facing you</span></div>
-        <div><kbd>C</kbd><span>Hold to zoom in</span></div>
+        <div><kbd>V</kbd><span>Camera</span></div>
+        <div><kbd>C</kbd><span>Hold to zoom</span></div>
         <div><kbd>F3</kbd><span>Debug overlay</span></div>
         <div><kbd>Esc</kbd><span>Pause</span></div>
       </div>
@@ -322,11 +313,10 @@
   <div id="sign-write" class="overlay hidden">
     <div class="menu-card small">
       <h2>Sign</h2>
-      <p class="tagline">Two lines, and keep them short.</p>
       <input id="sign-line" maxlength="48" autocomplete="off" spellcheck="false" />
       <div class="menu-actions">
-        <button id="sign-ok" class="primary">Carve it</button>
-        <button id="sign-cancel">Leave it blank</button>
+        <button id="sign-ok" class="primary">Carve</button>
+        <button id="sign-cancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -339,6 +329,22 @@
       <div class="menu-actions">
         <button id="dz-respawn" class="primary">Wake Up</button>
         <button id="dz-quit">Quit to Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── confirm ─────────────────────────────────────────────
+       The game's own yes/no, replacing every `window.confirm`. A browser dialog
+       breaks pointer lock, cannot be styled, and looks like the page is broken
+       rather than like the game is asking. Sits above every other overlay
+       because it is always raised *from* one. -->
+  <div id="confirm" class="overlay hidden">
+    <div class="menu-card small confirm-card">
+      <h2 id="cf-title">Are you sure</h2>
+      <p class="tagline" id="cf-body"></p>
+      <div class="menu-actions">
+        <button id="cf-yes" class="primary">Yes</button>
+        <button id="cf-no">Cancel</button>
       </div>
     </div>
   </div>

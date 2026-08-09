@@ -1,20 +1,85 @@
-/* Mojazer — cozy-cosmic UI.
-   Compact, low-chrome HUD; warm parchment panels only when the game pauses. */
+/* Mojazer.
+
+   Two materials, and everything in the game is made of one of them.
+
+   PLATE is the HUD: dark, faceted, lit from above, with a hard outer keyline
+   and a bright inner one. It sits over a moving 3D world, so it has to hold
+   its own contrast against grass, snow, night and lava without ever becoming
+   an opaque box that eats the view. Small radii, visible bevels, warm accent.
+
+   PARCHMENT is every screen the game stops for: menus, inventory, the tree.
+   Warm, light, and physically the opposite of the plate, so "the game is
+   paused" is legible before a single word is read.
+
+   Two rules the HUD side obeys without exception, because it runs at 60fps
+   over a 1.6GB heap:
+     1. No `backdrop-filter` anywhere inside #hud. It was on the chips, the
+        vitals, the hotbar, the toasts and the hint, all of which are written
+        every frame, and every one of them forced a backdrop re-blur on the
+        compositor. The plate gets its depth from layered gradients and
+        shadows, which are free once painted.
+     2. No `filter` on anything that changes per frame. Drop-shadows are baked
+        into `text-shadow`/`box-shadow` instead, and the only filters left are
+        on one-shot animations (the crit flash) and static glyphs. */
 
 :root {
+  /* --- parchment ------------------------------------------------------- */
   --ink: #26201a;
   --ink-soft: #6a5e52;
+  --ink-faint: rgba(38, 32, 26, .42);
   --parchment: #f7eede;
-  --parchment-2: #ebdfc9;
+  --parchment-2: #e9dcc4;
   --edge: #d8c7aa;
+
+  /* --- accent ---------------------------------------------------------- */
   --accent: #dd7c38;
   --accent-2: #f2b45c;
+  --accent-hi: #ffd79a;
   --teal: #3f9d94;
-  --glass: rgba(12, 15, 24, .46);
-  --glass-edge: rgba(255, 255, 255, .13);
-  --shadow: 0 20px 48px -20px rgba(6, 8, 16, .78), 0 1px 0 rgba(255, 255, 255, .5) inset;
+  --danger: #cf4630;
+  --good: #63b04b;
+
+  /* --- plate ----------------------------------------------------------- */
+  /* One gradient, top-lit, over a near-opaque base. Opaque enough to read a
+     white numeral on snow, transparent enough that the world still shows. */
+  --plate: linear-gradient(180deg, rgba(30, 38, 58, .80), rgba(10, 14, 24, .86));
+  --plate-solid: linear-gradient(180deg, rgba(30, 38, 58, .94), rgba(10, 14, 24, .96));
+  /* The bevel: a dark keyline outside so the plate never dissolves into a pale
+     sky, a light line inside so it reads as a lifted face rather than a hole. */
+  --bevel:
+    0 0 0 1px rgba(0, 0, 0, .55),
+    inset 0 1px 0 rgba(255, 255, 255, .16),
+    inset 0 -1px 0 rgba(0, 0, 0, .35),
+    0 6px 16px -8px rgba(0, 0, 0, .85);
+  --bevel-lift:
+    0 0 0 1px rgba(0, 0, 0, .6),
+    inset 0 1px 0 rgba(255, 255, 255, .22),
+    inset 0 -1px 0 rgba(0, 0, 0, .4),
+    0 10px 22px -10px rgba(0, 0, 0, .95);
+  --plate-edge: rgba(255, 255, 255, .14);
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 9px;
+
+  /* --- type ------------------------------------------------------------
+     A real scale, fourth-ish, so nothing on screen is a size picked by hand.
+     Everything below refers to these and to nothing else. */
+  --fs-xs: 10px;
+  --fs-sm: 11.5px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 19px;
+  --fs-2xl: 24px;
+  --fs-3xl: 34px;
+  /* Two letter-spacings, and they mean two different things: `--ls-cap` is for
+     anything set in small caps (a label), `--ls-disp` for display type. */
+  --ls-cap: .13em;
+  --ls-disp: .06em;
+
   --font: "Segoe UI Variable Display", "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
   --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --shadow: 0 20px 48px -20px rgba(6, 8, 16, .78), 0 1px 0 rgba(255, 255, 255, .5) inset;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -28,12 +93,20 @@ html, body {
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 .hidden { display: none !important; }
 
+/* The one label style in the game: small, spaced, upper. Used for every
+   caption on both materials, which is most of what makes them look related. */
+.cap, .set-head, .ctl-head, .cmp-polar, .slot-cap, .smelt-label,
+.recipe-panel h3, .shop-col h3, .cg-cap, .status {
+  font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+}
+
 /* ── overlays ──────────────────────────────────────────── */
 
 .overlay {
   position: fixed; inset: 0; z-index: 50;
   display: grid; place-items: center;
-  background: radial-gradient(120% 90% at 50% 0%, rgba(10, 14, 26, .5), rgba(3, 5, 11, .86));
+  background: radial-gradient(120% 90% at 50% 0%, rgba(10, 14, 26, .5), rgba(3, 5, 11, .88));
   backdrop-filter: blur(13px) saturate(118%);
   animation: fade .22s ease;
 }
@@ -42,61 +115,88 @@ html, body {
 
 .panel {
   width: min(660px, 93vw); max-height: 88vh; overflow: auto;
-  padding: 16px 18px 16px; border-radius: 10px;
+  padding: 18px 20px; border-radius: var(--r-lg);
   background: linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 40%),
               linear-gradient(165deg, var(--parchment), var(--parchment-2));
   border: 1px solid var(--edge); box-shadow: var(--shadow);
   animation: rise .28s cubic-bezier(.2, .8, .25, 1);
 }
-.panel header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.panel header {
+  display: flex; align-items: center; gap: 10px;
+  margin: -2px 0 14px; padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, .1);
+}
 .panel header h2 { flex: 1; }
-.panel h2 { font-size: 16px; font-weight: 650; letter-spacing: .02em; }
-.note { margin-top: 14px; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+.panel h2 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: var(--ls-disp); }
+.note { margin-top: 14px; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
 
-h1 { font-size: 34px; font-weight: 300; letter-spacing: .24em; color: var(--parchment); text-align: center; }
+h1 {
+  font-size: var(--fs-3xl); font-weight: 200; letter-spacing: .26em;
+  color: var(--parchment); text-align: center;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, .6);
+}
 h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
-.tagline { text-align: center; margin: 6px 0 0; font-size: 13.5px; letter-spacing: .05em; color: rgba(247, 238, 222, .55); }
+.tagline {
+  text-align: center; margin: 7px 0 0;
+  font-size: var(--fs-md); letter-spacing: .05em; color: rgba(247, 238, 222, .5);
+}
 
 /* ── menu cards ────────────────────────────────────────── */
 
 .menu-card {
-  width: min(340px, 90vw); padding: 26px 22px 18px; text-align: center;
+  width: min(340px, 90vw); padding: 28px 24px 20px; text-align: center;
   border-radius: 12px;
-  background: linear-gradient(170deg, rgba(28, 34, 54, .74), rgba(12, 15, 26, .82));
-  border: 1px solid rgba(255, 255, 255, .11);
-  box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .9), 0 1px 0 rgba(255, 255, 255, .1) inset;
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(90, 116, 170, .22), rgba(0, 0, 0, 0) 62%),
+    linear-gradient(170deg, rgba(28, 34, 54, .84), rgba(10, 13, 24, .9));
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .92), inset 0 1px 0 rgba(255, 255, 255, .12);
   animation: rise .32s cubic-bezier(.2, .8, .25, 1);
 }
-.menu-card.small { width: min(300px, 90vw); padding: 22px 20px 16px; }
-.menu-card h2 { color: var(--parchment); font-size: 22px; font-weight: 600; letter-spacing: .08em; text-align: center; }
+.menu-card.small { width: min(320px, 90vw); padding: 24px 22px 18px; }
+.menu-card h2 {
+  color: var(--parchment); font-size: var(--fs-xl); font-weight: 600;
+  letter-spacing: .08em; text-align: center;
+}
 .menu-card .tagline { margin-bottom: 16px; }
-.menu-actions { display: flex; flex-direction: column; gap: 5px; margin-top: 14px; }
+.menu-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
 .death-title { color: #f0a08a !important; }
-/* One line per source, so no one is a clause inside somebody else's sentence. */
-.credit-list { list-style: none; font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
+.credit-list { list-style: none; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
 .credit-list li { padding-left: 10px; text-indent: -10px; margin-bottom: 3px; }
-.credit-list strong { color: var(--ink); font-weight: 650; }
+.credit-list strong { color: var(--ink); font-weight: 700; }
 
 button {
-  font: inherit; cursor: pointer; border: none; border-radius: 7px;
-  padding: 8px 14px; font-size: 13.5px; font-weight: 600;
-  color: rgba(247, 238, 222, .88);
-  background: rgba(255, 255, 255, .07);
-  border: 1px solid rgba(255, 255, 255, .1);
+  font: inherit; cursor: pointer; border-radius: 7px;
+  padding: 9px 15px; font-size: var(--fs-md); font-weight: 600;
+  letter-spacing: .015em;
+  color: rgba(247, 238, 222, .9);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .04));
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1);
   transition: transform .12s ease, box-shadow .18s ease, background .18s ease, filter .18s;
 }
-button:hover:not(:disabled) { background: rgba(255, 255, 255, .13); transform: translateY(-1px); }
-button:active:not(:disabled) { transform: translateY(0); }
-button:disabled { opacity: .35; cursor: default; }
-button.primary {
-  color: #fff; border-color: transparent;
-  background: linear-gradient(170deg, var(--accent-2), var(--accent));
-  box-shadow: 0 10px 22px -12px rgba(221, 124, 56, .95), 0 1px 0 rgba(255, 255, 255, .4) inset;
+button:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .17), rgba(255, 255, 255, .07));
+  transform: translateY(-1px);
 }
-button.primary:hover { filter: brightness(1.06); }
-.panel button { color: var(--ink-soft); background: rgba(0, 0, 0, .055); border-color: rgba(0, 0, 0, .07); }
-.panel button:hover { background: rgba(0, 0, 0, .1); }
-.panel button.ghost { padding: 5px 9px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+button:active:not(:disabled) { transform: translateY(0); filter: brightness(.94); }
+button:disabled { opacity: .32; cursor: default; }
+button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+button.primary {
+  color: #2a1607; border-color: rgba(255, 226, 180, .5);
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  box-shadow: 0 10px 22px -12px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .55);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .28);
+}
+button.primary:hover { filter: brightness(1.05); }
+.panel button {
+  color: var(--ink-soft); text-shadow: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(0, 0, 0, .05));
+  border-color: rgba(0, 0, 0, .12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6);
+}
+.panel button:hover { background: #fff; color: var(--ink); }
+.panel button.ghost { padding: 6px 10px; font-size: var(--fs-sm); display: flex; gap: 6px; align-items: center; }
 
 /* ── loader ────────────────────────────────────────────── */
 
@@ -107,7 +207,7 @@ button.primary:hover { filter: brightness(1.06); }
 #loader.done { animation: fadeout .55s ease forwards; }
 @keyframes fadeout { to { opacity: 0; visibility: hidden } }
 .loader-inner { width: min(400px, 84vw); text-align: center; }
-.planet-mark { width: 92px; height: 92px; margin: 0 auto 24px; position: relative; }
+.planet-mark { width: 92px; height: 92px; margin: 0 auto 26px; position: relative; }
 .planet-mark span { position: absolute; inset: 0; border-radius: 50%; }
 .planet-mark span:nth-child(1) {
   background: radial-gradient(circle at 34% 30%, #7fd4c2, #2f7d78 46%, #1b3f52 78%, #101f33);
@@ -117,80 +217,98 @@ button.primary:hover { filter: brightness(1.06); }
 .planet-mark span:nth-child(2) { inset: -14px -30px; border: 1.5px solid rgba(242, 180, 92, .5); border-radius: 50%; transform: rotate(-22deg) scaleY(.34); }
 .planet-mark span:nth-child(3) { inset: -22px -42px; border: 1px solid rgba(242, 180, 92, .22); border-radius: 50%; transform: rotate(-22deg) scaleY(.3); }
 @keyframes spin { to { transform: rotate(360deg) } }
-.bar { height: 3px; border-radius: 99px; margin: 22px 0 9px; background: rgba(255, 255, 255, .1); overflow: hidden; }
-.bar-fill { height: 100%; width: 0%; border-radius: 99px; background: linear-gradient(90deg, var(--teal), var(--accent-2)); box-shadow: 0 0 12px rgba(242, 180, 92, .55); transition: width .3s cubic-bezier(.3, .9, .3, 1); }
-.status { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: rgba(247, 238, 222, .45); }
+.bar {
+  height: 4px; border-radius: 99px; margin: 24px 0 10px;
+  background: rgba(255, 255, 255, .08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%; width: 0%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--teal), var(--accent-2));
+  box-shadow: 0 0 12px rgba(242, 180, 92, .55);
+  transition: width .3s cubic-bezier(.3, .9, .3, 1);
+}
+.status { color: rgba(247, 238, 222, .42); }
 
 /* ── save slots ────────────────────────────────────────── */
 
 .slots-panel { width: min(520px, 93vw); }
-.slots-hint { font-size: 12px; color: var(--ink-soft); margin: -4px 0 10px; }
-.slot-list { display: flex; flex-direction: column; gap: 5px; }
-.slot-row { display: flex; gap: 5px; align-items: stretch; }
+.slot-list { display: flex; flex-direction: column; gap: 6px; }
+.slot-row { display: flex; gap: 6px; align-items: stretch; }
 /* The row is a button, so the whole card is the hit target rather than the
    words in it. Delete is a second, deliberately smaller one beside it. */
 .slot-open {
-  flex: 1; display: grid; gap: 0 10px; text-align: left;
-  grid-template-columns: 82px 1fr auto;
-  align-items: center; padding: 9px 12px;
+  flex: 1; display: grid; gap: 0 12px; text-align: left;
+  grid-template-columns: 76px 1fr auto;
+  align-items: center; padding: 10px 13px;
 }
-.slot-open b { grid-row: 1 / span 2; align-self: center; font-weight: 650; font-size: 13px; color: var(--ink); }
-.slot-open .slot-who { font-size: 12.5px; color: var(--ink); }
-.slot-open .slot-who.empty { color: var(--ink-soft); opacity: .7; font-style: italic; }
-.slot-open .slot-when { grid-column: 2; font-size: 11.5px; color: var(--ink-soft); }
+.slot-open b {
+  grid-row: 1 / span 2; align-self: center;
+  font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: var(--ls-cap);
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.slot-open .slot-who { font-size: var(--fs-md); font-weight: 700; color: var(--ink); }
+.slot-open .slot-who.empty { color: var(--ink-faint); font-weight: 600; }
+.slot-open .slot-when { grid-column: 2; font-size: var(--fs-sm); font-weight: 500; color: var(--ink-soft); }
 .slot-open .slot-ago {
   grid-column: 3; grid-row: 1 / span 2; align-self: center;
-  font: 600 11px var(--mono); color: var(--ink-soft); opacity: .8; white-space: nowrap;
+  font: 600 var(--fs-xs) var(--mono); color: var(--ink-soft); opacity: .75; white-space: nowrap;
 }
-.panel .slot-row.filled .slot-open { background: rgba(0, 0, 0, .085); }
-.slot-del { padding: 8px 11px; font-size: 11.5px; }
-.panel .slot-del:hover { background: rgba(207, 70, 48, .16); color: #a33a28; }
+.panel .slot-row.filled .slot-open { background: linear-gradient(180deg, #fff, rgba(255, 255, 255, .3)); }
+.slot-del { padding: 8px 12px; font-size: var(--fs-sm); }
+.panel .slot-del:hover { background: rgba(207, 70, 48, .14); color: #a33a28; border-color: rgba(207, 70, 48, .3); }
 
-/* ── character picker ──────────────────────────────────── */
+/* ── character select ──────────────────────────────────── */
 
 /* Above the loader, which is z-index 100 and is running underneath this the
    whole time the picker is up. */
 #chargen {
   position: fixed; inset: 0; z-index: 110; display: grid; place-items: center;
-  background: radial-gradient(78% 60% at 50% 38%, rgba(22, 32, 60, .72), rgba(4, 6, 13, .93));
+  background: radial-gradient(78% 60% at 50% 38%, rgba(22, 32, 60, .74), rgba(4, 6, 13, .94));
   backdrop-filter: blur(10px) saturate(115%);
   animation: fade .22s ease;
+  overflow: auto; padding: 16px 0;
 }
 .chargen-card {
-  width: min(420px, 94vw); padding: 22px 22px 16px; border-radius: 12px;
-  background: linear-gradient(170deg, rgba(28, 34, 54, .8), rgba(12, 15, 26, .88));
-  border: 1px solid rgba(255, 255, 255, .11);
-  box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .9), 0 1px 0 rgba(255, 255, 255, .1) inset;
+  width: min(440px, 94vw); padding: 22px 22px 16px; border-radius: 12px;
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(90, 116, 170, .2), rgba(0, 0, 0, 0) 60%),
+    linear-gradient(170deg, rgba(28, 34, 54, .86), rgba(10, 13, 24, .92));
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .92), inset 0 1px 0 rgba(255, 255, 255, .12);
   animation: rise .32s cubic-bezier(.2, .8, .25, 1);
 }
-.chargen-card h2 { color: var(--parchment); font-size: 20px; font-weight: 600; letter-spacing: .08em; text-align: center; }
+.chargen-card h2 {
+  color: var(--parchment); font-size: var(--fs-lg); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase; text-align: center;
+  opacity: .8;
+}
 /* A pale backdrop, and it goes *behind* the canvas rather than on the cells.
    These characters are mostly dark hair and dark clothing, and against the
-   card's own near-black panel the top third of every figure simply vanished —
-   the first read of that was "the characters have no heads". Tinting the cell
-   buttons instead would have put the light over the figures, which veils them;
-   the canvas is transparent, so a lit panel underneath lights them from behind
+   card's own near-black panel the top third of every figure simply vanished.
+   The canvas is transparent, so a lit panel underneath lights them from behind
    and dark-on-pale does the rest. */
 .chargen-stage {
-  position: relative; margin-top: 16px; border-radius: 10px; overflow: hidden;
+  position: relative; margin-top: 14px; border-radius: var(--r-lg); overflow: hidden;
   background:
     radial-gradient(115% 95% at 50% 0%, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 62%),
     linear-gradient(180deg, #808ba6, #5c6684);
   background-color: #6b7590;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), inset 0 -16px 30px -18px rgba(0, 0, 0, .65);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), inset 0 -16px 30px -18px rgba(0, 0, 0, .65),
+              0 0 0 1px rgba(0, 0, 0, .4);
 }
-/* Square, set inline by UI.js, matching the picker's square frustum: one
-   character fills the frame and the arrows sit either side of it. */
+/* Square, set inline by UI.js, matching the picker's square frustum. */
 #cg-canvas { display: block; width: 100%; }
 .cg-arrow {
   position: absolute; top: 50%; transform: translateY(-50%);
-  width: 40px; height: 56px; padding: 0; border-radius: 8px;
-  background: rgba(12, 15, 26, .34); border: 1px solid rgba(255, 255, 255, .18);
+  width: 38px; height: 54px; padding: 0; border-radius: var(--r-md);
+  background: rgba(12, 15, 26, .38); border: 1px solid rgba(255, 255, 255, .2);
+  box-shadow: none;
 }
 .cg-arrow.prev { left: 8px; }
 .cg-arrow.next { right: 8px; }
-.cg-arrow:hover:not(:disabled) { background: rgba(12, 15, 26, .5); transform: translateY(-50%); }
-.cg-arrow:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.cg-arrow:hover:not(:disabled) { background: rgba(12, 15, 26, .58); transform: translateY(-50%); }
 /* The chevron itself: two borders of an empty box, turned 45 degrees. Drawn
    rather than typed, so it is the same shape in every font. */
 .cg-arrow i {
@@ -201,15 +319,69 @@ button.primary:hover { filter: brightness(1.06); }
 }
 .cg-arrow.prev i { transform: rotate(45deg) translate(1px, -1px); }
 .cg-arrow.next i { transform: rotate(-135deg) translate(1px, -1px); }
-.cg-name {
-  display: flex; align-items: baseline; justify-content: center; gap: 10px;
-  margin-top: 12px;
+.cg-name { text-align: center; margin-top: 12px; }
+.cg-name b {
+  color: var(--parchment); font-size: var(--fs-xl); font-weight: 600;
+  letter-spacing: var(--ls-disp);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, .7);
 }
-.cg-name b { color: var(--parchment); font-size: 15px; font-weight: 650; letter-spacing: .04em; }
-.cg-name span { font: 600 11px var(--mono); color: rgba(247, 238, 222, .45); }
-.chargen-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+
+/* What you bring, and how hard it hits back. */
+.cg-pick { margin-top: 14px; }
+.cg-cap { display: block; color: rgba(247, 238, 222, .38); margin-bottom: 7px; }
+.cg-kit { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.cg-opt {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 7px 3px 5px; border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02));
+  border: 1px solid rgba(255, 255, 255, .1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+  font: 600 var(--fs-xs)/1.2 var(--font); letter-spacing: .02em;
+  color: rgba(247, 238, 222, .62);
+}
+.cg-opt img { width: 28px; height: 28px; pointer-events: none; }
+.cg-opt .qty {
+  position: absolute; top: 3px; right: 4px;
+  font: 700 9px var(--mono); color: rgba(247, 238, 222, .5);
+}
+.cg-opt:hover:not(:disabled) { transform: none; color: rgba(247, 238, 222, .92); }
+.cg-opt.on {
+  color: #2a1607; border-color: rgba(255, 226, 180, .55);
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 60%, var(--accent));
+  box-shadow: 0 8px 18px -10px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .55);
+}
+.cg-opt.on .qty { color: rgba(42, 22, 7, .6); }
+/* Nothing left to spend: the unpicked tiles go quiet rather than disappear, so
+   the shape of the choice stays on screen. */
+.cg-kit.full .cg-opt:not(.on) { opacity: .3; }
+
+/* Three buttons in one bar. A segmented control says "pick exactly one" by its
+   shape, which is the whole reason there is no sentence under it. */
+.seg {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+  padding: 2px; border-radius: 7px;
+  background: rgba(0, 0, 0, .3);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .5);
+}
+.seg button {
+  padding: 7px 4px; border-radius: var(--r-md); border-color: transparent;
+  background: transparent; box-shadow: none;
+  font-size: var(--fs-sm); font-weight: 700; letter-spacing: .04em;
+  color: rgba(247, 238, 222, .5);
+}
+.seg button:hover:not(.on) { transform: none; background: rgba(255, 255, 255, .07); color: rgba(247, 238, 222, .85); }
+.seg button.on {
+  color: #2a1607;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 60%, var(--accent));
+  box-shadow: 0 6px 14px -9px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .5);
+}
+
+.chargen-foot {
+  display: flex; align-items: center; gap: 12px; margin-top: 16px;
+  padding-top: 13px; border-top: 1px solid rgba(255, 255, 255, .09);
+}
 .chargen-foot .status { flex: 1; text-align: left; }
-.chargen-foot .status.ready { color: rgba(242, 180, 92, .8); }
+.chargen-foot .status.ready { color: var(--accent-2); }
 .chargen-actions { display: flex; gap: 6px; }
 .chargen-actions button { min-width: 92px; }
 
@@ -221,29 +393,22 @@ button.primary:hover { filter: brightness(1.06); }
   position: absolute; left: 50%; top: 50%; width: 20px; height: 20px;
   transform: translate(-50%, -50%); transition: transform .12s ease;
 }
-#crosshair i { position: absolute; background: rgba(255, 255, 255, .82); box-shadow: 0 0 2px rgba(0, 0, 0, .9); }
+#crosshair i { position: absolute; background: rgba(255, 255, 255, .85); box-shadow: 0 0 2px rgba(0, 0, 0, .95); }
 #crosshair i:nth-child(1) { left: 50%; top: 0; width: 1.5px; height: 5px; margin-left: -.75px; }
 #crosshair i:nth-child(2) { left: 50%; bottom: 0; width: 1.5px; height: 5px; margin-left: -.75px; }
 #crosshair i:nth-child(3) { top: 50%; left: 0; height: 1.5px; width: 5px; margin-top: -.75px; }
 #crosshair i:nth-child(4) { top: 50%; right: 0; height: 1.5px; width: 5px; margin-top: -.75px; }
-#crosshair b { position: absolute; left: 50%; top: 50%; width: 2px; height: 2px; margin: -1px 0 0 -1px; border-radius: 50%; background: rgba(255, 255, 255, .5); }
+#crosshair b { position: absolute; left: 50%; top: 50%; width: 2px; height: 2px; margin: -1px 0 0 -1px; border-radius: 50%; background: rgba(255, 255, 255, .55); }
 #crosshair.active { transform: translate(-50%, -50%) scale(1.35); }
+#crosshair.active i { background: var(--accent-hi); }
 /* Drawing a bow: the sight closes from 2.4x down to 1x as the shot charges. The
-   transition is off because the value is written every frame — see
-   `UI.setCrosshairDraw` — and easing a per-frame value only adds lag. Placed
-   after `.active` so a drawn bow aimed at a creature still tightens. */
+   transition is off because the value is written every frame. */
 #crosshair.drawing {
   transform: translate(-50%, -50%) scale(var(--draw-scale, 1));
   transition: none;
 }
 /* A critical hit landed: the sight snaps open and flares warm, then settles
-   back to the 1.35 of `.active` — which is on whenever you are aiming at the
-   creature you just hit, so the animation ends exactly where the static rule
-   would have left it and there is no jump at the end. An animation rather than
-   a transition because it has to be able to play again immediately (see
-   `UI.critHit`), and last in the file so it wins over both states above. Warm
-   amber, matching the spark burst at the other end of the swing: one hit, two
-   places to notice it. */
+   back to the 1.35 of `.active`. */
 #crosshair.crit { animation: crit-flash .3s cubic-bezier(.2, .9, .3, 1); }
 @keyframes crit-flash {
   0% {
@@ -257,77 +422,107 @@ button.primary:hover { filter: brightness(1.06); }
   100% { transform: translate(-50%, -50%) scale(1.35); filter: none; }
 }
 
-/* top-right status chips */
-#status-bar { position: absolute; top: 7px; right: 8px; display: flex; gap: 3px; align-items: center; }
+/* --- status chips (top right) --------------------------------------------
+   One rail rather than four floating pills: a single plate with hairline
+   dividers, so the corner reads as one instrument instead of a row of tags. */
+#status-bar {
+  position: absolute; top: 10px; right: 10px;
+  display: flex; align-items: stretch; gap: 1px;
+  padding: 1px; border-radius: var(--r-md);
+  background: var(--plate); box-shadow: var(--bevel);
+}
 .chip {
-  display: flex; align-items: center; gap: 5px;
-  height: 20px; padding: 0 7px; border-radius: 4px;
-  font: 600 10px/1 var(--font); letter-spacing: .06em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 9px; border-radius: 2px;
+  font: 700 var(--fs-xs)/1 var(--font);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
   color: rgba(255, 255, 255, .82);
-  background: var(--glass); border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(8px);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
+  background: rgba(255, 255, 255, .035);
 }
 .chip .dial {
-  width: 11px; height: 11px; border-radius: 50%; display: block; flex: none;
+  width: 12px; height: 12px; border-radius: 50%; display: block; flex: none;
   background: conic-gradient(from 180deg, #0d1224 0deg, #1b2a4d 55deg, #6fa4e0 95deg, #ffd9a0 140deg, #fff3d8 180deg, #ffc07a 220deg, #4a3a5e 265deg, #0d1224 330deg);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .18) inset;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .22) inset, 0 0 6px rgba(255, 210, 150, .25);
   transition: transform .5s linear;
 }
-#chip-clock #clock-text { font-family: var(--mono); letter-spacing: .04em; }
+#chip-clock #clock-text { font-family: var(--mono); letter-spacing: .04em; color: #fff; }
+#chip-biome { color: var(--accent-hi); }
 
 /* bottom cluster */
 #bottom {
-  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
-/* --- minimap (top-left) --------------------------------------------------
-   The disc takes the top-left corner and the vitals move down under it. They
-   were there first, but a health bar is read peripherally and a map is read by
-   looking at it, so the map gets the corner and the bars keep their edge. */
+
+/* --- minimap (top left) ---------------------------------------------------
+   Square, and heading-up: the canvas turns inside a fixed frame.
+
+   A square window onto a turning picture has one hard requirement, and it is
+   the whole geometry of this element: at 45 degrees the frame's corners are
+   half a diagonal from the centre, so the canvas has to be at least
+   `frame * sqrt(2)` across or the corners show through to nothing. It is sized
+   in UI.js from `MAP_FRAME` and `MAP_CANVAS` for exactly that reason, and
+   `mapCoversRotation()` there is the assertion. Sample count went up with it,
+   so the ground per pixel is unchanged from the old disc.
+
+   Corner ticks rather than a full second border: four short arms read as an
+   instrument bezel and cost one static background-image. */
 #minimap {
-  position: absolute; top: 8px; left: 8px;
-  width: 148px; height: 148px; border-radius: 50%;
-  background: rgba(6, 9, 16, .55);
-  border: 1px solid var(--glass-edge);
-  box-shadow: 0 6px 20px -8px rgba(0, 0, 0, .8), 0 0 0 3px rgba(6, 9, 16, .35);
-  /* The canvas is square and the frame is round, so the corners have to be
-     cut somewhere. Clipping here rather than on the canvas keeps the clip
-     still while the canvas spins inside it. */
+  position: absolute; top: 10px; left: 10px;
+  width: 152px; height: 152px; border-radius: var(--r-md);
+  background: #060910;
+  box-shadow: var(--bevel);
   overflow: hidden;
 }
+/* 148% of the frame, centred. That number is the whole fix and it is not a
+   taste: a square window onto a picture that turns under it needs the picture
+   to be at least `sqrt(2)` = 141.5% of the window, or at 45 degrees the frame's
+   own corners reach past the canvas and show empty. 148 is that plus six
+   points of overscan, which also keeps the outermost sampled row off the visible
+   edge where the browser's bilinear filter has nothing beyond it to blend with.
+   Set as a percentage so the media query below can shrink the frame without
+   any of this having to be recomputed. `MAP_CANVAS_PCT` in UI.js is the same
+   number, and `mapCoversRotation()` is the assertion on it. */
 #mm-canvas {
   position: absolute; left: 50%; top: 50%;
-  /* Two pixels of overscan on each side. The backing store is 81px upscaled
-     1.9x, and drawn at the exact size the outermost sampled row lands *on* the
-     rim, where the browser's bilinear filter has nothing beyond it to blend
-     with — which leaves a hairline of half-transparent edge all the way round,
-     and a visible corner whenever the canvas is turned 45°. */
-  width: 152px; height: 152px; margin: -76px 0 0 -76px; padding: 0;
+  width: 148%; height: 148%; margin: -74% 0 0 -74%;
   transform-origin: 50% 50%;
 }
-/* Vignette, so the map fades into its own frame instead of ending at a hard
-   circle — and so the player marker at the centre always has contrast under
-   it whatever biome is there. */
+/* Vignette plus the corner ticks, in one static layer over the turning canvas.
+   The gradient is square-cornered now, so it darkens the edges of a frame
+   rather than the rim of a circle. */
 #minimap::after {
-  content: ''; position: absolute; inset: 0; border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%,
-    rgba(0, 0, 0, .34) 0%, rgba(0, 0, 0, 0) 34%, rgba(0, 0, 0, 0) 62%, rgba(6, 9, 16, .72) 100%);
-  pointer-events: none;
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background:
+    /* four corner brackets, two arms each */
+    linear-gradient(var(--accent-2), var(--accent-2)) left 4px top 4px / 10px 2px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) left 4px top 4px / 2px 10px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) right 4px top 4px / 10px 2px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) right 4px top 4px / 2px 10px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) left 4px bottom 4px / 10px 2px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) left 4px bottom 4px / 2px 10px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) right 4px bottom 4px / 10px 2px no-repeat,
+    linear-gradient(var(--accent-2), var(--accent-2)) right 4px bottom 4px / 2px 10px no-repeat,
+    /* and the vignette under them */
+    linear-gradient(180deg, rgba(4, 7, 14, .55), rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 78%, rgba(4, 7, 14, .6)),
+    linear-gradient(90deg, rgba(4, 7, 14, .55), rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 78%, rgba(4, 7, 14, .6));
+  opacity: .9;
 }
-/* Where north is. It orbits the rim rather than sitting at the top, because on
-   a sphere the top of a heading-up map is not north and never was. */
+/* Where north is. It rides the inside of the frame rather than sitting at the
+   top, because on a sphere the top of a heading-up map is not north and never
+   was. `UI.northPip` is what puts it on the square. */
 #mm-north {
-  position: absolute; left: 50%; top: 50%;
-  font: 700 10px/1 var(--font); letter-spacing: .06em;
+  position: absolute; left: 50%; top: 50%; z-index: 2;
+  font: 700 var(--fs-xs)/1 var(--font); letter-spacing: .06em;
   color: var(--accent-2);
-  text-shadow: 0 0 4px rgba(0, 0, 0, .95), 0 1px 2px rgba(0, 0, 0, .9);
+  text-shadow: 0 0 5px rgba(0, 0, 0, .98), 0 1px 2px rgba(0, 0, 0, .95);
   pointer-events: none;
 }
-/* The player: a chevron, always pointing at the top of the disc, because the
-   disc is what turns. */
+/* The player: a chevron, always pointing at the top of the frame, because the
+   frame is what stays still. */
 #mm-me {
-  position: absolute; left: 50%; top: 50%;
+  position: absolute; left: 50%; top: 50%; z-index: 2;
   width: 0; height: 0; margin: -7px 0 0 -5px;
   border: 5px solid transparent; border-bottom: 9px solid #fff;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
@@ -339,184 +534,236 @@ button.primary:hover { filter: brightness(1.06); }
    built once and positioned absolutely; turning costs one transform on the
    track, which the compositor can do without touching layout. */
 #compass {
-  position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
   width: 320px; pointer-events: none;
   transition: opacity .25s linear;
 }
 .cmp-win {
-  position: relative; height: 26px; overflow: hidden;
+  position: relative; height: 28px; overflow: hidden;
   /* Feather both ends, so a letter arrives and leaves rather than popping in
      at the edge of a box. */
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
 }
 .cmp-track { position: absolute; left: 0; top: 0; height: 100%; will-change: transform; }
 .cmp-track i, .cmp-track b {
   position: absolute; transform: translateX(-50%);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .98);
 }
-.cmp-track i {
-  top: 9px; width: 1px; height: 6px;
-  background: rgba(255, 255, 255, .42);
-}
+.cmp-track i { top: 11px; width: 1px; height: 6px; background: rgba(255, 255, 255, .38); }
 .cmp-track b {
-  top: 6px; font: 700 12px/1 var(--font); letter-spacing: .08em;
-  color: rgba(255, 255, 255, .92);
+  top: 7px; font: 700 var(--fs-md)/1 var(--font); letter-spacing: .1em;
+  color: #fff;
 }
-.cmp-track b.inter { font-size: 9.5px; font-weight: 600; top: 8px; color: rgba(255, 255, 255, .58); }
+.cmp-track b.inter { font-size: var(--fs-xs); font-weight: 700; top: 10px; color: rgba(255, 255, 255, .52); }
 .cmp-notch {
   position: absolute; left: 50%; top: 0;
-  width: 0; height: 0; margin-left: -4px;
-  border: 4px solid transparent; border-top: 6px solid var(--accent-2);
+  width: 0; height: 0; margin-left: -5px;
+  border: 5px solid transparent; border-top: 7px solid var(--accent-2);
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .9));
 }
-/* Inside the polar cap there is no bearing to show, so the strip is replaced
-   by the reason there isn't one. */
+/* Inside the polar cap there is no bearing to show. One word. */
 .cmp-polar {
-  display: none; position: absolute; left: 0; right: 0; top: 7px;
-  text-align: center; font: 600 10px/1 var(--font);
-  letter-spacing: .07em; text-transform: uppercase;
-  color: rgba(255, 255, 255, .5); text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
+  display: none; position: absolute; left: 0; right: 0; top: 9px;
+  text-align: center; color: rgba(255, 255, 255, .45);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
 }
 #compass.polar { opacity: 1 !important; }
 #compass.polar .cmp-win, #compass.polar .cmp-notch { display: none; }
 #compass.polar .cmp-polar { display: block; }
 
-/* --- vitals (top-left, under the map) ------------------------------------ */
+/* --- vitals (top left, under the map) -------------------------------------
+   Every bar is one plate: icon well, track, number, all inside a single bevel,
+   so four of them stack into a column rather than into twelve floating pieces.
+   The track carries a static tick pattern; only the fill's width is written
+   per frame. */
 #vitals {
-  position: absolute; top: 164px; left: 8px;
-  display: flex; flex-direction: column; gap: 5px;
+  position: absolute; top: 172px; left: 10px;
+  display: flex; flex-direction: column; gap: 4px;
 }
 /* ...and back in the corner when there is no map above them. Driven off a
-   class on #hud rather than off the map's own `hidden`, because a sibling
-   cannot be selected backwards in CSS and the map is genuinely absent — it is
-   `display: none`, so it occupies nothing to be laid out under. */
-#hud.no-map #vitals { top: 7px; }
-.vital { display: flex; align-items: center; gap: 7px; }
+   class on #hud because the map is `display: none` and cannot push anything. */
+#hud.no-map #vitals { top: 10px; }
+.vital {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 9px 3px 4px; border-radius: var(--r-md);
+  background: var(--plate); box-shadow: var(--bevel);
+}
 .vital.hidden { display: none; }
 .vital .v-ico {
-  width: 18px; height: 18px; flex: none;
-  background: no-repeat center/contain;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .9));
+  width: 22px; height: 22px; flex: none;
+  background: no-repeat center/17px 17px;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07);
 }
 .vital .v-track {
   position: relative; display: block;
-  width: 168px; height: 12px; border-radius: 99px;
-  background: rgba(6, 9, 16, .58);
-  border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(8px);
+  width: 164px; height: 13px; border-radius: 2px;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .07) 0 1px, rgba(0, 0, 0, 0) 1px 16.4px),
+    linear-gradient(180deg, rgba(0, 0, 0, .62), rgba(0, 0, 0, .48));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7), 0 1px 0 rgba(255, 255, 255, .06);
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
 }
 .vital .v-track b {
   display: block; height: 100%; width: 100%;
-  border-radius: 99px;
-  /* The width transition is what makes a hit read as a hit — an instant jump */
-  /* at 60fps is easy to miss entirely. */
+  /* The width transition is what makes a hit read as a hit: an instant jump at
+     60fps is easy to miss entirely. */
   transition: width .16s cubic-bezier(.3, .8, .4, 1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), inset 0 -3px 6px -3px rgba(0, 0, 0, .6);
 }
 .vital .v-num {
-  font: 700 11px/1 var(--mono); font-style: normal;
-  color: rgba(255, 255, 255, .78);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .85);
-  min-width: 30px;
+  font: 700 var(--fs-sm)/1 var(--mono); font-style: normal;
+  color: rgba(255, 255, 255, .88);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .9);
+  min-width: 42px; text-align: right;
 }
-#v-health   .v-track b { background: linear-gradient(90deg, #b4231f, #e2453f 55%, #ff7a6f); }
-#v-food     .v-track b { background: linear-gradient(90deg, #b96f14, #e8a83f 60%, #ffd07a); }
-#v-stamina  .v-track b { background: linear-gradient(90deg, #c8901f, var(--accent-2) 55%, #ffe6b0); }
-#v-breath   .v-track b { background: linear-gradient(90deg, #2b7fb0, #79c8f0 60%, #c8ecff); }
+#v-health   .v-track b { background: linear-gradient(180deg, #ff7a6f, #e2453f 45%, #a81e1a); }
+#v-food     .v-track b { background: linear-gradient(180deg, #ffd07a, #e8a83f 45%, #a55f0e); }
+#v-stamina  .v-track b { background: linear-gradient(180deg, #ffe6b0, var(--accent-2) 45%, #b5811a); }
+#v-breath   .v-track b { background: linear-gradient(180deg, #c8ecff, #79c8f0 45%, #2372a3); }
 
-/* Health flashes when it is low enough to kill you in one more mistake. */
-#v-health.critical .v-track b { animation: vital-pulse 1s ease-in-out infinite; }
-@keyframes vital-pulse { 0%, 100% { filter: none; } 50% { filter: brightness(1.7); } }
+/* Low health is a different-looking HUD, not a shorter bar. The whole plate
+   turns red, the keyline glows, and the fill breathes. Cheap: one box-shadow
+   swap and a brightness keyframe on a 164px element. */
+#v-health.critical {
+  background: linear-gradient(180deg, rgba(86, 22, 22, .86), rgba(38, 8, 8, .9));
+  box-shadow:
+    0 0 0 1px rgba(255, 90, 70, .55),
+    inset 0 1px 0 rgba(255, 180, 160, .3),
+    0 0 18px -4px rgba(226, 69, 63, .7);
+  animation: vital-alarm 1.15s ease-in-out infinite;
+}
+#v-health.critical .v-num { color: #ffd9d2; }
+@keyframes vital-alarm {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 90, 70, .45), inset 0 1px 0 rgba(255, 180, 160, .25), 0 0 14px -6px rgba(226, 69, 63, .55); }
+  50%      { box-shadow: 0 0 0 1px rgba(255, 130, 110, .8), inset 0 1px 0 rgba(255, 200, 180, .4), 0 0 26px -4px rgba(240, 90, 70, .9); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #v-health.critical { animation: none; }
+}
 
-#hotbar, #offhand-bar { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: blur(9px); pointer-events: auto; }
-/* The offhand hangs off the row rather than sitting inside it. Laid out in
-   flow it would have widened the row by 46px and pushed the hotbar half that
-   far right of the crosshair — a bar that has been centred on the middle of the
-   screen since the first build, moved by an addition that is not part of it. */
+/* --- hotbar --------------------------------------------------------------
+   The one thing on screen the player's hands are always on, so it is the
+   heaviest plate in the game: a deeper base, a wider bevel, and a selected
+   cell that lifts clear of the row with a warm rim and a notch above it. */
+#hotbar, #offhand-bar {
+  display: flex; gap: 3px; padding: 4px; border-radius: var(--r-md);
+  background: var(--plate-solid); box-shadow: var(--bevel-lift);
+  pointer-events: auto;
+}
+/* The offhand hangs off the row rather than sitting inside it, so the hotbar
+   stays centred on the crosshair. */
 #bar-row { position: relative; display: flex; }
-#offhand-bar { position: absolute; right: 100%; bottom: 0; margin-right: 5px; }
+#offhand-bar { position: absolute; right: 100%; bottom: 0; margin-right: 7px; }
 .slot {
-  position: relative; width: 38px; height: 38px; border-radius: 4px;
-  background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .08);
+  position: relative; width: 42px; height: 42px; border-radius: var(--r-sm);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .035));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), inset 0 0 0 1px rgba(0, 0, 0, .35);
   display: grid; place-items: center; cursor: pointer;
-  transition: transform .13s cubic-bezier(.2, .9, .3, 1.35), box-shadow .16s, border-color .16s, background .16s;
+  transition: transform .13s cubic-bezier(.2, .9, .3, 1.35), box-shadow .16s, background .16s;
 }
-.slot img { width: 32px; height: 32px; pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .45)); }
-.slot .num { position: absolute; top: 2px; left: 3px; font: 600 8px var(--mono); color: rgba(255, 255, 255, .3); }
-.slot .count { position: absolute; right: 3px; bottom: 1px; font: 700 11px var(--font); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .95); pointer-events: none; }
-.slot .wear { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 2px; border-radius: 2px; background: rgba(0, 0, 0, .6); overflow: hidden; }
+.slot img { width: 34px; height: 34px; pointer-events: none; }
+.slot .num {
+  position: absolute; top: 2px; left: 4px;
+  font: 700 8.5px var(--mono); color: rgba(255, 255, 255, .3);
+}
+.slot .count {
+  position: absolute; right: 3px; bottom: 1px;
+  font: 700 var(--fs-sm) var(--mono); color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .98), 0 0 3px rgba(0, 0, 0, .9);
+  pointer-events: none;
+}
+.slot .wear { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, .7); overflow: hidden; }
 .slot .wear i { display: block; height: 100%; background: #6ec25a; }
 .slot.active {
-  border-color: var(--accent-2);
-  box-shadow: 0 0 0 1.5px rgba(242, 180, 92, .65);
-  transform: translateY(-2px) scale(1.04);
-  background: rgba(255, 220, 170, .17);
+  background: linear-gradient(180deg, rgba(255, 216, 160, .3), rgba(255, 180, 100, .12));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .4),
+    0 0 0 2px var(--accent-2),
+    0 0 16px -2px rgba(242, 180, 92, .7);
+  transform: translateY(-3px);
+}
+.slot.active .num { color: rgba(255, 231, 195, .8); }
+/* The notch above the selected cell: a small warm wedge that points at it, so
+   which slot is live is legible from the corner of the eye. */
+.slot.active::before {
+  content: ''; position: absolute; left: 50%; bottom: 100%; margin: 0 0 5px -4px;
+  width: 0; height: 0;
+  border: 4px solid transparent; border-top: 5px solid var(--accent-2);
 }
 
 /* Sits on top of the bottom cluster and grows upward, so the hint and the item
    name clear the meter rows however many of them are showing. */
 #above-bar {
   position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
-  margin-bottom: 4px;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  margin-bottom: 7px;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
 }
 
 #item-name {
-  font-size: 12.5px; font-weight: 600; letter-spacing: .05em; white-space: nowrap;
-  color: #fff; text-shadow: 0 2px 6px rgba(0, 0, 0, .95);
+  font-size: var(--fs-lg); font-weight: 700; letter-spacing: .03em; white-space: nowrap;
+  color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .98), 0 0 2px rgba(0, 0, 0, .9);
   opacity: 0; transition: opacity .3s ease;
 }
 #item-name.show { opacity: 1; }
 
 /* Deliberately quieter than the item name: this one is on screen almost all the
-   time, so it reads as a label rather than as an announcement. The fade is
-   short — a name that lingers after you look away is worse than none, because
-   it describes something you are no longer pointing at. */
+   time, so it reads as a label rather than as an announcement. */
 #look-at {
-  font-size: 11.5px; font-weight: 500; letter-spacing: .04em; white-space: nowrap;
-  color: rgba(255, 255, 255, .82); text-shadow: 0 2px 6px rgba(0, 0, 0, .95);
+  font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase; white-space: nowrap;
+  color: rgba(255, 255, 255, .68); text-shadow: 0 2px 6px rgba(0, 0, 0, .98);
   opacity: 0; transition: opacity .12s ease;
 }
 #look-at.show { opacity: 1; }
 
 #toasts {
-  position: fixed; left: 50%; top: 34px; transform: translateX(-50%); z-index: 95;
-  display: flex; flex-direction: column; gap: 5px; align-items: center;
+  position: fixed; left: 50%; top: 46px; transform: translateX(-50%); z-index: 95;
+  display: flex; flex-direction: column; gap: 6px; align-items: center;
   pointer-events: none;
 }
 .toast {
-  padding: 4px 9px; border-radius: 4px; font-size: 12.5px; font-weight: 600;
-  background: var(--glass); color: #fff; border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(8px); animation: toastIn .25s cubic-bezier(.2, .9, .3, 1.2);
-  display: flex; align-items: center; gap: 7px;
+  padding: 6px 12px 6px 8px; border-radius: var(--r-md);
+  font-size: var(--fs-md); font-weight: 600; letter-spacing: .01em;
+  background: var(--plate-solid); color: #fff;
+  box-shadow: var(--bevel);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+  animation: toastIn .25s cubic-bezier(.2, .9, .3, 1.2);
+  display: flex; align-items: center; gap: 9px;
 }
-.toast img { width: 18px; height: 18px; }
-@keyframes toastIn { from { opacity: 0; transform: translateY(-6px) } to { opacity: 1; transform: none } }
+/* A hairline of accent down the leading edge: enough to say "the game is
+   telling you something" without a colour field behind the words. */
+.toast::before {
+  content: ''; width: 2px; align-self: stretch; border-radius: 2px;
+  background: var(--accent-2); flex: none;
+}
+.toast img { width: 20px; height: 20px; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-8px) } to { opacity: 1; transform: none } }
 .toast.out { animation: toastOut .3s ease forwards; }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-8px) } }
 
 #hint {
-  font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, .88);
-  background: var(--glass); border: 1px solid var(--glass-edge); backdrop-filter: blur(8px);
-  padding: 4px 9px; border-radius: 4px; white-space: nowrap;
+  font-size: var(--fs-md); font-weight: 600; color: #fff;
+  background: var(--plate-solid); box-shadow: var(--bevel);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+  padding: 5px 11px; border-radius: var(--r-md); white-space: nowrap;
 }
 #hint kbd { margin: 0 3px; }
 
 #debug {
-  position: absolute; top: 7px; left: 7px;
-  font: 11px/1.6 var(--mono); color: #cfe9dd; text-shadow: 0 1px 2px rgba(0, 0, 0, .95);
-  background: rgba(6, 10, 18, .42); padding: 6px 9px; border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, .07); backdrop-filter: blur(5px); white-space: pre;
+  position: absolute; top: 10px; left: 10px;
+  font: var(--fs-sm)/1.6 var(--mono); color: #cfe9dd; text-shadow: 0 1px 2px rgba(0, 0, 0, .95);
+  background: rgba(6, 10, 18, .74); padding: 7px 10px; border-radius: var(--r-md);
+  box-shadow: var(--bevel); white-space: pre;
 }
 
 /* ── inventory screen ──────────────────────────────────── */
 
 .inv-panel { width: min(830px, 96vw); }
-#screen-top { margin-bottom: 14px; }
+#screen-top { margin-bottom: 16px; }
 
-.inv-body { display: flex; gap: 16px; align-items: flex-start; }
+.inv-body { display: flex; gap: 18px; align-items: flex-start; }
 .inv-left { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* ── craftable sidebar ─────────────────────────────────── */
@@ -524,283 +771,243 @@ button.primary:hover { filter: brightness(1.06); }
 .recipe-panel {
   width: 236px; flex: none; align-self: stretch;
   display: flex; flex-direction: column;
-  padding-left: 16px; border-left: 1px solid rgba(0, 0, 0, .1);
+  padding-left: 18px; border-left: 1px solid rgba(0, 0, 0, .1);
 }
-.recipe-panel h3 {
-  font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
-  color: var(--ink-soft); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
+.recipe-panel h3, .shop-col h3 {
+  color: var(--ink-faint); margin-bottom: 9px;
+  display: flex; align-items: center; gap: 6px;
 }
 .recipe-panel h3 span {
-  font: 700 10px var(--mono); color: #fff; background: var(--accent);
-  padding: 1px 5px; border-radius: 3px;
+  font: 700 var(--fs-xs) var(--mono); color: #fff; background: var(--accent);
+  padding: 1px 5px; border-radius: 3px; letter-spacing: 0;
 }
-#recipe-list { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; max-height: 330px; }
+#recipe-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 330px; }
 .recipe-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 6px; border-radius: 4px; cursor: pointer;
-  background: rgba(255, 255, 255, .42); border: 1px solid rgba(0, 0, 0, .07);
+  display: flex; align-items: center; gap: 9px;
+  padding: 5px 7px; border-radius: var(--r-md); cursor: pointer;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .28));
+  border: 1px solid rgba(0, 0, 0, .08);
   transition: background .12s, border-color .12s, transform .1s;
 }
 .recipe-row:hover { background: #fff; border-color: var(--accent); transform: translateX(2px); }
-.recipe-row img { width: 30px; height: 30px; flex: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.22)); }
-.recipe-row .rname { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recipe-row .rcost { display: flex; gap: 3px; align-items: center; flex: none; }
+.recipe-row img { width: 30px; height: 30px; flex: none; }
+.recipe-row .rname { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-row .rcost { display: flex; gap: 4px; align-items: center; flex: none; }
 .recipe-row .rcost i {
   display: flex; align-items: center; gap: 2px; font-style: normal;
-  font: 600 10px var(--mono); color: var(--ink-soft);
+  font: 700 var(--fs-xs) var(--mono); color: var(--ink-soft);
 }
-.recipe-row .rcost img { width: 16px; height: 16px; filter: none; }
-.recipe-row .ryield { font: 700 10px var(--mono); color: var(--accent); flex: none; }
-.recipe-empty { font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; opacity: .8; }
+.recipe-row .rcost img { width: 16px; height: 16px; }
+.recipe-row .ryield { font: 700 var(--fs-xs) var(--mono); color: var(--accent); flex: none; }
+.recipe-empty { font-size: var(--fs-sm); color: var(--ink-faint); line-height: 1.5; }
 
-.craft-area { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.craft-grid { display: grid; gap: 3px; }
+.craft-area { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.craft-grid { display: grid; gap: 4px; }
 .craft-grid.g2 { grid-template-columns: repeat(2, 1fr); }
 .craft-grid.g3 { grid-template-columns: repeat(3, 1fr); }
-.craft-arrow { font-size: 17px; color: var(--ink-soft); opacity: .5; }
-.craft-out .islot { width: 56px; height: 56px; }
+/* Drawn, not typed. An arrow glyph is a different shape in every fallback
+   font and it is the only character on this screen that was not on a
+   keyboard. */
+.craft-arrow {
+  width: 0; height: 0; flex: none;
+  border: 7px solid transparent;
+  border-left: 11px solid var(--ink-faint);
+}
+.craft-out .islot { width: 58px; height: 58px; }
 
-.smelt-area { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.smelt-col { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.smelt-label { font: 700 8.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); opacity: .65; }
+.smelt-area { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.smelt-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.smelt-label { color: var(--ink-faint); font-family: var(--mono); }
 .flame { width: 18px; height: 22px; position: relative; }
 .flame i {
   position: absolute; inset: 0; border-radius: 50% 50% 45% 45%;
   background: linear-gradient(180deg, #ffd876, #ff7a2e 60%, #d33d12);
   clip-path: inset(var(--burn, 100%) 0 0 0);
-  filter: drop-shadow(0 0 5px rgba(255, 140, 50, .7));
 }
 .flame::after { content: ''; position: absolute; inset: 0; border-radius: 50% 50% 45% 45%; border: 1.5px solid rgba(0, 0, 0, .18); }
-.progress-arrow { width: 46px; height: 8px; border-radius: 4px; background: rgba(0, 0, 0, .12); overflow: hidden; }
+.progress-arrow { width: 46px; height: 9px; border-radius: 4px; background: rgba(0, 0, 0, .14); overflow: hidden; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18); }
 .progress-arrow i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 
 /* ── merchant ──────────────────────────────────────────── */
 
-.shop-area { display: flex; flex-direction: column; gap: 10px; }
+.shop-area { display: flex; flex-direction: column; gap: 12px; }
 .shop-purse {
-  display: flex; align-items: center; gap: 7px; align-self: flex-start;
-  padding: 4px 11px 4px 6px; border-radius: 999px;
-  background: rgba(255, 255, 255, .5); border: 1px solid rgba(0, 0, 0, .09);
+  display: flex; align-items: center; gap: 8px; align-self: stretch;
+  padding: 5px 12px 5px 7px; border-radius: 999px;
+  background: linear-gradient(180deg, #fff, rgba(255, 255, 255, .35));
+  border: 1px solid rgba(0, 0, 0, .1);
 }
-.shop-purse img { width: 22px; height: 22px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }
-.shop-purse b { font: 700 15px var(--font); color: var(--ink); }
-.shop-purse span { font: 700 9.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); opacity: .7; }
-/* What the trader can still pay out — pushed to the right of your own balance
-   so the two are never confused for one number. */
+.shop-purse img { width: 22px; height: 22px; }
+.shop-purse b { font: 700 var(--fs-lg) var(--font); color: var(--ink); }
+.shop-purse span { color: var(--ink-faint); font-size: var(--fs-xs); font-weight: 700; letter-spacing: var(--ls-cap); text-transform: uppercase; }
 .shop-purse .shop-float {
-  margin-left: auto; font: 600 11px var(--mono); font-style: normal;
-  letter-spacing: .04em; color: var(--ink-soft); opacity: .75;
+  margin-left: auto; font: 600 var(--fs-sm) var(--mono); font-style: normal;
+  color: var(--ink-soft); opacity: .75;
 }
 .shop-purse .shop-float.low { color: #b4451f; opacity: 1; }
 
-.shop-cols { display: flex; gap: 16px; align-items: flex-start; }
+.shop-cols { display: flex; gap: 18px; align-items: flex-start; }
 .shop-col { flex: 1; min-width: 0; }
-.shop-col + .shop-col { padding-left: 16px; border-left: 1px solid rgba(0, 0, 0, .1); }
-.shop-col h3 {
-  font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
-  color: var(--ink-soft); margin-bottom: 8px;
-}
-.shop-list { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; max-height: 250px; }
+.shop-col + .shop-col { padding-left: 18px; border-left: 1px solid rgba(0, 0, 0, .1); }
+.shop-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 250px; }
 .shop-row .shop-price {
-  display: flex; align-items: center; gap: 3px; flex: none;
-  font: 700 12px var(--mono); color: var(--ink);
+  display: flex; align-items: center; gap: 4px; flex: none;
+  font: 700 var(--fs-md) var(--mono); color: var(--ink);
 }
-.shop-row .shop-price img { width: 16px; height: 16px; filter: none; }
+.shop-row .shop-price img { width: 16px; height: 16px; }
+
+/* The trader's standing request. Warmer than the counter below it so the eye
+   lands here first. */
+.shop-errand {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0; padding: 9px 12px; border-radius: var(--r-lg);
+  background: rgba(196, 148, 58, .16);
+  border: 1px solid rgba(150, 108, 34, .28);
+}
+.shop-errand img { width: 26px; height: 26px; }
+.errand-text { flex: 1; font-size: var(--fs-md); color: var(--ink); }
+.errand-text em { opacity: .6; font-style: normal; }
+.shop-errand.ready { background: rgba(96, 168, 74, .18); border-color: rgba(60, 122, 44, .34); }
+.shop-errand.done { opacity: .6; }
+/* `.panel button` greys every button inside a screen, which made the one
+   actionable control on this panel look disabled. */
+.panel .errand-go, .panel .errand-go:hover {
+  border: 1px solid rgba(40, 96, 30, .4); border-radius: 7px; cursor: pointer;
+  padding: 8px 14px; font: 700 var(--fs-sm)/1 var(--font);
+  color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
+  background: linear-gradient(180deg, #7ac45f, var(--good) 50%, #3f8232);
+  box-shadow: 0 8px 16px -9px rgba(40, 96, 30, .9), inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+.panel .errand-go:hover { filter: brightness(1.07); }
 
 /* ── growth ────────────────────────────────────────────── */
+/* The tree, and nothing else. The aside that used to sit beside it listed
+   where XP came from and which firsts were unearned, which is a manual filed
+   under a menu: the planet pays you, and noticing that is the game. Its
+   removal is also what let this panel come back to one column. */
 
-.skills-panel { max-width: 780px; }
-.skills-body { display: flex; gap: 18px; align-items: flex-start; }
-.skills-left { flex: 1; min-width: 0; }
-.skills-side {
-  width: 216px; flex: none; padding-left: 18px;
-  border-left: 1px solid rgba(0, 0, 0, .1);
-}
-.skills-side h3 {
-  font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
-  color: var(--ink-soft); margin: 0 0 7px;
-}
-.skills-side h3 + div + h3 { margin-top: 14px; }
-.skills-side .note { margin-top: 14px; font-size: 11px; line-height: 1.5; }
+.skills-panel { width: min(560px, 94vw); }
 
 /* The balance, and the one destructive button on the screen, on one line. */
-.skills-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.skills-bar { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
 .skill-points {
-  font: 700 26px/1 var(--font); color: var(--ink);
-  min-width: 34px; text-align: center;
+  font: 200 var(--fs-3xl)/1 var(--font); color: var(--ink);
+  letter-spacing: -.02em;
 }
 /* Nothing to spend is not an error, so it goes quiet rather than red. */
-.skill-points.none { opacity: .34; }
-.skill-sub { flex: 1; font-size: 11.5px; color: var(--ink-soft); }
+.skill-points.none { opacity: .3; }
+.skill-sub {
+  flex: 1; color: var(--ink-faint);
+  font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+}
+.skills-bar .ghost { align-self: center; }
 
-.skill-tree { display: flex; flex-direction: column; gap: 5px; }
+.skill-tree { display: flex; flex-direction: column; gap: 6px; }
 .skill-row {
-  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px;
+  display: grid; grid-template-columns: 1fr auto; gap: 3px 14px;
   align-items: center;
-  padding: 8px 11px; border-radius: 9px;
-  background: rgba(255, 255, 255, .42); border: 1px solid rgba(0, 0, 0, .08);
+  padding: 10px 13px; border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .58), rgba(255, 255, 255, .25));
+  border: 1px solid rgba(0, 0, 0, .08);
 }
 /* A leaf is indented under its root and ruled off on the left, so the shape of
    the tree is visible without reading a single prerequisite. */
-.skill-row.leaf { margin-left: 22px; border-left: 3px solid rgba(90, 130, 200, .38); }
-.skill-row.maxed { background: rgba(120, 170, 110, .18); border-color: rgba(80, 130, 70, .22); }
-.skill-head-row { display: flex; align-items: center; gap: 9px; }
-.skill-name { font: 700 13.5px var(--font); color: var(--ink); }
+.skill-row.leaf { margin-left: 24px; border-left: 3px solid rgba(90, 130, 200, .4); }
+.skill-row.maxed { background: rgba(120, 170, 110, .2); border-color: rgba(80, 130, 70, .24); }
+.skill-head-row { display: flex; align-items: center; gap: 10px; }
+.skill-name { font: 700 var(--fs-md) var(--font); color: var(--ink); letter-spacing: .01em; }
 .skill-pips { display: flex; gap: 3px; }
 .skill-pips i {
   width: 8px; height: 8px; border-radius: 50%;
   background: rgba(0, 0, 0, .13);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .16);
 }
-.skill-pips i.on { background: linear-gradient(170deg, var(--accent), var(--accent-2)); }
-.skill-blurb { grid-column: 1; font-size: 11px; color: var(--ink-soft); line-height: 1.45; }
+.skill-pips i.on {
+  background: linear-gradient(170deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 0 1px rgba(180, 100, 40, .35);
+}
+.skill-blurb { grid-column: 1; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.45; }
 /* Spans both rows of the row's grid so the button is centred against the name
-   and the blurb together rather than sitting up against the name. */
+   and the blurb together. */
 .skill-buy { grid-column: 2; grid-row: 1 / 3; align-self: center; }
 .panel .skill-buy {
-  border: 0; border-radius: 7px; cursor: pointer; min-width: 104px;
-  /* `var(--ui)` is what the neighbouring buttons use and it is not a variable
-     this stylesheet defines — an unresolved var makes the whole `font`
-     shorthand invalid, which is why those buttons quietly inherit their type.
-     This one names the font that exists. */
-  padding: 7px 12px; font: 700 11.5px/1 var(--font); color: #fff;
-  background: linear-gradient(170deg, #63b04b, #47903a);
-  box-shadow: 0 6px 14px -8px rgba(40, 96, 30, .9);
+  border: 1px solid rgba(40, 96, 30, .4); border-radius: 7px; cursor: pointer; min-width: 108px;
+  padding: 8px 13px; font: 700 var(--fs-sm)/1 var(--font); color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
+  background: linear-gradient(180deg, #7ac45f, var(--good) 50%, #3f8232);
+  box-shadow: 0 8px 16px -9px rgba(40, 96, 30, .9), inset 0 1px 0 rgba(255, 255, 255, .35);
 }
 .panel .skill-buy:hover:not(:disabled) { filter: brightness(1.07); }
 .panel .skill-buy:disabled {
-  cursor: default; background: rgba(0, 0, 0, .07); box-shadow: none;
-  color: var(--ink-soft); font-weight: 600;
+  cursor: default; background: rgba(0, 0, 0, .06); box-shadow: none;
+  border-color: rgba(0, 0, 0, .08);
+  color: var(--ink-faint); font-weight: 600; text-shadow: none;
 }
-/* Affordable-but-for-the-points reads as a price you have not met yet, not as a
-   rule you have broken — see `blockedBy` in Skills.js. */
 .panel .skill-buy.short { opacity: .72; }
 
 /* The level bar, at the head of the tree because it is the thing the whole
-   column is downstream of: every row below it is priced in points, and points
-   only ever arrive one way. */
+   column is downstream of. */
 .xp-block {
-  padding: 9px 11px 8px; border-radius: 9px; margin-bottom: 7px;
-  background: rgba(0, 0, 0, .045); border: 1px solid rgba(0, 0, 0, .06);
+  padding: 11px 13px 10px; border-radius: var(--r-lg); margin-bottom: 8px;
+  background: rgba(0, 0, 0, .05); border: 1px solid rgba(0, 0, 0, .07);
 }
-.xp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-.xp-head b { font: 700 14px var(--font); color: var(--ink); }
-.xp-head span { flex: 1; font-size: 10.5px; color: var(--ink-soft); }
+.xp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.xp-head b { font: 700 var(--fs-md) var(--font); color: var(--ink); letter-spacing: .02em; }
 .xp-bar {
-  height: 7px; border-radius: 4px; overflow: hidden;
-  background: rgba(0, 0, 0, .13);
+  height: 8px; border-radius: 4px; overflow: hidden;
+  background: rgba(0, 0, 0, .14);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .2);
 }
-.xp-bar i { display: block; height: 100%; border-radius: 4px; min-width: 2px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
-.xp-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 5px; }
-.xp-foot span { font: 700 10.5px var(--mono); color: var(--ink); }
-/* The shortfall, in xp, is the number the player acts on — so it gets the
-   width and the rest of the line gets out of its way. */
-.xp-foot em { flex: 1; text-align: right; font-style: normal; font-size: 10.5px;
-  color: var(--ink-soft); }
-.xp-block.maxed { background: rgba(120, 170, 110, .18); border-color: rgba(80, 130, 70, .22); }
+.xp-bar i {
+  display: block; height: 100%; border-radius: 4px; min-width: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4);
+}
+.xp-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+.xp-foot span { font: 700 var(--fs-xs) var(--mono); color: var(--ink); }
+.xp-foot em { flex: 1; text-align: right; font-style: normal; font-size: var(--fs-xs); color: var(--ink-faint); font-family: var(--mono); }
+.xp-block.maxed { background: rgba(120, 170, 110, .2); border-color: rgba(80, 130, 70, .24); }
 
-.earn-lead {
-  font-size: 10.5px; color: var(--ink-soft); line-height: 1.4;
-  margin: 0 0 5px;
-}
-.earn-row, .mark-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 0; font-size: 11.5px; color: var(--ink);
-  border-bottom: 1px solid rgba(0, 0, 0, .055);
-}
-.earn-row span, .mark-row span { flex: 1; min-width: 0; }
-/* The second line of a row — what the source is, or what a mark wants — sits
-   under the name rather than beside it, so the value column stays a column. */
-.earn-row em, .mark-row em {
-  display: block; font-style: normal; font-size: 10px;
-  color: var(--ink-soft); line-height: 1.35;
-}
-.earn-row b, .mark-row b { font: 700 11.5px var(--mono); color: var(--ink); }
-/* A source that pays nothing is shown, not hidden: "dirt is worth nothing" is
-   the single most useful thing this panel says, and it can only say it by
-   being on the list. */
-.earn-row.nil, .earn-row.nil b { color: var(--ink-soft); opacity: .62; }
-.earn-row.bonus b { color: var(--accent); }
-/* Earned or not is carried by the marker as well as by the colour, because a
-   colour difference alone left the two states reading identically. */
-.mark-row i.mk {
-  flex: none; width: 13px; height: 13px; border-radius: 50%;
-  border: 1.5px solid rgba(0, 0, 0, .22);
-  font: 700 9px/10px var(--font); text-align: center; color: transparent;
-}
-.mark-row.got i.mk {
-  border-color: transparent; color: #fff;
-  background: linear-gradient(170deg, var(--accent), var(--accent-2));
-}
-.mark-row:not(.got) span { color: var(--ink-soft); }
-.mark-row.got b { color: var(--accent); }
+.inv-section { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.inv-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
 
-.inv-section { display: flex; flex-direction: column; gap: 5px; align-items: center; }
-.inv-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; }
-
-/* The crate's own rows sit above your inventory, tinted and ruled off so it is
-   never ambiguous which twenty-seven slots stay behind when you walk away. */
 /* The sign writing field. Sized to the card rather than the text so a short
    note and a long one look like the same kind of thing. */
 #sign-line {
-  width: 100%; margin: 4px 0 14px; padding: 10px 12px;
-  border-radius: 8px; font: 600 14px/1.2 var(--ui);
-  color: var(--ink); background: rgba(0, 0, 0, .05);
-  border: 1px solid rgba(0, 0, 0, .12);
+  width: 100%; margin: 14px 0 0; padding: 11px 13px;
+  border-radius: 8px; font: 600 var(--fs-lg)/1.2 var(--font);
+  color: var(--ink); background: rgba(255, 255, 255, .9);
+  border: 1px solid rgba(0, 0, 0, .2);
 }
-#sign-line:focus { outline: none; border-color: var(--accent); background: #fff; }
-
-/* The trader's standing request. Warmer than the counter below it so the eye
-   lands here first — it is the reason to have walked over. */
-.shop-errand {
-  display: flex; align-items: center; gap: 9px;
-  margin: 0 0 9px; padding: 8px 11px; border-radius: 9px;
-  background: rgba(196, 148, 58, .16);
-  border: 1px solid rgba(150, 108, 34, .28);
-}
-.shop-errand img { width: 26px; height: 26px; image-rendering: auto; }
-.errand-text { flex: 1; font-size: 12.5px; color: var(--ink); }
-.errand-text em { opacity: .62; font-style: normal; }
-.shop-errand.ready { background: rgba(96, 168, 74, .18); border-color: rgba(60, 122, 44, .34); }
-.shop-errand.done { opacity: .62; }
-/* `.panel button` greys every button inside a screen, which made the one
-   actionable control on this panel look disabled. Matched at the same depth so
-   it wins on order rather than on an !important. */
-.panel .errand-go, .panel .errand-go:hover {
-  border: 0; border-radius: 7px; cursor: pointer;
-  padding: 7px 13px; font: 700 11.5px/1 var(--ui);
-  color: #fff;
-  background: linear-gradient(170deg, #63b04b, #47903a);
-  box-shadow: 0 6px 14px -8px rgba(40, 96, 30, .9);
-}
-.panel .errand-go:hover { filter: brightness(1.07); }
+#sign-line:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(242, 180, 92, .35); }
 
 /* The pack marker. Warm against the other chips so it reads as a thing to act
-   on rather than another readout, and the arrow turns with you. */
-/* The chips are uppercased as a set, which turned "79m" into "79M" — a
-   distance that reads as a magnitude. This one keeps its lowercase unit. */
-#chip-pack { background: rgba(190, 92, 40, .82); color: #fff5ec; gap: 5px; text-transform: none; }
+   on rather than another readout, and the arrow turns with you. The chips are
+   uppercased as a set, which turned "79m" into "79M" — a distance that reads
+   as a magnitude. This one keeps its lowercase unit. */
+#chip-pack { background: rgba(190, 92, 40, .9); color: #fff5ec; gap: 6px; text-transform: none; }
 
-/* A button that is about to throw something away. Only Save & Quit wears this,
-   and only after a save has actually failed — see `UI.setQuitConfirm`. */
+/* A button that is about to throw something away. */
 button.danger {
-  background: linear-gradient(180deg, #c4402f, #962c20);
-  border-color: #7d2318;
+  background: linear-gradient(180deg, #d4503c, #96271b);
+  border-color: rgba(255, 160, 140, .35);
   color: #fff3f0;
 }
+.confirm-card h2 { letter-spacing: .04em; }
+.confirm-card .tagline { margin-bottom: 4px; }
+#confirm { z-index: 120; }
 
 /* The save warning. Redder than the pack marker and slowly pulsing, because it
-   outranks every other chip: the pack is a thing you may go and get back, and
-   this is the one state where continuing to play is actively losing work.
-   The pulse is slow on purpose — a fast blink reads as an alarm to be dismissed,
-   and this cannot be dismissed, only fixed. */
-#chip-save { background: rgba(176, 46, 46, .88); color: #fff2f2; }
+   outranks every other chip. The pulse is slow on purpose: a fast blink reads
+   as an alarm to be dismissed, and this cannot be dismissed, only fixed. */
+#chip-save { background: rgba(176, 46, 46, .92); color: #fff2f2; }
 @media (prefers-reduced-motion: no-preference) {
   #chip-save { animation: saveWarn 2.4s ease-in-out infinite; }
 }
 @keyframes saveWarn {
-  0%, 100% { background: rgba(176, 46, 46, .88); }
-  50% { background: rgba(214, 74, 54, .95); }
+  0%, 100% { background: rgba(176, 46, 46, .92); }
+  50% { background: rgba(214, 74, 54, .98); }
 }
 .pack-arrow {
   width: 0; height: 0; display: inline-block;
@@ -809,104 +1016,103 @@ button.danger {
   transform-origin: 50% 62%;
 }
 
-/* The offhand, on the left edge of the screen. It kept the tinted-cell-with-a-
-   faint-label language the worn armour column used to share with it, which is
-   now simply what a slot that is not part of the grid looks like. */
+/* The offhand, on the left edge of the inventory screen. */
 .offhand-col {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
   margin-right: 14px;
 }
-.offhand-slot { background: rgba(120, 132, 158, .16); border-color: rgba(60, 74, 104, .18); }
-.offhand-slot::after {
-  content: '✋';
-  position: absolute; inset: 0; display: grid; place-items: center;
-  font-size: 15px; opacity: .18; pointer-events: none;
-}
-.offhand-slot.filled::after { content: none; }
+.offhand-slot { background: rgba(120, 132, 158, .16); border-color: rgba(60, 74, 104, .2); }
 .slot-cap {
-  font: 700 7px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
-  color: rgba(40, 52, 78, .5); display: flex; align-items: center; gap: 3px;
+  color: var(--ink-faint); font-family: var(--mono);
+  display: flex; align-items: center; gap: 4px;
 }
-.slot-cap kbd { font-size: 8px; padding: 1px 3px; }
+.slot-cap kbd { font-size: 9px; padding: 1px 4px; }
 
 .crate-area { display: flex; justify-content: center; }
 .crate-grid {
-  padding: 6px; border-radius: 8px;
-  background: rgba(150, 106, 58, .13);
-  border: 1px solid rgba(120, 84, 44, .22);
+  padding: 7px; border-radius: var(--r-lg);
+  background: rgba(150, 106, 58, .14);
+  border: 1px solid rgba(120, 84, 44, .24);
 }
-.inv-hot { padding-top: 5px; margin-top: 2px; border-top: 1px dashed rgba(0, 0, 0, .14); }
+.inv-hot { padding-top: 6px; margin-top: 3px; border-top: 1px dashed rgba(0, 0, 0, .16); }
 
 .islot {
-  position: relative; width: 46px; height: 46px; border-radius: 5px;
-  background: rgba(255, 255, 255, .5); border: 1px solid rgba(0, 0, 0, .08);
+  position: relative; width: 46px; height: 46px; border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, .3));
+  border: 1px solid rgba(0, 0, 0, .1);
   display: grid; place-items: center; cursor: pointer;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .7) inset;
-  transition: background .13s, border-color .13s, transform .1s;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
+  transition: background .13s, border-color .13s, transform .1s, box-shadow .13s;
 }
 .islot:hover { background: #fff; border-color: var(--accent); transform: translateY(-1px); }
-.islot.sel { border-color: var(--accent-2); box-shadow: 0 0 0 1.5px rgba(242, 180, 92, .55); }
-.islot img { width: 40px; height: 40px; pointer-events: none; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .25)); }
-.islot .count { position: absolute; right: 3px; bottom: 1px; font: 700 12px var(--font); color: var(--ink); text-shadow: 0 1px 0 rgba(255, 255, 255, .9); pointer-events: none; }
-.islot .wear { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 2.5px; border-radius: 2px; background: rgba(0, 0, 0, .22); overflow: hidden; }
+.islot.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(242, 180, 92, .6), inset 0 1px 0 rgba(255, 255, 255, .8); }
+.islot img { width: 40px; height: 40px; pointer-events: none; }
+.islot .count { position: absolute; right: 4px; bottom: 1px; font: 700 var(--fs-md) var(--mono); color: var(--ink); text-shadow: 0 1px 0 rgba(255, 255, 255, .95); pointer-events: none; }
+.islot .wear { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, .24); overflow: hidden; }
 .islot .wear i { display: block; height: 100%; background: #57a844; }
 
-#cursor-stack { position: fixed; z-index: 90; pointer-events: none; width: 40px; height: 40px; transform: translate(-50%, -50%); }
+#cursor-stack { position: fixed; z-index: 130; pointer-events: none; width: 40px; height: 40px; transform: translate(-50%, -50%); }
 #cursor-stack img { width: 100%; height: 100%; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .5)); }
-#cursor-stack span { position: absolute; right: 0; bottom: -2px; font: 700 12px var(--font); color: #fff; text-shadow: 0 1px 3px #000; }
+#cursor-stack span { position: absolute; right: 0; bottom: -2px; font: 700 var(--fs-md) var(--mono); color: #fff; text-shadow: 0 1px 3px #000; }
 
 #tooltip {
-  position: fixed; z-index: 92; pointer-events: none;
-  padding: 5px 8px; border-radius: 4px; font-size: 12.5px; font-weight: 600;
-  background: rgba(16, 18, 28, .92); color: #f3ece0;
-  border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 8px 20px -8px rgba(0, 0, 0, .8);
+  position: fixed; z-index: 132; pointer-events: none;
+  padding: 6px 10px; border-radius: var(--r-md);
+  font-size: var(--fs-md); font-weight: 600;
+  background: var(--plate-solid); color: #f3ece0;
+  box-shadow: var(--bevel);
   transform: translate(12px, 12px); max-width: 220px; line-height: 1.45;
 }
-#tooltip em { display: block; font-style: normal; font-weight: 500; font-size: 11px; opacity: .6; margin-top: 2px; }
+#tooltip em {
+  display: block; font-style: normal; font-weight: 600;
+  font-size: var(--fs-xs); font-family: var(--mono);
+  color: rgba(243, 236, 224, .5); margin-top: 3px;
+}
 
 /* ── settings + controls ───────────────────────────────── */
 
-.settings { display: flex; flex-direction: column; gap: 9px; }
-.settings label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); letter-spacing: .02em; }
-.settings label.row { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; flex-wrap: wrap; }
-.settings label.row input { margin-top: 2px; }
-.settings label.row small {
-  flex: 1 0 100%; padding-left: 22px; font-size: 11.5px;
-  color: rgba(60, 48, 34, .62); line-height: 1.45;
-}
-.settings .val { float: right; font: 600 11.5px var(--mono); color: var(--accent); }
-.settings input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 3px; margin-top: 8px; border-radius: 99px; background: var(--edge); outline: none; }
-.settings input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: linear-gradient(170deg, var(--accent-2), var(--accent)); box-shadow: 0 2px 5px rgba(0, 0, 0, .3); cursor: pointer; }
-.settings select { width: 100%; margin-top: 5px; padding: 6px 9px; border-radius: 5px; border: 1px solid var(--edge); background: rgba(255, 255, 255, .7); font: inherit; font-size: 13.5px; color: var(--ink); cursor: pointer; }
-.settings input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.settings { display: flex; flex-direction: column; gap: 10px; }
+.settings label { display: block; font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
+.settings label.row { display: flex; align-items: center; gap: 9px; cursor: pointer; }
+.settings .val { float: right; font: 700 var(--fs-sm) var(--mono); color: var(--accent); }
+.settings input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin-top: 9px; border-radius: 99px; background: var(--edge); outline: none; }
+.settings input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(170deg, var(--accent-hi), var(--accent)); box-shadow: 0 2px 5px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .5); cursor: pointer; }
+.settings input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
 
 /* Group headings. Both screens are long because they genuinely have a lot of
-   rows, so the fix is somewhere for the eye to stop, not an explanation of each
-   row. */
+   rows, so the fix is somewhere for the eye to stop, not an explanation of
+   each row. */
 .set-head, .ctl-head {
-  font-size: 10.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
-  color: var(--ink-soft); opacity: .65;
-  margin-top: 6px; padding-bottom: 4px; border-bottom: 1px solid rgba(0, 0, 0, .09);
+  color: var(--ink-faint);
+  margin-top: 8px; padding-bottom: 5px; border-bottom: 1px solid rgba(0, 0, 0, .1);
 }
-.ctl-head { margin-top: 14px; margin-bottom: 7px; }
+.ctl-head { margin-top: 16px; margin-bottom: 8px; }
 .ctl-head:first-of-type, .set-head:first-of-type { margin-top: 0; }
-.settings details.credits { margin-top: 12px; border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 9px; }
+.settings details.credits { margin-top: 14px; border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 10px; }
 .settings details.credits summary {
-  cursor: pointer; font-size: 12px; font-weight: 650; color: var(--ink-soft); letter-spacing: .02em;
+  cursor: pointer; font-size: var(--fs-md); font-weight: 700; color: var(--ink-soft);
 }
-.settings details.credits .credit-list { margin-top: 8px; }
+.settings details.credits .credit-list { margin-top: 9px; }
 
-.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 18px; font-size: 12px; color: var(--ink-soft); }
+.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; font-size: var(--fs-md); color: var(--ink-soft); }
 .controls-grid > div { display: flex; align-items: center; gap: 4px; }
-.controls-grid span { margin-left: 5px; }
-kbd { font: 600 10px/1 var(--mono); padding: 2px 5px; border-radius: 3px; background: rgba(255, 255, 255, .72); border: 1px solid var(--edge); box-shadow: 0 1.5px 0 var(--edge); color: var(--ink); }
-.menu-card kbd, #hint kbd { background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .18); box-shadow: 0 1.5px 0 rgba(0, 0, 0, .3); color: #f3ece0; }
+.controls-grid span { margin-left: 6px; }
+kbd {
+  font: 700 var(--fs-xs)/1 var(--mono); padding: 3px 6px; border-radius: 3px;
+  background: linear-gradient(180deg, #fff, rgba(255, 255, 255, .55));
+  border: 1px solid var(--edge); box-shadow: 0 1.5px 0 var(--edge); color: var(--ink);
+}
+.menu-card kbd, #hint kbd, .panel button kbd {
+  background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .2);
+  box-shadow: 0 1.5px 0 rgba(0, 0, 0, .35); color: #f3ece0;
+}
+.panel button kbd { background: rgba(0, 0, 0, .07); border-color: rgba(0, 0, 0, .12); box-shadow: none; color: var(--ink-soft); }
 
 /* ── narrow windows ────────────────────────────────────── */
 /* The nine-column grid and the 236px sidebar together need ~760px of viewport.
-   Below that the grid used to overflow the panel and get clipped on both sides,
-   which `overflow: auto` cannot scroll back into view. Drop the sidebar under
-   the grid first, then shrink the slots. */
+   Below that the grid used to overflow the panel and get clipped on both
+   sides, which `overflow: auto` cannot scroll back into view. Drop the sidebar
+   under the grid first, then shrink the slots. */
 
 @media (max-width: 790px) {
   .inv-body { flex-direction: column; gap: 12px; }
@@ -921,11 +1127,18 @@ kbd { font: 600 10px/1 var(--mono); padding: 2px 5px; border-radius: 3px; backgr
 @media (max-width: 540px) {
   .islot { width: 36px; height: 36px; border-radius: 4px; }
   .islot img { width: 31px; height: 31px; }
-  .islot .count { font-size: 10.5px; }
+  .islot .count { font-size: var(--fs-sm); }
   .craft-out .islot { width: 44px; height: 44px; }
+  .slot { width: 34px; height: 34px; }
+  .slot img { width: 28px; height: 28px; }
+  .vital .v-track { width: 120px; }
+  /* The frame is deliberately not shrunk here. `MAP_RIM` in UI.js is the north
+     pip's offset in pixels, so a frame that changed size under it would put the
+     pip outside its own map. The canvas is a percentage and would follow; the
+     pip would not. */
 }
 
-::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar { width: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 100, 70, .32); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(120, 100, 70, .5); }

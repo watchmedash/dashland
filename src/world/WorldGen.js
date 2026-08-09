@@ -307,11 +307,75 @@ const SPRING_RI = 1.6;         // water radius — every 4-neighbour of a water
 const SPRING_CHANCE = 0.085;   // column is therefore inside the rim
 const SPRING_BIOMES = [BIOME.SNOW, BIOME.TUNDRA, BIOME.MOUNTAIN];
 
+/**
+ * Fallen logs: a windfall lying on the forest floor.
+ *
+ * On a lattice, for exactly the reason the hot springs are (see SPRING_LATTICE),
+ * and then for a second reason of its own. A run is up to seven columns long, so
+ * without a lattice every column on the planet would have to evaluate a
+ * seven-cell run — seven ground tests, seven tree decisions, seven 5x5 boulder
+ * sweeps — to find out that it does not have a log. One column in
+ * LOG_LATTICE^2 is a candidate, so that work happens for 1.5% of columns and the
+ * minimum separation between two windfalls is eight columns, which makes an
+ * overlapping pair impossible without anybody asking about anybody.
+ *
+ * The run is *centred* on its candidate column rather than starting there, and
+ * that is a correctness constraint rather than a cosmetic one. DECOR_MARGIN is
+ * 6: a feature may not reach further than six columns from the column that
+ * decides it, and — less obviously — may not *read* further than that either,
+ * because terrain is only guaranteed to exist over the margin. A centred run of
+ * seven reaches three, and the boulder sweep two past the end of it, for a total
+ * read radius of five. A run that started at its candidate would reach six and
+ * read eight, and the two columns past the margin would be whatever the block
+ * array happened to be holding — air in an ungenerated region, real ground in a
+ * generated one, which is a decision that depends on where the player walked in.
+ */
+const LOG_LATTICE = 8;
+const LOG_LI = 6;
+const LOG_LJ = 2;
+const LOG_MIN = 3;
+const LOG_MAX = 7;
+/**
+ * How likely a candidate column carries one, by biome.
+ *
+ * Against a standing tree's 0.115 per column in a wood, 0.62 per candidate is
+ * 0.62/64 = 0.0097 per column: one windfall for every twelve trees, which is
+ * something you come across on a walk rather than something you have to look
+ * for. The open biomes are much lower because the trees there are, too — a log
+ * in a meadow should read as the one tree that used to be there.
+ */
+const LOG_CHANCE = [];
+LOG_CHANCE[BIOME.FOREST] = 0.62;
+LOG_CHANCE[BIOME.PINE_FOREST] = 0.62;
+LOG_CHANCE[BIOME.MEADOW] = 0.16;
+LOG_CHANCE[BIOME.PLAINS] = 0.09;
+/**
+ * What a log will lie on. Every one of these is solid, which is the whole point:
+ * the fallen-log ids carry no `needsFloor`, so an unsupported one simply hangs
+ * in the air and nothing downstream will ever take it down.
+ */
+const LOG_FLOOR = new Uint8Array(N_BLOCKS);
+for (const n of ['grass', 'podzol', 'dirt', 'coarse_dirt', 'moss_block', 'snow']) LOG_FLOOR[ID[n]] = 1;
+/** The two ids per species, indexed [axis 0:i 1:j]. */
+const LOG_IDS = {
+  oak: [ID.log_oak_i, ID.log_oak_j],
+  birch: [ID.log_birch_i, ID.log_birch_j],
+  pine: [ID.log_pine_i, ID.log_pine_j],
+};
+
 /** Shared scratch for the per-column passes — they are called a million times. */
 const _fillDir = [0, 0, 0];
 /** Aquifers and springs get their own, because they run inside the others. */
 const _aqDir = [0, 0, 0];
 const _spParts = { f: 0, i: 0, j: 0 };
+/**
+ * Two more for the fallen logs, and they have to be two. The log pass holds a
+ * candidate's coordinates across a loop that calls `_springNear` — which owns
+ * `_spParts` — and inside that loop walks a second column's neighbourhood.
+ * Sharing any of the three would rewrite the centre halfway through the run.
+ */
+const _logParts = { f: 0, i: 0, j: 0 };
+const _logNb = { f: 0, i: 0, j: 0 };
 
 /**
  * Volcano geometry. Module scope rather than locals now that choosing a site
@@ -330,6 +394,12 @@ const VOLCANO_TARGET = 4;
  * radius 3.0 plus up to 0.45 of fraying and one column of rounding; a boulder
  * reaches 2. Six is that with room to spare, and being generous here is cheap —
  * it costs a wider overlap, and getting it wrong costs a visible seam.
+ *
+ * It is also a bound on how far a pass may *read*, not only on how far it may
+ * write: terrain is only guaranteed to exist over the margin, and reading past
+ * it gets air in an ungenerated region and real ground in a generated one. The
+ * fallen logs are sized against that — a centred run of seven reaches three and
+ * its boulder sweep two further, for five. See LOG_LATTICE.
  */
 export const DECOR_MARGIN = 6;
 
@@ -2063,14 +2133,36 @@ export class WorldGen {
    * without any region ever writing into another one — see `decorateRegion`.
    */
   treeAt(blocks, col, rid) {
+    const t = this._treeKind(blocks, col);
+    if (!t) return;
+    this.stampTree(blocks, t.kind, col, t.k + 1, t.rng, rid);
+  }
+
+  /**
+   * Does a tree stand on this column, and what is it? `null` for no.
+   *
+   * Split out of `treeAt` so the fallen-log pass can ask the question without
+   * growing anything: a windfall lying through a standing trunk is the single
+   * most obvious way this can look wrong, and the trunk is written with
+   * `force`, so the log would not even survive to be seen.
+   *
+   * The stream is handed back rather than re-derived. `stampTree` continues to
+   * draw from exactly the sequence the decision left behind — re-seeding it
+   * would be a different tree — and the log pass simply throws it away.
+   *
+   * Every test in here reads the global per-column tables or terrain blocks and
+   * nothing decoration writes, which is what lets both callers run over a
+   * region's margin and agree from either side. See `decorateRegion`.
+   */
+  _treeKind(blocks, col) {
     const bi = this.colBiome[col];
-    if (this.colSlope[col] > 1.5) return;
+    if (this.colSlope[col] > 1.5) return null;
     // Nothing takes root in a hot spring. Asked of the terrain rather than of
     // the blocks — see `_springCenter`.
-    if (this._springNear(col) >= 0) return;
+    if (this._springNear(col) >= 0) return null;
     // The gorge and its rim. See CANYON_TREE_THIN.
     const thin = CANYON_TREE_THIN[this.canyonNear[col]];
-    if (thin <= 0) return;
+    if (thin <= 0) return null;
     /**
      * The ground, from the height field — not `surfaceK`, and this is the one
      * subtle thing in the whole lazy scheme.
@@ -2092,7 +2184,7 @@ export class WorldGen {
     const k = this.groundKOf(col);
     // need some headroom, but the land surface sits around k=40 of 66 — this
     // bound has to be generous or it rejects the entire planet
-    if (k < 0 || k > D - 7) return;
+    if (k < 0 || k > D - 7) return null;
     const surf = blocks[col * D + k];
     // Nothing grows out of a flooded cell.
     //
@@ -2127,7 +2219,7 @@ export class WorldGen {
     // standing on the sea — while leaving the answer a pure function of the
     // ground.
     const above = blocks[col * D + k + 1];
-    if (above === ID.water || above === ID.lava) return;
+    if (above === ID.water || above === ID.lava) return null;
     const rng = this.colRng(col, 0x7a11);
 
     let kind = null, chance = 0;
@@ -2180,22 +2272,36 @@ export class WorldGen {
       if (((cp.i + cp.j) & 1) === 0) { kind = 'cactus'; chance = 0.04; }
     }
 
-    if (!kind || rng() > chance * thin) return;
-    this.stampTree(blocks, kind, col, k + 1, rng, rid);
+    if (!kind || rng() > chance * thin) return null;
+    return { kind, k, rng };
+  }
+
+  /**
+   * Does a boulder stand on this column? Split out of `boulderAt` for the same
+   * reason `_treeKind` was split out of `treeAt` — the fallen-log pass has to
+   * be able to ask without building anything — and the cheap roll is first, so
+   * asking it of a hundred columns costs a hundred xorshifts and no terrain
+   * lookups at all for 99.8% of them.
+   */
+  _boulderKind(blocks, col) {
+    const rng = this.colRng(col, 0xb0d1);
+    if (rng() > 0.0022) return null;
+    // Same reason as `treeAt`: the ground, not whatever is standing on it.
+    const k = this.groundKOf(col);
+    if (k < 0 || k > D - 5) return null;
+    const surf = blocks[col * D + k];
+    if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) return null;
+    // A boulder is scenery, and a gorge floor already has rock lying about it.
+    if (this.canyonNear[col] === 0) return null;
+    if (this._springNear(col) >= 0) return null;
+    return { rng, k };
   }
 
   /** One column's boulder, if it has one, clipped to a region. */
   boulderAt(blocks, col, rid) {
-    const rng = this.colRng(col, 0xb0d1);
-    if (rng() > 0.0022) return;
-    // Same reason as `treeAt`: the ground, not whatever is standing on it.
-    const k = this.groundKOf(col);
-    if (k < 0 || k > D - 5) return;
-    const surf = blocks[col * D + k];
-    if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) return;
-    // A boulder is scenery, and a gorge floor already has rock lying about it.
-    if (this.canyonNear[col] === 0) return;
-    if (this._springNear(col) >= 0) return;
+    const b = this._boulderKind(blocks, col);
+    if (!b) return;
+    const { rng, k } = b;
     const rad = 1 + Math.floor(rng() * 2);
     const mossy = rng() < 0.4;
     const bp = colParts(col);
@@ -2226,6 +2332,154 @@ export class WorldGen {
           blocks[c * D + kk] = id;
         }
       }
+    }
+  }
+
+  /**
+   * The windfall this column carries, decided from the terrain alone.
+   *
+   * Returns the whole plan — where, which way, how long, which species, where
+   * the break is — or `null`. Nothing is written and no block outside a five
+   * column radius is read, which is what lets `decorateRegion` run this over a
+   * margin of somebody else's columns and get the same answer either way round.
+   *
+   * The three things a log must not lie in — a hot spring, a standing trunk, a
+   * boulder — are each asked as a *decision* rather than looked for in the
+   * block array (`_springNear`, `_treeKind`, `_boulderKind`). Looking would be
+   * the obvious way and it is unsound: the block array is shared across
+   * regions, so whether a neighbouring region's trees are standing in it yet
+   * depends entirely on which region the player walked into first.
+   */
+  _fallenLog(blocks, col) {
+    const p = colParts(col, _logParts);
+    const f = p.f, ci = p.i, cj = p.j;
+    if (ci % LOG_LATTICE !== LOG_LI || cj % LOG_LATTICE !== LOG_LJ) return null;
+    const bi = this.colBiome[col];
+    const chance = LOG_CHANCE[bi] || 0;
+    if (chance <= 0) return null;
+    const rng = this.colRng(col, 0x1c9b);
+    if (rng() > chance) return null;
+
+    // Every draw happens before every test, so a run that is rejected costs the
+    // same rolls as one that is kept and the stream stays a function of the
+    // column alone — the same rule the boulder pass learned the hard way.
+    const axis = rng() < 0.5 ? 0 : 1;
+    const len = LOG_MIN + Math.floor(rng() * (LOG_MAX - LOG_MIN + 1));
+    // Rotted through in the middle. It is one cell and it is most of what
+    // separates a windfall from a row of blocks; only on a long run, where
+    // there is still something left on both sides of the break.
+    const gap = (len >= 5 && rng() < 0.38) ? 1 + Math.floor(rng() * (len - 2)) : -1;
+    const pickSpecies = rng();
+
+    // Centred on the candidate — see LOG_LATTICE for why that is a constraint
+    // and not a preference.
+    const off0 = -((len - 1) >> 1);
+    const along = axis === 0 ? ci : cj;
+    // The run stays inside one face. `_i` and `_j` name the *face's* tangential
+    // axes, and past a cube seam the neighbouring face's i points somewhere
+    // else entirely — a trunk that crossed one would visibly kink and wear its
+    // end grain sideways.
+    if (along + off0 < 0 || along + off0 + len > F) return null;
+
+    // Not on a volcano's apron. The cone is stamped into the block array after
+    // the height field is settled, so `groundKOf` there describes the ground the
+    // volcano replaced. Same test and same reason as `_springCenterUncached`.
+    if (this.volcanoes) {
+      for (let v = 0; v < this.volcanoes.length; v++) {
+        const s = this.volcanoes[v];
+        if (s.f !== f) continue;
+        if (Math.hypot(s.i - ci, s.j - cj) <= APRON + LOG_MAX) return null;
+      }
+    }
+
+    const k = this.groundKOf(col);
+    if (k < 1 || k > D - 3) return null;
+    for (let n = 0; n < len; n++) {
+      const d = off0 + n;
+      const c = axis === 0 ? patchColumn(f, ci, cj, d, 0) : patchColumn(f, ci, cj, 0, d);
+      if (!this._logRests(blocks, c, k)) return null;
+    }
+
+    // The species the wood around it is made of — the same rule `_treeKind`
+    // uses, so a windfall never comes out of a species the forest it is lying
+    // in does not grow.
+    const kind = bi === BIOME.PINE_FOREST ? 'pine'
+      : bi === BIOME.MEADOW ? 'birch'
+        : bi === BIOME.FOREST ? (pickSpecies < 0.68 ? 'oak' : 'birch')
+          : (pickSpecies < 0.6 ? 'oak' : 'birch');
+    return { f, ci, cj, axis, len, gap, off0, k, kind, id: LOG_IDS[kind][axis] };
+  }
+
+  /**
+   * Can one cell of a run lie here, on layer `k`?
+   *
+   * The level test is the load-bearing one. A fallen log carries no
+   * `needsFloor`, so nothing downstream will ever take an unsupported one down
+   * — one cell of step under a seven-cell run is one cell of log hanging in the
+   * air, forever. Demanding that every column of the run have its ground on the
+   * same layer is both the support rule and the "level enough" rule, and it is
+   * the reason a windfall is something you find in a clearing rather than
+   * draped down a hillside.
+   */
+  _logRests(blocks, c, k) {
+    /**
+     * What the far end of a run may lie on is a question about the *ground*,
+     * not about the biome, and the two are not interchangeable here.
+     *
+     * Requiring every cell to sit in a biome that grows logs was the obvious
+     * rule and it very nearly deleted the pine windfall from the planet:
+     * PINE_FOREST is 1.26% of the surface and comes in patches a few dozen
+     * columns across, ringed by mountain and snow, so a five-cell run centred
+     * anywhere but the middle of one had a foot outside and was thrown away.
+     * Measured, 93 of the planet's 237 level pine candidates survived every
+     * other test and none of them survived this one.
+     *
+     * LOG_FLOOR is the rule that was actually wanted. It is soil, turf and
+     * snow — the things a wood grows on — and it already refuses sand, red
+     * sand, gravel and bare rock, so a trunk still cannot run out of the trees
+     * and across a desert. What it now allows is the treeline, which is where
+     * a windfall belongs anyway.
+     */
+    const bi = this.colBiome[c];
+    if (bi === BIOME.OCEAN || bi === BIOME.BEACH) return false;
+    if (this.colSlope[c] > 1.2) return false;
+    // Out of the gorge and off its rim, like everything else that decorates.
+    if (this.canyonNear[c] < CANYON_NEAR_MAX) return false;
+    if (this._springNear(c) >= 0) return false;
+    if (this.groundKOf(c) !== k) return false;
+    if (!LOG_FLOOR[blocks[c * D + k]]) return false;
+    // Liquid specifically, not "is it air" — for exactly the reason spelled out
+    // at length in `_treeKind`. Terrain puts air or water in the cell above the
+    // ground and nothing else; decoration puts trees and boulders there, and
+    // asking about those would be asking whether the region next door has been
+    // decorated yet.
+    const above = blocks[c * D + k + 1];
+    if (above === ID.water || above === ID.lava) return false;
+    // Nothing lies through a standing trunk, and nothing lies through a
+    // boulder — which is up to two columns across, hence the sweep.
+    if (this._treeKind(blocks, c)) return false;
+    const q = colParts(c, _logNb);
+    const qf = q.f, qi = q.i, qj = q.j;
+    for (let di = -2; di <= 2; di++) {
+      for (let dj = -2; dj <= 2; dj++) {
+        if (this._boulderKind(blocks, patchColumn(qf, qi, qj, di, dj))) return false;
+      }
+    }
+    return true;
+  }
+
+  /** One column's fallen log, if it has one, clipped to a region. */
+  logAt(blocks, col, rid) {
+    const plan = this._fallenLog(blocks, col);
+    if (plan === null) return;
+    for (let n = 0; n < plan.len; n++) {
+      if (n === plan.gap) continue;
+      const d = plan.off0 + n;
+      const c = plan.axis === 0
+        ? patchColumn(plan.f, plan.ci, plan.cj, d, 0)
+        : patchColumn(plan.f, plan.ci, plan.cj, 0, d);
+      if (rid >= 0 && regionOfCol(c) !== rid) continue;
+      blocks[c * D + plan.k + 1] = plan.id;
     }
   }
 
@@ -2465,9 +2719,10 @@ export class WorldGen {
    * overwrites the leaves when it eventually runs, write into a decorated one
    * and the answer depends on who went first.
    *
-   * Trees, then boulders, then flora, each as a complete sweep. That is the
-   * order the three passes ran in globally and they interact: a boulder is only
-   * laid in air, and flora reads the surface a canopy may have raised.
+   * Springs, logs, trees, boulders, then flora, each as a complete sweep. They
+   * interact: a boulder is only laid in air, flora reads the surface a canopy
+   * may have raised, and a fallen log has to be laid while the cell above the
+   * ground still holds terrain (see `_fallenLog`).
    */
   decorateRegion(blocks, cols, margin) {
     const rid = regionOfCol(cols[0]);
@@ -2475,6 +2730,14 @@ export class WorldGen {
     // ask `_springNear` rather than looking at what is there, so this ordering
     // is for the blocks' sake and not for the decisions'.
     for (let n = 0; n < margin.length; n++) this.springAt(blocks, margin[n], rid);
+    // Fallen logs before the trees, and this is the one ordering here that is
+    // about the blocks rather than about taste. A log decides from terrain
+    // only — so it must run while the cells above the ground still *hold*
+    // terrain — and a trunk is stamped with `force`, so a standing tree would
+    // overwrite a windfall that had already been laid through it. The log pass
+    // refuses those columns outright, which makes the two agree; running
+    // second as well would make the agreement depend on the order.
+    for (let n = 0; n < margin.length; n++) this.logAt(blocks, margin[n], rid);
     for (let n = 0; n < margin.length; n++) this.treeAt(blocks, margin[n], rid);
     for (let n = 0; n < margin.length; n++) this.boulderAt(blocks, margin[n], rid);
     for (let n = 0; n < cols.length; n++) this.floraAt(blocks, cols[n]);

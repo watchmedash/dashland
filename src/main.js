@@ -2862,8 +2862,10 @@ class Game {
       this.ui.toast('The merchant moved on.', itemIdOf('coin'), 2600);
     }
     this.drops.update(dt, this.player, {
-      collect: (item, count) => {
-        const taken = this.inventory.add(item, count);
+      // `wear` is the third argument Drops has always passed and this callback
+      // used to ignore — see `Inventory.add`.
+      collect: (item, count, wear) => {
+        const taken = this.inventory.add(item, count, wear);
         if (taken > 0) {
           this.audio.pickup();
           this.ui.toast(ITEMS[item].label, item, 1500);

@@ -154,10 +154,26 @@ export class Drops {
       if (d.item === itemId && !d.collected && d.wear === wear) {
         if (d.pos.distanceToSquared(_v.set(x, y, z)) < MERGE_RADIUS * MERGE_RADIUS) {
           const max = ITEMS[itemId]?.stack ?? 64;
-          if (d.count + count <= max) { d.count += count; d.keep = d.keep || keep; return; }
+          if (d.count + count <= max) {
+            d.count += count;
+            d.keep = d.keep || keep;
+            // The pile is as old as its newest item, not its oldest. Leaving
+            // the clock alone meant merging into a five-minute-old heap put the
+            // thing you just mined one second from despawning — you watched
+            // thirty stone and the one you added vanish together. It also let a
+            // merged drop skip the anti-repickup delay below, since that is
+            // measured on the same `age`.
+            d.age = 0;
+            return;
+          }
         }
       }
     }
+    // Before the eviction, not after: this can fail for an unknown item id, and
+    // failing after the splice meant a legitimate drop had already been taken
+    // out of the world to make room for one that never arrived.
+    const mesh = this._mesh(itemId);
+    if (!mesh) return;
     if (this.list.length >= MAX) {
       // Evict ordinary litter before anything from a death — otherwise a busy
       // mining session quietly pushes your body's contents out of the world.
@@ -166,8 +182,6 @@ export class Drops {
       const old = this.list.splice(victim, 1)[0];
       this.group.remove(old.mesh);
     }
-    const mesh = this._mesh(itemId);
-    if (!mesh) return;
     mesh.layers.enable(1);
     this.group.add(mesh);
     const pos = new THREE.Vector3(x, y, z);
@@ -358,12 +372,34 @@ export class Drops {
   toJSON() {
     return this.list.map((d) => ({
       p: d.pos.toArray(), i: d.item, c: d.count, w: d.wear, k: d.keep ? 1 : 0,
+      // How long it has been lying there. Without it every load handed the
+      // whole planet's litter a fresh five minutes, so anyone who saved more
+      // often than that never saw a drop despawn at all.
+      a: Math.round(d.age),
     }));
   }
 
   fromJSON(arr) {
     this.clear();
-    for (const d of arr || []) this.spawn(d.p[0], d.p[1], d.p[2], d.i, d.c, d.w, null, !!d.k);
+    for (const d of arr || []) {
+      const before = this.list.length;
+      this.spawn(d.p[0], d.p[1], d.p[2], d.i, d.c, d.w, null, !!d.k);
+      // `spawn` throws what it creates into the air, which is right for an item
+      // that has just been dropped and wrong for one that was already lying
+      // still when the game was saved. Loading used to toss every drop on the
+      // planet upward with a random sideways kick — enough to walk a death pack
+      // off the ledge it was saved on and into whatever was below.
+      //
+      // Guarded on the list actually growing, because `spawn` merges instead of
+      // pushing when two saved drops are close enough, and the fixup would
+      // otherwise land on somebody else's drop.
+      if (this.list.length > before) {
+        const made = this.list[this.list.length - 1];
+        made.vel.set(0, 0, 0);
+        made.grounded = true;
+        made.age = d.a || 0;
+      }
+    }
   }
 }
 

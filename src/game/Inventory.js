@@ -127,8 +127,23 @@ export class Inventory {
     this.changed();
   }
 
-  /** @returns {number} how many were actually taken in */
-  add(itemId, count = 1) {
+  /**
+   * @param {number} [wear] how used the item is, for the things that carry it.
+   *   Only ever meaningful for a stack of one — a tool — because that is the
+   *   only kind of item with durability, and two tools at different wear are
+   *   not interchangeable anyway. Stacking is left alone: a stackable item's
+   *   wear is always 0, so there is nothing to merge or lose.
+   *
+   *   It exists because leaving it out silently repaired things. `Drops.spawn`
+   *   stores wear, the merge test compares it, the save round-trips it, and
+   *   every producer — dropping by hand, a broken kiln, a broken crate, your
+   *   own death pack — passes it in. `Drops` even hands it to the pickup
+   *   callback. It was thrown away at this one step, where a slot was filled
+   *   with the default of 0, so an almost-broken pickaxe came back off the
+   *   floor as good as new. Dying repaired your whole toolkit.
+   * @returns {number} how many were actually taken in
+   */
+  add(itemId, count = 1, wear = 0) {
     if (!itemId || count <= 0) return 0;
     const max = ITEMS[itemId]?.stack ?? 64;
     let left = count;
@@ -145,7 +160,7 @@ export class Inventory {
       const s = this.slots[i];
       if (s.empty) {
         const take = Math.min(max, left);
-        s.set(itemId, take);
+        s.set(itemId, take, max === 1 ? wear : 0);
         left -= take;
       }
     }

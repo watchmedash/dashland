@@ -5765,32 +5765,8 @@ class Game {
       ? (mobHit.mob.spec.label ?? null)
       : (hit ? (BLOCKS[this.planet.at(hit.col, hit.k)]?.label ?? null) : null));
 
-    // A bow takes the whole of both buttons and answers none of the questions
-    // below it.
-    //
-    // The right button is the draw — `_tickBow` already has it — and letting the
-    // chain below see it too meant aiming at a bench opened the crafting screen
-    // and aiming at farmland tilled it, both on the frame the player pressed to
-    // shoot. The left button is a melee swing with a longbow, which is not a
-    // thing, and mining with one is worse: `miningTime` gives any tool that is
-    // not the block's own a flat 1.15, so a bow was quietly a universal pickaxe
-    // that broke nothing and dropped nothing.
-    //
-    // The highlight box and the crosshair state are set above and below this on
-    // purpose — you can still see what you are aiming at.
-    if (ITEMS[this.inventory.active().item]?.bow) {
-      this.ui.setCrosshairActive(!!mobHit || !!hit);
-      this.highlight.visible = false;
-      this.placeCooldown = Math.max(0, this.placeCooldown - dt);
-      this.useCooldown = Math.max(0, this.useCooldown - dt);
-      voxelUniforms.uBreakStage.value = -1;
-      this.mining.key = null;
-      this.mining.progress = 0;
-      this.eating = 0;
-      this.ui.setHint(this.bow.hint || null);
-      return;
-    }
-    if (mobHit && (!hit || mobHit.dist < hit.dist)) {
+    const bowHeld = !!ITEMS[this.inventory.active().item]?.bow;
+    if (!bowHeld && mobHit && (!hit || mobHit.dist < hit.dist)) {
       this.ui.setCrosshairActive(true);
       this.highlight.visible = false;
       if (input.clicked[0] && input.locked) {
@@ -6003,6 +5979,14 @@ class Game {
     if (stage >= 0 && hit) {
       this.planet.centerOf(hit.col, hit.k, voxelUniforms.uBreakPos.value);
     }
+
+    // Everything below is the right button, and for a bow that is the draw,
+    // which `_tickBow` already owns. This sits here rather than at the top of
+    // the method so the mining block above still runs: a bow swings at exactly
+    // bare-hand speed, and a pick block refuses to drop for anything that is
+    // not a pickaxe, so a fist and a bow are refused by the same line. The old
+    // early return cited a flat wrong-tool multiplier that no longer exists.
+    if (bowHeld) { this.eating = 0; this.ui.setHint(this.bow.hint || null); return; }
 
     // --- eating: hold RMB on any food ---
     //

@@ -261,16 +261,64 @@ for (const m of MATERIALS) add(m);
 
 // --- tools ------------------------------------------------------------------
 
+/**
+ * The tool ladder, and `speed` is the divisor in `miningTime`.
+ *
+ * **This is the lever the "mining is like ice cream" report was answered on.**
+ * It is worth writing down why it is this one and not `hardness`, because the
+ * obvious reading of that report is "the blocks are too soft" and the
+ * measurements say otherwise.
+ *
+ * Anchored on Minecraft, which is what the player is comparing against, and the
+ * anchor is the *whole formula* rather than a feel: `miningTime` now computes
+ * `hardness * 1.5 / speed`, which is Minecraft's own expression for a correct
+ * tool, so a hardness number in `Blocks.js` means what the same number means
+ * there. Minecraft's rungs are 2 / 4 / 6 / 8 / 9 (wood, stone, iron, diamond,
+ * netherite) and its reference times are stone with a wooden pick 1.15s, stone
+ * with diamond 0.4s, dirt with a shovel 0.15s, and timber deliberately quick.
+ *
+ * Against that anchor the old table was **already right at the bottom and badly
+ * wrong at the top**:
+ *
+ *   stone / wooden pick    1.24s   vs Minecraft's 1.15   — fine
+ *   stone / bare hands     9.90s   vs Minecraft's 7.50   — already heavier
+ *   dirt  / wooden shovel  0.34s   vs Minecraft's 0.38   — fine
+ *   stone / cinder pick    0.19s   vs Minecraft's 0.35   — **half**
+ *
+ * So the fault was never the hardness column. It was that 2.4 / 4.2 / 7 / 11 /
+ * 15.5 spans 6.5x from the first rung to the last, where Minecraft spans 4.5x —
+ * and it spends that larger spread over *five* rungs instead of four, so every
+ * step was 1.75x and the ladder ran out of block underneath it by tier 3.
+ * "With tools not even a second" is the arithmetic of that, exactly.
+ *
+ * The new rungs are a constant **1.44x**: five steps carrying the same 4.2x
+ * total spread Minecraft carries in four. The bottom rung is 2.0, which is
+ * Minecraft's wooden tier to the digit — a wooden pickaxe is the one tool whose
+ * timing was never complained about and it does not move. Everything above it
+ * slows, progressively, exactly where the report points: stone 1.6x slower,
+ * iron 1.9x, astral 2.0x, cinder 2.1x.
+ *
+ * Two things this deliberately does **not** touch. Bare hands are pinned by the
+ * breath meter, not by taste — see `HAND_HARD` — and are unchanged to the
+ * millisecond. And the hardness column moves in exactly three places (obsidian,
+ * the hearth, voidstone), because those are ordering errors rather than scale
+ * ones; see the note on `obsidian` in `Blocks.js`.
+ */
 export const TIERS = {
-  wood: { tier: 1, speed: 2.4, durability: 60, label: 'Wooden', color: '#9a6f3f', edge: '#c99a63' },
-  stone: { tier: 2, speed: 4.2, durability: 140, label: 'Stone', color: '#8c8c93', edge: '#c2c2ca' },
-  iron: { tier: 3, speed: 7.0, durability: 320, label: 'Iron', color: '#b9bcc4', edge: '#eef0f6' },
-  crystal: { tier: 4, speed: 11.0, durability: 820, label: 'Astral', color: '#5fb6e4', edge: '#d6f4ff' },
+  wood: { tier: 1, speed: 2.0, durability: 60, label: 'Wooden', color: '#9a6f3f', edge: '#c99a63' },
+  stone: { tier: 2, speed: 2.9, durability: 140, label: 'Stone', color: '#8c8c93', edge: '#c2c2ca' },
+  iron: { tier: 3, speed: 4.2, durability: 320, label: 'Iron', color: '#b9bcc4', edge: '#eef0f6' },
+  crystal: { tier: 4, speed: 6.0, durability: 820, label: 'Astral', color: '#5fb6e4', edge: '#d6f4ff' },
   // The top of the ladder, and the only rung you cannot reach by digging: its
   // ingredient drops from husks. Astral already harvests every block in the
   // game, so cinder deliberately buys speed and life rather than access —
   // otherwise the reward for surviving nights would be a gate, not a gift.
-  cinder: { tier: 5, speed: 15.5, durability: 2100, label: 'Cinder', color: '#c2451f', edge: '#ffbe7a' },
+  //
+  // 8.4 sits a shade under Minecraft's netherite (9) against a formula that is
+  // otherwise identical, which is the intended landing: the best pick on the
+  // planet is about the best pick in the game it is being compared to, and not
+  // the 15.5 that made cobblestone a keypress.
+  cinder: { tier: 5, speed: 8.4, durability: 2100, label: 'Cinder', color: '#c2451f', edge: '#ffbe7a' },
 };
 
 export const TOOL_KINDS = {
@@ -778,14 +826,33 @@ export const UNDERWATER_MINING = 3;
  * It is also the one number in here with a hard ceiling on it, and the ceiling
  * is a lungful of air. Bare-handed digging on the seabed pays the drag
  * multiplier from `Player.miningDrag` (3x standing, 9x adrift) on top of this,
- * and base breath is 9 seconds: at 0.75 a bare hand takes 0.90s on sand, i.e.
- * 2.7s planted on the bed and 8.1s treading water — still inside one breath.
- * Anything harsher than about 0.8 puts a single block of sand past a lungful
- * for an unequipped diver, which is the "underwater mining is impossible" wall
- * this must not build. With a shovel of any tier it is never close: a wooden
- * one is 2.5s adrift.
+ * and base breath is 9 seconds: a bare hand takes 0.90s on sand, i.e. 2.7s
+ * planted on the bed and 8.1s treading water — still inside one breath. Any
+ * slower and a single block of sand goes past a lungful for an unequipped
+ * diver, which is the "underwater mining is impossible" wall this must not
+ * build. With a shovel of any tier it is never close: a wooden one is 3.0s
+ * adrift.
+ *
+ * **These three numbers moved, and moved so that nothing changes.** When the
+ * mining rebalance put `miningTime`'s base constant on Minecraft's 1.5 (it was
+ * 1.35 — see `TIERS`), every time in the game got 1.111x longer, hands
+ * included. Hands are the one column that cannot afford it: at 1.35 sand was
+ * already 8.10s adrift against a 9s breath, so a flat 1.111x would have taken
+ * it to 9.00s and drowned an unequipped diver on his first block. So all three
+ * rows were divided by exactly the same 1.111, which holds every bare-handed
+ * and every wrong-tool time in the game *identical* across the retune — dirt is
+ * 1.08s before and after, sand adrift is 8.10s before and after — and puts the
+ * whole of the slowdown on the tool ladder, which is where the report is.
+ *
+ * That is also why they are written as fractions rather than as decimals. The
+ * compensation factor is 1.35/1.5 = 0.9 exactly, and 0.30, 0.42 and 0.75 over
+ * 0.9 are 1/3, 7/15 and 5/6 — exact, so the hands column reproduces to the
+ * digit (dirt 1.08, sand 0.90, stone 9.90, oak 4.50) rather than to within a
+ * rounding. A tenth of a percent of drift is inaudible on dirt and is 0.008s of
+ * a diver's breath, but it is drift that means nothing, and a number that means
+ * nothing is a number nobody can check.
  */
-const HAND_HARD = { pick: 0.30, axe: 0.42, shovel: 0.75 };
+const HAND_HARD = { pick: 1 / 3, axe: 7 / 15, shovel: 5 / 6 };
 
 /**
  * What a hand — or, now, the wrong tool — is worth on this block.
@@ -849,7 +916,14 @@ export function miningTime(blockId, toolItem, submerged = false) {
     else if (toolItem.tool.kind === 'sword' && b.render === 2) speed = 12;
     else speed = handSpeed(b);
   }
-  const base = b.hardness * 1.35;
+  // Minecraft's constant, exactly, so that `hardness` in `Blocks.js` is
+  // denominated in the same unit as the game this one is measured against: a
+  // correct tool takes `hardness * 1.5 / speed` seconds there and here. It was
+  // 1.35, which meant every hardness number in the table read ~10% harder than
+  // it played and the anchor had to be recomputed every time anyone asked. See
+  // the note on `TIERS` for the rebalance this is the arithmetic half of, and
+  // `HAND_HARD` for why the change is invisible on the bare-hands column.
+  const base = b.hardness * 1.5;
   const penalty = b.tier > (toolItem?.tool?.tier ?? 0) ? 3.2 : 1;
   // Three, not Minecraft's five. Five turns a lake bed into a chore rather than
   // a decision, and the breath meter is already applying its own pressure.

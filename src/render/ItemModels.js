@@ -288,11 +288,46 @@ export const POSE = {
   // The icon is deliberately left alone. It has not been reported, it is a
   // different framing (a slot, not a fist), and the toolbar's convention is
   // head-up across every tool.
-  // `rot` is `Rxyz(-0.17, -0.55, 0.20) · Rz(π)` evaluated out. Both halves are
+  // **Up the band again, from the torch's lean to the sword's**, on "shovel can
+  // lean forward more like the sword". This is the third time this one angle has
+  // been asked about and the second time it has moved, so it is worth being
+  // precise about what changed and what did not.
+  //
+  // The lean is the tool's long axis out of the screen plane, positive when the
+  // top tips away from the camera, and it is the same measurement the table
+  // twenty lines up is in. The pitch inside the composition is the only thing
+  // that moves it, so it is solved for rather than nudged — bisected on the
+  // sword's own measured value:
+  //
+  //     pitch -0.170  ->  lean +15.55   (the torch's, where the last pass put it)
+  //     pitch -0.381  ->  lean +27.43   (the sword's, to two decimal places)
+  //
+  // The two settled properties the previous passes bought both survive, which is
+  // the whole reason to move a pitch inside the composition instead of writing a
+  // new triple:
+  //
+  //     above the fist   67% -> 66%    (family 82-88%; the constraint was ~69%)
+  //     scoop toward us  0.840 -> 0.791 (model +Z's view z; 1.0 is dead face-on)
+  //
+  // `grip` is untouched at 0.70 for the reason it has always been 0.70: it is
+  // where the hand closes on the shaft, which is a fact about the shovel and not
+  // about the pose. Do not "restore" 0.22.
+  //
+  // Note that this is the *grip* half of the report only. The same sentence also
+  // asked for everything to be bigger, to lean back and to sit further right,
+  // and none of that is here: those are framing and they are three constants in
+  // `ViewModel.js` (`HELD_SCALE`, `HAND_TILT`, `REST`), applied at the fist so
+  // that the third-person body — which reads this table through
+  // `Character._buildPosedItem` — is untouched by them. The carry tilt adds a
+  // further +12 degrees on screen, so what the player will actually see is the
+  // shovel at +27.6 against the sword's +38.9: the same *relative* place in the
+  // band, which is what "like the sword" asks for.
+  //
+  // `rot` is `Rxyz(-0.381, -0.55, 0.20) · Rz(π)` evaluated out. Both halves are
   // described above and neither is a dialled number; if this needs retuning,
   // change the pitch in that construction and re-evaluate rather than nudging
   // the composed triple, whose first component is no longer the pitch.
-  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [-0.170, -0.550, -2.942],  pos: [-0.02, 0.12, -0.14], icon: [0.18, 0.52, -0.26] },
+  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [-0.381, -0.550, -2.942],  pos: [-0.02, 0.12, -0.14], icon: [0.18, 0.52, -0.26] },
   // The roll is the whole of this entry's history. At `rot.z` 1.00 it was two
   // and a half times the next largest in the table — the axe's 0.40 — and the
   // number to read it by is where that leaves the blade: the tip sat **66° off

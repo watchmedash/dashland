@@ -34,31 +34,161 @@ const HANDS = ['right', 'left'];
  */
 const ARM_NODE = { right: 'arm-right', left: 'arm-left' };
 
+/**
+ * **The first-person composition, and it is five constants rather than a
+ * hundred and six poses.**
+ *
+ * The report was one sentence with four asks in it: "shovel can lean forward
+ * more like the sword and make it little bigger, actually everything at hand
+ * could be bigger, but the hand can be shorter and be straight not pointing in
+ * the middle, and to be honest everything hand held should be leaning backwards
+ * also leaning more to the right, like how minecraft does it".
+ *
+ * Three of the four are about the *frame* — how big the thing in your fist is,
+ * where on screen it sits, and how it is tipped relative to the camera — and
+ * exactly one is about a particular tool's grip (the shovel; that one is
+ * `POSE.shovel` in `ItemModels.js` and is the only edit made there). Framing
+ * belongs here and grip belongs there, and the split is not a filing preference:
+ *
+ *  - `ItemModels.POSE` is read by **both** views. `Character._buildPosedItem`
+ *    takes the same `heldModel` clone for the third-person body, and that file
+ *    already establishes the rule this follows — it drops `pose.pos` on the
+ *    grounds that the nudge is "screen framing, not grip", and framing does not
+ *    survive a change of camera. A global lean and a global size baked into 106
+ *    poses would have been carried onto the body, where nobody asked for it and
+ *    where it cannot be seen from here. Applied at the fist, third person is
+ *    bit-identical.
+ *  - and one hundred and six triples is a hundred and six chances to typo a
+ *    change that is, by the player's own description, the same change to all of
+ *    them.
+ *
+ * **What Minecraft is, measured rather than remembered.** Its first-person
+ * `handheld` display transform is `rotation [0, -90, 25]`, `translation
+ * [1.13, 3.2, 1.13]`, `scale [0.68, 0.68, 0.68]` — a tool rolled a quarter turn
+ * to present its flat, tipped 25 degrees on screen, and pushed down-right and
+ * *away* from the eye. Three properties come out of that and they are what is
+ * copied here, in this order of confidence:
+ *
+ *   1. the item is **large in frame** — Minecraft's held tool is the single
+ *      biggest thing on screen after the world itself;
+ *   2. it sits **low and to the right**, its handle running off the bottom
+ *      corner rather than floating clear of it;
+ *   3. it is **tipped away from the camera at the top**, so you are looking at
+ *      the tool's face and not down its length;
+ *   4. and the arm is a **stub** — a forearm's worth of limb entering the
+ *      corner, not a whole arm reaching across the view.
+ *
+ * Measured through the real glTF at 16:9, this table was at a mean of 1.87% of
+ * the frame with the tools between 1.06% (bow) and 2.15% (axe), and the whole
+ * family's mean lean was +7.3 degrees — barely off square to the camera. That
+ * is the "could be bigger" and the "should be leaning backwards" in numbers.
+ */
+
+/**
+ * How much bigger everything in the fist is drawn, over its authored `height`.
+ *
+ * 1.30 linear, so 1.69x the covered area: the tools go from 1.1-2.2% of the
+ * frame to 1.8-3.6%, and the mean over all 106 posed items from 1.87% to 3.16%.
+ * A single multiplier rather than a pass over the table because the ask is a
+ * single one ("everything at hand could be bigger"), and because the table's
+ * *relative* sizing is already deliberate and hard-won — an apple is meant to be
+ * smaller than a pickaxe, and any per-item pass would relitigate 106 decisions
+ * to answer one sentence.
+ *
+ * Applied in `_setMesh`, which is the one funnel every held mesh goes through —
+ * authored model, generated cube and fallback sprite alike — so a block in the
+ * hand grows with a pickaxe rather than being forgotten.
+ */
+const HELD_SCALE = 1.30;
+
+/**
+ * The carry tilt: a view-space rotation laid over every held item's own pose.
+ *
+ * `x` is the lean, and the sign is worth stating because it is the one axis the
+ * player named twice from opposite ends. Measured as the item's long axis out of
+ * the screen plane, **positive when the top tips away from the camera**, the
+ * family sat at:
+ *
+ *     torch, shovel  +15.5      bow  +0.7      the food kit  0..+16
+ *     sword          +27.4      bucket +4.2    mean of all 106  +7.3
+ *     pick           +34.1
+ *     axe            +37.8
+ *
+ * -0.21 rad about view X adds **+12 degrees to every one of them**, which is
+ * "leaning backwards" done once. It takes the mean to +19 and the tool band to
+ * +13..+50, against Minecraft's own 25-degree tip.
+ *
+ * `z` is the smaller half. Every long item in the table leans its top *toward*
+ * the middle of the screen — pick -19, sword -24, torch -12, stick -17 degrees
+ * of on-screen roll, negative meaning the top falls to the left — which is the
+ * item's share of "not pointing in the middle". -0.13 rad brings each of them 7
+ * degrees back toward upright-and-right without flipping any of them past
+ * vertical, so the family keeps the diagonal it is composed on and simply stops
+ * closing across the crosshair.
+ *
+ * Applied to the mesh in `_setMesh`, i.e. **about the item's own grip**, which
+ * is where the origin already is (`loadGeometry` puts it there) and is what a
+ * wrist does. Not applied to `this.hand`, which would tilt the nocked arrow with
+ * it; and not applied to `armPivot`, which would take the arm along.
+ */
+const HAND_TILT = new THREE.Euler(-0.21, 0, -0.13);
+
 // Where the shoulder sits in view space. The hand hangs off the far end of the
-// limb, so these are the old hand rest points pushed back down the arm: hand ≈
-// shoulder plus the limb vector, which at the rest rotation puts the item at
-// about (0.40, -0.40, -0.72). At that depth, with a 70° vertical fov, the
-// visible height is ~1.0 units — an item scaled 0.4 fills about a third of the
-// screen, which is where a first-person held item should sit.
-const REST = new THREE.Vector3(0.48, -0.56, -0.23);
-const REST_EMPTY = new THREE.Vector3(0.54, -0.62, -0.15);
+// limb, so these are the hand rest points pushed back down the arm: hand ≈
+// shoulder plus the limb vector.
+//
+// **Moved right and back for the composition above, and solved rather than
+// dialled.** The limb is shorter and no longer angles inward (see
+// `ARM_REST_ROT`), and both of those move the fist on their own, so `REST` is
+// whatever puts the fist at a chosen point: the target is (0.50, -0.44, -0.72),
+// which is the old (0.40, -0.40, -0.72) taken 0.10 units right and 0.04 down at
+// **the same depth**. Depth is held fixed on purpose — the item is already 1.30x
+// bigger, and pulling the fist toward the eye as well would have compounded two
+// size changes into one that nobody asked for.
+const REST = new THREE.Vector3(0.50, -0.576, -0.365);
+const REST_EMPTY = new THREE.Vector3(0.56, -0.636, -0.285);
 
-// Fist position in arm-local space. The limb is a 0.62-long box running from the
-// pivot to z = -0.59, so the fist closes just shy of its end. The counter-
-// rotation cancels the arm's rest tilt: an item's own pose is then expressed in
-// view space, the way it reads on screen, while still inheriting every bit of
-// the arm's swing.
-const HAND_LOCAL = new THREE.Vector3(0, 0.01, -0.52);
-const ARM_REST_ROT = new THREE.Euler(0.30, 0.16, 0.12);
+// Fist position in arm-local space. The counter-rotation cancels the arm's rest
+// tilt: an item's own pose is then expressed in view space, the way it reads on
+// screen, while still inheriting every bit of the arm's swing.
+//
+// **0.52 -> 0.38, which is "the hand can be shorter".** This one number is the
+// whole of the limb's length, for both limbs there can be: the stand-in box is
+// built to it below, and `_tryArms` *scales the character's real arm* so its far
+// end lands exactly here — so shortening the anchor shortens whichever limb is
+// on screen, and no swing amplitude, bob term or item offset has to move for it.
+// The real arm scales uniformly, so it comes in 27% thinner as well, which is
+// the other half of a stub.
+const HAND_LOCAL = new THREE.Vector3(0, 0.01, -0.38);
 
-// The offhand arm, mirrored across the view's centre line: the shoulder moves
-// to the left of the screen and the two rotations that lean the limb inward —
-// yaw and roll — change sign. Pitch does not: both arms hang at the same angle
-// below the eye, and negating it would have the left arm reaching up out of
-// frame. There is no separate REST_EMPTY here because an empty offhand draws
-// nothing at all; see `setOffhand`.
-const OFF_REST = new THREE.Vector3(-0.48, -0.56, -0.23);
-const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
+/**
+ * The limb's rest attitude — and it is now a pitch and nothing else.
+ *
+ * It was (0.30, 0.16, 0.12): a yaw that swung the far end of the arm 9 degrees
+ * toward the middle of the screen and a roll that leaned it 7 more, so the limb
+ * arrived across the frame pointing at the crosshair. Measured, the stand-in
+ * limb ran along (-0.159, 0.292, -0.943) in view space — the x is the part the
+ * report is about, and it is the literal reading of "be straight not pointing in
+ * the middle".
+ *
+ * Zeroing both leaves the limb running dead ahead and slightly up, out of the
+ * bottom-right corner, which is Minecraft's stub. The pitch goes 0.30 -> 0.34 to
+ * put back the height the yaw was contributing.
+ *
+ * This costs nothing elsewhere: the fist group counter-rotates by exactly this
+ * Euler (see the constructor), so every item pose stays expressed in view space
+ * whatever this becomes, and the swing tracks are offsets *from* it.
+ */
+const ARM_REST_ROT = new THREE.Euler(0.34, 0, 0);
+
+// The offhand arm, mirrored across the view's centre line: the shoulder moves to
+// the left of the screen. The two rotations that used to lean the limb inward —
+// yaw and roll — were the ones that changed sign, and both are now zero, so the
+// mirror is the shoulder's x and nothing else. Pitch never changed sign: both
+// arms hang at the same angle below the eye. There is no separate REST_EMPTY
+// here because an empty offhand draws nothing at all; see `setOffhand`.
+const OFF_REST = new THREE.Vector3(-0.50, -0.576, -0.365);
+const OFF_ARM_REST_ROT = new THREE.Euler(0.34, 0, 0);
 
 /**
  * The bow draw.
@@ -90,9 +220,9 @@ const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
  *    its way out of shot. `p` is the middle of the stave, `r` the bow model's
  *    orientation on screen, `len` the stave's length in view units (the model is
  *    normalised to one unit on its longest axis, so `len` is literally how long
- *    it is drawn). At 0.85 out and 1.41 long, the stave over-fills the viewport
- *    — 2.48 of 2.00 in NDC, cropped top and bottom — and its centre line sits
- *    three quarters of the way across, on the right.
+ *    it is drawn). At 0.85 out and 1.55 long, the stave over-fills the viewport
+ *    — 3.10 of 2.00 in NDC, cropped top and bottom — and its centre line sits
+ *    78% of the way across, on the right.
  *  - `r` was solved, not dialled: the bow lies in its own XZ plane (stave along
  *    model X, string a straight run at model z = -0.28, shot along +Z), so
  *    standing the stave up off vertical and turning the shot across the frame
@@ -149,6 +279,18 @@ const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
  *   0.75   3.32%  0.00%   23 deg             12 deg                2.42
  *   1.00   3.56%  0.00%   22 deg             12 deg                2.48
  *
+ * **The last row has been re-measured twice since, and both times the absolute
+ * figures came out a little different from the ones above.** They are left as
+ * written because they are still the shape of the animation — the rise, the
+ * arm's retreat and the monotone growth are what the rows are for — but the
+ * full-draw numbers to trust are the ones beside `aim` below, taken by
+ * rasterising the real glTF at 16:9 with the bow's transform composed straight
+ * from `aim` (which is what `_poseDraw` produces at t = 1, since `drawEase(1)`
+ * and `turnEase(1)` are both exactly 1). On that measurement the pose these
+ * rows describe reads 3.35% and 2.77 NDC rather than 3.56% and 2.48; the two
+ * angles reproduce to a tenth of a degree, so the poses agree and only the
+ * silhouette metric differs. Do not mix the two scales in one comparison.
+ *
  * The bow rises the whole way (its centre goes -0.65 -> -0.17 NDC), which is the
  * property the previous rebuild bought and this must not give back: coming
  * toward the camera costs apparent height, and a draw that sinks reads as a
@@ -173,7 +315,39 @@ const DRAW = {
    * a "the drawn bow is turned wrong" report is always this number and never
    * that one.
    */
-  aim: { p: [0.42, -0.07, -0.85], r: [-3.077, -0.431, -1.488], len: 1.41 },
+  /**
+   * **Bigger and further right, on "bow is perfect now but can be bigger and
+   * more little to the right".** Only `p.x` and `len` move; the rotation is not
+   * touched, which is what keeps every property the last two passes settled —
+   * the stave stays 4.6 degrees off vertical, the shot stays 25.0 degrees off
+   * the view axis, and the plane stays exactly as face-on as it was.
+   *
+   *   len   1.41 -> 1.55   (+10% linear, 1.21x the covered area)
+   *   p.x   0.42 -> 0.52   (+0.10 view units at z -0.85)
+   *
+   * Re-measured through the real glTF at 16:9, bow only, at full draw:
+   *
+   *                        was        now
+   *     coverage           3.35%      3.76%
+   *     NDC height         2.77       3.10   (the viewport is 2.00; it is meant
+   *     NDC width          0.33       0.40    to over-fill and crop, see above)
+   *     NDC centre         (0.446,    (0.555,
+   *                         -0.114)    -0.108)
+   *     across the frame   72.3%      77.7%
+   *     right edge         0.612      0.755  (1.000 is the edge of the screen)
+   *
+   * `p.z` is deliberately left at -0.85. Pulling the bow toward the eye is the
+   * other way to make it bigger and it is the wrong one: it costs stave length
+   * off the top and bottom for the same width, and it steepens the perspective
+   * on a shape whose whole legibility is that you can see its curve.
+   *
+   * The nock is unaffected, which is the property `string`/`pull` were moved
+   * into the bow's model space for. Measured at this `len`, the nock point's
+   * distance to the nearest vertex of the string's straight run is 0.2294 in
+   * bow-model units against 0.2522 before — it tracks the retune instead of
+   * being left behind by it, which is exactly what that change bought.
+   */
+  aim: { p: [0.52, -0.07, -0.85], r: [-3.077, -0.431, -1.488], len: 1.55 },
   /** The limb stops being drawn once its retreat is this far along. */
   hide: 0.35,
   /**
@@ -362,6 +536,8 @@ const _sA = new THREE.Vector3();
 const _pB = new THREE.Vector3();
 const _qB = new THREE.Quaternion();
 const _sB = new THREE.Vector3();
+/** `HAND_TILT` as a quaternion, built once — see `_setMesh`. */
+const _tiltQ = new THREE.Quaternion().setFromEuler(HAND_TILT);
 const _aimP = new THREE.Vector3(...DRAW.aim.p);
 const _aimQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(...DRAW.aim.r));
 const _aimS = new THREE.Vector3(DRAW.aim.len, DRAW.aim.len, DRAW.aim.len);
@@ -428,8 +604,12 @@ export class ViewModel {
     // nothing else: the pivot, the item anchor and every number in the swing
     // tracks belong to this group, which is why a real arm can be swapped in
     // without retuning any of them.
-    const armGeo = new THREE.BoxGeometry(0.14, 0.14, 0.62);
-    armGeo.translate(0, 0, -0.28);
+    // 0.62 -> 0.48 with the same overhang past the fist, following `HAND_LOCAL`
+    // down from 0.52 to 0.38. The box still runs from just behind the shoulder
+    // (z +0.03) to just past the fist (z -0.45), so the knuckles are covered and
+    // nothing else is.
+    const armGeo = new THREE.BoxGeometry(0.14, 0.14, 0.48);
+    armGeo.translate(0, 0, -0.21);
     this.arm = new THREE.Mesh(armGeo, armMat);
     this.armPivot = new THREE.Group();
     this.armPivot.add(this.arm);
@@ -865,6 +1045,28 @@ export class ViewModel {
    */
   _setMesh(h, mesh, owned, modelled = false) {
     this._clearMesh(h);
+    // The composition pass, and this is the only place it happens.
+    //
+    // Every held mesh in the game arrives here — the authored model out of
+    // `ItemModels`, the generated cube a plain block is drawn as, and the flat
+    // sprite that stands in while a GLB loads — so applying `HELD_SCALE` and
+    // `HAND_TILT` at this one line is what makes "everything at hand" mean
+    // everything rather than "the tools". See the note on those two constants.
+    //
+    // The rotation is *pre*-multiplied: the mesh's own quaternion is its
+    // authored pose expressed in view space (the fist counter-rotates the arm's
+    // rest tilt for exactly that reason), so pre-multiplying lays the carry tilt
+    // on in the same frame — a tip of the screen, not a turn of the tool in the
+    // fist. Post-multiplying would rotate in the item's own axes and give a
+    // different, and wrong, answer per item.
+    //
+    // The mesh is always a fresh object at this point — a clone from
+    // `heldModel`, or a Mesh built two dozen lines up — so this is never applied
+    // twice to the same transform. `_clearMesh` above has already emptied the
+    // rig, which is the other half of that guarantee.
+    mesh.quaternion.premultiply(_tiltQ);
+    mesh.scale.multiplyScalar(HELD_SCALE);
+    mesh.position.multiplyScalar(HELD_SCALE);
     h.rig.add(mesh);
     h.mesh = mesh;
     h.owns = owned;

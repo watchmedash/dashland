@@ -310,7 +310,26 @@ export const BLOCKS = [
   // 3.4 seconds — the hardest natural material in the game, with no gate at
   // all, while the iron ore beside it needed a stone pick. Every block added
   // since is gated; these are the stragglers.
-  block({ name: 'obsidian', label: 'Obsidian', all: 'obsidian', hardness: 6, tool: 'pick', tier: 3, particle: [0.12, 0.1, 0.18], sound: 'stone' }),
+  // 14, up from 6, and this is the *only* place the mining rebalance touched a
+  // hardness — see the note on `TIERS` in `Items.js` for why the rest of that
+  // work is on the tool ladder instead of on this column.
+  //
+  // The column is a scale everywhere else and an ordering here. `hardness` is
+  // now denominated in Minecraft's unit (`hardness * 1.5 / speed` seconds), so
+  // the two tables are directly comparable, and the comparison is stark: there
+  // obsidian is 50 against a stone of 1.5, i.e. **33x the rock in a hillside**,
+  // and it is the one block whose whole identity is "you will stand here for a
+  // while". At 6 against this planet's stone of 2.2 it was 2.7x — softer,
+  // relative to its own world, than a *gold ore*. No adjustment to the tool
+  // ladder can fix a block that is in the wrong place on the scale.
+  //
+  // 14 and not 50: at 50 an iron pick — the tier that gates it — would be 18
+  // seconds a block, and Minecraft can afford that because it has an efficiency
+  // enchantment and a beacon and this planet has neither. 14 puts it at 5.0s
+  // with the pick that unlocks it and 2.5s with the best pick in the game,
+  // which is 2.3x granite and 6.4x cobblestone: plainly the hardest thing you
+  // can dig, and still a thing you would build a wall out of.
+  block({ name: 'obsidian', label: 'Obsidian', all: 'obsidian', hardness: 14, tool: 'pick', tier: 3, particle: [0.12, 0.1, 0.18], sound: 'stone' }),
   block({ name: 'core', label: 'Planet Core', all: 'core', hardness: 24, tool: 'pick', tier: 4, drop: null, light: 8, lightColor: [1.0, 0.55, 0.25], particle: [1, 0.6, 0.2], sound: 'stone' }),
   // What the planet gives you for coming all the way down.
   //
@@ -319,8 +338,16 @@ export const BLOCKS = [
   // nothing in it. This is the one of these that exists, it cannot be crafted,
   // and the planet only offers it once.
   //
-  // Tier 3 and hardness 6 — obsidian's numbers, and read off obsidian on
-  // purpose. It used to be tier 0 at 1.4, softer than the stone in a hillside
+  // Tier 3 and hardness 14 — obsidian's numbers, and read off obsidian on
+  // purpose, which is why it moved with obsidian when that was corrected from 6
+  // (see the note there). The coupling is the point: this is a block whose
+  // whole claim is that it is the deepest thing on the planet, and it says so
+  // by taking as long to move as the hardest natural material does. At 5.0s
+  // with the iron pick you arrive holding, that is two swings' worth of
+  // ceremony once, at the bottom of the world, and once more wherever you
+  // decide to re-site it.
+  //
+  // It used to be tier 0 at 1.4, softer than the stone in a hillside
   // and softer than the basalt you dug through to reach it: the one object the
   // whole descent exists to hand you came out of the wall faster than
   // cobblestone. That is not a difficulty question, it is a legibility one. The
@@ -335,7 +362,7 @@ export const BLOCKS = [
   // you there. Iron is what you have when you arrive.
   block({
     name: 'hearth', label: 'Planet Hearth', all: 'hearth',
-    hardness: 6, tool: 'pick', tier: 3, light: 15, lightColor: [1.0, 0.72, 0.36],
+    hardness: 14, tool: 'pick', tier: 3, light: 15, lightColor: [1.0, 0.72, 0.36],
     particle: [1, 0.7, 0.3], sound: 'stone',
   }),
 
@@ -512,7 +539,21 @@ export const BLOCKS = [
   block({ name: 'emerald_ore', label: 'Emerald Ore', all: 'emerald_ore', hardness: 4.0, tool: 'pick', tier: 3, drop: 'emerald', light: 3, lightColor: [0.3, 1.0, 0.45], particle: [0.24, 0.8, 0.36], sound: 'glass' }),
   // The bottom of the ladder. Tier 4 means an astral pick, which means crystal,
   // which is itself a deep ore — there is no shortcut to the mantle.
-  block({ name: 'voidstone_ore', label: 'Voidstone', all: 'voidstone_ore', hardness: 7, tool: 'pick', tier: 4, drop: 'void_shard', dropCount: 2, light: 5, lightColor: [0.55, 0.3, 0.95], particle: [0.45, 0.24, 0.75], sound: 'glass' }),
+  //
+  // 18, up from 7, and the second and last of the mining rebalance's ordering
+  // corrections (obsidian is the other; the rest of that work is on the tool
+  // ladder — see `TIERS` in `Items.js`). The gate says this is the hardest ore
+  // in the game and the clock said it was a quarter of the work of the obsidian
+  // one tier below it: 7 against obsidian's corrected 14 is *softer than the
+  // thing it is meant to be the reward past*, and it was being dug with a
+  // strictly better pickaxe on top of that. A block that is gated harder and
+  // breaks faster teaches the player that the gate is decoration.
+  //
+  // 18 puts it at 4.5s with the astral pick that unlocks it, against obsidian's
+  // 5.0s with the iron one that unlocks obsidian: each is the wall at the end
+  // of its own tier, and each takes about the same five seconds to get through
+  // with the tool you had to earn to try. With a cinder pick it is 3.2s.
+  block({ name: 'voidstone_ore', label: 'Voidstone', all: 'voidstone_ore', hardness: 18, tool: 'pick', tier: 4, drop: 'void_shard', dropCount: 2, light: 5, lightColor: [0.55, 0.3, 0.95], particle: [0.45, 0.24, 0.75], sound: 'glass' }),
 
   block({ name: 'deep_coal_ore', label: 'Deep Coal Ore', all: 'deep_coal_ore', hardness: 3.6, tool: 'pick', tier: 1, drop: 'coal', dropCount: 2, particle: [0.24, 0.24, 0.26], sound: 'stone' }),
   block({ name: 'deep_copper_ore', label: 'Deep Copper Ore', all: 'deep_copper_ore', hardness: 3.6, tool: 'pick', tier: 1, drop: 'raw_copper', dropCount: 2, particle: [0.72, 0.44, 0.26], sound: 'stone' }),

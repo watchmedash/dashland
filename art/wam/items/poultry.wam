@@ -1,0 +1,79 @@
+# Raw poultry — a drumstick, held by the bone.
+#
+# `meat.wam` and `cooked_meat.wam` were both this shape in two browns, and at
+# 46px they were the same item twice. What separates a bird's leg from a lump of
+# red meat is not the outline, it is the *ratio* and the *colour*: a drumstick is
+# roughly half bare bone, and raw poultry is a pale pink-cream, nowhere near the
+# oxblood of a steak. So this model spends far more of its height on the shaft
+# than the old joints did — meat from the ground to 0.5, bone from there to 1.0 —
+# and puts the two palest values in the game's larder against a pink that is
+# closer to salmon than to beef.
+#
+# The knuckle is what makes the pale half read as bone rather than as a stick or
+# a candle: the shaft pinches to its thinnest at 0.55, then swells into a ball
+# just short of the tip and steps back in. That bulb-then-neck is the one
+# silhouette cue that survives the icon rasteriser, so it is deliberately
+# oversized — 0.19 against a 0.10 shaft, nearly twice the waist.
+#
+# The muscle and the shaft are two lofts on one chain rather than one loft with a
+# colour band, because the join has to *step in* sharply where the meat ends; a
+# single tube can only taper through it and that reads as a carrot.
+
+model poultry
+  height 0.3
+  style chunky
+
+palette
+  Skin  #e3a98d
+  Flesh #cf7f6d
+  Bone  #fcf8ea
+  Joint #efe6cc
+
+skeleton
+  root hock at 0.04
+  bone shank parent=hock dir=up pitch=-5 len=0.88
+
+parts
+  # The drum. Widest low — 0.20 up the chain — so the mass sits at the bottom
+  # and the eye reads "heavy end down, thin end up" before it reads any colour.
+  # The topmost ring is `Flesh`, the cut face where the joint was severed; every
+  # ring below it is `Skin`, which is the pale outside of the bird.
+  loft drum bones=hock..shank material=Skin sides=8
+    ring 0.00 w=0.20 d=0.19
+    ring 0.06 w=0.36 d=0.34
+    ring 0.16 w=0.46 d=0.43
+    ring 0.30 w=0.47 d=0.44
+    ring 0.42 w=0.42 d=0.39
+    ring 0.52 w=0.32 d=0.30 material=Flesh
+    ring 0.60 w=0.19 d=0.18
+    cap start=dome end=flat
+
+  # The shaft starts inside the muscle so the two never part company at the
+  # shoulder, and finishes in a knuckle — a bone cut flat reads as a dowel.
+  loft shaft bone=shank at=0.50 dir=up pitch=4 len=0.56 material=Bone sides=8
+    ring 0.00 w=0.16 d=0.15
+    ring 0.25 w=0.11 d=0.105
+    ring 0.55 w=0.095 d=0.09
+    ring 0.72 w=0.105 d=0.10
+    ring 0.80 w=0.16 d=0.15 material=Joint
+    ring 0.88 w=0.21 d=0.20
+    ring 0.96 w=0.19 d=0.18
+    ring 1.00 w=0.14 d=0.135
+    cap start=flat end=dome
+
+checks
+  assert bottom(drum) < 0.012
+  # Half the model is bare bone. This is the assertion that keeps it a drumstick
+  # and not the old joint: the exposed shaft has to be a *third* of the height on
+  # its own, which no amount of drifting the meat upward can fake.
+  assert top(shaft) > top(drum) + 0.30
+  # ...and the meat is still the mass, or it reads as a bone with a bead on it.
+  assert volume(drum) > volume(shaft) * 3
+  # The knuckle is the read. It has to be visibly wider than the waist it grows
+  # out of, measured as geometry rather than trusted from the ring table.
+  assert width(shaft) > 0.16
+  # An egg, not a ball. The first pass made the muscle spherical and the whole
+  # model read as a maraca; the drum has to be taller than it is wide.
+  assert width(drum) / height(drum) in 0.6..0.95
+  assert parts == 2
+  assert tris < 300

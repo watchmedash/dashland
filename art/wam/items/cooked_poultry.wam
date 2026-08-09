@@ -1,0 +1,87 @@
+# Roast poultry — the same leg, off the fire.
+#
+# This is the second half of a raw/cooked pair that sits side by side in the
+# inventory, and the pair this project retired failed on exactly that: `meat` and
+# `cooked_meat` were one drumstick in two browns, so at 46px the only thing
+# telling them apart was a hue, and a hue is the first thing a small dark icon
+# loses. So the difference here is carried by the **silhouette**, and the colour
+# is only the confirmation.
+#
+# Three things roasting actually does, all of them shape:
+#
+# 1. **The meat pulls back off the bone.** The drum stops at 0.44 up the chain
+#    where the raw one runs to 0.60, and the shaft is mounted lower to meet it.
+#    That is ~60% bare bone against the raw model's ~52% — a taller, thinner
+#    stalk over a smaller mass.
+# 2. **The drum shrinks and squats.** Same width, much less height, so where
+#    `poultry.wam` is an egg standing on end (w/h 0.75) this is a squat knot
+#    wider than it is tall (w/h ~1.2). The two `checks` bands do not overlap:
+#    that is the pair's silhouette test written down, and it is the assertion to
+#    look at first if the two ever start reading alike again.
+# 3. **The skin crisps.** A roast leg is not a solid of revolution — it is
+#    lumpy. The drum is bilobed: it swells at 0.14, creases in at 0.21, swells
+#    again at 0.28. The crease ring is also rolled 22°, which puts its facet
+#    corners in the gaps between its neighbours' and breaks the outline into
+#    something jagged rather than a clean arc.
+#
+# Colour then does what colour is good for: a deep roast brown, a lighter
+# gold on the upper lobe where the fat rendered and caught the heat, and a
+# near-black sear at the base where it sat on the fire.
+
+model cooked_poultry
+  height 0.3
+  style chunky
+
+palette
+  Skin  #b06a2c
+  Crisp #c8822f
+  Sear  #5c3113
+  Bone  #f4edd6
+  Joint #e6dbbb
+
+skeleton
+  root hock at 0.04
+  bone shank parent=hock dir=up pitch=-5 len=0.88
+
+parts
+  # The knot of roast meat. The widths deliberately do not run monotonically —
+  # 0.49, 0.44, 0.49 — because a tapering tube is a vegetable and the whole
+  # point of this model is that the outline is knobbly.
+  loft drum bones=hock..shank material=Skin sides=8 material_arc=Crisp:50-130
+    ring 0.00 w=0.23 d=0.22 material=Sear
+    ring 0.07 w=0.42 d=0.40 material=Skin shape=squarish
+    ring 0.15 w=0.50 d=0.47 fwd=0.015
+    ring 0.23 w=0.47 d=0.44 roll=16 side=-0.018
+    ring 0.31 w=0.48 d=0.45 fwd=-0.012
+    ring 0.38 w=0.34 d=0.31 side=0.010
+    ring 0.44 w=0.20 d=0.18
+    cap start=dome end=flat
+
+  # Mounted at 0.36 rather than the raw model's 0.50: the meat has contracted
+  # and left more shaft standing. It still starts inside the drum so the two
+  # never part company at the shoulder, and it finishes in a knuckle — a bone
+  # cut flat reads as a dowel.
+  loft shaft bone=shank at=0.36 dir=up pitch=4 len=0.70 material=Bone sides=8
+    ring 0.00 w=0.16 d=0.15
+    ring 0.22 w=0.11 d=0.105
+    ring 0.50 w=0.09 d=0.085
+    ring 0.70 w=0.10 d=0.095
+    ring 0.80 w=0.155 d=0.15 material=Joint
+    ring 0.89 w=0.20 d=0.19
+    ring 0.96 w=0.185 d=0.175
+    ring 1.00 w=0.135 d=0.13
+    cap start=flat end=dome
+
+checks
+  assert bottom(drum) < 0.012
+  # More bone than the raw leg (which asserts > 0.30). The meat has pulled back.
+  assert top(shaft) > top(drum) + 0.45
+  assert volume(drum) > volume(shaft) * 2
+  assert width(shaft) > 0.16
+  # THE PAIR TEST. `poultry.wam` asserts this same ratio in 0.6..0.95 — an egg on
+  # end. This one is a squat knot and the two bands do not touch, so the raw and
+  # the roast can never converge on one silhouette the way the retired
+  # meat/cooked_meat pair did. Widen either band and you reopen that bug.
+  assert width(drum) / height(drum) in 0.95..1.45
+  assert parts == 2
+  assert tris < 300

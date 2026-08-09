@@ -160,6 +160,22 @@ const RAW = [
     ];
   }),
 
+  // --- archery ---
+  //
+  // Hide is the cord, as it is for the fishing rod and the bed: the planet has
+  // no flax, no sheep and no spiders, so the only soft, sinewy thing an animal
+  // gives you is the thing that has to stand in for string. Three lengths down
+  // the far column and three sticks up the near one is Minecraft's bow read the
+  // way this registry spells it, and the 3x3 makes it a bench recipe — which is
+  // right for the first ranged weapon on the planet.
+  { out: 'bow', count: 1, table: true, shape: [' SH', 'S H', ' SH'], key: { S: 'stick', H: 'hide' } },
+  // Four to a craft, flint on the point and a feather on the nock. Every one of
+  // the three is already something you pick up rather than something you build:
+  // flint out of gravel, sticks out of leaves and planks, feathers off the
+  // birds. That is deliberate — a quiver should be replenished by walking
+  // around, not by a production line.
+  { out: 'arrow', count: 4, table: true, shape: ['F', 'S', 'E'], key: { F: 'flint', S: 'stick', E: 'feather' } },
+
   // --- armour ---
   // Twenty recipes used to stand here, one per piece per tier. They are gone
   // with the system that wore them: nothing on the planet reduces damage by

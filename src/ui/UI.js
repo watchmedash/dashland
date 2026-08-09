@@ -612,7 +612,11 @@ export class UI {
     if (!slot || slot.empty) return this._hideTooltip();
     const def = ITEMS[slot.item];
     let sub = '';
-    if (def.tool) sub = `${def.tool.kind === 'sword' ? 'Weapon' : 'Tool'} · tier ${def.tool.tier} · ${def.tool.durability - slot.wear}/${def.tool.durability}`;
+    // A bow is a weapon and has no tier — it is not on the mining ladder and
+    // does not become a better bow by being made of iron. Printing "tier 0"
+    // beside it invited the question of where tiers 1-5 were.
+    if (def.bow) sub = `Weapon · ${def.tool.durability - slot.wear}/${def.tool.durability}`;
+    else if (def.tool) sub = `${def.tool.kind === 'sword' ? 'Weapon' : 'Tool'} · tier ${def.tool.tier} · ${def.tool.durability - slot.wear}/${def.tool.durability}`;
     else if (def.block !== undefined) sub = 'Placeable block';
     else if (def.food) sub = `Food · restores ${def.food}`;
     else if (def.fuel) sub = 'Fuel';
@@ -1340,6 +1344,38 @@ export class UI {
   }
 
   setCrosshairActive(on) { this.el.crosshair.classList.toggle('active', on); }
+
+  /**
+   * The bow's charge, as the sight closing in on the shot.
+   *
+   * Wide and loose at the start of the draw, tight at full — which is the read
+   * every game that has ever done this uses, and it is the right one: the sight
+   * *is* the accuracy, so the player learns the curve without a number or a bar
+   * anywhere on screen. It costs one CSS variable and no new element.
+   *
+   * The `.drawing` class also kills the 120ms transform transition, which exists
+   * so the `.active` pop eases and would otherwise turn a per-frame value into a
+   * spring that lags the draw by a tenth of a second.
+   *
+   * Guarded on a visible change rather than written every frame: this is a style
+   * write on the HUD and the draw only moves about a hundredth per frame.
+   *
+   * @param {number} t 0..1, or 0 for "not drawing"
+   */
+  setCrosshairDraw(t) {
+    const el = this.el.crosshair;
+    if (t <= 0) {
+      if (this._drawT === 0) return;
+      this._drawT = 0;
+      el.classList.remove('drawing');
+      el.style.removeProperty('--draw-scale');
+      return;
+    }
+    if (this._drawT !== undefined && Math.abs(t - this._drawT) < 0.01) return;
+    this._drawT = t;
+    el.classList.add('drawing');
+    el.style.setProperty('--draw-scale', (2.4 - 1.4 * t).toFixed(3));
+  }
 
   /**
    * Show the sight only where it tells the truth — first person.

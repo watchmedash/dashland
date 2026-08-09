@@ -246,6 +246,33 @@ const POSE = {
     'leg-right': [-0.34, 0, 0.10],
     'leg-left': [-0.34, 0, -0.10],
   },
+
+  /**
+   * Drawing a bow. The one pose in this table that is not chosen by `wantPose`.
+   *
+   * It is here rather than in a table of its own precisely so that it costs
+   * nothing to add: `POSE_Q` compiles it, `_instantiate` resolves its node names,
+   * `_poseAll` picks its nodes up and so `_clearPose` returns them to rest when
+   * the weight goes. The only thing it needs that the other three do not is its
+   * own weight — `_drawW` rather than `_poseW` — because a player can perfectly
+   * well be drawing a bow while airborne or crouching, and the mutual exclusion
+   * `_poseW` enforces is exactly wrong for it.
+   *
+   * Built on the sign rule stated above: negative X carries a limb forward. The
+   * bow arm goes out in front and a little across the chest; the string arm
+   * comes up to the same height and splays *out* (negative Z on the left, the
+   * same direction `air` and `swim` use to part the limbs), which is the elbow
+   * of a drawn bow seen from behind. The torso takes a quarter turn toward the
+   * bow side so the shoulders line up with the shot instead of squaring off with
+   * the camera, and the head takes it back so the archer is still looking where
+   * the crosshair is.
+   */
+  draw: {
+    torso: [0, 0.34, 0],
+    head: [0, -0.30, 0],
+    'arm-right': [-1.48, 0, 0.26],
+    'arm-left': [-1.12, 0, -0.78],
+  },
 };
 
 /**
@@ -261,6 +288,9 @@ const CROUCH_SINK = 0.16;
 
 /** How fast a pose fades in and out, in weight per second. */
 const POSE_RATE = 5.5;
+
+/** How fast the bow draw's weight chases its target. See `_drawW`. */
+const DRAW_RATE = 14;
 
 /**
  * How far forward the body tips when swimming, in radians, and how fast the
@@ -379,6 +409,19 @@ export class PlayerCharacter {
      */
     this.pose = null;
     this._poseW = 0;
+    /**
+     * The bow draw's own weight, and its target.
+     *
+     * Eased rather than written straight through, and only one of the two
+     * directions is the reason: the rise is already a ramp — `main.js` hands
+     * over a charge clock that takes a second to fill — but the fall is a single
+     * frame, because letting go of the button is instantaneous. Snapping four
+     * node rotations back to the gait in one frame is a visible pop from behind.
+     * At `DRAW_RATE` the arms come down in about a tenth of a second, which
+     * reads as the release it is.
+     */
+    this._drawW = 0;
+    this._drawTarget = 0;
     this._kick = 0;
     this._airT = 0;
     /** Resolved per instance, since the model arrives long after construction. */
@@ -613,6 +656,12 @@ export class PlayerCharacter {
     MobModels.playOnce(this.model, CLIP.attack[this.swingHand]);
     this.model.current = base;
   }
+
+  /**
+   * How far this body is drawing a bow, 0..1. Cheap enough to call every frame
+   * from a game that is not drawing one — it writes a number.
+   */
+  setDraw(t) { this._drawTarget = Math.max(0, Math.min(1, t)); }
 
   /**
    * Put an item in a hand.
@@ -852,6 +901,22 @@ export class PlayerCharacter {
       if (arm && q && this._holdW[h] > 0.002) {
         arm.quaternion.slerp(q, this._holdW[h] * HOLD_BLEND);
       }
+    }
+
+    // --- the bow draw ---
+    // Last, and after the carrying pose rather than before it, because a bow is
+    // the one thing where the carry is *wrong*: `holding-right` presents an
+    // object out in front of the chest, and an archer's bow arm is locked out
+    // straight along the shot. Layering the draw over it at full weight is what
+    // overrides that, and the two arms move as one gesture because both are in
+    // the same table.
+    //
+    // The item in each hand rides along for free: the anchors are children of
+    // the `arm-*` nodes, so posing the nodes carries the bow and the arrow with
+    // them. Nothing here knows what is being held.
+    this._drawW += (this._drawTarget - this._drawW) * Math.min(1, dt * DRAW_RATE);
+    if (this._drawW > 0.002 && this._poseNodes?.draw) {
+      for (const [node, q] of this._poseNodes.draw) node.quaternion.slerp(q, this._drawW);
     }
   }
 

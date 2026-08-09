@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, RENDER_TYPE, R_CROSS } from '../world/Blocks.js';
 import { createItemBlockMaterial } from '../render/VoxelMaterial.js';
-import { heldModel, hasModel } from '../render/ItemModels.js';
+import { heldModel, hasModel, worldModel } from '../render/ItemModels.js';
 import * as MobModels from '../game/MobModels.js';
 import { characterUrl, DEFAULT_CHARACTER } from './Character.js';
 
@@ -128,6 +128,20 @@ const SWINGS = {
       { t: 0.00, p: [0, 0, 0], r: [0, 0, 0], e: 'out' },
       { t: 0.16, p: [0.10, 0.06, 0.06], r: [0.14, -0.42, -0.24], e: 'in' },
       { t: 0.40, p: [-0.20, 0.02, -0.14], r: [0.02, 0.66, 0.36], e: 'out3' },
+      { t: 1.00, p: [0, 0, 0], r: [0, 0, 0], e: 'linear' },
+    ],
+  },
+  // A bow has no swing at all — see `setDraw`, which poses the arm continuously
+  // off the draw clock instead. The entry exists so that `_equip`'s
+  // `SWINGS[tool.kind]` lookup finds something for `tool.kind === 'bow'` rather
+  // than silently handing a bow the punch track, and it is deliberately almost
+  // nothing: the one motion a bow makes that is not a draw is the little recoil
+  // as the string goes, which `punch()` plays on release.
+  bow: {
+    rate: 5.2,
+    keys: [
+      { t: 0.00, p: [0, 0, 0], r: [0, 0, 0], e: 'out3' },
+      { t: 0.22, p: [0.02, 0.01, 0.06], r: [0.06, 0.10, 0], e: 'out' },
       { t: 1.00, p: [0, 0, 0], r: [0, 0, 0], e: 'linear' },
     ],
   },
@@ -317,6 +331,20 @@ export class ViewModel {
      */
     this.charUrl = characterUrl(DEFAULT_CHARACTER);
     this._armsBuilt = false;
+
+    /**
+     * How far the bow is drawn, 0..1, and the arrow sitting on the string.
+     *
+     * A separate clock from `swing` and not a track on it. A swing is a fixed
+     * animation the game plays *at* you; a draw is a pose the player is holding,
+     * and the whole point of the mechanic is that the frame you are looking at
+     * is the charge you would release. Driving it off `swing` would mean the arm
+     * ran to the end of a track and let go on its own.
+     */
+    this.draw = 0;
+    /** The nocked arrow's mesh, built on the first draw and then kept. */
+    this.nock = null;
+    this._nockItem = 0;
 
     this.swing = 1;
     /** Which arm the current swing belongs to. See `punch`. */
@@ -646,6 +674,60 @@ export class ViewModel {
   }
 
   /**
+   * Hold the bow at `t` of a full draw, with `arrowItem` on the string.
+   *
+   * Called every frame while the use button is down and once with 0 when it is
+   * not, which is the whole of the state: there is no start, no stop and no
+   * animation clock to keep in sync with the one `main.js` is already keeping.
+   * If the game's idea of the charge and the arm's ever disagree, the arm is
+   * wrong by exactly one frame and self-corrects on the next.
+   *
+   * The arrow is a child of the item anchor, not of the bow mesh. The bow is a
+   * cached template that `heldModel` hands out clones of and that the icon
+   * painter and the third-person body may be holding at the same time; hanging
+   * anything off it would put an arrow on all of them.
+   *
+   * @param {number} t 0..1
+   * @param {number} [arrowItem] the item id to draw on the string
+   */
+  setDraw(t, arrowItem = 0) {
+    this.draw = Math.max(0, Math.min(1, t));
+    if (this.draw <= 0) {
+      if (this.nock) this.nock.visible = false;
+      return;
+    }
+    if (arrowItem && arrowItem !== this._nockItem) {
+      if (this.nock) { this.hand.remove(this.nock); this.nock = null; }
+      this._nockItem = arrowItem;
+      // `worldModel` and not `heldModel`: the held pose is the diagonal an arrow
+      // takes when you are *carrying* one, which is the wrong object entirely
+      // for one lying on a string. This wants the raw model, upright and
+      // unrotated, so the transform below is the only thing deciding where it
+      // points.
+      const build = (m) => {
+        if (this.nock || this._nockItem !== arrowItem) return;
+        // The model is normalised to one unit on its longest axis and its head
+        // is on +Z (see the arrow's pose note in ItemModels), so a half turn
+        // about Y aims it down the screen's -Z — where the camera, and the
+        // shot, are going.
+        m.scale.setScalar(0.44);
+        m.rotation.set(0, Math.PI, 0);
+        this.nock = m;
+        this.hand.add(m);
+      };
+      const now = worldModel(arrowItem, build);
+      if (now) build(now);
+    }
+    if (!this.nock) return;
+    this.nock.visible = true;
+    // Slides back along the aim as the string comes with it. The bow sits at
+    // z = -0.10 in this space; the arrow's head stays out in front of it and its
+    // nock travels a fifth of a unit, which at this scale is most of the length
+    // of the shaft and reads as a full draw.
+    this.nock.position.set(0.02, 0.055, -0.24 + 0.20 * this.draw);
+  }
+
+  /**
    * The hand that would act if nobody says otherwise.
    *
    * This is `Inventory.active()`'s rule read off the fists instead of off the
@@ -676,6 +758,26 @@ export class ViewModel {
     this.swingTrack = this.hands[h].track || SWINGS.default;
     this.swing = 0;
     this.onPunch?.(h);
+  }
+
+  /**
+   * The same clock, without telling the body.
+   *
+   * A bow's release is a kick at the shoulder and a hand that stays where it
+   * was; it is emphatically not a strike, and `punch` is wired straight to
+   * `PlayerCharacter.punch`, which plays a melee attack clip over the whole
+   * rig. Routing the loose through there made the third-person body swing an
+   * invisible sword at the moment the arrow left — and it fought the draw pose
+   * for the arm on the way out of it.
+   *
+   * So: the view model's own track plays, the body's does not. The body has its
+   * own answer to a release, which is coming off the draw pose.
+   */
+  recoil(hand = this.actingHand()) {
+    const h = this.hands[hand] ? hand : 'right';
+    this.swingHand = h;
+    this.swingTrack = this.hands[h].track || SWINGS.default;
+    this.swing = 0;
   }
 
   /**
@@ -721,9 +823,29 @@ export class ViewModel {
     const eq = 1 - this.equipT;
     const equipY = -eq * 0.42;
 
-    const px = rest.x + bx + _swingP.x * sw;
-    const py = rest.y + by + _swingP.y * sw + equipY;
-    const pz = rest.z + _swingP.z * sw;
+    // The draw, layered on top of everything else the arm is doing.
+    //
+    // Additive rather than a track of its own, and that is what lets it coexist
+    // with the walking bob, the equip dip and the release recoil without any of
+    // them being special-cased: a drawing archer still sways as they walk, and
+    // the recoil `punch()` plays on release lands on an arm that is already on
+    // its way back from the draw.
+    //
+    // The three terms are the gesture read off a real one. The shoulder comes
+    // *in* toward the centre line (the bow crosses the view rather than sitting
+    // out at the edge), *up* toward eye level, and *back* — and the arm rolls a
+    // little as it goes, which is what turns the stave's flat toward the camera
+    // so you can see the string move at all. Kept under 0.2 units and 0.3 rad
+    // for the reason every other amplitude here is: the item is half a unit out
+    // along the limb and a radian at the shoulder throws it off screen.
+    const dw = this.draw;
+    const drawX = -0.16 * dw;
+    const drawY = 0.13 * dw;
+    const drawZ = 0.09 * dw;
+
+    const px = rest.x + bx + _swingP.x * sw + drawX;
+    const py = rest.y + by + _swingP.y * sw + equipY + drawY;
+    const pz = rest.z + _swingP.z * sw + drawZ;
 
     // Shoulder anchor sits low-right, just behind the near plane. Everything —
     // bob, swing, equip dip, sprint — is applied here and nowhere else; the fist
@@ -742,9 +864,9 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55,
-      ARM_REST_ROT.y + _swingR.y * sw,
-      ARM_REST_ROT.z + _swingR.z * sw,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 - 0.22 * dw,
+      ARM_REST_ROT.y + _swingR.y * sw + 0.26 * dw,
+      ARM_REST_ROT.z + _swingR.z * sw - 0.18 * dw,
     );
 
     // The offhand arm, on the frames there is one. Everything above has already

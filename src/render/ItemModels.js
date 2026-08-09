@@ -126,6 +126,48 @@ const POSE = {
   // is simply below the screen.
   shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [0.50, -0.55, 0.20],  pos: [-0.04, 0.28, -0.14], icon: [0.18, 0.52, -0.26] },
   sword:  { file: 'sword_B',      pack: 'weapons', height: 0.50, grip: 0.16, rot: [-0.25, -0.60, 1.00], pos: [0.04, 0.04, -0.03],  icon: [0.05, 0.30, -0.42] },
+
+  // --- archery --------------------------------------------------------------
+  //
+  // The two models in this file that are not authored standing up, and the
+  // reason `fitMax` became a per-pose flag (see `loadGeometry`). KayKit lays the
+  // bow along **X** — 1.96 units tip to tip and 0.09 thick — and the arrow along
+  // **Z**. The shared normalisation divides by the model's *height*, so the bow
+  // came out of it twenty-one units tall: a wall, seen from the inside. Fitting
+  // the longest axis instead is the food kit's existing answer to the same
+  // problem, and it was already written; it was only nailed to the pack.
+  //
+  // `grip` is measured on Y either way and both models are a hair thick in Y, so
+  // 0.5 is as near to "no offset" as makes no difference — which is correct for
+  // both. A bow is held at the middle of the stave and an arrow at the middle of
+  // the shaft, and the recentre in `loadGeometry` already puts X and Z on the
+  // fist.
+  //
+  // **The rotation is a mapping, not a taste.** Measured off the mesh: the bow's
+  // stave runs along model X, its limbs curve toward -Z and its string is a
+  // straight run of verts at z = -0.28 — so the archer stands on -Z and the
+  // arrow leaves along +Z. In the view model's hand space the camera looks down
+  // -Z, so the shot has to come out of the screen's -Z: `rot` maps model X to
+  // view Y (the stave stands up) and model +Z to view -Z (the bow faces where
+  // you are aiming). That is exactly Ry(π)·Rz(π/2), which in three's XYZ Euler
+  // order is [0, π, π/2]; the small departures from those two numbers are the
+  // three-quarter turn that stops the stave being a flat line across the frame.
+  //
+  // The icon takes a much flatter yaw for the opposite reason: side-on, a bow is
+  // a curve and a cord and unmistakable at 46px, and any real turn foreshortens
+  // the stave into a stick.
+  bow: {
+    file: 'bow_A_withString', pack: 'weapons', height: 0.62, grip: 0.50, fitMax: true,
+    rot: [0.10, 3.02, 1.44], pos: [0.02, 0.06, -0.10], icon: [0.10, 0.18, 0.30],
+  },
+  // Held like the shafts — the drawn diagonal the stick and the feather take —
+  // rather than pointed at the camera, which is what the model's own axis would
+  // give. Small: it is a stick with a stone on it, and at a sword's size it read
+  // as a spear.
+  arrow: {
+    file: 'arrow_A', pack: 'weapons', height: 0.40, grip: 0.50, fitMax: true,
+    rot: [-0.30, -0.55, 0.30], pos: [0.02, 0.10, -0.04], icon: [0.10, 0.30, -0.44],
+  },
   // `glow`: the fraction of the model's own height over which the head lights
   // up. On this art the last fifth is the wrapped, burning end and nothing else.
   // A torch you are holding is lit — it was only ever lit once planted, which
@@ -323,6 +365,10 @@ const BY_NAME = {
   // model it read as a grey lump seen from above — the cube preview of what you
   // are about to place is both clearer and truer.
   torch: 'torch',
+  // The bow is absent here on purpose: it carries `tool.kind === 'bow'`, so
+  // `poseKeyFor` finds it by the same route a pickaxe is found and never reaches
+  // this table. The arrow has no tool block and does.
+  arrow: 'arrow',
   bucket: 'bucket',
   water_bucket: 'bucket',
   apple: 'apple',
@@ -607,7 +653,14 @@ function loadGeometry(key) {
     // `grip` stays a fraction of the *height* either way — it is where the fist
     // closes on the model as it stands — but what gets fitted to one unit is the
     // longest axis for packs that ask for it. See `fitMax` in PACKS.
-    const span = PACKS[pose.pack].fitMax
+    //
+    // The pose may override the pack, which is what the bow and the arrow need:
+    // the weapons pack is shared with the sword, and a sword is authored upright
+    // and wants its height fitted like everything else. `fitMax` is a fact about
+    // an individual model's axis, not about who published it — the pack-level
+    // flag survives because for the food kit it happens to be true of all
+    // twenty-odd of them.
+    const span = (pose.fitMax ?? PACKS[pose.pack].fitMax)
       ? Math.max(bb.max.x - bb.min.x, h, bb.max.z - bb.min.z)
       : h;
     const s = 1 / Math.max(1e-4, span);

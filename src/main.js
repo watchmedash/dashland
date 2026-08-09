@@ -29,7 +29,9 @@ import { Water } from './game/Water.js';
 import { Save } from './game/Save.js';
 import {
   ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, armourPoints,
+  bowShot, bowDrawStep,
 } from './game/Items.js';
+import { Arrows } from './game/Arrows.js';
 import { Skills, MARKS } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
@@ -520,6 +522,13 @@ class Game {
     this.particles = new Particles(this.scene, this.planet);
     this.blockModels = new BlockModels(this.scene);
     this.drops = new Drops(this.scene, this.planet, this.materials);
+    // Arrows in flight. Built here, between the drops and the animals, because
+    // it needs the planet for its collision and nothing else: the mob list is
+    // handed to `update` per frame rather than held, so the projectiles cannot
+    // outlive a world reset holding a reference to a dead herd.
+    this.arrows = new Arrows(this.scene, this.planet, itemIdOf('arrow'));
+    this.arrows.onHit = (mob) => this.audio.mobHit(mob.pos);
+    this.arrows.onStick = (pos) => this.audio.dig('stone', pos);
     this.mobs = new Mobs(this.scene, this.planet, this.drops);
     // Creatures speak for themselves — idle calls, pain and death, all anchored
     // in the world so you can hear which direction the herd is in.
@@ -606,6 +615,19 @@ class Game {
     this._resize();
 
     this.mining = { key: null, progress: 0 };
+    /**
+     * The bow, mid-draw.
+     *
+     * `t` is the charge in seconds-normalised-to-one and is the only state the
+     * mechanic has: everything else — the arm, the body, the sight, the field of
+     * view — is a function of it, computed fresh each frame. There is no "am I
+     * drawing" flag because `t > 0` is that question, and a second field would
+     * be a second thing to keep true.
+     *
+     * Deliberately not saved. An arrow half-drawn when you quit is not a state
+     * worth restoring, and the save format is a compatibility surface.
+     */
+    this.bow = { t: 0 };
     this.placeCooldown = 0;
     this.useCooldown = 0;
     /** Seconds since the last swing landed, for the attack rhythm. */
@@ -829,6 +851,12 @@ class Game {
     this._streamTimer = 0;
     this._welcome = false;
     this.drops.clear();
+    // Arrows are entities in the old world's air. They are not saved and they
+    // must not survive the planet under them being replaced — a stuck arrow
+    // carries a world position, and the same position in a new world is inside
+    // whatever generated there.
+    this.arrows.clear();
+    this.bow.t = 0;
     this.mobs.clear();
     // The flow sim keys everything by cell index, so its sources and levels are
     // meaningless against a different planet — carried over, they marked cells
@@ -2683,6 +2711,16 @@ class Game {
   }
 
   _frozenUpdate(dt) {
+    // Paused or dead. `_tickBow` is not running, so a draw that was live when
+    // the game stopped would sit charged behind the menu and — worse — the arm,
+    // the body and the sight would stay frozen mid-pull. Dropped rather than
+    // held: a pause is not a hold, and there is nothing to fire at.
+    if (this.bow?.t) {
+      this.bow.t = 0;
+      this.viewModel.setDraw(0);
+      this.character.setDraw(0);
+      this.ui.setCrosshairDraw(0);
+    }
     this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob, this.viewMode);
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
       this.inventory.held().item, this.inventory.offhand.item);
@@ -2835,6 +2873,10 @@ class Game {
     // up the label has to be cleared here — otherwise it freezes on whatever
     // you happened to be looking at when you opened your inventory and sits
     // there behind it.
+    // Before `_interact`, and unconditionally — see `_tickBow`. It has to run
+    // with a screen open, because that is one of the ways a draw is cancelled.
+    this._safeTick('bow', () => this._tickBow(dt, input, busy));
+
     if (!busy) this._interact(dt, input);
     else this.ui.setLookAt(null);
     // Each of these is isolated. The whole frame is already wrapped in a catch
@@ -2856,6 +2898,10 @@ class Game {
     this._safeTick('core', () => this._tickCore(dt));
     this._safeTick('skills', () => this._tickSkills(dt));
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
+    // After the animals have moved, so a shot lands where the body is drawn
+    // this frame rather than where it was drawn last one. The mob list is handed
+    // over per call rather than held; see the constructor.
+    this._safeTick('arrows', () => this.arrows.update(dt, this.mobs));
     // A merchant that has walked out of range, run out of life or been killed
     // takes its shop with it. Without this the screen stays up over a stock
     // list belonging to a mob that no longer exists.
@@ -2888,11 +2934,23 @@ class Game {
     this.shelter += (this._skyExposure() - this.shelter) * Math.min(1, dt * 3.5);
     this.particles.setWeather(this.weather.type, this.weather.precip * this.shelter, this.player.headInWater);
 
-    this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob, this.viewMode);
+    // A drawn bow pulls the view in by a sixth. Not a scope — a sixth of 75° is
+    // 12°, which is a lean rather than a zoom — but it is enough that the world
+    // creeps forward as the shot charges, which is the cheapest possible way to
+    // make the charge legible without drawing anything. It rides the same
+    // `bow.t` everything else does, so it can never disagree with the sight.
+    this.player.updateCamera(this.camera, dt, this.settings.fov * (1 - 0.16 * this.bow.t),
+      this.settings.bob, this.viewMode);
     // After the camera, because the body hides itself when the camera has been
     // pulled in on top of it and it needs this frame's distance to know.
+    //
+    // While drawing, the left hand holds the arrow — passed as the offhand item
+    // rather than plumbed through a new path, because the offhand is already
+    // "the thing in the body's left fist" and the draw pose has already put that
+    // fist at the string. Nothing in Character knows a bow exists.
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
-      this.inventory.held().item, this.inventory.offhand.item);
+      this.inventory.held().item,
+      this.bow.t > 0 ? itemIdOf('arrow') : this.inventory.offhand.item);
     // The body is an entity like any other and takes its torchlight the same
     // way the mobs do — probed at chest height rather than at the feet, so a
     // wall torch lights you as it lights the husk standing beside you.
@@ -4404,6 +4462,110 @@ class Game {
     this.inventory.changed();
   }
 
+  /**
+   * Hold to draw, release to loose.
+   *
+   * Ticked from `_update` and *not* from `_interact`, and that placement is the
+   * design. `_interact` is skipped whenever a screen is open, so a draw ticked
+   * inside it would freeze at whatever charge it had when you opened your
+   * inventory and fire that charge whenever you closed it again. Out here, the
+   * one branch that matters — "the button is no longer down and I had a draw" —
+   * runs on every frame of the game, including the frame you alt-tabbed, opened
+   * a crate or lost pointer lock.
+   *
+   * What happens on that branch depends on *why* the button is no longer down:
+   *
+   *  - released while you could still shoot        → the shot goes
+   *  - a screen opened, lock was lost, the bow left your hand, the arrows ran
+   *    out                                          → the draw is dropped
+   *
+   * The second case spends nothing. It has to: losing pointer lock clears
+   * `input.buttons` wholesale (see `Input._onLockChange`), so a build that fired
+   * on any release would put an arrow into the ceiling every time the player
+   * tabbed away mid-aim.
+   *
+   * **Below the minimum draw nothing happens at all** — no arrow leaves the bow
+   * and none is taken out of the quiver. A short press is a mis-click far more
+   * often than it is a deliberate weak shot, and the alternative (a feeble arrow
+   * and a lost one from the stack) punishes the mistake twice. The floor is
+   * `bow.min` in Items.js, a quarter of the draw.
+   *
+   * @param {boolean} busy true when a screen is up
+   */
+  _tickBow(dt, input, busy) {
+    const b = this.bow;
+    // `active()` and not `held()`: the offhand is the hand that acts when the
+    // main hand is empty, and a bow parked there has to be drawable and has to
+    // spend its own durability. Everything downstream — `damageHeld`,
+    // `ViewModel.actingHand` — already follows the same rule.
+    const def = ITEMS[this.inventory.active().item];
+    const arrowId = itemIdOf(def?.ammo || '');
+    // Everything that has to be true to go on drawing. Read once and used for
+    // both the charge and the release, so the two can never disagree about
+    // whether this was a shot or a cancellation.
+    const armed = !!def?.bow && !busy && input.locked
+      && (arrowId ? this.inventory.count(arrowId) > 0 : false);
+
+    // The state machine itself is in Items.js, as a pure function, because it is
+    // the only part of this with a wrong answer that nobody would see — see
+    // `bowDrawStep`. This module cannot be imported by a test (it builds a game
+    // on import), so the branch that decides "shot or cancellation" is kept
+    // somewhere that can be.
+    const next = bowDrawStep(b.t, {
+      armed, down: input.buttons[2], dt, drawTime: def?.bow?.draw ?? 1,
+    });
+    b.t = next.t;
+    if (next.fire) this._loose(def, arrowId, next.fire);
+
+    // Told every frame, including the frames it is zero: these are poses, not
+    // events, and a listener that is only updated while drawing is a listener
+    // that stays drawn after the shot.
+    this.viewModel.setDraw(b.t, arrowId);
+    this.character.setDraw(b.t);
+    this.ui.setCrosshairDraw(this.viewMode === VIEW_FIRST ? b.t : 0);
+
+    // A drawn bow with no arrows says so rather than doing nothing, which is
+    // otherwise indistinguishable from a broken button.
+    //
+    // Recorded rather than pushed straight at the UI: `_interact` owns the hint
+    // line and clears it every frame it runs, so a message written from here
+    // would be overwritten on the frames the player is looking at a block and
+    // would stick forever on the frames they are not. It is read back out in the
+    // bow branch of `_interact`, which is the one place that both runs at the
+    // right time and knows nothing else wants the line.
+    this.bow.hint = def?.bow && !armed && arrowId && input.buttons[2] && !busy && input.locked
+      ? 'Out of arrows' : null;
+  }
+
+  /**
+   * Let one go.
+   *
+   * @param {object} def the bow's item definition
+   * @param {number} arrowId the ammunition item
+   * @param {number} t draw fraction
+   */
+  _loose(def, arrowId, t) {
+    // One function decides whether the shot happens and how hard, so there is
+    // no window in which an arrow has been spent on a shot that was refused.
+    const shot = bowShot(def, t);
+    if (!shot) return;
+    if (this.inventory.remove(arrowId, 1) < 1) return;
+    this.inventory.changed();
+
+    // Out of the eye, along the look, pushed clear of the player's own body —
+    // the first sub-step of the flight is a solidity probe and starting it
+    // inside your own head would land the arrow at your feet.
+    const from = _v1.copy(this.player.eye).addScaledVector(this.player.lookDir, 0.6);
+    this.arrows.spawn(from, this.player.lookDir, shot.speed, shot.damage, shot.power);
+
+    // The recoil, not a swing. See `ViewModel.recoil`: `punch` would also fire
+    // the body's melee clip, and the body is already coming out of the draw.
+    this.viewModel.recoil();
+    // A bow wears by the shot, like every other tool wears by the stroke.
+    if (def.tool) this.inventory.damageHeld(1);
+    this.audio.ui(240 + 140 * shot.power);
+  }
+
   _interact(dt, input) {
     const hit = this.planet.raycast(this.player.eye, this.player.lookDir, this.player.reach);
 
@@ -4420,6 +4582,32 @@ class Game {
     this.ui.setLookAt(mobHit && (!hit || mobHit.dist < hit.dist)
       ? (mobHit.mob.spec.label ?? null)
       : (hit ? (BLOCKS[this.planet.at(hit.col, hit.k)]?.label ?? null) : null));
+
+    // A bow takes the whole of both buttons and answers none of the questions
+    // below it.
+    //
+    // The right button is the draw — `_tickBow` already has it — and letting the
+    // chain below see it too meant aiming at a bench opened the crafting screen
+    // and aiming at farmland tilled it, both on the frame the player pressed to
+    // shoot. The left button is a melee swing with a longbow, which is not a
+    // thing, and mining with one is worse: `miningTime` gives any tool that is
+    // not the block's own a flat 1.15, so a bow was quietly a universal pickaxe
+    // that broke nothing and dropped nothing.
+    //
+    // The highlight box and the crosshair state are set above and below this on
+    // purpose — you can still see what you are aiming at.
+    if (ITEMS[this.inventory.active().item]?.bow) {
+      this.ui.setCrosshairActive(!!mobHit || !!hit);
+      this.highlight.visible = false;
+      this.placeCooldown = Math.max(0, this.placeCooldown - dt);
+      this.useCooldown = Math.max(0, this.useCooldown - dt);
+      voxelUniforms.uBreakStage.value = -1;
+      this.mining.key = null;
+      this.mining.progress = 0;
+      this.eating = 0;
+      this.ui.setHint(this.bow.hint || null);
+      return;
+    }
     if (mobHit && (!hit || mobHit.dist < hit.dist)) {
       this.ui.setCrosshairActive(true);
       this.highlight.visible = false;

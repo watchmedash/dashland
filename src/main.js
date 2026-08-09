@@ -931,7 +931,12 @@ class Game {
      * Deliberately not saved. An arrow half-drawn when you quit is not a state
      * worth restoring, and the save format is a compatibility surface.
      */
-    this.bow = { t: 0 };
+    // `slot` is the hand that is drawing, remembered from the frame it claimed
+    // the button so the release can charge the wear and the recoil to it. Null
+    // whenever nothing is drawing. `_aimHit` is the crosshair cell `_interact`
+    // last resolved, which `_tickBow` reads because it runs a frame ahead of it.
+    this.bow = { t: 0, slot: null, hint: null };
+    this._aimHit = null;
     this.placeCooldown = 0;
     this.useCooldown = 0;
     /** Seconds since the last swing landed, for the attack rhythm. */
@@ -3138,7 +3143,19 @@ class Game {
   _breakBlock(hit) {
     const b = BLOCKS[hit.id];
     if (b.hardness < 0 || hit.id === ID.core) return;
-    const heldDef = ITEMS[this.inventory.active().item];
+    // `held()` — the main hand, always, however empty it is.
+    //
+    // This used to be `active()`, which hands the job to the offhand when the
+    // main hand is empty, and that is the one place the fall-through rule does
+    // not belong. Minecraft's left button is the main hand's and nothing else's:
+    // an empty right fist punches wood at fist speed with a pickaxe in the left,
+    // and the pickaxe neither speeds the dig, nor changes the drop, nor takes
+    // the wear. Anything else makes the left hand a second toolbelt you never
+    // asked for — park a diamond pick there, clear the hotbar slot, and you were
+    // mining with it by accident. The three answers a break needs (the timer,
+    // the drop table, the durability) all come off this one line and its two
+    // siblings in `_interact`, so they cannot disagree about which hand dug.
+    const heldDef = ITEMS[this.inventory.held().item];
     const center = this.planet.centerOf(hit.col, hit.k, new THREE.Vector3());
 
     const edits = [{ col: hit.col, k: hit.k, id: 0 }];
@@ -3211,8 +3228,13 @@ class Game {
     // one, and marking it would teach exactly the wrong lesson about farming.
     if (hit.id === ID.wheat_3) this._mark('harvest');
     this.player.swing();
-    this.viewModel.punch();
-    if (heldDef?.tool && b.hardness > 0.15) this.inventory.damageHeld(1);
+    // `'right'` explicitly: `ViewModel.actingHand` derives the arm from what is
+    // in the two fists — right unless it is empty and the left is not — which is
+    // `active()`'s rule, and mining no longer follows it. Without this an empty
+    // main hand and a torch in the left would swing the *left* arm to break a
+    // block the left hand had nothing to do with.
+    this.viewModel.punch('right');
+    if (heldDef?.tool && b.hardness > 0.15) this.inventory.damageHeld(1, this.inventory.held());
   }
 
   /**
@@ -3221,7 +3243,7 @@ class Game {
    *   once (see `_hasUse`) and passes it in, so a torch placed out of the
    *   offhand while the main hand holds a pickaxe comes off the torch.
    */
-  _placeBlock(hit, held = this.inventory.active()) {
+  _placeBlock(hit, held = this.inventory.held()) {
     const def = ITEMS[held.item];
     if (!def || def.block === undefined) return false;
     const id = def.block;
@@ -3378,7 +3400,9 @@ class Game {
     this.audio.place(BLOCKS[id].sound, this.planet.centerOf(col, k, _v1));
     this.stats.placed++;
     this.player.swing();
-    this.viewModel.punch();
+    // The arm that put it down — the left one when the torch came out of the
+    // offhand, which is the whole point of being able to place from there.
+    this.viewModel.punch(this._handOf(held));
     return true;
   }
 
@@ -5575,6 +5599,29 @@ class Game {
     this._announceHeld();
   }
 
+  /**
+   * Which arm the view model should move for something done with `slot`.
+   *
+   * `ViewModel.punch()` and `recoil()` default to `actingHand()`, which reads
+   * the rule off the two fists — the right arm whenever the right fist holds
+   * anything. That was `Inventory.active()`'s rule and it is now nobody's: the
+   * left button is the main hand's however empty it is, and the right button
+   * falls through on whether the item has a *use*, not on whether the fist is
+   * full. So both of those questions are now answered here, from the slot the
+   * action was actually charged to, and passed in.
+   *
+   * Compared by identity against the offhand slot rather than by contents,
+   * because the two hands very often hold the same thing — two stacks of torches
+   * is the ordinary case — and a contents test would light up the wrong arm for
+   * exactly the player who is paying attention to both.
+   *
+   * @param {Slot} slot the hand that acted
+   * @returns {'left'|'right'}
+   */
+  _handOf(slot) {
+    return slot === this.inventory.offhand ? 'left' : 'right';
+  }
+
   _dropHeld() {
     const s = this.inventory.held();
     if (s.empty) return;
@@ -5618,11 +5665,23 @@ class Game {
    */
   _tickBow(dt, input, busy) {
     const b = this.bow;
-    // `active()` and not `held()`: the offhand is the hand that acts when the
-    // main hand is empty, and a bow parked there has to be drawable and has to
-    // spend its own durability. Everything downstream — `damageHeld`,
-    // `ViewModel.actingHand` — already follows the same rule.
-    const def = ITEMS[this.inventory.active().item];
+    // Which hand is drawing, resolved by the same rule the rest of the right
+    // button uses — not `active()`, which only reaches the offhand when the main
+    // hand is *empty*. A bow in the left hand and a pickaxe in the right is the
+    // ordinary way to carry one: the pickaxe claims no right-click, so the bow
+    // draws, exactly as it does in Minecraft.
+    //
+    // `_aimHit` is last frame's crosshair cell, cached by `_interact`, because
+    // this runs a step ahead of the raycast and must not cast a second one — two
+    // rays in a frame is two answers about what you are looking at. One frame of
+    // lag is invisible here and only matters at all for a shovel, whose claim is
+    // the only aim-dependent thing that can talk a bow out of the click.
+    const slot = this.inventory.actingSlot((s) => this._hasUse(s, this._aimHit));
+    const def = ITEMS[slot.item];
+    // Remembered for the release, which happens on some later frame and must
+    // charge the wear to the hand that actually drew rather than re-deriving it
+    // against whatever the player is looking at by then.
+    b.slot = def?.bow ? slot : null;
     const arrowId = itemIdOf(def?.ammo || '');
     // Everything that has to be true to go on drawing. Read once and used for
     // both the charge and the release, so the two can never disagree about
@@ -5660,7 +5719,20 @@ class Game {
     // would stick forever on the frames they are not. It is read back out in the
     // bow branch of `_interact`, which is the one place that both runs at the
     // right time and knows nothing else wants the line.
-    this.bow.hint = def?.bow && !armed && arrowId && input.buttons[2] && !busy && input.locked
+    // Asked of whichever fist has a bow in it, not of `def` — because `def` is
+    // the hand that *claimed* the click, and a bow with an empty quiver claims
+    // nothing. That is the entire state this message exists for, so reading it
+    // off the acting hand meant a pickaxe or a torch in the other hand silently
+    // swallowed the explanation and the player was back to a dead button. The
+    // main hand wins the tie for the same reason it wins everywhere else.
+    const main = this.inventory.held();
+    const bowSlot = ITEMS[main.item]?.bow ? main
+      : ITEMS[this.inventory.offhand.item]?.bow ? this.inventory.offhand : null;
+    const bowDef = bowSlot ? ITEMS[bowSlot.item] : null;
+    const dry = bowDef
+      && !(itemIdOf(bowDef.ammo || '')
+        && this.inventory.countWithOffhand(itemIdOf(bowDef.ammo || '')) > 0);
+    this.bow.hint = dry && input.buttons[2] && !busy && input.locked
       ? 'Out of arrows' : null;
   }
 
@@ -5689,9 +5761,18 @@ class Game {
 
     // The recoil, not a swing. See `ViewModel.recoil`: `punch` would also fire
     // the body's melee clip, and the body is already coming out of the draw.
-    this.viewModel.recoil();
-    // A bow wears by the shot, like every other tool wears by the stroke.
-    if (def.tool) this.inventory.damageHeld(1);
+    //
+    // The arm that drew is the arm that kicks. `recoil()`'s default is
+    // `actingHand()`, which is `active()`'s rule read off the fists — right
+    // whenever the right fist holds anything — so an offhand bow fired while a
+    // pickaxe was in the main hand kicked the pickaxe.
+    const shooter = this.bow.slot ?? this.inventory.held();
+    this.viewModel.recoil(this._handOf(shooter));
+    // A bow wears by the shot, like every other tool wears by the stroke — and
+    // the bow that was drawn is the bow that wears. The default here is
+    // `active()`, which with an offhand bow and a pickaxe in the main hand
+    // charged the shot to the pickaxe.
+    if (def.tool) this.inventory.damageHeld(1, shooter);
     this.audio.ui(240 + 140 * shot.power);
   }
 
@@ -5756,6 +5837,10 @@ class Game {
 
   _interact(dt, input) {
     const hit = this.planet.raycast(this.player.eye, this.player.lookDir, this.player.reach);
+    // Handed to `_tickBow`, which runs before this method and needs the same
+    // answer to decide whether a shovel in the main hand has talked the offhand
+    // bow out of the click. See the note there about why it does not cast again.
+    this._aimHit = hit;
 
     // a creature in front of the block takes the hit instead
     const mobHit = this.mobs.raycast(this.player.eye, this.player.lookDir, this.player.reach);
@@ -5771,12 +5856,34 @@ class Game {
       ? (mobHit.mob.spec.label ?? null)
       : (hit ? (BLOCKS[this.planet.at(hit.col, hit.k)]?.label ?? null) : null));
 
-    const bowHeld = !!ITEMS[this.inventory.active().item]?.bow;
-    if (!bowHeld && mobHit && (!hit || mobHit.dist < hit.dist)) {
+    // The hand the *right* button is speaking to, for the whole of this method.
+    //
+    // Hoisted above the creature branch rather than left down by the block
+    // placement, because the creature branch is the other half of the same
+    // question: whether a bow is drawing decides whether the right button is
+    // available to feed a cow, and whether the offhand holds the wheat decides
+    // what the cow is offered. Two resolutions of "which hand" in one frame is
+    // two chances to disagree.
+    //
+    // `actingSlot` and not `active()`: the offhand acts when the main hand has
+    // nothing to do with the cell under the crosshair, which is what makes a
+    // torch in the left hand placeable while a shovel is in the right. The left
+    // button is emphatically *not* resolved this way — see `_breakBlock`.
+    const heldSlot = this.inventory.actingSlot((s) => this._hasUse(s, hit));
+    const heldItem = ITEMS[heldSlot.item];
+    // A bow that is actually drawing, in whichever hand is drawing it. The right
+    // button belongs to it, so nothing else may answer that button this frame —
+    // but the left button is untouched, because in Minecraft a bow is still a
+    // (feeble) club and, more to the point, a pickaxe in the main hand must not
+    // stop being a weapon just because there is a bow in the left.
+    const drawing = !!heldItem?.bow;
+    if (mobHit && (!hit || mobHit.dist < hit.dist)) {
       this.ui.setCrosshairActive(true);
       this.highlight.visible = false;
       if (input.clicked[0] && input.locked) {
-        const held = ITEMS[this.inventory.active().item];
+        // The main hand, always — a sword in the left hand does not swing, for
+        // the same reason a pickaxe there does not mine. See `_breakBlock`.
+        const held = ITEMS[this.inventory.held().item];
         // Swings have a rhythm. Clicking is edge-triggered with no cooldown, so
         // once blows started knocking husks backwards a player could hold one
         // in the air indefinitely by clicking fast — free, skill-less immunity.
@@ -5793,7 +5900,7 @@ class Game {
         const dmg = (held?.damage ?? 1) * (0.3 + 0.7 * charge) * crit;
         this.attackT = 0;
         this.player.swing();
-        this.viewModel.punch();
+        this.viewModel.punch('right');   // the attacking arm, see `_breakBlock`
         // soft flesh impact at the animal, not a grass footstep at your feet.
         // The species' own hurt/death cry comes from Mobs via onSound.
         //
@@ -5847,7 +5954,7 @@ class Game {
         // per-species table, so anything added later prices itself. A calf pays
         // less, which is the point: a herd is not a farm.
         if (killed) this.skills.xpKill(mobHit.mob.spec, mobHit.mob.baby > 0);
-        if (held?.tool) this.inventory.damageHeld(1);
+        if (held?.tool) this.inventory.damageHeld(1, this.inventory.held());
       }
       // Right-click offers whatever you're holding. Feeding is how a herd
       // grows, and it's the only reason to keep an animal alive.
@@ -5857,22 +5964,29 @@ class Game {
       // what the cow is offered. `feed` is asked again below because it also
       // refuses a cow on cooldown, and that refusal must not silently eat the
       // stack.
-      const heldSlot = this.inventory.actingSlot((s) => this.mobs.canFeed(s.item));
-      if (input.clicked[2] && input.locked && this.useCooldown === 0) {
+      const feedSlot = this.inventory.actingSlot((s) => this.mobs.canFeed(s.item));
+      // `!drawing`: the right button is the bow's while it is being drawn, and
+      // an animal wandering across the aim must not eat the shot — nor a stack
+      // of wheat. This is the whole of what the old `bowHeld` gate on this
+      // branch was for; the left button is no longer caught by it.
+      if (!drawing && input.clicked[2] && input.locked && this.useCooldown === 0) {
         this.useCooldown = 0.3;
         // The merchant answers the same button, empty-handed or not — it is the
         // one creature you interact with rather than feed.
         if (mobHit.mob.spec.trader) {
           this.openScreen('shop', mobHit.mob);
-        } else if (!heldSlot.empty && this.mobs.feed(mobHit.mob, heldSlot.item)) {
-          this.inventory.consumeHeld(1, heldSlot);
+        } else if (!feedSlot.empty && this.mobs.feed(mobHit.mob, feedSlot.item)) {
+          this.inventory.consumeHeld(1, feedSlot);
           this.player.swing();
-          this.viewModel.punch();
+          this.viewModel.punch(this._handOf(feedSlot));
           this.ui.toast(mobHit.mob.baby > 0 ? 'Fed the calf' : 'Ready to breed',
-            heldSlot.item, 1300);
+            feedSlot.item, 1300);
         }
       }
-      this.ui.setHint(this._feedHint(mobHit.mob));
+      // The bow's own refusal outranks the feed prompt: a player holding the
+      // button on an empty quiver is asking why nothing happened, and "Feed" is
+      // not the answer. Everywhere else this message is joined in below.
+      this.ui.setHint(this.bow.hint || this._feedHint(mobHit.mob));
       this.placeCooldown = Math.max(0, this.placeCooldown - dt);
       this.useCooldown = Math.max(0, this.useCooldown - dt);
       voxelUniforms.uBreakStage.value = -1;
@@ -5895,15 +6009,13 @@ class Game {
     // seconds to an iron vein reads as a broken game, so name the tool needed.
     // One chain, one winner. Setting a hint anywhere above this ran into the
     // unconditional clear at the end of it and lasted exactly zero frames.
-    const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.active().item]) : null;
-    // The hand the right button is speaking to, for the whole of the rest of
-    // this method. `actingSlot` and not `active()`: the offhand acts when the
-    // main hand has nothing to do with the cell under the crosshair, which is
-    // what makes a torch in the left hand placeable while a shovel is in the
-    // right. Left-click is untouched and still runs off `active()` — mining is
-    // the main hand's job and a torch in the other one has no opinion about it.
-    const heldSlot = this.inventory.actingSlot((s) => this._hasUse(s, hit));
-    const heldItem = ITEMS[heldSlot.item];
+    // `held()`: this line describes the *dig*, and the dig is the main hand's.
+    // With a pickaxe in the left hand and an empty right one, "Needs a pickaxe"
+    // is the true and useful answer, and `active()` used to suppress it and then
+    // fail to drop the ore anyway.
+    const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.held().item]) : null;
+    // (`heldSlot`/`heldItem` — the hand the right button is speaking to — are
+    // resolved once at the top of this method, above the creature branch.)
     // Soil with something built over it, said while you are *aiming*.
     //
     // The till is edge-triggered, so a refusal written from inside the click
@@ -5943,7 +6055,9 @@ class Game {
     } else this.ui.setHint(null);
 
     const m = this.mining;
-    const heldDef = ITEMS[this.inventory.active().item];
+    // The dig timer's tool, and the third of the three lines that must agree
+    // about which hand is mining — see `_breakBlock` for why it is the main one.
+    const heldDef = ITEMS[this.inventory.held().item];
     if (input.buttons[0] && hit && input.locked) {
       const key = hit.col * D + hit.k;
       if (m.key !== key) { m.key = key; m.progress = 0; }
@@ -5975,7 +6089,7 @@ class Game {
         if (Math.random() < dt * 10 / Math.sqrt(drag)) {
           this.audio.dig(BLOCKS[hit.id].sound, hit.point);
         }
-        if (this.player.swingT >= 1) { this.player.swing(); this.viewModel.punch(); }
+        if (this.player.swingT >= 1) { this.player.swing(); this.viewModel.punch('right'); }
         if (m.progress >= 1) {
           this._breakBlock(hit);
           m.progress = 0; m.key = null;
@@ -5998,16 +6112,15 @@ class Game {
     // bare-hand speed, and a pick block refuses to drop for anything that is
     // not a pickaxe, so a fist and a bow are refused by the same line. The old
     // early return cited a flat wrong-tool multiplier that no longer exists.
-    // `heldItem` and not `bowHeld`: the two differ in exactly one state and it
-    // is the one that was reported. `bowHeld` is `active()`'s answer — the main
-    // hand unless it is empty — and it is right for the melee branch above,
-    // which is about what your arm is encumbered with. Down here the subject is
-    // the right button, and the right button has already resolved which hand is
-    // speaking (line ~5899). A bow with an empty quiver no longer claims (see
-    // `useKind`), so the acting hand is the offhand, and returning on `bowHeld`
-    // meant a torch in the left hand was refused by a bow that was doing
-    // nothing. When the bow *is* the acting hand this is the same early return
-    // it has always been.
+    //
+    // `heldItem`, the hand the right button resolved to at the top of this
+    // method, and not "is there a bow anywhere on me". A bow with an empty
+    // quiver no longer claims (see `useKind`), so the acting hand is the
+    // offhand, and returning here on a bow that is doing nothing was what made
+    // "holding torch in left hand can still not place it" true. It is also the
+    // line that lets a bow be drawn *from the offhand*: a pickaxe claims
+    // nothing, so `heldItem` is the left hand's bow, and `_tickBow` — which
+    // resolves the hand exactly the same way — is charging it.
     if (heldItem?.bow) { this.eating = 0; this.ui.setHint(this.bow.hint || null); return; }
 
     // --- eating: hold RMB on any food ---
@@ -6089,7 +6202,7 @@ class Game {
         if (!this.farming.till(hit.col, hit.k)) return;
         this.audio.place('soil');
         this.player.swing();
-        this.viewModel.punch();
+        this.viewModel.punch(this._handOf(heldSlot));
         this.inventory.damageHeld(1, heldSlot);
         return;
       }
@@ -6098,7 +6211,7 @@ class Game {
         this.inventory.consumeHeld(1, heldSlot);
         this.audio.place('grass');
         this.player.swing();
-        this.viewModel.punch();
+        this.viewModel.punch(this._handOf(heldSlot));
         this.ui.toast('Planted', heldSlot.item, 1200);
         return;
       }
@@ -6170,7 +6283,10 @@ class Game {
       this._showBobber(c);
       this.audio.splash(c);
       this.player.swing();
-      this.viewModel.punch();
+      // The hand with the rod in it, found the same way `_landCatch` finds it
+      // for the wear — cast left-handed and the left arm casts.
+      this.viewModel.punch(this._handOf(this.inventory.actingSlot(
+        (s) => ITEMS[s.item]?.tool?.kind === 'rod')));
       return;
     }
     // Line is out. Striking during the bite window lands it.
@@ -6365,12 +6481,10 @@ class Game {
       // on a dry cell reads as flowing water to everything that asks.
       this.water.level.delete(key);
       this.water.onEdit(wet.col, wet.k);
-      this.inventory.consumeHeld(1, heldSlot);
-      this.inventory.add(itemIdOf(FILLED[kind]), 1);
-      this.inventory.changed();
+      this._swapInHand(heldSlot, itemIdOf(FILLED[kind]));
       this.audio.splash();
       this.player.swing();
-      this.viewModel.punch();
+      this.viewModel.punch(this._handOf(heldSlot));
       return true;
     }
 
@@ -6392,13 +6506,40 @@ class Game {
     this._applyEdits([{ col: target.col, k: target.k, id: pouring }]);
     // Poured water is a spring, not a puddle: it feeds a flow and never drains.
     this.water.addSource(target.col, target.k);
-    this.inventory.consumeHeld(1, heldSlot);
-    this.inventory.add(itemIdOf('bucket'), 1);
-    this.inventory.changed();
+    this._swapInHand(heldSlot, itemIdOf('bucket'));
     this.audio.splash();
     this.player.swing();
-    this.viewModel.punch();
+    this.viewModel.punch(this._handOf(heldSlot));
     return true;
+  }
+
+  /**
+   * Spend one from `slot` and hand back `itemId` — into the same hand if that
+   * hand is now free, into the bags if it is not.
+   *
+   * The bucket, both ways round. It used to be `consumeHeld` followed by a bare
+   * `add`, and `add` only ever walks `slots`: scoop a spring with the pail in
+   * your left hand and the full bucket appeared in your *hotbar*, leaving the
+   * offhand empty. Doing it twice left you holding nothing and hunting through
+   * the bag for two pails. Minecraft puts the swapped item back where it came
+   * from, and the reason is the one that matters here — you are mid-job, the
+   * next click is the pour, and the thing you need has to still be in the hand
+   * you are clicking with.
+   *
+   * The fallback is not dead code: a stack of buckets in the offhand spends one
+   * and leaves the rest, so the hand is not free and the filled one has to go
+   * somewhere. `add` returning short is the last case, and it drops on the floor
+   * rather than evaporating.
+   */
+  _swapInHand(slot, itemId) {
+    const wear = slot.wear;
+    this.inventory.consumeHeld(1, slot);
+    if (slot.empty) slot.set(itemId, 1, ITEMS[itemId]?.tool ? wear : 0);
+    else if (this.inventory.add(itemId, 1) < 1) {
+      _v1.copy(this.player.eye).addScaledVector(this.player.lookDir, 0.6);
+      this.drops.spawn(_v1.x, _v1.y, _v1.z, itemId, 1);
+    }
+    this.inventory.changed();
   }
 
   /**

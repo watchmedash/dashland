@@ -7,9 +7,6 @@ export const HOTBAR = 9;
 export const STORAGE = 27;
 export const TOTAL = HOTBAR + STORAGE;
 
-/** The test `active()` asks: a hand with something in it has something to do. */
-const NON_EMPTY = () => true;
-
 /**
  * What the right button can do with an item, *before* the world is consulted.
  *
@@ -132,49 +129,39 @@ export class Inventory {
   heldDef() { return ITEMS[this.slots[this.selected].item] || null; }
 
   /**
-   * The slot that actually *does* things: the main hand, or the offhand when
-   * the main hand is empty.
+   * The hand that acts, asked of a caller that knows what it is asking for.
    *
-   * Until now the offhand only carried and displayed, which left it with no
-   * purpose at all for anyone who was not deliberately posing with a torch. An
-   * empty right hand is the one moment where deferring to the left is
-   * unambiguous — there is nothing to choose between, so nothing can be taken
-   * from you by surprise — and it means a torch in the offhand is placeable, a
-   * pickaxe there still mines, and food there still feeds you.
+   * **This is the right button and nothing else.** There used to be an
+   * `active()` beside this — the same question with the test "is there anything
+   * in this hand at all", so the offhand acted whenever the main hand was empty
+   * — and the left button ran off it. That is not Minecraft's rule and it was
+   * not a good one: with an empty hotbar slot and a pickaxe parked in the left
+   * hand you were mining with the pickaxe, at pickaxe speed, spending its
+   * durability, without having equipped it. Minecraft's left button is the main
+   * hand's however empty it is, so mining and attacking now read `held()`
+   * directly and `active()` is gone rather than left lying about as a plausible
+   * thing to call.
    *
-   * Deliberately **not** what `held()` returns. Display, the hotbar highlight
-   * and the view model all ask that question and want the literal hand: if this
-   * were folded into `held()` the same torch would be drawn in both fists at
-   * once, because the right hand's model and the left hand's model would each
-   * be handed the same item.
+   * The right button is the fall-through, and this is it. A shovel and a torch,
+   * aimed at stone: the shovel has no answer for stone, so the torch goes down.
+   * Aimed at dirt the shovel tills, because tilling *is* an answer and the main
+   * hand is never talked over. `hasAction` is supplied by the caller and is the
+   * only place that decides what "no answer" means — see `_hasUse` in main.js,
+   * which is where the world, the aim and the item table all are, and
+   * `Mobs.canFeed`, which is the same shape for an animal.
    *
-   * Consumption follows the actor, because this returns the slot itself — if
-   * the left hand placed the torch, the left hand's stack is the one that goes
-   * down by one.
-   */
-  active() {
-    return this.actingSlot(NON_EMPTY);
-  }
-  activeDef() { return ITEMS[this.active().item] || null; }
-
-  /**
-   * The same question as `active()`, asked of a hand that knows what it is being
-   * asked to do.
+   * Deliberately **not** what `held()` returns, and the two must stay apart:
+   * display, the hotbar highlight and the view model all want the literal hand,
+   * and folding the fall-through into `held()` would draw the same torch in both
+   * fists at once.
    *
-   * `active()` is this with the test "is there anything in this hand at all",
-   * which is why it is written in terms of this one rather than beside it: an
-   * empty main hand is the degenerate case of a main hand with nothing to do.
-   *
-   * The general case is the right button. A shovel and a torch, aimed at stone:
-   * the shovel has no answer for stone, so the torch goes down. Aimed at dirt
-   * the shovel tills, because tilling *is* an answer and the main hand is never
-   * talked over. `hasAction` is supplied by the caller and is the only place
-   * that decides what "no answer" means — see `_hasUse` in main.js, which is
-   * where the world, the aim and the item table all are.
+   * Consumption follows the actor, because this returns the slot itself — if the
+   * left hand placed the torch, the left hand's stack is the one that goes down
+   * by one.
    *
    * The last line is the tie-break: when neither hand claims the click, the main
-   * hand is still the one that acted, so an empty-handed punch, a wear tick or a
-   * refusal message is charged to the hand the player thinks they are using.
+   * hand is still the one that acted, so a wear tick or a refusal message is
+   * charged to the hand the player thinks they are using.
    *
    * @param {(slot: Slot) => boolean} hasAction
    * @returns {Slot} the hand that acts. Never null; may be empty.
@@ -349,17 +336,18 @@ export class Inventory {
    * Consume one of the held stack (placing a block).
    *
    * @param {number} [n]
-   * @param {Slot} [s] the hand that did it, when the caller has already worked
-   *   that out. Passed by every branch of the right-button chain, because
-   *   `active()` answers "the main hand unless it is empty" and the button now
-   *   resolves further than that: with a pickaxe in the right hand and bread in
-   *   the left, defaulting here would have taken a bite out of the pickaxe.
+   * @param {Slot} [s] the hand that did it. Every caller passes it, and callers
+   *   should go on passing it: whichever hand did the thing pays for it, and
+   *   only the caller knows which that was. With a pickaxe in the right hand and
+   *   bread in the left, guessing here would have taken a bite out of the
+   *   pickaxe — a bug this codebase has actually had.
+   *
+   *   The default is the main hand because that is the answer that cannot
+   *   invent items: an offhand placement charged to the main hand would have
+   *   taken the torch off a hand that is not holding one, which is to say off
+   *   nothing, and handed out free torches.
    */
-  consumeHeld(n = 1, s = this.active()) {
-    // `active()`, not `held()`: whichever hand did the thing pays for it. With
-    // `held()` an offhand placement would have taken a torch off an empty main
-    // hand — which is to say off nothing, giving infinite torches to anyone who
-    // emptied their hotbar slot.
+  consumeHeld(n = 1, s = this.held()) {
     if (s.empty) return false;
     s.count -= n;
     if (s.count <= 0) s.clear();
@@ -372,7 +360,7 @@ export class Inventory {
    * @param {number} [amount]
    * @param {Slot} [s] the hand that swung, see `consumeHeld`.
    */
-  damageHeld(amount = 1, s = this.active()) {
+  damageHeld(amount = 1, s = this.held()) {
     // Same rule as consumeHeld: the tool that swung is the tool that wears.
     const def = ITEMS[s.item];
     if (!def?.tool) return false;

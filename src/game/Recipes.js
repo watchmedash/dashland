@@ -23,6 +23,20 @@ const RAW = [
   // Hide stands in for wool — the planet has no sheep to shear, and the animals
   // already give you the soft material this needs.
   { out: 'bed', count: 1, table: true, shape: ['HHH', 'PPP'], key: { H: 'hide', P: 'planks' } },
+  // A sponge mattress, and the sea sponge's only recipe anywhere.
+  //
+  // Of the eleven reef blocks the sponge was the awkward one: it is the
+  // scarcest placeable thing down there and, unlike every coral and the
+  // anemone, it gives off no light, so "put it on a shelf and look at it" was
+  // the whole of its argument. It is also the only soft, absorbent material on
+  // the planet other than hide, and hide is what this recipe already uses as a
+  // stand-in for wool. So a diver who has never killed anything can still sleep
+  // through a night.
+  //
+  // Deliberately the expensive way round — three sponges are a good deal more
+  // than three hides — so the bed keeps its price and this is a route, not a
+  // discount.
+  { out: 'bed', count: 1, table: true, shape: ['SSS', 'PPP'], key: { S: 'sea_sponge', P: 'planks' } },
   { out: 'ladder', count: 3, table: true, shape: ['S S', 'SSS', 'S S'], key: { S: 'stick' } },
   { out: 'door', count: 1, table: true, shape: ['PP', 'PP', 'PP'], key: { P: 'planks' } },
   // Hide again for the line — the planet has no flax and no spiders, and a
@@ -48,11 +62,18 @@ const RAW = [
     'planks', 'planks_birch', 'planks_pine', 'mossy_stone_brick', 'snow_brick', 'packed_ice',
   ].flatMap((base) => [
     { out: `slab_${base}`, count: 6, table: true, shape: ['BBB'], key: { B: base } },
-    { out: base, count: 1, in: [`slab_${base}`, `slab_${base}`] },
+    // `undo` marks the two recipes that only put a mis-click back. They are not
+    // a way to *get* the block — every one of these bases is mined, smelted or
+    // cut from something else — so `Trade.js` must not read them as a supply
+    // route when it works out what the merchant will pay. Without the flag the
+    // sell-price cap runs backwards down them: a half-slab is worth less than a
+    // coin, so two of them "prove" a block of stone is worth nothing, and the
+    // whole masonry ladder collapses to zero. See `buildSellPrices`.
+    { out: base, count: 1, in: [`slab_${base}`, `slab_${base}`], undo: true },
     // Six blocks in the classic staircase pattern for four stairs — the same
     // 1.5:1 loss Minecraft charges, so cutting is never free but never ruinous.
     { out: `stair_${base}`, count: 4, table: true, shape: ['B  ', 'BB ', 'BBB'], key: { B: base } },
-    { out: base, count: 3, in: Array(4).fill(`stair_${base}`) },
+    { out: base, count: 3, in: Array(4).fill(`stair_${base}`), undo: true },
   ]),
   { out: 'brick', count: 4, table: true, shape: ['CC', 'CC'], key: { C: 'clay' } },
   { out: 'iron_block', count: 1, table: true, shape: ['III', 'III', 'III'], key: { I: 'iron_ingot' } },
@@ -100,6 +121,38 @@ const RAW = [
     ['brick_tan', 'sand'], ['brick_crimson', 'flower_red'], ['brick_azure', 'flower_blue'],
     ['brick_rose', 'berries'], ['brick_olive', 'seeds'], ['brick_jade', 'cactus'],
     ['brick_amber', 'flower_gold'], ['brick_cyan', 'ice'], ['brick_ember', 'coal'],
+    // --- the sixteen, as pigment ------------------------------------------
+    //
+    // Twelve of the new land and cave plants dropped themselves and were an
+    // input to nothing at all: you could fill a crate with lavender and the
+    // crafting graph had never heard of it. They join the family that was
+    // already built for exactly this — four bricks and one thing with a colour
+    // in it — rather than getting a dye system of their own, which is a whole
+    // new item class to describe what one column of this table already says.
+    //
+    // Each is matched to the brick nearest its own particle colour, so the
+    // recipe is guessable from the plant in your hand:
+    //
+    //   lingonberry   0.72,0.14,0.18   crimson  0.60,0.22,0.18
+    //   firebloom     0.90,0.36,0.12   amber    0.85,0.45,0.20
+    //   golden_grass  0.78,0.66,0.30   tan      0.72,0.58,0.40
+    //   marram        0.62,0.68,0.52   olive    0.50,0.52,0.24
+    //   clover        0.34,0.56,0.26   jade     0.44,0.68,0.36
+    //   alpine_aster  0.42,0.38,0.78   azure    0.34,0.44,0.70
+    //   snowbell      0.80,0.78,0.90   cyan     0.30,0.72,0.76
+    //
+    // None of them undercuts the colourant already on the line — a plant is one
+    // or two coins and so is a handful of seeds — so `Trade.js` takes the same
+    // price it took before and no finish gets cheaper. What changes is that a
+    // player standing in a meadow can make the wall without walking to a beach.
+    ['brick_crimson', 'lingonberry'], ['brick_amber', 'firebloom'],
+    ['brick_tan', 'golden_grass'], ['brick_olive', 'marram'],
+    ['brick_jade', 'clover'], ['brick_azure', 'alpine_aster'],
+    ['brick_cyan', 'snowbell'],
+    // The reef's one plain plant. Sea grass is the most abundant thing on the
+    // seabed and the only one of the eleven reef blocks that neither glows nor
+    // feeds you, so it is the one that genuinely had nowhere to go.
+    ['brick_olive', 'sea_grass'],
   ].map(([out, dye]) => ({ out, count: 4, table: true, in: ['brick', 'brick', 'brick', 'brick', dye] })),
 
   // --- finishes ---
@@ -113,9 +166,32 @@ const RAW = [
   { out: 'mosaic_blue', count: 2, in: ['clay', 'glass', 'coral_fan'] },
   { out: 'mosaic_green', count: 2, in: ['clay', 'glass', 'kelp'] },
   { out: 'mosaic_green', count: 2, in: ['clay', 'glass', 'cactus'] },
+  { out: 'mosaic_blue', count: 2, in: ['clay', 'glass', 'lavender'] },
+  { out: 'mosaic_green', count: 2, in: ['clay', 'glass', 'aloe'] },
+  // Bleached coral, and the only reef block this file gives a recipe to.
+  //
+  // The live corals, the sponge and the anemone are all *placeable and lit* —
+  // a coral fan is a coloured lamp you found — so they already do something the
+  // moment they leave the bag, and grinding a 16-coin light into wall tile
+  // would be the crafting graph arguing with the thing in your hand. Dead coral
+  // is the one that lost its colour, so it is the one with nothing to be.
+  //
+  // No glass in it, unlike the other two pale mosaics: a coral skeleton is
+  // already the white grit a kiln would have had to make, so this is the
+  // furnace-free route for someone who is standing on a beach rather than
+  // beside a kiln. It is dearer, not cheaper — `Trade.js` prices at the
+  // cheapest recipe, so Pale Mosaic keeps the two coins it always cost.
+  { out: 'mosaic_white', count: 2, in: ['clay', 'coral_dead'] },
+  // Tundra plaster. The seed heads are the whitening, which is what the sand
+  // was there for, and the tundra is precisely where there is no sand.
+  { out: 'plaster', count: 2, in: ['clay', 'cotton_grass'] },
   { out: 'shingle_red', count: 4, table: true, in: ['clay', 'clay', 'brick'] },
   { out: 'shingle_green', count: 4, table: true, in: ['clay', 'clay', 'cactus'] },
+  { out: 'shingle_green', count: 4, table: true, in: ['clay', 'clay', 'fern'] },
   { out: 'shingle_dark', count: 4, table: true, in: ['clay', 'clay', 'coal'] },
+  // The other cave fungus, which is brown and flat and burns — three facts that
+  // between them describe a roof tile better than they describe anything else.
+  { out: 'shingle_dark', count: 4, table: true, in: ['clay', 'clay', 'shelf_fungus'] },
   { out: 'shingle_rose', count: 4, table: true, in: ['clay', 'clay', 'berries'] },
 
   // --- earth ---
@@ -161,6 +237,22 @@ const RAW = [
   { out: 'bread', count: 1, table: true, shape: ['WWW'], key: { W: 'wheat' } },
   { out: 'salad', count: 1, in: ['carrot', 'tomato', 'corn'] },
   { out: 'soup', count: 1, in: ['mushroom', 'mushroom', 'carrot'] },
+  // The same soup out of the common cave fungus, and it takes *three* where the
+  // glowcap takes two. That ratio is not flavour, it is the price: a cave
+  // mushroom is two coins to a glowcap's three, so three of them come to
+  // exactly what two glowcaps do and the soup keeps the value it had. A cheaper
+  // second recipe would have quietly marked the meal down for everyone, because
+  // `Trade.js` prices an item at whichever recipe costs least.
+  //
+  // It is worth the line because the cave mushroom is described in Blocks.js as
+  // "the one you walk past", and until now the game agreed with that far too
+  // literally: it carpeted every cavern and fed into nothing.
+  { out: 'soup', count: 1, in: ['cave_mushroom', 'cave_mushroom', 'cave_mushroom', 'carrot'] },
+  // Two lingonberries make a handful of berries, which is the one addition here
+  // that opens a whole branch rather than a single line: the cake, the cookie,
+  // the muffin, Rose Bricks and Rose Shingles all want `berries`, and a pine
+  // forest had none. The shrub drops two at a time, so one plant is one craft.
+  { out: 'berries', count: 1, in: ['lingonberry', 'lingonberry'] },
   { out: 'sandwich', count: 1, in: ['bread', 'cooked_meat', 'tomato'] },
   { out: 'stew', count: 1, table: true, in: ['cooked_meat', 'carrot', 'corn', 'mushroom'] },
   { out: 'pie', count: 1, table: true, in: ['wheat', 'wheat', 'pumpkin'] },
@@ -274,7 +366,7 @@ const RAW = [
 ];
 
 export const RECIPES = RAW.map((r) => {
-  const rec = { out: itemIdOf(r.out), count: r.count, table: !!r.table, label: r.out };
+  const rec = { out: itemIdOf(r.out), count: r.count, table: !!r.table, label: r.out, undo: !!r.undo };
   if (r.shape) {
     rec.kind = 'shaped';
     rec.h = r.shape.length;

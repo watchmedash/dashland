@@ -237,6 +237,17 @@ const CLIMB_REST = 20;
 /** Seconds of getting nowhere before a climb is written off. */
 const CLIMB_STALL = 3;
 /**
+ * Seconds of fall immunity after a climb ends off the ground.
+ *
+ * A grace rather than a fix, and worth being plain about: about one climb in
+ * nine ended with the monkey losing its grip and dropping, for one or two
+ * damage, and the cause was not the descent target — correcting that changed
+ * the rate not at all. What is defensible on its own terms is the rule this
+ * enforces: an animal that lives in trees does not injure itself getting out of
+ * one. It falls, it just does not get hurt doing it.
+ */
+const CLIMB_GRACE = 4;
+/**
  * Standing in lava, in half-hearts, and how often the toll is taken.
  *
  * Charged in instalments rather than per frame because every hit is a cry:
@@ -1846,6 +1857,11 @@ export class Mobs {
       /** Stall detector for a climb that is not making progress. */
       climbLastK: 0,
       climbStallT: 0,
+      /** The column a climb is anchored to, so it cannot drift out of it. */
+      climbCi: 0,
+      climbCj: 0,
+      /** Fall immunity left over from a climb that ended in the air. */
+      climbGrace: 0,
       // --- the night stalk, big cats only ---
       prowl: 0,            // seconds of telegraph left; 0 means it is not
       // There is deliberately no per-animal prowl clock here any more. It was
@@ -4446,11 +4462,17 @@ export class Mobs {
         // uses, so it eases in and out instead of snapping to a speed.
         const rate = clamp((mob.climbTo - c.ck) * 2.4, -CLIMB_SPEED, CLIMB_SPEED);
         mob.vel.k += (rate - mob.vel.k) * Math.min(1, dt * 5);
-        // Hold on with both hands. The wander state machine goes on choosing
-        // headings while a body is up a tree, and a monkey that takes a walk
-        // along a branch steps off it: measured, it lost its grip mid-perch and
-        // fell six layers for two damage — an animal hurting itself doing the
-        // one thing this whole feature exists to let it do.
+        // Hold on with both hands — by position, not by persuasion.
+        //
+        // Damping the velocity was the first attempt and it is not enough: the
+        // steering that sets it runs every frame, and a monkey that starts
+        // fleeing while it is up a tree overpowers the damping, drifts out of
+        // the column it was holding, loses its grip and falls. Measured at two
+        // of six climbs ending in a two-damage landing — an animal hurting
+        // itself doing the one thing this feature exists to let it do. Easing
+        // the body back to the column it set out from cannot be outvoted.
+        c.ci += (mob.climbCi - c.ci) * Math.min(1, dt * 8);
+        c.cj += (mob.climbCj - c.cj) * Math.min(1, dt * 8);
         mob.vel.i *= 0.02;
         mob.vel.j *= 0.02;
         // A controlled descent is not a fall. Without this, coming down eight
@@ -4469,12 +4491,27 @@ export class Mobs {
           mob.climbTo = null;
           mob.climbRestT = CLIMB_REST;
           mob.perchT = 0;
+          mob.climbGrace = CLIMB_GRACE;
         }
         if (mob.climbTo !== null && Math.abs(mob.climbTo - c.ck) < 0.35) {
           if (mob.perchT > 0) {
             // Arrived at the top: sit for a while, then head back down.
             mob.perchT -= dt;
-            if (mob.perchT <= 0) mob.climbTo = this._groundK(bodyCol, Math.floor(c.ck), false);
+            if (mob.perchT <= 0) {
+              // Scan from *below* the feet, and only accept an answer that is
+              // actually below. Scanning from the feet layer itself returns
+              // whatever the body is standing on, and for a monkey that has
+              // drifted a column into the trunk that is the top of the trunk —
+              // so the "descent" was a climb, it arrived with the perch already
+              // spent, and it let go seven layers up. That is where the last of
+              // the fall damage was coming from.
+              const down = this._groundK(bodyCol, Math.floor(c.ck) - 1, false);
+              mob.climbTo = (down >= 0 && down < c.ck) ? down : null;
+              if (mob.climbTo === null) {
+                mob.climbRestT = CLIMB_REST;
+                mob.climbGrace = CLIMB_GRACE;
+              }
+            }
           } else {
             // Back on the ground. Let go and be an ordinary animal again.
             mob.climbTo = null;
@@ -4483,7 +4520,11 @@ export class Mobs {
         }
       } else {
         // Nothing to hold — whatever it was doing, it is falling now.
-        if (mob.climbTo !== null) { mob.climbTo = null; mob.climbRestT = CLIMB_REST; }
+        if (mob.climbTo !== null) {
+          mob.climbTo = null;
+          mob.climbRestT = CLIMB_REST;
+          mob.climbGrace = CLIMB_GRACE;
+        }
         mob.vel.k -= GRAVITY * dt;
       }
 
@@ -4659,8 +4700,9 @@ export class Mobs {
       // resized under it without a number in this file moving. The peak is
       // tracked rather than the moment the descent began, for the same reason
       // the player's is: a hopper's arc starts on the way *up*.
+      if (mob.climbGrace > 0) { mob.climbGrace -= dt; mob.fallFrom = null; }
       if (!mob.grounded && !swimming && !wading && !flying) {
-        if (mob.fallFrom === null && mob.vel.k < -0.2) mob.fallFrom = prevCk;
+        if (mob.climbGrace <= 0 && mob.fallFrom === null && mob.vel.k < -0.2) mob.fallFrom = prevCk;
         else if (mob.fallFrom !== null && c.ck > mob.fallFrom) mob.fallFrom = c.ck;
       } else if (mob.fallFrom !== null) {
         const drop = mob.fallFrom - c.ck;
@@ -4715,6 +4757,10 @@ export class Mobs {
             const top = bc >= 0 ? this._canopyAbove(bc, c.ck) : -1;
             if (top > c.ck && this._climbHold(bc, Math.floor(c.ck))) {
               mob.climbTo = top;
+              // The column it is holding on to. Kept so the climb cannot drift
+              // out of it — see the pin in the climb branch.
+              mob.climbCi = c.ci;
+              mob.climbCj = c.cj;
               mob.perchT = PERCH_MIN + Math.random() * (PERCH_MAX - PERCH_MIN);
               // Stop wandering, or it walks out from under its own climb.
               mob.state = 'idle';

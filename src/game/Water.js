@@ -14,12 +14,21 @@
 // per step until it dies on ground that is still falling away in front of it.
 // The cap is therefore six columns *per drop*, not six columns per breach.
 //
+// Lava runs through the same tick and differs in exactly two places: it loses
+// two levels a step instead of one, so it crawls three columns from a breach
+// where water runs six, and water quenches it — a lava source touched by water
+// becomes obsidian, a flowing lava cell becomes cobblestone, and the water is
+// untouched. See `_quench` for why the water surviving is what makes the
+// reaction stop rather than eat a lava lake alive.
+//
 // Only cells adjacent to a change are ever examined. The active set is seeded by
-// edits and drains to empty once the water settles, so a still lake costs nothing.
+// edits and drains to empty once the water settles, so a still lake costs
+// nothing — and "drains to empty" is a property the tests check directly,
+// because the ways it fails are silent.
 
 import { D } from '../world/Constants.js';
 import { colNeighbor } from '../world/Sphere.js';
-import { ID, RENDER_TYPE, R_LIQUID, IS_SOLID, IS_REPLACEABLE, IS_SUBMERGED } from '../world/Blocks.js';
+import { ID, RENDER_TYPE, R_LIQUID, DROWNS } from '../world/Blocks.js';
 
 /** A full source block. Sideways flow loses one level per cell. */
 const LEVEL_MAX = 7;
@@ -53,10 +62,23 @@ export class Water {
     this.sources = new Set();
     /** cells to re-examine next tick */
     this.active = new Set();
+    /**
+     * Cells turned to rock by `_quench` during the tick currently running.
+     *
+     * A tick reads `planet` but writes a *batch*, applied once at the end, so
+     * for the rest of the tick a quenched cell still reads as the lava it was.
+     * Without this the batch contradicted itself: cell 2 quenches to
+     * cobblestone, cell 3 is examined a moment later, sees lava still standing
+     * in cell 2, and appends a lava edit *after* the quench — so the lava came
+     * straight back and the pair oscillated forever. Measured at a water/lava
+     * boundary: 46 edits every tick, indefinitely, with the two fronts neither
+     * advancing nor settling.
+     */
+    this._quenched = new Set();
     this.timer = 0;
   }
 
-  clear() { this.level.clear(); this.sources.clear(); this.active.clear(); }
+  clear() { this.level.clear(); this.sources.clear(); this.active.clear(); this._quenched.clear(); }
 
   key(col, k) { return col * D + k; }
 
@@ -96,9 +118,18 @@ export class Water {
    * business of the two paths that break a block on the player's behalf, and
    * this sim has no route to them — the callback it is handed is `_applyEdits`,
    * which is deliberately the plumbing and nothing else.
+   *
+   * The test is `DROWNS`, which is the flag the block table already keeps for
+   * exactly this sentence — "the liquid would destroy this" — and which
+   * `main.js` already consults to refuse a *placement* into a liquid cell. This
+   * used to be an open-coded `IS_REPLACEABLE && !IS_SUBMERGED`, which is the
+   * same set minus torches, and the mismatch was visible: the game would not
+   * let you stand a torch in water, yet a torch already standing there stopped
+   * a river dead. One flag, read in both places, and a flame goes out when the
+   * water reaches it.
    */
   _washes(id) {
-    return IS_REPLACEABLE[id] === 1 && IS_SUBMERGED[id] === 0;
+    return DROWNS[id] === 1;
   }
 
   /**
@@ -110,15 +141,31 @@ export class Water {
    * converted the lava it came from. Nothing turns lava into water — that is a
    * property change no rule in this game licenses.
    *
+   * `level` is **the level that would be written**, not the level of the cell
+   * doing the writing, and the difference is the whole of a bug that kept the
+   * sim awake forever. The test used to be `levelAt < level - 1` against the
+   * *source* cell's level, which silently assumed a decay of exactly one. Lava
+   * decays two, so a lava cell at 7 writing 5 asked "is my neighbour shallower
+   * than 6?", the neighbour sat at 5, and the answer was yes — every tick,
+   * forever. `_place` re-wrote the same 5, pushed no edit because nothing had
+   * changed, and `touch`ed the cell anyway, so a lava pool that was disturbed
+   * once never went idle again. Measured: a single lava source on flat ground
+   * held 89 cells in the active set and 0 edits, indefinitely; water, whose
+   * decay happens to be 1, settled to 0. Comparing against the level actually
+   * being written is decay-agnostic and identical for water.
+   *
+   * @param {number} level the flow level about to be written into the cell
    * @param {number} self the liquid doing the moving
    */
   _canEnter(col, k, level, self) {
+    // Already rock as far as this batch is concerned, whatever the array says.
+    if (this._quenched.has(this.key(col, k))) return false;
     const id = this.planet.at(col, k);
     if (id === 0) return true;
     if (this._washes(id)) return true;
     if (RENDER_TYPE[id] !== R_LIQUID) return false;
     if (id !== self) return false;
-    return this.levelAt(col, k) < level - 1;
+    return this.levelAt(col, k) < level;
   }
 
   /**
@@ -158,7 +205,7 @@ export class Water {
 
     // Falling beats spreading, exactly as the tick below does it — a liquid
     // over a hole is going down, whatever its neighbours say.
-    if (k > 0 && this._canEnter(col, k - 1, LEVEL_MAX + 1, self)) {
+    if (k > 0 && this._canEnter(col, k - 1, LEVEL_MAX, self)) {
       out.k = -1; out.s = 1;
       return out;
     }
@@ -238,13 +285,32 @@ export class Water {
     }
 
     const edits = [];
+    this._quenched.clear();
     for (const key of todo) {
       const k = key % D;
       const col = (key - k) / D;
       const here = this.levelAt(col, k);
 
       // Not liquid any more: drop the stale bookkeeping and move on.
-      if (here < 0) { this.level.delete(key); continue; }
+      //
+      // The `sources` half of that is not tidiness, it is the flood. A spring
+      // mark on a cell that no longer holds liquid is a spring waiting to
+      // happen: clear the cell later and the first flow that runs into it gets
+      // a `sources` entry, which reads as full strength, never drains, and
+      // hands a bucket a free scoop. Freezing was the live route in — a lake
+      // surface ices over by writing `ID.ice` straight across cells the sim has
+      // registered as springs, and nothing unregistered them — but the test is
+      // about the cell rather than about winter, so mining, a quench and
+      // anything added later are covered by the same line.
+      //
+      // It is done here, off the settled voxel array, rather than in `onEdit`.
+      // A batch may hold two edits for one cell (a cell that dries and is refed
+      // in the same tick does), and reaping per-edit sees the intermediate air,
+      // drops the level of a cell that ends the tick full, and leaves an orphan
+      // the next tick sweeps — measured as a permanent build-and-drain
+      // oscillation under every waterfall. `touch` has already queued the cell,
+      // so the check simply happens one tick later against the truth.
+      if (here < 0) { this.level.delete(key); this.sources.delete(key); continue; }
 
       // Cut off from everything that was feeding it? Then it goes.
       //
@@ -259,6 +325,12 @@ export class Water {
       // Whatever is in this cell is what spreads out of it. The simulation used
       // to place ID.water unconditionally, so any lava it touched became water.
       const self = this.planet.at(col, k);
+
+      // --- water quenches lava --------------------------------------------
+      if (self === ID.lava && this._touchedByWater(col, k)) {
+        this._quench(col, k, edits);
+        continue;
+      }
 
       // --- fall straight down first; a liquid prefers a hole to a spread ---
       //
@@ -284,7 +356,7 @@ export class Water {
       // cut, and it still spreads at most six columns before the next fall. The
       // reach of one breach is bounded by six columns per layer of descent, and
       // there are only D layers.
-      if (k > 0 && this._canEnter(col, k - 1, LEVEL_MAX + 1, self)) {
+      if (k > 0 && this._canEnter(col, k - 1, LEVEL_MAX, self)) {
         this._place(col, k - 1, LEVEL_MAX, edits, self);
         // a falling column feeds the cell below and stops spreading sideways
         continue;
@@ -328,11 +400,61 @@ export class Water {
       for (let d = 0; d < 4; d++) {
         const n = colNeighbor(col, d);
         if (n < 0) continue;
-        if (this._canEnter(n, k, here, self)) this._place(n, k, next, edits, self);
+        if (this._canEnter(n, k, next, self)) this._place(n, k, next, edits, self);
       }
     }
 
     if (edits.length) this.applyEdits(edits);
+  }
+
+  /** Is any of this cell's six neighbours water? */
+  _touchedByWater(col, k) {
+    if (this.planet.at(col, k + 1) === ID.water) return true;
+    if (k > 0 && this.planet.at(col, k - 1) === ID.water) return true;
+    for (let d = 0; d < 4; d++) {
+      const n = colNeighbor(col, d);
+      if (n >= 0 && this.planet.at(n, k) === ID.water) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Lava that water has reached turns to rock.
+   *
+   * Before this, the two liquids were simply opaque to one another: `_canEnter`
+   * refuses to let either enter the other, so a lava sheet and an aquifer met
+   * along a line and then sat there, permanently, each one a wall to the other.
+   * That is a hole in the world's physics rather than a rule — the one place on
+   * the planet where two things touch and nothing at all happens — and it is
+   * also the only remaining reason a player would think of lava as scenery.
+   *
+   * **The rule: the LAVA changes and the water does not.** A lava *source*
+   * becomes obsidian, a flowing lava cell becomes cobblestone. That is
+   * Minecraft's distinction and it is worth keeping for the reason Minecraft
+   * has it: obsidian is the thing you cannot get any other way, so a bucket of
+   * water carried down to the mantle is a tool and not just a fire blanket,
+   * while a stray splash on a trickle gives you the cheap rock and no windfall.
+   *
+   * The water surviving is not a courtesy, it is what makes the reaction stop.
+   * Consuming the water would leave a hole for the next lava cell to flow into
+   * and be quenched in, and a lava lake beside the sea would chew its way
+   * through itself one cell per tick. As written, the boundary lava turns to
+   * rock, the rock is a wall the water cannot pass, and the reaction is over
+   * after one layer however big the two bodies are.
+   *
+   * Neither product is a liquid, so both bookkeeping marks have to go with it:
+   * a `sources` entry left on a cell that is now obsidian is a spring the sim
+   * would honour the moment anything cleared that cell again, which is the one
+   * failure this file exists to prevent.
+   */
+  _quench(col, k, edits) {
+    const key = this.key(col, k);
+    const id = this.sources.has(key) ? ID.obsidian : ID.cobblestone;
+    this.sources.delete(key);
+    this.level.delete(key);
+    this._quenched.add(key);
+    edits.push({ col, k, id });
+    this.touch(col, k);
   }
 
   _place(col, k, level, edits, id = ID.water) {
@@ -380,12 +502,21 @@ export class Water {
     // running after its source was gone, and every cell it filled behaved like
     // a spring. Only a true source — no entry at all — is exempt, which the
     // early return above already handles.
+    // Fed *by its own kind*, and the qualifier is not pedantry. The test used to
+    // accept any liquid, so a lava neighbour counted as a feed for a water cell
+    // — and lava is very often a source, which reads as level 7 and therefore
+    // outranks any flow. A stranded trickle beside a lava lake was immortal:
+    // measured, an orphaned water cell next to a lava source was still there
+    // after 200 ticks with nothing whatsoever behind it. Nothing that cannot
+    // flow into this cell can be what is keeping it full, and `_canEnter`
+    // already refuses to let one liquid enter the other.
+    const self = this.planet.at(col, k);
     let fed = false;
-    if (k + 1 < D && RENDER_TYPE[this.planet.at(col, k + 1)] === R_LIQUID) fed = true;
+    if (k + 1 < D && this.planet.at(col, k + 1) === self) fed = true;
     if (!fed) {
       for (let d = 0; d < 4 && !fed; d++) {
         const n = colNeighbor(col, d);
-        if (n >= 0 && this.levelAt(n, k) > mine) fed = true;
+        if (n >= 0 && this.planet.at(n, k) === self && this.levelAt(n, k) > mine) fed = true;
       }
     }
     if (!fed) {

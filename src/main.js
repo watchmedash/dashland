@@ -656,7 +656,16 @@ class Game {
     // handed to `update` per frame rather than held, so the projectiles cannot
     // outlive a world reset holding a reference to a dead herd.
     this.arrows = new Arrows(this.scene, this.planet, itemIdOf('arrow'));
-    this.arrows.onHit = (mob) => this.audio.mobHit(mob.pos);
+    this.arrows.onHit = (mob, _dmg, killed) => {
+      this.audio.mobHit(mob.pos);
+      // An arrow kill has to earn what a sword kill earns, and be worth the
+      // same mark. This is the second death path in the game and the melee
+      // branch of `_interact` is the other; a bow-only player was earning
+      // nothing at all for combat because only that branch awarded either.
+      if (!killed) return;
+      if (mob.spec.hostile) this._mark('slayer');
+      this.skills.xpKill(mob.spec, mob.baby > 0);
+    };
     this.arrows.onStick = (pos) => this.audio.dig('stone', pos);
     this.mobs = new Mobs(this.scene, this.planet, this.drops);
     // Creatures speak for themselves — idle calls, pain and death, all anchored
@@ -2508,6 +2517,12 @@ class Game {
     // Footsteps, embers and bubbles have their own methods and are untouched.
     this.audio.break_(b.sound, center);
     this.stats.mined++;
+    // What the block was worth in xp, which for stone, dirt, wood and leaves is
+    // deliberately nothing — see `xpForBlock`. That zero is the fix for "earning
+    // points is so easy": cobblestone is placeable, so paying for rock at all
+    // makes place-and-rebreak an unlimited faucet faster than any real activity.
+    // Ore cannot be placed back, so a seam pays exactly once per finite world.
+    this.skills.xpMine(b);
     // Ripe wheat only. Breaking a green shoot is losing a crop, not harvesting
     // one, and marking it would teach exactly the wrong lesson about farming.
     if (hit.id === ID.wheat_3) this._mark('harvest');
@@ -4926,6 +4941,10 @@ class Game {
         // clubbing a cow never does.
         const killed = this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge);
         if (killed && mobHit.mob.spec.hostile) this._mark('slayer');
+        // Priced from the creature's own health and damage rather than from a
+        // per-species table, so anything added later prices itself. A calf pays
+        // less, which is the point: a herd is not a farm.
+        if (killed) this.skills.xpKill(mobHit.mob.spec, mobHit.mob.baby > 0);
         if (held?.tool) this.inventory.damageHeld(1);
       }
       // Right-click offers whatever you're holding. Feeding is how a herd
@@ -5250,6 +5269,7 @@ class Game {
     this.ui.toast(`Caught ${ITEMS[id]?.label}`, id, 2000);
     this.audio.pickup();
     this.stats.fished = (this.stats.fished ?? 0) + 1;
+    this.skills.xpFish();
     this.inventory.damageHeld(1);
     this._stopFishing();
   }

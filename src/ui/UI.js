@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { BLOCKS } from '../world/Blocks.js';
 import { ITEMS } from '../game/Items.js';
 import { Slot, HOTBAR, TOTAL } from '../game/Inventory.js';
-import { BRANCHES, EARNED, MARKS } from '../game/Skills.js';
+import { BRANCHES, MARKS, XP_SOURCES, MAX_LEVEL, MAX_POINTS } from '../game/Skills.js';
 import { findRecipe, availableRecipes, craftFromInventory } from '../game/Recipes.js';
 import {
   COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest,
@@ -923,7 +923,10 @@ export class UI {
       else cur.count += rec.count;
       made++;
     } while (all && made < 64);
-    if (made) { g.audio.pickup(); g.stats.crafted += made; }
+    // XP is per trip to the bench, not per item — see `xpCraft` in Skills.js.
+    // `made` can be 64 planks off one shift-click and paying by the item would
+    // make plank-spam the best xp in the game.
+    if (made) { g.audio.pickup(); g.stats.crafted += made; g.skills.xpCraft(); }
     this.refresh();
   }
 
@@ -1032,6 +1035,7 @@ export class UI {
         if (made) {
           this.game.audio.pickup();
           this.game.stats.crafted += made;
+          this.game.skills.xpCraft();
         } else {
           this.game.audio.ui(240);
         }
@@ -1492,15 +1496,17 @@ export class UI {
 
     this.el.skPoints.textContent = left;
     this.el.skPoints.classList.toggle('none', left <= 0);
-    // Both halves of the balance, because "8 points" on its own does not say
-    // whether the tree has been touched. Spent is the part a player checks
-    // before deciding to unlearn everything.
-    this.el.skSub.textContent = left === 1
-      ? `1 point to spend · ${sk.spent} spent`
-      : `${left} points to spend · ${sk.spent} spent`;
+    // All three parts of the balance. "8 points" on its own does not say whether
+    // the tree has been touched, and neither half says how much of a lifetime's
+    // earning that is — 8 of a possible 76 is a very different sentence from 8
+    // with nothing left to find, and the tree costs 91, so the last number is
+    // also the quiet statement that it can never all be bought.
+    this.el.skSub.textContent = `${left === 1 ? '1 point' : `${left} points`} to spend`
+      + ` · ${sk.spent} spent · ${sk.points} of ${MAX_POINTS} ever earned`;
 
     const tree = this.el.skTree;
     tree.innerHTML = '';
+    tree.appendChild(this._xpBar(sk));
     for (const s of sk.summary()) {
       const row = document.createElement('div');
       // Leaves are indented under their root. The prerequisite is the shape of
@@ -1556,54 +1562,107 @@ export class UI {
   }
 
   /**
-   * Where the points came from, and what is still out there.
+   * The level bar: what you are, what the next level needs, in xp.
    *
-   * This half of the screen is the answer to the only question a tree with no
-   * XP bar invites: "how do I get more?". Every source is shown with the count
-   * the game has actually been keeping and the cap it is worth, so a player can
-   * see at a glance that mining has another twelve points in it and that fish
-   * are close to spent.
+   * This is the fix for the complaint that earning points was confusing, and
+   * the confusion had a precise cause worth recording so it is not rebuilt. The
+   * screen used to print `Blocks mined  0/22`, in which the 22 was the maximum
+   * number of *points* the source could ever pay while the 0 was a count of
+   * *blocks* — two different units, one slash, neither labelled. A player read
+   * it as "0 of 22 blocks" and then mined a thousand expecting linear pay.
+   *
+   * There is one number now and it says what it is. The bar fills toward the
+   * next level, the shortfall is stated in xp, and the head says outright that
+   * each level costs 5% more than the last — so the diminishing return is
+   * something the screen tells you before you feel it, rather than a discovery
+   * that reads as the game having cheated.
+   */
+  _xpBar(sk) {
+    const p = sk.xpProgress();
+    const box = document.createElement('div');
+    box.className = `xp-block${p.maxed ? ' maxed' : ''}`;
+
+    const head = document.createElement('div');
+    head.className = 'xp-head';
+    head.innerHTML = `<b>Level ${p.level}</b><span>of ${MAX_LEVEL} · `
+      + `${p.maxed ? 'every level earned' : 'each costs 5% more than the last'}</span>`;
+
+    const bar = document.createElement('div');
+    bar.className = 'xp-bar';
+    const fill = document.createElement('i');
+    fill.style.width = `${(p.frac * 100).toFixed(1)}%`;
+    bar.appendChild(fill);
+
+    const foot = document.createElement('div');
+    foot.className = 'xp-foot';
+    const total = `${p.xp.toLocaleString('en-GB')} xp`;
+    foot.innerHTML = p.maxed
+      ? `<span>${total}</span><em>Nothing left to level</em>`
+      : `<span>${total}</span><em>${p.toNext.toLocaleString('en-GB')} xp to level ${p.level + 1}`
+        + ` — worth 1 point</em>`;
+
+    box.append(head, bar, foot);
+    return box;
+  }
+
+  /**
+   * What pays xp, and what is still out there.
+   *
+   * The weights, in the model's own words and order, because the second half of
+   * "earning points is confusing" was that the game never said what it wanted.
+   * A player who can see that a husk is 22 and a block of dirt is nothing knows
+   * what to go and do; a player looking at `Blocks mined 0/22` does not.
    */
   _paintEarned() {
-    const g = this.game;
-    const sk = g.skills;
+    const sk = this.game.skills;
 
     const earned = this.el.skEarned;
     earned.innerHTML = '';
-    for (const key in EARNED) {
-      const src = EARNED[key];
-      const count = key === 'playtime' ? g.playtime : (g.stats?.[key] ?? 0);
-      // Points from this source, by the module's own formula. Recomputed here
-      // rather than exposed by `observe`, which reports one total on purpose —
-      // this is a readout, and a model field per source would be five more
-      // things to keep in step for the sake of one panel.
-      const n = Math.min(src.cap, Math.floor(Math.sqrt(count / src.per)));
+    const lead = document.createElement('p');
+    lead.className = 'earn-lead';
+    lead.textContent = 'Every level is one skill point. XP, per thing done:';
+    earned.appendChild(lead);
+    for (const src of XP_SOURCES) {
       const row = document.createElement('div');
-      row.className = 'earn-row';
-      const shown = key === 'playtime'
-        ? `${Math.floor(count / 60)}m`
-        : String(Math.floor(count));
-      row.innerHTML = `<span>${src.label}</span><em>${shown}</em><b>${n}/${src.cap}</b>`;
+      row.className = `earn-row${src.value === '0' ? ' nil' : ''}`;
+      row.innerHTML = `<span>${src.label}<em>${src.detail}</em></span>`
+        + `<b>${src.value === '0' ? '—' : src.value}</b>`;
       earned.appendChild(row);
     }
     if (sk.bonus > 0) {
       const row = document.createElement('div');
       row.className = 'earn-row bonus';
-      row.innerHTML = `<span>Armour, converted</span><em>—</em><b>${sk.bonus}</b>`;
+      row.innerHTML = '<span>Armour, converted<em>one-off, already taken</em></span>'
+        + `<b>+${sk.bonus} pts</b>`;
       earned.appendChild(row);
     }
 
     const marks = this.el.skMarks;
     marks.innerHTML = '';
+    let got = 0, gotPts = 0, allPts = 0;
+    for (const key in MARKS) {
+      allPts += MARKS[key].points;
+      if (sk.marks.has(key)) { got++; gotPts += MARKS[key].points; }
+    }
+    const sum = document.createElement('p');
+    sum.className = 'earn-lead';
+    sum.textContent = `${got} of ${Object.keys(MARKS).length} done`
+      + ` · ${gotPts} of ${allPts} points · paid in points, not xp`;
+    marks.appendChild(sum);
+
     for (const key in MARKS) {
       const m = MARKS[key];
       const has = sk.marks.has(key);
       const row = document.createElement('div');
       row.className = `mark-row${has ? ' got' : ''}`;
-      // The hint is shown whether or not it has been earned. A locked mark that
-      // will not say what it wants is a riddle, and this game has no room for
-      // one — the marks are a list of things worth doing, not a puzzle.
-      row.innerHTML = `<span>${has ? m.label : m.hint}</span><b>${m.points}</b>`;
+      // The old row swapped the hint for the label on earning it, which meant
+      // the two states differed only in wording and colour — an unearned mark
+      // read exactly like an earned one to anyone not comparing. Now the name
+      // is always there, the second line says either what to do or that it is
+      // done, and a tick or an empty ring says which without relying on colour.
+      row.innerHTML = `<i class="mk">${has ? '✓' : ''}</i>`
+        + `<span>${m.label}<em>${has ? 'Earned' : m.hint}</em></span>`
+        + `<b>${has ? '' : '+'}${m.points}</b>`;
       marks.appendChild(row);
     }
   }

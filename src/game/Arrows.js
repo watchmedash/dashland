@@ -189,8 +189,12 @@ export class Arrows {
     if (this._hits.length) {
       for (const h of this._hits) {
         if (!mobs || h.mob.health <= 0) continue;
-        mobs.hurt(h.mob, h.damage, h.from, h.power);
-        this.onHit?.(h.mob, h.damage);
+        // Whether this arrow was the last one, passed on. An arrow is the game's
+        // *second* way to kill something and the melee path in main.js is where
+        // the mark and the xp are awarded from — so without this a player who
+        // fights entirely with a bow earns nothing for any of it.
+        const killed = mobs.hurt(h.mob, h.damage, h.from, h.power);
+        this.onHit?.(h.mob, h.damage, killed);
       }
       this._hits.length = 0;
     }

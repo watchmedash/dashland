@@ -198,8 +198,8 @@ function block(o) {
     // 1 for a block that cannot bear a solid neighbour beside it. See NEEDS_ROOM.
     needsRoom: o.needsRoom ?? false,
     // 1 for a block that breaks when the cell under it stops holding it up.
-    // Distinct from `gravity` above, which nothing reads yet and which means the
-    // sand rule — keep the block, move it down until it lands. See NEEDS_FLOOR.
+    // Distinct from `gravity` above, which means the sand rule — keep the
+    // block, move it down until it lands. See NEEDS_FLOOR and HAS_GRAVITY.
     needsFloor: o.needsFloor ?? false,
     // 1 for reef life: a block that lives *inside* the water rather than beside
     // it. See IS_SUBMERGED.
@@ -1020,9 +1020,9 @@ export const NEEDS_ROOM = new Uint8Array(N_BLOCKS);
  * finding the places that hard-coded the cactus.
  *
  * *Not* `gravity`. That field (sand, gravel, red sand) means the other rule —
- * the block survives and moves down until it lands — and nothing implements it
- * yet. A cactus does not slide down a cliff face; it comes apart. Two rules,
- * two flags, so that whoever writes the falling-sand entity does not inherit
+ * the block survives and moves down until it lands — and it is implemented, in
+ * `Game._settleGravity`. A cactus does not slide down a cliff face; it comes
+ * apart. Two rules, two flags, so that the falling-sand pass does not inherit
  * a cactus that tries to use it.
  *
  * What counts as holding one up is `supports()` below, and it is one cell: the
@@ -1065,6 +1065,44 @@ export const IS_SUBMERGED = new Uint8Array(N_BLOCKS);
  * would let you plant a cactus on a flower.
  */
 export const STACKS = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for a block that is *brushed aside* rather than treated as an obstacle:
+ * every cross plant in the game, from a tuft of tall grass to a coral fan.
+ *
+ * Minecraft's "replaceable" tag, and it answers one question in two voices.
+ * Placing: a block aimed at a flower goes *into* the flower's cell and the
+ * flower is gone, instead of the placement squeezing into whichever cell the
+ * ray happened to be in a moment earlier. Flowing: a stem does not dam a
+ * river — see `Water._canEnter`, which reads this and then makes an exception
+ * of the reef.
+ *
+ * Derived from the render class rather than listed, which is the whole point.
+ * The first version of this was a set of four ids — the three flowers and tall
+ * grass — written when those were the only plants; the planet now grows
+ * thirty-odd, and a hardcoded list would have made sixteen brand-new tufts of
+ * ground cover behave like stone the day they were added. Anything drawn as
+ * two crossed quads is a plant, and every plant is replaceable.
+ *
+ * Air is deliberately *not* in here. It is replaceable in the obvious sense and
+ * every caller special-cases id 0 already; folding it in would make
+ * `IS_REPLACEABLE[air]` true and quietly turn "is there a plant in the way?"
+ * into "is this cell free?", which is a different question with a different
+ * answer at every wall.
+ */
+export const IS_REPLACEABLE = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for a block that does not stand on nothing: sand, gravel and red sand fall
+ * until they land.
+ *
+ * The `gravity` field has been on those three since the block table was
+ * written and nothing read it, so a mined-out dune hung in the air like
+ * masonry. See `Game._settleGravity`, which is the one thing that reads it.
+ *
+ * Distinct from NEEDS_FLOOR, and the comment there says why at length: that
+ * rule *breaks* the block where it stands (a cactus comes apart), this one
+ * *keeps* it and moves it down.
+ */
+export const HAS_GRAVITY = new Uint8Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -1419,6 +1457,8 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
   IS_SUBMERGED[i] = b.submerged ? 1 : 0;
   STACKS[i] = b.stacks ? 1 : 0;
+  IS_REPLACEABLE[i] = b.render === R_CROSS ? 1 : 0;
+  HAS_GRAVITY[i] = b.gravity ? 1 : 0;
   // Reef life is exempt: `DROWNS` means "the water would destroy this", and
   // water is the only place a coral or a kelp stalk can be. The opposite rule —
   // these may only be placed *in* water — lives in `main.js`, where the cell

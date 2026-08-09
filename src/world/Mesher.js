@@ -92,7 +92,13 @@ for (let i = 0; i < N_BLOCKS; i++) {
  * chunk's baked voxel light and the wind sway.
  */
 const MODELLED_CROSS = new Uint8Array(N_BLOCKS);
-for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom',
+// `sapling` sits here rather than with the flowers because it was the one
+// block whose three pictures disagreed after the icon audit: it has a WAM
+// model, so your fist, the ground drop and the inventory slot all showed it,
+// while the planted block was still the mesher's tinted billboard. This entry
+// and its MODELLED_PLANTS height go together, or the block is a model inside a
+// billboard, or an empty cell.
+for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom', 'sapling',
   // The reef. Unlike the flowers these have no billboard to fall back on —
   // they were authored as models and carry no tile of their own — so this list
   // and `MODELLED_PLANTS` in `main.js` have to agree or the seabed is empty:

@@ -460,10 +460,24 @@ function getBlockGeo(blockId) {
   return g;
 }
 
-/** Dropped blocks use the temperate palette — biome context is gone by then. */
+/**
+ * Dropped blocks use the temperate palette — biome context is gone by then, and
+ * the inventory icon picks the same one for the same reason (see `tintRGB` in
+ * `ui/Icons.js`), so a moss block on the ground, in your fist and in the toolbar
+ * are one colour.
+ *
+ * Which palette entry is not a shortcut: this handled tints 1 and 2 and lumped
+ * the other two in with foliage, so a dropped mossy stone and a dropped pine
+ * canopy came out plain leaf-green — a shade no wall of either is. The four
+ * branches below are `tintOf` in `world/Mesher.js` term for term; that is the
+ * function this has to agree with, because it is the one the world draws with.
+ */
 function dropTint(blockId) {
   const t = TINT_ID[blockId];
   if (!t) return [1, 1, 1];
   const c = BIOME_COLORS[2];
-  return t === 1 ? c.grass : c.foliage;
+  if (t === 1) return c.grass;
+  if (t === 2) return c.foliage;
+  if (t === 3) { const f = c.foliage; return [f[0] * 0.90, f[1] * 0.98, f[2] * 0.93]; }
+  return [c.foliage[0] * 0.9, c.foliage[1] * 1.0, c.foliage[2] * 0.85];
 }

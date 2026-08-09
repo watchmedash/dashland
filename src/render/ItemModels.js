@@ -103,7 +103,7 @@ function food(file, height, flat = false, extra = {}) {
   };
 }
 
-const POSE = {
+export const POSE = {
   pick:   { file: 'pickaxe',      pack: 'tools',   height: 0.46, grip: 0.18, rot: [-0.42, -0.62, 0.34], pos: [0.02, -0.04, 0],     icon: TOOL_ICON },
   axe:    { file: 'axe',          pack: 'tools',   height: 0.40, grip: 0.20, rot: [-0.35, -0.95, 0.40], pos: [0.03, 0.04, -0.02],  icon: TOOL_ICON },
   // The shovel is the one tool the pick's pose does not transfer to, and it had
@@ -472,8 +472,15 @@ const POSE = {
   driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.34, grip: 0.44, fitMax: true, rot: [0.16, -1.25, 0.22], pos: [0.02, 0.10, -0.04], icon: [0.24, 1.30, -0.10] },
 };
 
-/** Item name -> pose key, for the items that carry no `tool` block. */
-const BY_NAME = {
+/**
+ * Item name -> pose key, for the items that carry no `tool` block.
+ *
+ * Exported alongside `POSE` and `poseKeyFor` purely so an offline audit can
+ * walk the registry and check that what the world draws, what the fist holds
+ * and what the toolbar paints are the same object for every item. Nothing in
+ * the game reads them from outside this file.
+ */
+export const BY_NAME = {
   // The lantern is deliberately absent: it is a full block, and held as its own
   // model it read as a grey lump seen from above — the cube preview of what you
   // are about to place is both clearer and truer.
@@ -657,7 +664,7 @@ const TIER_LOOK = {
 };
 
 /** Which item art maps to which model. */
-function poseKeyFor(def) {
+export function poseKeyFor(def) {
   if (def.tool) return POSE[def.tool.kind] ? def.tool.kind : null;
   return BY_NAME[def.name] ?? null;
 }

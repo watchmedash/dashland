@@ -4,33 +4,136 @@
 // what you see in the grid are the same object.
 
 import * as THREE from 'three';
-import { BLOCKS, TILES, R_CROSS, R_LIQUID } from '../world/Blocks.js';
+import {
+  BLOCKS, TINT_ID, R_CROSS, R_LIQUID, R_SLAB, R_STAIR,
+  R_LADDER, R_DOOR, R_SIGN, R_FENCE,
+} from '../world/Blocks.js';
+import { BIOME_COLORS } from '../world/Constants.js';
 import { ITEMS } from '../game/Items.js';
 import { iconModel, hasModel } from '../render/ItemModels.js';
 
 // Rendered at 2x the largest slot so icons stay crisp when scaled down.
 const ICON = 96;
 
-// True 2:1 isometric cube laid out inside the icon box. The top rhombus is
-// 2 wide : 1 tall, and the side walls are taller than half the rhombus —
-// otherwise the cube reads squashed.
-const ISO = (() => {
-  const pad = 5;
-  const w = ICON - pad * 2;              // 86 full width
-  const halfW = w / 2;                   // 43
-  const rhombusH = halfW;                // 2:1 → 43 total height, 21.5 per half
-  const wallH = Math.round(w * 0.52);    // 45
-  const cx = ICON / 2;
-  const topY = pad;                      // apex of the top face
-  const midY = topY + rhombusH / 2;      // left/right corners of the top face
-  const botY = topY + rhombusH;          // near corner of the top face
-  return {
-    top: { ox: pad, oy: midY, ux: halfW, uy: -rhombusH / 2, vx: halfW, vy: rhombusH / 2 },
-    left: { ox: pad, oy: midY, ux: halfW, uy: rhombusH / 2, vx: 0, vy: wallH },
-    right: { ox: cx, oy: botY, ux: halfW, uy: -rhombusH / 2, vx: 0, vy: wallH },
-    apex: [cx, topY], leftC: [pad, midY], rightC: [ICON - pad, midY],
-  };
-})();
+// True 2:1 isometric projection of the block's own cell, laid out inside the
+// icon box. The top rhombus is 2 wide : 1 tall, and the side walls are taller
+// than half the rhombus — otherwise the cube reads squashed.
+//
+// `P` is the whole of it: a point of the unit cell (x, y, z all 0..1) to a
+// point on the canvas. The three faces a viewer standing at (-x, +y, +z) can
+// see are the top (y = y1), the west wall (x = x0) and the south wall (z = z1),
+// and every shape below is built out of boxes drawn through exactly those.
+// Deriving the faces from one projection rather than writing three bases out by
+// hand is what makes a slab, a stair and a fence post cost a rectangle each.
+const PAD = 5;
+const CELL_W = ICON - PAD * 2;           // 86 full width
+const HALF_W = CELL_W / 2;               // 43
+const RHOMB_H = HALF_W;                  // 2:1 → 43 total height, 21.5 per half
+const WALL_H = Math.round(CELL_W * 0.52);// 45
+const MID_Y = PAD + RHOMB_H / 2;         // left/right corners of the top face
+
+/** Unit-cell point (x right-and-back, y up, z right-and-front) to canvas. */
+function P(x, y, z) {
+  return [PAD + (x + z) * HALF_W, MID_Y + (z - x) * (RHOMB_H / 2) + (1 - y) * WALL_H];
+}
+
+/**
+ * How much of its own cell each world shape actually fills, as boxes in that
+ * same unit space, listed back to front.
+ *
+ * This is the whole reason a slab, a stair and a full block stopped being the
+ * same picture. `stair_stone`, `slab_stone` and `smooth_stone` share one set of
+ * tiles, so painted as three full cubes they were byte-identical in the
+ * toolbar: three different things you could place, one icon between them. The
+ * boxes are the block's real silhouette, so now they read apart at a glance and
+ * each one reads as the thing that will appear when you place it.
+ *
+ * Back to front matters and is checked, not assumed: the viewer is at
+ * (-x, +y, +z), so a box is behind another when it sits at larger x, smaller z
+ * or greater height over the same footprint. Coplanar faces never fight, which
+ * is why a stair's two boxes can share the x = 0 wall without seaming.
+ */
+export const SHAPES = {
+  // The tread, then the riser standing on the back half of it.
+  [R_STAIR]: [
+    { x0: 0, x1: 1, y0: 0, y1: 0.5, z0: 0, z1: 1 },
+    { x0: 0, x1: 1, y0: 0.5, y1: 1, z0: 0, z1: 0.5 },
+  ],
+  [R_SLAB]: [{ x0: 0, x1: 1, y0: 0, y1: 0.5, z0: 0, z1: 1 }],
+  // A section of fence rather than one post: two posts with the rails run
+  // between them is what says "fence" at 46px, where a single post is a stick.
+  // The rails are narrower in x than the posts, so the near post's west wall is
+  // in front of them and drawing it last is correct.
+  [R_FENCE]: [
+    { x0: 0.38, x1: 0.62, y0: 0, y1: 1, z0: 0.06, z1: 0.28 },
+    { x0: 0.44, x1: 0.56, y0: 0.30, y1: 0.44, z0: 0.06, z1: 0.94 },
+    { x0: 0.44, x1: 0.56, y0: 0.66, y1: 0.80, z0: 0.06, z1: 0.94 },
+    { x0: 0.38, x1: 0.62, y0: 0, y1: 1, z0: 0.72, z1: 0.94 },
+  ],
+};
+
+/**
+ * Shapes that are a *picture of themselves* on one tile, and are therefore
+ * drawn flat rather than wrapped round a box.
+ *
+ * A cross block has no cube form at all — built as one its transparent pixels
+ * read as a black cage. The ladder, the door and the sign are the same case
+ * arrived at from the other direction: each has its own cut-out tile that draws
+ * the whole object (see `G.ladder`/`G.door`/`G.sign` in `render/TextureGen.js`,
+ * and the note in `scripts/bake-textures.mjs` about the ladder keeping its own
+ * alpha), so pasting that tile on three faces of a cube gave a box with a
+ * ladder's holes punched through it. Flat, they are the thing.
+ *
+ * The fence is deliberately *not* here: its tile is uniform vertical grain with
+ * no object on it, authored that way because the mesher crops it to a quarter
+ * of a cell, so flat it is a plank swatch. It gets real posts above instead.
+ */
+export const FLAT_TILE = new Set([R_CROSS, R_LADDER, R_DOOR, R_SIGN]);
+
+// --- the biome tint, in the grid ---------------------------------------------
+//
+// The bug this whole file was audited for. A tintable block is stored once and
+// coloured at draw time: the mesher writes `tintOf(id, biome)` into a vertex
+// attribute and the voxel shader multiplies it into the albedo texel, so what
+// is on the wall is the tile times a colour. The tile *by itself* is the
+// uncoloured plate — mossy stone's is grey rock with grey blotches, grass's top
+// is a pale straw — and this painter drew exactly that. So a Mossy Stone in the
+// world was green, a Mossy Stone in your fist was green (a dropped cube carries
+// the same attribute, see `dropTint` in `game/Drops.js`) and a Mossy Stone in
+// the toolbar was a grey cobble. Nine blocks were wrong, not one.
+//
+// Which biome's colour, for a thing that is in a bag rather than in a place?
+// The temperate one, index 2, which is the same answer `Drops` already gives
+// for the same reason: an item has left the world and there is no biome to ask.
+// That is what puts the icon and the held cube on the same colour.
+const ICON_BIOME = 2;
+
+/**
+ * The multiplier for one `TINT_ID`, matching `tintOf` in `world/Mesher.js` term
+ * for term — including the two the drop path still rounds off. Moss is foliage
+ * pushed warm and dark and pine needles are foliage pushed cool and dark; treat
+ * either as plain foliage and mossy stone comes out a leaf green that no wall
+ * in the game is.
+ */
+export function tintRGB(t) {
+  if (!t) return null;
+  const c = BIOME_COLORS[ICON_BIOME];
+  if (t === 1) return c.grass;
+  if (t === 2) return c.foliage;
+  if (t === 3) { const f = c.foliage; return [f[0] * 0.90, f[1] * 0.98, f[2] * 0.93]; }
+  return [c.foliage[0] * 0.9, c.foliage[1] * 1.0, c.foliage[2] * 0.85];
+}
+
+// The shader multiplies in the linear working space — the atlas is an sRGB
+// texture, so three decodes it, multiplies, and the framebuffer encodes it
+// back. Canvas has no such notion: a `multiply` composite here would multiply
+// the *encoded* bytes and land somewhere noticeably darker and flatter than the
+// wall it is meant to match. So the round trip is done by hand, once per
+// (tile, tint) pair, and the result is cached.
+const toLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+const toSRGB = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055);
+const SRGB_TO_LINEAR = new Float32Array(256);
+for (let i = 0; i < 256; i++) SRGB_TO_LINEAR[i] = toLinear(i / 255);
 
 // --- icons painted from the 3D models ---------------------------------------
 
@@ -173,6 +276,8 @@ export class IconFactory {
       this.tiles.push(c);
     }
     this.cache = new Map();
+    /** "layer|tintId" -> a copy of that tile with the biome tint multiplied in. */
+    this.tinted = new Map();
     this.painter = null;
     this.onUpdate = null;
     this.modelIcons = new Map();   // item id -> data URL painted from the model
@@ -196,56 +301,146 @@ export class IconFactory {
     this.onUpdate = onUpdate || null;
   }
 
+  /**
+   * One tile of the baked atlas, with this block's biome tint multiplied in.
+   *
+   * Returns null when the block names no tile at all, which is not a defect: a
+   * modelled cross block — the twenty-seven corals, weeds and fungi authored in
+   * WAM — never added a tile to `TILES`, so its `top`/`side` are `undefined`.
+   * That used to reach `drawImage(undefined)` and throw, on the first paint of
+   * every one of them, because `item()` falls through to here for the frame or
+   * two before the model lands. See `_swatch` for what is drawn instead.
+   */
+  _tile(layer, tintId) {
+    const base = layer === undefined || layer === null ? undefined : this.tiles[layer];
+    if (!base) return null;
+    const rgb = tintRGB(tintId);
+    if (!rgb) return base;
+    const key = `${layer}|${tintId}`;
+    let out = this.tinted.get(key);
+    if (out) return out;
+    const S = this.size;
+    out = document.createElement('canvas');
+    out.width = out.height = S;
+    const g = out.getContext('2d', { willReadFrequently: true });
+    g.drawImage(base, 0, 0);
+    const img = g.getImageData(0, 0, S, S);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (!d[i + 3]) continue;
+      d[i] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i]] * rgb[0]) * 255);
+      d[i + 1] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i + 1]] * rgb[1]) * 255);
+      d[i + 2] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i + 2]] * rgb[2]) * 255);
+    }
+    g.putImageData(img, 0, 0);
+    this.tinted.set(key, out);
+    return out;
+  }
+
+  /**
+   * Stand-in for a block with no tile: a soft lozenge in its own break-particle
+   * colour, which is the one colour every block in the registry carries.
+   *
+   * Only ever seen for a moment. These are exactly the blocks whose real icon is
+   * rendered from a model, and `item()` asks the model first on every call, so
+   * this holds the slot until the mesh arrives instead of leaving a live slot
+   * looking empty — and it is what shows for good if `public/models/` is gone.
+   */
+  _swatch(g, b) {
+    const [r, gg, bl] = b.particle;
+    const hex = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));
+    g.fillStyle = `rgb(${hex(r)},${hex(gg)},${hex(bl)})`;
+    g.beginPath();
+    g.ellipse(ICON / 2, ICON / 2, ICON * 0.28, ICON * 0.3, 0, 0, 7);
+    g.fill();
+    g.fillStyle = 'rgba(255,255,255,.22)';
+    g.beginPath();
+    g.ellipse(ICON * 0.41, ICON * 0.38, ICON * 0.12, ICON * 0.09, -0.5, 0, 7);
+    g.fill();
+  }
+
   /** data-URL icon for a block id. */
   block(id) {
     if (this.cache.has(id)) return this.cache.get(id);
     const b = BLOCKS[id];
+    const t = TINT_ID[id];
     const c = document.createElement('canvas');
     c.width = c.height = ICON;
     const g = c.getContext('2d');
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
 
-    if (b.render === R_CROSS) {
-      g.drawImage(this.tiles[b.side], 6, 6, ICON - 12, ICON - 12);
+    if (FLAT_TILE.has(b.render)) {
+      const tile = this._tile(b.side, t);
+      if (tile) g.drawImage(tile, 6, 6, ICON - 12, ICON - 12);
+      else this._swatch(g, b);
     } else {
       const S = this.size;
-      const face = (tile, ox, oy, ux, uy, vx, vy, shade, alpha = 1) => {
-        g.save();
-        g.beginPath();
-        g.moveTo(ox, oy);
-        g.lineTo(ox + ux, oy + uy);
-        g.lineTo(ox + ux + vx, oy + uy + vy);
-        g.lineTo(ox + vx, oy + vy);
-        g.closePath();
-        g.clip();
-        g.globalAlpha = alpha;
-        g.setTransform(ux / S, uy / S, vx / S, vy / S, ox, oy);
-        g.drawImage(this.tiles[tile], 0, 0);
-        g.setTransform(1, 0, 0, 1, 0, 0);
-        g.globalAlpha = 1;
-        if (shade < 0) { g.fillStyle = `rgba(0,0,0,${-shade})`; g.fillRect(0, 0, ICON, ICON); }
-        else if (shade > 0) { g.fillStyle = `rgba(255,255,255,${shade})`; g.fillRect(0, 0, ICON, ICON); }
-        g.restore();
-      };
-
       const alpha = b.render === R_LIQUID ? 0.82 : 1;
-      const { top, left, right } = ISO;
-      face(b.top, top.ox, top.oy, top.ux, top.uy, top.vx, top.vy, 0.12, alpha);
-      face(b.side, left.ox, left.oy, left.ux, left.uy, left.vx, left.vy, -0.28, alpha);
-      // a directional block shows its front on one visible face, so the icon
-      // still reads as a kiln/furnace rather than a blank box
-      face(b.directional ? b.front : b.side,
-        right.ox, right.oy, right.ux, right.uy, right.vx, right.vy, -0.11, alpha);
+      // A directional block shows its front on one visible face, so the icon
+      // still reads as a kiln/furnace rather than a blank box. The front goes
+      // on the south wall, which is the one facing the viewer.
+      const topTile = this._tile(b.top, t);
+      const sideTile = this._tile(b.side, t);
+      const frontTile = this._tile(b.directional ? b.front : b.side, t);
+      if (!topTile || !sideTile) {
+        this._swatch(g, b);
+      } else {
+        /**
+         * One face of one box: clipped to the part of the face the box actually
+         * occupies, but textured as if the face spanned the whole cell. That is
+         * the difference between a slab whose side shows the *bottom half* of
+         * its tile and a slab whose side shows the whole tile squashed — and
+         * the second one does not match the wall it came off.
+         */
+        const face = (tile, quad, ox, oy, ax, ay, bx, by, shade) => {
+          g.save();
+          g.beginPath();
+          g.moveTo(quad[0][0], quad[0][1]);
+          for (let i = 1; i < 4; i++) g.lineTo(quad[i][0], quad[i][1]);
+          g.closePath();
+          g.clip();
+          g.globalAlpha = alpha;
+          g.setTransform(ax / S, ay / S, bx / S, by / S, ox, oy);
+          g.drawImage(tile, 0, 0);
+          g.setTransform(1, 0, 0, 1, 0, 0);
+          g.globalAlpha = 1;
+          if (shade < 0) { g.fillStyle = `rgba(0,0,0,${-shade})`; g.fillRect(0, 0, ICON, ICON); }
+          else if (shade > 0) { g.fillStyle = `rgba(255,255,255,${shade})`; g.fillRect(0, 0, ICON, ICON); }
+          g.restore();
+        };
 
-      // crisp silhouette highlight along the two top edges
-      g.strokeStyle = 'rgba(255,255,255,.18)';
-      g.lineWidth = 1.2;
-      g.beginPath();
-      g.moveTo(ISO.leftC[0], ISO.leftC[1]);
-      g.lineTo(ISO.apex[0], ISO.apex[1]);
-      g.lineTo(ISO.rightC[0], ISO.rightC[1]);
-      g.stroke();
+        const boxes = SHAPES[b.render] ?? [{ x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 }];
+        for (const k of boxes) {
+          const { x0, x1, y0, y1, z0, z1 } = k;
+          // top (y = y1)
+          let o = P(0, y1, 0), a = P(1, y1, 0), v = P(0, y1, 1);
+          face(topTile, [P(x0, y1, z0), P(x1, y1, z0), P(x1, y1, z1), P(x0, y1, z1)],
+            o[0], o[1], a[0] - o[0], a[1] - o[1], v[0] - o[0], v[1] - o[1], 0.12);
+          // west wall (x = x0)
+          o = P(x0, 1, 0); a = P(x0, 1, 1); v = P(x0, 0, 0);
+          face(sideTile, [P(x0, y1, z0), P(x0, y1, z1), P(x0, y0, z1), P(x0, y0, z0)],
+            o[0], o[1], a[0] - o[0], a[1] - o[1], v[0] - o[0], v[1] - o[1], -0.28);
+          // south wall (z = z1)
+          o = P(0, 1, z1); a = P(1, 1, z1); v = P(0, 0, z1);
+          face(frontTile ?? sideTile,
+            [P(x0, y1, z1), P(x1, y1, z1), P(x1, y0, z1), P(x0, y0, z1)],
+            o[0], o[1], a[0] - o[0], a[1] - o[1], v[0] - o[0], v[1] - o[1], -0.11);
+        }
+
+        // Crisp silhouette highlight along the two top edges of the topmost box.
+        const cap = boxes.reduce((m, k) => (k.y1 > m.y1 ? k : m), boxes[0]);
+        const e0 = P(cap.x0, cap.y1, cap.z0);
+        const e1 = P(cap.x1, cap.y1, cap.z0);
+        const e2 = P(cap.x1, cap.y1, cap.z1);
+        g.strokeStyle = 'rgba(255,255,255,.18)';
+        g.lineWidth = 1.2;
+        g.beginPath();
+        g.moveTo(e0[0], e0[1]);
+        g.lineTo(e1[0], e1[1]);
+        g.lineTo(e2[0], e2[1]);
+        g.stroke();
+      }
     }
 
     const url = c.toDataURL();

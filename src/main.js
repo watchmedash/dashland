@@ -50,7 +50,7 @@ import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
-  NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED,
+  NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY,
 } from './world/Blocks.js';
 import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
@@ -231,6 +231,17 @@ const FREEZE_SCAN = 220;
 const FREEZE_BATCH = 14;
 /** How far from the player winter is allowed to work, in columns. */
 const FREEZE_RADIUS = 24;
+/**
+ * Falling sand: seconds between passes, and columns settled per pass.
+ *
+ * 0.1s is fast enough that a grain mined out from under a dune is gone before
+ * you have finished the swing, and slow enough that a big collapse is a visible
+ * event rather than a single frame's worth of geometry churn. 256 columns is the
+ * ceiling that keeps one pass in the same cost bracket as a water tick — see
+ * `_settleGravity`, which explains both numbers at length.
+ */
+const GRAVITY_TICK = 0.1;
+const GRAVITY_PER_TICK = 256;
 const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
 /** Scratch for `_crossLightAt`, which runs once per modelled instance per frame. */
 const _clParts = { f: 0, i: 0, j: 0 };
@@ -482,6 +493,9 @@ for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID
  */
 const MODELLED_PLANTS = {
   flower_red: 0.62, flower_blue: 0.62, flower_gold: 0.62, mushroom: 0.62,
+  // A seedling stands above the flowers and under the firebloom. Paired with
+  // the `sapling` entry in MODELLED_CROSS: neither works without the other.
+  sapling: 0.70,
   // Uprights: a little under a cell, so a reef has air above it and does not
   // read as a hedge.
   coral_branch: 0.82, coral_dead: 0.78, coral_fan: 0.86, sea_sponge: 0.80,
@@ -831,6 +845,20 @@ class Game {
 
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
+    /**
+     * Cells that may hold a sand or gravel block with nothing under it, as
+     * `col * D + k`. Seeded by every edit, drained on a clock. See
+     * `_seedGravity` and `_settleGravity`.
+     *
+     * Not saved. It is a work list rather than world state — everything in it is
+     * re-derivable from the voxels — and saving it would mean a world reloaded
+     * mid-collapse finished the collapse, while a world reloaded a second later
+     * did not. A dune left hanging by a quit is left hanging by the reload too,
+     * and comes down the next time anything touches it, which is the same rule
+     * `_dropUnsupported` already lives by for exactly the same reason.
+     */
+    this.falling = new Set();
+    this.fallTimer = 0;
     // A current carries what is in it. Both are built before the sim is, so
     // they take the reference here rather than through their constructors.
     this.player.water = this.water;
@@ -1002,7 +1030,7 @@ class Game {
     this.player.onHurt = (dmg) => {
       this.damageFlash = Math.min(1, 0.35 + dmg * 0.1);
       this.audio.hurt();
-      if (this.player.health <= 0) this._die('The fall was further than it looked.');
+      if (this.player.health <= 0) this._die('Fell');
     };
   }
 
@@ -1125,6 +1153,11 @@ class Game {
     // meaningless against a different planet — carried over, they marked cells
     // of the new world as springs at random.
     this.water.clear();
+    // Cell indices again, and the same reason: a queued grain of the old world
+    // is a cell of the new one, and settling it would drop a block out of
+    // terrain nobody has touched.
+    this.falling.clear();
+    this.fallTimer = 0;
     this.farming.clear();
     this.kilns.clear();
     this.crates.clear();
@@ -1421,7 +1454,7 @@ class Game {
       <h1>MOJA<em>ZER</em></h1>
       <p class="tagline">A tiny planet, entirely yours.</p>
       <div class="bar"><div class="bar-fill" id="load-fill"></div></div>
-      <p class="status" id="load-status">Working…</p></div>`;
+      <p class="status" id="load-status">Working</p></div>`;
     this.ui.el.loader = el;
     this.ui.el.loadFill = el.querySelector('#load-fill');
     this.ui.el.loadStatus = el.querySelector('#load-status');
@@ -1980,7 +2013,7 @@ class Game {
     // See `_tickNightOut`: a night you did not live through does not count.
     this._nightOut = 0;
     this.ui.refresh();
-    this.ui.showDeath(cause + this._loseSkills());
+    this.ui.showDeath(cause, this._loseSkills());
   }
 
   /**
@@ -1994,7 +2027,9 @@ class Game {
    * What is taken is entirely `ON_DEATH` in Skills.js; this end only reconciles
    * the body, tells the player, and writes it down.
    *
-   * @returns {string} a sentence for the death screen, or '' if nothing was lost
+   * @returns {string} a short phrase for the death screen, or '' if nothing
+   *   was lost. Not a sentence: the death screen states the cause and then, at
+   *   most, the one fact that a wipe is real. It used to return a paragraph.
    */
   _loseSkills() {
     const lost = this.skills.die();
@@ -2007,19 +2042,16 @@ class Game {
     // already up, and the write is the same one the ninety-second autosave does.
     this.saveGame(false);
     if (!lost || !(lost.level > 0 || lost.spent > 0 || lost.xp > 0)) return '';
-    if (ON_DEATH === 'unlearn') {
-      return ` Every skill is unlearned, and your ${lost.spent} points are back.`;
-    }
+    if (ON_DEATH === 'unlearn') return `Skills unlearned, ${lost.spent} points back`;
     if (ON_DEATH === 'toll') {
       return lost.level > 0
-        ? ` You lost ${lost.xp} XP, and ${lost.level} level${lost.level > 1 ? 's' : ''} with it.`
-        : ` You lost ${lost.xp} XP.`;
+        ? `Lost ${lost.xp} XP and ${lost.level} level${lost.level > 1 ? 's' : ''}`
+        : `Lost ${lost.xp} XP`;
     }
-    // 'wipe'. Two facts, in the order they hurt: the ladder, then the tree.
-    const lvl = lost.level > 0 ? `Level ${lost.level} is gone` : 'Your XP is gone';
-    return lost.spent > 0
-      ? ` ${lvl}, and every skill with it. You start again at level 0.`
-      : ` ${lvl}. You start again at level 0.`;
+    // 'wipe'. The ladder, then the tree, and no line about starting again:
+    // the level bar on the Growth screen already reads 0.
+    const lvl = lost.level > 0 ? `Level ${lost.level} gone` : 'XP gone';
+    return lost.spent > 0 ? `${lvl}, and every skill` : lvl;
   }
 
   respawn() {
@@ -2439,6 +2471,145 @@ class Game {
     // runs for the original batch those cells are already air, so nothing is
     // dropped twice.
     this._dropUnsupported(edits);
+    // And finally the sand. Queued rather than done here: see `_seedGravity`.
+    this._seedGravity(edits);
+  }
+
+  /**
+   * Note which cells these edits may have left a sand or gravel block hanging
+   * over, for `_settleGravity` to deal with on its own clock.
+   *
+   * Queued and not settled on the spot, and the reason is a cliff. `_applyEdits`
+   * is re-entrant — crushing and unsupported-plant removal both call back into
+   * it — and settling here would mean one pick swing at the foot of a dune
+   * recursing through every grain above and beside it inside a single call,
+   * emitting an edit batch per cell and posting each one to the meshing worker
+   * separately. The queue is what turns that into "as much as fits in a tick,
+   * as one batch".
+   *
+   * Two cells per edit can be affected and no others: the cell *above* it, which
+   * may have just lost its floor, and the edited cell itself, for a grain you
+   * placed in mid-air. A gravity block further up is reached on the next pass,
+   * because moving a column re-seeds from its own edits.
+   */
+  _seedGravity(edits) {
+    for (const e of edits) {
+      if (HAS_GRAVITY[this.planet.at(e.col, e.k + 1)]) this.falling.add(e.col * D + e.k + 1);
+      if (HAS_GRAVITY[e.id]) this.falling.add(e.col * D + e.k);
+    }
+  }
+
+  /**
+   * Can a falling block pass through what is in this cell?
+   *
+   * Air, and a plant, which it flattens on the way past — deliberately the same
+   * answer water gives, because a tuft of grass that stops a landslide and a
+   * tuft of grass that dams a river are one complaint. `IS_REPLACEABLE` covers
+   * every cross plant there is, so the sixteen new ones are in without being
+   * named.
+   *
+   * It is the *whole* set, including the reef, where `Water._canEnter` exempts
+   * the submerged plants. The exemption there is specific and does not
+   * generalise: coral must survive the sea it grows in, which is a statement
+   * about water and not about everything that could ever land on it. A rockfall
+   * is not the sea. In practice this never fires — a gravity block will not
+   * enter liquid at all (below), and every submerged plant is under some — so
+   * the choice costs nothing either way and the narrower rule is the one that
+   * can be stated in a sentence.
+   *
+   * **Liquid is not in here, and that is a decision rather than an oversight.**
+   * Minecraft's sand sinks through water; ours lands on it. Sinking would mean
+   * a gravity block overwriting a liquid cell, and this sim keeps a *side table*
+   * about liquid cells — `Water.sources` — that is keyed by cell and would still
+   * be marked long after the sand arrived. Clear that cell later and the water
+   * that flowed back in would be read as a spring, which is the one failure mode
+   * this whole file is arranged to prevent: a source that was never meant to
+   * exist does not drain and floods the planet. Landing on the water is a
+   * cosmetic loss; the other is the world.
+   */
+  _fallsThrough(col, k) {
+    const id = this.planet.at(col, k);
+    return id === 0 || IS_REPLACEABLE[id] === 1;
+  }
+
+  /**
+   * Sand falls.
+   *
+   * `gravity` has been declared on sand, gravel and red sand since the block
+   * table was first written and nothing has ever read it, so mining under a dune
+   * left the dune hanging — the reported "blocks not being affected by gravity
+   * like sand, gravel and among other things".
+   *
+   * ---- the whole column, in one move ----
+   *
+   * A block does not fall one cell per tick, and it must not: a column settled a
+   * cell at a time is a column that is briefly *broken apart*, with gaps between
+   * grains that the player can see and walk into, and every intermediate state
+   * is an edit batch and a remesh of the same chunk. So a settle finds where the
+   * bottom grain lands, takes the whole contiguous run of gravity blocks stacked
+   * on it, and rewrites the run at its destination in a single batch: clears
+   * first, writes second, which is safe because the destination of the run is
+   * strictly below where it started and the clears therefore cover every cell a
+   * write could land in.
+   *
+   * ---- it cannot fall out of the world ----
+   *
+   * `dest > 0` in the scan. Layer 0 is the innermost shell of the planet and
+   * there is nothing under it; a grain that reached it would be written to k=-1,
+   * which `Planet.setAt` silently discards — the block would simply cease to
+   * exist. The guard stops the scan *at* layer 0, so the worst case is a grain
+   * resting on the floor of the world.
+   *
+   * ---- the budget ----
+   *
+   * `GRAVITY_PER_TICK` columns per tick at `GRAVITY_TICK` seconds, so **256
+   * column-settles every 0.1s**, whatever the size of the collapse. A settle is
+   * one downward scan bounded by D (99) plus its own edits, so a full tick is
+   * about twenty-five thousand array reads and one batch posted to the worker —
+   * the same order as a water tick, which is budgeted at 900 cells. A cliff of
+   * ten thousand columns comes down over four seconds instead of stalling a
+   * frame, and it comes down from the bottom outward because the queue is
+   * drained in insertion order.
+   *
+   * Anything left over stays queued. Nothing is ever dropped from the queue: a
+   * grain silently declining to fall is the bug this method exists to remove,
+   * and it would be indistinguishable from it.
+   */
+  _settleGravity() {
+    if (this.falling.size === 0) return;
+    const edits = [];
+    let budget = GRAVITY_PER_TICK;
+    for (const key of this.falling) {
+      if (budget-- <= 0) break;
+      this.falling.delete(key);
+      const k = key % D;
+      const col = (key - k) / D;
+      const id = this.planet.at(col, k);
+      // The queue is a list of suspicions, not of facts: the cell may have been
+      // mined, replaced or already settled by an earlier entry in this very
+      // pass.
+      if (!HAS_GRAVITY[id]) continue;
+
+      let dest = k;
+      while (dest > 0 && this._fallsThrough(col, dest - 1)) dest--;
+      if (dest === k) continue;
+
+      // Everything of the same nature stacked directly on top comes with it —
+      // the run ends at the first cell that is not a gravity block, which is a
+      // block with its own rules about what holds it up.
+      let top = k;
+      while (top + 1 < D && HAS_GRAVITY[this.planet.at(col, top + 1)]) top++;
+
+      const run = [];
+      for (let s = k; s <= top; s++) run.push(this.planet.at(col, s));
+      for (let s = k; s <= top; s++) edits.push({ col, k: s, id: 0 });
+      for (let n = 0; n < run.length; n++) edits.push({ col, k: dest + n, id: run[n] });
+    }
+    // One batch for the whole tick. `_applyEdits` re-seeds the queue from these
+    // edits, so whatever the move exposed — a grain above the run, a plant that
+    // lost its floor — is picked up on the next pass rather than recursed into
+    // now.
+    if (edits.length) this._applyEdits(edits);
   }
 
   /**
@@ -2727,9 +2898,25 @@ class Game {
     const held = this.inventory.active();
     const def = ITEMS[held.item];
     if (!def || def.block === undefined) return false;
-    if (hit.prevCol < 0) return false;
     const id = def.block;
-    const col = hit.prevCol, k = hit.prevK;
+    // Where the block goes. Normally the cell the ray was in just before it hit
+    // something — you build *against* a face — but a cell holding a plant is not
+    // a face to build against, it is a cell to build *in*. See IS_REPLACEABLE.
+    //
+    // This is the whole of "grass won't let me put a block where it's standing".
+    // The old line refused nothing and that is why the report is confusing: the
+    // placement *succeeded*, just not where you aimed. Standing on a meadow and
+    // clicking the tuft in front of you, the ray stops in the tuft, so the cell
+    // before it is the air beside your own head — the block landed floating at
+    // eye height, or, when that cell was your own, `_intersectsPlayer` ate the
+    // click and nothing happened at all. Either way the tuft was still there and
+    // the block was not where you put it. Aiming at a plant now fills the
+    // plant's own cell and the plant is gone, which is Minecraft's rule and the
+    // one every player already has in their hands.
+    const replacing = IS_REPLACEABLE[hit.id] === 1;
+    if (!replacing && hit.prevCol < 0) return false;
+    const col = replacing ? hit.col : hit.prevCol;
+    const k = replacing ? hit.k : hit.prevK;
     if (k < 0 || k >= D) return false;
     const existing = this.planet.at(col, k);
     if (existing !== 0 && RENDER_TYPE[existing] !== R_LIQUID && RENDER_TYPE[existing] !== R_CROSS) return false;
@@ -2822,6 +3009,18 @@ class Game {
         return false;
       }
       if (this._intersectsPlayer(col, k + 1)) return false;
+    }
+
+    // The plant that was standing here comes apart, and it hands over whatever
+    // it would have given you if you had punched it — a sapling, some seeds, an
+    // amethyst off a crystal cluster. Building over a lingonberry patch should
+    // not be a quieter way of destroying it than walking up and hitting it, and
+    // "I lost the berries because I put a fence post there" is exactly the kind
+    // of silent loss this codebase already refuses for a crate.
+    if (existing !== 0 && IS_REPLACEABLE[existing]) {
+      const at = this.planet.centerOf(col, k, new THREE.Vector3());
+      for (const d of computeDrops(existing, null)) this.drops.spawn(at.x, at.y, at.z, d.item, d.count);
+      this.audio.break_(BLOCKS[existing].sound, at);
     }
 
     const edit = { col, k, id };
@@ -3293,7 +3492,7 @@ class Game {
           this.player.health = Math.max(0, this.player.health - 1);
           this.damageFlash = 0.5;
           this.audio.hurt();
-          if (this.player.health <= 0) this._die('The water was deeper than it looked.');
+          if (this.player.health <= 0) this._die('Drowned');
         }
       }
     } else {
@@ -3337,6 +3536,15 @@ class Game {
     this._safeTick('kilns', () => this._tickKilns(dt));
     this._safeTick('farming', () => this.farming.update(dt, this.seasons.growth));
     this._safeTick('water', () => this.water.update(dt));
+    // After the water, so a grain that lands in a channel the flow just opened
+    // is settled against the world the flow left behind rather than the one it
+    // started the tick with.
+    this._safeTick('gravity', () => {
+      this.fallTimer -= dt;
+      if (this.fallTimer > 0) return;
+      this.fallTimer = GRAVITY_TICK;
+      this._settleGravity();
+    });
     this._safeTick('freeze', () => this._tickFreeze(dt));
     this._safeTick('vitals', () => this._tickVitals(dt));
     this._safeTick('grace', () => this._tickGrace(dt));
@@ -3466,10 +3674,9 @@ class Game {
     this.damageFlash = Math.min(1, 0.32 + damage * 0.1);
     this.audio.hurt();
     if (p.health <= 0) {
-      // Name the thing that killed you. "Something in the dark got you" was
-      // written when the only thing that could was a husk at night; a tiger
-      // mauling you at noon deserves to be told plainly, and a death you cannot
-      // attribute is a death you cannot learn from.
+      // Name the thing that killed you, and only name it. A death you cannot
+      // attribute is a death you cannot learn from, and a death narrated back
+      // at you in a full sentence is one you stop reading by the third time.
       this._die(typeof cause === 'string' ? cause : this._killedBy(cause));
       return true;
     }
@@ -3477,17 +3684,15 @@ class Game {
   }
 
   /**
-   * How the death screen says who did it.
+   * How the death screen says who did it: the creature's own label, and
+   * nothing round it.
    *
-   * `cause` is whatever was passed to `hurt` — a mob for a blow. Falls back to
-   * the old line only when the killer has no label to read, which is not a case
-   * that exists today but is one bad refactor away.
+   * `cause` is whatever was passed to `hurt` — a mob for a blow. The fallback
+   * covers a killer with no label to read, which is not a case that exists
+   * today but is one bad refactor away.
    */
   _killedBy(cause) {
-    const label = cause?.spec?.label;
-    if (!label) return 'Something in the dark got you.';
-    const article = /^[aeiou]/i.test(label) ? 'An' : 'A';
-    return `${article} ${label.toLowerCase()} got you.`;
+    return cause?.spec?.label || 'Killed';
   }
 
   /**
@@ -3506,7 +3711,7 @@ class Game {
       this._lavaTimer = (this._lavaTimer || 0) + dt;
       if (this._lavaTimer > 0.45) {
         this._lavaTimer = 0;
-        if (this._takeHit(3, 'The lava was not as shallow as it looked.', false, 'lava')) return;
+        if (this._takeHit(3, 'Lava', false, 'lava')) return;
       }
       this.particles.embers(p.eye, p.up, 3, 1.1);
     } else if (p.burning > 0) {
@@ -3517,7 +3722,7 @@ class Game {
         this._burnTimer = (this._burnTimer || 0) + dt;
         if (this._burnTimer > 0.9) {
           this._burnTimer = 0;
-          if (this._takeHit(1, 'You burned.', false, 'fire')) return;
+          if (this._takeHit(1, 'Burned', false, 'fire')) return;
         }
         if (Math.random() < dt * 12) this.particles.embers(p.eye, p.up, 1, 0.8);
       }
@@ -3560,7 +3765,7 @@ class Game {
     this._contactTimer = (this._contactTimer || 0) - dt;
     if (this._contactTimer > 0) return;
     this._contactTimer = CONTACT_PERIOD;
-    this._takeHit(hurt, 'The desert was sharper than it looked.', false, 'blow');
+    this._takeHit(hurt, 'Cactus', false, 'blow');
   }
 
   /**

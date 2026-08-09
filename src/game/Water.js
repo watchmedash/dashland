@@ -8,15 +8,18 @@
 // every connected air cell it can reach — one dug block and the ocean drains
 // across the whole planet. So each cell carries a level: a source is at LEVEL_MAX
 // and every sideways step costs one, dying out a fixed distance from its origin.
-// Falling water keeps its level, which is what lets a waterfall reach the bottom
-// of a shaft and still spread there.
+// Falling water lands full, which is what lets a waterfall reach the bottom of a
+// shaft and spread there as if it had come straight off a spring — and what lets
+// a stepped slope carry a stream all the way down instead of charging it a level
+// per step until it dies on ground that is still falling away in front of it.
+// The cap is therefore six columns *per drop*, not six columns per breach.
 //
 // Only cells adjacent to a change are ever examined. The active set is seeded by
 // edits and drains to empty once the water settles, so a still lake costs nothing.
 
 import { D } from '../world/Constants.js';
 import { colNeighbor } from '../world/Sphere.js';
-import { ID, RENDER_TYPE, R_LIQUID, IS_SOLID } from '../world/Blocks.js';
+import { ID, RENDER_TYPE, R_LIQUID, IS_SOLID, IS_REPLACEABLE, IS_SUBMERGED } from '../world/Blocks.js';
 
 /** A full source block. Sideways flow loses one level per cell. */
 const LEVEL_MAX = 7;
@@ -71,7 +74,36 @@ export class Water {
   }
 
   /**
-   * A liquid can move into air, and into a shallower pool of *its own kind*.
+   * Is this cell one the current can simply take? Air, or a plant it washes
+   * away.
+   *
+   * **The rule: flowing liquid destroys any cross plant that is not
+   * IS_SUBMERGED.** A tuft of grass, a daisy, a sapling, a fern, a stand of
+   * wheat — a stem is not a dam, and having one stop a river dead was the most
+   * visible way this world contradicted itself, because the very same tuft is
+   * something you walk through without slowing down.
+   *
+   * The reef is exempt and the exemption is not a special case bolted on: coral,
+   * kelp, sea grass, sponges, clams and the abyssal anemone are flagged
+   * `submerged` precisely because water is the only place they can be, and the
+   * sea they grow in is made of the liquid that would otherwise be washing them
+   * out. A rule that mowed them would empty every reef the first time anything
+   * disturbed the ocean nearby. Everything else on the planet that renders as a
+   * cross goes, including all sixteen of the new land flora, because the test is
+   * the render class and not a list of names.
+   *
+   * Washing is destruction, not a harvest: nothing is dropped. Drops are the
+   * business of the two paths that break a block on the player's behalf, and
+   * this sim has no route to them — the callback it is handed is `_applyEdits`,
+   * which is deliberately the plumbing and nothing else.
+   */
+  _washes(id) {
+    return IS_REPLACEABLE[id] === 1 && IS_SUBMERGED[id] === 0;
+  }
+
+  /**
+   * A liquid can move into air or a washable plant, and into a shallower pool of
+   * *its own kind*.
    *
    * The second half used to be "any liquid", and combined with `_place` always
    * writing `ID.water` it meant a disturbed lava flow spread as water and
@@ -83,6 +115,7 @@ export class Water {
   _canEnter(col, k, level, self) {
     const id = this.planet.at(col, k);
     if (id === 0) return true;
+    if (this._washes(id)) return true;
     if (RENDER_TYPE[id] !== R_LIQUID) return false;
     if (id !== self) return false;
     return this.levelAt(col, k) < level - 1;
@@ -136,7 +169,10 @@ export class Water {
       if (n < 0) continue;
       const id = this.planet.at(n, k);
       let fall;
-      if (id === 0) fall = mine;                        // open side: all of it
+      // A plant the flow is about to wash away is an open side, not a wall: it
+      // has to read the same way here as it does in `_canEnter`, or the push a
+      // swimmer feels points somewhere the water is not actually going.
+      if (id === 0 || this._washes(id)) fall = mine;    // open side: all of it
       else if (RENDER_TYPE[id] !== R_LIQUID) continue;  // a wall diverts, it doesn't pull
       else if (id !== self) continue;                   // water does not chase lava
       else {
@@ -225,9 +261,60 @@ export class Water {
       const self = this.planet.at(col, k);
 
       // --- fall straight down first; a liquid prefers a hole to a spread ---
+      //
+      // What lands at the bottom is a FULL cell, whatever the level of the water
+      // that went over the lip, and that one word is the whole of the reported
+      // bug: "it stops flowing even though it can still go down".
+      //
+      // It used to carry `here` down with it, which sounds conservative and is
+      // in fact a slow death sentence. Measured on a staircase — a source at the
+      // top and forty columns of descent below it — water spent a level per
+      // sideways step and never got any of it back at a drop, so it ran six
+      // columns and stopped, on ground that fell away in front of it for
+      // another thirty-four. Every step of a stepped slope was charged as if it
+      // were flat. A single cliff showed the same thing in miniature: three
+      // columns along the shelf, over the edge, and only three more at the foot
+      // of a fall it had every right to arrive at full strength from.
+      //
+      // A drop is a fall, not a journey: the water at the bottom of one has as
+      // much behind it as the water at the top, which is why Minecraft calls a
+      // falling cell full and spreads seven from the base of any waterfall. This
+      // is that rule. It does not uncap anything — a landed cell is still a
+      // `level` entry and not a source, so it still dries the moment its feed is
+      // cut, and it still spreads at most six columns before the next fall. The
+      // reach of one breach is bounded by six columns per layer of descent, and
+      // there are only D layers.
       if (k > 0 && this._canEnter(col, k - 1, LEVEL_MAX + 1, self)) {
-        this._place(col, k - 1, here === LEVEL_MAX ? LEVEL_MAX : here, edits, self);
+        this._place(col, k - 1, LEVEL_MAX, edits, self);
         // a falling column feeds the cell below and stops spreading sideways
+        continue;
+      }
+
+      // --- a cell in the middle of a fall is still falling, and does not creep -
+      //
+      // This is the other half of landing full, and without it that change is a
+      // flood. Once the shaft under a waterfall has filled, every cell of the
+      // column is a full-strength flowing cell that can no longer go down — so
+      // each of them starts creeping outward six columns of its own, and a
+      // thirty-cell drop becomes a thirty-storey wall of water walking across
+      // the floor. Measured before this line went in: a waterfall onto a plain
+      // spread to ring 20 instead of the ring 10 the geometry allows, and it got
+      // there by feeding the layer below from a fall the layer above had already
+      // paid for.
+      //
+      // Minecraft has a whole separate *state* for this — a falling block, which
+      // only ever flows downward — and the state is derivable here rather than
+      // stored: liquid above me and liquid below me means I am the middle of a
+      // column, not the head or the foot of one. The foot (something solid
+      // underneath) is exactly the cell that should spread, and it does, at the
+      // full strength it landed with. The head has air above it and spreads
+      // normally.
+      //
+      // Sources are exempt and have to be: a lake is a solid block of them and
+      // every interior cell has liquid on both sides, so reading this rule on a
+      // source would stop a shoreline from ever flowing anywhere.
+      if (!this.sources.has(key)
+        && this.planet.at(col, k + 1) === self && this.planet.at(col, k - 1) === self) {
         continue;
       }
 

@@ -1,23 +1,37 @@
 /* Mojazer.
 
-   Two materials, and everything in the game is made of one of them.
+   One material, in two weights.
 
-   PLATE is the HUD: dark, faceted, lit from above, with a hard outer keyline
-   and a bright inner one. It sits over a moving 3D world, so it has to hold
-   its own contrast against grass, snow, night and lava without ever becoming
-   an opaque box that eats the view. Small radii, visible bevels, warm accent.
+   PARCHMENT is the whole game: menus, inventory, the tree, and the HUD. Warm,
+   light, a fibre tooth, a bright top edge. The HUD used to be its opposite, a
+   dark plate, on the argument that a bright world needs a dark instrument over
+   it. That argument lost: a player who has seen both wants the corner of the
+   screen to be made of the same thing the inventory is made of, and a HUD that
+   is a different material to every screen behind it is two products.
 
-   PARCHMENT is every screen the game stops for: menus, inventory, the tree.
-   Warm, light, and physically the opposite of the plate, so "the game is
-   paused" is legible before a single word is read.
+   So the HUD is parchment now, in the over-the-world weight, and the legibility
+   the plate was buying is bought three other ways instead:
+     - the sheet is near-opaque, so grass, water and a night sky are behind it
+       rather than mixed into it;
+     - the outer keyline is *dark*, not warm. A warm hairline is invisible on
+       sand and on snow, and those two are the whole failure case. A dark line
+       plus a tight black drop shadow is what holds the edge on a white field;
+     - mass stays low. Nothing grew: the vitals got narrower, and the map, the
+       chips and the hotbar occupy exactly the boxes they did before.
+
+   PLATE survives on the screens the game stops for that are not workspaces:
+   the title, pause, death and the character picker, which sit on a dimmed
+   world and are meant to read as the world going away.
 
    Two rules the HUD side obeys without exception, because it runs at 60fps
    over a 1.6GB heap:
      1. No `backdrop-filter` anywhere inside #hud. It was on the chips, the
         vitals, the hotbar, the toasts and the hint, all of which are written
         every frame, and every one of them forced a backdrop re-blur on the
-        compositor. The plate gets its depth from layered gradients and
-        shadows, which are free once painted.
+        compositor. The sheet gets its depth from layered gradients and
+        shadows, which are free once painted. This is also why the HUD sheet is
+        near-opaque rather than a frosted one: frosted is a blur, and a blur
+        over a moving world is a recomposite every frame.
      2. No `filter` on anything that changes per frame. Drop-shadows are baked
         into `text-shadow`/`box-shadow` instead, and the only filters left are
         on one-shot animations (the crit flash) and static glyphs. */
@@ -61,10 +75,56 @@
      so a selected inventory slot and a selected hotbar slot are one idea. */
   --ring: 0 0 0 2px var(--accent), 0 0 14px -3px rgba(221, 124, 56, .7);
 
+  /* --- parchment, over the world ---------------------------------------
+     The same sheet as every screen, in the weight that has to survive being
+     laid over a lit planet. Three differences from `--paper` and only three,
+     because any more and it stops being the same material:
+       1. a couple of points of translucency, so the world is still behind it;
+       2. a dark outer keyline instead of the warm one. This is the whole
+          reason a light HUD works over a bright world: `--paper-hard` is a
+          warm brown line that disappears completely against sand and snow,
+          which is exactly where the HUD has to hold its edge;
+       3. a tighter, blacker drop shadow, so the sheet sits above the world
+          rather than in it.
+     Everything below is gradients and shadows. Nothing is a filter, because
+     everything wearing these is repainted every frame. */
+  --paper-hud:
+    linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(168deg, rgba(247, 238, 222, .94), rgba(228, 214, 188, .95));
+  --paper-hud-cell:
+    linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(255, 247, 234, .4));
+  --hud-hard: rgba(26, 18, 8, .62);
+  --emboss-hud:
+    0 0 0 1px var(--hud-hard),
+    inset 0 1px 0 rgba(255, 255, 255, .85),
+    inset 0 -1px 0 rgba(122, 94, 54, .2),
+    0 3px 10px -4px rgba(0, 0, 0, .6);
+  --emboss-hud-lift:
+    0 0 0 1px var(--hud-hard),
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    inset 0 -1px 0 rgba(122, 94, 54, .22),
+    0 9px 22px -9px rgba(0, 0, 0, .8);
+  /* A groove cut into a sheet that is over the world. Deeper than `--sunk`,
+     because what shows through a shallow one here is a planet. */
+  --sunk-hud:
+    inset 0 0 0 1px rgba(74, 54, 28, .45),
+    inset 0 2px 4px rgba(52, 36, 16, .34);
+
+  /* The one width the top-left corner is built on. The map is square, the
+     vitals column is the same number across, and the two are one stack. */
+  --map-size: 152px;
+  /* Room for the widest numeral a bar ever shows, which is health at three
+     digits either side of the slash. Every row reserves it, so four bars have
+     four tracks that start and end on the same two pixels. */
+  --vital-num: 44px;
+
   /* --- accent ---------------------------------------------------------- */
   --accent: #dd7c38;
   --accent-2: #f2b45c;
   --accent-hi: #ffd79a;
+  /* The accent, taken down until it is a colour you can set type in on paper.
+     `--accent-2` is a highlight and reads as a smudge at 10px on parchment. */
+  --accent-deep: #a3521a;
   --teal: #3f9d94;
   --danger: #cf4630;
   --good: #63b04b;
@@ -481,7 +541,18 @@ button.primary:hover { filter: brightness(1.05); }
 
 /* What you bring, and how hard it hits back. */
 .cg-pick { margin-top: 14px; }
-.cg-cap { display: block; color: rgba(247, 238, 222, .38); margin-bottom: 7px; }
+.cg-cap {
+  display: flex; align-items: baseline; justify-content: space-between;
+  color: rgba(247, 238, 222, .38); margin-bottom: 7px;
+}
+/* How much of the choice is left, on the caption. Quiet until it is spent, and
+   then the same warm the live tiles are, so the number and the tiles that have
+   gone dead are visibly the same statement. */
+#cg-kit-count {
+  font: 700 var(--fs-xs) var(--mono); letter-spacing: 0;
+  color: rgba(247, 238, 222, .45);
+}
+#cg-kit-count.full { color: var(--accent-2); }
 .cg-kit { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
 .cg-opt {
   position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px;
@@ -504,9 +575,38 @@ button.primary:hover { filter: brightness(1.05); }
   box-shadow: 0 8px 18px -10px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .55);
 }
 .cg-opt.on .qty { color: rgba(42, 22, 7, .6); }
-/* Nothing left to spend: the unpicked tiles go quiet rather than disappear, so
-   the shape of the choice stays on screen. */
-.cg-kit.full .cg-opt:not(.on) { opacity: .3; }
+/* Nothing left to spend. The unpicked tiles stay on screen, because the shape
+   of the choice is part of reading it, but they have to say they are shut and
+   not merely say it faintly: a tile at 30% opacity still looks like a tile you
+   press, so a fourth click read as the screen being broken. They go the other
+   way instead. The face is pressed *into* the card rather than raised out of
+   it, the lit top edge that makes every other tile look pressable is gone, the
+   art is knocked back, and the cursor stops offering. Same three moves the
+   disabled buttons on the parchment screens make, which is what makes this
+   read as "not now" rather than as a rendering fault. */
+.cg-kit.full .cg-opt:not(.on) {
+  cursor: default;
+  color: rgba(247, 238, 222, .26);
+  background: rgba(0, 0, 0, .3);
+  border-color: rgba(255, 255, 255, .04);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, .55);
+}
+.cg-kit.full .cg-opt:not(.on) img { opacity: .28; }
+.cg-kit.full .cg-opt:not(.on) .qty { color: rgba(247, 238, 222, .2); }
+.cg-kit.full .cg-opt:not(.on):hover { color: rgba(247, 238, 222, .26); }
+/* And the other half of the same sentence, which is the half that was missing:
+   the three tiles that *are* on stay lit, keep the pointer, and are the only
+   things on the row that answer it. A full row where everything looks equally
+   inert says "broken"; a full row where three tiles are clearly the live ones
+   says "press one of these back off", which is the actual way out and the way
+   the torches get replaced. */
+.cg-kit.full .cg-opt.on { cursor: pointer; }
+.cg-kit.full .cg-opt.on:hover {
+  box-shadow:
+    0 0 0 2px var(--accent-hi),
+    inset 0 1px 0 rgba(255, 255, 255, .6),
+    0 8px 18px -10px rgba(221, 124, 56, .95);
+}
 
 /* Three buttons in one bar. A segmented control says "pick exactly one" by its
    shape, which is the whole reason there is no sentence under it. */
@@ -576,31 +676,33 @@ button.primary:hover { filter: brightness(1.05); }
 }
 
 /* --- status chips (top right) --------------------------------------------
-   One rail rather than four floating pills: a single plate with hairline
-   dividers, so the corner reads as one instrument instead of a row of tags. */
+   One rail rather than four floating pills: a single sheet with the cells cut
+   out of it, so the corner reads as one instrument instead of a row of tags.
+   The 1px gap is the sheet showing between the cells, which is the same trick
+   the inventory tray uses one size up. */
 #status-bar {
   position: absolute; top: 10px; right: 10px;
   display: flex; align-items: stretch; gap: 1px;
   padding: 1px; border-radius: var(--r-md);
-  background: var(--plate); box-shadow: var(--bevel);
+  background: var(--paper-hud); box-shadow: var(--emboss-hud);
 }
 .chip {
   display: flex; align-items: center; gap: 6px;
   height: 22px; padding: 0 9px; border-radius: 2px;
   font: 700 var(--fs-xs)/1 var(--font);
   letter-spacing: var(--ls-cap); text-transform: uppercase;
-  color: rgba(255, 255, 255, .82);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
-  background: rgba(255, 255, 255, .035);
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+  background: var(--paper-hud-cell);
 }
 .chip .dial {
   width: 12px; height: 12px; border-radius: 50%; display: block; flex: none;
   background: conic-gradient(from 180deg, #0d1224 0deg, #1b2a4d 55deg, #6fa4e0 95deg, #ffd9a0 140deg, #fff3d8 180deg, #ffc07a 220deg, #4a3a5e 265deg, #0d1224 330deg);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .22) inset, 0 0 6px rgba(255, 210, 150, .25);
+  box-shadow: 0 0 0 1px rgba(38, 24, 8, .5), 0 1px 0 rgba(255, 255, 255, .6);
   transition: transform .5s linear;
 }
-#chip-clock #clock-text { font-family: var(--mono); letter-spacing: .04em; color: #fff; }
-#chip-biome { color: var(--accent-hi); }
+#chip-clock #clock-text { font-family: var(--mono); letter-spacing: .04em; color: var(--ink); }
+#chip-biome { color: var(--accent-deep); }
 
 /* bottom cluster */
 #bottom {
@@ -623,9 +725,9 @@ button.primary:hover { filter: brightness(1.05); }
    instrument bezel and cost one static background-image. */
 #minimap {
   position: absolute; top: 10px; left: 10px;
-  width: 152px; height: 152px; border-radius: var(--r-md);
-  background: #060910;
-  box-shadow: var(--bevel);
+  width: var(--map-size); height: var(--map-size); border-radius: var(--r-md);
+  background: var(--paper-hud);
+  box-shadow: var(--emboss-hud);
   overflow: hidden;
 }
 /* 148% of the frame, centred. That number is the whole fix and it is not a
@@ -642,25 +744,37 @@ button.primary:hover { filter: brightness(1.05); }
   width: 148%; height: 148%; margin: -74% 0 0 -74%;
   transform-origin: 50% 50%;
 }
-/* Vignette plus the corner ticks, in one static layer over the turning canvas.
-   The gradient is square-cornered now, so it darkens the edges of a frame
-   rather than the rim of a circle. */
+/* The mount, the corner ticks and the vignette, in one static layer over the
+   turning canvas. This is also where the map joins the rest of the HUD: the
+   canvas fills the whole frame and always will, so the parchment surround is
+   drawn *on top of* it as an inset ring rather than as padding, which would
+   have changed the box the 148% is a percentage of. Three inset rings, in
+   paint order: the sheet, a dark hairline cut into its inside edge, and a lit
+   line under that. The dark one is the important one. A map is a picture of
+   terrain, so parts of it are always going to be the colour of whatever it is
+   sitting on, and that hairline is what keeps a snowfield on the map from
+   running into the parchment around it. */
 #minimap::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
+  border-radius: var(--r-md);
+  box-shadow:
+    inset 0 0 0 4px rgba(243, 233, 214, .96),
+    inset 0 0 0 5px rgba(38, 26, 12, .68),
+    inset 0 0 0 6px rgba(255, 255, 255, .3);
   background:
-    /* four corner brackets, two arms each */
-    linear-gradient(var(--accent-2), var(--accent-2)) left 4px top 4px / 10px 2px no-repeat,
-    linear-gradient(var(--accent-2), var(--accent-2)) left 4px top 4px / 2px 10px no-repeat,
-    linear-gradient(var(--accent-2), var(--accent-2)) right 4px top 4px / 10px 2px no-repeat,
-    linear-gradient(var(--accent-2), var(--accent-2)) right 4px top 4px / 2px 10px no-repeat,
-    linear-gradient(var(--accent-2), var(--accent-2)) left 4px bottom 4px / 10px 2px no-repeat,
-    linear-gradient(var(--accent-2), var(--accent-2)) left 4px bottom 4px / 2px 10px no-repeat,
-    linear-gradient(var(--accent-2), var(--accent-2)) right 4px bottom 4px / 10px 2px no-repeat,
-    linear-gradient(var(--accent-2), var(--accent-2)) right 4px bottom 4px / 2px 10px no-repeat,
-    /* and the vignette under them */
-    linear-gradient(180deg, rgba(4, 7, 14, .55), rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 78%, rgba(4, 7, 14, .6)),
-    linear-gradient(90deg, rgba(4, 7, 14, .55), rgba(0, 0, 0, 0) 22%, rgba(0, 0, 0, 0) 78%, rgba(4, 7, 14, .6));
-  opacity: .9;
+    /* four corner brackets, two arms each, inside the mount */
+    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px top 7px / 9px 2px no-repeat,
+    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px top 7px / 2px 9px no-repeat,
+    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px top 7px / 9px 2px no-repeat,
+    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px top 7px / 2px 9px no-repeat,
+    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px bottom 7px / 9px 2px no-repeat,
+    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px bottom 7px / 2px 9px no-repeat,
+    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px bottom 7px / 9px 2px no-repeat,
+    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px bottom 7px / 2px 9px no-repeat,
+    /* and the vignette under them, warm rather than black now, so the edge of
+       the picture settles into the mount instead of being burnt away from it */
+    linear-gradient(180deg, rgba(58, 40, 18, .34), rgba(0, 0, 0, 0) 20%, rgba(0, 0, 0, 0) 80%, rgba(58, 40, 18, .36)),
+    linear-gradient(90deg, rgba(58, 40, 18, .34), rgba(0, 0, 0, 0) 20%, rgba(0, 0, 0, 0) 80%, rgba(58, 40, 18, .36));
 }
 /* Where north is. It rides the inside of the frame rather than sitting at the
    top, because on a sphere the top of a heading-up map is not north and never
@@ -668,8 +782,14 @@ button.primary:hover { filter: brightness(1.05); }
 #mm-north {
   position: absolute; left: 50%; top: 50%; z-index: 2;
   font: 700 var(--fs-xs)/1 var(--font); letter-spacing: .06em;
-  color: var(--accent-2);
-  text-shadow: 0 0 5px rgba(0, 0, 0, .98), 0 1px 2px rgba(0, 0, 0, .95);
+  /* Dark on a light halo, not light on a dark one. The pip rides the inside of
+     the frame and the frame passes over every biome the map can draw, so the
+     halo has to be the thing that is never the colour of terrain. Parchment
+     is; black was, when the map was dark, and is not now. */
+  color: #2b1a08;
+  text-shadow:
+    0 0 4px rgba(247, 238, 222, .95), 0 0 2px rgba(247, 238, 222, 1),
+    0 1px 0 rgba(255, 255, 255, .8);
   pointer-events: none;
 }
 /* The player: a chevron, always pointing at the top of the frame, because the
@@ -677,8 +797,11 @@ button.primary:hover { filter: brightness(1.05); }
 #mm-me {
   position: absolute; left: 50%; top: 50%; z-index: 2;
   width: 0; height: 0; margin: -7px 0 0 -5px;
-  border: 5px solid transparent; border-bottom: 9px solid #fff;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
+  border: 5px solid transparent; border-bottom: 9px solid #2b1a08;
+  /* Painted once and never rewritten, which is why a filter is allowed on it
+     at all. Same inversion as the north pip: a dark arrow on a pale outline
+     survives snow, sand and open water, and a white one does not. */
+  filter: drop-shadow(0 0 2px rgba(255, 250, 240, .95)) drop-shadow(0 1px 1px rgba(255, 255, 255, .9));
   pointer-events: none;
 }
 
@@ -691,8 +814,19 @@ button.primary:hover { filter: brightness(1.05); }
   width: 320px; pointer-events: none;
   transition: opacity .25s linear;
 }
+/* The strip is a piece of the same sheet, and the mask is what makes it one:
+   the parchment is painted on the masked element, so the material fades out at
+   both ends exactly where the letters do, instead of the letters sliding off
+   the end of a hard-edged box. That is also why the keyline here is inset and
+   not an outer ring: a mask clips to the border box and would cut an outer
+   shadow off entirely. */
 .cmp-win {
-  position: relative; height: 28px; overflow: hidden;
+  position: relative; height: 26px; overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--paper-hud);
+  box-shadow:
+    inset 0 0 0 1px rgba(38, 26, 12, .5),
+    inset 0 1px 0 rgba(255, 255, 255, .8);
   /* Feather both ends, so a letter arrives and leaves rather than popping in
      at the edge of a box. */
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
@@ -701,61 +835,78 @@ button.primary:hover { filter: brightness(1.05); }
 .cmp-track { position: absolute; left: 0; top: 0; height: 100%; will-change: transform; }
 .cmp-track i, .cmp-track b {
   position: absolute; transform: translateX(-50%);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .98);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .75);
 }
-.cmp-track i { top: 11px; width: 1px; height: 6px; background: rgba(255, 255, 255, .38); }
+.cmp-track i { top: 10px; width: 1px; height: 6px; background: rgba(74, 54, 28, .45); }
 .cmp-track b {
-  top: 7px; font: 700 var(--fs-md)/1 var(--font); letter-spacing: .1em;
-  color: #fff;
+  top: 6px; font: 700 var(--fs-md)/1 var(--font); letter-spacing: .1em;
+  color: var(--ink);
 }
-.cmp-track b.inter { font-size: var(--fs-xs); font-weight: 700; top: 10px; color: rgba(255, 255, 255, .52); }
+.cmp-track b.inter { font-size: var(--fs-xs); font-weight: 700; top: 9px; color: var(--ink-soft); }
 .cmp-notch {
   position: absolute; left: 50%; top: 0;
   width: 0; height: 0; margin-left: -5px;
-  border: 5px solid transparent; border-top: 7px solid var(--accent-2);
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .9));
+  border: 5px solid transparent; border-top: 7px solid var(--accent-deep);
+  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, .8));
 }
-/* Inside the polar cap there is no bearing to show. One word. */
+/* Inside the polar cap there is no bearing to show. One word, and it carries
+   its own piece of sheet because the strip it would otherwise sit on is gone
+   by the time it is up. */
 .cmp-polar {
-  display: none; position: absolute; left: 0; right: 0; top: 9px;
-  text-align: center; color: rgba(255, 255, 255, .45);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
+  display: none; position: absolute; left: 50%; top: 0;
+  transform: translateX(-50%);
+  padding: 6px 14px; border-radius: var(--r-md);
+  background: var(--paper-hud); box-shadow: var(--emboss-hud);
+  color: var(--ink-soft);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .75);
 }
 #compass.polar { opacity: 1 !important; }
 #compass.polar .cmp-win, #compass.polar .cmp-notch { display: none; }
 #compass.polar .cmp-polar { display: block; }
 
 /* --- vitals (top left, under the map) -------------------------------------
-   Every bar is one plate: icon well, track, number, all inside a single bevel,
-   so four of them stack into a column rather than into twelve floating pieces.
-   The track carries a static tick pattern; only the fill's width is written
-   per frame. */
+   Every bar is one sheet: icon, groove, number, inside a single keyline, so
+   four of them stack into a column rather than into twelve floating pieces.
+   The groove carries a static tick pattern; only the fill's width is written
+   per frame.
+
+   The column is exactly the width of the map above it, and that is the whole
+   point of the fixed pieces below. A 152px-wide map over a 257px-wide bar was
+   two objects in one corner: the eye reads the left edge they share and then
+   the right edge they do not, and the stack falls apart at the second one. So
+   the row is built out of three fixed widths and one that takes what is left:
+   the icon and the numeral never change size between rows, which is what puts
+   all four tracks on the same two pixels, and the track is `flex: 1` so the
+   arithmetic lives in one place and the media query below can change the
+   width without touching any of it. */
 #vitals {
   position: absolute; top: 172px; left: 10px;
+  width: var(--map-size);
   display: flex; flex-direction: column; gap: 4px;
 }
 /* ...and back in the corner when there is no map above them. Driven off a
    class on #hud because the map is `display: none` and cannot push anything. */
 #hud.no-map #vitals { top: 10px; }
 .vital {
-  display: flex; align-items: center; gap: 8px;
-  padding: 3px 9px 3px 4px; border-radius: var(--r-md);
-  background: var(--plate); box-shadow: var(--bevel);
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px 3px 3px; border-radius: var(--r-md);
+  background: var(--paper-hud); box-shadow: var(--emboss-hud);
 }
 .vital.hidden { display: none; }
 .vital .v-ico {
-  width: 22px; height: 22px; flex: none;
-  background: no-repeat center/17px 17px;
+  width: 18px; height: 18px; flex: none;
+  background: no-repeat center/16px 16px;
   border-radius: var(--r-sm);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07);
 }
 .vital .v-track {
   position: relative; display: block;
-  width: 164px; height: 13px; border-radius: 2px;
+  flex: 1; min-width: 0; height: 11px; border-radius: 2px;
+  /* Ticks in percent rather than pixels, because the track no longer has a
+     width of its own to divide up. Four marks either way. */
   background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, .07) 0 1px, rgba(0, 0, 0, 0) 1px 16.4px),
-    linear-gradient(180deg, rgba(0, 0, 0, .62), rgba(0, 0, 0, .48));
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7), 0 1px 0 rgba(255, 255, 255, .06);
+    repeating-linear-gradient(90deg, rgba(74, 54, 28, .2) 0 1px, rgba(0, 0, 0, 0) 1px 25%),
+    rgba(122, 94, 54, .16);
+  box-shadow: var(--sunk-hud);
   overflow: hidden;
 }
 .vital .v-track b {
@@ -763,34 +914,34 @@ button.primary:hover { filter: brightness(1.05); }
   /* The width transition is what makes a hit read as a hit: an instant jump at
      60fps is easy to miss entirely. */
   transition: width .16s cubic-bezier(.3, .8, .4, 1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), inset 0 -3px 6px -3px rgba(0, 0, 0, .6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), inset 0 -3px 6px -3px rgba(74, 40, 16, .5);
 }
 .vital .v-num {
-  font: 700 var(--fs-sm)/1 var(--mono); font-style: normal;
-  color: rgba(255, 255, 255, .88);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .9);
-  min-width: 42px; text-align: right;
+  font: 700 var(--fs-xs)/1 var(--mono); font-style: normal;
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+  width: var(--vital-num); flex: none; text-align: right;
 }
 #v-health   .v-track b { background: linear-gradient(180deg, #ff7a6f, #e2453f 45%, #a81e1a); }
 #v-food     .v-track b { background: linear-gradient(180deg, #ffd07a, #e8a83f 45%, #a55f0e); }
 #v-stamina  .v-track b { background: linear-gradient(180deg, #ffe6b0, var(--accent-2) 45%, #b5811a); }
 #v-breath   .v-track b { background: linear-gradient(180deg, #c8ecff, #79c8f0 45%, #2372a3); }
 
-/* Low health is a different-looking HUD, not a shorter bar. The whole plate
-   turns red, the keyline glows, and the fill breathes. Cheap: one box-shadow
-   swap and a brightness keyframe on a 164px element. */
+/* Low health is a different-looking HUD, not a shorter bar. The sheet itself
+   goes to a scorched red, the keyline glows, and the row breathes. Cheap: one
+   box-shadow swap on a 152px element, and no filter anywhere in it. */
 #v-health.critical {
-  background: linear-gradient(180deg, rgba(86, 22, 22, .86), rgba(38, 8, 8, .9));
+  background: linear-gradient(180deg, rgba(250, 214, 202, .95), rgba(232, 172, 158, .95));
   box-shadow:
-    0 0 0 1px rgba(255, 90, 70, .55),
-    inset 0 1px 0 rgba(255, 180, 160, .3),
-    0 0 18px -4px rgba(226, 69, 63, .7);
+    0 0 0 1px rgba(120, 26, 14, .8),
+    inset 0 1px 0 rgba(255, 240, 234, .9),
+    0 0 18px -4px rgba(190, 44, 30, .8);
   animation: vital-alarm 1.15s ease-in-out infinite;
 }
-#v-health.critical .v-num { color: #ffd9d2; }
+#v-health.critical .v-num { color: #6d1408; text-shadow: 0 1px 0 rgba(255, 240, 234, .8); }
 @keyframes vital-alarm {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 90, 70, .45), inset 0 1px 0 rgba(255, 180, 160, .25), 0 0 14px -6px rgba(226, 69, 63, .55); }
-  50%      { box-shadow: 0 0 0 1px rgba(255, 130, 110, .8), inset 0 1px 0 rgba(255, 200, 180, .4), 0 0 26px -4px rgba(240, 90, 70, .9); }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(120, 26, 14, .7), inset 0 1px 0 rgba(255, 240, 234, .85), 0 0 14px -6px rgba(190, 44, 30, .6); }
+  50%      { box-shadow: 0 0 0 1px rgba(170, 34, 18, .95), inset 0 1px 0 rgba(255, 246, 242, .95), 0 0 26px -4px rgba(226, 60, 40, .95); }
 }
 @media (prefers-reduced-motion: reduce) {
   #v-health.critical { animation: none; }
@@ -798,11 +949,13 @@ button.primary:hover { filter: brightness(1.05); }
 
 /* --- hotbar --------------------------------------------------------------
    The one thing on screen the player's hands are always on, so it is the
-   heaviest plate in the game: a deeper base, a wider bevel, and a selected
-   cell that lifts clear of the row with a warm rim and a notch above it. */
+   heaviest sheet in the game: the deepest shadow, and a selected cell that
+   lifts clear of the row with a warm rim and a notch above it. It is the same
+   tray of cells the inventory screen opens onto, which is now legible without
+   opening the inventory. */
 #hotbar, #offhand-bar {
   display: flex; gap: 3px; padding: 4px; border-radius: var(--r-md);
-  background: var(--plate-solid); box-shadow: var(--bevel-lift);
+  background: var(--paper-hud); box-shadow: var(--emboss-hud-lift);
   pointer-events: auto;
 }
 /* The offhand hangs off the row rather than sitting inside it, so the hotbar
@@ -811,39 +964,39 @@ button.primary:hover { filter: brightness(1.05); }
 #offhand-bar { position: absolute; right: 100%; bottom: 0; margin-right: 7px; }
 .slot {
   position: relative; width: 42px; height: 42px; border-radius: var(--r-sm);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .035));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), inset 0 0 0 1px rgba(0, 0, 0, .35);
+  background: var(--paper-hud-cell);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 0 0 1px rgba(122, 94, 54, .4);
   display: grid; place-items: center; cursor: pointer;
   transition: transform .13s cubic-bezier(.2, .9, .3, 1.35), box-shadow .16s, background .16s;
 }
 .slot img { width: 34px; height: 34px; pointer-events: none; }
 .slot .num {
   position: absolute; top: 2px; left: 4px;
-  font: 700 var(--fs-2xs) var(--mono); color: rgba(255, 255, 255, .3);
+  font: 700 var(--fs-2xs) var(--mono); color: var(--ink-faint);
 }
 .slot .count {
   position: absolute; right: 3px; bottom: 1px;
-  font: 700 var(--fs-sm) var(--mono); color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .98), 0 0 3px rgba(0, 0, 0, .9);
+  font: 700 var(--fs-sm) var(--mono); color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .95), 0 0 3px rgba(255, 255, 255, .9);
   pointer-events: none;
 }
-.slot .wear { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, .7); overflow: hidden; }
-.slot .wear i { display: block; height: 100%; background: #6ec25a; }
+.slot .wear { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 3px; border-radius: 2px; background: rgba(74, 54, 28, .3); overflow: hidden; }
+.slot .wear i { display: block; height: 100%; background: linear-gradient(180deg, #82d06b, #3f8232); }
 .slot.active {
-  background: linear-gradient(180deg, rgba(255, 216, 160, .3), rgba(255, 180, 100, .12));
+  background: linear-gradient(180deg, #fff6e6, rgba(255, 219, 168, .6));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .4),
-    0 0 0 2px var(--accent-2),
-    0 0 16px -2px rgba(242, 180, 92, .7);
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    0 0 0 2px var(--accent),
+    0 0 16px -2px rgba(221, 124, 56, .7);
   transform: translateY(-3px);
 }
-.slot.active .num { color: rgba(255, 231, 195, .8); }
+.slot.active .num { color: var(--accent-deep); }
 /* The notch above the selected cell: a small warm wedge that points at it, so
    which slot is live is legible from the corner of the eye. */
 .slot.active::before {
   content: ''; position: absolute; left: 50%; bottom: 100%; margin: 0 0 5px -4px;
   width: 0; height: 0;
-  border: 4px solid transparent; border-top: 5px solid var(--accent-2);
+  border: 4px solid transparent; border-top: 5px solid var(--accent);
 }
 
 /* Sits on top of the bottom cluster and grows upward, so the hint and the item
@@ -854,9 +1007,14 @@ button.primary:hover { filter: brightness(1.05); }
   display: flex; flex-direction: column; align-items: center; gap: 5px;
 }
 
+/* The two lines above the hotbar carry no sheet, on purpose: they arrive and
+   leave, and a piece of parchment flashing in and out over the middle of the
+   screen is a bigger event than the thing it is announcing. They are set in
+   the parchment's own colour instead, over a dark halo, which is the one place
+   in the HUD where light-on-dark is still the right answer. */
 #item-name {
   font-size: var(--fs-lg); font-weight: 700; letter-spacing: .03em; white-space: nowrap;
-  color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .98), 0 0 2px rgba(0, 0, 0, .9);
+  color: var(--parchment); text-shadow: 0 2px 8px rgba(0, 0, 0, .98), 0 0 2px rgba(0, 0, 0, .95);
   opacity: 0; transition: opacity .3s ease;
 }
 #item-name.show { opacity: 1; }
@@ -866,7 +1024,7 @@ button.primary:hover { filter: brightness(1.05); }
 #look-at {
   font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase; white-space: nowrap;
-  color: rgba(255, 255, 255, .68); text-shadow: 0 2px 6px rgba(0, 0, 0, .98);
+  color: rgba(247, 238, 222, .78); text-shadow: 0 2px 6px rgba(0, 0, 0, .98), 0 0 2px rgba(0, 0, 0, .9);
   opacity: 0; transition: opacity .12s ease;
 }
 #look-at.show { opacity: 1; }
@@ -879,9 +1037,9 @@ button.primary:hover { filter: brightness(1.05); }
 .toast {
   padding: 6px 12px 6px 8px; border-radius: var(--r-md);
   font-size: var(--fs-md); font-weight: 600; letter-spacing: .01em;
-  background: var(--plate-solid); color: #fff;
-  box-shadow: var(--bevel);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+  background: var(--paper-hud); color: var(--ink);
+  box-shadow: var(--emboss-hud-lift);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
   animation: toastIn .25s cubic-bezier(.2, .9, .3, 1.2);
   display: flex; align-items: center; gap: 9px;
 }
@@ -889,7 +1047,7 @@ button.primary:hover { filter: brightness(1.05); }
    telling you something" without a colour field behind the words. */
 .toast::before {
   content: ''; width: 2px; align-self: stretch; border-radius: 2px;
-  background: var(--accent-2); flex: none;
+  background: var(--accent); flex: none;
 }
 .toast img { width: 20px; height: 20px; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-8px) } to { opacity: 1; transform: none } }
@@ -897,18 +1055,19 @@ button.primary:hover { filter: brightness(1.05); }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-8px) } }
 
 #hint {
-  font-size: var(--fs-md); font-weight: 600; color: #fff;
-  background: var(--plate-solid); box-shadow: var(--bevel);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+  font-size: var(--fs-md); font-weight: 600; color: var(--ink);
+  background: var(--paper-hud); box-shadow: var(--emboss-hud);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
   padding: 5px 11px; border-radius: var(--r-md); white-space: nowrap;
 }
 #hint kbd { margin: 0 3px; }
 
 #debug {
   position: absolute; top: 10px; left: 10px;
-  font: var(--fs-sm)/1.6 var(--mono); color: #cfe9dd; text-shadow: 0 1px 2px rgba(0, 0, 0, .95);
-  background: rgba(6, 10, 18, .74); padding: 7px 10px; border-radius: var(--r-md);
-  box-shadow: var(--bevel); white-space: pre;
+  font: var(--fs-sm)/1.6 var(--mono); color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+  background: var(--paper-hud); padding: 7px 10px; border-radius: var(--r-md);
+  box-shadow: var(--emboss-hud); white-space: pre;
 }
 
 /* ── inventory screen ──────────────────────────────────── */
@@ -1365,19 +1524,21 @@ button.danger {
 #cursor-stack span {
   position: absolute; right: -4px; bottom: -5px;
   padding: 1px 4px; border-radius: var(--r-sm);
-  font: 700 var(--fs-sm) var(--mono); color: #fff;
-  background: var(--plate-solid); box-shadow: var(--bevel);
+  font: 700 var(--fs-sm) var(--mono); color: var(--ink);
+  background: var(--paper-hud); box-shadow: var(--emboss-hud);
 }
 
-/* A tooltip is over the world and over a screen both, so it is a plate: the
-   same material as the hotbar it names things for. */
+/* A tooltip is over the world and over a screen both, so it is the same sheet
+   as the hotbar it names things for. Over a screen it is a second sheet on
+   the first, which is exactly what the dark keyline and the lifted shadow are
+   for: they are what separates paper from paper. */
 #tooltip {
   position: fixed; z-index: 132; pointer-events: none;
   padding: 7px 11px; border-radius: var(--r-md);
   font-size: var(--fs-md); font-weight: 600; letter-spacing: .01em;
-  background: var(--plate-solid); color: #f7eede;
-  box-shadow: var(--bevel-lift);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
+  background: var(--paper-hud); color: var(--ink);
+  box-shadow: var(--emboss-hud-lift);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
   transform: translate(14px, 14px); max-width: 230px; line-height: 1.4;
   animation: fade .1s ease;
 }
@@ -1386,9 +1547,10 @@ button.danger {
 #tooltip em {
   display: block; font-style: normal; font-weight: 700;
   font-size: var(--fs-xs); font-family: var(--mono);
-  letter-spacing: .02em; color: var(--accent-2);
+  letter-spacing: .02em; color: var(--accent-deep);
   margin-top: 5px; padding-top: 5px;
-  border-top: 1px solid rgba(255, 255, 255, .12);
+  border-top: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, .7);
 }
 
 /* ── settings + controls ───────────────────────────────── */
@@ -1520,7 +1682,10 @@ kbd {
     inset 0 1px 0 rgba(255, 255, 255, .9),
     0 2px 0 rgba(122, 94, 54, .35);
 }
-.menu-card kbd, #hint kbd, .panel button kbd {
+/* The dark key cap belongs to the plate, which after the HUD came onto
+   parchment means the title, pause and death cards and nothing else. `#hint`
+   used to be listed here and is a sheet now, so it takes the paper cap. */
+.menu-card kbd, .panel button kbd {
   background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .2);
   box-shadow: 0 1.5px 0 rgba(0, 0, 0, .35); color: #f3ece0;
 }
@@ -1549,11 +1714,13 @@ kbd {
   .craft-out .islot { width: 44px; height: 44px; }
   .slot { width: 34px; height: 34px; }
   .slot img { width: 28px; height: 28px; }
-  .vital .v-track { width: 120px; }
-  /* The frame is deliberately not shrunk here. `MAP_RIM` in UI.js is the north
-     pip's offset in pixels, so a frame that changed size under it would put the
-     pip outside its own map. The canvas is a percentage and would follow; the
-     pip would not. */
+  /* The vitals used to be narrowed here, because at 257px across they were a
+     third of a phone. They are the width of the map now, which is 152px, and
+     shrinking them further would only break the stack the change was for.
+     The map frame is deliberately not shrunk either. `MAP_RIM` in UI.js is the
+     north pip's offset in pixels, so a frame that changed size under it would
+     put the pip outside its own map. The canvas is a percentage and would
+     follow; the pip would not, and neither would that. */
 }
 
 ::-webkit-scrollbar { width: 9px; }

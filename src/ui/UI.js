@@ -71,7 +71,20 @@ export const LOADOUT_OPTIONS = [
 /** How many of the above one player may take. */
 export const LOADOUT_MAX = 3;
 
-/** What Begin sends if the player touches nothing: exactly today's six torches. */
+/**
+ * What every new game opens with selected: the torches, every time.
+ *
+ * They are a real pick and they spend one of the three, which leaves two free
+ * and a third press refused. That refusal is the whole reason the tiles say
+ * "shut" as loudly as they do now — see `.cg-kit.full` in the stylesheet —
+ * because the way to take a third tool is to press the torches off, and a
+ * screen that only dims a little when you reach the limit is a screen that
+ * looks broken instead of full.
+ *
+ * `openCharacterPicker` copies this into `_loadout` on every open rather than
+ * only in the constructor, so this really is what a new game starts from and
+ * not what the last visit to the picker happened to leave behind.
+ */
 export const DEFAULT_LOADOUT = ['torches'];
 
 /** Mob damage, and nothing else. The game side owns what the keys are worth. */
@@ -224,6 +237,33 @@ const MAP_RIM = 62;
  * second palette that would then have to be kept in step with the world's.
  */
 const MAP_GAMMA = 1 / 1.3;
+
+/**
+ * The two numbers that give the lifted palette its body back, and why there
+ * are two of them rather than one.
+ *
+ * `MAP_GAMMA` above pulls the biome tints apart, and it does it by pushing
+ * every one of them upward: a gamma under 1 is a curve that raises midtones
+ * and cannot do anything else. Against the old near-black frame that was free,
+ * because everything on the map was lighter than the thing around it. The
+ * frame is parchment now, and a set of raised midtones inside a light mount is
+ * a map you have to look for. Both of these run once per redraw over 13k
+ * samples, which is eight times a second at a dead sprint and nothing at all
+ * while standing still.
+ *
+ * `MAP_SAT` pushes each sample away from its own grey. Terrain tints are all
+ * within a few points of each other in luminance, so colour is what actually
+ * separates a meadow from a beach, and it is the cheapest separation there is.
+ *
+ * `MAP_CONTRAST` then stretches around `MAP_PIVOT` rather than around 0.5. The
+ * pivot sits above the middle deliberately: it is roughly where the lifted
+ * palette's midtones land, so the stretch pulls the bulk of the map *down*
+ * away from the parchment while leaving snow and beach at the top of the range
+ * where they belong.
+ */
+const MAP_SAT = 1.32;
+const MAP_CONTRAST = 1.2;
+const MAP_PIVOT = 0.58;
 
 // --- compass ----------------------------------------------------------------
 
@@ -386,7 +426,8 @@ export class UI {
       deathCause: $('death-cause'), deathLost: $('death-lost'),
       slots: $('slots'), slotList: $('slot-list'), slotsTitle: $('slots-title'),
       chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgStatus: $('cg-status'),
-      cgWho: $('cg-who'), cgKit: $('cg-kit'), cgDiff: $('cg-diff'),
+      cgWho: $('cg-who'), cgKit: $('cg-kit'), cgKitCount: $('cg-kit-count'),
+      cgDiff: $('cg-diff'),
       skills: $('skills'), skPoints: $('sk-points'), skSub: $('sk-sub'),
       skTree: $('sk-tree'),
       confirm: $('confirm'), cfTitle: $('cf-title'), cfBody: $('cf-body'),
@@ -680,10 +721,21 @@ export class UI {
           const gc = bc.grass;
           r = gc[0] * k; g = gc[1] * k; b = gc[2] * k;
         }
+        // Lift, then put the body back: see MAP_SAT. The luminance is the
+        // usual 30/59/11 rather than a mean, because a mean turns the sea and
+        // the grass the same grey and then saturates them both away from it by
+        // the same amount, which is the one thing this pass exists to avoid.
+        let lr = Math.min(1, r) ** MAP_GAMMA;
+        let lg = Math.min(1, g) ** MAP_GAMMA;
+        let lb = Math.min(1, b) ** MAP_GAMMA;
+        const y = 0.30 * lr + 0.59 * lg + 0.11 * lb;
+        lr = (y + (lr - y) * MAP_SAT - MAP_PIVOT) * MAP_CONTRAST + MAP_PIVOT;
+        lg = (y + (lg - y) * MAP_SAT - MAP_PIVOT) * MAP_CONTRAST + MAP_PIVOT;
+        lb = (y + (lb - y) * MAP_SAT - MAP_PIVOT) * MAP_CONTRAST + MAP_PIVOT;
         const o = n * 4;
-        d[o] = Math.min(255, 255 * r ** MAP_GAMMA);
-        d[o + 1] = Math.min(255, 255 * g ** MAP_GAMMA);
-        d[o + 2] = Math.min(255, 255 * b ** MAP_GAMMA);
+        d[o] = Math.max(0, Math.min(255, 255 * lr));
+        d[o + 1] = Math.max(0, Math.min(255, 255 * lg));
+        d[o + 2] = Math.max(0, Math.min(255, 255 * lb));
         d[o + 3] = 255;
       }
     }
@@ -997,6 +1049,16 @@ export class UI {
       this.el.cgCanvas.style.aspectRatio = '1 / 1';
     }
     this._chosen = CHARACTER_IDS.includes(selected) ? selected : CHARACTER_IDS[0];
+    // Every new game opens on the default kit, and this line is the only reason
+    // that is true. The picker is not built fresh each time it is opened: the
+    // UI object outlives it, so `_loadout` used to carry whatever the last
+    // visit left in it. Back out of New Game having picked an axe and a pick,
+    // start New Game again, and the screen came up with two of your three
+    // already spent by a choice you made for a planet that was never built.
+    // Deselect the torches once and every later new game started without them.
+    // That is a picker that "sometimes gives you what you picked", and the
+    // player is the one who has to work out why.
+    this._loadout = [...DEFAULT_LOADOUT];
     // Built here rather than in the constructor: the tiles carry item icons and
     // `setIcons` has not run when the UI is first constructed.
     this._buildKit();
@@ -1141,8 +1203,17 @@ export class UI {
   _syncKit() {
     const kit = this.el.cgKit;
     if (!kit) return;
-    kit.classList.toggle('full', this._loadout.length >= LOADOUT_MAX);
+    const full = this._loadout.length >= LOADOUT_MAX;
+    kit.classList.toggle('full', full);
     for (const b of kit.children) b.classList.toggle('on', this._loadout.includes(b.dataset.key));
+    // How much of the choice is left, as a readout. The screen opens on 1/3
+    // because the torches are already on, and that number is what makes their
+    // being a pick rather than a gift legible before the limit is hit.
+    const count = this.el.cgKitCount;
+    if (count) {
+      count.textContent = `${this._loadout.length}/${LOADOUT_MAX}`;
+      count.classList.toggle('full', full);
+    }
   }
 
   /** Three buttons in a bar. A segmented control needs no caption per option. */

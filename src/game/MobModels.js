@@ -11,6 +11,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 const loader = new GLTFLoader();
 
@@ -104,8 +105,14 @@ export async function prepare(urls) {
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const size = new THREE.Vector3();
     box.getSize(size);
+    // Whether this model has bones, which decides how it is cloned. Measured
+    // here once rather than walked per spawn.
+    let skinned = false;
+    gltf.scene.traverse((n) => { if (n.isSkinnedMesh) skinned = true; });
+
     protos.set(url, {
       scene: gltf.scene,
+      skinned,
       clips: gltf.animations || [],
       height: size.y || 1,
       radius: Math.max(size.x, size.z) * 0.5 || 0.5,
@@ -132,7 +139,16 @@ export const footOffset = (url) => protos.get(url)?.footOffset ?? 0;
 export function instantiate(url) {
   const proto = protos.get(url);
   if (!proto) return null;
-  const root = proto.scene.clone(true);
+  // `Object3D.clone` is wrong for a skinned mesh: it copies the mesh but leaves
+  // it bound to the *prototype's* skeleton, so every instance is driven by one
+  // set of bones and a whole shoal swims in lockstep — or, once the prototype
+  // itself is never animated, does not swim at all. `SkeletonUtils.clone`
+  // rebuilds the bone hierarchy and rebinds. It costs more than a plain clone,
+  // so it is used only where it is needed.
+  //
+  // The animal pack is not skinned — it is eight nodes with clips keying their
+  // rotations — which is why this never came up until the fish arrived.
+  const root = proto.skinned ? cloneSkinned(proto.scene) : proto.scene.clone(true);
   const mixer = new THREE.AnimationMixer(root);
   const actions = {};
   for (const clip of proto.clips) actions[clip.name] = mixer.clipAction(clip);

@@ -626,6 +626,34 @@ const CHAR = (n) => `models/characters/character-${n}.glb`;
  * comment on the swing there.
  */
 const PET_CLIPS = { idle: 'idle', walk: 'walk', run: 'run', graze: 'eat' };
+
+/**
+ * The fish pack, which speaks a different animation language from the animals.
+ *
+ * Its clips are named by the exporter after the armature that owns them, and
+ * there is no walk or eat — a fish only ever swims, at two speeds. So `idle`,
+ * `walk` and `graze` all map to the same unhurried stroke and only a fleeing
+ * fish gets the fast one, which is exactly how a fish reads.
+ */
+const FISH = (n) => `models/fish/fish-${n}.glb`;
+const FISH_A = 'Fish_Armature|Fish_Armature|';
+const FISH_CLIPS = {
+  idle: `${FISH_A}Swimming_Normal`,
+  walk: `${FISH_A}Swimming_Normal`,
+  run: `${FISH_A}Swimming_Fast`,
+  graze: `${FISH_A}Swimming_Normal`,
+  die: `${FISH_A}Death`,
+};
+/**
+ * Which of them swim in ordinary water. The deep-water and predatory models in
+ * the pack — anglerfish, blobfish, goblin shark, shark, piranha, puffer — are
+ * converted and sitting beside these, waiting on species of their own rather
+ * than being dropped into the shallows with the tangs.
+ */
+const FISH_KINDS = [
+  'clownfish', 'bluetang', 'butterflyfish', 'moorishidol',
+  'yellowtang', 'royalgramma', 'koi', 'tetra',
+];
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
   idle: 'idle', walk: 'walk', run: 'sprint', graze: 'idle',
@@ -1071,10 +1099,27 @@ const SPECIES = {
     label: 'Caterpillar', h: 0.22, var: 0.06, hp: 3, spd: 0.55, shy: 0.6, turn: 2.5, accel: 4.0,
     graze: 0.8, idleMin: 2, idleMax: 6,
   }),
-  fish: pet('fish', {
-    label: 'Fish', h: 0.40, var: 0.10, hp: 4, spd: 1.50, shy: 0.9, turn: 4.5, accel: 8.0,
-    graze: 0.3, idleMin: 1, idleMax: 3, drops: [['fish', 1, 1]], aquatic: true,
-  }),
+  /**
+   * One species, many faces.
+   *
+   * `urls` has always been a list the spawner draws a variant from — the husk
+   * uses it for two bodies — so a shoal of clownfish, tangs, koi and tetras
+   * costs no new spawn logic, no new budget and no new save field. What used to
+   * be a single generic fish is now whichever of these the seed picked, and it
+   * stays that fish across a reload because the variant is drawn from the same
+   * seeded stream.
+   *
+   * The pack is skinned, unlike every animal before it, which is what made
+   * `MobModels.instantiate` need a real skeleton clone.
+   */
+  fish: {
+    ...pet('fish', {
+      label: 'Fish', h: 0.40, var: 0.10, hp: 4, spd: 1.50, shy: 0.9, turn: 4.5, accel: 8.0,
+      graze: 0.3, idleMin: 1, idleMax: 3, drops: [['fish', 1, 1]], aquatic: true,
+    }),
+    urls: FISH_KINDS.map(FISH),
+    clips: FISH_CLIPS,
+  },
 
   // --- the one thing that wants you dead ---
   husk: {
@@ -1783,6 +1828,10 @@ export class Mobs {
         // slot binds the WebGLTexture that is already uploaded — and it is
         // writing to it that renders the mob flat white.
         if (m.map && m.emissive) { m.emissiveMap = m.map; m.needsUpdate = true; }
+        // The colour this material was authored with, kept so the damage tint
+        // can multiply into it rather than replace it. Untextured models — the
+        // fish — carry their whole appearance here.
+        if (m.color) m.userData.baseColor = m.color.clone();
       }
       // (No layer juggling here. Putting a mesh on layer 1 to "reach" the
       // entity fill was tried and does nothing: three tests a light's layers
@@ -4943,7 +4992,21 @@ export class Mobs {
     }
     if (mob.tintR !== tr || mob.tintG !== tg || mob.tintB !== tb) {
       mob.tintR = tr; mob.tintG = tg; mob.tintB = tb;
-      for (const m of model.owned) if (m.color) m.color.setRGB(tr, tg, tb);
+      // Multiplied into the material's own colour, not written over it.
+      //
+      // Setting it outright was fine for as long as every animal was textured:
+      // their base colour is white and the coat comes from the map, so
+      // white-times-texture is the texture. The fish are painted in the
+      // material instead — no map at all, one flat colour per fin — and this
+      // line repainted every one of them white on the first frame, so a
+      // clownfish arrived as a pale blob. `baseColor` is captured at spawn for
+      // exactly this.
+      for (const m of model.owned) {
+        if (!m.color) continue;
+        const b = m.userData.baseColor;
+        if (b) m.color.setRGB(tr * b.r, tg * b.g, tb * b.b);
+        else m.color.setRGB(tr, tg, tb);
+      }
     }
 
     // --- block light ---

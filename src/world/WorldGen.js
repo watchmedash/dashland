@@ -10,7 +10,7 @@ import {
 import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
 } from './Sphere.js';
-import { ID, N_BLOCKS } from './Blocks.js';
+import { ID, N_BLOCKS, supports } from './Blocks.js';
 import { placeStructures } from './Structures.js';
 
 /**
@@ -546,6 +546,155 @@ const LAKE_MIN_CELLS = 8;
 const _lakeDir = [0, 0, 0];
 const _lakeCtr = [0, 0, 0];
 const _lakeParts = { f: 0, i: 0, j: 0 };
+
+/**
+ * The reef.
+ *
+ * Two passes, and they are deliberately different shapes because the things
+ * they grow are different things. A reef is a *place* — a bank of coral thirty
+ * or forty columns across with a grass skirt round it, which you either swim
+ * into or you do not — so it comes from a lattice of candidate centres like the
+ * hot springs and the fallen logs. Sea grass and kelp are *cover*, the
+ * underwater equivalent of tall grass, so they come from a per-column roll
+ * modulated by a noise field and they run everywhere the water will take them,
+ * reefs included. Scattering coral the way flora is scattered was the first
+ * thing tried and it reads as confetti: every column of the shelf with one
+ * lonely head on it and nothing that looks like a reef.
+ *
+ * Everything both passes decide is read off the terrain tables (`colHeight`,
+ * `colBiome`, `submerged`, `lakeSurf`) and the column's own `colRng`, never off
+ * what is already standing in the block array — the rule `decorateRegion`
+ * exists to enforce. The one block read is the floor cell itself, which is
+ * terrain by construction.
+ *
+ * --- the two rules that are not taste ------------------------------------
+ *
+ * `floorK` is the topmost solid cell of the column and `topK` the topmost
+ * *water* cell. A prop goes at `floorK + 1` and must satisfy `k < topK`: the
+ * topmost water cell of a column owns that column's sea-surface quad, and
+ * anything standing in it punches a visible hole through the surface of the
+ * ocean. So a reef prop needs two cells of water over the floor, and a kelp
+ * stalk of `n` needs `n + 1`. This is the same rule `main.js` enforces on the
+ * player's own placement path, and it is the reason REEF_DEPTH_MIN is 2 rather
+ * than 1 — the depth band and the topK test have to agree or the shallow rim of
+ * every reef would be rolled and then thrown away.
+ */
+const REEF_LATTICE = 8;
+const REEF_LI = 1;
+const REEF_LJ = 4;
+/**
+ * The ocean's topmost water cell, which is the same layer on every column of
+ * the planet: cell `k` is centred at `R_MIN + k + 0.5` and water is every cell
+ * whose centre is at or under R_SEA, so it is one number and not a search.
+ * Deriving it from the constants rather than scanning the block array for the
+ * last `ID.water` is not an optimisation — a scan would be reading the column
+ * *after* an earlier pass may have written into it.
+ */
+const SEA_TOP_K = Math.floor(R_SEA - R_MIN - 0.5);
+/** Depth below the waterline of the floor cell whose layer is `k`. */
+const depthOfK = (k) => R_SEA - (R_MIN + k + 0.5);
+/**
+ * A reef's radius, in columns.
+ *
+ * Capped under half the lattice on purpose: 2 x 3.4 < 8, so two candidates can
+ * never claim the same column and a reef is never a decision about which of two
+ * overlapping discs went first. Two adjacent candidates that both fire come out
+ * as two heads nearly touching, which is what makes a bank rather than a blob.
+ *
+ * Worst-case reach is 3 columns from the candidate — the largest `|di|` with
+ * `hypot(di, dj) <= 3.4` — against DECOR_MARGIN's 6, and the pass reads nothing
+ * further than it writes: every column of the disc is tested from its own
+ * tables and its own floor cell. There is no sweep of a neighbourhood anywhere
+ * in it, which is the mistake the fallen logs made.
+ *
+ * The upper end is also what the *bathymetry* will take. `oceanDepthAt` puts
+ * the whole 2..12 band inside about eleven columns of continental slope, so a
+ * disc much wider than this has half of itself out of the band whatever it does
+ * and comes apart into fragments. Measured at radius 3.9 the median reef was
+ * two columns; at 3.4 it is eleven.
+ */
+const REEF_R_MIN = 2.6;
+const REEF_R_MAX = 3.4;
+/** How many lattice candidates in warm water actually carry a reef. */
+const REEF_CHANCE = 0.85;
+/**
+ * The depth band, in blocks below R_SEA, measured to the floor cell's centre.
+ *
+ * 2 is the shallowest a prop can stand without owning the surface quad (see
+ * above). 12 is where `fillColumn`'s seabed goes from clay and sand to slate
+ * and basalt and the light stops — the same line the material bands already
+ * draw, reused rather than re-invented.
+ */
+const REEF_DEPTH_MIN = 2.0;
+const REEF_DEPTH_MAX = 12.0;
+/**
+ * Where reefs are, as a function of the seabed temperature term.
+ *
+ * `_seaTemp` is the *same* expression `fillColumn` uses to decide whether a
+ * shallow is polar, temperate or warm — factored out rather than copied, so a
+ * reef cannot end up on a climate the ground it stands on disagrees with.
+ * 0.45 is exactly `fillColumn`'s "warm sea" threshold, the one that lays pale
+ * sand and moss; reefs fade in from 0.30 so the edge of a reef province is a
+ * thinning rather than a line, and are at full strength by 0.80.
+ */
+const REEF_TEMP_MIN = 0.30;
+const REEF_TEMP_FULL = 0.80;
+/**
+ * The clam, and therefore the pearl economy.
+ *
+ * `sea_shell` is the only source of `pearl` in the game, so this number is not a
+ * scatter rate, it is a drop rate. Per reef column, before the falloff — a reef
+ * of ~40 valid columns carries about one, so a pearl is a thing you find by
+ * swimming into a reef and looking, not a thing you farm. See the harness
+ * numbers in the report for what it comes to planet-wide.
+ */
+const REEF_SHELL = 0.055;
+/** One coral head in five is bleached, so a reef is not uniformly bright. */
+const REEF_DEAD = 0.20;
+/**
+ * Sea grass and kelp: cover rather than landmark.
+ *
+ * A wider depth band than the coral and a much wider climate one — grass grows
+ * anywhere that is not polar, kelp likes it *cool*, which is why its window is
+ * the other way up from the coral's and overlaps it only at the edges. A kelp
+ * forest off a temperate coast and a coral bank off a tropical one are then two
+ * different places rather than the same place twice.
+ */
+const SEAB_DEPTH_MIN = 1.5;
+const SEAB_DEPTH_MAX = 13.0;
+const GRASS_TEMP_MIN = -0.05;
+const KELP_TEMP_MIN = -0.10;
+const KELP_TEMP_MAX = 0.62;
+/** Kelp needs headroom: `n` segments want `n + 1` cells of water. */
+const KELP_MIN = 3;
+const KELP_MAX = 8;
+/**
+ * Peak per-column odds, at the centre of a patch of the density field. Both are
+ * multiplied by a smoothed fbm raised to a power, so the mean is far lower than
+ * this and the cover comes in meadows instead of an even dusting.
+ */
+const GRASS_PEAK = 0.62;
+const KELP_PEAK = 0.34;
+/**
+ * Fresh water gets weed, and only weed.
+ *
+ * Kelp and sea grass in a pond or a marsh is a reasonable reading of what those
+ * blocks are; coral, sponges and a giant clam in one are not, so the reef pass
+ * refuses lakes outright and this pass takes only the two plants. A tarn is out
+ * as well — it is scoured rock at altitude, and the one lake kind whose bed has
+ * no soil on it at all. An oasis is out because a desert spring is not a weed
+ * bed. The `topK` rule matters more here than in the sea, not less: a lake's
+ * surface cell owns its own surface quad exactly as the ocean's does, and a
+ * marsh is ankle-deep, so most marsh columns have one cell of water and take
+ * nothing.
+ */
+const LAKE_WEED = new Uint8Array(8);
+LAKE_WEED[LAKE_POND] = 1;
+LAKE_WEED[LAKE_MARSH] = 1;
+
+/** Scratch for the two reef passes. Neither nests inside anything. */
+const _reefDir = [0, 0, 0];
+const _reefParts = { f: 0, i: 0, j: 0 };
 
 /**
  * Volcano geometry. Module scope rather than locals now that choosing a site
@@ -1175,6 +1324,25 @@ export class WorldGen {
   }
 
   /**
+   * The climate of a piece of seabed, from a unit direction through it.
+   *
+   * This is the temperature term of the biome climate and nothing else — the
+   * latitude ramp plus the same low-frequency wobble that makes the biome map
+   * ragged — recomputed on demand rather than stored, because a
+   * Float32Array(COLUMNS) would be 5 MB resident for a value only submerged
+   * columns ever ask for.
+   *
+   * It lives here, out of `fillColumn`'s ocean case, because the reef passes
+   * need the identical number. Two expressions that agree today and are edited
+   * separately tomorrow is how you get coral growing on polar gravel: the
+   * ground would say one climate and the thing standing on it another.
+   */
+  _seaTemp(dir) {
+    return 1 - Math.abs(dir[1]) * 1.35
+      + this.nBiome.fbm3(dir[0] * 2.2, dir[1] * 2.2, dir[2] * 2.2, 3, 2, 0.5) * 0.45;
+  }
+
+  /**
    * A private random stream for one column.
    *
    * Everything scattered on the surface — trees, boulders, grass, mushrooms —
@@ -1249,8 +1417,7 @@ export class WorldGen {
         // rather than stored: a Float32Array(COLUMNS) would be 5 MB resident
         // for a value only seabed columns ever read, against one extra fbm on
         // those same columns.
-        const temp = 1 - Math.abs(dir[1]) * 1.35
-          + this.nBiome.fbm3(dir[0] * 2.2, dir[1] * 2.2, dir[2] * 2.2, 3, 2, 0.5) * 0.45;
+        const temp = this._seaTemp(dir);
         // `patch` is frequency 14 — a blob about twenty columns across, which
         // on its own still reads as flat ground with a smear on it. `grit` is
         // the single-column speckle that makes a bed look like a bed at the
@@ -3320,6 +3487,268 @@ export class WorldGen {
     }
   }
 
+  // --- the reef --------------------------------------------------------------
+
+  /**
+   * The topmost *water* cell of a column, or -1 if it holds no water.
+   *
+   * Two independent waters, exactly as `fillColumn` fills them: the sea, which
+   * is everything at or below R_SEA the flood fill could reach, and a lake,
+   * which is everything at or below its own surface. A column can in principle
+   * be under both — a pond sitting in a coastal hollow — so it is the higher of
+   * the two, because that is the one whose cell carries the surface quad.
+   */
+  _topWaterK(col) {
+    let top = this.submerged[col] ? SEA_TOP_K : -1;
+    const ls = this.lakeSurf[col];
+    if (ls > 0) {
+      const lk = Math.floor(ls - R_MIN - 0.5);
+      if (lk > top) top = lk;
+    }
+    return top >= D ? D - 1 : top;
+  }
+
+  /**
+   * The floor a reef prop would stand on in this column, or -1.
+   *
+   * `groundKOf` is the height field, not a scan, so this is answerable for a
+   * column whose voxels are not built yet — but the `supports` test is a real
+   * block read, and it is worth its cost. The cell is terrain by construction
+   * (caves keep a skin under the surface, and an ore vein swaps one rock for
+   * another), so it cannot be reading somebody else's decoration. Every
+   * material the ocean case lays — sand, clay, mud, gravel, slate, basalt,
+   * moss, packed ice — is a full cube and passes; what this actually catches is
+   * the column whose surface cell a cave or a canyon opened, and the day a
+   * seabed grows something that is not a cube it will catch that too.
+   * `needsFloor` on the blocks means the alternative is not a cosmetic bug: a
+   * prop whose floor does not support it comes down the moment anything near it
+   * is disturbed.
+   */
+  _reefFloorK(blocks, col) {
+    const k = this.groundKOf(col);
+    if (k < 1 || k > D - 3) return -1;
+    return supports(blocks[col * D + k]) ? k : -1;
+  }
+
+  /**
+   * Put one single-cell prop on the floor of a column. The whole topK rule is
+   * the second line, and every prop in both passes goes through here.
+   */
+  _propAt(blocks, col, id, floorK, topK) {
+    const k = floorK + 1;
+    if (k >= topK) return false;
+    if (blocks[col * D + k] !== ID.water) return false;
+    blocks[col * D + k] = id;
+    return true;
+  }
+
+  /**
+   * A kelp stalk: `n` segments from `floorK + 1` up, all or nothing.
+   *
+   * Only the base needs a floor — a kelp segment supports the segment above it,
+   * which is what `STACKS` is for — so the run is checked for water and then
+   * written, rather than being grown one cell at a time and left half-built if
+   * it meets something. `base + n - 1 < topK` leaves at least one cell of clear
+   * water over the tip, so a stalk never reaches the surface cell.
+   *
+   * @returns {number} segments written, 0 if the stalk did not fit
+   */
+  _kelpAt(blocks, col, n, floorK, topK) {
+    const base = floorK + 1;
+    if (n < KELP_MIN || base + n - 1 >= topK) return 0;
+    const b = col * D;
+    for (let s = 0; s < n; s++) if (blocks[b + base + s] !== ID.water) return 0;
+    for (let s = 0; s < n; s++) blocks[b + base + s] = ID.kelp;
+    return n;
+  }
+
+  /**
+   * The reef this column is the centre of, decided from terrain alone, or null.
+   *
+   * On a lattice for the reason SPRING_LATTICE spells out and REEF_R_MAX
+   * repeats: it turns "is there a reef near this column" into arithmetic, and it
+   * puts a floor under the distance between two of them. Nothing is written and
+   * nothing outside the candidate column itself is read, so `decorateRegion` can
+   * run it over a margin of somebody else's columns and get the same answer from
+   * either side.
+   *
+   * Every draw happens before every test, the rule the boulder pass learned the
+   * hard way — a rejected candidate costs the same rolls as a kept one, so the
+   * stream stays a pure function of the column.
+   */
+  _reefSite(col) {
+    const p = colParts(col, _reefParts);
+    if (p.i % REEF_LATTICE !== REEF_LI || p.j % REEF_LATTICE !== REEF_LJ) return null;
+    // Sea only, and never a lake. Coral in a pond is the one thing this pass is
+    // most likely to be asked to do by accident: a coastal pond is submerged,
+    // is at sea level and has a floor two cells down, so it passes every test
+    // here except this one.
+    if (this.colBiome[col] !== BIOME.OCEAN || !this.submerged[col]) return null;
+    if (this.lakeKind[col]) return null;
+    const floorK = this.groundKOf(col);
+    if (floorK < 1 || floorK > D - 3) return null;
+    const depth = depthOfK(floorK);
+    if (depth < REEF_DEPTH_MIN || depth > REEF_DEPTH_MAX) return null;
+
+    const dir = _reefDir;
+    this._dirOf(col, dir);
+    const warm = clamp((this._seaTemp(dir) - REEF_TEMP_MIN)
+      / (REEF_TEMP_FULL - REEF_TEMP_MIN), 0, 1);
+    if (warm <= 0) return null;
+
+    const rng = this.colRng(col, 0xd33f);
+    const roll = rng();
+    const rad = REEF_R_MIN + rng() * (REEF_R_MAX - REEF_R_MIN);
+    // How thick this particular reef is in the middle. Without it every reef
+    // comes out the same density and a bank of three reads as one texture.
+    const rich = 0.55 + rng() * 0.45;
+    if (roll > REEF_CHANCE * warm) return null;
+    return { f: p.f, i: p.i, j: p.j, rad, rich, warm };
+  }
+
+  /**
+   * One column's reef, if it has one, clipped to a region.
+   *
+   * Dense in the middle and thinning to nothing at the rim, with the grass
+   * skirt running the other way — that gradient is the whole difference between
+   * a reef and a patch of coral. `w` is 1 at the centre and 0 at the rim; the
+   * coral term is `w` with a knee in it so the core stays solid instead of
+   * fading from the first column out, and the grass term rises as the coral
+   * falls, so the carpet is thickest exactly where the heads stop.
+   *
+   * Each column draws from its own `colRng`, not from the centre's stream, so
+   * the order the disc is walked in cannot change what any column gets — which
+   * is what lets the region clip be a `continue` rather than something that has
+   * to keep the stream in step.
+   */
+  reefAt(blocks, col, rid) {
+    const site = this._reefSite(col);
+    if (site === null) return;
+    const ri = Math.ceil(site.rad);
+    for (let di = -ri; di <= ri; di++) {
+      for (let dj = -ri; dj <= ri; dj++) {
+        const d = Math.hypot(di, dj);
+        if (d > site.rad) continue;
+        // Grid arithmetic on the *face*, then a re-projection, because a reef
+        // eight columns across can sit on a cube seam and the neighbouring
+        // face's i points somewhere else entirely.
+        const c = patchColumn(site.f, site.i, site.j, di, dj);
+        if (rid >= 0 && regionOfCol(c) !== rid) continue;
+        if (this.colBiome[c] !== BIOME.OCEAN || !this.submerged[c]) continue;
+        if (this.lakeKind[c]) continue;
+        const floorK = this._reefFloorK(blocks, c);
+        if (floorK < 0) continue;
+        const depth = depthOfK(floorK);
+        if (depth < REEF_DEPTH_MIN || depth > REEF_DEPTH_MAX) continue;
+
+        const w = 1 - d / site.rad;
+        const rng = this.colRng(c, 0xc0a1);
+        const r = rng();
+        const pShell = REEF_SHELL * (0.30 + 0.70 * w);
+        /**
+         * A solid core with a short shoulder, and — the part that took three
+         * goes to get right — *nothing* at the rim.
+         *
+         * A plain falloff (`w^1.35`, then `0.35 + 0.65 w^1.6`) leaves a low but
+         * non-zero chance out at the edge of the disc, and the edge of a disc is
+         * most of its area. Measured, that put a third of all reefs into
+         * one-column fragments: single heads standing alone in open water, which
+         * is exactly the confetti a cluster pass exists to avoid. The
+         * smoothstep takes the outer 42% of the radius to zero, so the reef has
+         * a body and an edge, and what is left standing beyond that edge is the
+         * grass skirt below rather than a stray coral.
+         */
+        const pCoral = Math.min(0.90,
+          site.rich * site.warm * 1.25 * smoothstep(0, 0.42, w));
+        const pGrass = 0.28 + 0.34 * (1 - w);
+
+        let id;
+        if (r < pShell) {
+          id = ID.sea_shell;
+        } else if (r < pShell + pCoral) {
+          const c2 = rng();
+          id = c2 < 0.22 ? ID.sea_sponge
+            : c2 < 0.52 ? ID.coral_branch
+              : c2 < 0.76 ? ID.coral_brain
+                : ID.coral_fan;
+          // A sponge is not a coral and does not bleach. Rolled unconditionally
+          // all the same, so the stream does not fork on which head came up.
+          const bleach = rng() < REEF_DEAD;
+          if (id !== ID.sea_sponge && bleach) id = ID.coral_dead;
+        } else if (r < pShell + pCoral + pGrass) {
+          id = ID.sea_grass;
+        } else {
+          continue;
+        }
+        this._propAt(blocks, c, id, floorK, SEA_TOP_K);
+      }
+    }
+  }
+
+  /**
+   * Sea grass and kelp for one column — the underwater flora pass.
+   *
+   * Writes only into this column, like `floraAt`, so it needs no region clip,
+   * and it runs *after* the reefs for the same reason `floraAt` runs after the
+   * trees: every reef that can reach this column has already been stamped by
+   * the time we get here, so the water test below sees the finished cell. That
+   * is deterministic rather than lucky — a reef only ever writes into its own
+   * region, and every candidate that could reach this column is inside the
+   * margin this region was handed.
+   *
+   * Density comes from a low-frequency field raised to a power rather than from
+   * a flat per-column chance. A flat chance at the same mean is an even dusting
+   * of single blades over the entire shelf; the field gives beds with clear
+   * water between them, which is the same trick the surface flora plays with
+   * `dens`.
+   */
+  seabedFloraAt(blocks, col) {
+    const topK = this._topWaterK(col);
+    if (topK < 2) return;
+    const inLake = this.lakeSurf[col] > 0;
+    // Fresh water takes weed and nothing else, and only two of the four kinds.
+    if (inLake && (!this.inLakeBed(col) || !LAKE_WEED[this.lakeKind[col] & 7])) return;
+    if (!inLake && (this.colBiome[col] !== BIOME.OCEAN || !this.submerged[col])) return;
+    const floorK = this._reefFloorK(blocks, col);
+    if (floorK < 0 || floorK + 1 >= topK) return;
+    // The sea's depth band; a lake is its own bottom and has no business being
+    // measured against the ocean's waterline.
+    if (!inLake) {
+      const depth = depthOfK(floorK);
+      if (depth < SEAB_DEPTH_MIN || depth > SEAB_DEPTH_MAX) return;
+    }
+
+    const dir = _reefDir;
+    this._dirOf(col, dir);
+    // A pond is fresh water at whatever altitude the land put it, so the
+    // seabed climate term means nothing there. Weed grows in all of them.
+    const temp = inLake ? 0.2 : this._seaTemp(dir);
+    // Two fields at two frequencies and two offsets, so a kelp forest and a
+    // grass bed are not the same patch wearing two hats.
+    const gf = this.nDetail.fbm3(dir[0] * 7.5, dir[1] * 7.5, dir[2] * 7.5, 3, 2, 0.5);
+    const kf = this.nDetail.fbm3(dir[0] * 5.0 + 31.7, dir[1] * 5.0, dir[2] * 5.0 - 12.3, 3, 2, 0.5);
+    const gDens = clamp(gf * 0.5 + 0.55, 0, 1);
+    const kDens = clamp(kf * 0.5 + 0.42, 0, 1);
+
+    const rng = this.colRng(col, 0x5ea9);
+    const r = rng();
+    const n = KELP_MIN + Math.floor(rng() * (KELP_MAX - KELP_MIN + 1));
+
+    const canGrass = inLake || temp > GRASS_TEMP_MIN;
+    const canKelp = inLake || (temp > KELP_TEMP_MIN && temp < KELP_TEMP_MAX);
+    const pKelp = canKelp ? KELP_PEAK * Math.pow(kDens, 2.6) : 0;
+    const pGrass = canGrass ? GRASS_PEAK * Math.pow(gDens, 2.2) : 0;
+
+    if (r < pKelp) {
+      // A stalk that does not fit falls through to nothing rather than to
+      // grass: the alternative is a kelp bed in deep water that turns into a
+      // lawn wherever the bottom rises, which reads as a bug.
+      this._kelpAt(blocks, col, Math.min(n, topK - floorK - 1), floorK, topK);
+    } else if (r < pKelp + pGrass) {
+      this._propAt(blocks, col, ID.sea_grass, floorK, topK);
+    }
+  }
+
   /**
    * Everything that stands *on* the ground, for one region.
    *
@@ -3368,5 +3797,13 @@ export class WorldGen {
     for (let n = 0; n < margin.length; n++) this.treeAt(blocks, margin[n], rid);
     for (let n = 0; n < margin.length; n++) this.boulderAt(blocks, margin[n], rid);
     for (let n = 0; n < cols.length; n++) this.floraAt(blocks, cols[n]);
+    // The two underwater passes, last, and in this order. A reef is a feature
+    // laid over a margin like a tree is; the grass and kelp are cover laid one
+    // column at a time like `floraAt` is, and they run second so that a blade
+    // and a coral head never both claim the cell above the same piece of
+    // seabed. Nothing above this touches water: trees and flora refuse a liquid
+    // cell outright and a boulder is only ever laid into air.
+    for (let n = 0; n < margin.length; n++) this.reefAt(blocks, margin[n], rid);
+    for (let n = 0; n < cols.length; n++) this.seabedFloraAt(blocks, cols[n]);
   }
 }

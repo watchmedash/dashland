@@ -628,16 +628,30 @@ export class PlayerCharacter {
     if (id === this.heldItem[which]) return;
     this.heldItem[which] = id;
 
-    // Cached holders are only detached — they are handed out again next equip.
-    // A stand-in built while a model was still loading is nobody else's, and
-    // its sprite plane is a geometry this class allocated, so it goes.
+    // Detached, never disposed.
+    //
+    // This used to dispose the geometry of a transient holder, on the grounds
+    // that "its sprite plane is a geometry this class allocated". It is not:
+    // the holder comes from the drop factory, whose sprite path returns a
+    // module-level `PlaneGeometry` singleton and whose cube path returns an
+    // entry from a per-block cache. Both are shared with every drop lying on
+    // the ground.
+    //
+    // And the branch was exactly inverted with respect to the risk. A holder is
+    // transient precisely when the item *has* a model that has not finished
+    // loading — so the factory fell back to the shared sprite or the shared
+    // cube. Disposing it deleted the buffer every bone, hide, sapling and
+    // amethyst in the world draws from, and the cache goes on handing out the
+    // dead object, so it never recovers: hold a pickaxe before its GLB lands,
+    // press 2, and every sprite drop for the rest of the session renders from
+    // freed memory.
+    //
+    // Nothing here is ours to free. `ViewModel` is the one that allocates its
+    // own plane, and it tracks that with an `owns` flag precisely so it can.
     for (let i = anchor.children.length - 1; i >= 0; i--) {
       const child = anchor.children[i];
       anchor.remove(child);
-      if (child === this._transient[which]) {
-        child.traverse((n) => { if (n.isMesh) n.geometry.dispose(); });
-        this._transient[which] = null;
-      }
+      if (child === this._transient[which]) this._transient[which] = null;
     }
     if (!id) return;
 

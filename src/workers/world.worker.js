@@ -156,6 +156,38 @@ function markChunk(set, col, k) {
   set.add(chunkIdx(f, Math.floor(i / CHUNK_T), Math.floor(j / CHUNK_T), ck));
 }
 
+/**
+ * Mark every chunk that draws anything from this cell — not just the one that
+ * contains it.
+ *
+ * A face is lit and occluded by the cell on the *other side* of it, so a chunk
+ * routinely reads a cell that is not in it: a top face samples `k + 1`, an
+ * inward face `k - 1`, a side face the neighbour column, and every
+ * ambient-occlusion corner reads a diagonal. Marking only the containing chunk
+ * therefore misses the reader.
+ *
+ * It bites hardest on light, because an opaque block's light is always 0 and so
+ * never *changes*: place a torch under a stone ceiling that happens to sit above
+ * a radial chunk boundary and the air below it relights, the ceiling block does
+ * not, its chunk is never marked, and the ceiling stays black until something
+ * unrelated rebuilds it. Laterally the same thing draws a dark seam along a
+ * tile boundary. Chunks are 16 columns and 11 layers, so the boundaries are
+ * regular and so are the artefacts.
+ *
+ * Two steps through the adjacency graph rather than arithmetic on the column
+ * index, which is wrong across a cube seam. The Set makes the overlap free.
+ */
+function markChunkAround(set, col, k) {
+  for (let dk = -1; dk <= 1; dk++) {
+    markChunk(set, col, k + dk);
+    for (let d = 0; d < 4; d++) {
+      const n = COL_NB[col * 4 + d];
+      markChunk(set, n, k + dk);
+      for (let e = 0; e < 4; e++) markChunk(set, COL_NB[n * 4 + e], k + dk);
+    }
+  }
+}
+
 // --- region generation -------------------------------------------------------
 
 /** A chunk id names exactly one region: drop its radial index. */
@@ -516,14 +548,24 @@ self.onmessage = (e) => {
         facing.delete(idx);
       }
       seeds.push(ed.col);
-      // the edited cell and its immediate neighbours always need a remesh
-      markChunk(dirty, ed.col, ed.k);
-      markChunk(dirty, ed.col, ed.k - 1);
-      markChunk(dirty, ed.col, ed.k + 1);
-      for (let d = 0; d < 4; d++) markChunk(dirty, COL_NB[ed.col * 4 + d], ed.k);
+      // The edited cell and everything that reads it. That means the *diagonal*
+      // columns too, not only the four axis neighbours: the mesher resolves
+      // `nPiPj`/`nPiMj`/`nMiPj`/`nMiMj` and every ambient-occlusion corner
+      // quartet includes one. Edit the +i+j corner column of a chunk and the
+      // cell diagonally across the boundary samples it for both its occlusion
+      // and its smooth light, in a chunk nothing had marked.
+      //
+      // The relight pass below does not rescue it. It reports only cells whose
+      // light byte actually changed, and out in open sky the neighbour still
+      // gets full sun from directly above — so nothing changes there, nothing
+      // is queued, and a quarter of the contact shadow is missing until that
+      // chunk is rebuilt for some unrelated reason. Roughly one edit in 256
+      // lands on a corner column.
+      //
+      markChunkAround(dirty, ed.col, ed.k);
     }
 
-    light.relight(blocks, seeds, 17, (col, k) => markChunk(dirty, col, k));
+    light.relight(blocks, seeds, 17, (col, k) => markChunkAround(dirty, col, k));
 
     for (const id of dirty) {
       // Rebuilding a chunk with no mesh would post geometry the main thread

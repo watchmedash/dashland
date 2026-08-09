@@ -864,15 +864,27 @@ function fillDisc(geo, hex) {
  *
  * Never throws and never blocks: on a miss it starts the load and calls `onReady`
  * once (if given) when the mesh exists. Callers keep their fallback art until
- * then. Meshes are shared — the same object is handed out every time, which is
- * safe because only one item is ever in hand.
+ * then.
+ *
+ * Returns a clone, like `iconModel` and `worldModel` do. It used to hand back
+ * the cached template itself, on the grounds that only one item is ever in
+ * hand — which stopped being true when the offhand arrived. Both hands equip
+ * through the same path, so holding a torch in each gave them the same
+ * Object3D, and `add` reparents: the main hand's torch silently vanished into
+ * the left fist while you went on mining with it. Nothing corrected it either,
+ * because the equip guard early-returns on an unchanged item id and `remove` on
+ * the hand that no longer owns the mesh is a no-op.
+ *
+ * Cloning shares geometry and materials, so the cost is an Object3D and a
+ * matrix per equip, not a re-upload.
  *
  * @param {number} itemId
  * @param {(mesh: THREE.Mesh) => void} [onReady]
  * @returns {THREE.Mesh|null}
  */
 export function heldModel(itemId, onReady) {
-  return requestMesh(itemId, onReady ? (mesh) => onReady(mesh) : null);
+  return requestMesh(itemId, onReady ? (mesh) => onReady(mesh.clone()) : null,
+    (m) => m.clone());
 }
 
 /**

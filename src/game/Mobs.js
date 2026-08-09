@@ -585,6 +585,53 @@ const STALKER_MARGIN = 1.08;
 const LOS_STEP = 0.85;
 
 /**
+ * Sample spacing of the *blow* walk, and how far short of the target it stops.
+ *
+ * Both are much tighter than the sighting walk because the line is short. The
+ * step has to be under half a cell or a wall crossed near a corner — where the
+ * chord through the block is well under 1 — can fall between two samples; 0.28
+ * puts at least three samples inside any block the line passes squarely
+ * through. The skip only has to clear the target's own skin, and every cell a
+ * body is standing in is air by construction, so it is small.
+ */
+const BLOW_STEP = 0.28;
+const BLOW_SKIP = 0.12;
+
+/**
+ * The three rays of `_blowClear`, as (source, target) fractions of each body's
+ * height, tried in order and stopping at the first clear one. Mid-to-mid first
+ * because in the open it answers on its own and the other two are never walked.
+ */
+const BLOW_RAYS = [0.55, 0.55, 0.85, 0.90, 0.55, 0.20];
+
+/**
+ * The player's height and eye height, in cells.
+ *
+ * Duplicated from Player.js rather than imported: Mobs.js is handed a `player`
+ * duck-type (position, up, cell, grounded, inWater) by main.js and by every
+ * harness, and importing the class to read two numbers off a module constant
+ * would make this file depend on the whole player. Keep in step with HEIGHT and
+ * EYE in src/player/Player.js — they are 1.8 and 1.62 there.
+ */
+const PLAYER_HEIGHT = 1.8;
+const PLAYER_EYE = 1.62;
+
+/**
+ * Seconds between line-of-sight checks while a hostile is looking for someone
+ * to hunt.
+ *
+ * Acquisition is the only place sight is asked about, and it is asked of every
+ * hostile inside its aggro ring on every frame it has no target. A husk's ring
+ * is 34 cells, so an unthrottled check is a forty-sample march per husk per
+ * frame for as long as one stands outside your wall — which is precisely the
+ * situation this was written for, i.e. the worst case is also the common one.
+ * A quarter second is four times a second, is invisible against a body that
+ * takes a second and a half to cross a cell, and turns the worst case into
+ * about 300 lookups a second for the whole night's worth of husks.
+ */
+const SIGHT_PERIOD = 0.25;
+
+/**
  * The opening clearing: how far around the world spawn point nothing large and
  * nothing that hunts may be *placed*, in world units, and what counts as large.
  *
@@ -752,6 +799,10 @@ const _vpm = new THREE.Matrix4();
 const _ndc = new THREE.Vector3();
 const _eye = new THREE.Vector3();
 const _los = new THREE.Vector3();
+// Endpoints of a blow ray. Kept apart from _eye/_los because _lineOfSight
+// scribbles on _los, and _blowClear holds both of its endpoints across the call.
+const _ptA = new THREE.Vector3();
+const _ptB = new THREE.Vector3();
 const _seen = new THREE.Vector3();
 
 const wrapAngle = (a) => {
@@ -2938,6 +2989,9 @@ export class Mobs {
       preyT: Math.random() * PREY_PERIOD,
       /** Seconds until this hunter may bite again. See BITE_PERIOD. */
       biteT: 0,
+      /** Last sight check's answer, and the clock to the next. See SIGHT_PERIOD. */
+      sighted: false,
+      sightT: 0,
       prey: null,
       // --- and the prey's own side of it: see _spook ---
       /** Accumulated unease, 0..SPOOK_TRIGGER-and-a-bit. */
@@ -3292,21 +3346,95 @@ export class Mobs {
    * Cross plants are not solid, which is the right answer for both of the
    * places it matters: a stalker standing in waist-high grass is visible, and a
    * stalker behind a trunk is not.
+   *
+   * The step and the end margin are arguments because there are now two
+   * calibrations of the same walk and only one walk should exist. A sighting
+   * runs tens of cells and can afford to be coarse; a blow runs one or two and
+   * cannot. The clamp below is the floor under both — see BLOW_STEP for why a
+   * blow wants more than that floor.
+   *
+   * @param {number} step sample spacing, in world units.
+   * @param {number} skip how far short of `to` to stop.
    */
-  _lineOfSight(from, to) {
+  _lineOfSight(from, to, step = LOS_STEP, skip = 0.4) {
     _los.copy(to).sub(from);
     const len = _los.length();
     if (len < 1e-3) return true;
     _los.multiplyScalar(1 / len);
+    // A step is never allowed to be longer than the line it is walking. Without
+    // this, `step` and `skip` together can skip the walk entirely: at LOS_STEP
+    // and 0.4 a line 1.10 long takes its first sample at 0.85, which is already
+    // past 0.70, so the loop never runs and a solid metre of stone reads as
+    // clear. That was measured — a husk pressed to one face of a wall and a
+    // player pressed to the other are 1.10 apart, and the sight test said it
+    // could see them. Three samples over whatever interior the line has costs
+    // nothing on a short line and never triggers on a long one.
+    const s = Math.min(step, (len - skip) / 3);
+    if (s <= 0) return true;
     // Start clear of the observer and stop clear of the target: the first
     // sample would otherwise be inside the camera's own block on a bad frame,
     // and the last inside the body we are asking about.
-    for (let t = LOS_STEP; t < len - 0.4; t += LOS_STEP) {
+    for (let t = s; t < len - skip; t += s) {
       if (this.planet.isSolidWorld(
         from.x + _los.x * t, from.y + _los.y * t, from.z + _los.z * t,
       )) return false;
     }
     return true;
+  }
+
+  /**
+   * Can this body actually land a blow on that one, or is there terrain in the
+   * way?
+   *
+   * The reported bug, and the whole of it: `reach` was a distance between two
+   * centres and asked nothing about what lay between them. A husk's reach is
+   * 1.25 plus its radius; a wall is one block thick; the player standing half a
+   * cell from one face and the husk half a cell from the other are inside that
+   * number, so the husk hit through the wall — which removes the point of
+   * building a shelter. A fox at 1.26 does the same to a rabbit, which is the
+   * case that was measured.
+   *
+   * Three rays, not one, and it is clear if ANY of them is:
+   *
+   *   mid to mid    the ordinary case, and the one that answers first in the
+   *                 open, so the ordinary case costs one march.
+   *   head to head  over a low lip. A one-block step between two tall bodies is
+   *                 not cover and should not read as cover; a wall built to
+   *                 head height blocks this ray as well as the first.
+   *   mid to shins  down into a dip. Without it, standing on a rim and biting
+   *                 something in a one-deep hollow reads as blocked, because
+   *                 the mid-to-mid line clips the rim.
+   *
+   * Heights are fractions of `spec.height`, and the source uses the same 0.85
+   * as `_headOf` for the head so a body has one idea of where its head is.
+   *
+   * Cost is the point of the constants: BLOW_STEP is fine enough that no
+   * one-cell-thick wall can fall between two samples, and the lines are one to
+   * three cells long, so a march is four to twelve `isSolidWorld` lookups. It
+   * runs on the decision to swing and again at the contact frame — per hostile
+   * per swing, not per frame — plus once per predator bite. Measured in the
+   * harness: see the report.
+   *
+   * @param {number} th the target's full height, in cells.
+   */
+  _blowClear(mob, pos, up, th) {
+    const sh = mob.spec.height;
+    for (let n = 0; n < BLOW_RAYS.length; n += 2) {
+      _ptA.copy(mob.pos).addScaledVector(mob.up, sh * BLOW_RAYS[n]);
+      _ptB.copy(pos).addScaledVector(up, th * BLOW_RAYS[n + 1]);
+      if (this._lineOfSight(_ptA, _ptB, BLOW_STEP, BLOW_SKIP)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Can this body land a blow on the player?
+   *
+   * Separate only because the player is not a mob: feet at `position`, up at
+   * `up`, and a fixed height that Mobs has no other reason to know.
+   */
+  _blowClearPlayer(mob, player) {
+    return this._blowClear(mob, player.position, player.up, PLAYER_HEIGHT);
   }
 
   /**
@@ -4990,14 +5118,21 @@ export class Mobs {
    */
   _hunt(mob, dt, dist, player, fr) {
     const spec = mob.spec;
-    // Aggro is straight-line, with no notion of whether the player can actually
-    // be reached — through a cavern roof, they are ten cells away. A husk that
+    // Aggro now needs a sight line to start (see ACQUIRE BY SIGHT below) but
+    // still has no notion of whether the player can actually be *reached* — seen
+    // across a ravine, they are ten cells away and unwalkable. A husk that
     // has been chasing for nine seconds without closing any ground is chasing
     // something on the other side of the rock, and standing there aggroed
     // forever is both eerie in the wrong way and a waste of a hostile slot.
     if (mob.huntCooldown > 0) {
       mob.huntCooldown -= dt;
       mob.target = null;
+      // And the sighting that started the hunt expires with it. Otherwise a
+      // husk that gave up on a walled player re-acquires the instant the
+      // cooldown ends, off an answer it worked out fourteen seconds ago from
+      // somewhere it is no longer standing.
+      mob.sighted = false;
+      mob.sightT = 0;
       return false;
     }
     // Losing interest at a longer range than it gains it stops a husk on the
@@ -5062,10 +5197,60 @@ export class Mobs {
     // monstrous is ever born a cub.
     const acquires = spec.hostile || spec.monster
       || (this.savage && !!spec.preyOn && !!spec.predator && mob.baby <= 0);
-    if (acquires && dist < spec.aggroRange) {
+    /**
+     * ACQUIRE BY SIGHT, COMMIT BLIND. The rule, written down.
+     *
+     * The report is "a husk can find me even though I'm inside a block", and it
+     * was true: aggro was a straight-line distance and nothing else, so a
+     * player sealed in solid stone was as visible as one standing in a field.
+     *
+     * Minecraft's answer is worth copying because it is the one players already
+     * have in their hands: a hostile *acquires* you by seeing you, inside a
+     * radius; once it has you it keeps you through walls; and a sealed room is
+     * safe because nothing can path to you, not because nothing can sense you.
+     * Both halves matter. Sight-only would let you break a chase by stepping
+     * behind a boulder, which makes every fight a game of peekaboo. Blind
+     * acquisition is the bug.
+     *
+     * So: the line below is the only place in this file where a mob decides
+     * about the player on its own, and it is now gated on a clear line. Every
+     * other way in — `hurt` when you swing at one, `_prowl` at the end of a
+     * night stalk — is a target being *handed* to it by something that already
+     * knows the player is there, and none of them are gated, which is the
+     * commit-blind half.
+     *
+     * A player who seals themselves in mid-chase is therefore still hunted, and
+     * that is correct and costs them nothing: the husk cannot path in, HUNT_STALL
+     * calls the hunt off after nine seconds of getting no closer, and `_blowClear`
+     * refuses the blow in the meantime. Sealed ends with the player safe by
+     * three independent mechanisms, and only the third of them is new.
+     *
+     * The eye is checked first and the ankles second, so a body in a dip or
+     * behind a low lip is still seen by something standing over it — one ray
+     * would make waist-high terrain a cloaking device.
+     */
+    if (acquires && mob.target !== 'player' && dist < spec.aggroRange) {
+      mob.sightT -= dt;
+      if (mob.sightT <= 0) {
+        mob.sightT = SIGHT_PERIOD;
+        this._headOf(mob, _eye);
+        _ptB.copy(player.position).addScaledVector(player.up, PLAYER_EYE);
+        mob.sighted = this._lineOfSight(_eye, _ptB);
+        if (!mob.sighted) {
+          _ptB.copy(player.position).addScaledVector(player.up, 0.4);
+          mob.sighted = this._lineOfSight(_eye, _ptB);
+        }
+      }
+    } else if (dist >= spec.aggroRange) {
+      // Out of the ring: forget the last answer so re-entering re-asks rather
+      // than inheriting a sighting from wherever it was standing before.
+      mob.sighted = false;
+      mob.sightT = 0;
+    }
+    if (acquires && mob.sighted && dist < spec.aggroRange) {
       if (mob.target !== 'player') { mob.bestDist = dist; mob.stallT = 0; }
       mob.target = 'player';
-    } else if (dist > spec.aggroRange * 1.6) mob.target = null;
+    } else if (dist > spec.aggroRange * 1.6) { mob.target = null; mob.sighted = false; }
     if (!mob.target) return false;
 
     // Only count the stall while it is still trying to *travel*. A husk stood
@@ -5168,7 +5353,11 @@ export class Mobs {
     // Close the distance, then stop and swing. Walking into the player would
     // shove them around — _separate already pushes bodies apart.
     const reach = spec.reach + mob.radius;
-    if (dist > reach) {
+    // Close enough is not the same as able to. A body one block away through a
+    // wall is inside every reach in the table, and swinging at the wall would
+    // be both free damage and a mob visibly attacking masonry — so a blocked
+    // hostile stays in 'chase' and lets `_pathBearing` go and look for the door.
+    if (dist > reach || !this._blowClearPlayer(mob, player)) {
       mob.state = 'chase';
     } else {
       mob.state = 'idle';
@@ -5942,7 +6131,11 @@ export class Mobs {
 
     const fr = mob.frame;
     const reach = (spec.reach ?? 1.0) + mob.radius + prey.radius;
-    if (d > reach) {
+    // The body-to-body half of the same bug, and the one that was actually
+    // measured: a fox reaches 1.26, a rabbit half a cell the other side of one
+    // block is 1.0 away, so foxes ate through walls. Blocked counts as out of
+    // reach — the hunter keeps chasing, and if there is a door it will find it.
+    if (d > reach || !this._blowClear(mob, prey.pos, prey.up, prey.spec.height)) {
       _rel.copy(prey.pos).sub(mob.pos);
       mob.want = Math.atan2(
         _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2],
@@ -6040,6 +6233,12 @@ export class Mobs {
       if (h.mob.health <= 0 || h.mob.dying > 0) continue;
       const reach = h.mob.spec.reach + h.mob.radius + 0.35;
       if (h.mob.pos.distanceTo(player.position) > reach) continue;
+      // Asked again at the contact frame rather than trusted from the decision
+      // to swing, because 0.28s is long enough to step behind a block — and
+      // because this is the one door every blow on the player comes through, so
+      // gating it here is what makes "no blow passes through terrain" a property
+      // of the system rather than of one call site.
+      if (!this._blowClearPlayer(h.mob, player)) continue;
       if (this.onAttack) this.onAttack(h.dmg, h.mob);
     }
   }

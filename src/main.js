@@ -4632,6 +4632,18 @@ class Game {
     // you are no longer standing beside.
     if (this.player.position.distanceTo(f.pos) > FISH_LEASH) { this._stopFishing(); return; }
 
+    // The water can leave while the line is out. Only the cast was ever checked
+    // for water, which was survivable when water could not move; a starved flow
+    // drains itself now, and a bucket empties a cell outright. Without this the
+    // float went on bobbing over open air and the strike landed a fish out of a
+    // dry hole. Worth saying out loud, unlike the leash above — walking away
+    // explains itself, a pond draining behind you does not.
+    if (this.planet.at(f.col, f.k) !== ID.water) {
+      this.ui.toast('The water is gone.', itemIdOf('fishing_rod'), 1600);
+      this._stopFishing();
+      return;
+    }
+
     if (f.bite > 0) {
       f.bite -= dt;
       if (f.bite <= 0) {

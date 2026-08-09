@@ -314,7 +314,20 @@ const RAW = [
   // dearer per point of nourishment than any staple or meal on the planet, and
   // it is dearer for one reason you can point at.
   { out: 'pancakes', count: 1, in: ['wheat', 'egg', 'honeycomb'] },
-  { out: 'muffin', count: 1, in: ['wheat', 'berries', 'egg', 'honeycomb'] },
+  // Two handfuls of berries, not one, and the second one is a price fix rather
+  // than a flavour note.
+  //
+  // At one the muffin's bill came to 18 coins against the croissant's 19, and
+  // the muffin feeds 6 to the croissant's 5 — so the croissant was strictly
+  // worse on both axes for the same four ingredients and the same two gates (a
+  // bird for the egg, a bee for the comb). Nothing in the game should be the
+  // dearer *and* the thinner version of something else.
+  //
+  // Fixing it from the nourishment end would have meant moving numbers in a band
+  // only four points wide with seven sweets already in it; fixing it from the
+  // bill costs one lingonberry pair and reads correctly — a berry muffin with
+  // twice the berries. Measured after: croissant 19c for 5, muffin 21c for 6.
+  { out: 'muffin', count: 1, in: ['wheat', 'berries', 'berries', 'egg', 'honeycomb'] },
   { out: 'croissant', count: 1, in: ['wheat', 'wheat', 'egg', 'honeycomb'] },
   { out: 'donut', count: 1, in: ['wheat', 'wheat', 'honeycomb'] },
   // Ice from a cold coast, berries from the grass and a comb from a hive. No
@@ -421,10 +434,19 @@ export const SMELTING = [
   // cooks, which is the intended on-ramp: buy a dozen, walk away with breakfast.
   { in: 'egg', out: 'cooked_egg', count: 1, time: 4 },
   // Kelp on the rack. The one thing the sea gives you that a fire genuinely
-  // transforms — everything else down there is eaten as it comes up — and the
-  // cheapest cooked food in the game, because its input grows in forests and
-  // costs nothing but the swim. 5 seconds puts it between an egg and a fish:
-  // a leaf dries faster than a fillet cooks.
+  // transforms — everything else down there is eaten as it comes up.
+  //
+  // It is **not** the cheapest cooked food in the game, whatever this comment
+  // used to say. Measured, the simple-cooked band prices out at crab 4, egg 4,
+  // poultry 5, meat 5, fish 5, dried kelp 6, roast pumpkin 8 — kelp is the
+  // second dearest of the six. That is not a mispricing to chase: kelp carries a
+  // 4-coin override set by the reef's scarcity ladder in `Trade.js` (sea grass
+  // 3, kelp 4, up to sea sponge 18), and a leaf that is free to *pick* is not
+  // therefore free to *find*. The claim was simply never re-measured after that
+  // ladder landed.
+  //
+  // 5 seconds puts it between an egg and a fish: a leaf dries faster than a
+  // fillet cooks.
   { in: 'kelp', out: 'dried_kelp', count: 1, time: 5 },
 ].map((s) => ({ in: itemIdOf(s.in), out: itemIdOf(s.out), count: s.count, time: s.time }))
   .filter((s) => s.in && s.out);

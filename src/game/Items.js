@@ -73,9 +73,14 @@ for (const b of BLOCKS) {
 /**
  * The nourishment ladder.
  *
- * `food: N` restores `N * 0.09` of the energy bar (see `_tickVitals` in main.js)
- * and heals `ceil(N * 0.35)`, so 11 is a full bar from empty and anything above
- * that is wasted on a hungry player. Every tier is priced off this number too —
+ * `food: N` restores `N * FOOD_TO_ENERGY` of the energy bar (see `_tickEating`
+ * in main.js) and heals `ceil(N * 0.35)`. That constant is **0.06**, not the
+ * 0.09 this comment claimed for a long time, so a full bar from empty is 16.7
+ * points and *nothing on the planet fills one in a sitting* — the best food in
+ * the game is the burger at 14, which is 84%. The old figure said 11 was a full
+ * bar; measured, 11 is 66%. Nothing here is capped by the bar any more, which is
+ * why the meal band below is free to be ordered purely by what it costs.
+ * Every tier is priced off this number too —
  * the trader derives coin value from item properties — so the ladder is the one
  * place the whole food economy is decided:
  *
@@ -141,17 +146,36 @@ const FOOD = [
   // proper meals. Stack low: a hot meal you can carry sixty-four of is not a
   // meal, it is a supply line, and it would flatten the trader's food prices.
   //
-  // The order is the ingredient bill, not taste: soup is two glowcaps and a
-  // carrot and needs neither fire nor bench, so it is the floor; the stew is
-  // four things including a cooked one and is the ceiling. Everything between
-  // moves with what it costs.
-  { name: 'sandwich', label: 'Sandwich', food: 11, stack: 16, color: '#c9a057', shine: '#ecc98d' },
+  // **The order is the ingredient bill, not taste**, and these seven numbers are
+  // read straight off it rather than felt for. The bill is what `Trade.valueOf`
+  // derives from the recipes, measured:
+  //
+  //     soup 10c   pie 13c   stew 15c   cake 17c   sandwich 18c   pizza 18c
+  //     burger 23c
+  //
+  // The rule was already written down here and the data had stopped obeying it.
+  // The stew was 14 — the top of the band — on the third *cheapest* bill in it,
+  // which made it strictly better than the four meals above it: more nourishing
+  // than a burger and eight coins less. Measured, it dominated the cake, the
+  // sandwich, the pizza and the burger outright, so four of the seven meals were
+  // things you would only ever cook if you had run out of carrots. The sandwich
+  // had the mirror fault, feeding 11 on the fifth dearest bill.
+  //
+  // So: non-decreasing in the bill, which is the only ordering that leaves no
+  // meal dominated. Ties are where the bills tie or nearly do (stew 15 / cake 17,
+  // sandwich 18 / pizza 18) and are honest — those really are the same dinner
+  // for the same money.
+  //
+  // The burger is the ceiling now, and it earns it: bread, a cooked thing, a
+  // tomato and a sea lettuce is the longest bill on the planet and the only one
+  // with a dive in it.
+  { name: 'sandwich', label: 'Sandwich', food: 13, stack: 16, color: '#c9a057', shine: '#ecc98d' },
   { name: 'soup', label: 'Glowcap Soup', food: 10, stack: 16, color: '#8a5a35', shine: '#c08d5c' },
   { name: 'pie', label: 'Pumpkin Pie', food: 11, stack: 16, color: '#c07a2c', shine: '#e8ab63' },
   { name: 'cake', label: 'Berry Cake', food: 12, stack: 16, color: '#e6d3c2', shine: '#f2a0b4' },
-  { name: 'stew', label: 'Hearty Stew', food: 14, stack: 16, color: '#7a4a28', shine: '#b8794a' },
-  { name: 'pizza', label: 'Pizza', food: 12, stack: 16, color: '#c4762c', shine: '#eaa95e' },
-  { name: 'burger', label: 'Burger', food: 13, stack: 16, color: '#b07a3a', shine: '#e0ad6c' },
+  { name: 'stew', label: 'Hearty Stew', food: 12, stack: 16, color: '#7a4a28', shine: '#b8794a' },
+  { name: 'pizza', label: 'Pizza', food: 13, stack: 16, color: '#c4762c', shine: '#eaa95e' },
+  { name: 'burger', label: 'Burger', food: 14, stack: 16, color: '#b07a3a', shine: '#e0ad6c' },
 
   // treats. `treat` is read by the trader, which stocks them in ones and twos
   // rather than in fives — see `larderPool` — and by the harness, which holds

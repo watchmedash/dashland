@@ -1074,7 +1074,14 @@ export class UI {
     this._loadout = [...DEFAULT_LOADOUT];
     // Built here rather than in the constructor: the tiles carry item icons and
     // `setIcons` has not run when the UI is first constructed.
-    this._buildKit();
+    // No loadout picker. It is not hidden with a class: `_loadout` stays empty
+    // so `loadoutStacks` falls through to DEFAULT_START_ITEMS, which is now the
+    // torches plus a full set of tools. Removing the row rather than disabling
+    // it is the point, since a screen that offers a choice it does not honour is
+    // worse than no choice. `_buildKit`, `_syncKit`, `_toggleKit` and
+    // `_paintKit` are left in place and unreferenced so the feature can come
+    // back when the tool economy is settled.
+    this._loadout = [];
     this._buildDifficulty();
     this._buildDeathRule();
     this.el.chargen.classList.remove('hidden');

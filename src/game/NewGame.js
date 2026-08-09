@@ -19,7 +19,30 @@
  * reachable from more than one place and an older UI passes no loadout at all,
  * so this is the answer to "no choice was made" rather than a fourth option.
  */
-export const DEFAULT_START_ITEMS = Object.freeze([Object.freeze(['torch', 6])]);
+export const DEFAULT_START_ITEMS = Object.freeze([
+  Object.freeze(['torch', 6]),
+  // The whole tool set, on purpose and for now.
+  //
+  // A pick-three loadout screen shipped, and then repeatedly failed to give the
+  // player what they had picked: first because the tiles never painted, then
+  // because the picker's selection outlived the picker and came back already
+  // spent, and each fix was followed by another report of the same symptom. The
+  // instruction was "if you can't fix the tool selection then better remove it,
+  // stick to just a new game always gives torch, but for now include all tools
+  // for testing purposes". So the screen is gone and every world starts kitted.
+  //
+  // This is deliberately not the shipping answer: starting with one of every
+  // tool removes the early game's whole first act. When the rest of the tool
+  // and weapon economy is settled, this list comes back down to the torches and
+  // the choice can be reconsidered as a feature rather than as a repair.
+  Object.freeze(['stone_pick', 1]),
+  Object.freeze(['stone_axe', 1]),
+  Object.freeze(['stone_shovel', 1]),
+  Object.freeze(['stone_sword', 1]),
+  Object.freeze(['bow', 1]),
+  Object.freeze(['arrow', 32]),
+  Object.freeze(['fishing_rod', 1]),
+]);
 
 /** How many options a player may bring. Three, and the UI enforces it too. */
 export const LOADOUT_MAX = 3;

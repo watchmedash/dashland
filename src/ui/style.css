@@ -49,11 +49,11 @@
   --parchment-2: #e9dcc4;
   --edge: #d8c7aa;
 
-  /* The parchment's own bevel set, and it is deliberately the exact mirror of
-     the plate's below: a hard warm keyline on the outside so a card never
-     dissolves into the dimmed world behind it, a bright line inside so it
-     reads as a lifted face, and a matching sunk shadow for anything the
-     material is supposed to be cut *into* rather than laid on top of. Every
+  /* The parchment's bevel set, which is the only one left: a hard warm keyline
+     on the outside so a card never dissolves into the dimmed world behind it,
+     a bright line inside so it reads as a lifted face, and a matching sunk
+     shadow for anything the material is supposed to be cut *into* rather than
+     laid on top of. Every
      card, row, cell and well on every screen is one of these three and
      nothing else. */
   --paper:

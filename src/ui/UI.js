@@ -72,11 +72,10 @@ export const LOADOUT_MAX = 3;
  * What every new game opens with selected: the torches, every time.
  *
  * They are a real pick and they spend one of the three, which leaves two free
- * and a third press refused. That refusal is the whole reason the tiles say
- * "shut" as loudly as they do now — see `.cg-kit.full` in the stylesheet —
- * because the way to take a third tool is to press the torches off, and a
- * screen that only dims a little when you reach the limit is a screen that
- * looks broken instead of full.
+ * and a third press refused. That refusal is the whole reason the tiles have to
+ * say "shut" loudly when the row comes back: the way to take a third tool is to
+ * press the torches off, and a screen that only dims a little when you reach
+ * the limit is a screen that looks broken instead of full.
  *
  * `openCharacterPicker` copies this into `_loadout` on every open rather than
  * only in the constructor, so this really is what a new game starts from and
@@ -104,7 +103,7 @@ export const DIFFICULTIES = [
 export const DEFAULT_DIFFICULTY = 'normal';
 
 /**
- * What dying costs, as two buttons in the same segmented bar difficulty uses.
+ * What dying costs, as two buttons in a segmented bar.
  *
  * One control for the bag and the ladder together, because that is the one
  * sentence the player said. The labels name the outcome and stop: "Lose all" is
@@ -1078,9 +1077,11 @@ export class UI {
     // so `loadoutStacks` falls through to DEFAULT_START_ITEMS, which is now the
     // torches plus a full set of tools. Removing the row rather than disabling
     // it is the point, since a screen that offers a choice it does not honour is
-    // worse than no choice. `_buildKit`, `_syncKit`, `_toggleKit` and
-    // `_paintKit` are left in place and unreferenced so the feature can come
-    // back when the tool economy is settled.
+    // worse than no choice. Its markup and its styling went with it, because a
+    // caption with an empty grid under it is a hole where a row used to be;
+    // `_buildKit`, `_syncKit`, `_toggleKit` and `_paintKit` are left in place
+    // and unreferenced so the feature can come back when the tool economy is
+    // settled, and they all no-op while `cg-kit` is absent from the document.
     this._loadout = [];
     this._buildDifficulty();
     this._buildDeathRule();

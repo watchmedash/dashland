@@ -4570,6 +4570,25 @@ class Game {
     return null;
   }
 
+  /**
+   * Crosshair prompt for the environment's tax on the swing, or null on dry
+   * land. The multiplier is printed rather than described because the whole
+   * point is that the player can check it against what they are watching: a
+   * vague "this is slow" is the same information a stuttering timer gives.
+   *
+   * `+toFixed(1)` prints 9 and 1.9 rather than 9.0 and 1.9 — the round numbers
+   * are the common cases and a trailing zero reads like a measurement.
+   */
+  _dragHint() {
+    const p = this.player;
+    const drag = p.miningDrag;
+    if (drag < 1.05) return null;
+    const where = p.headInWater
+      ? (p.grounded ? 'Under water' : 'Under water, adrift')
+      : 'Adrift';
+    return `${where} — ${+drag.toFixed(1)}× slower`;
+  }
+
   _announceHeld() {
     const s = this.inventory.held();
     this.ui.showItemName(s.empty ? '' : ITEMS[s.item].label);
@@ -4824,6 +4843,15 @@ class Game {
     // One chain, one winner. Setting a hint anywhere above this ran into the
     // unconditional clear at the end of it and lasted exactly zero frames.
     const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.active().item]) : null;
+    // Same argument as the line above it, for the other invisible tax. A player
+    // who dives onto a lake bed and finds sand taking two thirds of a second a
+    // block has no way to tell a rule from a broken timer, so the rule says so
+    // itself, with the multiplier in it — and it says so while you are *aiming*
+    // rather than only once you have already spent the breath.
+    //
+    // Gated on a breakable block so it is not a permanent caption on swimming;
+    // water's own hardness is -1, so looking at the lake says nothing.
+    const dragHint = hit && BLOCKS[hit.id]?.hardness >= 0 ? this._dragHint() : null;
     if (hit && IS_SIGN[hit.id]) {
       // Reading is looking: no key to press and nothing to open, so a row of
       // signs can be read by sweeping across them.
@@ -4831,8 +4859,11 @@ class Game {
       this.ui.setHint(text ? `“${text}”` : 'A blank sign');
     } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
       this.ui.setHint(`<kbd>RMB</kbd> ${hit.id === ID.bench ? 'Craft' : 'Smelt'}`);
-    } else if (needTool) {
-      this.ui.setHint(needTool);
+    } else if (needTool || dragHint) {
+      // Both can be true — a wrong tool on a wet seam is the worst case in the
+      // game and the one most likely to be read as broken — so neither hides
+      // the other.
+      this.ui.setHint([needTool, dragHint].filter(Boolean).join(' · '));
     } else this.ui.setHint(null);
 
     const m = this.mining;
@@ -4844,11 +4875,22 @@ class Game {
       // term inside `miningTime`: that function is shared with the worker's
       // idea of hardness and with the tool ladder, and a skill reaching into it
       // would make a block's break time depend on who was asking.
-      const time = miningTime(hit.id, heldDef, this.player.headInWater)
-        * this.skills.miningScale;
+      // `miningTime` is asked for the dry-land number and the environment is
+      // applied out here, for the same reason the skill multiplier is: that
+      // function is the shared idea of hardness and the tool ladder, and a
+      // block's break time should not depend on who is standing in front of
+      // it. `Player.miningDrag` carries the whole water/adrift rule — including
+      // the water constant `miningTime` would otherwise apply itself, which is
+      // why `submerged` is passed false here rather than left to double up.
+      const drag = this.player.miningDrag;
+      const time = miningTime(hit.id, heldDef, false)
+        * drag * this.skills.miningScale;
       if (isFinite(time) && hit.id !== ID.core) {
         m.progress += dt / time;
-        if (Math.random() < dt * 10) {
+        // Sparks and the dig sound thin out with the swing rate rather than
+        // ticking on at ten a second while the arm moves at three — the same
+        // √drag Player.js uses, so the three channels stay in step.
+        if (Math.random() < dt * 10 / Math.sqrt(drag)) {
           this.particles.hitSpark(hit.point, hit.normal, hit.id);
           this.audio.dig(BLOCKS[hit.id].sound, hit.point);
         }

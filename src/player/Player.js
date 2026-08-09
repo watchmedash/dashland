@@ -9,6 +9,11 @@ import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, ID, collisionBoxes, isPassable,
   CONTACT_HURT,
 } from '../world/Blocks.js';
+// Imported rather than re-declared so there is exactly one "how much slower is
+// water" number in the game. Items.js owns it, Skills.js quotes it in prose
+// ("three times slower"), and `miningDrag` below is the only thing that applies
+// it. Items.js imports Blocks.js and nothing else, so this is not a cycle.
+import { UNDERWATER_MINING } from '../game/Items.js';
 
 /** The extent of an ordinary full block, so the shaped path stays branch-free. */
 const FULL_BOX = [[0, 0, 0, 1, 1, 1]];
@@ -222,7 +227,12 @@ export class Player {
     this.autoJump = false;       // walk up a one-block ledge without jumping
     this.lookDir = new THREE.Vector3(0, 0, -1);
     this.eye = new THREE.Vector3();
-    this.reach = 5.0;
+    // Overwritten every frame from the skill tree once one exists; this is what
+    // a player with no Skills instance gets. Keep it equal to REACH_BASE in
+    // Skills.js — the two are separate constants and drifting apart would mean
+    // learning the first level of Reach silently changed your arm by more or
+    // less than the half block it advertises.
+    this.reach = 3.0;
     this.walkTimer = 0;
     this.lastStepDist = 0;
     this.swingT = 1;             // arm swing, 0..1
@@ -1001,7 +1011,19 @@ export class Player {
       this.stamina = Math.max(0, this.stamina - dt * 0.055 * (this.skills?.staminaScale ?? 1));
     } else this.stamina = Math.min(1, this.stamina + dt * 0.12);
 
-    if (this.swingT < 1) this.swingT = Math.min(1, this.swingT + dt * 3.4);
+    // The arm labours when the water does. A penalty the player cannot see is
+    // indistinguishable from a bug in the mining code, and this is the channel
+    // that costs nothing to read: main.js re-swings the moment this reaches 1,
+    // so the whole cadence of digging — arm, particles, the dig sound — slows
+    // together with the timer.
+    //
+    // The square root, not the drag itself: at 9× a full swing would take two
+    // and a half seconds and read as the animation having frozen. √9 = 3 gives
+    // a stroke about every nine tenths of a second, which is roughly one swing
+    // per block of wet sand — laboured, and still obviously alive.
+    if (this.swingT < 1) {
+      this.swingT = Math.min(1, this.swingT + dt * 3.4 / Math.sqrt(this.miningDrag));
+    }
   }
 
   /**
@@ -1087,6 +1109,48 @@ export class Player {
     const baseJ = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
     const col = cidx(c.f, baseI, baseJ);
     return this.planet.at(col, Math.floor(c.ck - 0.2));
+  }
+
+  /**
+   * How much slower the world makes you swing right now: 1 on dry land.
+   *
+   * Two conditions, one number, applied once each — a rule you can state in a
+   * sentence and therefore learn from playing:
+   *
+   *   head under water   ×3   the swing is dragging water the whole way down
+   *   adrift in water    ×3   there is nothing under your feet to push against
+   *
+   * so a diver standing on the seabed is 3× slower and one treading water above
+   * it is 9×. Minecraft's are 5 and 5 for a total of 25; three is the number
+   * Items.js already chose for water and the reasoning there holds for both
+   * halves — 25 puts a single block of stone past a whole lungful, which stops
+   * being a rule and starts being a wall. Nine leaves a breath at the seabed
+   * worth roughly four blocks of stone with a stone pick standing, or one
+   * floating, which is exactly the decision this is for: sink, or drain it.
+   *
+   * The float half is deliberately gated on being *in water* rather than on
+   * `grounded` alone. A jump lasts about four tenths of a second and you take
+   * your weight into the swing with you; buoyancy lasts as long as you like and
+   * does not. Taxing a jumping builder on dry land would be a different game.
+   *
+   * Lungs is the aqua-affinity node and it did not need inventing: it is
+   * already the diver branch, already behind agility, and its own note in
+   * Skills.js says it exists to make the seabed "a place you can work". Each
+   * level takes a quarter off the water half only, 3.0 down to 2.0 at lungs 4.
+   * It never touches the float half, so standing on the bed stays worth its
+   * full 3× no matter how deep the tree goes — the skill buys you a better
+   * swing, not permission to stop diving.
+   */
+  get miningDrag() {
+    let d = 1;
+    if (this.headInWater) {
+      d *= Math.max(1, UNDERWATER_MINING - 0.25 * (this.skills?.level?.lungs ?? 0));
+    }
+    // `inWater` is true in lava as well — that is what gives lava its wading
+    // physics — so it is excluded by name, the same way `headInWater` excludes
+    // it. Burning to death is punishment enough without a mining tax.
+    if (this.inWater && !this.inLava && !this.grounded) d *= UNDERWATER_MINING;
+    return d;
   }
 
   swing() { this.swingT = 0; }

@@ -288,9 +288,24 @@ const FALL_FREE_BASE = 3.0;
 const BREATH_PER_LUNGS = 0.5;
 /** Multiplier on the mining timer per level of hands. */
 const MINE_PER_HANDS = 0.94;
-/** Cells of reach per level, on top of Player.js's 5.0. */
+/**
+ * Reach, and where the two numbers come from.
+ *
+ * The base was 5.0, which is longer than Minecraft's 4.5 and long enough that
+ * reach never registered as a limit — you could already touch anything you
+ * could see, so the branch bought you nothing you missed. At 3.0 the arm is
+ * genuinely short: you step up to what you are working on, and a block placed
+ * across a gap is a decision rather than a reflex.
+ *
+ * That also puts the branch somewhere. Fully learned it is 3.0 + 3 x 0.5 =
+ * 4.5, which lands exactly on Minecraft's default — so the top of the tree is
+ * "a normal arm", not a superpower, and every level of it is felt.
+ *
+ * Must agree with `Player.js`'s own initial `reach`, which is what a player
+ * with no skills and no Skills instance uses.
+ */
 const REACH_PER_LEVEL = 0.5;
-const REACH_BASE = 5.0;
+const REACH_BASE = 3.0;
 
 /**
  * Damage kinds tolerance applies to.

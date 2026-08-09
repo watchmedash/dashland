@@ -375,6 +375,24 @@ const float BLOCK_CEIL = 0.58;
  */
 const float NIGHT_OPEN_GAIN = 3.0;
 
+/**
+ * The same idea by day, for ground the canopy shadows.
+ *
+ * A forest floor at nine in the morning was dark enough to need a torch. That
+ * is not the light field's doing: leaves cost sky light nothing, so a cell five
+ * columns into a wood already stores the maximum, exactly like open meadow.
+ * What takes the light is the shadow map, which the canopy blocks completely,
+ * leaving the fragment standing on the sky fill alone at roughly a ninth of
+ * what full sun gives it.
+ *
+ * 1.2 roughly doubles that shade while moving a sunlit meadow about a tenth,
+ * because the meadow's ambient is a ninth of its total and its direct term is
+ * untouched. Gated on `openSky` so it is exactly zero in a cave, in a sealed
+ * room and under a slab roof, and faded out by `uNight` so it cannot brighten
+ * dusk.
+ */
+const float DAY_SHADE_GAIN = 1.2;
+
 // --- moving-light occlusion --------------------------------------------------
 
 const vec3 OCC_DIM = vec3(${OCC_NI}.0, ${OCC_NJ}.0, ${OCC_NK}.0);
@@ -1018,7 +1036,25 @@ const LIGHTS_END = /* glsl */`
   // to fail for this to do anything, which is why it can afford to be large.
   float openSky = vSun * vSun;
   float nightLift = 1.0 + uNight * NIGHT_OPEN_GAIN * openSky;
-  vec3 skyTinted = uSkyColor * uSkyIntensity * sunAmt * nightLift;
+  // And the same trick by day, for the forest floor.
+  //
+  // "It's daytime but still way too dark especially when trees are dense, I
+  // have to actually place torches along the way even though it's morning."
+  // Measured, the light field was not the problem: leaves cost sky light
+  // nothing, so a cell five columns deep in a wood already stores the full
+  // fifteen, exactly like open meadow. There was no value the lighting pass
+  // could raise. What darkens it is that the canopy blocks the sun's shadow
+  // map, so the fragment loses all of its direct term and is left standing on
+  // the sky fill alone, which is about a ninth of what full sun gives it.
+  //
+  // So lift the fill, gated on openSky exactly as the night lift is. That gate
+  // is what keeps it honest: it is zero in a cave, in a sealed room and under
+  // a slab roof, so none of them move at all. A sunlit meadow barely moves
+  // either, because its ambient is only a ninth of its total, while shade
+  // roughly doubles. Deliberately not applied to sunAmt itself, which would
+  // light caves.
+  float dayLift = 1.0 + DAY_SHADE_GAIN * openSky * (1.0 - uNight);
+  vec3 skyTinted = uSkyColor * uSkyIntensity * sunAmt * nightLift * dayLift;
   vec3 skyFill = mix(skyTinted, vec3(dot(skyTinted, vec3(0.2126, 0.7152, 0.0722))), 0.34);
   // ground bounce, strongest on downward-facing surfaces
   vec3 upDir = normalize(vWorld - uPlanetCenter);

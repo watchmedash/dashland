@@ -1190,8 +1190,14 @@ class Game {
     this.worldWorker.postMessage({ type: 'init', seed: this.seed });
     this._choosing = true;
     this._readyHeld = false;
-    if (opts.character) this.beginWorld(opts.character);
-    else this.ui.openCharacterPicker(this.character.id);
+    // Always the picker. This used to skip straight to `beginWorld` when the
+    // options carried a character, on the reasoning that a screen collecting
+    // all three answers at once would want that door. The screen that got built
+    // keeps the carousel and passes its current selection at slot-claim time,
+    // so the door was always open and New Game stopped showing the picker at
+    // all. Picking who you are is the point of starting a world; the shortcut
+    // was speculative and the bug was real.
+    this.ui.openCharacterPicker(this.character.id);
   }
 
   /**
@@ -5189,8 +5195,13 @@ class Game {
         // Sparks and the dig sound thin out with the swing rate rather than
         // ticking on at ten a second while the arm moves at three — the same
         // √drag Player.js uses, so the three channels stay in step.
+        // Sound only. `hitSpark` threw chips off the face on the way in, and
+        // those chips come out of the same instanced-cube pool as the break
+        // burst that was removed at the player's request, so mining still
+        // produced exactly the cubes they had asked to be rid of. The crack
+        // overlay already draws the whole dig and it lands on the one face
+        // being worked, which is more information than a spray of boxes.
         if (Math.random() < dt * 10 / Math.sqrt(drag)) {
-          this.particles.hitSpark(hit.point, hit.normal, hit.id);
           this.audio.dig(BLOCKS[hit.id].sound, hit.point);
         }
         if (this.player.swingT >= 1) { this.player.swing(); this.viewModel.punch(); }

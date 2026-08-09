@@ -1675,6 +1675,111 @@ const PREY_REST_MAX = 70;
  * their size jitter and the hunter's prey has eaten its way up GROW_MAX.
  */
 const PREY_SIZE = 1.5;
+
+// --- the other half of predation: prey that can see it coming ----------------
+//
+// Everything above this is the hunter's side. The prey's side, until now, was a
+// single line inside _stalk: the hunter tells the animal it has already chosen
+// to run. That is awareness of *being hunted*, which is not the same thing as
+// awareness of a predator, and the difference is the report — "deer not getting
+// away from the tiger doesn't make sense". A tiger that has eaten is resting off
+// PREY_REST and never picks anyone, so nobody is ever told anything, and a deer
+// grazes at its elbow for a minute.
+//
+// So prey gets a sense of its own. Three rules shape it:
+//
+//   1. It is about presence, not intent. A predator standing there is enough.
+//      Nothing here reads `hungerT` or `prey` — that is exactly the coupling
+//      that produced the bug.
+//   2. The threat is measured with what the species table already says: can
+//      this thing physically take me (the PREY_SIZE ceiling _findPrey uses),
+//      am I actually on its list, and how hard does it hit (`damage`). There
+//      is no threat table, because a second table would drift from the first.
+//   3. It has to settle. An animal that cannot escape stops trying and stands
+//      there warily rather than vibrating, and an animal that has escaped does
+//      not turn round at the boundary and come back — hence SPOOK_CLEAR and
+//      SPOOK_REST.
+//
+// Cost. This is a scan by *every* prey animal, which is the thing the hunt
+// scan's own comment warns about, so it is inverted: once per THREAT_PERIOD the
+// manager makes one pass over this.list and keeps the handful of bodies that
+// could threaten anything at all (`this._threats` — carnivores, omnivores and
+// husks, typically under ten of the 134). Each prey animal then looks at that
+// short list on its own jittered SPOOK_PERIOD clock. The whole system is
+// therefore O(n) twice a second plus O(n·k/SPOOK_PERIOD) with k ≈ the number of
+// predators alive, not O(n²) per frame. Measured at a full roster it is a few
+// microseconds a frame; see the harness note in the change description.
+/** Seconds between rebuilds of the planet's shared threat list. */
+const THREAT_PERIOD = 0.5;
+/** Seconds between one prey animal's looks around it (jittered ±20%). */
+const SPOOK_PERIOD = 0.75;
+/**
+ * The comfort ring, in cells, before scaling: what a zero-damage predator would
+ * get, and the per-half-heart slope on top of it. A tiger (6) comes out at 8.4
+ * cells before the size factor, a lion (5) at 7.5, a fox (1) at 3.9 — which is
+ * the graded response the report asks for, taken straight off the damage ladder
+ * rather than off a new number per species.
+ */
+const SPOOK_BASE = 3.0;
+const SPOOK_PER_DMG = 0.9;
+/**
+ * And a ceiling, because the ring is also the distance a hunt has to close.
+ * PREY_RANGE * 0.55 = 11 is where a committed hunt starts driving its target
+ * anyway, so nothing gains from a ring wider than that: past it the prey would
+ * be reacting to an animal the hunt has not even noticed.
+ */
+const SPOOK_MAX = 10;
+/** Relative size, as a multiplier on the ring. A tiger over a bunny, not a deer. */
+const SPOOK_SIZE_MIN = 0.6;
+const SPOOK_SIZE_MAX = 1.6;
+/**
+ * What a predator that could take you but does not have you on its list is
+ * worth. A tiger does not eat pandas, and a panda grazing at its feet is the
+ * same picture the report complained about — but half a ring, not a whole one,
+ * because it is wariness rather than being dinner.
+ */
+const SPOOK_UNLISTED = 0.5;
+/** Unease needed to actually move. Filled at (0.3 + depth into the ring)/s. */
+const SPOOK_TRIGGER = 1.0;
+const SPOOK_FILL = 0.3;
+/** ...and drained at this a second once the ring is clear. */
+const SPOOK_DECAY = 0.9;
+/**
+ * Hysteresis. It runs until it is a third clear of the ring, not until it is
+ * exactly on the edge — a herd that stops the instant the test flips spends the
+ * next minute stepping in and out of it, which is the oscillation the report
+ * would have complained about next.
+ */
+const SPOOK_CLEAR = 1.35;
+/** Well inside the ring: skip the build-up, go. Also the only bypass of SPOOK_REST. */
+const SPOOK_PANIC = 0.8;
+/** Longest one bolt lasts before the animal either has escaped or gives up. */
+const SPOOK_HOLD = 6;
+/**
+ * And the wary pause afterwards. The long one is for an animal that could not
+ * get away: it stops, because a deer pinned in a corner that keeps sprinting
+ * into the same wall reads far worse than a deer that has frozen. Being
+ * genuinely hunted overrides it — see the `hunted` test in _spook.
+ */
+const SPOOK_REST = 7;
+const SPOOK_REST_VAR = 3;
+/** ...and the short one, for an animal that simply got clear. */
+const SPOOK_EASE = 1.5;
+/**
+ * The herd cue: one animal bolting is a reason for its neighbours to look up.
+ * Deliberately worth less than a trigger on its own, so alarm cannot propagate
+ * on its own account and turn the planet into a standing wave — it only tips
+ * over an animal that was already uneasy, which in practice means one that is
+ * inside the same predator's ring and a second or two behind its neighbour.
+ * The list is a handful of entries that expire after ALARM_LIFE.
+ */
+const ALARM_LIFE = 1.5;
+const ALARM_RANGE = 7;
+const ALARM_WEIGHT = 0.55;
+const ALARM_MAX = 24;
+/** Seconds an alarm-only bolt runs for, when the caller cannot see the threat itself. */
+const ALARM_BOLT = 1.6;
+
 /**
  * A kill makes a predator bigger, permanently. Five good ones take it to the
  * ceiling and no further — an old tiger should be a landmark, not a mountain —
@@ -2120,6 +2225,16 @@ export class Mobs {
     /** Animals taken by a predator this frame, removed once the tick is over. */
     this._kills = [];
     /**
+     * Everything alive that could frighten anything, rebuilt once per
+     * THREAT_PERIOD by one pass over this.list. Prey reads this short list
+     * instead of scanning the whole roster — see the note above THREAT_PERIOD
+     * for why that inversion is the whole cost story.
+     */
+    this._threats = [];
+    this._threatT = 0;
+    /** Recent bolts, as {pos, threat, mob, t}, for the herd cue. Expire on ALARM_LIFE. */
+    this._alarms = [];
+    /**
      * Stalkers that stopped being looked at this frame, on exactly the same
      * terms and for the same reason: update() walks `this.list` in reverse and
      * a helper that splices out of it moves the cursor's own entry. Collected
@@ -2172,6 +2287,12 @@ export class Mobs {
     // of a bug, not a bug that has happened yet.
     this._kills.length = 0;
     this._vanished.length = 0;
+    // Same reasoning: both of these name bodies from the world just thrown
+    // away, and _threats in particular would hand the next world's prey a
+    // predator that no longer exists.
+    this._threats.length = 0;
+    this._threatT = 0;
+    this._alarms.length = 0;
     this.stalkerRest = 0;
   }
 
@@ -2461,6 +2582,19 @@ export class Mobs {
       /** Seconds until this hunter may bite again. See BITE_PERIOD. */
       biteT: 0,
       prey: null,
+      // --- and the prey's own side of it: see _spook ---
+      /** Accumulated unease, 0..SPOOK_TRIGGER-and-a-bit. */
+      spook: 0,
+      /** Seconds until this animal next looks around. Staggered, like hungerT. */
+      spookT: Math.random() * SPOOK_PERIOD,
+      /** Seconds it will not start a new bolt for — the wary pause after one. */
+      spookRest: 0,
+      /** Seconds left of the current bolt, 0 when it is not running from anything. */
+      bolt: 0,
+      /** What it is running from, when it can see it. */
+      boltFrom: null,
+      /** ...and where it was, for a bolt started off a neighbour's alarm. */
+      boltAt: new THREE.Vector3(),
       // --- up a tree, monkeys only ---
       /** Layer it is climbing toward, or null when it is not climbing. */
       climbTo: null,
@@ -4660,6 +4794,214 @@ export class Mobs {
   }
 
   /**
+   * Everything on the planet that could frighten anything, in one pass.
+   *
+   * Run once per THREAT_PERIOD for the whole world rather than once per animal:
+   * the alternative — every prey animal walking this.list for itself — is the
+   * O(n²) pass the hunt scan's own comment exists to avoid, and there are far
+   * more prey than predators, so the cheap half is the one to share.
+   *
+   * `preyOn` is the test rather than `diet`, because "hunts something" is what
+   * matters and an omnivore with a list is as dangerous as a carnivore with
+   * one. Husks are in as well: they have no prey list and no interest in
+   * animals, but a deer that grazes through one is the same picture in a
+   * different hat, and _spook's unlisted weight already prices it as wariness.
+   */
+  _buildThreats() {
+    const out = this._threats;
+    out.length = 0;
+    for (const o of this.list) {
+      const s = o.spec;
+      // He frightens exactly one thing and it is not the wildlife. Same rule as
+      // _findPrey's, and for the same reason: the lists are data.
+      if (s.phantom || s.trader) continue;
+      if (o.taken || o.released || o.dying > 0 || o.health <= 0) continue;
+      // A cub is not a threat. It cannot hunt — _stalk refuses on `baby` — so
+      // treating it as one would have a herd bolting from a kitten.
+      if (o.baby > 0) continue;
+      if (!s.preyOn && !s.hostile && !s.monster) continue;
+      out.push(o);
+    }
+  }
+
+  /**
+   * How close `p` is willing to let `t` get, in cells, or 0 if `t` is nothing
+   * to it. Centre to centre, so both bodies' radii are in it.
+   *
+   * Built entirely out of numbers that already exist. The gate is _findPrey's
+   * own ceiling — if this thing could not physically take me there is nothing
+   * to be afraid of, which is what makes a fox beside a deer a non-event
+   * without anybody writing "foxes do not scare deer" down anywhere. The width
+   * is the damage ladder, scaled by how much bigger than me it is.
+   */
+  _comfort(t, p) {
+    const ts = t.spec, ps = p.spec;
+    if (t === p || t.type === p.type) return 0;
+    // Water and air are walls in both directions, exactly as they are in
+    // _findPrey: a shark cannot come ashore and a deer is not a bee's problem.
+    if (ts.aquatic && !ps.aquatic) return 0;
+    if (ps.aquatic && !(ts.aquatic || ts.amphibious)) return 0;
+    if (ps.flies && !ts.flies) return 0;
+    const th = ts.height * t.grown, ph = ps.height * p.grown;
+    // The prey-ceiling rule, from the hunter's side. Above it, I am simply too
+    // big to be dinner.
+    if (ph > th * PREY_SIZE) return 0;
+    const weight = (ts.preyOn && ts.preyOn.has(p.type)) ? 1 : SPOOK_UNLISTED;
+    const size = clamp(0.6 + 0.4 * (th / Math.max(0.2, ph)), SPOOK_SIZE_MIN, SPOOK_SIZE_MAX);
+    const r = (SPOOK_BASE + SPOOK_PER_DMG * (ts.damage ?? 2)) * size * weight;
+    return Math.min(r, SPOOK_MAX) + t.radius + p.radius;
+  }
+
+  /** Point `mob` away from a world position and set it running. */
+  _boltAway(mob, from, jitter) {
+    const fr = mob.frame;
+    _rel.copy(mob.pos).sub(from);
+    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
+    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    mob.want = wrapAngle(Math.atan2(rb, ra) + jitter);
+    mob.state = 'flee';
+    // Long enough that the wander cannot take the state back between looks, and
+    // refreshed every frame the bolt is live, so the two clocks cannot fight.
+    mob.stateT = Math.max(mob.stateT, 0.6);
+  }
+
+  /**
+   * An animal notices a predator standing near it, and eventually leaves.
+   *
+   * The counterpart to _stalk, and independent of it on purpose: nothing here
+   * asks whether the predator is hungry, has chosen a target, or is even awake.
+   * A tiger that has just eaten is still a tiger.
+   *
+   * @returns {boolean} true if it is bolting, so the wander stands down
+   */
+  _spook(mob, dt) {
+    const spec = mob.spec;
+    // Who has no nerves: the stalker (nothing about him is ordinary), the
+    // merchant (he is here to trade and a shopkeeper who runs into the trees
+    // takes the shop with him — the same exemption _stalk already gives him),
+    // and the husk, which is a corpse with a grudge.
+    if (spec.phantom || spec.trader || spec.hostile || spec.monster) return false;
+    if (mob.spookRest > 0) mob.spookRest -= dt;
+
+    // --- already running ---
+    if (mob.bolt > 0) {
+      mob.bolt -= dt;
+      const t = mob.boltFrom;
+      const alive = !!t && !t.taken && !t.released && t.dying <= 0 && t.health > 0;
+      if (alive) {
+        const comfort = this._comfort(t, mob);
+        const d = mob.pos.distanceTo(t.pos);
+        if (comfort <= 0 || d > comfort * SPOOK_CLEAR) {
+          // Clear of it, with the hysteresis margin. A short breather rather
+          // than none, so it does not immediately re-arm on the way back in.
+          mob.bolt = 0; mob.boltFrom = null; mob.spook = 0;
+          mob.spookRest = SPOOK_EASE;
+          return false;
+        }
+        if (mob.bolt <= 0) {
+          // Six seconds and still inside the ring. Either it is cornered or the
+          // thing is faster than it, and in both cases more sprinting achieves
+          // nothing — except when it is genuinely being hunted, where standing
+          // still is not a choice an animal gets to make. _stalk keeps driving
+          // that case anyway; this only declines to stop it.
+          if (t.prey === mob) { mob.bolt = SPOOK_HOLD; }
+          else {
+            mob.bolt = 0; mob.boltFrom = null; mob.spook = 0;
+            mob.spookRest = SPOOK_REST + Math.random() * SPOOK_REST_VAR;
+            return false;
+          }
+        }
+        this._boltAway(mob, t.pos, 0);
+        return true;
+      }
+      // Running from a remembered place — an alarm bolt, or a threat that died
+      // mid-flight. It runs out the clock and stops.
+      if (mob.bolt <= 0) {
+        mob.bolt = 0; mob.boltFrom = null; mob.spook = 0;
+        mob.spookRest = SPOOK_EASE;
+        return false;
+      }
+      this._boltAway(mob, mob.boltAt, 0);
+      return true;
+    }
+
+    // --- otherwise, a look round, on its own clock ---
+    mob.spookT -= dt;
+    if (mob.spookT > 0) return false;
+    mob.spookT = SPOOK_PERIOD * (0.8 + Math.random() * 0.4);
+    if (!this._threats.length && !this._alarms.length) { mob.spook = 0; return false; }
+
+    let worst = null, depth = 0;
+    for (const t of this._threats) {
+      if (t === mob || t.taken || t.dying > 0 || t.health <= 0) continue;
+      const comfort = this._comfort(t, mob);
+      if (comfort <= 0) continue;
+      const d2 = mob.pos.distanceToSquared(t.pos);
+      if (d2 >= comfort * comfort) continue;
+      // How far inside the ring, 0 at the edge and 1 on top of it. The worst
+      // threat is the one that has come furthest in, not the nearest — a fox at
+      // three cells is deeper into its own small ring than a tiger at five is
+      // into a wide one, and the fox is the one to step away from first.
+      const u = 1 - Math.sqrt(d2) / comfort;
+      if (u > depth) { depth = u; worst = t; }
+    }
+
+    const step = SPOOK_PERIOD;
+    if (worst) mob.spook += (SPOOK_FILL + depth) * step;
+    else mob.spook = Math.max(0, mob.spook - SPOOK_DECAY * step);
+
+    // The herd cue, and only when it cannot see anything itself — an animal
+    // with a tiger in front of it does not need to be told. Half a trigger's
+    // worth, so it tips over a neighbour that was already uneasy and does
+    // nothing at all to a calm one.
+    let alarm = null;
+    if (!worst && this._alarms.length) {
+      for (const a of this._alarms) {
+        if (a.mob === mob) continue;
+        if (mob.pos.distanceToSquared(a.pos) > ALARM_RANGE * ALARM_RANGE) continue;
+        mob.spook += ALARM_WEIGHT;
+        alarm = a;
+        break;
+      }
+    }
+
+    // Deep inside the ring is the one thing that overrides the wary pause. A
+    // deer that gave up and settled, with a tiger then walking up to its
+    // shoulder, is the report again.
+    const panic = depth > SPOOK_PANIC;
+    if (mob.spook < SPOOK_TRIGGER || (mob.spookRest > 0 && !panic)) {
+      mob.spook = Math.min(mob.spook, SPOOK_TRIGGER * 1.5);
+      return false;
+    }
+
+    mob.spook = 0;
+    mob.spookRest = 0;
+    if (worst) {
+      mob.bolt = SPOOK_HOLD;
+      mob.boltFrom = worst;
+      mob.boltAt.copy(worst.pos);
+      // Only a first-hand sighting raises the alarm. An alarm bolt that raised
+      // one of its own is a chain reaction with no damping in it, and the far
+      // side of the meadow would be running from a rumour.
+      if (this._alarms.length < ALARM_MAX) {
+        this._alarms.push({ pos: mob.pos.clone(), mob, t: ALARM_LIFE });
+      }
+    } else if (alarm) {
+      // Off a neighbour's word alone: a short break in the same direction it
+      // went, not a committed escape from something it has not seen.
+      mob.bolt = ALARM_BOLT;
+      mob.boltFrom = null;
+      mob.boltAt.copy(alarm.pos);
+    } else {
+      return false;
+    }
+    // A shared bearing per animal would line a herd up like a chorus; a little
+    // spread keeps it a scatter.
+    this._boltAway(mob, mob.boltAt, (Math.random() - 0.5) * 0.8);
+    return true;
+  }
+
+  /**
    * The night stalk: a hungry big cat walks the player down, slowly, and says
    * so for six seconds before it means it.
    *
@@ -5093,6 +5435,14 @@ export class Mobs {
     this.prowlT -= dt;
     if (this.prowlRest > 0) this.prowlRest -= dt;
 
+    // The planet's threat list, on the same terms and for the same reason: one
+    // pass shared by every prey animal rather than one pass each. See _spook.
+    this._threatT -= dt;
+    if (this._threatT <= 0) { this._threatT = THREAT_PERIOD; this._buildThreats(); }
+    for (let n = this._alarms.length - 1; n >= 0; n--) {
+      if ((this._alarms[n].t -= dt) <= 0) this._alarms.splice(n, 1);
+    }
+
     // Top up the population *around the player*, wherever the player now is.
     //
     // The search was already anchored to the player's column rather than the
@@ -5352,11 +5702,21 @@ export class Mobs {
       // wandering will not reliably bring two animals together inside the love
       // window. Fleeing still wins — a spooked animal has other priorities.
       const courting = !hunting && !prowling && !stalking && this._court(mob, fr);
+      // And the prey's side of the ecology. Last of the five, so it overrides
+      // the courtship above it — "fleeing still wins", the same rule that
+      // comment already states — and gated out of the three that mean this
+      // animal is itself the one doing the hunting: a tiger mid-chase is not
+      // frightened of the lion at the far end of the valley, and a hungry fox
+      // that abandoned a rabbit because a bear walked past would be the
+      // stampede this is trying not to cause.
+      const spooked = !hunting && !prowling && !stalking && !haunting
+        && this._spook(mob, dt);
       if (!prowling) mob.creep = false;
 
       // --- behaviour: pick a *desired* heading, never assign the real one ---
       const wasFleeing = mob.state === 'flee';
-      if (!hunting && !prowling && !stalking && !courting && !haunting && mob.stateT <= 0) {
+      if (!hunting && !prowling && !stalking && !courting && !haunting && !spooked
+        && mob.stateT <= 0) {
         if (wasFleeing) {
           mob.state = 'idle';
           mob.stateT = 1 + Math.random() * 2;

@@ -46,7 +46,13 @@
         <h2 id="slots-title">Continue</h2>
         <button class="ghost" data-close-slots>Back <kbd>Esc</kbd></button>
       </header>
-      <div class="slot-list" id="slot-list"></div>
+      <!-- Everything below the header is wrapped, on every panel in this file.
+           The wrapper is what scrolls when a window is too short for the
+           screen; the header stays where it is, so Back and Close are never
+           the first things to leave. -->
+      <div class="panel-body">
+        <div class="slot-list" id="slot-list"></div>
+      </div>
     </div>
   </div>
 
@@ -153,19 +159,21 @@
         <button class="ghost" data-close-screen>Close <kbd>Esc</kbd></button>
       </header>
 
-      <div class="inv-body">
-        <div class="inv-left">
-          <div id="screen-top"></div>
-          <div class="inv-section">
-            <div class="inv-grid" id="inv-main"></div>
-            <div class="inv-grid inv-hot" id="inv-hot"></div>
+      <div class="panel-body">
+        <div class="inv-body">
+          <div class="inv-left">
+            <div id="screen-top"></div>
+            <div class="inv-section">
+              <div class="inv-grid" id="inv-main"></div>
+              <div class="inv-grid inv-hot" id="inv-hot"></div>
+            </div>
           </div>
+          <aside class="recipe-panel" id="recipe-panel">
+            <h3>Can Craft <span id="recipe-count"></span></h3>
+            <div id="recipe-list"></div>
+            <p class="recipe-empty" id="recipe-empty">Nothing yet</p>
+          </aside>
         </div>
-        <aside class="recipe-panel" id="recipe-panel">
-          <h3>Can Craft <span id="recipe-count"></span></h3>
-          <div id="recipe-list"></div>
-          <p class="recipe-empty" id="recipe-empty">Nothing yet</p>
-        </aside>
       </div>
     </div>
   </div>
@@ -184,12 +192,17 @@
         <h2>Growth</h2>
         <button class="ghost" data-close-skills>Close <kbd>K</kbd></button>
       </header>
+      <!-- The balance stays out of the scrolling body on purpose: every row in
+           the tree is a question about that number, and scrolling it away
+           makes each of them unanswerable. -->
       <div class="skills-bar">
         <span class="skill-points" id="sk-points">0</span>
         <p class="skill-sub" id="sk-sub">points</p>
         <button class="ghost" id="sk-reset">Unlearn everything</button>
       </div>
-      <div class="skill-tree" id="sk-tree"></div>
+      <div class="panel-body">
+        <div class="skill-tree" id="sk-tree"></div>
+      </div>
     </div>
   </div>
 
@@ -213,6 +226,7 @@
       <header><h2>Settings</h2><button class="ghost" data-close-settings>Back</button></header>
       <!-- Grouped, and stripped of prose. Four headings do for the whole screen
            what a sentence under each row was doing badly. -->
+      <div class="panel-body">
       <div class="settings">
         <h3 class="set-head">Mouse</h3>
         <label>Sensitivity <span class="val" id="sens-val">1.00</span>
@@ -259,6 +273,7 @@
           </ul>
         </details>
       </div>
+      </div>
     </div>
   </div>
 
@@ -267,6 +282,7 @@
     <div class="panel">
       <header><h2>Controls</h2><button class="ghost" data-close-controls>Back</button></header>
       <!-- Keys and what they do, and nothing else. -->
+      <div class="panel-body">
       <h3 class="ctl-head">Move</h3>
       <div class="controls-grid">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>
@@ -306,6 +322,7 @@
         <div><kbd>C</kbd><span>Hold to zoom</span></div>
         <div><kbd>F3</kbd><span>Debug overlay</span></div>
         <div><kbd>Esc</kbd><span>Pause</span></div>
+      </div>
       </div>
     </div>
   </div>

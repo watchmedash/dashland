@@ -166,6 +166,48 @@
   --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
 
   --shadow: 0 20px 48px -20px rgba(6, 8, 16, .78), 0 1px 0 rgba(255, 255, 255, .5) inset;
+
+  /* --- how a screen meets the edge of the window -----------------------
+     This game ships to a desktop store, where the window is whatever size
+     the player left it, and a card that only fits one of those sizes is a
+     broken screen rather than an ugly one. So there are three numbers here
+     and every overlay is built out of them rather than out of hand-picked
+     pixels.
+
+     `--gutter` is the band of dimmed world that is always visible around a
+     card, on all four sides. It is what makes "the card's edge left the
+     viewport" a thing the stylesheet cannot do.
+
+     `--screen-h` is therefore the tallest anything is ever allowed to be,
+     and every card and panel caps itself at it. A screen with more rows
+     than that scrolls inside its own body, under a header that stays put:
+     scrolling the whole sheet takes Close and Back off the screen with it,
+     which is the failure this replaces.
+
+     `--cg-stage` is the character picker's window, and it is the one box in
+     the game whose size is a camera's problem as well as a layout's. The
+     canvas is square because the picker's frustum is square, so its height
+     is its width and a stage sized off the card alone grows with the card
+     and off the bottom of a short window. Capped against the window height
+     instead, with the rest of the card's furniture subtracted, a floor so
+     it cannot collapse to nothing, and a ceiling because a figure four
+     hundred pixels tall is already as big as it needs to be.
+
+     `vh` first and `dvh` under `@supports`, in that order, because a custom
+     property is stored unparsed: a browser that does not know `dvh` would
+     accept the token and then throw away the `max-height` that used it,
+     which is a cap that silently is not there. */
+  --gutter: 16px;
+  --screen-h: calc(100vh - var(--gutter) * 2);
+  --cg-chrome: 350px;
+  --cg-stage: clamp(140px, calc(100vh - var(--cg-chrome)), 420px);
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --screen-h: calc(100dvh - var(--gutter) * 2);
+    --cg-stage: clamp(140px, calc(100dvh - var(--cg-chrome)), 420px);
+  }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -197,11 +239,21 @@ html, body {
    per-frame budget. */
 .overlay {
   position: fixed; inset: 0; z-index: 50;
-  display: grid; place-items: center;
+  display: flex; overflow: auto;
+  padding: var(--gutter);
   background: radial-gradient(120% 90% at 50% 0%, rgba(10, 14, 26, .5), rgba(3, 5, 11, .88));
   backdrop-filter: blur(13px) saturate(118%);
   animation: fade var(--t-mid) ease;
 }
+/* Centred by auto margins rather than by `place-items: center`, and the
+   difference only shows up in a small window. Centre alignment splits an
+   overflow across both edges, so a card taller than the viewport loses its top
+   to a scroll position the player cannot scroll back to: the title and the top
+   of the sheet are simply gone. An auto margin resolves to zero when there is
+   no free space to share out, so the same card pins to the top edge and the
+   rest of it is one scroll away. This is the exact fault the character screen
+   had at 960x600. */
+.overlay > * { margin: auto; flex: none; }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.985) } to { opacity: 1; transform: none } }
 
@@ -228,10 +280,30 @@ html, body {
     inset 0 -20px 40px -30px rgba(74, 54, 28, .5),
     var(--shadow);
 }
+/* A workspace screen is a header that stays and a body that scrolls, not one
+   sheet with a scrollbar down it. The panel used to be the scroll container
+   itself, which meant that on any window short enough to need scrolling the
+   first thing to leave the screen was the header, and the header is where
+   Close and Back live. So the sheet is a column now: `header` is fixed,
+   `.panel-body` takes whatever height is left and scrolls inside it, and the
+   sheet itself never exceeds the window. */
 .panel {
-  width: min(660px, 93vw); max-height: 88vh; overflow: auto;
+  width: min(660px, 93vw);
+  max-height: var(--screen-h);
+  display: flex; flex-direction: column; overflow: hidden;
   padding: 20px 22px;
   animation: rise .26s var(--ease);
+}
+.panel > header { flex: none; }
+/* `min-height: 0` is the whole reason this works: a flex item's default floor
+   is its content, so without it the body refuses to be shorter than its rows
+   and pushes the sheet past the cap instead of scrolling. The right edge is
+   pulled out to the sheet's padding so the scrollbar runs down the margin
+   rather than through the rows. */
+.panel-body {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  margin-right: -12px; padding-right: 12px;
 }
 /* The screens the game stops for get one warm hairline along the top edge of
    the sheet. It is what makes a menu and the hotbar look struck from the same
@@ -286,6 +358,10 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
    the same sheet as every screen, in a narrower box. */
 .menu-card {
   width: min(340px, 90vw); padding: 26px 22px 20px; text-align: center;
+  /* These have no header to keep, so the sheet is allowed to be the scroll
+     container. The cap is what matters: a card is never taller than the
+     window, so its bottom button is always somewhere the player can reach. */
+  max-height: var(--screen-h); overflow-y: auto;
   animation: rise .28s var(--ease);
 }
 .menu-card.small { width: min(320px, 90vw); padding: 22px 20px 18px; }
@@ -335,6 +411,18 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
 .credit-list { list-style: none; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
 .credit-list li { padding-left: 10px; text-indent: -10px; margin-bottom: 3px; }
 .credit-list strong { color: var(--ink); font-weight: 700; }
+
+/* Rows in a list do not shrink; the list scrolls.
+   Every list on every screen is a flex column, and a flex item's default is
+   `flex-shrink: 1`. Put a max-height on the column and the rows quietly give
+   up their own height to fit inside it instead of overflowing: at 600px of
+   window the craftable sidebar was capped at 204px and twelve recipe rows,
+   each of which contains a 30px thumbnail, came out 12px tall. That is not a
+   short list, it is a squashed one, and the scrollbar that should have
+   appeared never did because from the container's point of view everything
+   fitted. Stated once here for every list in the game rather than per screen,
+   because the next list somebody adds will have the same default. */
+.slot-row, .recipe-row, .shop-row, .skill-row, .toast { flex: none; }
 
 /* Every button in the game is cut from parchment: the same emboss as every
    other raised thing on a sheet, so a control and a row are visibly the same
@@ -425,9 +513,12 @@ button.ghost {
 .slot-row { display: flex; gap: 5px; align-items: stretch; }
 /* The row is a button, so the whole card is the hit target rather than the
    words in it. Delete is a second, deliberately smaller one beside it. */
+/* `minmax(0, 1fr)` and not `1fr`: a grid track's floor is its content, so a
+   long character name held the row open and pushed the delete button off the
+   card in a narrow window instead of being cut short. */
 .panel .slot-open {
   flex: 1; display: grid; gap: 0 12px; text-align: left;
-  grid-template-columns: 62px 1fr auto;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
   align-items: center; padding: 10px 13px; border-radius: var(--r-md);
   background: var(--paper-cell); border: none; box-shadow: var(--emboss);
   transition: box-shadow var(--t-fast) ease, background var(--t-fast) ease, transform var(--t-fast) var(--ease);
@@ -444,6 +535,9 @@ button.ghost {
   font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: var(--ls-cap);
   text-transform: uppercase; color: var(--ink-soft);
   background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+}
+.slot-open .slot-who, .slot-open .slot-when {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .slot-open .slot-who { font-size: var(--fs-md); font-weight: 700; color: var(--ink); }
 .slot-open .slot-who.empty { color: var(--ink-faint); font-weight: 600; }
@@ -470,12 +564,18 @@ button.ghost {
 /* Above the loader, which is z-index 100 and is running underneath this the
    whole time the picker is up. */
 #chargen {
-  position: fixed; inset: 0; z-index: 110; display: grid; place-items: center;
+  position: fixed; inset: 0; z-index: 110;
+  display: flex; overflow: auto; padding: var(--gutter);
   background: radial-gradient(78% 60% at 50% 38%, rgba(22, 32, 60, .74), rgba(4, 6, 13, .94));
   backdrop-filter: blur(10px) saturate(115%);
   animation: fade .22s ease;
-  overflow: auto; padding: 16px 0;
 }
+/* Same auto-margin centring as `.overlay`, and for the same reason. This is
+   the screen the fault was found on: at 960x600 the card was taller than the
+   window, `place-items: center` split the overflow across both edges, and the
+   heading and the top of the stage were above the top of the screen with no
+   way to scroll up to them. */
+#chargen > * { margin: auto; flex: none; }
 /* The same sheet as `.menu-card`, one size wider, because it is the same
    material doing the same job. */
 .chargen-card {
@@ -494,8 +594,18 @@ button.ghost {
    so a lit panel underneath lights every figure from behind and separates it
    from whichever material the card happens to be made of. It is a window cut
    into the paper, so it carries the sheet's own sunk edge. */
+/* Sized against the window, not against the card.
+   The canvas is square and has to stay square: the picker's camera is an
+   orthographic frustum one unit on a side, so a canvas of any other shape
+   does not crop the figure, it stretches it. That leaves the height as
+   something only the width can set, and a width taken from the card meant a
+   396px-tall stage inside a 440px card whatever the window was doing. Capping
+   the stage against `--cg-stage` caps its height by the same number, keeps it
+   square, and keeps the arrows on its edges rather than stranded out in the
+   card. Centred, because below the cap it is narrower than the sheet. */
 .chargen-stage {
   position: relative; margin-top: 14px; border-radius: var(--r-lg); overflow: hidden;
+  width: min(100%, var(--cg-stage)); margin-left: auto; margin-right: auto;
   background:
     radial-gradient(115% 95% at 50% 0%, rgba(255, 255, 255, .18), rgba(255, 255, 255, 0) 62%),
     linear-gradient(180deg, #8b95ad, #626c88);
@@ -1079,8 +1189,12 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   padding: 2px 6px; border-radius: var(--r-sm); letter-spacing: 0;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 0 0 1px rgba(140, 74, 26, .4);
 }
+/* Two caps, and the smaller wins. The pixel one is a taste limit on a big
+   monitor; the viewport one is what stops a list of recipes from being taller
+   than the window it is in. */
 #recipe-list {
-  display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 330px;
+  display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
+  max-height: min(330px, 34vh);
   padding: 5px; border-radius: var(--r-md);
   background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
 }
@@ -1192,7 +1306,8 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, .7);
 }
 .shop-list {
-  display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 250px;
+  display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
+  max-height: min(250px, 28vh);
   padding: 5px; border-radius: var(--r-md);
   background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
 }
@@ -1238,6 +1353,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    number is the largest thing on the panel because every row below it is a
    question about whether this number is big enough. */
 .skills-bar {
+  flex: none;
   display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px;
   padding: 8px 14px; border-radius: var(--r-lg);
   background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
@@ -1684,6 +1800,13 @@ button kbd { background: rgba(0, 0, 0, .07); box-shadow: none; color: var(--ink-
   #recipe-list { max-height: 190px; }
 }
 
+@media (max-width: 560px) {
+  /* Two columns of key-and-meaning need about 250px each before the cap and
+     the label start colliding. Below that they are one column, which is
+     longer and readable rather than shorter and not. */
+  .controls-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 540px) {
   .islot { width: 36px; height: 36px; border-radius: 4px; }
   .islot img { width: 31px; height: 31px; }
@@ -1698,6 +1821,59 @@ button kbd { background: rgba(0, 0, 0, .07); box-shadow: none; color: var(--ink-
      north pip's offset in pixels, so a frame that changed size under it would
      put the pip outside its own map. The canvas is a percentage and would
      follow; the pip would not, and neither would that. */
+}
+
+/* Nine cells of 36px still want ~430px of window. Below that they are 30px,
+   which is the last step: under this the inventory is a phone problem and not
+   a small-laptop one. */
+@media (max-width: 430px) {
+  .islot { width: 30px; height: 30px; }
+  .islot img { width: 26px; height: 26px; }
+  .craft-out .islot { width: 40px; height: 40px; }
+  .craft-out .islot img { width: 34px; height: 34px; }
+}
+
+/* The character screen, with the status and the two buttons on one line, wants
+   about 250px of card. Narrower than that the buttons take the next line down
+   and share it, rather than squeezing "Begin" to nothing. */
+@media (max-width: 390px) {
+  .chargen-foot { flex-wrap: wrap; }
+  .chargen-actions { width: 100%; }
+  .chargen-actions button { flex: 1; min-width: 0; }
+}
+
+/* ── short windows ─────────────────────────────────────── */
+/* A laptop at 600px of window height is the case this whole file was retuned
+   for. The stage is already capped against the height by `--cg-stage`; this
+   buys it the rest by taking the air out of everything around it, so a figure
+   in a short window is small rather than cropped. */
+@media (max-height: 660px) {
+  .chargen-card { padding: 14px 18px 12px; }
+  .chargen-card .chargen-stage { margin-top: 10px; }
+  .cg-name { margin-top: 8px; }
+  .cg-pick { margin-top: 10px; }
+  .chargen-foot { margin-top: 10px; padding-top: 9px; }
+  .menu-card { padding: 18px 22px 16px; }
+  .menu-card.small { padding: 16px 20px 14px; }
+  .menu-actions { margin-top: 12px; }
+  .panel { padding: 14px 18px; }
+  .panel header { margin-bottom: 12px; padding-bottom: 9px; }
+  .set-head, .ctl-head { margin-top: 11px; }
+  .ctl-head { margin-bottom: 7px; }
+}
+
+/* Half a laptop screen. Past this the stage is at the floor of its clamp and
+   the only room left is in the furniture, so the last of it goes here and the
+   card still lands inside a 450px window rather than hanging out of the bottom
+   of one. */
+@media (max-height: 520px) {
+  .chargen-card { padding: 10px 16px 10px; }
+  .chargen-card h2 { font-size: var(--fs-md); }
+  .cg-name { margin-top: 6px; }
+  .cg-name b { font-size: var(--fs-lg); }
+  .cg-pick { margin-top: 8px; }
+  .cg-cap { margin-bottom: 4px; }
+  .chargen-foot { margin-top: 8px; padding-top: 7px; }
 }
 
 ::-webkit-scrollbar { width: 9px; }

@@ -5155,6 +5155,18 @@ export class Mobs {
         // Size eaten for is earned, and it is also worth double loot — losing
         // it on a reload would make the reload the mistake.
         if (m.grown > 1) d.g = +m.grown.toFixed(3);
+        // Which of the two husk budgets this one is counted against.
+        //
+        // Not decoration either: `_countHostile(cave)` keys entirely off this
+        // flag, and it defaulted to false on every load. So a world saved with
+        // four husks in a dungeon and six on the surface came back reading zero
+        // cave husks and ten surface ones — the spawner immediately made four
+        // more underground, taking twelve hostiles against caps of eight and
+        // four, while refusing to spawn a single surface husk all night. Saving
+        // again laundered the new ones into the surface budget too, so it
+        // compounded every session. The split budgets exist precisely to stop a
+        // dungeon the player has never entered from eating the night.
+        if (m.fromCave) d.cv = 1;
         // A trader's stock and remaining life are state, not decoration.
         // Re-rolling them on load would make quit-and-reload the cheapest way
         // to shop: reload until the wares are the ones you wanted, and buy the
@@ -5191,6 +5203,9 @@ export class Mobs {
         mob.love = d.l ?? 0;
         mob.breedCooldown = d.d ?? 0;
         if (d.g > 1) this._setGrowth(mob, d.g);
+        // Absent in older saves, where false is the right answer: those worlds
+        // had no split budget to be counted against.
+        mob.fromCave = !!d.cv;
         if (mob.spec.trader) {
           if (d.st) mob.stock = d.st.map(([item, count]) => ({ item, count }));
           if (d.lf !== undefined) mob.life = d.lf;

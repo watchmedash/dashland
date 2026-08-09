@@ -60,6 +60,60 @@ const ARM_REST_ROT = new THREE.Euler(0.30, 0.16, 0.12);
 const OFF_REST = new THREE.Vector3(-0.48, -0.56, -0.23);
 const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
 
+/**
+ * The bow draw, as a single table rather than six loose terms in `update`.
+ *
+ * `p` is added to the shoulder's rest point and `r` to its rest rotation, both
+ * scaled by the eased draw; `nock` is where the arrow sits on the string at zero
+ * draw and `pull` how far back along the shot it travels by full draw.
+ *
+ * **These are not amplitudes, they are a destination, and it was solved for
+ * rather than dialled in.** The fist hangs at `HAND_LOCAL` off the shoulder, so
+ * a rotation moves the bow as much as a translation does and the two cannot be
+ * tuned apart. The rotation was chosen first — it is the gesture, the limb
+ * coming across the body and rolling the stave's flat toward the camera so the
+ * string is edge-on to you and its travel is visible at all — and then `p` is
+ * whatever puts the resulting fist on the target point, `(0.02, -0.22, -0.52)`
+ * in view space. That point is the whole of the fix and it is worth stating in
+ * screen terms, because that is where the complaint was:
+ *
+ *   draw   fist in view space        on screen        a 0.40-unit bow fills
+ *   0.00   ( 0.396, -0.399, -0.717)  22.2% right, 40% low   40% of the height
+ *   0.50   ( 0.108, -0.268, -0.582)   7.5% right, 33% low   49%
+ *   1.00   ( 0.017, -0.220, -0.520)   1.3% right, 30% low   55%
+ *
+ * So the bow crosses a fifth of the screen's width to arrive under the
+ * crosshair, lifts about a tenth of its height, and — being 0.20 units nearer
+ * the eye — grows 38% on the way. What it replaced travelled half as far, grew
+ * 17%, and actually sank 5% of the screen on the way (coming toward the camera
+ * costs apparent height, and the old rise did not pay for it), which is the
+ * arithmetic behind "the draw is a small motion".
+ *
+ * The remaining half of "the bow looks small in hand" is the model's own scale
+ * and pose, which live in `render/ItemModels.js` and are not this file's to set.
+ */
+const DRAW = {
+  p: [-0.17, 0.33, 0.14],
+  r: [-0.30, 0.44, -0.24],
+  nock: [0.02, 0.055, -0.34],
+  pull: 0.28,
+  /** How big the nocked arrow is drawn, against a bow that is now 38% nearer. */
+  scale: 0.50,
+};
+
+/**
+ * How the arm's half of the draw is spread over the charge: fast out of rest,
+ * then holding.
+ *
+ * Ease-out and not linear, and the split from the string is the point. The bow
+ * coming up is the part that has to read *immediately* — it is the feedback
+ * that the button did something — so 94% of the arm's travel is done by
+ * three-quarters of the charge. The string keeps pulling linearly for the whole
+ * of it (see `setDraw`), so the last quarter, where the damage curve is steepest,
+ * still has something moving in it. One gesture, two speeds.
+ */
+const drawEase = (t) => t * (2 - t);
+
 // --- swing animations -------------------------------------------------------
 // Every tool used to play the same forward-and-down jab, so a pickaxe, a sword
 // and a bare fist all read as punching. Each kind now gets its own track.
@@ -710,7 +764,7 @@ export class ViewModel {
         // is on +Z (see the arrow's pose note in ItemModels), so a half turn
         // about Y aims it down the screen's -Z — where the camera, and the
         // shot, are going.
-        m.scale.setScalar(0.44);
+        m.scale.setScalar(DRAW.scale);
         m.rotation.set(0, Math.PI, 0);
         this.nock = m;
         this.hand.add(m);
@@ -720,11 +774,17 @@ export class ViewModel {
     }
     if (!this.nock) return;
     this.nock.visible = true;
-    // Slides back along the aim as the string comes with it. The bow sits at
-    // z = -0.10 in this space; the arrow's head stays out in front of it and its
-    // nock travels a fifth of a unit, which at this scale is most of the length
-    // of the shaft and reads as a full draw.
-    this.nock.position.set(0.02, 0.055, -0.24 + 0.20 * this.draw);
+    // Slides back along the aim as the string comes with it. The arrow starts a
+    // third of a unit out in front of the fist and its nock travels 0.28 back —
+    // against a shaft drawn 0.50 long, that is over half the arrow disappearing
+    // behind the hand, which is what makes the pull legible as a pull rather
+    // than as a twitch. (It was 0.20 of travel on a 0.44 shaft.)
+    //
+    // Linear in `this.draw`, deliberately *not* the eased `drawEase` the arm
+    // uses: the arm's job is to arrive, the string's is to keep going. See the
+    // note on `drawEase`.
+    this.nock.position.set(
+      DRAW.nock[0], DRAW.nock[1], DRAW.nock[2] + DRAW.pull * this.draw);
   }
 
   /**
@@ -831,17 +891,22 @@ export class ViewModel {
     // the recoil `punch()` plays on release lands on an arm that is already on
     // its way back from the draw.
     //
-    // The three terms are the gesture read off a real one. The shoulder comes
-    // *in* toward the centre line (the bow crosses the view rather than sitting
-    // out at the edge), *up* toward eye level, and *back* — and the arm rolls a
-    // little as it goes, which is what turns the stave's flat toward the camera
-    // so you can see the string move at all. Kept under 0.2 units and 0.3 rad
-    // for the reason every other amplitude here is: the item is half a unit out
-    // along the limb and a radian at the shoulder throws it off screen.
-    const dw = this.draw;
-    const drawX = -0.16 * dw;
-    const drawY = 0.13 * dw;
-    const drawZ = 0.09 * dw;
+    // The shoulder comes *in* toward the centre line (the bow crosses the view
+    // rather than sitting out at the edge), *up* toward eye level, and *back*
+    // toward the eye, and the arm turns and rolls as it goes. Where that puts
+    // the bow on screen, and why it is a destination rather than an amplitude,
+    // is in `DRAW`.
+    //
+    // The old note here warned to keep every term under 0.2 units and 0.3 rad
+    // because "a radian at the shoulder throws the item off screen". That is
+    // true of the swing tracks, which are transients nobody is looking at, and
+    // it is exactly wrong for the draw, which is a pose the player is holding
+    // and staring at: the constraint is not "stay small", it is "land here",
+    // and the landing point is checked in view space instead of guessed.
+    const dw = drawEase(this.draw);
+    const drawX = DRAW.p[0] * dw;
+    const drawY = DRAW.p[1] * dw;
+    const drawZ = DRAW.p[2] * dw;
 
     const px = rest.x + bx + _swingP.x * sw + drawX;
     const py = rest.y + by + _swingP.y * sw + equipY + drawY;
@@ -864,9 +929,9 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 - 0.22 * dw,
-      ARM_REST_ROT.y + _swingR.y * sw + 0.26 * dw,
-      ARM_REST_ROT.z + _swingR.z * sw - 0.18 * dw,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * dw,
+      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * dw,
+      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * dw,
     );
 
     // The offhand arm, on the frames there is one. Everything above has already

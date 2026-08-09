@@ -388,10 +388,28 @@ const POSE = {
    * the crosshair is.
    */
   draw: {
-    torso: [0, 0.34, 0],
-    head: [0, -0.30, 0],
-    'arm-right': [-1.48, 0, 0.26],
-    'arm-left': [-1.12, 0, -0.78],
+    // Strengthened alongside the first-person gesture, and for the same
+    // complaint: at a quarter turn of torso and a bow arm 5° short of level the
+    // silhouette from behind was a figure standing with its arms slightly out,
+    // which is not a draw. Every number here moved in the direction it already
+    // pointed rather than in a new one.
+    //
+    //  - torso 0.34 -> 0.42: the shoulders line up with the shot properly.
+    //  - head -0.30 -> -0.38: taken straight back off the torso, so the archer
+    //    still looks exactly where the crosshair is. This is the torso's number
+    //    negated to within a rounding and should stay that way.
+    //  - bow arm -1.48 -> -1.62: past level, which is what "locked out along the
+    //    shot" looks like from behind, and its splay 0.26 -> 0.14 brings it in
+    //    toward the aim line instead of holding the bow out at arm's width.
+    //  - string arm -1.12 -> -1.06 with its splay -0.78 -> -0.98: the hand comes
+    //    *back* toward the face (less forward) while the elbow goes further out.
+    //    The rig has no elbow, so those two shoulder terms together are the only
+    //    way the bent arm of a drawn bow can exist at all, and widening the
+    //    splay is what puts a visible triangle between the two arms.
+    torso: [0, 0.42, 0],
+    head: [0, -0.38, 0],
+    'arm-right': [-1.62, 0, 0.14],
+    'arm-left': [-1.06, 0, -0.98],
   },
 };
 

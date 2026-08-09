@@ -57,6 +57,27 @@ const SUBSTEP = 0.35;
 /** How many arrows may exist at once. The oldest goes when the cap is reached. */
 const MAX = 48;
 
+/**
+ * How close you have to be to a stuck arrow to pull it out, in cells, and how
+ * long it must have been there before you can.
+ *
+ * Stuck arrows used to be gone for good, which was a deliberate call and the
+ * player disagreed with it: in Minecraft you walk your shots back, and a bow
+ * whose ammunition is strictly consumed is a bow you stop using. The radius is
+ * `Drops.PICKUP_RADIUS` minus a little — 1.85 there starts a *magnet*, and a
+ * drop then flies the rest of the way, where an arrow buried in a wall visibly
+ * stays where it is, so its radius has to be the whole of the reach rather than
+ * the beginning of one.
+ *
+ * The delay exists because the common shot is at something a few cells away, and
+ * without it an arrow that sticks in the block by your feet is collected on the
+ * frame it lands — the shot reads as never having been fired. A third of a
+ * second is under the time it takes to look at where it went. `Drops` has the
+ * same guard at 0.45 and for the same reason.
+ */
+const PICKUP_RADIUS = 1.5;
+const PICKUP_DELAY = 0.33;
+
 const _up = new THREE.Vector3();
 const _step = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -169,13 +190,23 @@ export class Arrows {
    * @param {number} dt
    * @param {{raycast:Function, hurt:Function}} [mobs] optional, so the flight
    *   half of this can be exercised with nothing else in the world
+   * @param {{position:THREE.Vector3}} [player] who might walk into a stuck one
+   * @param {{collect:Function, hasRoom:Function}} [io] the *same* pair `Drops`
+   *   takes, deliberately: `collect(item, count, wear) -> taken` and
+   *   `hasRoom(item) -> boolean`. Passing the identical contract means an arrow
+   *   goes into the bag through the one door every other pickup in the game
+   *   uses — same stacking rules, same full-inventory answer, same sound and
+   *   toast — rather than through a second one that would drift from it. Both
+   *   this and `player` are optional and the whole feature is simply absent when
+   *   either is missing, which is what lets the flight be tested on its own.
    */
-  update(dt, mobs = null) {
+  update(dt, mobs = null, player = null, io = null) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const a = this.list[i];
       a.age += dt;
       if (a.stuck) {
         if (a.age > STUCK_LIFE) this._remove(i);
+        else this._collect(a, i, player, io);
         continue;
       }
       if (a.age > MAX_FLIGHT) { this._remove(i); continue; }
@@ -198,6 +229,37 @@ export class Arrows {
       }
       this._hits.length = 0;
     }
+  }
+
+  /**
+   * Walk one back out of the ground.
+   *
+   * Returns true when the arrow left the list, so the caller knows its index is
+   * now somebody else's — the same contract `_remove` implies everywhere else in
+   * this file.
+   *
+   * The order of the two guards is not arbitrary. `hasRoom` is asked *before*
+   * `collect`, exactly as `Drops.update` asks it, because `collect` is allowed
+   * to take a partial stack and an arrow is one item: without the check, a full
+   * bag would have `collect` return 0 every frame you stood near a shot, which
+   * is harmless but means the game asks the inventory a question it already
+   * knows the answer to sixty times a second for as long as you loiter. With it,
+   * a full inventory leaves the arrow lying there — visibly still yours to come
+   * back for — which is the behaviour the ground already has for everything else.
+   *
+   * And the pickup is only ever offered to a *stuck* arrow (the caller's branch
+   * guarantees it): one in flight is travelling at up to 64 cells a second and
+   * would be collected by anyone who happened to be standing along the shot,
+   * including the archer at point-blank range.
+   */
+  _collect(a, i, player, io) {
+    if (!player || !io) return false;
+    if (a.age < PICKUP_DELAY) return false;
+    if (a.pos.distanceTo(player.position) > PICKUP_RADIUS) return false;
+    if (!io.hasRoom(this.item)) return false;
+    if (!(io.collect(this.item, 1) > 0)) return false;
+    this._remove(i);
+    return true;
   }
 
   /**

@@ -40,6 +40,7 @@ import { Save } from './game/Save.js';
 import {
   DEFAULT_DIFFICULTY, normalizeDifficulty, mobDamageScale, normalizeLoadout, loadoutStacks,
   DEFAULT_ON_DEATH, normalizeDeathRule, keepsOnDeath, skillDeathMode,
+  huntsOnSight, endsOnDeath,
 } from './game/NewGame.js';
 import {
   ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, armourPoints,
@@ -61,7 +62,7 @@ import {
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
-  patchColumn, FACE_N, FACE_R, FACE_U,
+  patchColumn, normalizeCell, FACE_N, FACE_R, FACE_U,
 } from './world/Sphere.js';
 import { CROSS_LIGHT_ADDR_SHIFT } from './world/Mesher.js';
 import { makeRng } from './util/Noise.js';
@@ -451,6 +452,18 @@ const MAX_ENTITY_EMITTERS = 24;
 const FLAME_PERIOD = 0.14;
 /** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
 const HURT_IMMUNITY = 0.5;
+/**
+ * How fast a spectator drifts, in cells per second, and how fast with Shift.
+ *
+ * Faster than walking and slower than the chunk streamer, which is the only
+ * real constraint on it: `_streamChunks` runs four times a second over a load
+ * radius of 150 units, so anything up to about forty cells a second arrives
+ * over terrain that exists. Twelve is a comfortable look-around, thirty is
+ * crossing the planet to see what is on the other side of it, and neither can
+ * outrun the ground.
+ */
+const SPECTATE_SPEED = 12;
+const SPECTATE_FAST = 30;
 /** How often a body pressed against a hurting block is charged. See _tickContact. */
 const CONTACT_PERIOD = 0.5;
 
@@ -650,12 +663,22 @@ class Game {
      */
     this.saveSlot = -1;
     /**
-     * How hard the animals hit on this planet: 'easy', 'normal' or 'hard'.
+     * How hard this planet is: 'easy', 'normal', 'hard' or 'extreme'.
      *
      * A fact about the world, not about the person, so it is chosen once on the
-     * New Game screen, written into the save, and read back on load. It scales
-     * mob blows and nothing else — not health, not spawn rates, not hunger, not
-     * a fall. See `mobDamageMul`.
+     * New Game screen, written into the save, and read back on load. For three
+     * of the four it scales mob blows and nothing else — not health, not spawn
+     * rates, not hunger, not a fall. See `mobDamageMul`.
+     *
+     * Extreme is the exception and says so out loud: the carnivores hunt you,
+     * the dark carries more husks, and a death is the end of the run. Each of
+     * those is a predicate in `game/NewGame.js` rather than a comparison
+     * written out here — `huntsOnSight`, `crowdedNights`, `endsOnDeath` — so
+     * what a tier means is stated once, in the module a harness can load.
+     *
+     * Assigned through `_setDifficulty` and never directly: the mob manager
+     * keeps its own copy of the first of those, and the two disagreeing is the
+     * one way this can break silently.
      */
     this.difficulty = DEFAULT_DIFFICULTY;
     /** The loadout keys picked for this world, in pick order. */
@@ -1123,6 +1146,45 @@ class Game {
   /** What a mob's blow is multiplied by before it reaches the player. */
   get mobDamageMul() { return mobDamageScale(this.difficulty); }
 
+  /**
+   * Set the world's difficulty, and everything that follows from it.
+   *
+   * The single door, for the reason `_setDeathRule` is one: the answer is
+   * stored in two places that must never disagree. `this.difficulty` is what
+   * the save carries and what `mobDamageMul` reads; `mobs.savage` is what the
+   * animals read, and a world loaded from disk that set the first without the
+   * second would be an extreme planet whose carnivores had forgotten about it.
+   * Four assignment sites became one call.
+   */
+  _setDifficulty(name) {
+    this.difficulty = normalizeDifficulty(name);
+    this.mobs.savage = huntsOnSight(this.difficulty);
+  }
+
+  /**
+   * Is this a world you do not wake up from?
+   *
+   * Read at the one moment it matters — the death — rather than stored, so it
+   * is always the difficulty this planet actually has.
+   */
+  get runEnds() { return endsOnDeath(this.difficulty); }
+
+  /**
+   * Watching a world you can no longer touch.
+   *
+   * A state rather than a flag, and that is the whole design of it. "Cannot
+   * interact" written as a list of disabled features is a list with a hole in
+   * it — someone adds a key next month and the spectator can press it — so it
+   * is written the other way round: `_update` already has one gate that says
+   * "your hands are elsewhere" for an open inventory (`busy`, which swaps the
+   * real input for `Game.NO_INPUT`), and a spectator is permanently in it. The
+   * things that reach *into* the player rather than out of them are three, and
+   * each is answered at its own single door: damage at `_takeHit`, the mobs at
+   * `Mobs.ghost`, and the ground at `_drift`, which is the only movement code
+   * a spectator runs and which does nothing but change where the camera is.
+   */
+  get spectating() { return this.state === 'spectating'; }
+
   /** Whether this world lets you keep the bag and the ladder through a death. */
   get keepsOnDeath() { return keepsOnDeath(this.deathRule); }
 
@@ -1145,7 +1207,14 @@ class Game {
     // a world — `newGame` from the choices, `_placeEntities` from the save. The
     // reset is what stops a planet you quit from lending its difficulty to the
     // next one, on the paths that set neither (`abandonNewGame`).
-    this.difficulty = DEFAULT_DIFFICULTY;
+    this._setDifficulty(DEFAULT_DIFFICULTY);
+    // A new world is not somebody else's ending. All three of these belong to
+    // the planet being torn down, and a spectator flag left set would open the
+    // next one with no hotbar and nothing able to see the player.
+    this._deadOnLoad = false;
+    this._pausedFrom = 'playing';
+    this.mobs.ghost = false;
+    this.ui.setSpectator(false);
     this.loadout = [];
     this._setDeathRule(DEFAULT_ON_DEATH);
     this.planet.clearMeshes();
@@ -1271,7 +1340,7 @@ class Game {
    */
   newGame(slot, opts = {}) {
     this.saveSlot = slot | 0;
-    this.difficulty = normalizeDifficulty(opts.difficulty);
+    this._setDifficulty(opts.difficulty);
     this.loadout = normalizeLoadout(opts.loadout);
     this._setDeathRule(opts.deathRule);
     this.ui.hideMenu();
@@ -1309,7 +1378,7 @@ class Game {
   beginWorld(id, opts = {}) {
     if (!this._choosing) return;
     this._choosing = false;
-    if (opts.difficulty !== undefined) this.difficulty = normalizeDifficulty(opts.difficulty);
+    if (opts.difficulty !== undefined) this._setDifficulty(opts.difficulty);
     if (opts.loadout !== undefined) this.loadout = normalizeLoadout(opts.loadout);
     if (opts.deathRule !== undefined) this._setDeathRule(opts.deathRule);
     this.ui.closeCharacterPicker();
@@ -1696,12 +1765,18 @@ class Game {
       // which is the game they were played under. The loadout is a record of
       // what this planet was started with — it is only spent once, in
       // `_beginGrace`, which a load never reaches.
-      this.difficulty = normalizeDifficulty(save.difficulty);
+      this._setDifficulty(save.difficulty);
       this.loadout = normalizeLoadout(save.loadout);
       // Same story: a save written before the question was asked carries no
       // field, and `normalizeDeathRule` reads that as 'lose', which is the game
       // every such planet has been played under.
       this._setDeathRule(save.deathRule);
+      // Strictly after the difficulty above, which is what decides whether a
+      // dead save is a spectator or an ordinary one. Held rather than acted on
+      // because the world is not up yet — there is no HUD to change and no
+      // pointer to lock — and `_onWorldReady` is where every other hand-over to
+      // the player already happens.
+      this._deadOnLoad = !!save.player?.dead && this.runEnds;
       this._refreshWards();
       this._pendingSave = null;
     } else {
@@ -1746,6 +1821,11 @@ class Game {
     this.audio.start();
     this.audio.resume();
     this.input.requestLock();
+    // ...unless this planet was left dead. No death screen on the way in — the
+    // player has already read it once and already chosen — just the world, from
+    // where they fell. `_spectate` takes the state from here, which is why this
+    // sits after the assignment above rather than instead of it.
+    if (this._deadOnLoad) { this._deadOnLoad = false; this._spectate(); }
 
     if (this._welcome) {
       this._welcome = false;
@@ -2004,11 +2084,23 @@ class Game {
     if (ui.skillsOpen) { this.closeSkills(); return; }
     if (ui.pauseOpen) { this.resume(); return; }
     if (ui.screenOpen) { this.closeScreen(); return; }
-    if (this.state === 'playing') this.pause();
+    // A spectator reaches the pause menu the same way, and must: it is where
+    // the way out of the world is.
+    if (this.state === 'playing' || this.state === 'spectating') this.pause();
   }
 
+  /**
+   * The pause menu, which a spectator gets on exactly the same terms.
+   *
+   * It has to: quitting to the menu is the only way out of a world whose run is
+   * over, and it lives on that screen. Where it came *from* is remembered
+   * rather than assumed, so resuming puts the player back into the state they
+   * paused — a spectator who pauses and resumes is still a spectator, and the
+   * alternative (`state = 'playing'`) would quietly resurrect them.
+   */
   pause() {
-    if (this.state !== 'playing') return;
+    if (this.state !== 'playing' && this.state !== 'spectating') return;
+    this._pausedFrom = this.state;
     this.state = 'paused';
     this.ui.openPause();
     this.input.exitLock();
@@ -2016,13 +2108,16 @@ class Game {
 
   resume() {
     this.ui.closePause();
-    this.state = 'playing';
+    this.state = this._pausedFrom === 'spectating' ? 'spectating' : 'playing';
     this.audio.resume();
     this.input.requestLock();
   }
 
   _die(cause) {
-    if (this.state === 'dead') return;
+    // Once, and never again on a world that is already over. Belt and braces
+    // behind `_takeHit`'s own refusal, because a death screen appearing over a
+    // spectator would be the one way this state could be left by accident.
+    if (this.state === 'dead' || this.spectating) return;
     this.state = 'dead';
     this.input.exitLock();
     this.closeScreen();
@@ -2055,7 +2150,13 @@ class Game {
     // See `_tickNightOut`: a night you did not live through does not count.
     this._nightOut = 0;
     this.ui.refresh();
-    this.ui.showDeath(cause, this._loseSkills());
+    // The same screen either way, with the button that would have put you back
+    // saying what it will actually do. The bag rule above is untouched by this:
+    // an extreme keep-world still keeps everything, on a body nobody will walk
+    // again, and an extreme lose-world still leaves the pile where you fell —
+    // which a spectator can go and look at and not pick up. That is a better
+    // ending than making the drop a special case.
+    this.ui.showDeath(cause, this._loseSkills(), this.runEnds);
   }
 
   /**
@@ -2097,7 +2198,18 @@ class Game {
     return lost.spent > 0 ? `${lvl}, and every skill` : lvl;
   }
 
+  /**
+   * The one button on the death screen, and the one door out of `dead`.
+   *
+   * A world that ends on death routes through here rather than past it, and
+   * that is the point: `respawn` is what the button calls, what the harness
+   * calls and what any future caller will call, so putting the branch at the
+   * top means there is no path that can put an extreme player back on their
+   * feet. A second entry point that "also respawns" is how this rule would be
+   * lost, and there is now nowhere to add one.
+   */
   respawn() {
+    if (this.runEnds) { this._spectate(); return; }
     this.ui.hideDeath();
     this.player.health = this.player.maxHealth;
     this.breath = 1;
@@ -2115,6 +2227,100 @@ class Game {
     }
     this.state = 'playing';
     this.input.requestLock();
+  }
+
+  /**
+   * Become a spectator of your own world.
+   *
+   * Entered from exactly two places, and both of them are the end of a run:
+   * `respawn` when the player presses the one button the death screen offers,
+   * and `_onWorldReady` when a save that was written dead is opened again. It
+   * is idempotent, because a reload that lands in it and a button press that
+   * lands in it should produce the same world.
+   *
+   * What it actually does is small, and that is the argument for it. There is
+   * no spectator movement controller, no separate render path and no list of
+   * features to switch off:
+   *
+   *   - the state becomes `spectating`, which `_update` treats as permanently
+   *     `busy` — the same gate an open inventory uses, so every action that
+   *     already knew how to be unavailable is unavailable, including the ones
+   *     added after this was written;
+   *   - `mobs.ghost` says there is nobody standing there, so nothing acquires,
+   *     swings at, or pushes past the player;
+   *   - `_takeHit` returns at its first line, so no damage of any kind can
+   *     reach a body that is already at zero;
+   *   - the HUD loses the things that describe a body and keeps the things
+   *     that describe a planet.
+   *
+   * Health stays at zero on purpose. It is what the save carries, it is what
+   * makes this state recoverable across a reload, and nothing reads it any
+   * more: `_tickVitals` does not run, and the one thing that could act on it
+   * is `_die`, which refuses to run twice.
+   */
+  _spectate() {
+    if (this.spectating) return;
+    this.ui.hideDeath();
+    this.closeScreen();
+    this.closeSkills();
+    this.state = 'spectating';
+    this.mobs.ghost = true;
+    this.ui.setSpectator(true);
+    // Nothing carried over from the last frame it was alive: no stagger, no
+    // held bow, no sprint. It drifts from where it fell.
+    this.player.vel.i = 0; this.player.vel.j = 0; this.player.vel.k = 0;
+    this.player.knockT = 0;
+    this.bow.t = 0;
+    this.breath = 1;
+    this.ui.refresh();
+    this.input.requestLock();
+  }
+
+  /**
+   * Move the eye, and nothing else.
+   *
+   * The whole of a spectator's physics, and deliberately not a mode inside
+   * `Player.update`: that function is where the collision, the step-up, the
+   * ladders, the water, the fall damage and the mob push all live, and a flag
+   * threaded through it would be a promise that none of them fires rather than
+   * a guarantee. This writes a position. There is nothing else in it to go
+   * wrong, and no way to add anything without meaning to.
+   *
+   * The steering is the player's own: `forward` and `up` are whatever `look`
+   * has already set, so the drift follows the camera through a cube seam
+   * exactly as walking does — `tangentToCell` is the same Gram solve the
+   * walking move uses, and `normalizeCell` is what carries the body onto the
+   * neighbouring face.
+   */
+  _drift(dt, input) {
+    const p = this.player;
+    const c = p.cell;
+    const fast = input.down('ShiftLeft') || input.down('ShiftRight');
+    const speed = fast ? SPECTATE_FAST : SPECTATE_SPEED;
+    const iz = (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0);
+    const ix = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
+    const iy = (input.down('Space') ? 1 : 0)
+      - ((input.down('ControlLeft') || input.down('ControlRight')) ? 1 : 0);
+    const right = _v2.copy(p.forward).cross(p.up).normalize();
+    const wish = _v1.set(0, 0, 0).addScaledVector(p.forward, iz).addScaledVector(right, ix);
+    if (wish.lengthSq() > 1) wish.normalize();
+    wish.multiplyScalar(speed);
+    // Split the wish into the two things cell space keeps apart: along the
+    // ground, and away from the middle of the planet. Looking up and walking
+    // forward should climb, which is the whole of what a free camera is for.
+    const radial = wish.dot(p.up);
+    const flat = _v3.copy(wish).addScaledVector(p.up, -radial);
+    const v = p.tangentToCell(flat);
+    c.ci += v.i * dt;
+    c.cj += v.j * dt;
+    c.ck += (radial + iy * speed) * dt;
+    // The two hard edges of the shell. Bedrock is not a wall a spectator is
+    // being kept out of — it is the bottom of the array — and the same at the
+    // top, where there is no world left to look at.
+    if (c.ck < 1) c.ck = 1;
+    if (c.ck > D - 2) c.ck = D - 2;
+    if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) normalizeCell(c);
+    p._sync();
   }
 
   /**
@@ -2252,6 +2458,22 @@ class Game {
         // you are holding. A save from before this existed has no key at all,
         // and `loadOffhand` turns `undefined` into an empty slot.
         offhand: this.inventory.offhandJSON(),
+        /**
+         * Whether this run is over.
+         *
+         * Inside `player` rather than at the top level, unlike `difficulty`:
+         * how hard the animals hit is a rule of the planet and has to be true
+         * of whoever opens it, while this is the plainest possible fact about
+         * the person — they died. It is written on every save because
+         * `_loseSkills` writes one the moment you die, so the state is on disk
+         * before the player has decided anything.
+         *
+         * Read back through `endsOnDeath` as well as through this flag, so a
+         * save that somehow carries it on a normal world loads as an ordinary
+         * living planet rather than trapping the player in a spectator they
+         * never agreed to.
+         */
+        dead: this.spectating || (this.state === 'dead' && this.runEnds),
         // The other thing that block was written in anticipation of. Only what
         // cannot be recomputed goes in — levels, marks, the armour conversion —
         // because the rest is a function of `stats` and `playtime`, which are
@@ -3301,12 +3523,19 @@ class Game {
     // every state — including paused, where `_update` never runs.
     if (this.input.pressed('Escape')) this._escape();
 
-    if (this.state === 'playing') this._update(dt);
+    // A spectator's world keeps running, and runs through the same function:
+    // the crops grow, the water flows, the animals live their night. That is
+    // the whole of what is left to do with the planet, and a second update path
+    // for it would be a second place to forget to tick something.
+    if (this.state === 'playing' || this.state === 'spectating') this._update(dt);
     else if (this.state === 'menu' || this.state === 'loading') this._idleUpdate(dt);
     else this._frozenUpdate(dt);
 
     voxelUniforms.uTime.value += dt;
     this.postfx.render(dt, { damage: this.damageFlash, underwater: this.player.headInWater });
+    // No hands. `viewModel.enabled` is already false for a spectator — see the
+    // gate in `_syncViewModel` — and this is the second half of the same thing:
+    // nothing of the body is drawn over a world it cannot touch.
     if (this.state === 'playing' || this.state === 'paused') this.viewModel.render(this.renderer);
     this.damageFlash = Math.max(0, this.damageFlash - dt * 1.6);
     this.input.endFrame();
@@ -3335,6 +3564,14 @@ class Game {
   static NO_INPUT = { down: () => false };
 
   /**
+   * ...and the same idea for the one thing that reaches the player without
+   * going through a key at all. `Drops` asks whether there is room before it
+   * flies an item at you; a spectator has nowhere to put anything, so it is
+   * answered honestly rather than by not running the drops at all.
+   */
+  static NO_POCKETS = { collect: () => 0, hasRoom: () => false };
+
+  /**
    * Step the camera round the player. The viewmodel and the body are opposite
    * sides of one switch — exactly one of them is ever drawn, so first person
    * keeps the finished hand and third person never shows a fist floating in
@@ -3356,7 +3593,8 @@ class Game {
    * else to look at. Coming back it is the last thing to return.
    */
   _syncViewModel() {
-    this.viewModel.enabled = this.viewMode === VIEW_FIRST && this.zoom < 0.1;
+    this.viewModel.enabled = this.viewMode === VIEW_FIRST && this.zoom < 0.1
+      && !this.spectating;
   }
 
   _cycleView() {
@@ -3398,7 +3636,11 @@ class Game {
     }
     this.player.updateCamera(this.camera, dt, this.settings.fov, this.settings.bob,
       this.viewMode, this.zoom);
-    this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
+    // No body behind the pause menu either, for a world that has ended — the
+    // same rule as in `_update`, and the pause screen is exactly where a
+    // spectator spends the moment before quitting.
+    this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST && !this.spectating
+      && this._pausedFrom !== 'spectating',
       this.inventory.held().item, this.inventory.offhand.item);
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     this.sky.update(dt, this.camera, this.player.up, this.player.position);
@@ -3408,8 +3650,26 @@ class Game {
   _update(dt) {
     const input = this.input;
     const ui = this.ui;
+    /**
+     * Watching rather than playing, and the one word the rest of this function
+     * reads to know it.
+     *
+     * Every use of it below is either "your hands are elsewhere" — which is
+     * what `busy` already meant and what every action in here was already
+     * written to respect — or one of the three things that are not driven by a
+     * key at all: the vitals that a body has, the pickup radius that a body
+     * has, and the collision a body has. There is no fourth kind, because
+     * everything else in this function reads `act` and `act` is `NO_INPUT`.
+     */
+    const ghost = this.spectating;
     this.playtime += dt;
     this._tickClock(dt);
+
+    // The two overlays, which are inventories of a body that no longer has one.
+    // Gated here rather than inside `openScreen` because these two are the only
+    // keys handled above the `busy` gate — everything below it is covered by
+    // `act` — and the point of the gate is that there is one of it.
+    if (ghost && (input.pressed('KeyE') || input.pressed('KeyK'))) return;
 
     if (input.pressed('KeyE')) {
       if (ui.screenOpen) this.closeScreen();
@@ -3451,8 +3711,30 @@ class Game {
     // — `Input` listens on the window, so W and the number keys still arrive
     // while the cursor is free, and browsing a skill tree would otherwise walk
     // you into a lake.
-    const busy = ui.screenOpen || ui.skillsOpen;
+    //
+    // And a spectator is permanently in that gate, which is the whole of how
+    // "cannot interact" is made true. It is not a list of features that have
+    // been switched off — a list is where one path gets missed, and the path
+    // that gets missed is always the one added next — it is the same one door
+    // every action in this function was already written to come through. The
+    // hotbar, the wheel, the drop key, the offhand swap, mining, placing,
+    // attacking, using, opening a crate, talking to the merchant, drawing the
+    // bow: none of them is named below, and none of them can fire, because
+    // every one of them reads `act` and `act` is a stub that answers false to
+    // every key. Anything added to this function tomorrow inherits that for
+    // free, provided it does what everything here already does and asks `act`.
+    const busy = ui.screenOpen || ui.skillsOpen || ghost;
     const act = busy ? Game.NO_INPUT : input;
+
+    // Looking around is not interacting with anything, so it is the one thing a
+    // spectator keeps. Gated on the two overlays by name rather than on `busy`,
+    // which used to be the same test and is not any more.
+    const handsFree = !ui.screenOpen && !ui.skillsOpen;
+    if (handsFree && input.locked && (input.mouseDX || input.mouseDY)) {
+      const scale = lookScaleFor(this.camera.fov, this.settings.fov);
+      this.player.look(input.mouseDX, input.mouseDY,
+        input.sensitivity * this.settings.sensitivity * scale, input.invertY);
+    }
 
     if (!busy) {
       for (let i = 1; i <= HOTBAR; i++) {
@@ -3472,18 +3754,13 @@ class Game {
       // for, and F is not one of the codes Input has to swallow a browser
       // default for while the pointer is locked.
       if (input.pressed('KeyF')) this.swapOffhand();
-
-      if (input.locked && (input.mouseDX || input.mouseDY)) {
-        // Scaled down by however far in the camera actually is, so the same
-        // movement of the hand slides the picture by the same fraction of the
-        // screen at any zoom. Read off `camera.fov` rather than off `this.zoom`
-        // so it tracks the transition rather than jumping at the ends of it —
-        // that is one frame behind, which is invisible, and it is also correct
-        // for the sprint kick for free.
-        const scale = lookScaleFor(this.camera.fov, this.settings.fov);
-        this.player.look(input.mouseDX, input.mouseDY,
-          input.sensitivity * this.settings.sensitivity * scale, input.invertY);
-      }
+      // (The look is above, outside this gate: it is the one input a spectator
+      // keeps. It is scaled down by however far in the camera actually is, so
+      // the same movement of the hand slides the picture by the same fraction
+      // of the screen at any zoom — read off `camera.fov` rather than off
+      // `this.zoom` so it tracks the transition rather than jumping at the ends
+      // of it, which is one frame behind, invisible, and correct for the sprint
+      // kick for free.)
     }
 
     // The spyglass. First person only: narrowing the fov with the camera three
@@ -3518,7 +3795,17 @@ class Game {
       this.player.vel.i = 0; this.player.vel.j = 0; this.player.vel.k = 0;
     }
     const wasInWater = this.player.inWater;
-    if (onBuiltGround) this.player.update(dt, act);
+    // The fork, and the only one a spectator takes in this whole function.
+    //
+    // `Player.update` is where the collision, the step-up, the ladders, the
+    // swimming, the fall damage and the push out of animals all live. A
+    // spectator runs none of it: `_drift` moves the camera and returns, so the
+    // absence of collision is a property of which function ran rather than of a
+    // flag threaded through the one that has all the physics in it. It also
+    // means the body's water flags stay false, so the splash, the bubbles and
+    // the breath below are all simply never true.
+    if (ghost) this._drift(dt, input);
+    else if (onBuiltGround) this.player.update(dt, act);
     if (this.player.inWater && !wasInWater) {
       this.particles.splash(this.player.position, this.player.up, 1.2);
       this.audio.splash();
@@ -3527,7 +3814,25 @@ class Game {
       this.particles.bubbles(this.player.eye, this.player.up, 2);
     }
 
-    if (this.player.headInWater) {
+    // --- everything below here is a fact about a body ----------------------
+    //
+    // Air, fire, spines. They are the three sources of damage that are not a
+    // key press and not a mob, so they are the three the input gate does not
+    // reach — and a spectator has no lungs to run out of, nothing to catch
+    // alight and nothing to lean on a cactus. `_takeHit` refuses each of them
+    // on its own account whatever happens here, which is what makes this a
+    // tidiness rather than the guarantee; the guarantee is one line and it is
+    // there.
+    //
+    // It also matters that the *flags* they read are stale for a spectator:
+    // `headInWater` and `inLava` are written by `Player.update`, which no
+    // longer runs, so a player who drowned would otherwise go on drowning
+    // forever against a breath meter nobody can see.
+    if (ghost) {
+      this.breath = 1;
+      this._drownTimer = 0;
+      this.player.burning = 0;
+    } else if (this.player.headInWater) {
       // Nine seconds of air, stretched by the lungs branch — 27 at lungs 4.
       // The bar is still 0..1, so what the skill changes is how long it takes
       // to empty, not how much of it there is; a HUD that showed "180% breath"
@@ -3548,8 +3853,10 @@ class Game {
       this._drownTimer = 0;
     }
 
-    this._tickFire(dt);
-    this._tickContact(dt);
+    if (!ghost) {
+      this._tickFire(dt);
+      this._tickContact(dt);
+    }
 
     // Four times a second is plenty: a sprint covers about 2 units in that time
     // and the load and keep radii are 28 apart.
@@ -3594,7 +3901,8 @@ class Game {
       this._settleGravity();
     });
     this._safeTick('freeze', () => this._tickFreeze(dt));
-    this._safeTick('vitals', () => this._tickVitals(dt));
+    // Hunger, healing and stamina, all three of which are about a body.
+    if (!ghost) this._safeTick('vitals', () => this._tickVitals(dt));
     this._safeTick('grace', () => this._tickGrace(dt));
     this._safeTick('core', () => this._tickCore(dt));
     this._safeTick('skills', () => this._tickSkills(dt));
@@ -3602,17 +3910,14 @@ class Game {
     // After the animals have moved, so a shot lands where the body is drawn
     // this frame rather than where it was drawn last one. The mob list is handed
     // over per call rather than held; see the constructor.
-    this._safeTick('arrows', () => this.arrows.update(dt, this.mobs));
-    // A merchant that has walked out of range, run out of life or been killed
-    // takes its shop with it. Without this the screen stays up over a stock
-    // list belonging to a mob that no longer exists.
-    if (this.ui.screen === 'shop' && !this.mobs.list.includes(this.ui.shop)) {
-      this.closeScreen();
-      this.ui.toast('The merchant moved on.', itemIdOf('coin'), 2600);
-    }
-    this.drops.update(dt, this.player, {
-      // `wear` is the third argument Drops has always passed and this callback
-      // used to ignore — see `Inventory.add`.
+    // The one definition of "picked up", shared by arrows and drops.
+    //
+    // A recovered arrow goes into the bag through exactly the door an item on
+    // the ground uses, so it stacks the same way, answers a full bag the same
+    // way, and makes the same sound. Hoisted rather than written twice because
+    // two definitions of collecting is how one of them ends up subtly different.
+    // A spectator collects nothing, which is the same object drops already use.
+    const bag = ghost ? Game.NO_POCKETS : {
       collect: (item, count, wear) => {
         const taken = this.inventory.add(item, count, wear);
         if (taken > 0) {
@@ -3622,7 +3927,23 @@ class Game {
         return taken;
       },
       hasRoom: (item) => this.inventory.hasRoom(item),
-    });
+    };
+    this._safeTick('arrows', () => this.arrows.update(dt, this.mobs, this.player, bag));
+    // A merchant that has walked out of range, run out of life or been killed
+    // takes its shop with it. Without this the screen stays up over a stock
+    // list belonging to a mob that no longer exists.
+    if (this.ui.screen === 'shop' && !this.mobs.list.includes(this.ui.shop)) {
+      this.closeScreen();
+      this.ui.toast('The merchant moved on.', itemIdOf('coin'), 2600);
+    }
+    // Drops still fall, still settle, still burn and still expire, because that
+    // is the world carrying on. What a spectator cannot do is pick one up, and
+    // the way to say so is to hand `Drops` a bag with no room in it rather than
+    // to skip the tick — skipping would freeze every item on the planet
+    // mid-air, including the pile the player's own body left.
+    // `bag` is built above, beside the arrows tick, and carries the `wear`
+    // argument Drops has always passed.
+    this.drops.update(dt, this.player, bag);
 
     const c = this.player.cell;
     const biomeId = this.planet.colBiome[cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)))] ?? 2;
@@ -3654,7 +3975,12 @@ class Game {
     // rather than plumbed through a new path, because the offhand is already
     // "the thing in the body's left fist" and the draw pose has already put that
     // fist at the string. Nothing in Character knows a bow exists.
-    this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST,
+    // No body either, in any view. The figure is still standing where it fell —
+    // or rather, it is not: it would follow the camera about, which is a
+    // corpse flying over its own world. Third person stays available because
+    // the camera offset is a nicer way to look at terrain, it simply has
+    // nothing in front of it.
+    this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST && !ghost,
       this.inventory.held().item,
       this.bow.t > 0 ? itemIdOf('arrow') : this.inventory.offhand.item);
     // The body is an entity like any other and takes its torchlight the same
@@ -3706,6 +4032,14 @@ class Game {
    */
   _takeHit(damage, cause, guarded = true, kind = 'blow') {
     const p = this.player;
+    // There is nothing there to hit. This is the single door every blow, every
+    // burn, every drowning and every fall in the game already comes through —
+    // its own comment two paragraphs down says so and lists them — which is why
+    // "a spectator cannot be hurt" is one line rather than a rule repeated at
+    // each source. `Mobs.ghost` stops the swings ever being thrown; this is
+    // what makes it true of the environment as well, and of whatever the next
+    // damage source turns out to be.
+    if (this.spectating) return false;
     if (p.health <= 0) return true;
     if (guarded && this._hurtGuard > 0) return false;
     if (guarded) this._hurtGuard = HURT_IMMUNITY;

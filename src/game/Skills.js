@@ -213,6 +213,25 @@ export const EARNED = {
 };
 
 /**
+ * What the caps above add up to, because it is not obvious and it decides the
+ * shape of the endgame.
+ *
+ * Every derived source at its ceiling is 64 points, and every mark is another
+ * 12, so a player who has done absolutely everything holds 76 — 84 if they
+ * carried a full cinder set through the armour conversion. The tree costs 91.
+ *
+ * So it cannot be finished, by about one branch, and that is worth stating
+ * rather than leaving to be rediscovered: the "91 points in the tree" quoted
+ * further up is the price of everything, not a budget anyone reaches. It is
+ * what keeps the branch choice permanent instead of merely early — spread
+ * across all six and you finish none of them. Anyone raising a cap should know
+ * they are spending that, not fixing a shortfall.
+ *
+ * Measured rather than derived by hand: hand `observe` an impossible stat line
+ * and read `points` back.
+ */
+
+/**
  * One-off awards for firsts. These are the part that cannot be derived — the
  * game does not count husks killed or kilns lit — so they are the only earned
  * points that have to be written to the save.

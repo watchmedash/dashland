@@ -1,0 +1,233 @@
+# Driftwood — the beach findable. A bleached limb that washed up, not a stump.
+#
+# Everything about this model is bent around one engine constraint, and it is
+# worth stating first because it explains a shape that would otherwise look
+# arbitrary. **The game normalises a block model by its Y extent.** A genuinely
+# horizontal piece of driftwood — the honest shape — has a Y extent equal to its
+# own thickness, so the engine would scale that thickness up to a cell and
+# deliver a log the size of a bus. So the piece is authored as a *low leaning
+# tangle*: the main limb lies along the ground, and one fork throws up and back,
+# leaving at 52° and standing up to 80° over its length, which buys a real Y
+# extent without ever making the thing look like it is standing. The `height / width in 0.55..0.95` check is the whole negotiation
+# written down — below 0.55 the engine blows it up, above 0.95 it stops reading
+# as something lying on sand.
+#
+# **It has to look like it arrived, not like it grew.** Three things do that
+# work, and none of them is colour:
+#
+#  - The **main axis is near-horizontal** — 6°, 18°, then 3°, so it lifts off the
+#    sand the way a beached limb rests on its own knuckles rather than lying flat
+#    like a plank. A plank looks placed; a limb resting on two contact points
+#    looks dropped.
+#  - The **butt is splintered**, not cut and not tapered like a growing tip. The
+#    loft's first ring is 0.030 across and the third, 0.12 along, is 0.135 — a
+#    violent flare over an eighth of the length, with `cap start=point` closing
+#    it to a spike, and the first two rings are pushed off-axis with `up=` and
+#    `side=` so the spike leaves at an angle. A centred cone is a nose cone; an
+#    off-axis spike is a break.
+#  - The **side branches are broken stubs**, closed with `cap end=flat` and
+#    swelling at the collar where they leave the limb. A blunt end is a snapped
+#    end. They sit at different stations on opposite sides, never as a pair.
+#
+# **The long axis runs along X, and that is not arbitrary either.** A model this
+# elongated has to lie along the axis the `width` global measures, or the ratio
+# check above is measuring the wrong thing entirely. It also puts the piece
+# broadside to the default camera, which is the angle that shows a fork.
+#
+# **The render sheet said "aircraft" twice before it said "wood".** Worth writing
+# down in full, because nothing in the source looked wrong either time:
+#
+#  1. *First sheet — a dart.* One straight limb, a monotonic taper from a fat
+#     root to a thin tip, and two straight swept prongs off the end. That is a
+#     fuselage with a V-tail and it is what the panel showed. The taper was the
+#     main culprit: a shape that only ever gets thinner in one direction is an
+#     engineered shape.
+#  2. *Second sheet — a jet.* The limb got a lumpy ring list and an S-bend and
+#     stopped being a fuselage, but the two forks were still single straight
+#     bones leaving at a fixed angle, so they were still wings, and the two stubs
+#     sat almost opposite each other at the same station, so they were canards.
+#
+#  The fixes were structural, not cosmetic: the limb runs on **three** bones so
+#  it has an S rather than an elbow; the rising fork runs on **two** so it bends
+#  as it stands up (52° into 80°, swinging the other way in Z); the widest ring
+#  came down from 0.215 to 0.155 against an 0.80 limb, because slenderness is
+#  most of what separates a branch from a body; and the stubs moved to different
+#  stations on opposite faces. All four together, and only all four together,
+#  made the panel read as wood.
+#
+# **Colour is value, not hue.** Bleached wood is grey-white, and grey-white on
+# pale sand is the hardest possible read — so the model carries its contrast
+# internally rather than against its background: a bone-pale sun-bleached top and
+# a distinctly darker weathered underside, done as one `material_arc` on a single
+# tube (`Shade:195-345`, which with `frame=up` is the bottom half) rather than as
+# two lofts with a seam down the middle. The splintered butt and the broken stub
+# ends are the palest thing in the model — freshly exposed wood — which puts the
+# brightest specks exactly on the features that say "broken".
+#
+# Iterate this one landscape: `--width 760 --height 560`. At the default 480×600
+# portrait panel a piece 1.05 long and 0.64 tall is fitted to the panel's *height*
+# and arrives as a thin streak in the middle of a lot of empty sky, and the two
+# things worth checking — whether the butt reads as splintered and whether the
+# fork clears the limb — are both a dozen pixels across.
+
+model driftwood
+  height 0.55
+  style chunky
+
+palette
+  Drift #b0aca1
+  Pale  #e6e1d3
+  Shade #6c6961
+  Split #faf6ea
+
+skeleton
+  # The root sits well off-centre in X because the limb runs that way and a long
+  # central part has to be *balanced* about X=0 or the centreline lint calls it
+  # lopsided — correctly, since a part straddling the axis is claiming symmetry.
+  # This number is not derived, it is tuned against the reported extents.
+  root sand at (-0.393,0.055,0.02)
+  # The main limb in **three** bones, not two. Two bones give one bend and one
+  # bend is an elbow; three give an S — 6°, then 18° with a −15° swing in Z, then
+  # back to 3° swinging +17° the other way — and an S is what a branch that grew
+  # toward light and then spent a month in surf looks like.
+  bone limbA parent=sand dir=side tilt=6  len=0.32
+  bone limbB parent=limbA dir=side tilt=18 yaw=-15 len=0.26
+  bone limbC parent=limbB dir=side tilt=3  yaw=17  len=0.24
+
+  # The rising fork, also in two bones so that it *bends*. This is the part that
+  # buys the model a Y extent; it leaves the limb at 52° and stands up to 80°,
+  # swinging back the other way in Z as it goes. A single straight bone here was
+  # a swept wing, which is most of why the first two sheets read as an aircraft.
+  bone forkU1 parent=limbC dir=side tilt=52 yaw=12  len=0.26
+  bone forkU2 parent=forkU1 dir=side tilt=80 yaw=-16 len=0.26
+  # ...and the low fork, which swings back in Z so the two prongs are not
+  # coplanar and drops 18° so its far end comes back down toward the sand.
+  # Rooted a little to +X of the joint so it is honestly one-sided.
+  bone forkL parent=limbC side=0.04 dir=side tilt=-18 yaw=-42 len=0.28
+
+  # Two broken side branches. They are deliberately **not** placed opposite each
+  # other: one sits a third of the way along on the +Z side and points up and
+  # back, the other is two thirds along on the −Z side. Symmetric stubs at the
+  # same station are canards, and the sheet said so.
+  bone stub1 parent=limbA at=0.55 dir=fwd pitch=-40 yaw=-22 len=0.24
+  bone stub2 parent=limbB at=0.50 side=0.09 dir=back pitch=20 yaw=20 len=0.19
+
+parts
+  # The limb. `frame=up` pins the section's depth axis to world vertical so the
+  # `material_arc` underside means the underside no matter how the limb bends —
+  # with the default auto frame, a part running this close to horizontal sits
+  # right on the axis-switch and the arc would rotate somewhere along its length.
+  #
+  # Seven sides, not the chunky eight: an odd count means no pair of facets is
+  # parallel, and weathered wood has no parallel faces left on it.
+  #
+  # The ring list is deliberately **lumpy and thin**. A monotonic taper — fat at
+  # the root, thin at the tip — is a fuselage, full stop, and the first sheet
+  # proved it. Real driftwood swells at every old branch collar and pinches
+  # between them, its section is never round (`w` and `d` swap which is larger
+  # twice along the length), and it is *slender*: the widest ring here is 0.155
+  # against a limb 0.80 long, where the first cut was 0.215 and read as a body
+  # with wings on it.
+  #
+  # The first three rings are the splintered butt. They are offset off-axis with
+  # `up=` and `side=` so the spike leaves at an angle instead of running down the
+  # centreline: a centred cone is a nose cone, and an off-axis spike is a break.
+  loft limb bones=sand..limbC material=Drift frame=up sides=7 material_arc=Shade:195-345
+    ring 0.00 w=0.030 d=0.026 up=0.048 side=-0.030 material=Split
+    ring 0.05 w=0.072 d=0.060 up=0.026 side=-0.016
+    ring 0.12 w=0.135 d=0.112 material=Drift
+    ring 0.26 w=0.112 d=0.140 roll=22
+    ring 0.42 w=0.155 d=0.124 material=Pale
+    ring 0.56 w=0.104 d=0.100 roll=-18 material=Drift
+    ring 0.72 w=0.140 d=0.118
+    ring 0.87 w=0.108 d=0.104 material=Pale
+    ring 1.00 w=0.096 d=0.092 material=Drift
+    cap start=point end=flat
+
+  # The rising fork, lofted along both of its bones so the bend is real geometry
+  # rather than two parts butted together. Blunt at the end — a broken end, not a
+  # grown tip — with the near-white band over the last tenth as the exposed break.
+  loft fork_up bones=forkU1..forkU2 material=Drift frame=up sides=6 material_arc=Shade:195-345
+    ring 0.00 w=0.115 d=0.104
+    ring 0.24 w=0.078 d=0.092 roll=24
+    ring 0.50 w=0.092 d=0.076 material=Pale
+    ring 0.74 w=0.072 d=0.068 material=Drift
+    ring 0.90 w=0.064 d=0.058 material=Split
+    ring 1.00 w=0.050 d=0.046
+    cap start=flat end=flat
+
+  # The low fork. Thinner, and it drops so its far end comes back down toward the
+  # sand — which is what makes the piece read as resting on three points rather
+  # than balancing on one.
+  loft fork_low bones=forkL..forkL material=Drift frame=up sides=6 material_arc=Shade:195-345
+    ring 0.00 w=0.104 d=0.094
+    ring 0.30 w=0.072 d=0.086 roll=-20
+    ring 0.58 w=0.082 d=0.068 material=Pale
+    ring 0.80 w=0.062 d=0.058 material=Drift
+    ring 0.92 w=0.054 d=0.050 material=Split
+    ring 1.00 w=0.040 d=0.037
+    cap start=flat end=flat
+
+  # The two snapped stubs. Barely tapered and cut off flat: a stub that tapers to
+  # a point is a twig, and a twig on driftwood is a thing that would have broken
+  # off in the surf. Each swells at its collar where it leaves the limb, which is
+  # what a branch scar on a bleached log actually looks like.
+  loft stub_a bones=stub1..stub1 material=Drift frame=up sides=5 material_arc=Shade:195-345
+    ring 0.00 w=0.115 d=0.106
+    ring 0.24 w=0.080 d=0.074
+    ring 0.64 w=0.072 d=0.066 material=Pale
+    ring 0.86 w=0.066 d=0.060 material=Split
+    ring 1.00 w=0.056 d=0.052
+    cap start=flat end=flat
+  loft stub_b bones=stub2..stub2 material=Drift frame=up sides=5 material_arc=Shade:195-345
+    ring 0.00 w=0.102 d=0.094
+    ring 0.24 w=0.072 d=0.066
+    ring 0.64 w=0.064 d=0.058 material=Pale
+    ring 0.86 w=0.058 d=0.053 material=Split
+    ring 1.00 w=0.050 d=0.046
+    cap start=flat end=flat
+
+checks
+  # It rests on the sand. The limb is the part that touches, and it touches at
+  # its low end — this is the check that catches the whole piece drifting upward
+  # the next time the tilts are adjusted.
+  assert bottom(limb) < 0.02
+  # Lying down, not standing. The main limb rises 6° then 14°; anything past
+  # about 25° and the model reads as a sapling that lost its leaves.
+  assert elevation(limbA) in 2..14
+  assert elevation(limbB) in 8..24
+  # ...and the limb is much longer than it is thick, which is the other half of
+  # "this is a branch".
+  assert width(limb) / height(limb) > 3.0
+  # The fork is what buys the Y extent, and it has to be steep enough to do it
+  # while still being clearly subordinate to the horizontal limb.
+  assert elevation(forkU1) in 46..58
+  assert elevation(forkU2) in 70..86
+  assert top(fork_up) > top(limb) * 1.6
+  # ...and the two prongs are a fork, not a straight continuation: they diverge
+  # hard, and they are not coplanar (the low one swings back in Z).
+  assert angle(forkU1, forkL) > 55
+  assert angle(forkU1, limbB) > 30
+  # ...and the rising fork genuinely bends rather than running straight.
+  assert angle(forkU1, forkU2) > 20
+  assert abs(z(forkL.tail)) > 0.15
+  # The low fork comes back down near the sand, which is what makes the piece
+  # rest on three points instead of balancing on one.
+  assert bottom(fork_low) < 0.12
+  # Broken stubs, not branches: each one is a small fraction of the limb.
+  assert height(stub_a) + width(stub_a) < width(limb) * 0.45
+  assert volume(stub_b) < volume(limb) / 8
+  assert top(stub_a) < top(fork_up)
+  # The framing constraint, stated. Wider than tall — it washed up — but with a
+  # real Y extent so the engine's Y-normalisation does not inflate it.
+  assert height / width in 0.55..0.95
+  # ...and the long axis is X, not Z, which is what makes the ratio above mean
+  # what it says.
+  assert width > depth * 1.6
+  # Nothing passes through anything. The forks and stubs all leave the limb at a
+  # joint, which the sweep forgives; a stub crossing the limb mid-span is a bug.
+  noclip
+  assert parts == 5
+  assert tris < 700
+  measure aspect height / width
+  measure slenderness width(limb) / height(limb)

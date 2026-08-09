@@ -1,0 +1,218 @@
+# Shelf Fungus — bracket fungus on a rotting stub. The cave's other fungus.
+#
+# The set needs two fungi that cannot be confused with each other at torchlight
+# range, and the honest way to get that is not two colours of toadstool but two
+# *topologies*. `cave_mushroom` is verticals with knobs on top. This is the
+# opposite in every structural respect: **no stems and no caps, only horizontals**
+# — a staircase of flat plates cantilevered off a short woody stub. Where the
+# toadstool patch is a row of light columns, this is a stack of dark shelves with
+# bright leading edges, and the two silhouettes have nothing in common.
+#
+# **The plates are the entire model, so they must be plainly plates.** That means
+# three things stated as numbers: every shelf is at least four times wider than
+# its own bounding box is tall (and the material itself is far thinner than that
+# — the box includes the droop), each is authored with `frame=up` so its thin
+# axis is world-vertical no matter which heading it grows at, and the whole thing
+# is 1.35 times wider than it is tall. A bracket that thickens into a wedge stops
+# being a shelf and becomes a burl.
+#
+# **Separated in height *and* heading.** Six brackets, walking up the stub in
+# equal steps and pointing at 0°, 95°, 180°, −85°, 75°, −110°, so no two are
+# stacked directly above each other, and every one of them droops 7–10° at the
+# front, which opens a real shadow gap between one plate's underside and the top
+# face of the plate below it. The `noclip` battery at the bottom names all
+# fifteen pairs: the first spacing had B growing through C by 0.069 and the
+# result was not a stack of shelves, it was one lump with a notched outline.
+#
+# **What the render sheet changed, twice.** The first sheet's plates were too
+# close in height *and* the stub was too short — the shelves stacked into a
+# single mass. Spreading them fixed the clipping. The second sheet found a worse
+# problem the numbers could not: the largest bracket was the lowest one, sitting
+# more or less centred over the base, and from the front the model read as *a
+# wide cap on a dark stalk* — i.e. as a mushroom, which is the one thing this
+# model exists not to be. The size peak moved one shelf up (B is now the biggest
+# and it is thrown out to one side), the bottom bracket shrank from 0.55 reach to
+# 0.44, and the whole stack rose so the stub's foot shows below it. No single
+# plate dominates the outline now.
+#
+# **The rim band is what makes it a bracket and not a mushroom seen edge-on.**
+# Real polypores lay down concentric growth zones and the outermost, the actively
+# growing margin, is the palest — often bone white against a rusty top. Because a
+# shelf is lofted outward from the stub, "concentric" is just *along the loft*,
+# so the banding costs one `material=` per ring: `Ring` (pale tan) from 0.60 and
+# `Rim` (near-white) from 0.84. That white margin is the highest-value thing in
+# the model and it runs along the whole leading edge of every plate, which is
+# exactly the line the silhouette is made of.
+#
+# **The underside is a material arc, not a separate part.** A polypore's pore
+# surface is near-white and the top is rust; authored as two lofts that would be
+# a slab with a seam, so instead the whole plate is one tube with
+# `material_arc=Under:195-345` — with `frame=up` the depth axis is world up, so
+# 270° is straight down and that arc is the bottom half of the plate all the way
+# out to the margin. The player at floor level looking up a cave wall sees the
+# pale face; from above they see rust.
+#
+# The stub is deliberately thin and very dark: it is the dead wood the fungus is
+# eating, not a trunk, and it is checked to be narrower than the *smallest*
+# bracket is wide. It reads as the dark spine holding the plates apart, which is
+# all it should ever do — the moment it reads as a stem the model is a toadstool.
+
+model shelf_fungus
+  height 0.30
+  style chunky
+
+palette
+  Shelf #a4622e
+  Zone  #8a4a22
+  Ring  #d9a066
+  Rim   #f2e6d2
+  Under #ece0c8
+  Bark  #4d3a2c
+
+skeleton
+  root rock at 0.0
+  # One short stub, leaning a few degrees so the stack is not a plumb line.
+  bone stub parent=rock dir=up pitch=4 len=0.70
+
+parts
+  # The dead wood. Narrow and dark; it has to be tall enough to space six plates
+  # apart, and thin enough that it never reads as the subject.
+  loft stub_wood bones=rock..stub material=Bark sides=6
+    ring 0.00 w=0.26 d=0.25
+    ring 0.16 w=0.19 d=0.185
+    ring 0.72 w=0.165 d=0.16
+    ring 1.00 w=0.15 d=0.145
+    cap start=flat end=dome
+
+  # Six shelves. Each is a loft fired horizontally out of the stub: `frame=up`
+  # pins the thin axis to world vertical, `w` fans the plate out from a narrow
+  # attachment to a rounded front and back in again (the semicircle), and `d`
+  # runs from 0.075 where it meets the wood to a 0.015 wafer at the margin. That
+  # taper is the one thing that makes a cantilevered plate look grown rather
+  # than sawn, and the narrow root is how a real bracket attaches — a wide root
+  # made the plate read as a collar around the stub.
+  #
+  # There is deliberately **no `on=`** here, and that was a bug fix rather than
+  # a style choice. `on=` snaps a part's origin to the closest point on the named
+  # surface, and for a ray fired out of the middle of a round stub "closest" is
+  # very nearly a tie between several vertices — the snap landed a few
+  # hundredths off the axis in X and the centreline lint correctly flagged
+  # shelves at yaw=0 and yaw=180 as lopsided when the source says they are dead
+  # symmetric. The root ring is 0.10–0.12 across against a stub 0.17 across, so
+  # each shelf starts *inside* the wood and is flush by construction anyway; the
+  # snap was buying nothing and moving the geometry.
+  #
+  # The `pitch` is the droop, and it is what opens a shadow between one plate's
+  # underside and the top face of the plate below it.
+  #
+  # **The headings are constrained by the centreline lint and it is right to
+  # constrain them.** A wide fan fired off at a diagonal yaw straddles X=0
+  # lopsidedly — it is claiming a symmetry it does not have — so the usable
+  # headings are along ±Z (where the fan spans X symmetrically, genuinely
+  # symmetric) and along ±X within about 25° (where the whole plate lives on one
+  # side of the axis, genuinely one-sided). Six shelves at 0°, 95°, 180°, −85°,
+  # 75°, −110° use four of those quadrants and no two of them repeat, which is
+  # enough irregularity: the height gradient and the size gradient are doing the
+  # work of making the stack look grown, not the yaw jitter.
+  #
+  # E and F carry a 0.025 root `offset=` in the direction they lean, which is the
+  # `sea_grass` rule: a plate whose reach is 0.39 to one side and 0.013 to the
+  # other is not symmetric, it is one-sided with a rounding error, and the honest
+  # fix is to move it fully onto its own side rather than to argue with the lint.
+  loft shelfA bone=stub at=0.26 dir=fwd yaw=0 pitch=8 len=0.44  frame=up sides=8 material=Shelf material_arc=Under:195-345
+    ring 0.00 w=0.11 d=0.072 material=Zone
+    ring 0.26 w=0.42 d=0.066 material=Shelf
+    ring 0.60 w=0.54 d=0.047 material=Ring
+    ring 0.84 w=0.47 d=0.028 material=Rim
+    ring 1.00 w=0.24 d=0.015
+    cap start=flat end=flat
+  loft shelfB bone=stub at=0.42 dir=fwd yaw=95 pitch=9 len=0.52  frame=up sides=8 material=Shelf material_arc=Under:195-345
+    ring 0.00 w=0.12 d=0.075 material=Zone
+    ring 0.26 w=0.50 d=0.070 material=Shelf
+    ring 0.60 w=0.64 d=0.050 material=Ring
+    ring 0.84 w=0.56 d=0.030 material=Rim
+    ring 1.00 w=0.28 d=0.016
+    cap start=flat end=flat
+  loft shelfC bone=stub at=0.57 dir=fwd yaw=180 pitch=10 len=0.50  frame=up sides=8 material=Shelf material_arc=Under:195-345
+    ring 0.00 w=0.115 d=0.073 material=Zone
+    ring 0.26 w=0.48 d=0.068 material=Shelf
+    ring 0.60 w=0.61 d=0.048 material=Ring
+    ring 0.84 w=0.53 d=0.029 material=Rim
+    ring 1.00 w=0.26 d=0.015
+    cap start=flat end=flat
+  loft shelfD bone=stub at=0.72 dir=fwd yaw=-85 pitch=7 len=0.46  frame=up sides=8 material=Shelf material_arc=Under:195-345
+    ring 0.00 w=0.10 d=0.068 material=Zone
+    ring 0.26 w=0.42 d=0.060 material=Shelf
+    ring 0.60 w=0.52 d=0.043 material=Ring
+    ring 0.84 w=0.45 d=0.026 material=Rim
+    ring 1.00 w=0.22 d=0.014
+    cap start=flat end=flat
+  loft shelfE bone=stub at=0.86 offset=(0.025,0,0) dir=fwd yaw=75 pitch=9 len=0.38  frame=up sides=8 material=Shelf material_arc=Under:195-345
+    ring 0.00 w=0.095 d=0.062 material=Zone
+    ring 0.26 w=0.36 d=0.055 material=Shelf
+    ring 0.60 w=0.45 d=0.039 material=Ring
+    ring 0.84 w=0.39 d=0.024 material=Rim
+    ring 1.00 w=0.19 d=0.013
+    cap start=flat end=flat
+  # The youngest bracket, right at the top of the stub and half the size of the
+  # bottom one. The size gradient runs the right way: brackets colonise a dead
+  # trunk from the bottom up, so the oldest and biggest is lowest.
+  loft shelfF bone=stub at=0.99 offset=(-0.025,0,0) dir=fwd yaw=-110 pitch=8 len=0.30  frame=up sides=7 material=Shelf material_arc=Under:195-345
+    ring 0.00 w=0.085 d=0.056 material=Zone
+    ring 0.28 w=0.30 d=0.048 material=Shelf
+    ring 0.62 w=0.37 d=0.034 material=Ring
+    ring 0.86 w=0.31 d=0.021 material=Rim
+    ring 1.00 w=0.16 d=0.012
+    cap start=flat end=flat
+
+checks
+  # The stub is planted in the rock. Everything else hangs off it, so this is the
+  # only ground contact the model has and it has to be honest.
+  assert bottom(stub_wood) < 0.02
+  # Plates, not wedges. Width over thickness on every shelf, and the bound is
+  # generous at the low end only because `height(shelf)` is a bounding box that
+  # includes the droop — the material itself is thinner than this says.
+  assert width(shelfB) / height(shelfB) > 4.0
+  assert width(shelfC) / height(shelfC) > 4.0
+  assert width(shelfF) / height(shelfF) > 3.5
+  # Each shelf reaches further out than the stub is wide, by a lot. If this ever
+  # fails the brackets have shrunk into knots on a stick.
+  assert width(shelfB) > width(stub_wood) * 2.0
+  assert width(shelfE) > width(stub_wood) * 1.5
+  # A staircase: six distinct heights, in order, and the spacing between
+  # neighbours is real. `top()` and not `y()` because a drooping plate's centre
+  # sits below the height it was mounted at.
+  assert top(shelfA) < top(shelfB)
+  assert top(shelfB) < top(shelfC)
+  assert top(shelfC) < top(shelfD)
+  assert top(shelfD) < top(shelfE)
+  assert top(shelfE) < top(shelfF)
+  # ...and no two of them touch. This is the check that separates "a stack of
+  # shelves" from "one lump", and it is the thing the first render sheet got
+  # wrong. Named pairs, because a named pair forgives nothing.
+  noclip shelfA vs shelfB,shelfC,shelfD,shelfE,shelfF
+  noclip shelfB vs shelfC,shelfD,shelfE,shelfF
+  noclip shelfC vs shelfD,shelfE,shelfF
+  noclip shelfD vs shelfE,shelfF
+  noclip shelfE vs shelfF
+  # Horizontal plates: the whole bracket stack spans less height than one shelf
+  # spans width. This is the single number the silhouette lives or dies by.
+  assert height < width(shelfB) * 1.4
+  # Wider than tall overall, in both horizontal axes, because the game
+  # normalises on the Y extent and an upright bracket colony arrives waist high.
+  assert width / height > 1.15
+  assert depth / height > 1.0
+  # The size gradient: oldest and largest at the bottom, youngest at the top.
+  assert volume(shelfF) < volume(shelfB) / 2
+  assert width(shelfF) < width(shelfB) * 0.75
+  # The stub stays a stub: thinner than the smallest bracket is wide, so it
+  # reads as the spine holding the plates apart rather than as the subject.
+  assert width(stub_wood) < width(shelfF)
+  assert width(stub_wood) < width(shelfB) * 0.5
+  # The stack uses the stub. If the shelves ever bunch into the middle the
+  # staircase collapses into a rosette.
+  assert top(shelfF) - top(shelfA) > height * 0.5
+  assert parts == 7
+  assert tris < 700
+  measure spread width / height
+  measure plate width(shelfB) / height(shelfB)

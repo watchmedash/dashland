@@ -1,0 +1,260 @@
+# Golden Grass — tall dry standing grass, and a lesson in what makes a grass a
+# *species* rather than a recolour.
+#
+# The game already has `tall_grass`, and the savanna's problem is not that it
+# lacks green grass but that a savanna horizon needs something standing above
+# knee height and gone over to seed. The first instinct — take `sea_grass`, turn
+# the palette straw, make it taller — produces exactly nothing: a yellow spray of
+# blades reads as green grass in bad light, and at 32px it is a smudge with no
+# feature in it at all.
+#
+# **The seed heads are the model.** Everything else here is context for three
+# thin stalks that rise clear above the blades, arch over at the top, and carry a
+# drooping panicle. That arch is the silhouette feature — it is the only curve in
+# a model otherwise made of straight lines, it breaks the vertical, and it is
+# instantly legible as "grass that has gone to seed" at any size. If you deleted
+# the blades this would still read as dry grass; delete the panicles and it is
+# yellow sea grass. So the panicles get the triangle budget: six sides and six
+# rings each, where a blade gets four and four.
+#
+# **The arch is three bones, not two.** A stalk that simply leans over reads as a
+# broken stem. What a seeded grass actually does is stand straight for most of
+# its length, bend hard in the last fifth, and then let the head hang almost
+# vertically off the end of that bend — so each stalk is a straight `up` bone, a
+# short `up` bone at a much steeper angle, and then a `fwd` bone pitched down
+# past horizontal to carry the head. The `dir=fwd pitch=` form is what makes the
+# last one honest: on a `fwd` bone, pitch tips it *downward*, so the droop is a
+# positive number and not a sign I had to guess.
+#
+# **The panicle is faceted on purpose.** `shape=squarish` with the roll alternating
+# ring to ring is the trick `flower_red` uses to break a loft's facets out of
+# alignment, and it does the same job here for a different reason: a smooth
+# spindle on a stick is a cattail, and a cattail is a marsh plant. Broken into
+# offset facets it reads as a cluster of separate spikelets, which is an oat.
+#
+# **Upright, unlike everything else in this batch.** `thornbrush` and `aloe` are
+# both deliberately wider than tall because they are ground cover. This one's
+# job is the opposite: it exists to break a flat horizon, so Y stays the long
+# axis and the blades lean by fifteen or twenty degrees rather than the forty
+# `sea_grass` uses. The `height / width in 1.1..2.0` check is what keeps it that
+# way — `BlockModels` normalises on the Y extent, so a golden grass that spreads
+# comes back shrunk and stops clearing the grass line it was built to clear.
+
+model golden_grass
+  height 0.78
+  style chunky
+
+palette
+  Straw #d8b45e
+  Amber #b98a3c
+  Pale  #eed892
+  Dry   #8d692f
+
+skeleton
+  root soil at 0.0
+  # Three seed stalks, each a straight rise, a hard bend, and a hanging head.
+  # They lean on three different headings so the three panicles never stack; the
+  # two that lean along X carry a root offset in the same direction, which is the
+  # centreline rule `sea_grass` and `coral_branch` both follow.
+  #
+  # These were a third shorter on the first pass and the render sheet was
+  # unambiguous about it: every panicle hung level with the middle of the blades,
+  # so the one feature the model exists for was buried in foliage from all four
+  # views. The whole point of a seed head is that it is *above* the leaf canopy —
+  # that is what you see across a savanna — so the culms now rise clear of the
+  # tallest blade before they bend, and the blades themselves were cut back to
+  # make the gap unmistakable. The `bottom(headA) > top(bladeA)` check is the
+  # written form of that lesson.
+  bone sa1 parent=soil side=-0.012 dir=up tilt=8 len=0.90
+  bone sa2 parent=sa1 dir=up tilt=40 pitch=10 len=0.16
+  bone sa3 parent=sa2 dir=fwd yaw=-74 pitch=60 len=0.15
+  bone sb1 parent=soil side=0.012 dir=up tilt=-6 pitch=-8 len=1.02
+  bone sb2 parent=sb1 dir=up tilt=-32 pitch=-28 len=0.15
+  bone sb3 parent=sb2 dir=fwd yaw=42 pitch=64 len=0.14
+  bone sc1 parent=soil dir=up pitch=10 len=0.80
+  bone sc2 parent=sc1 dir=up pitch=42 len=0.14
+  bone sc3 parent=sc2 dir=fwd pitch=62 len=0.13
+
+parts
+  # Eight blades. Flat straps — `frame=up`, wide `w`, near-nothing `d` — because
+  # that is what a grass leaf is, and a round section here is chives. They are
+  # narrower than `sea_grass`'s (0.13 against 0.20 at the widest) because dry
+  # savanna grass is a coarse wire rather than a ribbon, and because narrow
+  # blades let eight of them fit in the same footprint six wide ones would fill.
+  #
+  # Four lean along X and are rooted a half-width off the axis in the same
+  # direction, so each is honestly one-sided; four lean along Z and stay centred
+  # on X, so they are symmetric. Those are the only two arrangements the
+  # centreline lint accepts.
+  loft bladeA bone=soil at=0.0 offset=(-0.040,0,0.02) dir=up pitch=4 tilt=15 len=0.56 material=Straw frame=up sides=4
+    ring 0.00 w=0.060 d=0.016
+    ring 0.30 w=0.130 d=0.020
+    ring 0.74 w=0.095 d=0.015
+    ring 1.00 w=0.022 d=0.008 tip
+    cap start=flat end=point
+  loft bladeB bone=soil at=0.0 offset=(0.042,0,-0.03) dir=up pitch=-3 tilt=-17 len=0.62 material=Amber frame=up sides=4
+    ring 0.00 w=0.060 d=0.016
+    ring 0.30 w=0.128 d=0.020
+    ring 0.74 w=0.092 d=0.015
+    ring 1.00 w=0.022 d=0.008 tip
+    cap start=flat end=point
+  loft bladeC bone=soil at=0.0 offset=(-0.036,0,-0.04) dir=up pitch=-5 tilt=11 len=0.54 material=Pale frame=up sides=4
+    ring 0.00 w=0.055 d=0.014
+    ring 0.30 w=0.115 d=0.018
+    ring 0.74 w=0.082 d=0.013
+    ring 1.00 w=0.020 d=0.007 tip
+    cap start=flat end=point
+  loft bladeD bone=soil at=0.0 offset=(0.038,0,0.04) dir=up pitch=6 tilt=-13 len=0.60 material=Straw frame=up sides=4
+    ring 0.00 w=0.056 d=0.014
+    ring 0.30 w=0.120 d=0.018
+    ring 0.74 w=0.086 d=0.013
+    ring 1.00 w=0.020 d=0.007 tip
+    cap start=flat end=point
+  loft bladeE bone=soil at=0.0 offset=(0,0,0.04) dir=up pitch=17 tilt=0 len=0.60 material=Amber frame=up sides=4
+    ring 0.00 w=0.058 d=0.015
+    ring 0.30 w=0.124 d=0.019
+    ring 0.74 w=0.088 d=0.014
+    ring 1.00 w=0.021 d=0.008 tip
+    cap start=flat end=point
+  loft bladeF bone=soil at=0.0 offset=(0,0,-0.04) dir=up pitch=-15 tilt=0 len=0.58 material=Dry frame=up sides=4
+    ring 0.00 w=0.055 d=0.014
+    ring 0.30 w=0.115 d=0.018
+    ring 0.74 w=0.082 d=0.013
+    ring 1.00 w=0.020 d=0.007 tip
+    cap start=flat end=point
+  loft bladeG bone=soil at=0.0 offset=(0,0,0.03) dir=up pitch=9 tilt=0 len=0.48 material=Pale frame=up sides=4
+    ring 0.00 w=0.050 d=0.013
+    ring 0.30 w=0.105 d=0.016
+    ring 0.74 w=0.074 d=0.012
+    ring 1.00 w=0.018 d=0.007 tip
+    cap start=flat end=point
+  loft bladeH bone=soil at=0.0 offset=(0,0,-0.03) dir=up pitch=-8 tilt=0 len=0.44 material=Straw frame=up sides=4
+    ring 0.00 w=0.050 d=0.013
+    ring 0.30 w=0.105 d=0.016
+    ring 0.74 w=0.074 d=0.012
+    ring 1.00 w=0.018 d=0.007 tip
+    cap start=flat end=point
+
+  # The stalks. Barely thicker than nothing, and they taper almost not at all: a
+  # culm is a straw, and the flare the flower models put at the foot of a stem
+  # would read as a bulb here. Lofted across all three bones so the arch bends
+  # smoothly — the compiler inserts a ring at each joint for exactly this.
+  loft stalkA bones=sa1..sa3 material=Dry sides=4
+    ring 0.00 w=0.030 d=0.028
+    ring 0.12 w=0.020 d=0.019
+    ring 0.70 w=0.016 d=0.015 material=Amber
+    ring 1.00 w=0.013 d=0.012
+    cap start=flat end=flat
+  loft stalkB bones=sb1..sb3 material=Dry sides=4
+    ring 0.00 w=0.030 d=0.028
+    ring 0.12 w=0.020 d=0.019
+    ring 0.70 w=0.016 d=0.015 material=Amber
+    ring 1.00 w=0.013 d=0.012
+    cap start=flat end=flat
+  loft stalkC bones=sc1..sc3 material=Dry sides=4
+    ring 0.00 w=0.028 d=0.026
+    ring 0.12 w=0.019 d=0.018
+    ring 0.70 w=0.015 d=0.014 material=Amber
+    ring 1.00 w=0.012 d=0.011
+    cap start=flat end=flat
+
+  # The three panicles, hung off the tail of each stalk's last bone and pointing
+  # wherever that bone points, which is down and out. Widest at a third of the
+  # way along and tapering to a point: an oat head is a teardrop, not a sausage.
+  # `Pale` at the far end because the ripe end of a seed head bleaches first, and
+  # because a pale tip on a straw stalk is the one place in this model where a
+  # value contrast lands at icon size. It is named on all three of the last rings
+  # rather than just the first of them: a loft ring with no `material=` falls
+  # back to the **part's** base material and not to the ring above it, so a band
+  # written once ends at the next ring and the colour silently reverts. This bit
+  # `firebloom` hard enough to be worth restating here.
+  #
+  # Lengthened and narrowed on the second pass. At 0.24 long and 0.086 wide they
+  # rendered as fat little cones and read as buds rather than seed heads — a
+  # short wide taper on a stalk is a flower in every plant model in this project,
+  # which is precisely the wrong association. An oat panicle is long and slim, so
+  # these are half again as long and a third narrower, and the roll steps were
+  # pushed past twenty degrees so the facets visibly stagger down the length
+  # instead of blending back into a spindle.
+  loft headA bone=sa3 at=1.0 dir=fwd yaw=-74 pitch=60 len=0.34 on=stalkA material=Straw sides=6 shape=squarish
+    ring 0.00 w=0.024 d=0.024 material=Amber
+    ring 0.16 w=0.062 d=0.060 roll=22 material=Straw
+    ring 0.36 w=0.070 d=0.068 roll=-26
+    ring 0.56 w=0.060 d=0.058 roll=24
+    ring 0.76 w=0.048 d=0.046 roll=-22 material=Pale
+    ring 0.92 w=0.030 d=0.029 roll=20 material=Pale
+    ring 1.00 w=0.009 d=0.009 material=Pale
+    cap start=flat end=flat
+  loft headB bone=sb3 at=1.0 dir=fwd yaw=42 pitch=64 len=0.32 on=stalkB material=Straw sides=6 shape=squarish
+    ring 0.00 w=0.024 d=0.024 material=Amber
+    ring 0.16 w=0.060 d=0.058 roll=-24 material=Straw
+    ring 0.36 w=0.068 d=0.066 roll=26
+    ring 0.56 w=0.058 d=0.056 roll=-22
+    ring 0.76 w=0.046 d=0.044 roll=24 material=Pale
+    ring 0.92 w=0.029 d=0.028 roll=-20 material=Pale
+    ring 1.00 w=0.009 d=0.009 material=Pale
+    cap start=flat end=flat
+  loft headC bone=sc3 at=1.0 dir=fwd pitch=62 len=0.30 on=stalkC material=Straw sides=6 shape=squarish
+    ring 0.00 w=0.022 d=0.022 material=Amber
+    ring 0.16 w=0.057 d=0.055 roll=22 material=Straw
+    ring 0.36 w=0.064 d=0.062 roll=-26
+    ring 0.56 w=0.055 d=0.053 roll=24
+    ring 0.76 w=0.043 d=0.041 roll=-22 material=Pale
+    ring 0.92 w=0.027 d=0.026 roll=20 material=Pale
+    ring 1.00 w=0.008 d=0.008 material=Pale
+    cap start=flat end=flat
+
+checks
+  # Rooted in the ground, blades and stalks both. A tuft the player can see under
+  # is the one failure a ground plant cannot survive.
+  assert bottom(bladeA) < 0.02
+  assert bottom(bladeF) < 0.02
+  assert bottom(stalkA) < 0.02
+  # Y is the long axis, and stays it. This is the check that separates this model
+  # from the other three in the batch: `thornbrush` and `aloe` are policed for
+  # being wide enough and this one for being narrow enough, because its whole
+  # purpose is to stand above the grass line and break a flat horizon.
+  assert height / width in 1.1..2.0
+  assert height / depth in 1.1..2.0
+  # The seed heads clear the blades. If this fails the feature that makes the
+  # model a species rather than a recolour is buried in the foliage and the block
+  # is yellow sea grass.
+  # This is the strictest check in the file and it is the one the first render
+  # sheet failed: the *bottom* of the tallest panicle sits above the *top* of the
+  # tallest blade. Not "the stalk is taller", which the first cut satisfied while
+  # the head still hung down into the foliage — the whole head has to be in clear
+  # air or the block is yellow sea grass with a lump in it.
+  assert bottom(headB) > top(bladeB)
+  assert bottom(headA) > top(bladeA)
+  assert top(stalkC) > top(bladeE)
+  # ...and they hang. A panicle whose top is at the top of its own stalk is
+  # sitting on the stem like a bulrush; a drooping one starts below the bend.
+  assert top(headA) < top(stalkA)
+  assert top(headB) < top(stalkB)
+  # The heads are fat relative to the stalk carrying them, or they are knots in
+  # the stem rather than seed clusters. Stated as an absolute rather than as a
+  # ratio against `width(stalkA)`: a stalk's bounding box measures the whole
+  # arch, which is nearly 0.3 across, so the ratio form compares a head against a
+  # curve and is meaningless. The culm's actual section is 0.016, so 0.055 is
+  # more than three times it.
+  assert width(headA) > 0.055
+  assert width(headB) > 0.055
+  # ...and long relative to fat, which is what separates an oat panicle from the
+  # tulip bud the first cut produced. Measured across the axis it actually hangs
+  # along: headA is yawed 74 degrees so it droops mostly in X, and `height` there
+  # measures only the vertical component of a diagonal hang — the check would
+  # have policed the droop angle instead of the proportions.
+  assert width(headA) > depth(headA) * 1.8
+  # Three heads at three heights, so the top of the model is ragged rather than
+  # a hedge cut. C is deliberately the short one.
+  assert top(stalkA) > top(stalkC) * 1.1
+  assert top(stalkB) > top(stalkA)
+  # Blades are straps, not tubes: a blade whose width is not several times its
+  # thickness is a chive and the tuft stops reading as grass.
+  assert width(bladeE) > 0.05
+  # Three distinct blade lengths, same ragged-top argument.
+  assert top(bladeB) > top(bladeH) * 1.2
+  assert parts == 14
+  assert tris < 700
+  measure lean width / height
+  measure headdrop top(stalkA) - top(headA)

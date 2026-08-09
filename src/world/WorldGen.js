@@ -10,7 +10,7 @@ import {
 import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
 } from './Sphere.js';
-import { ID, N_BLOCKS, supports } from './Blocks.js';
+import { ID, N_BLOCKS, supports, growsOn } from './Blocks.js';
 import { placeStructures } from './Structures.js';
 
 /**
@@ -777,6 +777,178 @@ const LAKE_WEED = new Uint8Array(8);
 /** Scratch for the two reef passes. Neither nests inside anything. */
 const _reefDir = [0, 0, 0];
 const _reefParts = { f: 0, i: 0, j: 0 };
+
+/**
+ * The land flora, the cave floor, and the stands.
+ *
+ * Three passes, and they exist because before them the entire surface of the
+ * planet grew four things, all four keyed off one block. `floraAt` tests
+ * `surf === ID.grass` and then scatters `tall_grass` and three flowers, so a
+ * meadow, a plain, a forest floor and a mountain shoulder are the same ground
+ * cover at the same density, and every biome that is not grass-topped — desert,
+ * badlands, tundra, snow, beach, and the whole of the underground — grows
+ * nothing whatsoever. `floraAt` is left exactly as it was; these run after it
+ * and fill what it leaves.
+ *
+ * The split into three is by *shape of decision*, which is the only split that
+ * matters here:
+ *
+ *   landFloraAt   one column, own column only, noise-modulated. The carpet.
+ *   caveFloraAt   one column, own column only, walks the column's air pockets.
+ *   standAt       a lattice site and a disc, over the margin. The landmark.
+ *
+ * The first two need no region clip for `floraAt`'s reason — they write into
+ * their own column and nowhere else. The third is a feature like a reef and is
+ * clipped like one.
+ */
+
+/**
+ * Peak per-column odds for the carpet, before the density field.
+ *
+ * Every one of these is multiplied by `pow(dens, LAND_CLUMP)` where `dens` is a
+ * low-frequency fbm, which is the same trick `seabedFloraAt` plays and it is
+ * doing the same job: a flat probability at the same mean is an even dusting of
+ * single plants over an entire biome, and what reads as a biome is beds of one
+ * thing with bare ground between them. The exponent is a little higher than the
+ * seabed's because there is more contrast to buy on land — you can see a long
+ * way across a plain, and a plain that is uniformly 12% clover is a texture
+ * rather than a place.
+ *
+ * The numbers are not all the same order and that is the point. A savanna is
+ * *made of* golden grass and reads wrong at anything under a third; a snowbell
+ * is meant to be the one dark thing in an hour of white, so it is at 5%; and
+ * driftwood sits at half a percent because a beach with driftwood every ten
+ * paces is a lumber yard. See the harness counts in the report.
+ */
+const LAND_CLUMP = 1.9;
+
+/**
+ * The stands: a lattice site, a disc, and one species massed inside it.
+ *
+ * `landFloraAt` gives every biome a carpet, which fixes "the ground is bare"
+ * and does not fix "there is nothing to walk toward". A carpet is by
+ * construction the same everywhere it is; what makes a place worth crossing is
+ * something you can see the edge of. So seven biomes get a stand — a patch two
+ * to seven columns across of that biome's *signature* plant at high density,
+ * rare enough that meeting one is an event.
+ *
+ * On a lattice for the reason SPRING_LATTICE spells out at length, and with the
+ * same arithmetic constraint: `2 * STAND_R_MAX < STAND_LATTICE` (6.8 < 8), so
+ * two sites can never claim the same column and there is at most one candidate
+ * per axis to test. `STAND_R_MAX` is also under DECOR_MARGIN (6), which is the
+ * hard bound — a disc that reached further would write outside the margin the
+ * region was handed.
+ *
+ * `(STAND_LI, STAND_LJ)` is `(5, 7)` and had to be chosen: springs sit at
+ * (3, 5), reefs at (1, 4) and fallen logs at (6, 2), all modulo 8, and a stand
+ * co-sited with any of them would be a stand that is always in the same place
+ * relative to that feature.
+ */
+const STAND_LATTICE = 8;
+const STAND_LI = 5;
+const STAND_LJ = 7;
+const STAND_R_MIN = 2.1;
+const STAND_R_MAX = 3.4;
+/**
+ * How full a stand is at its own centre, before the site's own `rich` roll and
+ * the falloff. Not 1.0: a solid disc of one plant reads as a texture swap and a
+ * bug, and what says "a stand of lavender" is lavender with ground showing
+ * through it.
+ */
+const STAND_FILL = 0.92;
+
+/**
+ * Which biome carries which stand, and how often a lattice candidate takes.
+ *
+ * Indexed by biome id, so the lookup in `_standSite` is an array read. A hole
+ * means that biome has no stand, and five of the twelve are holes on purpose:
+ * ocean and beach have no room for one, plains and forest already carry the
+ * densest carpets on the planet (clover and fern), and the desert's landmark is
+ * the cactus, which has been there all along.
+ *
+ * The chances look large next to a tree's 0.115 and they are not comparable:
+ * this is per *lattice candidate*, which is one column in 64, and it is then
+ * cut again by the terrain tests. A badlands stand at 0.16 works out at roughly
+ * one per 400 columns of badlands.
+ */
+const STAND_SPEC = [];
+// The badlands takes nearly double everyone else's chance, and it is earned
+// rather than chosen: it is the smallest land biome on the planet (1.7% of
+// columns) and the most heavily cut by its own canyons, so the same number that
+// gives a meadow 133 stands gave it 43. It is also the biome with the least
+// else in it, which is exactly why it needed the landmark.
+STAND_SPEC[BIOME.BADLANDS] = { id: ID.firebloom, chance: 0.30 };
+STAND_SPEC[BIOME.MEADOW] = { id: ID.lavender, chance: 0.20 };
+STAND_SPEC[BIOME.PINE_FOREST] = { id: ID.lingonberry, chance: 0.22 };
+STAND_SPEC[BIOME.SAVANNA] = { id: ID.aloe, chance: 0.14 };
+STAND_SPEC[BIOME.MOUNTAIN] = { id: ID.alpine_aster, chance: 0.18 };
+STAND_SPEC[BIOME.SNOW] = { id: ID.snowbell, chance: 0.12 };
+STAND_SPEC[BIOME.TUNDRA] = { id: ID.cotton_grass, chance: 0.20 };
+
+/**
+ * What a stand is allowed to replace.
+ *
+ * Air, and the four things `floraAt` scatters — a stand of lavender that
+ * stopped at every blade of tall grass would come out as lace. Everything else
+ * is refused, and the list is written out rather than expressed as "any cross
+ * block" for two reasons that both bite: a tree trunk stands at exactly the
+ * cell this pass writes into (`stampTree` starts at `groundK + 1`), and a
+ * cactus is a cross block whose upper segments would be left hanging in the air
+ * if the bottom one were taken.
+ */
+const STAND_CLEARS = new Uint8Array(N_BLOCKS);
+for (const n of ['air', 'tall_grass', 'flower_red', 'flower_gold', 'flower_blue']) {
+  STAND_CLEARS[ID[n]] = 1;
+}
+
+/**
+ * The cave floor.
+ *
+ * Caves were bare rock end to end. The one thing that grew down there was the
+ * glowcap, at 0.006 per pocket cell out of `floraAt`'s stream, which is a plant
+ * every few hundred metres of passage — right for a light source and wrong as
+ * the only sign of life in the entire underground.
+ *
+ * Three species and they are separated by *depth*, so descending is legible:
+ * the toadstools and the brackets are a shallow-cave thing and thin out with
+ * depth, and the crystal is the opposite and is what the deep is for. The
+ * density field is shared by all three at a low frequency and a high exponent,
+ * so a cave system has gardens in it and long dead stretches between them,
+ * which is the same shape `abyssAt` gives the deep sea floor and for the same
+ * reason: a find is only a find if there was nothing for a while before it.
+ *
+ * These are per *valid floor cell*, of which a deep column has many, so they
+ * are an order below what the surface numbers look like. See the report.
+ */
+const CAVE_CLUMP = 2.2;
+const CAVE_MUSH = 0.80;
+const CAVE_SHELF = 0.34;
+const CAVE_CRYSTAL = 0.45;
+/**
+ * The two depth ramps, and they are measured against the *crust*, not against
+ * D.
+ *
+ * That distinction cost a whole pass. Written first against D (99) the crystal
+ * ramp's denominator was three times the depth the world actually has: the
+ * ground sits around layer 32 and the deepest plantable cave floor is about 45
+ * under it, so `(under - 22) / (99 - 22)` never got above 0.1 and the planet
+ * came out with **four** crystal clusters on it. The histogram in the harness
+ * is where that showed up, and the numbers below are set against it: half of
+ * all cave floor is within 15 of the surface and almost none is past 40.
+ *
+ * Fungus is full strength to 8 under and gone by 26; the crystal has not
+ * started until 16 and is full at 34. The overlap from 16 to 26 is the band
+ * that has all three, which is what makes the descent read as a change of
+ * place rather than as a switch being thrown.
+ */
+const CAVE_WARM_FULL = 8;
+const CAVE_WARM_END = 26;
+const CAVE_COLD_MIN = 16;
+const CAVE_COLD_FULL = 34;
+
+/** Scratch for the three land-flora passes. None nests inside another. */
+const _landDir = [0, 0, 0];
+const _standParts = { f: 0, i: 0, j: 0 };
 
 /**
  * Volcano geometry. Module scope rather than locals now that choosing a site
@@ -3548,23 +3720,366 @@ export class WorldGen {
     } else if (inCanyon && (surf === ID.coarse_dirt || surf === ID.gravel || surf === ID.red_sand)) {
       // The other half of the canyon rule. Taking the trees away and leaving
       // it at that gives a bare stone trench, which reads as unfinished rather
-      // than as dry — so the floor keeps a thin scatter of grass and the odd
-      // flower on whatever the canyon re-surfaced it with. Sparse enough to see
-      // the ground through, which is the point: what makes a gorge legible is
-      // the strata in its walls and the shadow on its floor, and both survive
-      // scrub where neither survives a canopy.
+      // than as dry — so the floor keeps a thin scatter of cover on whatever
+      // the canyon re-surfaced it with. Sparse enough to see the ground
+      // through, which is the point: what makes a gorge legible is the strata
+      // in its walls and the shadow on its floor, and both survive scrub where
+      // neither survives a canopy.
+      //
+      // **The species is chosen by the ground and not by the biome, and this is
+      // the line that produced a bug report.** It used to scatter tall grass
+      // and flowers over all three of these surfaces, which is where "grass in
+      // gravel" came from: a canyon re-surfaces its floor with gravel and red
+      // sand, and turf plants were being laid on both. Grass now takes only the
+      // coarse dirt — the one of the three that is soil — and the grit takes
+      // thornbrush instead, which is the plant that belongs on it. `growsOn`
+      // is the authority either way, so the two cannot drift apart again.
       const h = rng();
-      if (h < 0.11) blocks[base + k + 1] = ID.tall_grass;
-      else if (h < 0.125) {
-        blocks[base + k + 1] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
+      if (surf === ID.coarse_dirt) {
+        if (h < 0.11) blocks[base + k + 1] = ID.tall_grass;
+        else if (h < 0.125) {
+          blocks[base + k + 1] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
+        }
+      } else if (h < 0.085) {
+        blocks[base + k + 1] = ID.thornbrush;
       }
     }
 
-    // cave mushrooms: look for open pockets under the surface
+    // cave mushrooms: look for open pockets under the surface. `growsOn` as
+    // well as CARVEABLE: the two nearly agree, and where they do not — a
+    // sandstone cave wall under a desert — it is the soil table that decides,
+    // because that is the table the harness measures against.
     for (let kk = 2; kk < k - 2; kk++) {
       if (blocks[base + kk] === ID.air && CARVEABLE[blocks[base + kk - 1]]
-        && rng() < 0.006) {
+        && rng() < 0.006 && growsOn(ID.mushroom, blocks[base + kk - 1])) {
         blocks[base + kk] = ID.mushroom;
+      }
+    }
+  }
+
+  // --- the land flora ---------------------------------------------------------
+
+  /**
+   * May this plant root on this surface cell, structurally and botanically?
+   *
+   * The two questions are genuinely different and both have to be asked.
+   * `supports` is the block rule — every one of these carries `needsFloor`, so
+   * one placed on something that cannot hold it falls the moment the cell below
+   * is disturbed. `growsOn` is the soil rule from `Blocks.js`, and it is the
+   * one that was missing: `supports` admits gravel, bare stone, glass and the
+   * top of a fence, which is how the world ended up with tall grass growing in
+   * scree.
+   *
+   * Both are reads of *terrain*, never of decoration, so a column answers this
+   * the same from either side of a region boundary.
+   */
+  _floraSoilOk(id, surf) {
+    return growsOn(id, surf) && supports(surf);
+  }
+
+  /**
+   * The carpet: one column's biome ground cover.
+   *
+   * Writes only into this column, so like `floraAt` it needs no region clip.
+   *
+   * **`groundKOf` and not `surfaceK`, and that one word is worth several
+   * thousand plants.** `floraAt` uses `surfaceK`, which is the topmost solid
+   * cell — under a wood that is the canopy, and grass does not grow on leaves,
+   * so the surface pass quietly does nothing at all under a tree. That is
+   * invisible until you count it: a forest column carries a canopy with
+   * probability well over one (chance 0.115 against a canopy covering some 28
+   * columns), so *the forest floor is the one place on the planet the old pass
+   * could never reach*. Measured with `surfaceK`, this pass put 557 ferns on
+   * the whole planet; with `groundKOf` it puts them where an understorey
+   * actually goes.
+   *
+   * The cell it writes into is `groundK + 1`, which is also where a trunk, a
+   * fallen log and the bottom of a boulder sit, and the air test below is what
+   * keeps it out of all three.
+   *
+   * It runs *after* `floraAt` and takes only cells that pass left empty, which
+   * is what keeps the meadows and plains looking like themselves: the grass and
+   * the three flowers are placed first at exactly the rates they always were,
+   * and this fills in around them. On the eight biomes `floraAt` never touched
+   * at all, "around them" is the whole ground.
+   *
+   * One roll, one species. A second roll per column would let two plants
+   * compete for one cell and only one of them ever win, which is a slower way
+   * of writing the same cumulative bands.
+   */
+  landFloraAt(blocks, col) {
+    // Water first and cheapest. A submerged column's surface cell is water and
+    // the air test below would catch it anyway, but a lake's *bank* is dry
+    // ground the lake pass has already dressed, and a marsh's margin comes out
+    // dry as often as not — so both are named rather than left to luck.
+    if (this.submerged[col] || this.lakeSurf[col] > 0) return;
+    if (this.inLakeBed(col)) return;
+    if (this._springNear(col) >= 0) return;
+
+    const k = this.groundKOf(col);
+    if (k < 1 || k >= D - 2) return;
+    const base = col * D;
+    if (blocks[base + k + 1] !== ID.air) return;
+    const surf = blocks[base + k];
+    const bi = this.colBiome[col];
+
+    const dir = _landDir;
+    this._dirOf(col, dir);
+    // One field for all of it, at a frequency that makes patches a few dozen
+    // columns across. Two species inside one biome share it deliberately —
+    // clover and lavender should thicken and thin together, because what they
+    // are between them is "the rich part of the meadow".
+    const f = this.nDetail.fbm3(dir[0] * 8.4 + 73.1, dir[1] * 8.4 - 41.2,
+      dir[2] * 8.4 + 19.6, 3, 2, 0.5);
+    const dp = Math.pow(clamp(f * 0.5 + 0.5, 0, 1), LAND_CLUMP);
+    const r = this.colRng(col, 0xa17c)();
+
+    let id = 0;
+    switch (bi) {
+      // Dry and hot. Both of these are an order below everything green: what
+      // makes a desert read as a desert is how much of it is nothing.
+      case BIOME.DESERT:
+        if (r < 0.075 * dp) id = ID.thornbrush;
+        else if (r < 0.092 * dp) id = ID.aloe;
+        break;
+      case BIOME.BADLANDS:
+        if (r < 0.080 * dp) id = ID.thornbrush;
+        else if (r < 0.090 * dp) id = ID.firebloom;
+        break;
+      // A savanna *is* its grass, so this is the densest carpet on the planet
+      // and the aloe is a rounding error beside it.
+      case BIOME.SAVANNA:
+        if (r < 0.75 * dp) id = ID.golden_grass;
+        else if (r < 0.775 * dp) id = ID.aloe;
+        break;
+      // Clover under, golden grass over: a plain gets two layers, which is what
+      // separates it from a meadow at a glance now that both are green.
+      case BIOME.PLAINS:
+        if (r < 0.40 * dp) id = ID.clover;
+        else if (r < 0.53 * dp) id = ID.golden_grass;
+        break;
+      case BIOME.MEADOW:
+        if (r < 0.42 * dp) id = ID.clover;
+        else if (r < 0.55 * dp) id = ID.lavender;
+        break;
+      // The forest floor, and the one place a single species is allowed to own
+      // the ground: a fern understorey under oaks is what a forest looks like.
+      case BIOME.FOREST:
+        if (r < 0.75 * dp) id = ID.fern;
+        break;
+      case BIOME.PINE_FOREST:
+        if (r < 0.32 * dp) id = ID.fern;
+        else if (r < 0.58 * dp) id = ID.lingonberry;
+        break;
+      case BIOME.TUNDRA:
+        if (r < 0.45 * dp) id = ID.cotton_grass;
+        break;
+      // Five percent, and it is the highest-value five percent here. A snow
+      // field is an hour of white; the snowbell is the only thing in it.
+      case BIOME.SNOW:
+        if (r < 0.10 * dp) id = ID.snowbell;
+        break;
+      case BIOME.MOUNTAIN:
+        if (r < 0.22 * dp) id = ID.alpine_aster;
+        break;
+      // Marram binds the dune and driftwood is the beachcomber's find, so the
+      // second is two orders below the first. A shoreline with a log on it
+      // every ten paces is a lumber yard.
+      case BIOME.BEACH:
+        if (r < 0.42 * dp) id = ID.marram;
+        else if (r < 0.48 * dp) id = ID.driftwood;
+        break;
+      default: return;
+    }
+    // The soil test comes *after* the species is chosen, and that ordering is
+    // the whole design: a biome says what would like to grow here and the
+    // ground says whether it may. A mountain shoulder that has weathered to
+    // bare stone grows no aster, and the roll is spent either way, so the
+    // column's stream does not depend on what it is standing on.
+    if (id && this._floraSoilOk(id, surf)) blocks[base + k + 1] = id;
+  }
+
+  /**
+   * The cave floor: one column's underground flora.
+   *
+   * Own column only, so no region clip — and unlike everything on the surface
+   * it walks the whole column rather than looking at one cell, because a cave
+   * column has as many floors as the carve left it.
+   *
+   * The floor test is the same `supports` the reef uses plus `CARVEABLE`, and
+   * both are needed for different reasons: `supports` is the block rule (these
+   * all carry `needsFloor`), and `CARVEABLE` is what says the cell under this
+   * pocket is *rock the cave pass could have cut*, which keeps the plants out
+   * of the air gaps inside a structure or under a fallen log.
+   *
+   * The headroom test above it is what stops a mushroom appearing inside a
+   * one-cell crack that nobody can enter and nobody can see into.
+   *
+   * It runs after `floraAt`, which scatters its glowcaps into these same
+   * pockets, and refuses any cell that is not air — so a glowcap always wins
+   * its cell. That is an ordering and not a race: both passes read only this
+   * column's terrain, which is finished before decoration starts.
+   */
+  caveFloraAt(blocks, col) {
+    const kTop = this.groundKOf(col);
+    // A column needs a surface to be under, and enough crust under that to
+    // hold a passage worth walking. The ground sits around layer 32 and the
+    // mantle starts at the bottom of the array, so ten is the point below which
+    // there is no cave to be in.
+    if (kTop < 10) return;
+    const base = col * D;
+
+    const dir = _landDir;
+    this._dirOf(col, dir);
+    // Its own frequency and its own offsets, like every other density field in
+    // this file: a cave garden and a meadow drawn from one field are one field
+    // wearing two hats, and the seam shows wherever a cave runs near a surface.
+    const f = this.nDetail.fbm3(dir[0] * 4.3 + 88.1, dir[1] * 4.3 - 23.6,
+      dir[2] * 4.3 + 61.9, 3, 2, 0.5);
+    const lush = Math.pow(clamp(f * 0.5 + 0.5, 0, 1), CAVE_CLUMP);
+    const rng = this.colRng(col, 0x6d3e);
+
+    // Stop three under the surface: the top of a cave that breaks the ground is
+    // daylight, and a cave mushroom growing in it reads as a surface plant that
+    // has come out wrong.
+    const kMax = Math.min(kTop - 3, D - 3);
+    for (let k = 2; k <= kMax; k++) {
+      if (blocks[base + k] !== ID.air) continue;
+      if (blocks[base + k + 1] !== ID.air) continue;
+      const floor = blocks[base + k - 1];
+      // CARVEABLE says "this is rock a passage could have been cut through",
+      // which is what keeps these out of the air gaps inside a structure or
+      // under a fallen log. The soil test per species is checked below, once
+      // the species is known — a crystal takes rock only and the two fungi
+      // take a dirt floor as well, so they cannot share one gate here.
+      if (!CARVEABLE[floor] || !supports(floor)) continue;
+
+      const under = kTop - k;
+      // The two gradients, and they run opposite ways on purpose so that
+      // descending is legible: the fungus is a shallow-cave thing that gives
+      // out, and the crystal has not started until well below it. They overlap
+      // from 16 to 26, so there is a band with all three, a shallow zone with
+      // only fungus, and a deep zone with only the mineral.
+      const warm = 1 - smoothstep(CAVE_WARM_FULL, CAVE_WARM_END, under);
+      const cold = smoothstep(CAVE_COLD_MIN, CAVE_COLD_FULL, under);
+
+      const r = rng();
+      const pMush = CAVE_MUSH * lush * warm;
+      const pShelf = CAVE_SHELF * lush * warm;
+      const pCrystal = CAVE_CRYSTAL * lush * cold;
+      let id = 0;
+      if (r < pMush) id = ID.cave_mushroom;
+      else if (r < pMush + pShelf) id = ID.shelf_fungus;
+      else if (r < pMush + pShelf + pCrystal) id = ID.crystal_cluster;
+      if (id && growsOn(id, floor)) blocks[base + k] = id;
+    }
+  }
+
+  /**
+   * The stand this column is the centre of, decided from terrain alone, or null.
+   *
+   * The reef's `_reefSite` with the sea taken out of it, and everything that
+   * function's docstring says applies here word for word: on a lattice so the
+   * separation is arithmetic, nothing written, nothing read outside the
+   * candidate column itself, and every draw taken before the roll that can
+   * reject it so a rejected candidate costs the same rolls as a kept one.
+   *
+   * The flatness bound is tighter than a tree's 1.5 and looser than a hot
+   * spring's 0.35: a stand does not level the ground the way a spring does, so
+   * it can take a slope, but a disc of one plant poured down a 2-block-a-column
+   * scarp reads as a spill.
+   */
+  _standSite(col) {
+    const p = colParts(col, _standParts);
+    if (p.i % STAND_LATTICE !== STAND_LI || p.j % STAND_LATTICE !== STAND_LJ) return null;
+    const spec = STAND_SPEC[this.colBiome[col]];
+    if (spec === undefined) return null;
+    if (this.submerged[col] || this.lakeKind[col]) return null;
+    if (this.colSlope[col] > 1.1) return null;
+    // Out of the gorge itself, and one column clear of its lip. `canyonNear` is
+    // the dilation and 0 means "in one", so this is "not in one and not on the
+    // edge of one".
+    //
+    // The first cut insisted on CANYON_NEAR_MAX — "nowhere near a canyon at
+    // all" — and that quietly gutted the one biome that needed a stand most:
+    // the badlands *is* canyon country, so almost every candidate in it was
+    // being thrown away by a rule meant to stop a disc of flowers pouring over
+    // a cliff edge. Two columns of clearance does that job and leaves the mesas
+    // between the gorges usable.
+    if (this.canyonNear[col] < 2) return null;
+    const k = this.groundKOf(col);
+    if (k < 1 || k > D - 4) return null;
+    // `_springNear` owns `_spParts`, which is why this pass has `_standParts`
+    // of its own — `p` is still live below.
+    if (this._springNear(col) >= 0) return null;
+
+    const rng = this.colRng(col, 0x9c4b);
+    const roll = rng();
+    const rad = STAND_R_MIN + rng() * (STAND_R_MAX - STAND_R_MIN);
+    // How thickly this particular stand grew, so a valley with two of them in
+    // it does not read as one texture stamped twice.
+    const rich = 0.62 + rng() * 0.38;
+    if (roll > spec.chance) return null;
+    return { f: p.f, i: p.i, j: p.j, bi: this.colBiome[col], rad, rich, id: spec.id };
+  }
+
+  /**
+   * One column's stand, if it has one, clipped to a region.
+   *
+   * Structurally `reefAt` on dry land, including the part that matters: every
+   * column in the disc draws from *its own* `colRng`, never from the centre's,
+   * so the order the disc is walked in cannot change what any column gets and
+   * the region clip can be a plain `continue`.
+   *
+   * `groundKOf` and not `surfaceK`, because this runs over the margin and
+   * `surfaceK` under a canopy returns the canopy — which is to say it encodes
+   * whether the neighbouring region has been decorated yet. The cell this
+   * writes into is `groundK + 1`, which is exactly where a trunk stands, and
+   * `STAND_CLEARS` is what keeps it from eating one.
+   */
+  standAt(blocks, col, rid) {
+    const site = this._standSite(col);
+    if (site === null) return;
+    const ri = Math.ceil(site.rad);
+    for (let di = -ri; di <= ri; di++) {
+      for (let dj = -ri; dj <= ri; dj++) {
+        const d = Math.hypot(di, dj);
+        if (d > site.rad) continue;
+        // Grid arithmetic on the face and then a re-projection, for the reef's
+        // reason: a seven-column disc can sit on a cube seam.
+        const c = patchColumn(site.f, site.i, site.j, di, dj);
+        if (rid >= 0 && regionOfCol(c) !== rid) continue;
+        // The stand stops at its biome's edge rather than running over it. A
+        // lavender field that spills two columns into the neighbouring desert
+        // is the one thing that would make the whole pass read as a bug.
+        if (this.colBiome[c] !== site.bi) continue;
+        if (this.submerged[c] || this.lakeSurf[c] > 0) continue;
+        if (this.inLakeBed(c)) continue;
+        if (this._springNear(c) >= 0) continue;
+        if (this.colSlope[c] > 1.4) continue;
+        const k = this.groundKOf(c);
+        if (k < 1 || k >= D - 2) continue;
+        const b = c * D;
+        const surf = blocks[b + k];
+        if (!this._floraSoilOk(site.id, surf)) continue;
+        if (!STAND_CLEARS[blocks[b + k + 1]]) continue;
+
+        const w = 1 - d / site.rad;
+        // The reef's smoothstep, and here for the same measured reason: a plain
+        // linear falloff leaves a low but non-zero chance out at the rim, and
+        // the rim is most of a disc's area, so most of what the pass produced
+        // was single plants standing alone a long way from anything. Taking the
+        // outer fifth to zero gives the stand a body and an edge.
+        //
+        // The knee is at 0.20 and not the reef's 0.42 because a reef is up to
+        // seven columns of radius and this is three: the same fraction of a
+        // much smaller disc is most of the stand. Measured at 0.34 a stand came
+        // out at 6-9 plants, which is a clump; at 0.20, with the fill and the
+        // minimum radius both raised, it is the patch you can pick out from the
+        // other side of a valley, which is the only reason the pass exists.
+        if (this.colRng(c, 0x2f85)() < site.rich * STAND_FILL * smoothstep(0, 0.20, w)) {
+          blocks[b + k + 1] = site.id;
+        }
       }
     }
   }
@@ -3936,6 +4451,27 @@ export class WorldGen {
     for (let n = 0; n < margin.length; n++) this.treeAt(blocks, margin[n], rid);
     for (let n = 0; n < margin.length; n++) this.boulderAt(blocks, margin[n], rid);
     for (let n = 0; n < cols.length; n++) this.floraAt(blocks, cols[n]);
+    // The three land passes, in this order and for reasons that are all
+    // orderings rather than taste.
+    //
+    // The stands run over the margin like a reef does, because a stand is a
+    // feature several columns across; they run *after* `floraAt` so that pass
+    // is untouched by them — a stand that ran first would leave a non-air cell
+    // where `floraAt` tests for one, and `floraAt` bails on the whole column
+    // when it finds one, cave mushrooms included. Running second, a stand
+    // overwrites the tall grass it lands on (see STAND_CLEARS), which is what
+    // makes it read as a stand rather than as lace.
+    //
+    // The carpet runs after the stands and takes only cells left empty, so a
+    // meadow comes out as lavender where the stand is and clover around it,
+    // rather than the two competing. Every stand that could reach a column in
+    // `cols` is inside the margin this region was handed, so what it finds is
+    // finished and the same from either side of a boundary.
+    //
+    // The cave pass is disjoint from both by depth and runs last of the three.
+    for (let n = 0; n < margin.length; n++) this.standAt(blocks, margin[n], rid);
+    for (let n = 0; n < cols.length; n++) this.landFloraAt(blocks, cols[n]);
+    for (let n = 0; n < cols.length; n++) this.caveFloraAt(blocks, cols[n]);
     // The two underwater passes, last, and in this order. A reef is a feature
     // laid over a margin like a tree is; the grass and kelp are cover laid one
     // column at a time like `floraAt` is, and they run second so that a blade

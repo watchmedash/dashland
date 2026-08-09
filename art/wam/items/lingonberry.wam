@@ -1,0 +1,442 @@
+# Lingonberry -- a pine-forest ground cover that is also food.
+#
+# This block has a second job none of the other plants in the set have: it is a
+# **findable**. The player is meant to spot it across a clearing, walk to it, and
+# get something. That single requirement decides almost every number below,
+# because a plant you are supposed to notice and a plant that is supposed to
+# carpet a forest floor pull in opposite directions -- one wants to be loud, the
+# other wants to be low and quiet.
+#
+# The resolution is that the *shrub* is quiet and the *berries* are loud. The
+# leaves are the darkest green in the whole set (#1c3f26), darker than the pine
+# needles they sit under, so the mass of the plant recedes into forest shadow;
+# and then eight berries in a flat, unshaded, fully saturated red (#e01b2b) hang
+# off it. Red on very dark green at low saturation elsewhere is the highest
+# contrast available in this palette, and it is doing the work that a glow or an
+# outline would do in a game that had those.
+#
+# **The berries hang on drooping stalks, outside and below the leaf mass.** This
+# is the part that was wrong first and it is the part that matters. Berries
+# tucked among the leaves are invisible from the side, which is the only angle
+# the player ever has on a ground-cover block: you look *across* a forest floor,
+# never down into it. So every berry sits on its own short stalk that leaves the
+# twig pointing down and outward, and the berry hangs clear at the end of it. The
+# checks below state this twice -- once as "the berry is lower than the leaves
+# above it" and once as "the berry reaches further out than the leaves do" -- and
+# both are needed, because a berry can satisfy either one alone and still be
+# buried.
+#
+# **The leaves are thick, not flat.** Every other leaf in this set is a flattened
+# loft, because most leaves are flat. Lingonberry leaves are small, leathery and
+# obviously three-dimensional, and more usefully a chunky oval (d is 0.64 of w)
+# has no edge-on angle at all -- it presents the same silhouette from every yaw.
+# `fern.wam` learned the hard way that a flat part seen edge-on is a line, and
+# needed a per-part `refaxis=` to dig itself out; this model sidesteps the
+# problem instead of solving it, which at this leaf size costs nothing.
+#
+# **What the sheet changed, in order.** The first three compiles all produced the
+# same wrong object: a small apple tree.
+#
+#  1. The berries were 0.145 across on a model 0.5 tall -- nearly a third of the
+#     plant each -- and they read as fruit hanging on a bare tree. They are now
+#     0.080, about the size of one leaf, and the check `width(berryA1) <
+#     width(leafA1) * 1.1` exists so nobody ever inflates them again "so they can
+#     be seen". Visibility is bought by the drooping stalks, not by size.
+#  2. The twigs were 0.021 thick and three segments long, so the brown outweighed
+#     the green from every angle. Thinned to 0.011 tapering to 0.007 and cut to
+#     two segments, which also freed 120 triangles.
+#  3. The shrub was simply not leafy enough -- twelve leaves cannot hide five
+#     twigs. There are twenty now, and finding the triangles for them is what the
+#     rest of the budget notes below are about.
+#
+# One shape decision is still a compromise the sheet lost: the leaves converge to
+# a soft point rather than ending blunt, because the blunt version costs 120
+# triangles more than the model has. The cheap two-ring taper was tried first and
+# was much worse -- twenty spears, a holly bush -- so the middle ring stays and
+# the flat end goes.
+#
+# **Structure: a woody trunk and five twigs, each twig a `group`.** The twig is
+# authored once in a clean local frame -- +Y up, growing out toward +Z, leaves on
+# +/-X -- and mounted five times with a `spin=` and a different `at=` along the
+# trunk, which is what makes it a shrub rather than a rosette. The twig sweeps
+# use `up=` bends, so each one leaves the trunk leaning well out and then curves
+# back toward vertical: that outward-then-up profile is what separates an
+# evergreen shrub from a tuft of grass, and it is also what makes the model
+# wider than it is tall without simply flopping over.
+
+model lingonberry
+  height 0.34
+  style chunky
+
+palette
+  Leaf  #1c3f26
+  Sheen #2f6b3d
+  Wood  #6b4a33
+  Berry #e01b2b
+  Blush #ff5f62
+
+skeleton
+  root soil at 0.0
+  # A short woody trunk. Everything mounts on it at a different height, so the
+  # twigs leave at five different levels rather than all from one crown -- a
+  # lingonberry is a creeping woody shrub, not a rosette.
+  bone stem parent=soil dir=up pitch=-3 len=0.11
+
+parts
+  # The trunk. Wood-brown and stubby: what little of it shows between the leaves
+  # is the cue that this is a shrub and not a herb.
+  loft trunk bones=soil..stem material=Wood sides=5
+    ring 0.00 w=0.12 d=0.115
+    ring 0.30 w=0.062 d=0.060
+    ring 1.00 w=0.050 d=0.048
+    cap start=flat end=flat
+
+  # Twig A -- spun 0 deg, mounted 0.55 up the trunk, 1.00 of the
+  # reference length. Inside the group: +Y up, the twig growing out toward
+  # +Z, leaves on +/-X, berries hanging down-and-out.
+  group twgA bone=stem at=0.55 dir=up spin=0
+    # The twig. Two segments only. It leaves at 60 deg off vertical and one
+    # `up=` bend pulls it back toward upright -- out first, then up. A twig
+    # that only goes out is a creeper and one that only goes up is a sapling.
+    # Two segments rather than three because a third cost 120 triangles across
+    # the model and bought a bend nobody can see at this size; the leaves are
+    # where that budget belongs.
+    sweep twigA at=(0,0,0) dir=up pitch=60 material=Wood sides=3
+      seg len=0.210 r=0.0110
+      seg len=0.170 r=0.0068 up=16 tip
+    # 5 leaves, alternating sides and tilted up off the twig, closest
+    # together near the base. Thick teardrops -- `d` is 0.64 of `w` -- which is
+    # the whole reason they need no `frame=` or `refaxis=` fussing: there is no
+    # angle from which one of these disappears, which is the trap `fern.wam`
+    # fell into twice. Three rings and blunt ends: the cheap two-ring version
+    # tapers to a `tip`, and twenty of those on the sheet read as a holly
+    # bush -- every leaf a spike. The blunt oval costs seven triangles more
+    # each and is the difference between foliage and thorns.
+    loft leafA1 at=(0,0.030,0.053) dir=side yaw=-66 tilt=26 len=0.150 on=twigA material=Leaf sides=3
+      ring 0.00 w=0.054 d=0.035
+      ring 0.55 w=0.108 d=0.069
+      ring 1.00 w=0.033 d=0.021 tip
+      cap start=flat end=point
+    loft leafA2 at=(0,0.068,0.118) dir=side yaw=246 tilt=20 len=0.155 on=twigA material=Sheen sides=3
+      ring 0.00 w=0.056 d=0.036
+      ring 0.55 w=0.112 d=0.071
+      ring 1.00 w=0.034 d=0.022 tip
+      cap start=flat end=point
+    loft leafA3 at=(0,0.106,0.184) dir=side yaw=-66 tilt=14 len=0.145 on=twigA material=Leaf sides=3
+      ring 0.00 w=0.052 d=0.033
+      ring 0.55 w=0.104 d=0.067
+      ring 1.00 w=0.032 d=0.020 tip
+      cap start=flat end=point
+    loft leafA4 at=(0,0.153,0.253) dir=side yaw=246 tilt=8 len=0.130 on=twigA material=Leaf sides=3
+      ring 0.00 w=0.047 d=0.030
+      ring 0.55 w=0.094 d=0.060
+      ring 1.00 w=0.029 d=0.018 tip
+      cap start=flat end=point
+    loft leafA5 at=(0,0.204,0.310) dir=side yaw=-66 tilt=2 len=0.105 on=twigA material=Leaf sides=3
+      ring 0.00 w=0.038 d=0.024
+      ring 0.55 w=0.076 d=0.048
+      ring 1.00 w=0.023 d=0.015 tip
+      cap start=flat end=point
+    # The berries. The stalk leaves the twig pointing down and outward, and
+    # the berry hangs off its end -- that is what clears the leaf mass. The
+    # `Blush` ring at the top is the specular kick a glossy berry gets from
+    # the sky; without it a flat red ball reads as a bead.
+    loft bstkA1 at=(0,0.140,0.235) dir=down pitch=-37 yaw=24 len=0.075 on=twigA material=Wood sides=3
+      ring 0.00 w=0.0160 d=0.0160
+      ring 1.00 w=0.0120 d=0.0120
+      cap start=flat end=flat
+    loft berryA1 at=(0,0.080,0.280) dir=down len=0.078 on=bstkA1 material=Berry sides=4
+      ring 0.00 w=0.032 d=0.032 material=Blush
+      ring 0.42 w=0.080 d=0.080 material=Berry
+      ring 1.00 w=0.032 d=0.032
+      cap start=flat end=flat
+    loft bstkA2 at=(0,0.188,0.294) dir=down pitch=-37 yaw=-28 len=0.075 on=twigA material=Wood sides=3
+      ring 0.00 w=0.0160 d=0.0160
+      ring 1.00 w=0.0120 d=0.0120
+      cap start=flat end=flat
+    loft berryA2 at=(0,0.128,0.339) dir=down len=0.078 on=bstkA2 material=Berry sides=4
+      ring 0.00 w=0.032 d=0.032 material=Blush
+      ring 0.42 w=0.080 d=0.080 material=Berry
+      ring 1.00 w=0.032 d=0.032
+      cap start=flat end=flat
+  end
+
+  # Twig B -- spun 73 deg, mounted 1.00 up the trunk, 0.92 of the
+  # reference length. Inside the group: +Y up, the twig growing out toward
+  # +Z, leaves on +/-X, berries hanging down-and-out.
+  group twgB bone=stem at=1.00 dir=up spin=73
+    # The twig. Two segments only. It leaves at 54 deg off vertical and one
+    # `up=` bend pulls it back toward upright -- out first, then up. A twig
+    # that only goes out is a creeper and one that only goes up is a sapling.
+    # Two segments rather than three because a third cost 120 triangles across
+    # the model and bought a bend nobody can see at this size; the leaves are
+    # where that budget belongs.
+    sweep twigB at=(0,0,0) dir=up pitch=54 material=Wood sides=3
+      seg len=0.193 r=0.0101
+      seg len=0.156 r=0.0063 up=16 tip
+    # 4 leaves, alternating sides and tilted up off the twig, closest
+    # together near the base. Thick teardrops -- `d` is 0.64 of `w` -- which is
+    # the whole reason they need no `frame=` or `refaxis=` fussing: there is no
+    # angle from which one of these disappears, which is the trap `fern.wam`
+    # fell into twice. Three rings and blunt ends: the cheap two-ring version
+    # tapers to a `tip`, and twenty of those on the sheet read as a holly
+    # bush -- every leaf a spike. The blunt oval costs seven triangles more
+    # each and is the difference between foliage and thorns.
+    loft leafB1 at=(0,0.033,0.045) dir=side yaw=-66 tilt=26 len=0.138 on=twigB material=Leaf sides=3
+      ring 0.00 w=0.050 d=0.032
+      ring 0.55 w=0.099 d=0.063
+      ring 1.00 w=0.030 d=0.019 tip
+      cap start=flat end=point
+    loft leafB2 at=(0,0.074,0.102) dir=side yaw=246 tilt=20 len=0.143 on=twigB material=Sheen sides=3
+      ring 0.00 w=0.051 d=0.033
+      ring 0.55 w=0.103 d=0.066
+      ring 1.00 w=0.031 d=0.020 tip
+      cap start=flat end=point
+    loft leafB3 at=(0,0.115,0.158) dir=side yaw=-66 tilt=14 len=0.133 on=twigB material=Leaf sides=3
+      ring 0.00 w=0.048 d=0.031
+      ring 0.55 w=0.096 d=0.061
+      ring 1.00 w=0.029 d=0.019 tip
+      cap start=flat end=point
+    loft leafB4 at=(0,0.165,0.217) dir=side yaw=246 tilt=8 len=0.120 on=twigB material=Leaf sides=3
+      ring 0.00 w=0.043 d=0.028
+      ring 0.55 w=0.086 d=0.055
+      ring 1.00 w=0.026 d=0.017 tip
+      cap start=flat end=point
+    # The berries. The stalk leaves the twig pointing down and outward, and
+    # the berry hangs off its end -- that is what clears the leaf mass. The
+    # `Blush` ring at the top is the specular kick a glossy berry gets from
+    # the sky; without it a flat red ball reads as a bead.
+    loft bstkB1 at=(0,0.150,0.202) dir=down pitch=-37 yaw=24 len=0.069 on=twigB material=Wood sides=3
+      ring 0.00 w=0.0147 d=0.0147
+      ring 1.00 w=0.0110 d=0.0110
+      cap start=flat end=flat
+    loft berryB1 at=(0,0.095,0.243) dir=down len=0.072 on=bstkB1 material=Berry sides=4
+      ring 0.00 w=0.029 d=0.029 material=Blush
+      ring 0.42 w=0.074 d=0.074 material=Berry
+      ring 1.00 w=0.029 d=0.029
+      cap start=flat end=flat
+    loft bstkB2 at=(0,0.200,0.251) dir=down pitch=-37 yaw=-28 len=0.069 on=twigB material=Wood sides=3
+      ring 0.00 w=0.0147 d=0.0147
+      ring 1.00 w=0.0110 d=0.0110
+      cap start=flat end=flat
+    loft berryB2 at=(0,0.145,0.292) dir=down len=0.072 on=bstkB2 material=Berry sides=4
+      ring 0.00 w=0.029 d=0.029 material=Blush
+      ring 0.42 w=0.074 d=0.074 material=Berry
+      ring 1.00 w=0.029 d=0.029
+      cap start=flat end=flat
+  end
+
+  # Twig C -- spun 145 deg, mounted 0.80 up the trunk, 1.08 of the
+  # reference length. Inside the group: +Y up, the twig growing out toward
+  # +Z, leaves on +/-X, berries hanging down-and-out.
+  group twgC bone=stem at=0.80 dir=up spin=145
+    # The twig. Two segments only. It leaves at 56 deg off vertical and one
+    # `up=` bend pulls it back toward upright -- out first, then up. A twig
+    # that only goes out is a creeper and one that only goes up is a sapling.
+    # Two segments rather than three because a third cost 120 triangles across
+    # the model and bought a bend nobody can see at this size; the leaves are
+    # where that budget belongs.
+    sweep twigC at=(0,0,0) dir=up pitch=56 material=Wood sides=3
+      seg len=0.227 r=0.0119
+      seg len=0.184 r=0.0073 up=16 tip
+    # 4 leaves, alternating sides and tilted up off the twig, closest
+    # together near the base. Thick teardrops -- `d` is 0.64 of `w` -- which is
+    # the whole reason they need no `frame=` or `refaxis=` fussing: there is no
+    # angle from which one of these disappears, which is the trap `fern.wam`
+    # fell into twice. Three rings and blunt ends: the cheap two-ring version
+    # tapers to a `tip`, and twenty of those on the sheet read as a holly
+    # bush -- every leaf a spike. The blunt oval costs seven triangles more
+    # each and is the difference between foliage and thorns.
+    loft leafC1 at=(0,0.037,0.054) dir=side yaw=-66 tilt=26 len=0.162 on=twigC material=Leaf sides=3
+      ring 0.00 w=0.058 d=0.037
+      ring 0.55 w=0.117 d=0.075
+      ring 1.00 w=0.036 d=0.023 tip
+      cap start=flat end=point
+    loft leafC2 at=(0,0.083,0.122) dir=side yaw=246 tilt=20 len=0.167 on=twigC material=Sheen sides=3
+      ring 0.00 w=0.060 d=0.039
+      ring 0.55 w=0.121 d=0.077
+      ring 1.00 w=0.037 d=0.023 tip
+      cap start=flat end=point
+    loft leafC3 at=(0,0.129,0.191) dir=side yaw=-66 tilt=14 len=0.157 on=twigC material=Leaf sides=3
+      ring 0.00 w=0.056 d=0.036
+      ring 0.55 w=0.113 d=0.072
+      ring 1.00 w=0.034 d=0.022 tip
+      cap start=flat end=point
+    loft leafC4 at=(0,0.184,0.261) dir=side yaw=246 tilt=8 len=0.140 on=twigC material=Leaf sides=3
+      ring 0.00 w=0.051 d=0.032
+      ring 0.55 w=0.101 d=0.065
+      ring 1.00 w=0.031 d=0.020 tip
+      cap start=flat end=point
+    # The berries. The stalk leaves the twig pointing down and outward, and
+    # the berry hangs off its end -- that is what clears the leaf mass. The
+    # `Blush` ring at the top is the specular kick a glossy berry gets from
+    # the sky; without it a flat red ball reads as a bead.
+    loft bstkC1 at=(0,0.168,0.243) dir=down pitch=-37 yaw=24 len=0.081 on=twigC material=Wood sides=3
+      ring 0.00 w=0.0173 d=0.0173
+      ring 1.00 w=0.0130 d=0.0130
+      cap start=flat end=flat
+    loft berryC1 at=(0,0.103,0.291) dir=down len=0.084 on=bstkC1 material=Berry sides=4
+      ring 0.00 w=0.035 d=0.035 material=Blush
+      ring 0.42 w=0.086 d=0.086 material=Berry
+      ring 1.00 w=0.035 d=0.035
+      cap start=flat end=flat
+    loft bstkC2 at=(0,0.225,0.302) dir=down pitch=-37 yaw=-28 len=0.081 on=twigC material=Wood sides=3
+      ring 0.00 w=0.0173 d=0.0173
+      ring 1.00 w=0.0130 d=0.0130
+      cap start=flat end=flat
+    loft berryC2 at=(0,0.160,0.351) dir=down len=0.084 on=bstkC2 material=Berry sides=4
+      ring 0.00 w=0.035 d=0.035 material=Blush
+      ring 0.42 w=0.086 d=0.086 material=Berry
+      ring 1.00 w=0.035 d=0.035
+      cap start=flat end=flat
+  end
+
+  # Twig D -- spun 216 deg, mounted 0.35 up the trunk, 0.86 of the
+  # reference length. Inside the group: +Y up, the twig growing out toward
+  # +Z, leaves on +/-X, berries hanging down-and-out.
+  group twgD bone=stem at=0.35 dir=up spin=216
+    # The twig. Two segments only. It leaves at 64 deg off vertical and one
+    # `up=` bend pulls it back toward upright -- out first, then up. A twig
+    # that only goes out is a creeper and one that only goes up is a sapling.
+    # Two segments rather than three because a third cost 120 triangles across
+    # the model and bought a bend nobody can see at this size; the leaves are
+    # where that budget belongs.
+    sweep twigD at=(0,0,0) dir=up pitch=64 material=Wood sides=3
+      seg len=0.181 r=0.0095
+      seg len=0.146 r=0.0058 up=16 tip
+    # 4 leaves, alternating sides and tilted up off the twig, closest
+    # together near the base. Thick teardrops -- `d` is 0.64 of `w` -- which is
+    # the whole reason they need no `frame=` or `refaxis=` fussing: there is no
+    # angle from which one of these disappears, which is the trap `fern.wam`
+    # fell into twice. Three rings and blunt ends: the cheap two-ring version
+    # tapers to a `tip`, and twenty of those on the sheet read as a holly
+    # bush -- every leaf a spike. The blunt oval costs seven triangles more
+    # each and is the difference between foliage and thorns.
+    loft leafD1 at=(0,0.023,0.047) dir=side yaw=-66 tilt=26 len=0.129 on=twigD material=Leaf sides=3
+      ring 0.00 w=0.046 d=0.030
+      ring 0.55 w=0.093 d=0.059
+      ring 1.00 w=0.028 d=0.018 tip
+      cap start=flat end=point
+    loft leafD2 at=(0,0.052,0.106) dir=side yaw=246 tilt=20 len=0.133 on=twigD material=Sheen sides=3
+      ring 0.00 w=0.048 d=0.031
+      ring 0.55 w=0.096 d=0.061
+      ring 1.00 w=0.029 d=0.019 tip
+      cap start=flat end=point
+    loft leafD3 at=(0,0.080,0.164) dir=side yaw=-66 tilt=14 len=0.125 on=twigD material=Leaf sides=3
+      ring 0.00 w=0.045 d=0.029
+      ring 0.55 w=0.090 d=0.057
+      ring 1.00 w=0.027 d=0.017 tip
+      cap start=flat end=point
+    loft leafD4 at=(0,0.116,0.227) dir=side yaw=246 tilt=8 len=0.112 on=twigD material=Leaf sides=3
+      ring 0.00 w=0.040 d=0.026
+      ring 0.55 w=0.080 d=0.051
+      ring 1.00 w=0.025 d=0.016 tip
+      cap start=flat end=point
+    # The berries. The stalk leaves the twig pointing down and outward, and
+    # the berry hangs off its end -- that is what clears the leaf mass. The
+    # `Blush` ring at the top is the specular kick a glossy berry gets from
+    # the sky; without it a flat red ball reads as a bead.
+    loft bstkD1 at=(0,0.106,0.210) dir=down pitch=-37 yaw=24 len=0.065 on=twigD material=Wood sides=3
+      ring 0.00 w=0.0138 d=0.0138
+      ring 1.00 w=0.0103 d=0.0103
+      cap start=flat end=flat
+    loft berryD1 at=(0,0.054,0.249) dir=down len=0.067 on=bstkD1 material=Berry sides=4
+      ring 0.00 w=0.028 d=0.028 material=Blush
+      ring 0.42 w=0.069 d=0.069 material=Berry
+      ring 1.00 w=0.028 d=0.028
+      cap start=flat end=flat
+  end
+
+  # Twig E -- spun 291 deg, mounted 0.68 up the trunk, 0.95 of the
+  # reference length. Inside the group: +Y up, the twig growing out toward
+  # +Z, leaves on +/-X, berries hanging down-and-out.
+  group twgE bone=stem at=0.68 dir=up spin=291
+    # The twig. Two segments only. It leaves at 58 deg off vertical and one
+    # `up=` bend pulls it back toward upright -- out first, then up. A twig
+    # that only goes out is a creeper and one that only goes up is a sapling.
+    # Two segments rather than three because a third cost 120 triangles across
+    # the model and bought a bend nobody can see at this size; the leaves are
+    # where that budget belongs.
+    sweep twigE at=(0,0,0) dir=up pitch=58 material=Wood sides=3
+      seg len=0.199 r=0.0104
+      seg len=0.162 r=0.0065 up=16 tip
+    # 3 leaves, alternating sides and tilted up off the twig, closest
+    # together near the base. Thick teardrops -- `d` is 0.64 of `w` -- which is
+    # the whole reason they need no `frame=` or `refaxis=` fussing: there is no
+    # angle from which one of these disappears, which is the trap `fern.wam`
+    # fell into twice. Three rings and blunt ends: the cheap two-ring version
+    # tapers to a `tip`, and twenty of those on the sheet read as a holly
+    # bush -- every leaf a spike. The blunt oval costs seven triangles more
+    # each and is the difference between foliage and thorns.
+    loft leafE1 at=(0,0.031,0.049) dir=side yaw=-66 tilt=26 len=0.142 on=twigE material=Leaf sides=3
+      ring 0.00 w=0.051 d=0.033
+      ring 0.55 w=0.103 d=0.066
+      ring 1.00 w=0.031 d=0.020 tip
+      cap start=flat end=point
+    loft leafE2 at=(0,0.069,0.110) dir=side yaw=246 tilt=20 len=0.147 on=twigE material=Sheen sides=3
+      ring 0.00 w=0.053 d=0.034
+      ring 0.55 w=0.106 d=0.068
+      ring 1.00 w=0.032 d=0.021 tip
+      cap start=flat end=point
+    loft leafE3 at=(0,0.107,0.171) dir=side yaw=-66 tilt=14 len=0.138 on=twigE material=Leaf sides=3
+      ring 0.00 w=0.050 d=0.032
+      ring 0.55 w=0.099 d=0.063
+      ring 1.00 w=0.030 d=0.019 tip
+      cap start=flat end=point
+    # The berries. The stalk leaves the twig pointing down and outward, and
+    # the berry hangs off its end -- that is what clears the leaf mass. The
+    # `Blush` ring at the top is the specular kick a glossy berry gets from
+    # the sky; without it a flat red ball reads as a bead.
+    loft bstkE1 at=(0,0.140,0.219) dir=down pitch=-37 yaw=24 len=0.071 on=twigE material=Wood sides=3
+      ring 0.00 w=0.0152 d=0.0152
+      ring 1.00 w=0.0114 d=0.0114
+      cap start=flat end=flat
+    loft berryE1 at=(0,0.083,0.261) dir=down len=0.074 on=bstkE1 material=Berry sides=4
+      ring 0.00 w=0.030 d=0.030 material=Blush
+      ring 0.42 w=0.076 d=0.076 material=Berry
+      ring 1.00 w=0.030 d=0.030
+      cap start=flat end=flat
+  end
+
+checks
+  # Planted.
+  assert bottom(trunk) < 0.02
+  # Wider than tall. `BlockModels` normalises on the Y extent, so a lingonberry
+  # that grows upward grows everywhere and stops being a ground cover.
+  assert width / height > 1.15
+  assert depth / height > 1.15
+  # THE pair of checks. A berry has to be both *below* the leaves above it and
+  # *further out* than they are, or it is buried -- and either one alone can be
+  # satisfied by a berry that is still invisible from the side. Checked on two
+  # different twigs so it is a property of the twig design and not a lucky spin.
+  assert top(berryA1) < top(leafA3)
+  assert top(berryC1) < top(leafC3)
+  assert (x(berryA1)*x(berryA1) + z(berryA1)*z(berryA1)) ** 0.5 > (x(leafA2)*x(leafA2) + z(leafA2)*z(leafA2)) ** 0.5
+  assert (x(berryC1)*x(berryC1) + z(berryC1)*z(berryC1)) ** 0.5 > (x(leafC2)*x(leafC2) + z(leafC2)*z(leafC2)) ** 0.5
+  # ...and they hang near the top, not down in the litter. A berry at ankle level
+  # of its own shrub is one the player walks past.
+  assert y(berryA1) > top(trunk) * 0.9
+  assert y(berryB1) > top(trunk) * 0.9
+  # Berries are round, and big enough to be a crop worth stopping for. Round
+  # rather than egg-shaped is what stops them reading as buds.
+  assert width(berryA1) > height(berryA1) * 0.65
+  assert width(berryA1) < height(berryA1) * 1.35
+  assert width(berryA1) > width(leafA1) * 0.55
+  assert width(berryA1) < width(leafA1) * 1.1
+  # Leaves are thick ovals, not plates: this is the check that keeps them
+  # readable from every yaw, and the reason they are authored differently from
+  # every other leaf in this set.
+  assert depth(leafA1) > width(leafA1) * 0.35
+  assert depth(leafB2) > width(leafB2) * 0.35
+  # The twigs climb clear of the trunk, and the tallest is a real leader rather
+  # than five twigs at one height.
+  assert top(twigC) > top(trunk) * 1.9
+  assert top(twigC) > top(twigD) * 1.15
+  # The shrub is leafy: twenty leaves against eight berries, five twigs, eight
+  # berry stalks and a trunk. More leaves than everything else combined is what
+  # makes the red read as an accent on a dark bush instead of as fruit on a bare
+  # tree, which is exactly what the first three sheets showed.
+  assert parts == 42
+  assert tris < 700
+  measure spread width / height
+  measure berrydrop top(leafA3) - top(berryA1)

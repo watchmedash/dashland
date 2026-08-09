@@ -1,0 +1,235 @@
+# Lavender — the meadow's signature, and the only purple on green ground.
+#
+# Everything on a meadow tile is some value of green, so a plant that is going
+# to be *the* meadow flower has to be a colour the ground cannot supply. That is
+# the whole brief: five thin stalks whose only job is to hold up five narrow
+# purple bars. The stems are almost invisible at icon size and that is correct —
+# what the eye gets at 32px is a small vertical picket fence of violet, and
+# nothing else in the green biomes does that.
+#
+# **The spike is a third of the stalk and the rest is bare.** The first cut had
+# the flowers running most of the way down and it read as a purple tuft — a
+# lupin, or worse, a hyacinth. Lavender's proportion is the read: a long empty
+# stem, then a dense head that stops abruptly. So each stalk is a stem loft of
+# 0.46–0.72 with a spike of 0.24–0.36 on top, and the `assert` that the spike is
+# under 40% of the stalk's total height is the one number here that is not
+# negotiable.
+#
+# **The sheet said "bulrush".** The first compile had the spikes 0.11 wide
+# against 0.33 long — barely three to one — and all four views read as cattails
+# on a pond, not lavender in a meadow. Nothing about the layout was wrong; the
+# heads were simply too fat. They are now 0.072 at their widest against 0.36
+# long, a five-to-one bar, and the `assert width(spikeA) < height(spikeA) / 4.2`
+# is there so the next person who thinks the flower needs more presence widens
+# something else. Related: the first purple (#8b5fd0 over #5f3d95) went to mud at
+# panel size because the dark collar was doing most of the area. The Bloom is now
+# a step brighter and the Deep collar a third as tall.
+#
+# **Three heights, five stalks, five leans.** Equal-height spikes are a bar
+# chart. The tallest goes up the middle-ish, two sit mid, two sit low, and every
+# one of them carries a different `tilt`/`yaw` so the tops fan out instead of
+# staying parallel. The yaw matters for the same reason it does in
+# `flower_red.wam`: tilts alone leave the whole clump coplanar and edge-on it is
+# one stalk. Here the leans are spread over a full circle by hand rather than
+# mirrored, because this is a set of five and not a mirrored pair.
+#
+# **`shape=squarish` with alternating `roll=`.** A round tapering loft at this
+# thickness is a candle, which is exactly what the first spike looked like on the
+# sheet — smooth, waxy, no florets. Turning the section squarish and rolling
+# every ring the other way breaks the tube's own facets out of alignment, so the
+# silhouette gets a series of small shoulders down its length and reads as
+# stacked whorls. It costs nothing: it is the same ring count. With the spike
+# narrowed the roll had to grow to ±22° to still be visible at all.
+#
+# **Every stem lofts `bones=stalkX..stalkX`, not `soil..stalkX`.** A chain that
+# starts at the root begins at the world origin, so a stalk leaning off to one
+# side straddles X=0 lopsidedly and the centreline lint calls it — correctly, it
+# is claiming a symmetry it does not have. Lofting the stalk bone alone starts
+# the tube at the bone's own offset head, out where the stalk actually grows.
+#
+# The stems and the low leaves are a grey-green (#8fa07a / #74895f), not the
+# green of the stem in `flower_red.wam`. Lavender foliage really is glaucous, and
+# more usefully it is the one part of this model that has to sit *against* grass
+# without disappearing into it. The leaves stay low and short — they are there so
+# the model has a foot rather than five wires rising out of nothing.
+
+model lavender
+  height 0.52
+  style chunky
+
+palette
+  Bloom #9d6ee6
+  Deep  #6a45a8
+  Pale  #caa3f7
+  Stem  #8fa07a
+  Leaf  #74895f
+
+skeleton
+  root soil at 0.0
+  # Five stalks, five headings. A stalk leaning along +X is rooted at +X so it is
+  # honestly one-sided rather than a part straddling the centreline — the same
+  # rule `sea_grass.wam` and `coral_branch.wam` follow, and the lint enforces.
+  # On an `up` bone a negative `tilt` leans toward +X (left), so each `side=`
+  # here carries the sign that matches where its stalk is going.
+  bone stalkA parent=soil side=0.050  fwd=0.020  dir=up tilt=-16 pitch=8   len=0.72
+  bone stalkB parent=soil side=-0.090 fwd=-0.035 dir=up tilt=22  pitch=-14 len=0.58
+  bone stalkC parent=soil side=0.100  fwd=-0.055 dir=up tilt=-26 pitch=-6  len=0.46
+  bone stalkD parent=soil side=-0.070 fwd=0.080  dir=up tilt=14  pitch=18  len=0.64
+  bone stalkE parent=soil side=0.075  fwd=0.070  dir=up tilt=-10 pitch=16  len=0.51
+  # Four low leaves, splayed near the ground on four headings. All four are
+  # `dir=fwd` with a `yaw`, not `dir=side`: a `tilt` on a side bone tips it below
+  # the ground plane as readily as above it, and the first compile buried two
+  # leaves 0.05 under the floor. A yawed forward bone with a small negative
+  # `pitch` always rises, whatever heading it ends up on.
+  bone leafA parent=soil side=0.030  up=0.012 dir=fwd yaw=72  pitch=-20 len=0.21
+  bone leafB parent=soil side=-0.030 up=0.012 dir=fwd yaw=250 pitch=-18 len=0.20
+  bone leafC parent=soil side=0.025 fwd=-0.030 up=0.012 dir=fwd yaw=163 pitch=-22 len=0.19
+  bone leafD parent=soil fwd=0.030   up=0.012 dir=fwd yaw=338 pitch=-17 len=0.18
+
+parts
+  # Stems. Four sides and three rings each: at this thickness the tube is barely
+  # a pixel wide and any more geometry is spent on nothing. The small flare at
+  # ring 0 is what makes the stalk look planted rather than pushed in.
+  loft stemA bones=stalkA..stalkA material=Stem sides=4
+    ring 0.00 w=0.045 d=0.043
+    ring 0.10 w=0.026 d=0.025
+    ring 1.00 w=0.020 d=0.019
+    cap start=flat end=flat
+  loft stemB bones=stalkB..stalkB material=Stem sides=4
+    ring 0.00 w=0.043 d=0.041
+    ring 0.10 w=0.025 d=0.024
+    ring 1.00 w=0.019 d=0.018
+    cap start=flat end=flat
+  loft stemC bones=stalkC..stalkC material=Stem sides=4
+    ring 0.00 w=0.041 d=0.039
+    ring 0.10 w=0.024 d=0.023
+    ring 1.00 w=0.018 d=0.017
+    cap start=flat end=flat
+  loft stemD bones=stalkD..stalkD material=Stem sides=4
+    ring 0.00 w=0.043 d=0.041
+    ring 0.10 w=0.025 d=0.024
+    ring 1.00 w=0.019 d=0.018
+    cap start=flat end=flat
+  loft stemE bones=stalkE..stalkE material=Stem sides=4
+    ring 0.00 w=0.041 d=0.039
+    ring 0.10 w=0.024 d=0.023
+    ring 1.00 w=0.018 d=0.017
+    cap start=flat end=flat
+
+  # The spikes. Narrow (0.072 across on a 1.05-tall model), tapering to a blunt
+  # point, with a short dark collar where the florets start and a pale crown
+  # where they are still opening — the same three-value read the corals use for a
+  # growing tip, and it is what stops five identical violet sticks looking like
+  # plastic. Seven rings rather than six: the extra one in the middle is what
+  # lets the roll alternate often enough to look like whorls.
+  loft spikeA bone=stalkA at=1.0 dir=up pitch=-6 len=0.36 on=stemA material=Bloom sides=6 shape=squarish
+    ring 0.00 w=0.030 d=0.029 material=Deep
+    ring 0.10 w=0.066 d=0.063 roll=20 material=Bloom
+    ring 0.32 w=0.072 d=0.069 roll=-22
+    ring 0.54 w=0.068 d=0.065 roll=21
+    ring 0.74 w=0.058 d=0.055 roll=-20
+    ring 0.90 w=0.042 d=0.040 roll=18 material=Pale
+    ring 1.00 w=0.016 d=0.015
+    cap start=flat end=flat
+  loft spikeB bone=stalkB at=1.0 dir=up pitch=8 tilt=8 len=0.30 on=stemB material=Bloom sides=6 shape=squarish
+    ring 0.00 w=0.028 d=0.027 material=Deep
+    ring 0.10 w=0.062 d=0.059 roll=-21 material=Bloom
+    ring 0.32 w=0.068 d=0.065 roll=22
+    ring 0.54 w=0.064 d=0.061 roll=-20
+    ring 0.74 w=0.054 d=0.052 roll=19
+    ring 0.90 w=0.040 d=0.038 roll=-17 material=Pale
+    ring 1.00 w=0.015 d=0.014
+    cap start=flat end=flat
+  loft spikeC bone=stalkC at=1.0 dir=up pitch=-9 tilt=-7 len=0.25 on=stemC material=Bloom sides=6 shape=squarish
+    ring 0.00 w=0.027 d=0.026 material=Deep
+    ring 0.10 w=0.059 d=0.056 roll=19 material=Bloom
+    ring 0.32 w=0.065 d=0.062 roll=-22
+    ring 0.54 w=0.061 d=0.058 roll=20
+    ring 0.74 w=0.051 d=0.049 roll=-18
+    ring 0.90 w=0.037 d=0.035 roll=16 material=Pale
+    ring 1.00 w=0.014 d=0.013
+    cap start=flat end=flat
+  loft spikeD bone=stalkD at=1.0 dir=up pitch=10 len=0.33 on=stemD material=Bloom sides=6 shape=squarish
+    ring 0.00 w=0.029 d=0.028 material=Deep
+    ring 0.10 w=0.064 d=0.061 roll=-20 material=Bloom
+    ring 0.32 w=0.070 d=0.067 roll=22
+    ring 0.54 w=0.066 d=0.063 roll=-21
+    ring 0.74 w=0.056 d=0.053 roll=19
+    ring 0.90 w=0.041 d=0.039 roll=-16 material=Pale
+    ring 1.00 w=0.015 d=0.014
+    cap start=flat end=flat
+  loft spikeE bone=stalkE at=1.0 dir=up pitch=-5 tilt=-10 len=0.27 on=stemE material=Bloom sides=6 shape=squarish
+    ring 0.00 w=0.027 d=0.026 material=Deep
+    ring 0.10 w=0.060 d=0.057 roll=21 material=Bloom
+    ring 0.32 w=0.066 d=0.063 roll=-19
+    ring 0.54 w=0.062 d=0.059 roll=22
+    ring 0.74 w=0.052 d=0.050 roll=-18
+    ring 0.90 w=0.038 d=0.036 roll=17 material=Pale
+    ring 1.00 w=0.014 d=0.013
+    cap start=flat end=flat
+
+  # Low leaves. Flattened lofts with `frame=up`, the ground-cover idiom from
+  # `sea_grass.wam` — a round section here is chives, and lavender leaves are
+  # narrow straps. They are short on purpose: long ones turned the base into a
+  # tuft and the picket-fence read went with it.
+  loft leafbA bones=leafA..leafA material=Leaf sides=4 frame=up
+    ring 0.00 w=0.030 d=0.016
+    ring 0.40 w=0.055 d=0.020
+    ring 1.00 w=0.018 d=0.010 tip
+    cap start=flat end=point
+  loft leafbB bones=leafB..leafB material=Leaf sides=4 frame=up
+    ring 0.00 w=0.030 d=0.016
+    ring 0.40 w=0.052 d=0.020
+    ring 1.00 w=0.018 d=0.010 tip
+    cap start=flat end=point
+  loft leafbC bones=leafC..leafC material=Leaf sides=4 frame=up
+    ring 0.00 w=0.028 d=0.015
+    ring 0.40 w=0.050 d=0.019
+    ring 1.00 w=0.016 d=0.009 tip
+    cap start=flat end=point
+  loft leafbD bones=leafD..leafD material=Leaf sides=4 frame=up
+    ring 0.00 w=0.028 d=0.015
+    ring 0.40 w=0.048 d=0.019
+    ring 1.00 w=0.016 d=0.009 tip
+    cap start=flat end=point
+
+checks
+  # Planted. Every stalk and every leaf starts in the soil; a stalk floating is a
+  # stalk the player can see under.
+  assert bottom(stemA) < 0.02
+  assert bottom(stemC) < 0.02
+  assert bottom(leafbA) < 0.02
+  assert bottom(leafbB) < 0.02
+  # Y stays the long axis or `ItemModels.js` hands the player an oversized
+  # toolbar icon. Upright plant, so the window is 1.1..2.0 — and the leans on the
+  # stalks are what buys the headroom under 2.0, not the leaves.
+  assert height / width in 1.1..2.0
+  assert height / depth in 1.1..2.5
+  # The proportion that makes it lavender rather than lupin: the flower head is
+  # the top third of the stalk and no more.
+  assert height(spikeA) / top(spikeA) < 0.40
+  assert height(spikeC) / top(spikeC) < 0.40
+  # Narrow bars. This is the check the whole second pass exists for — at three to
+  # one the sheet read as cattails from every angle.
+  assert width(spikeA) < height(spikeA) / 4.2
+  assert width(spikeD) < height(spikeD) / 4.2
+  # Three distinct heights, checked as real separations rather than by eye. A
+  # and D are the tall pair, B and E the middle, C the short one.
+  assert top(spikeA) > top(spikeB) * 1.12
+  assert top(spikeB) > top(spikeC) * 1.12
+  assert top(spikeD) > top(spikeE)
+  # ...and clearly separated from each other, so five bars stay five bars.
+  assert dist(stalkA.tail, stalkB.tail) > width(spikeA) * 2.5
+  assert dist(stalkB.tail, stalkC.tail) > width(spikeB) * 2.5
+  assert dist(stalkD.tail, stalkE.tail) > width(spikeD) * 2.5
+  # The spikes lean differently — the tops are not a parallel comb. Measured as
+  # the angle between the two most-opposed stalks.
+  assert angle(stalkB, stalkC) > 35
+  assert angle(stalkA, stalkD) > 20
+  # Leaves stay low: they are the plant's foot, not part of the flower read.
+  assert top(leafbA) < bottom(spikeC)
+  assert top(leafbA) < 0.20
+  assert parts == 14
+  assert tris < 700
+  measure spikefrac height(spikeA) / top(spikeA)
+  measure barratio height(spikeA) / width(spikeA)

@@ -419,6 +419,50 @@ const POSE = {
   // turned enough that the stepped margins read rather than the back sheet's
   // blank face.
   dried_kelp:    { file: 'wam/dried_kelp',    pack: 'wam', height: 0.22, grip: 0.34, rot: [0.14, -0.44, 0.20],  pos: [0.02, 0.11, -0.03], icon: [0.24, 0.38, -0.10] },
+
+  // The land flora. Sixteen entries, and they are grouped by *what the model
+  // needs the camera to do* rather than by biome, because that is the only
+  // thing a pose is about.
+  //
+  // Uprights whose read is a vertical silhouette — a spike, a sheaf, a seed
+  // head. These take the branching coral's pose almost unchanged: a shallow
+  // yaw, gripped low on the stem, because turning one of these far off square
+  // only ever hides one stalk behind another.
+  thornbrush:   { file: 'wam/thornbrush',   pack: 'wam', height: 0.28, grip: 0.30, rot: [-0.08, -0.55, 0.24], pos: [0.02, 0.12, -0.02], icon: [0.12, 0.50, -0.18] },
+  golden_grass: { file: 'wam/golden_grass', pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.42, 0.28], pos: [0.02, 0.13, -0.02], icon: [0.10, 0.38, -0.20] },
+  firebloom:    { file: 'wam/firebloom',    pack: 'wam', height: 0.34, grip: 0.26, rot: [-0.10, -0.40, 0.26], pos: [0.02, 0.14, -0.02], icon: [0.08, 0.34, -0.20] },
+  marram:       { file: 'wam/marram',       pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.46, 0.28], pos: [0.02, 0.13, -0.02], icon: [0.10, 0.40, -0.20] },
+  lavender:     { file: 'wam/lavender',     pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [0.02, 0.13, -0.02], icon: [0.10, 0.38, -0.18] },
+  cotton_grass: { file: 'wam/cotton_grass', pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.38, -0.18] },
+
+  // Clumps read from a three-quarter view, the flowers' treatment: enough yaw
+  // that the clump has depth, not so much that the leader hides the buds.
+  aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.26, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.02, 0.11, -0.03], icon: [0.18, 0.46, -0.14] },
+  snowbell:     { file: 'wam/snowbell',     pack: 'wam', height: 0.26, grip: 0.30, rot: [0.02, -0.45, 0.24],  pos: [0.02, 0.11, -0.02], icon: [0.10, 0.42, -0.16] },
+  lingonberry:  { file: 'wam/lingonberry',  pack: 'wam', height: 0.26, grip: 0.36, rot: [0.06, -0.48, 0.20],  pos: [0.02, 0.11, -0.03], icon: [0.16, 0.44, -0.14] },
+  fern:         { file: 'wam/fern',         pack: 'wam', height: 0.28, grip: 0.30, rot: [-0.06, -0.52, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.12, 0.48, -0.16] },
+
+  // The two that are read from *above*, the sea lettuce problem: a mat seen
+  // square-on from the side is a line. Both rotations pitch them well forward
+  // and the icons nearly onto their backs, because a trefoil and a star are
+  // shapes that exist only in plan view.
+  clover:       { file: 'wam/clover',       pack: 'wam', height: 0.24, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.02, 0.10, -0.04], icon: [0.78, 0.46, -0.10] },
+  alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.02, 0.10, -0.04], icon: [0.80, 0.42, -0.10] },
+
+  // Underground. The mushroom's own pose for the toadstools — a cap is read
+  // from slightly below so the overhang shows — and the clam's steeper one for
+  // the shelf fungus, whose plates only separate when you are not level with
+  // them. The crystal cluster takes the gem kit's pose: gripped near the middle
+  // of the matrix, turned so the points fan across the slot rather than at it.
+  cave_mushroom:   { file: 'wam/cave_mushroom',   pack: 'wam', height: 0.24, grip: 0.38, rot: [0.02, -0.45, 0.22], pos: [0.02, 0.10, -0.04], icon: [0.04, 0.42, -0.16] },
+  shelf_fungus:    { file: 'wam/shelf_fungus',    pack: 'wam', height: 0.24, grip: 0.38, rot: [0.34, -0.44, 0.18], pos: [0.02, 0.10, -0.04], icon: [0.52, 0.40, -0.12] },
+  crystal_cluster: { file: 'wam/crystal_cluster', pack: 'wam', height: 0.26, grip: 0.40, rot: [0.10, -0.55, 0.20], pos: [0.02, 0.11, -0.04], icon: [0.18, 0.52, -0.14] },
+
+  // Driftwood is the one authored wider than it is tall on purpose, so it
+  // normalises on its longest axis instead of its height — without `fitMax` a
+  // low tangle would be scaled up by its own thickness and arrive as a log
+  // across the whole slot. Same reason the bow carries it.
+  driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.34, grip: 0.44, fitMax: true, rot: [0.16, -1.25, 0.22], pos: [0.02, 0.10, -0.04], icon: [0.24, 1.30, -0.10] },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -509,6 +553,31 @@ const BY_NAME = {
   sea_grape: 'sea_grape',
   abyss_anemone: 'abyss_anemone',
   dried_kelp: 'dried_kelp',
+  // The land flora and the cave floor, all sixteen at the reef's stage: fist,
+  // icon, ground and planted, with no billboard behind any of them.
+  //
+  // Three of these are never in a hand — thornbrush and driftwood drop sticks,
+  // the crystal cluster drops amethysts — and they are listed anyway for the
+  // clam's reason, which is the one thing about this map that is easy to get
+  // wrong: `BlockModels.prime` reaches a *planted* block's art through the
+  // matching item's pose. Drop the line because the item is never picked up and
+  // the biome loses the plant off the ground, not out of the toolbar.
+  thornbrush: 'thornbrush',
+  aloe: 'aloe',
+  golden_grass: 'golden_grass',
+  firebloom: 'firebloom',
+  cotton_grass: 'cotton_grass',
+  snowbell: 'snowbell',
+  alpine_aster: 'alpine_aster',
+  marram: 'marram',
+  lavender: 'lavender',
+  clover: 'clover',
+  fern: 'fern',
+  lingonberry: 'lingonberry',
+  cave_mushroom: 'cave_mushroom',
+  shelf_fungus: 'shelf_fungus',
+  crystal_cluster: 'crystal_cluster',
+  driftwood: 'driftwood',
   // The one place this map is not an identity, and deliberately: raw and
   // steamed crab are one model. A claw is a claw cooked or not — the shell is
   // already the orange it turns — so the pair share `crab_claw` rather than

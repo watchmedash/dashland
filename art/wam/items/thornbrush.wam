@@ -1,0 +1,226 @@
+# Thornbrush — the desert's "there is life here, barely".
+#
+# Every biome needs a ground cover or it is objects standing on bare texture, and
+# for the desert and the badlands that cover cannot be a tuft of blades: grass
+# says water. What says *no water* is a leafless woody scrub — a knot of stems at
+# the ground that forks into twigs and stops. So this model has no foliage at all
+# and the entire read has to come from the branching, which is why it is built
+# out of `sweep`s rather than the flat straps `sea_grass` uses.
+#
+# **It must not read as a tiny tree.** The first cut had one long central stem
+# with shorter arms around it, and at icon size that is a sapling: the eye finds
+# the leader, calls it a trunk, and reads everything else as canopy. The fix is
+# in the skeleton rather than in the shapes — there is no leader. Six primaries
+# leave one short stub at roughly the same length in six different headings, and
+# the tallest of them beats the shortest by well under a third. A tangle is a
+# thing with no centre; the check `top(twigE) < top(twigA) * 1.30` is what keeps
+# it that way after someone lengthens a branch to fill a gap.
+#
+# **The tips go outward and down.** `coral_branch` ends every arm with `up=` and
+# gets a vase; run the same sweep with `down=` on the last two segments and you
+# get the opposite outline, a scrub that flops open at the edges. That droop is
+# doing two jobs. It is what dead dry wood looks like, and it is what makes the
+# silhouette wide at the top instead of narrow — the model needs to be about as
+# wide as it is tall, because `BlockModels` normalises by the Y extent and a
+# narrow bush arrives in the world as a stick.
+#
+# **Colour is a placement decision, not a taste one.** This block stands on pale
+# sand *and* on red sand, and the obvious tan bush is invisible on both. Every
+# value here is a dark grey-brown deliberately chosen to be darker than any sand
+# in the game; the only light material is `Bleach`, which appears on the last
+# 0.08 of four twigs and nowhere else. Bleached dead tips on dark wood are the
+# real cue, and confining them to the very ends means the pale never competes
+# with the silhouette — it decorates it.
+#
+# The thorns are three tiny two-segment sweeps `on=` their host twig. They are
+# not resolvable at 32px and they are not meant to be: what they buy is a broken,
+# prickly edge on the mid-branches when the player is standing next to the block,
+# and `on=` means they are flush by construction rather than by a coordinate I
+# would otherwise have had to solve against a curve.
+#
+# Branches leaning along X are rooted a half-thickness off the axis in the same
+# direction so each is honestly one-sided; the ones leaning along Z stay centred
+# and are symmetric. Same centreline rule as `sea_grass` and `coral_branch`.
+
+model thornbrush
+  height 0.50
+  style chunky
+
+palette
+  Bark   #4b4239
+  Wood   #6a5c4b
+  Grey   #857b6c
+  Bleach #b3a892
+  Root   #34302a
+
+skeleton
+  root soil at 0.0
+  # Short on purpose: every centimetre the stub does not use is a centimetre the
+  # twigs get, and a scrub whose branch point is high is a tree.
+  bone stub parent=soil dir=up pitch=-3 len=0.24
+
+parts
+  # The knot. Wide at the soil and darker than anything on it — the woody boss a
+  # desert shrub piles up at the ground, and the thing the model actually stands
+  # on. Five sides, not eight: at this size a round base is a plant pot.
+  loft knot bones=soil..stub material=Root sides=6
+    ring 0.00 w=0.24 d=0.23
+    ring 0.26 w=0.16 d=0.155 material=Bark
+    ring 0.70 w=0.13 d=0.125
+    ring 1.00 w=0.11 d=0.105
+    cap start=flat end=flat
+
+  # Six primaries. **The lean angles are deliberately uneven.** The first cut
+  # gave all six the same ~50° splay and the same length, and the render sheet
+  # showed a claw: six fat fingers off a pot, radially symmetric, unmistakably a
+  # hand. Six equal spokes at equal angles is a starburst no matter what you
+  # colour it. What is here now runs from 24° to 50° of lean and from 0.42 to
+  # 0.56 of total length, so no two branches occupy the same band of the
+  # silhouette and the eye cannot find a pattern to lock onto — which is what
+  # "tangle" means. Four sides each: a twig wants to be angular.
+  #
+  # They are also much thinner than the first cut (0.023 at the base against
+  # 0.032). Fat tapering tubes read as limbs; dry desert wood is wire.
+  # **The zigzag is not decoration.** The second render sheet had all six of
+  # these as smooth tapering arcs and they read as horns — a smooth monotone
+  # curve is the outline of something grown in one continuous push, i.e. living
+  # tissue. Dry woody growth restarts every season and kinks at every restart, so
+  # every branch here climbs, dips, climbs again and then falls: `up=` then a
+  # `down=` that does not undo it, then `up=` again, then the real drop. Same
+  # four segments, same triangle count, completely different read.
+  sweep twigA bone=stub at=0.35 offset=(-0.05,0,0.02) dir=up tilt=46 material=Bark sides=4
+    seg len=0.16 r=0.023 up=26
+    seg len=0.15 r=0.016 down=16 fwd=14 material=Wood
+    seg len=0.13 r=0.010 down=24 back=12 material=Grey
+    seg len=0.10 r=0.004 down=40 material=Bleach tip
+  sweep twigB bone=stub at=0.90 offset=(0.05,0,-0.02) dir=up tilt=-26 material=Bark sides=4
+    seg len=0.15 r=0.022 up=18
+    seg len=0.13 r=0.015 down=12 back=16 material=Wood
+    seg len=0.11 r=0.009 down=26 fwd=12 material=Grey
+    seg len=0.08 r=0.004 down=42 material=Bleach tip
+  sweep twigC bone=stub at=0.60 offset=(0,0,0.05) dir=up pitch=34 material=Bark sides=4
+    seg len=0.17 r=0.023 up=24
+    seg len=0.14 r=0.016 down=18 material=Wood
+    seg len=0.12 r=0.009 up=10 material=Grey
+    seg len=0.09 r=0.004 down=54 material=Bleach tip
+  sweep twigD bone=stub at=1.00 offset=(0,0,-0.05) dir=up pitch=-50 material=Bark sides=4
+    seg len=0.13 r=0.020 up=30
+    seg len=0.11 r=0.014 down=14 material=Wood
+    seg len=0.10 r=0.008 up=8 material=Grey
+    seg len=0.07 r=0.004 down=48 material=Bleach tip
+  # The two diagonals. These are the parts that stop the brush reading as a flat
+  # card edge-on, exactly as `bladeE`/`bladeF` do for the sea grass.
+  sweep twigE bone=stub at=0.45 offset=(-0.05,0,-0.05) dir=up tilt=24 pitch=-30 material=Bark sides=4
+    seg len=0.16 r=0.021 up=20
+    seg len=0.14 r=0.015 down=14 fwd=16 material=Wood
+    seg len=0.11 r=0.009 down=20 back=14 material=Grey
+    seg len=0.08 r=0.004 down=38 material=Wood tip
+  sweep twigF bone=stub at=0.75 offset=(0.05,0,0.05) dir=up tilt=-38 pitch=26 material=Bark sides=4
+    seg len=0.14 r=0.021 up=22
+    seg len=0.12 r=0.015 down=16 back=14 material=Wood
+    seg len=0.10 r=0.009 down=22 fwd=12 material=Grey
+    seg len=0.07 r=0.004 down=40 material=Wood tip
+
+  # Two low sprawlers, straight off the soil rather than off the stub. The sheet
+  # kept showing a clean pot at the bottom with daylight under every branch, and
+  # a scrub does not look like that: the oldest wood lies half along the ground
+  # and the new growth stands out of it. These are what close the base of the
+  # silhouette, and they are the reason the model does not read as a bouquet in
+  # a vase. Almost horizontal, so they cost width, which is exactly what a
+  # Y-normalised block wants.
+  # Kept short on the third pass. Authored at 0.15/0.13/0.09 they shot out dead
+  # straight and level and the sheet read them as antennae, and they took the
+  # width/height ratio to 1.54, which is past the point where a Y-normalised
+  # block starts poking into its neighbours. Shorter, with the droop moved onto
+  # the middle segment so they bend down rather than reaching out, they hug the
+  # foot of the brush instead of advertising themselves.
+  sweep sprawlA bone=soil at=0.0 offset=(-0.09,0.03,-0.03) dir=up tilt=72 material=Bark sides=4
+    seg len=0.12 r=0.019 up=10
+    seg len=0.10 r=0.012 down=26 fwd=16 material=Grey
+    seg len=0.07 r=0.004 down=22 material=Bleach tip
+  sweep sprawlB bone=soil at=0.0 offset=(0.09,0.03,0.04) dir=up tilt=-66 pitch=20 material=Bark sides=4
+    seg len=0.11 r=0.019 up=12
+    seg len=0.09 r=0.012 down=24 back=16 material=Grey
+    seg len=0.06 r=0.004 down=24 material=Bleach tip
+
+  # Four second-order forks, not the two the first cut had. Two forks on six
+  # branches is invisible — the sheet showed no forking at all, because both of
+  # them left low and were swallowed by the mass of primaries around them. Four,
+  # leaving high and thrown out wide, are what actually put a Y in the outline.
+  # A fork that opens *less* than its parent left the knot at reads as a kink in
+  # one branch rather than a division, so every one of these is angled harder
+  # than its host. Rooted `on=` the host so they are flush by construction.
+  sweep forkA bone=stub at=0.55 offset=(-0.22,0.26,0.03) dir=up tilt=72 on=twigA material=Wood sides=4
+    seg len=0.12 r=0.011 up=10
+    seg len=0.10 r=0.007 down=30 material=Grey
+    seg len=0.07 r=0.004 down=34 material=Bleach tip
+  sweep forkC bone=stub at=0.70 offset=(0.02,0.28,0.22) dir=up pitch=68 on=twigC material=Wood sides=4
+    seg len=0.12 r=0.011 up=10
+    seg len=0.10 r=0.007 down=30 material=Grey
+    seg len=0.07 r=0.004 down=34 material=Bleach tip
+  sweep forkE bone=stub at=0.62 offset=(-0.14,0.28,-0.16) dir=up tilt=52 pitch=-52 on=twigE material=Wood sides=4
+    seg len=0.11 r=0.010 up=8
+    seg len=0.09 r=0.006 down=28 material=Grey
+    seg len=0.06 r=0.004 down=32 material=Bleach tip
+  sweep forkB bone=stub at=0.85 offset=(0.16,0.26,-0.04) dir=up tilt=-64 on=twigB material=Wood sides=4
+    seg len=0.11 r=0.010 up=8
+    seg len=0.09 r=0.006 down=28 material=Grey
+    seg len=0.06 r=0.004 down=32 material=Bleach tip
+
+  # Thorns. Not resolvable at icon size and not meant to be: they buy a prickly,
+  # broken edge on the mid-branches for the player standing next to the block.
+  sweep thornA bone=stub at=0.55 offset=(-0.14,0.16,0.02) dir=up tilt=88 on=twigA material=Grey sides=3
+    seg len=0.05 r=0.008 down=10
+    seg len=0.04 r=0.002 down=18 material=Bleach tip
+  sweep thornB bone=stub at=0.85 offset=(0.13,0.14,-0.02) dir=up tilt=-88 on=twigB material=Grey sides=3
+    seg len=0.05 r=0.008 down=10
+    seg len=0.04 r=0.002 down=18 material=Bleach tip
+  sweep thornD bone=stub at=0.95 offset=(0,0.12,-0.13) dir=up pitch=-86 on=twigD material=Grey sides=3
+    seg len=0.05 r=0.008 down=10
+    seg len=0.04 r=0.002 down=18 material=Bleach tip
+
+checks
+  # Rooted in the sand. A scrub floating above the ground is the one failure a
+  # ground cover cannot survive, because the player is looking straight down the
+  # gap at 32px.
+  assert bottom(knot) < 0.02
+  # As wide as it is tall, and never taller. This is the whole reason the tips
+  # carry `down=` instead of the coral's `up=`, and it is the number that turns a
+  # bush into a stick the moment someone "tidies" the outline.
+  assert width / height > 0.9
+  assert depth / height > 0.8
+  assert width / height in 0.9..1.6
+  # No leader. Six primaries within a third of each other in height: the moment
+  # one of them beats the rest by half, the model is a sapling and the desert has
+  # a tiny tree in it.
+  assert top(twigA) < top(twigE) * 1.35
+  assert top(twigC) < top(twigE) * 1.35
+  assert top(twigB) < top(twigA) * 1.35
+  # The tips fall away, stated as geometry rather than as intent. A sweep has no
+  # nameable tip point, so the droop is asserted the way it is actually visible:
+  # a branch that keeps climbing is taller than it is wide, and a branch that
+  # flops open at the end is wider than it is tall. If someone ever swaps the
+  # trailing `down=` back to `up=` this is the check that catches it.
+  assert width(twigA) > height(twigA) * 0.7
+  assert width(sprawlA) > height(sprawlA) * 1.5
+  assert top(forkA) < top(twigA) * 1.20
+  # It actually forks: the second-order branches reach out past their parents
+  # rather than hiding inside them. Reach is measured on the axis each fork was
+  # actually thrown along — forkC leaves toward +Z, so its X width is nearly
+  # nothing and testing `width` there would fail a branch that is doing its job.
+  assert width(forkA) > 0.09
+  assert depth(forkC) > 0.09
+  assert width(forkB) > 0.07
+  # The knot is the widest thing at the bottom and the branches all clear it, so
+  # the brush is a tangle above a boss rather than a pile.
+  assert width(knot) > 0.20
+  assert top(twigA) > top(knot) * 1.5
+  # Thorns are on the branch, not floating beside it. `gap` is subsampled above
+  # 600 points and is a proximity measure between *vertices*, so an `on=` part
+  # sunk into a four-sided tube still reads a few centimetres of daylight where
+  # there is none; 0.06 is the honest bound, and what it is really policing is a
+  # thorn that has drifted off its host entirely.
+  assert gap(thornA, twigA) < 0.08
+  assert parts == 16
+  assert tris < 700
+  measure spread width / height

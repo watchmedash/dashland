@@ -1,0 +1,491 @@
+# Forest Fern -- five arching fronds, and the arch is the whole model.
+#
+# This is the forest floor's big ground cover, the one that has to make a stand
+# of pines feel like a forest rather than a field with trees in it. It is also
+# the model in this set most likely to come out wrong in a way that is invisible
+# in the source, because **a straight frond is a palm**. Everything about a fern
+# except the curve is generic: green, pinnate, tufted. What says fern is the
+# fountain -- fronds that leave the crown near-vertical, roll over through
+# horizontal, and end pointing outward and slightly down. Straighten them and the
+# model is a small palm; shorten them and it is a bracken clump.
+#
+# So the spine is a `sweep`, and every bend on it is a `down=`. That is the one
+# decision here that is load-bearing in the source rather than in the render: a
+# world-referenced bend has a sign you cannot get wrong, and the compiler reports
+# the realised path of every sweep it compiles -- "leaves up-fwd and ends up
+# pointing fwd" is the arch, stated, on every compile. With `curl=` I would have
+# been guessing at an axis I cannot see, and with a bone chain the arch would
+# have been four hand-solved pitches that nobody could re-tune later.
+#
+# **Each frond is a `group`, authored once in a clean local frame.** Local +Y is
+# up and the frond arches toward local +Z; the leaflets hang along local +/-X.
+# Then five copies are mounted on the crown with nothing but a `spin=`, which is
+# the heading each frond takes around the circle. This is the entire reason the
+# fountain is tunable at all: "make the arch heavier" is one `down=` edit
+# repeated five times with identical numbers, not five separate curves drifting
+# apart. It also means every leaflet position is a group-local coordinate read
+# straight off the arch, and `on=spine` snaps each one flush to the tube -- no
+# offset is guessed, and `on=` inside a group is allowed to reference the group's
+# own parts, which is exactly this case.
+#
+# **`web` was tried for the leaflet planes and rejected, for two reasons.**
+# The first is structural: a `web` must span *real bones*, and the frond's spine
+# is a sweep whose path is the accumulation of its own bends -- there are no
+# bones along it to hang ribs from, and inventing a matching bone chain would
+# mean re-deriving the arch by hand in a second place and keeping the two in sync
+# forever. A `web` also cannot live inside a `group`, so the whole one-frond
+# authoring scheme would have gone with it. The second reason is that it is the
+# wrong shape even where it works: a web is *one continuous membrane* stretched
+# across its ribs, so what comes out is a single solid blade with a scalloped
+# edge -- `trailing=scallop` bowing the outer edge back between rib tips is as
+# close to pinnate as it gets. A fern's read is separate leaflets with daylight
+# between them, and individual flattened lofts are the only version where those
+# gaps are real geometry. They are also, at three sides and two rings apiece,
+# cheaper than the web panels would have been.
+#
+# **The render sheet rewrote this model three times, and every time it was the
+# leaflets.**
+#
+#  1. The first pass had a fat rachis (r=0.019) carrying nine small leaflets, and
+#     all four views showed a *spider*: five bare bent wires with thorns near the
+#     bottom. The rachis was thinned to 0.014 tapering to 0.003, and the leaflets
+#     were roughly doubled in size and count.
+#  2. That got denser but still read as barbed wire, and the reason turned out to
+#     be orientation, not size. Every leaflet was `frame=up`, i.e. a horizontal
+#     plate -- and the game camera, like the sheet camera, looks along the
+#     horizon, so *every single leaflet was edge-on*. A flat part seen edge-on is
+#     a line, which is why they rendered as spikes no matter how wide they were
+#     made. The fix is `refaxis=(0,cos t,sin t)` per leaflet, where t is the
+#     rachis's tangent angle at that point: it pins each leaflet's broad face
+#     into the plane of its own frond, which is what a real pinna does. Near the
+#     crown the fronds are near-vertical, so those leaflets stand up as broad
+#     faces the player can actually see; out at the tip the frond has rolled over
+#     and its leaflets roll with it. `d` is therefore the leaflet's breadth and
+#     `w` its thickness -- the reverse of every other flattened loft in this set,
+#     which is why it is written on the loft line rather than left to be
+#     rediscovered.
+#  3. Correctly oriented, the leaflets were then too *broad*: at d=0.60 of their
+#     own length with square ends the sheet showed a banana plant. They settled
+#     at d=0.46 tapering to a `tip`, which is a pinna.
+#
+# The one thing that did not survive the triangle budget is a third ring per
+# leaflet. Widest-in-the-middle leaflets looked better than plain tapered ones,
+# and they cost 300 triangles across the model -- 996 against a 700 ceiling for a
+# block that gets instanced across a whole biome. Two rings it is.
+#
+# **Colour.** Everything else in the green biomes is a grass green, and a fern
+# that is grass green on grass-green ground is a texture rather than an object.
+# These fronds are a dark, distinctly blue-shifted green (#2f6146 / #24503a)
+# against a lighter olive rachis, which is both what a woodland fern looks like
+# in shade and the only value in the set that separates from the ground it stands
+# on. The crown is brown: a fern grows out of a knot of old scaly stipe bases,
+# and that dark lump at the bottom is what stops five wires looking like they
+# were pushed into the dirt.
+
+model fern
+  height 0.62
+  style chunky
+
+palette
+  Frond #2f6146
+  Deep  #24503a
+  Rib   #5c7a45
+  Crown #4a3b2a
+
+skeleton
+  root soil at 0.0
+  # One short, fat bone. Every frond mounts on its tail, so the whole fountain
+  # springs from one point -- which is what a crown is. Fronds rooted separately
+  # in the soil read as five plants standing near each other.
+  bone crown parent=soil dir=up len=0.10
+
+parts
+  # The crown knot. Squat and brown, and wide enough that the five stipes leave
+  # it rather than pierce it.
+  loft knot bones=soil..crown material=Crown sides=6
+    ring 0.00 w=0.22 d=0.21
+    ring 0.45 w=0.19 d=0.18
+    ring 1.00 w=0.13 d=0.125
+    cap start=flat end=flat
+
+  # Frond A -- spun 0 deg around the crown, 1.00 of the reference
+  # length, leaving 4 deg off vertical. Everything inside the group is the
+  # one frond authored in its own frame: +Y up, arching toward +Z, leaflets
+  # on +/-X.
+  group frondA bone=crown at=1.0 dir=up spin=0
+    # The rachis. Six segments, five `down=` bends, accumulating from 4 deg
+    # off vertical to about 150 -- past horizontal, so the tip finishes
+    # pointing out and downward. The bends are front-loaded (34, 42, then 30,
+    # 22, 18) so the crest lands about three-quarters of the way out rather
+    # than at the very tip: a curve that only turns at the end is a hook, and
+    # one that turns evenly is a quarter circle. A fern is neither.
+    sweep spineA at=(0,0,0) dir=up pitch=4 material=Rib sides=3
+      seg len=0.400 r=0.0140
+      seg len=0.220 r=0.0110 down=34
+      seg len=0.170 r=0.0090 down=42
+      seg len=0.130 r=0.0070 down=30
+      seg len=0.100 r=0.0050 down=22
+      seg len=0.080 r=0.0030 down=18 tip
+    # Ten leaflets, alternating sides and shortening toward the tip. Their
+    # positions are points measured on the arch itself, `on=spineA` sinks each
+    # one into the tube so none floats off the rachis, and the `refaxis=` on
+    # every line is the rachis tangent there -- that is what stands the leaflet
+    # up in its own frond plane instead of leaving it a horizontal plate that
+    # the camera only ever sees edge-on. `d` is breadth here and `w` thickness.
+    loft pinA1 at=(0,0.099,0.007) dir=side yaw=-42 tilt=-4 len=0.150 on=spineA material=Frond sides=3 refaxis=(0,1.00,0.07)
+      ring 0.00 w=0.020 d=0.069
+      ring 1.00 w=0.008 d=0.015 tip
+      cap start=flat end=point
+    loft pinA2 at=(0,0.208,0.015) dir=side yaw=222 tilt=-5 len=0.210 on=spineA material=Deep sides=3 refaxis=(0,1.00,0.07)
+      ring 0.00 w=0.020 d=0.097
+      ring 1.00 w=0.008 d=0.021 tip
+      cap start=flat end=point
+    loft pinA3 at=(0,0.307,0.021) dir=side yaw=-42 tilt=-6 len=0.250 on=spineA material=Frond sides=3 refaxis=(0,1.00,0.07)
+      ring 0.00 w=0.020 d=0.115
+      ring 1.00 w=0.008 d=0.025 tip
+      cap start=flat end=point
+    loft pinA4 at=(0,0.417,0.030) dir=side yaw=222 tilt=-7 len=0.270 on=spineA material=Deep sides=3 refaxis=(0,0.99,0.13)
+      ring 0.00 w=0.020 d=0.124
+      ring 1.00 w=0.008 d=0.027 tip
+      cap start=flat end=point
+    loft pinA5 at=(0,0.513,0.054) dir=side yaw=-42 tilt=-8 len=0.270 on=spineA material=Frond sides=3 refaxis=(0,0.93,0.38)
+      ring 0.00 w=0.020 d=0.124
+      ring 1.00 w=0.008 d=0.027 tip
+      cap start=flat end=point
+    loft pinA6 at=(0,0.607,0.110) dir=side yaw=222 tilt=-9 len=0.250 on=spineA material=Deep sides=3 refaxis=(0,0.77,0.63)
+      ring 0.00 w=0.020 d=0.115
+      ring 1.00 w=0.008 d=0.025 tip
+      cap start=flat end=point
+    loft pinA7 at=(0,0.672,0.197) dir=side yaw=-42 tilt=-10 len=0.230 on=spineA material=Frond sides=3 refaxis=(0,0.37,0.93)
+      ring 0.00 w=0.020 d=0.106
+      ring 1.00 w=0.008 d=0.023 tip
+      cap start=flat end=point
+    loft pinA8 at=(0,0.690,0.305) dir=side yaw=222 tilt=-11 len=0.200 on=spineA material=Deep sides=3 refaxis=(0,-0.07,1.00)
+      ring 0.00 w=0.020 d=0.092
+      ring 1.00 w=0.008 d=0.020 tip
+      cap start=flat end=point
+    loft pinA9 at=(0,0.661,0.410) dir=side yaw=-42 tilt=-12 len=0.160 on=spineA material=Frond sides=3 refaxis=(0,-0.46,0.89)
+      ring 0.00 w=0.020 d=0.074
+      ring 1.00 w=0.008 d=0.016 tip
+      cap start=flat end=point
+    loft pinA10 at=(0,0.599,0.486) dir=side yaw=222 tilt=-13 len=0.100 on=spineA material=Deep sides=3 refaxis=(0,-0.77,0.64)
+      ring 0.00 w=0.020 d=0.046
+      ring 1.00 w=0.008 d=0.010 tip
+      cap start=flat end=point
+  end
+
+  # Frond B -- spun 74 deg around the crown, 0.90 of the reference
+  # length, leaving 8 deg off vertical. Everything inside the group is the
+  # one frond authored in its own frame: +Y up, arching toward +Z, leaflets
+  # on +/-X.
+  group frondB bone=crown at=1.0 dir=up spin=74
+    # The rachis. Six segments, five `down=` bends, accumulating from 8 deg
+    # off vertical to about 150 -- past horizontal, so the tip finishes
+    # pointing out and downward. The bends are front-loaded (34, 42, then 30,
+    # 22, 18) so the crest lands about three-quarters of the way out rather
+    # than at the very tip: a curve that only turns at the end is a hook, and
+    # one that turns evenly is a quarter circle. A fern is neither.
+    sweep spineB at=(0,0,0) dir=up pitch=8 material=Rib sides=3
+      seg len=0.360 r=0.0126
+      seg len=0.198 r=0.0099 down=34
+      seg len=0.153 r=0.0081 down=42
+      seg len=0.117 r=0.0063 down=30
+      seg len=0.090 r=0.0045 down=22
+      seg len=0.072 r=0.0027 down=18 tip
+    # Ten leaflets, alternating sides and shortening toward the tip. Their
+    # positions are points measured on the arch itself, `on=spineB` sinks each
+    # one into the tube so none floats off the rachis, and the `refaxis=` on
+    # every line is the rachis tangent there -- that is what stands the leaflet
+    # up in its own frond plane instead of leaving it a horizontal plate that
+    # the camera only ever sees edge-on. `d` is breadth here and `w` thickness.
+    loft pinB1 at=(0,0.088,0.012) dir=side yaw=-42 tilt=-4 len=0.135 on=spineB material=Frond sides=3 refaxis=(0,0.99,0.14)
+      ring 0.00 w=0.018 d=0.062
+      ring 1.00 w=0.007 d=0.014 tip
+      cap start=flat end=point
+    loft pinB2 at=(0,0.186,0.026) dir=side yaw=222 tilt=-5 len=0.189 on=spineB material=Deep sides=3 refaxis=(0,0.99,0.14)
+      ring 0.00 w=0.018 d=0.087
+      ring 1.00 w=0.007 d=0.019 tip
+      cap start=flat end=point
+    loft pinB3 at=(0,0.275,0.039) dir=side yaw=-42 tilt=-6 len=0.225 on=spineB material=Frond sides=3 refaxis=(0,0.99,0.14)
+      ring 0.00 w=0.018 d=0.104
+      ring 1.00 w=0.007 d=0.023 tip
+      cap start=flat end=point
+    loft pinB4 at=(0,0.372,0.053) dir=side yaw=222 tilt=-7 len=0.243 on=spineB material=Deep sides=3 refaxis=(0,0.98,0.19)
+      ring 0.00 w=0.018 d=0.112
+      ring 1.00 w=0.007 d=0.024 tip
+      cap start=flat end=point
+    loft pinB5 at=(0,0.457,0.081) dir=side yaw=-42 tilt=-8 len=0.243 on=spineB material=Frond sides=3 refaxis=(0,0.90,0.44)
+      ring 0.00 w=0.018 d=0.112
+      ring 1.00 w=0.007 d=0.024 tip
+      cap start=flat end=point
+    loft pinB6 at=(0,0.538,0.137) dir=side yaw=222 tilt=-9 len=0.225 on=spineB material=Deep sides=3 refaxis=(0,0.73,0.69)
+      ring 0.00 w=0.018 d=0.104
+      ring 1.00 w=0.007 d=0.023 tip
+      cap start=flat end=point
+    loft pinB7 at=(0,0.591,0.219) dir=side yaw=-42 tilt=-10 len=0.207 on=spineB material=Frond sides=3 refaxis=(0,0.31,0.95)
+      ring 0.00 w=0.018 d=0.095
+      ring 1.00 w=0.007 d=0.021 tip
+      cap start=flat end=point
+    loft pinB8 at=(0,0.601,0.317) dir=side yaw=222 tilt=-11 len=0.180 on=spineB material=Deep sides=3 refaxis=(0,-0.14,0.99)
+      ring 0.00 w=0.018 d=0.083
+      ring 1.00 w=0.007 d=0.018 tip
+      cap start=flat end=point
+    loft pinB9 at=(0,0.567,0.409) dir=side yaw=-42 tilt=-12 len=0.144 on=spineB material=Frond sides=3 refaxis=(0,-0.52,0.85)
+      ring 0.00 w=0.018 d=0.066
+      ring 1.00 w=0.007 d=0.014 tip
+      cap start=flat end=point
+    loft pinB10 at=(0,0.507,0.474) dir=side yaw=222 tilt=-13 len=0.090 on=spineB material=Deep sides=3 refaxis=(0,-0.81,0.58)
+      ring 0.00 w=0.018 d=0.041
+      ring 1.00 w=0.007 d=0.009 tip
+      cap start=flat end=point
+  end
+
+  # Frond C -- spun 146 deg around the crown, 1.05 of the reference
+  # length, leaving 2 deg off vertical. Everything inside the group is the
+  # one frond authored in its own frame: +Y up, arching toward +Z, leaflets
+  # on +/-X.
+  group frondC bone=crown at=1.0 dir=up spin=146
+    # The rachis. Six segments, five `down=` bends, accumulating from 2 deg
+    # off vertical to about 150 -- past horizontal, so the tip finishes
+    # pointing out and downward. The bends are front-loaded (34, 42, then 30,
+    # 22, 18) so the crest lands about three-quarters of the way out rather
+    # than at the very tip: a curve that only turns at the end is a hook, and
+    # one that turns evenly is a quarter circle. A fern is neither.
+    sweep spineC at=(0,0,0) dir=up pitch=2 material=Rib sides=3
+      seg len=0.420 r=0.0147
+      seg len=0.231 r=0.0115 down=34
+      seg len=0.179 r=0.0095 down=42
+      seg len=0.137 r=0.0074 down=30
+      seg len=0.105 r=0.0053 down=22
+      seg len=0.084 r=0.0032 down=18 tip
+    # Ten leaflets, alternating sides and shortening toward the tip. Their
+    # positions are points measured on the arch itself, `on=spineC` sinks each
+    # one into the tube so none floats off the rachis, and the `refaxis=` on
+    # every line is the rachis tangent there -- that is what stands the leaflet
+    # up in its own frond plane instead of leaving it a horizontal plate that
+    # the camera only ever sees edge-on. `d` is breadth here and `w` thickness.
+    loft pinC1 at=(0,0.104,0.004) dir=side yaw=-42 tilt=-4 len=0.158 on=spineC material=Frond sides=3 refaxis=(0,1.00,0.03)
+      ring 0.00 w=0.021 d=0.072
+      ring 1.00 w=0.008 d=0.016 tip
+      cap start=flat end=point
+    loft pinC2 at=(0,0.219,0.008) dir=side yaw=222 tilt=-5 len=0.221 on=spineC material=Deep sides=3 refaxis=(0,1.00,0.03)
+      ring 0.00 w=0.021 d=0.101
+      ring 1.00 w=0.008 d=0.022 tip
+      cap start=flat end=point
+    loft pinC3 at=(0,0.323,0.011) dir=side yaw=-42 tilt=-6 len=0.263 on=spineC material=Frond sides=3 refaxis=(0,1.00,0.03)
+      ring 0.00 w=0.021 d=0.121
+      ring 1.00 w=0.008 d=0.026 tip
+      cap start=flat end=point
+    loft pinC4 at=(0,0.439,0.016) dir=side yaw=222 tilt=-7 len=0.284 on=spineC material=Deep sides=3 refaxis=(0,1.00,0.09)
+      ring 0.00 w=0.021 d=0.130
+      ring 1.00 w=0.008 d=0.028 tip
+      cap start=flat end=point
+    loft pinC5 at=(0,0.540,0.038) dir=side yaw=-42 tilt=-8 len=0.284 on=spineC material=Frond sides=3 refaxis=(0,0.94,0.34)
+      ring 0.00 w=0.021 d=0.130
+      ring 1.00 w=0.008 d=0.028 tip
+      cap start=flat end=point
+    loft pinC6 at=(0,0.641,0.093) dir=side yaw=222 tilt=-9 len=0.263 on=spineC material=Deep sides=3 refaxis=(0,0.80,0.61)
+      ring 0.00 w=0.021 d=0.121
+      ring 1.00 w=0.008 d=0.026 tip
+      cap start=flat end=point
+    loft pinC7 at=(0,0.712,0.183) dir=side yaw=-42 tilt=-10 len=0.242 on=spineC material=Frond sides=3 refaxis=(0,0.40,0.91)
+      ring 0.00 w=0.021 d=0.111
+      ring 1.00 w=0.008 d=0.024 tip
+      cap start=flat end=point
+    loft pinC8 at=(0,0.736,0.295) dir=side yaw=222 tilt=-11 len=0.210 on=spineC material=Deep sides=3 refaxis=(0,-0.04,1.00)
+      ring 0.00 w=0.021 d=0.097
+      ring 1.00 w=0.008 d=0.021 tip
+      cap start=flat end=point
+    loft pinC9 at=(0,0.708,0.406) dir=side yaw=-42 tilt=-12 len=0.168 on=spineC material=Frond sides=3 refaxis=(0,-0.43,0.90)
+      ring 0.00 w=0.021 d=0.077
+      ring 1.00 w=0.008 d=0.017 tip
+      cap start=flat end=point
+    loft pinC10 at=(0,0.646,0.488) dir=side yaw=222 tilt=-13 len=0.105 on=spineC material=Deep sides=3 refaxis=(0,-0.75,0.66)
+      ring 0.00 w=0.021 d=0.048
+      ring 1.00 w=0.008 d=0.011 tip
+      cap start=flat end=point
+  end
+
+  # Frond D -- spun 218 deg around the crown, 0.86 of the reference
+  # length, leaving 9 deg off vertical. Everything inside the group is the
+  # one frond authored in its own frame: +Y up, arching toward +Z, leaflets
+  # on +/-X.
+  group frondD bone=crown at=1.0 dir=up spin=218
+    # The rachis. Six segments, five `down=` bends, accumulating from 9 deg
+    # off vertical to about 150 -- past horizontal, so the tip finishes
+    # pointing out and downward. The bends are front-loaded (34, 42, then 30,
+    # 22, 18) so the crest lands about three-quarters of the way out rather
+    # than at the very tip: a curve that only turns at the end is a hook, and
+    # one that turns evenly is a quarter circle. A fern is neither.
+    sweep spineD at=(0,0,0) dir=up pitch=9 material=Rib sides=3
+      seg len=0.344 r=0.0120
+      seg len=0.189 r=0.0095 down=34
+      seg len=0.146 r=0.0077 down=42
+      seg len=0.112 r=0.0060 down=30
+      seg len=0.086 r=0.0043 down=22
+      seg len=0.069 r=0.0026 down=18 tip
+    # Ten leaflets, alternating sides and shortening toward the tip. Their
+    # positions are points measured on the arch itself, `on=spineD` sinks each
+    # one into the tube so none floats off the rachis, and the `refaxis=` on
+    # every line is the rachis tangent there -- that is what stands the leaflet
+    # up in its own frond plane instead of leaving it a horizontal plate that
+    # the camera only ever sees edge-on. `d` is breadth here and `w` thickness.
+    loft pinD1 at=(0,0.084,0.013) dir=side yaw=-42 tilt=-4 len=0.129 on=spineD material=Frond sides=3 refaxis=(0,0.99,0.16)
+      ring 0.00 w=0.017 d=0.059
+      ring 1.00 w=0.007 d=0.013 tip
+      cap start=flat end=point
+    loft pinD2 at=(0,0.178,0.028) dir=side yaw=222 tilt=-5 len=0.181 on=spineD material=Deep sides=3 refaxis=(0,0.99,0.16)
+      ring 0.00 w=0.017 d=0.083
+      ring 1.00 w=0.007 d=0.018 tip
+      cap start=flat end=point
+    loft pinD3 at=(0,0.262,0.041) dir=side yaw=-42 tilt=-6 len=0.215 on=spineD material=Frond sides=3 refaxis=(0,0.99,0.16)
+      ring 0.00 w=0.017 d=0.099
+      ring 1.00 w=0.007 d=0.022 tip
+      cap start=flat end=point
+    loft pinD4 at=(0,0.355,0.057) dir=side yaw=222 tilt=-7 len=0.232 on=spineD material=Deep sides=3 refaxis=(0,0.98,0.21)
+      ring 0.00 w=0.017 d=0.107
+      ring 1.00 w=0.007 d=0.023 tip
+      cap start=flat end=point
+    loft pinD5 at=(0,0.435,0.085) dir=side yaw=-42 tilt=-8 len=0.232 on=spineD material=Frond sides=3 refaxis=(0,0.89,0.45)
+      ring 0.00 w=0.017 d=0.107
+      ring 1.00 w=0.007 d=0.023 tip
+      cap start=flat end=point
+    loft pinD6 at=(0,0.512,0.140) dir=side yaw=222 tilt=-9 len=0.215 on=spineD material=Deep sides=3 refaxis=(0,0.72,0.70)
+      ring 0.00 w=0.017 d=0.099
+      ring 1.00 w=0.007 d=0.022 tip
+      cap start=flat end=point
+    loft pinD7 at=(0,0.561,0.219) dir=side yaw=-42 tilt=-10 len=0.198 on=spineD material=Frond sides=3 refaxis=(0,0.29,0.96)
+      ring 0.00 w=0.017 d=0.091
+      ring 1.00 w=0.007 d=0.020 tip
+      cap start=flat end=point
+    loft pinD8 at=(0,0.569,0.313) dir=side yaw=222 tilt=-11 len=0.172 on=spineD material=Deep sides=3 refaxis=(0,-0.16,0.99)
+      ring 0.00 w=0.017 d=0.079
+      ring 1.00 w=0.007 d=0.017 tip
+      cap start=flat end=point
+    loft pinD9 at=(0,0.535,0.401) dir=side yaw=-42 tilt=-12 len=0.138 on=spineD material=Frond sides=3 refaxis=(0,-0.54,0.84)
+      ring 0.00 w=0.017 d=0.063
+      ring 1.00 w=0.007 d=0.014 tip
+      cap start=flat end=point
+    loft pinD10 at=(0,0.477,0.461) dir=side yaw=222 tilt=-13 len=0.086 on=spineD material=Deep sides=3 refaxis=(0,-0.82,0.57)
+      ring 0.00 w=0.017 d=0.040
+      ring 1.00 w=0.007 d=0.009 tip
+      cap start=flat end=point
+  end
+
+  # Frond E -- spun 290 deg around the crown, 0.96 of the reference
+  # length, leaving 6 deg off vertical. Everything inside the group is the
+  # one frond authored in its own frame: +Y up, arching toward +Z, leaflets
+  # on +/-X.
+  group frondE bone=crown at=1.0 dir=up spin=290
+    # The rachis. Six segments, five `down=` bends, accumulating from 6 deg
+    # off vertical to about 150 -- past horizontal, so the tip finishes
+    # pointing out and downward. The bends are front-loaded (34, 42, then 30,
+    # 22, 18) so the crest lands about three-quarters of the way out rather
+    # than at the very tip: a curve that only turns at the end is a hook, and
+    # one that turns evenly is a quarter circle. A fern is neither.
+    sweep spineE at=(0,0,0) dir=up pitch=6 material=Rib sides=3
+      seg len=0.384 r=0.0134
+      seg len=0.211 r=0.0106 down=34
+      seg len=0.163 r=0.0086 down=42
+      seg len=0.125 r=0.0067 down=30
+      seg len=0.096 r=0.0048 down=22
+      seg len=0.077 r=0.0029 down=18 tip
+    # Ten leaflets, alternating sides and shortening toward the tip. Their
+    # positions are points measured on the arch itself, `on=spineE` sinks each
+    # one into the tube so none floats off the rachis, and the `refaxis=` on
+    # every line is the rachis tangent there -- that is what stands the leaflet
+    # up in its own frond plane instead of leaving it a horizontal plate that
+    # the camera only ever sees edge-on. `d` is breadth here and `w` thickness.
+    loft pinE1 at=(0,0.095,0.010) dir=side yaw=-42 tilt=-4 len=0.144 on=spineE material=Frond sides=3 refaxis=(0,0.99,0.10)
+      ring 0.00 w=0.019 d=0.066
+      ring 1.00 w=0.008 d=0.014 tip
+      cap start=flat end=point
+    loft pinE2 at=(0,0.200,0.021) dir=side yaw=222 tilt=-5 len=0.202 on=spineE material=Deep sides=3 refaxis=(0,0.99,0.10)
+      ring 0.00 w=0.019 d=0.093
+      ring 1.00 w=0.008 d=0.020 tip
+      cap start=flat end=point
+    loft pinE3 at=(0,0.294,0.031) dir=side yaw=-42 tilt=-6 len=0.240 on=spineE material=Frond sides=3 refaxis=(0,0.99,0.10)
+      ring 0.00 w=0.019 d=0.110
+      ring 1.00 w=0.008 d=0.024 tip
+      cap start=flat end=point
+    loft pinE4 at=(0,0.399,0.042) dir=side yaw=222 tilt=-7 len=0.259 on=spineE material=Deep sides=3 refaxis=(0,0.99,0.16)
+      ring 0.00 w=0.019 d=0.119
+      ring 1.00 w=0.008 d=0.026 tip
+      cap start=flat end=point
+    loft pinE5 at=(0,0.490,0.069) dir=side yaw=-42 tilt=-8 len=0.259 on=spineE material=Frond sides=3 refaxis=(0,0.91,0.41)
+      ring 0.00 w=0.019 d=0.119
+      ring 1.00 w=0.008 d=0.026 tip
+      cap start=flat end=point
+    loft pinE6 at=(0,0.579,0.126) dir=side yaw=222 tilt=-9 len=0.240 on=spineE material=Deep sides=3 refaxis=(0,0.75,0.66)
+      ring 0.00 w=0.019 d=0.110
+      ring 1.00 w=0.008 d=0.024 tip
+      cap start=flat end=point
+    loft pinE7 at=(0,0.638,0.212) dir=side yaw=-42 tilt=-10 len=0.221 on=spineE material=Frond sides=3 refaxis=(0,0.34,0.94)
+      ring 0.00 w=0.019 d=0.102
+      ring 1.00 w=0.008 d=0.022 tip
+      cap start=flat end=point
+    loft pinE8 at=(0,0.652,0.316) dir=side yaw=222 tilt=-11 len=0.192 on=spineE material=Deep sides=3 refaxis=(0,-0.11,0.99)
+      ring 0.00 w=0.019 d=0.088
+      ring 1.00 w=0.008 d=0.019 tip
+      cap start=flat end=point
+    loft pinE9 at=(0,0.620,0.415) dir=side yaw=-42 tilt=-12 len=0.154 on=spineE material=Frond sides=3 refaxis=(0,-0.49,0.87)
+      ring 0.00 w=0.019 d=0.071
+      ring 1.00 w=0.008 d=0.015 tip
+      cap start=flat end=point
+    loft pinE10 at=(0,0.558,0.487) dir=side yaw=222 tilt=-13 len=0.096 on=spineE material=Deep sides=3 refaxis=(0,-0.79,0.61)
+      ring 0.00 w=0.019 d=0.044
+      ring 1.00 w=0.008 d=0.010 tip
+      cap start=flat end=point
+  end
+
+checks
+  # Rooted. The crown knot is the only thing touching the floor, and it must.
+  assert bottom(knot) < 0.02
+  # A fountain, not a bush: roughly as wide as it is tall. Too narrow and the
+  # fronds have stopped arching; too wide and `BlockModels` (which normalises on
+  # the Y extent) delivers a fern spilling out of its own cell.
+  assert width / height in 0.85..1.45
+  assert depth / height in 0.85..1.45
+  # THE check. `pin*10` is the leaflet riding the very tip of each frond, and it
+  # must sit *below* the highest point of its own rachis. That is what "arches
+  # over" means as a number, and it is the single thing separating this model
+  # from a palm -- a straight frond puts its last leaflet at its own crest.
+  # Checked on three fronds, including the longest and the shortest, because the
+  # arch is scaled per frond and a scale that is too aggressive flattens it.
+  assert top(pinA10) < top(spineA)
+  assert top(pinC10) < top(spineC)
+  assert top(pinD10) < top(spineD)
+  # ...and the tip has not merely stopped rising: it stands no more than a
+  # quarter higher than the mid-frond leaflet, which bounds how tall the arch's
+  # outer half is allowed to be.
+  assert top(pinA10) < top(pinA5) * 1.25
+  # ...and the tips are thrown OUT, not tucked in. Horizontal reach of the tip
+  # leaflet against the reach of a mid-frond one -- if the fronds ever straighten,
+  # the outer leaflets stop being the widest thing in the model. Reach and not
+  # `abs(x)`, because the five fronds are spun to five headings and an x-only
+  # test reads three of them as tucked in when they are not.
+  assert (x(pinA10)*x(pinA10) + z(pinA10)*z(pinA10)) ** 0.5 > (x(pinA4)*x(pinA4) + z(pinA4)*z(pinA4)) ** 0.5 * 1.5
+  assert (x(pinC10)*x(pinC10) + z(pinC10)*z(pinC10)) ** 0.5 > (x(pinC4)*x(pinC4) + z(pinC4)*z(pinC4)) ** 0.5 * 1.5
+  # Five fronds at five heights, so the crest is ragged rather than a dome. C is
+  # the long one and D the short one, by construction.
+  assert top(spineC) > top(spineD) * 1.12
+  assert top(spineC) > top(spineB)
+  # The crown is small and the fronds clear it -- a knot as big as the plant is a
+  # tussock. Stated against the model's own width, which is what should dominate.
+  assert width(knot) < width / 3.5
+  assert top(knot) < top(spineA) / 3.5
+  # Leaflets stand up in the frond plane rather than lying flat. `pinA3` is low
+  # on frond A where the rachis is still near-vertical, so its blade should be
+  # near-vertical too and its bounding box should have real height. This is the
+  # check that catches the bug that cost this model two rebuilds: a leaflet
+  # authored as a horizontal plate is invisible from a horizontal camera, and a
+  # sheet full of thin green spikes is exactly what that looks like.
+  assert height(pinA3) > 0.05
+  assert width(pinA3) > height(pinA3) * 1.1
+  assert height(pinA2) > height(pinA10)
+  # Budget. Five fronds, one sweep and ten leaflets each, plus the knot.
+  assert parts == 56
+  assert tris < 700
+  measure spread width / height
+  measure archdrop top(spineA) - top(pinA10)
+  measure tipreach (x(pinA10)*x(pinA10) + z(pinA10)*z(pinA10)) ** 0.5

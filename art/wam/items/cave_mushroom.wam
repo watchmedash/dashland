@@ -1,0 +1,234 @@
+# Cave Mushroom — the brown toadstool patch that carpets a cave floor.
+#
+# The hard requirement on this model is **not to be the glowcap**. `mushroom.wam`
+# is already in the world and it is a very specific silhouette: one tall leader
+# with a huge flat overhanging plate, a torn veil ruff halfway up the stalk, and
+# two little buttons crouched underneath. Recolouring that brown would have given
+# the caves a purple mushroom with the saturation turned down, and at torchlight
+# distance the player would read one plant in two flavours rather than two
+# species. So every one of the glowcap's defining decisions is inverted here:
+#
+#  - **Squat, not tall.** Five bodies of *similar* height rather than a leader
+#    plus subordinates. There is a spread — the tallest is about a third taller
+#    than the shortest — but no one of them dominates, so the clump reads as a
+#    patch of one age rather than as a family group.
+#  - **Domes, not plates.** The glowcap's hood is 0.74 wide over 0.30 long, a
+#    disc. These caps are about 1.3 wide for every 1 tall: a closed knuckle of a
+#    dome whose widest ring sits at 0.30 of its length. The overhang over the
+#    stem is 2.4×, not 6.5× — enough to be a mushroom and not a nail, nowhere
+#    near enough to be mistaken for a parasol.
+#  - **Thick stems, no skirt.** The stalk is a fat peg (0.225 wide against the
+#    glowcap's 0.115 on a taller model), and there is deliberately no veil ruff.
+#    The ruff is the glowcap's one horizontal break; leaving it off keeps these
+#    stems unbroken columns and the two species distinguishable in profile even
+#    when the colour is gone.
+#
+# **The cream is the whole visibility budget.** A brown mushroom on grey stone in
+# near darkness is a brown smudge. What saves it is that the stems are a pale
+# bone cream and the gill undersides are paler still, so the model is a row of
+# bright verticals with dark caps sitting on them — value contrast, not hue, and
+# value contrast survives a torch. The caps run from a mid earth brown at the rim
+# to a darker umber over the crown, which is the direction real fungus shades and
+# also puts the darkest value at the top where it silhouettes against the ceiling
+# light rather than against the floor.
+#
+# `capD` is tilted 24° off vertical and its stem leans with it. Four upright
+# mushrooms of similar height at similar spacings read as a manufactured row of
+# pegs — a fence — from the front view. One body knocked off plumb breaks the
+# rhythm and the whole patch stops looking placed. The fifth body is a button,
+# deliberately *much* smaller and un-flared, so the patch has one silhouette that
+# is not a repeat of its neighbours.
+#
+# Three things the render sheet changed, all of them invisible in the source:
+#
+#  - **The stems were far too long.** Authored at 0.50 of model height on a 0.23
+#    shaft they were 2.2:1 columns, and the first sheet was five *tall* thin
+#    mushrooms — the glowcap's proportion in brown, which is the one outcome this
+#    model exists to avoid. They came down to 0.36–0.44 and out to 0.21–0.23, and
+#    the caps went up 8% to hold the overhang ratio. Squatness is a ratio between
+#    two numbers neither of which looks wrong alone.
+#  - **`capD` was tilted twice.** Its stem leans 24° and the cap carried another
+#    −22° on top of it, so the cap sat at 46° to its own stalk and the loft folded
+#    — the sheet showed a bright wedge erupting out of the crown. The cap now
+#    carries −4°, a nudge, and inherits the rest from the stalk it grows on.
+#  - **The bodies were packed too close.** At the original spacing capB and capD
+#    grew through each other and the side view read as one lump with two tops.
+#    They are spread to roughly a 0.45 ring now and the `noclip` pairs at the
+#    bottom of the checks are there so nobody closes the gap again by eye.
+#
+# Layout follows the `sea_grass` rule: a body that leans along X is rooted a
+# half-thickness off the axis in the same direction so it is honestly one-sided
+# and the centreline lint has nothing to complain about; the one that leans along
+# Z stays centred in X. Wider than tall by a comfortable margin, because
+# `BlockModels` normalises on the Y extent and a floor cover that is taller than
+# it is wide arrives knee-high and stops being a floor cover.
+
+model cave_mushroom
+  height 0.26
+  style chunky
+
+palette
+  Cap   #7c5334
+  Crown #5a3a24
+  Rim   #9c6f45
+  Stem  #ded1b6
+  Gill  #f0e6cf
+
+skeleton
+  root soil at 0.0
+  # Five separate fruiting bodies out of one patch of mycelium — separate bones
+  # off the soil root, never branched off each other. Mushrooms are separate
+  # organisms; branching them makes the clump read as one plant with limbs.
+  # Similar lengths on the first four is the point of the model.
+  bone stA parent=soil side=-0.42 fwd=0.12  up=0.022 dir=up tilt=8   pitch=4   len=0.40
+  bone stB parent=soil side=0.50  fwd=-0.22 up=0.018 dir=up tilt=-6  pitch=-3  len=0.36
+  # C and E lean along Z only and sit dead on X=0, so they are honestly
+  # symmetric and the centreline lint leaves them alone. Anything tilted in X
+  # carries a matching `side=` root offset instead — the `sea_grass` rule.
+  bone stC parent=soil side=0     fwd=-0.44 up=0.024 dir=up tilt=0   pitch=-9  len=0.44
+  # The off-plumb one. 24° of tilt with a matching root offset outward.
+  bone stD parent=soil side=0.40  fwd=0.30  up=0.050 dir=up tilt=-24 pitch=8   len=0.38
+  # The button: half the height of its neighbours, still closed.
+  bone stE parent=soil side=0     fwd=0.50  up=0.026 dir=up tilt=0   pitch=14  len=0.20
+
+parts
+  # Stems. Six-sided, barely tapered, and *fat* — a cave toadstool is a cork on a
+  # peg, and the slender column the glowcap uses reads as a different plant. The
+  # foot flares out into the mycelium mat, which is also what the model sits on.
+  loft stemA bones=stA..stA material=Stem sides=6
+    ring 0.00 w=0.30 d=0.29
+    ring 0.12 w=0.24 d=0.235
+    ring 0.70 w=0.225 d=0.22
+    ring 1.00 w=0.23 d=0.225
+    cap start=flat end=flat
+  loft stemB bones=stB..stB material=Stem sides=6
+    ring 0.00 w=0.28 d=0.27
+    ring 0.12 w=0.22 d=0.215
+    ring 0.70 w=0.205 d=0.20
+    ring 1.00 w=0.21 d=0.205
+    cap start=flat end=flat
+  loft stemC bones=stC..stC material=Stem sides=6
+    ring 0.00 w=0.29 d=0.28
+    ring 0.12 w=0.23 d=0.225
+    ring 0.70 w=0.215 d=0.21
+    ring 1.00 w=0.22 d=0.215
+    cap start=flat end=flat
+  loft stemD bones=stD..stD material=Stem sides=6
+    ring 0.00 w=0.27 d=0.26
+    ring 0.12 w=0.21 d=0.205
+    ring 0.70 w=0.20 d=0.195
+    ring 1.00 w=0.205 d=0.20
+    cap start=flat end=flat
+  loft stemE bones=stE..stE material=Stem sides=6
+    ring 0.00 w=0.22 d=0.215
+    ring 0.14 w=0.17 d=0.165
+    ring 1.00 w=0.16 d=0.155
+    cap start=flat end=flat
+
+  # The caps. Eight sides is enough for a dome this small; the glowcap needs ten
+  # because its rim is a wide circle seen edge-on, and here the rim is short.
+  #
+  # The ring at 0.00 is the gill face — a real disc set under the rim, cream, and
+  # it is what the player sees from ankle height looking along the floor. The
+  # widest ring is at 0.30 rather than the glowcap's 0.22: a fraction higher up,
+  # which rounds the shoulder over instead of leaving a flat lip, and that is the
+  # difference between a dome and a plate stated as one number.
+  loft capA bone=stA at=1.0 dir=up len=0.34 on=stemA material=Cap sides=8
+    ring 0.00 w=0.37 d=0.36 material=Gill
+    ring 0.14 w=0.50 d=0.49 material=Rim
+    ring 0.30 w=0.53 d=0.52 material=Cap
+    ring 0.62 w=0.48 d=0.47
+    ring 0.86 w=0.34 d=0.33 material=Crown
+    ring 1.00 w=0.13 d=0.12
+    cap start=flat end=dome
+  loft capB bone=stB at=1.0 dir=up pitch=6 len=0.30 on=stemB material=Cap sides=8
+    ring 0.00 w=0.33 d=0.32 material=Gill
+    ring 0.14 w=0.44 d=0.43 material=Rim
+    ring 0.30 w=0.47 d=0.46 material=Cap
+    ring 0.62 w=0.42 d=0.41
+    ring 0.86 w=0.30 d=0.29 material=Crown
+    ring 1.00 w=0.11 d=0.10
+    cap start=flat end=dome
+  loft capC bone=stC at=1.0 dir=up pitch=-5 len=0.32 on=stemC material=Cap sides=8
+    ring 0.00 w=0.35 d=0.34 material=Gill
+    ring 0.14 w=0.47 d=0.46 material=Rim
+    ring 0.30 w=0.50 d=0.49 material=Cap
+    ring 0.62 w=0.45 d=0.44
+    ring 0.86 w=0.32 d=0.31 material=Crown
+    ring 1.00 w=0.12 d=0.11
+    cap start=flat end=dome
+  # The tilted one — the cap keeps going the way its stalk leans, so the whole
+  # body is off plumb rather than a straight stalk wearing a crooked hat.
+  loft capD bone=stD at=1.0 dir=up tilt=-4 len=0.30 on=stemD material=Cap sides=8
+    ring 0.00 w=0.31 d=0.30 material=Gill
+    ring 0.14 w=0.42 d=0.41 material=Rim
+    ring 0.30 w=0.45 d=0.44 material=Cap
+    ring 0.62 w=0.41 d=0.40
+    ring 0.86 w=0.29 d=0.28 material=Crown
+    ring 1.00 w=0.11 d=0.10
+    cap start=flat end=dome
+  # The button. Almost no overhang and no gill face worth speaking of: this is
+  # the cap before it opens, and it exists so the patch has one silhouette that
+  # is not a repeat of the other four.
+  loft capE bone=stE at=1.0 dir=up len=0.20 on=stemE material=Cap sides=7
+    ring 0.00 w=0.17 d=0.165 material=Gill
+    ring 0.18 w=0.24 d=0.235 material=Cap
+    ring 0.55 w=0.26 d=0.25
+    ring 0.86 w=0.20 d=0.19 material=Crown
+    ring 1.00 w=0.09 d=0.085
+    cap start=flat end=dome
+
+checks
+  # Every body is rooted in the floor. A mushroom hovering over the stone is the
+  # one defect a ground cover can never survive — the player looks down at it.
+  assert bottom(stemA) < 0.02
+  assert bottom(stemB) < 0.02
+  assert bottom(stemC) < 0.02
+  assert bottom(stemD) < 0.02
+  assert bottom(stemE) < 0.02
+  # Ground cover, so wider than tall in both horizontal axes. This is the check
+  # that stops the patch turning into a shrub the next time a stalk is
+  # lengthened, and the reason the bodies are spread as far as they are.
+  assert width / height > 1.2
+  assert depth / height > 1.0
+  # Domes, not plates: the cap is only about 1.4× as wide as it is tall. The
+  # glowcap fails this by a mile (its hood is 2.5× wider than tall) and that is
+  # exactly the difference the two models are trading on.
+  assert width(capA) / height(capA) in 1.15..1.7
+  assert width(capC) / height(capC) in 1.15..1.7
+  # Modest overhang. There has to be *some* — a cap flush with its stem is a
+  # club, not a mushroom — but the upper bound is what keeps it out of parasol
+  # territory. Measured against the stem's flared foot, so the true ratio up at
+  # the collar is a little larger than the number.
+  assert width(capA) / width(stemA) in 1.6..2.6
+  assert width(capB) / width(stemB) in 1.6..2.6
+  # A patch of one age: no leader. The shortest of the four adults clears
+  # three quarters of the tallest, where the glowcap's buttons sit at a third.
+  assert top(capB) > top(capC) * 0.72
+  assert top(capD) > top(capC) * 0.66
+  # ...and one button that *is* clearly junior, so the patch is not four clones.
+  assert top(capE) < top(capC) * 0.62
+  assert volume(capE) < volume(capA) / 2
+  # The tilted body is genuinely off plumb. If someone straightens this the
+  # front view goes back to being a picket fence.
+  assert elevation(stD) in 60..78
+  # The other four are near upright, so the tilt reads as one deliberate
+  # exception rather than as a windblown patch.
+  assert elevation(stA) > 80
+  assert elevation(stC) > 78
+  # The bodies are spread, not stacked in a line: real separation in z as well
+  # as in x, which is what makes the clump survive a 90° camera move.
+  assert depth > 0.55 * width
+  # Each body is a separate fruiting organism, so no two caps may grow through
+  # each other. The first spacing had capB and capD interpenetrating and the
+  # side view showed it as a bright wedge of one cap's rim erupting out of the
+  # other's crown — the clump has to be five things, not one welded mass.
+  noclip capA vs capB,capC,capD,capE
+  noclip capB vs capC,capD,capE
+  noclip capC vs capD,capE
+  noclip capD vs capE
+  # Budget.
+  assert parts == 10
+  assert tris < 700
+  measure spread width / height
+  measure capdome width(capA) / height(capA)

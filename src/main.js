@@ -4891,19 +4891,23 @@ class Game {
         // so it reads as the edge going in rather than as a menu.
         this.audio.mobHit(mobHit.mob.pos, crit > 1 ? 1.5 : 1);
         if (crit > 1) {
+          // Two channels, and deliberately no particles.
+          //
+          // A crit first shipped with a burst of shards, which came out of the
+          // block-break debris pool — the same instanced cubes that were taken
+          // off the mining path at the player's request, because the crack
+          // overlay already told that story. Putting them back on a different
+          // event put them back in the game, and they were recognised on sight.
+          // Shrinking them below the size a cube resolves at was the obvious
+          // save; dropping them is the better one. The sound is heard wherever
+          // you are looking and the sight is where the eye already is, so a
+          // third announcement was never carrying its own weight.
+          //
+          // The one thing lost is that the crosshair is hidden in the
+          // third-person views, so there a crit is audible only. That is a fair
+          // trade for never showing a cube again, and the thump is already
+          // pitched differently from an ordinary hit.
           this.audio.ui(1480);
-          // At the chest rather than at the feet: `mob.pos` is the base of the
-          // body, and a burst down there is half swallowed by the ground. Sized
-          // off the grown height the same way `knockMass` is, so a burst on a
-          // calf is not floating above its head.
-          const m = mobHit.mob;
-          const h = m.baseHeight ? m.baseHeight * m.grown : m.spec.height;
-          _v1.copy(m.pos).addScaledVector(this.player.up, h * 0.55);
-          this.particles.critSpark(_v1, this.player.up);
-          // And on the sight, which is where the eye already is in first person.
-          // It is not redundant with the sparks: the two carry each other,
-          // because the crosshair is hidden entirely in the third-person views
-          // and the burst can land behind your own shoulder in them.
           this.ui.critHit();
         }
         // Shove scales with the swing, rather than switching on at 85%.

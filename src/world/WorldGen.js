@@ -616,17 +616,25 @@ const depthOfK = (k) => R_SEA - (R_MIN + k + 0.5);
 const REEF_R_MIN = 2.6;
 const REEF_R_MAX = 3.4;
 /** How many lattice candidates in warm water actually carry a reef. */
-const REEF_CHANCE = 0.85;
+const REEF_CHANCE = 0.55;
 /**
  * The depth band, in blocks below R_SEA, measured to the floor cell's centre.
  *
- * 2 is the shallowest a prop can stand without owning the surface quad (see
- * above). 12 is where `fillColumn`'s seabed goes from clay and sand to slate
- * and basalt and the light stops — the same line the material bands already
- * draw, reused rather than re-invented.
+ * 2 was the shallowest a prop can stand without owning the surface quad, and
+ * the band ran to 12 — so measured in the running game the whole distribution
+ * sat between 2 and 11 and peaked at 5. That is the shelf you can stand on and
+ * see the bottom of, which is exactly the complaint: a reef you meet by wading
+ * is not something you dive for.
+ *
+ * 5 to 16 instead. The floor is deep enough that a reef is under the surface
+ * rather than beside it, and 16 is against the real bathymetry — the ocean
+ * bottoms out at R_SEA - R_SEABED_MIN = 17 — so the band now reaches the foot
+ * of the slope instead of stopping a third of the way down it. The shallow
+ * limit stays a limit for the surface-quad reason, it just is not the one
+ * doing the work any more.
  */
-const REEF_DEPTH_MIN = 2.0;
-const REEF_DEPTH_MAX = 12.0;
+const REEF_DEPTH_MIN = 5.0;
+const REEF_DEPTH_MAX = 16.0;
 /**
  * Where reefs are, as a function of the seabed temperature term.
  *
@@ -689,8 +697,16 @@ const KELP_PEAK = 0.34;
  * nothing.
  */
 const LAKE_WEED = new Uint8Array(8);
-LAKE_WEED[LAKE_POND] = 1;
-LAKE_WEED[LAKE_MARSH] = 1;
+// Empty on purpose. Sea grass and kelp were allowed in ponds and marshes on the
+// reasoning that freshwater weed is a real thing — but in play they read as the
+// reef having leaked inland: the player's report was "the corals even appear in
+// lakes", and measurement said no coral ever had. It was these, 20 cells of
+// them above sea level, and the eye does not sort a strand of sea grass from a
+// coral at a glance. Both entries stay written out rather than deleted so the
+// next person can see this was decided rather than never considered.
+//
+// LAKE_WEED[LAKE_POND] = 1;
+// LAKE_WEED[LAKE_MARSH] = 1;
 
 /** Scratch for the two reef passes. Neither nests inside anything. */
 const _reefDir = [0, 0, 0];

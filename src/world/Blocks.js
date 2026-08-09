@@ -521,6 +521,14 @@ export const IS_OPAQUE = new Uint8Array(N_BLOCKS);
 export const IS_SOLID = new Uint8Array(N_BLOCKS);
 /** Foliage cubes. The mesher culls leaf-against-leaf faces, "fast leaves" style. */
 export const IS_LEAF = new Uint8Array(N_BLOCKS);
+/**
+ * Wood or foliage — the parts of a tree a climber can hold on to.
+ *
+ * Separate from `IS_LEAF` because that one answers "is this a canopy?", which
+ * decides what counts as a floor, and this one answers "is this a tree?", which
+ * decides what a monkey can climb. A trunk is the second and not the first.
+ */
+export const IS_TREE = new Uint8Array(N_BLOCKS);
 export const RENDER_TYPE = new Uint8Array(N_BLOCKS);
 export const LIGHT_EMIT = new Uint8Array(N_BLOCKS);
 export const LIGHT_R = new Uint8Array(N_BLOCKS);
@@ -771,6 +779,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_OPAQUE[i] = b.opaque ? 1 : 0;
   IS_SOLID[i] = b.solid ? 1 : 0;
   IS_LEAF[i] = b.name.startsWith('leaves') ? 1 : 0;
+  IS_TREE[i] = (IS_LEAF[i] || b.name.startsWith('log_')) ? 1 : 0;
   RENDER_TYPE[i] = b.render;
   LIGHT_EMIT[i] = b.light;
   LIGHT_R[i] = Math.round(b.lightColor[0] * 255);

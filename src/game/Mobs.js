@@ -19,7 +19,7 @@ import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn,
 } from '../world/Sphere.js';
 import {
-  ID, IS_SHAPED, IS_LEAF, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
+  ID, IS_SHAPED, IS_LEAF, IS_TREE, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
   isPassable, CONTACT_HURT,
 } from '../world/Blocks.js';
 import { itemIdOf } from './Items.js';
@@ -219,6 +219,23 @@ const MOB_STEP_DOWN = MOB_FALL_FREE;
  * set the height outright with no cap at all — see the note there.
  */
 const MOB_MAX_RISE = 1.05;
+
+// --- climbing (the monkey, and nothing else) ---------------------------------
+/** How far above itself a climber will look for a canopy worth going to. */
+const CLIMB_REACH = 12;
+/** Layers per second up or down. Slower than a fall, faster than a walk. */
+const CLIMB_SPEED = 2.2;
+/** Seconds a monkey sits up there before coming back down. */
+const PERCH_MIN = 6;
+const PERCH_MAX = 16;
+/** Seconds between a climber asking itself whether to go up. */
+const CLIMB_PERIOD = 2.5;
+/** And the chance it says yes when it is beside a tree and free to. */
+const CLIMB_CHANCE = 0.5;
+/** And how long it will not consider climbing again after coming down. */
+const CLIMB_REST = 20;
+/** Seconds of getting nowhere before a climb is written off. */
+const CLIMB_STALL = 3;
 /**
  * Standing in lava, in half-hearts, and how often the toll is taken.
  *
@@ -696,6 +713,11 @@ const pet = (file, o) => ({
   ...(o.amphibious ? { amphibious: true } : null),
   ...(o.shore ? { shore: true } : null),
   ...(o.stalks ? { stalks: true } : null),
+  // Foliage is floor to this one. Spelled out here like every other flag
+  // because this builder copies nothing it has not been told about — a
+  // `climbs: true` left on the species literal alone is silently dropped, and
+  // the only symptom is a monkey that keeps both feet on the ground.
+  ...(o.climbs ? { climbs: true } : null),
   ...(o.flies ? { flies: true, hover: o.hover ?? 1.5 } : null),
   ...(o.fights ? {
     predator: true,
@@ -937,6 +959,10 @@ const SPECIES = {
   monkey: pet('monkey', {
     label: 'Monkey', h: 0.68, hp: 6, spd: 1.60, shy: 0.8, turn: 5.0, accel: 9.0,
     graze: 0.35, idleMin: 1, idleMax: 3, drops: [['hide', 1, 1]], hops: true, hopImpulse: 3.6,
+    // The only climber on the planet: foliage is floor to a monkey and to
+    // nothing else. See `_groundK` for why that is a per-species exception
+    // rather than a rule change.
+    climbs: true,
   }),
   beaver: pet('beaver', {
     label: 'Beaver', h: 0.5, hp: 6, spd: 1.25, shy: 0.7, turn: 4.0, accel: 7.0,
@@ -1809,6 +1835,17 @@ export class Mobs {
       hungerT: Math.random() * PREY_REST_MIN,
       preyT: Math.random() * PREY_PERIOD,
       prey: null,
+      // --- up a tree, monkeys only ---
+      /** Layer it is climbing toward, or null when it is not climbing. */
+      climbTo: null,
+      /** Seconds left sitting in the canopy before it heads back down. */
+      perchT: 0,
+      /** Staggered, so a troop that spawns together does not all go up at once. */
+      climbRestT: Math.random() * CLIMB_REST,
+      climbT: Math.random() * CLIMB_PERIOD,
+      /** Stall detector for a climb that is not making progress. */
+      climbLastK: 0,
+      climbStallT: 0,
       // --- the night stalk, big cats only ---
       prowl: 0,            // seconds of telegraph left; 0 means it is not
       // There is deliberately no per-animal prowl clock here any more. It was
@@ -2566,7 +2603,7 @@ export class Mobs {
       const oi = cw * ll - sw * lw;
       const oj = sw * ll + cw * lw;
       const col = this._colOf(f, ci + oi, cj + oj);
-      const gk = this._groundK(col, hereK + 1);
+      const gk = this._groundK(col, hereK + 1, !!mob.spec.climbs);
       if (gk < 0) { cost++; continue; }
       // Nothing walks into lava, whatever else it is willing to walk into.
       //
@@ -2652,7 +2689,7 @@ export class Mobs {
       const lw = FOOT_OFF[n * 2] * mob.halfW;
       const ll = FOOT_OFF[n * 2 + 1] * mob.halfL;
       const col = this._colOf(mob.cell.f, ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
-      const gk = this._groundK(col, hereK + 1);
+      const gk = this._groundK(col, hereK + 1, !!mob.spec.climbs);
       if (gk !== hereK + 1) continue;              // not a one-block rise
       // ...unless the block is taller than its own cell. A fence stands 1.5,
       // and without this an animal read the top of it as an ordinary step and
@@ -2719,7 +2756,7 @@ export class Mobs {
       const lw = FOOT_OFF[n * 2] * mob.halfW;
       const ll = FOOT_OFF[n * 2 + 1] * mob.halfL;
       const col = this._colOf(f, ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
-      const gk = this._groundK(col, fromK);
+      const gk = this._groundK(col, fromK, !!mob.spec.climbs);
       if (gk < 0) continue;
       if (n > 0) {
         // Not the centre, so this is ground the body merely overhangs. It only
@@ -2918,7 +2955,7 @@ export class Mobs {
       for (let n = 0; n < 8; n++) {
         const di = RING8[n * 2] * s, dj = RING8[n * 2 + 1] * s;
         const c2 = stepColumn(col, di, dj);
-        const gk = this._groundK(c2, topK + 2);
+        const gk = this._groundK(c2, topK + 2, !!mob.spec.climbs);
         if (gk < 0) continue;
         if (gk > topK + 1) continue;                  // a cliff face, not a bank
         if (p.liquidAt(c2, gk + 1)) continue;         // still water — keep looking
@@ -2946,7 +2983,61 @@ export class Mobs {
    * headroom check does. Both have to agree or the door still cannot be walked
    * through.
    */
-  _groundK(col, fromK) {
+  /**
+   * Is there a trunk or a branch within reach of this cell to hold on to?
+   *
+   * A climber goes up the air column *beside* the tree rather than inside it,
+   * for the plain reason that a trunk is solid and a monkey drawn inside one
+   * looks like a bug. Holding on to the neighbour is also what makes the climb
+   * end by itself: step away from the tree and there is nothing to hold.
+   */
+  _climbHold(col, k) {
+    // Feet *and* the layer above them. Checking only the feet found nothing at
+    // the bottom of a trunk: an animal stands on the ground layer and the tree
+    // beside it starts at the next one up, so a monkey with both hands on a
+    // trunk measured as holding nothing at all.
+    for (let h = 0; h <= 1; h++) {
+      const kk = k + h;
+      if (kk < 0 || kk >= D) continue;
+      for (let d = 0; d < 4; d++) {
+        const n = colNeighbor(col, d);
+        if (n < 0) continue;
+        if (IS_TREE[this.planet.at(n, kk)]) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The canopy a climber standing here could get to, or -1.
+   *
+   * Measured from a real oak: the trunk is seven layers of wall and the lowest
+   * leaf sits level with its top, so there is no staircase up a tree and no
+   * amount of relaxing the step rules would find one. The climb has to be a
+   * climb.
+   */
+  _canopyAbove(col, fromK) {
+    const p = this.planet;
+    for (let k = Math.floor(fromK) + 1; k < Math.min(D - 1, fromK + CLIMB_REACH); k++) {
+      if (IS_LEAF[p.at(col, k)]) {
+        // The last clear layer *under* the foliage — in the branches, not on the
+        // roof. Aiming at the top of the canopy does not work and should not:
+        // leaves are solid, so a body cannot pass up through them, and a monkey
+        // sent there climbed until its head met the first leaf and then hung at
+        // that height for good — never arriving, so never starting the timer
+        // that brings it back down. Sitting in the branches is both reachable
+        // and the thing an actual monkey does.
+        return k - 1;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * @param {boolean} [climber] whether foliage counts as floor for this body.
+   *   Off for everything but a monkey — see the leaf rule below.
+   */
+  _groundK(col, fromK, climber = false) {
     const p = this.planet;
     for (let k = Math.min(D - 1, fromK); k >= 0; k--) {
       if (!p.solidAt(col, k)) continue;
@@ -2956,7 +3047,11 @@ export class Mobs {
       // *walk*, a canopy is a surface reachable by a one-block hop from the
       // branch beside it, and husks were quietly climbing trees and spending
       // the night standing on top of them.
-      if (IS_LEAF[p.at(col, k)]) continue;
+      //
+      // A climber is the deliberate exception, and it is per-species rather
+      // than a relaxation of the rule: `climbs` is on the monkey and nothing
+      // else, so the husks stay on the ground where that comment put them.
+      if (!climber && IS_LEAF[p.at(col, k)]) continue;
       return k;
     }
     return -1;
@@ -3313,7 +3408,7 @@ export class Mobs {
   _findPath(mob, goal) {
     const start = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
     if (start === goal) return null;
-    const startK = this._groundK(start, Math.floor(mob.cell.ck) + 1);
+    const startK = this._groundK(start, Math.floor(mob.cell.ck) + 1, !!mob.spec.climbs);
     if (startK < 0) return null;
 
     const gScore = new Map([[start, 0]]);
@@ -3352,7 +3447,7 @@ export class Mobs {
    */
   _stepTo(col, fromK, mob) {
     const p = this.planet;
-    const gk = this._groundK(col, fromK + 1);
+    const gk = this._groundK(col, fromK + 1, !!mob.spec.climbs);
     if (gk < 0) return -1;
     if (gk - fromK > 1) return -1;                 // too big a step up
     if (fromK - gk > PATH_MAX_DROP) return -1;     // too far to fall
@@ -4345,7 +4440,50 @@ export class Mobs {
         const want = (under >= 0 ? under + spec.hover : c.ck) + bob;
         const climb = Math.max(-2.2, Math.min(2.2, (want - c.ck) * 2.4));
         mob.vel.k += (climb - mob.vel.k) * Math.min(1, dt * 4);
+      } else if (mob.climbTo !== null && spec.climbs
+                 && this._climbHold(bodyCol, Math.floor(c.ck))) {
+        // Shinning up beside the trunk. Same "chase the gap" shape the flier
+        // uses, so it eases in and out instead of snapping to a speed.
+        const rate = clamp((mob.climbTo - c.ck) * 2.4, -CLIMB_SPEED, CLIMB_SPEED);
+        mob.vel.k += (rate - mob.vel.k) * Math.min(1, dt * 5);
+        // Hold on with both hands. The wander state machine goes on choosing
+        // headings while a body is up a tree, and a monkey that takes a walk
+        // along a branch steps off it: measured, it lost its grip mid-perch and
+        // fell six layers for two damage — an animal hurting itself doing the
+        // one thing this whole feature exists to let it do.
+        mob.vel.i *= 0.02;
+        mob.vel.j *= 0.02;
+        // A controlled descent is not a fall. Without this, coming down eight
+        // layers under its own power landed as a seven-layer drop and hurt —
+        // the animal would have climbed a tree and then injured itself getting
+        // out of it, every time.
+        mob.fallFrom = null;
+        // A climb that is not getting anywhere is abandoned. Belt and braces
+        // against an animal hanging in a tree for the rest of the session
+        // because something above it turned out to be in the way — the failure
+        // this replaced, which cost nothing to detect and everything to miss.
+        if (Math.abs(c.ck - mob.climbLastK) > 0.05) {
+          mob.climbLastK = c.ck;
+          mob.climbStallT = 0;
+        } else if ((mob.climbStallT += dt) > CLIMB_STALL) {
+          mob.climbTo = null;
+          mob.climbRestT = CLIMB_REST;
+          mob.perchT = 0;
+        }
+        if (mob.climbTo !== null && Math.abs(mob.climbTo - c.ck) < 0.35) {
+          if (mob.perchT > 0) {
+            // Arrived at the top: sit for a while, then head back down.
+            mob.perchT -= dt;
+            if (mob.perchT <= 0) mob.climbTo = this._groundK(bodyCol, Math.floor(c.ck), false);
+          } else {
+            // Back on the ground. Let go and be an ordinary animal again.
+            mob.climbTo = null;
+            mob.climbRestT = CLIMB_REST;
+          }
+        }
       } else {
+        // Nothing to hold — whatever it was doing, it is falling now.
+        if (mob.climbTo !== null) { mob.climbTo = null; mob.climbRestT = CLIMB_REST; }
         mob.vel.k -= GRAVITY * dt;
       }
 
@@ -4558,6 +4696,33 @@ export class Mobs {
       // layers a body actually occupies, and only when the timer is due —
       // `_contactHurtAt` returns 0 immediately for the overwhelming majority of
       // animals, which are standing on grass.
+      // --- up a tree ---------------------------------------------------------
+      //
+      // On its own clock rather than hung off the state machine, which is where
+      // this started and does not work: the trigger was "finished a walk while
+      // standing beside a tree", and over a 5-minute run a monkey produced two
+      // such moments — it spends most of its life fleeing, and a rule that only
+      // fires between a walk and an idle almost never fires at all. A timer asks
+      // the question often enough to matter and costs one subtraction a frame.
+      if (spec.climbs) {
+        if (mob.climbRestT > 0) mob.climbRestT -= dt;
+        mob.climbT -= dt;
+        if (mob.climbT <= 0) {
+          mob.climbT = CLIMB_PERIOD;
+          if (mob.climbTo === null && mob.climbRestT <= 0 && mob.state !== 'flee'
+              && Math.random() < CLIMB_CHANCE) {
+            const bc = this._colOf(c.f, c.ci, c.cj);
+            const top = bc >= 0 ? this._canopyAbove(bc, c.ck) : -1;
+            if (top > c.ck && this._climbHold(bc, Math.floor(c.ck))) {
+              mob.climbTo = top;
+              mob.perchT = PERCH_MIN + Math.random() * (PERCH_MAX - PERCH_MIN);
+              // Stop wandering, or it walks out from under its own climb.
+              mob.state = 'idle';
+              mob.stateT = 4 + mob.perchT;
+            }
+          }
+        }
+      }
       mob.contactT -= dt;
       if (mob.contactT <= 0) {
         mob.contactT = CONTACT_PERIOD;

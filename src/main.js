@@ -671,10 +671,13 @@ class Game {
      * rates, not hunger, not a fall. See `mobDamageMul`.
      *
      * Extreme is the exception and says so out loud: the carnivores hunt you,
-     * the dark carries more husks, and a death is the end of the run. Each of
-     * those is a predicate in `game/NewGame.js` rather than a comparison
-     * written out here — `huntsOnSight`, `crowdedNights`, `endsOnDeath` — so
-     * what a tier means is stated once, in the module a harness can load.
+     * the dark carries more husks, and a death is the end of the run. Those are
+     * *two* predicates in `game/NewGame.js` rather than comparisons written out
+     * here — `huntsOnSight` and `endsOnDeath` — so what a tier means is stated
+     * once, in the module a harness can load. The dark is not a third: it rides
+     * on the same `Mobs.savage` flag `huntsOnSight` sets, which is what chooses
+     * MAX_HOSTILE_SAVAGE over MAX_HOSTILE_SURFACE. There was a `crowdedNights`
+     * here saying otherwise and nothing imported it.
      *
      * Assigned through `_setDifficulty` and never directly: the mob manager
      * keeps its own copy of the first of those, and the two disagreeing is the

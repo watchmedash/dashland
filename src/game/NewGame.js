@@ -143,15 +143,14 @@ export function huntsOnSight(name) {
   return normalizeDifficulty(name) === EXTREME;
 }
 
-/**
- * Does the dark bring more of them?
- *
- * The budget itself lives with the other budgets in `Mobs.js`, for the reason
- * the comment on MAX_MOBS gives: they are a set that has to be read together.
- */
-export function crowdedNights(name) {
-  return normalizeDifficulty(name) === EXTREME;
-}
+// `crowdedNights` used to sit here, and it was deleted rather than wired up.
+// It was exported, documented as the predicate for "does the dark bring more of
+// them", and imported by nobody: the night budget rides on `Mobs.savage`, which
+// `main.js` already sets from `huntsOnSight`, and which picks
+// MAX_HOSTILE_SAVAGE over MAX_HOSTILE_SURFACE. The behaviour was correct the
+// whole time; what was wrong was a second name for it that a reader would
+// reasonably believe was load-bearing. Two predicates for one flag is the way
+// they drift apart later.
 
 /**
  * Is a death the end of the run?

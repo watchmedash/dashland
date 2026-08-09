@@ -318,10 +318,18 @@ export const POSE = {
   // and none of that is here: those are framing and they are three constants in
   // `ViewModel.js` (`HELD_SCALE`, `HAND_TILT`, `REST`), applied at the fist so
   // that the third-person body — which reads this table through
-  // `Character._buildPosedItem` — is untouched by them. The carry tilt adds a
-  // further +12 degrees on screen, so what the player will actually see is the
-  // shovel at +27.6 against the sword's +38.9: the same *relative* place in the
-  // band, which is what "like the sword" asks for.
+  // `Character._buildPosedItem` — is untouched by them.
+  //
+  // **Those three have since been re-solved against Minecraft's own figures, and
+  // the "lean" this note is written in is no longer the measurement first person
+  // is judged on** — see the long note on `HAND_TILT`. What that pass leaves the
+  // shovel with, measured through the real glTF at 16:9: its long axis 31.9
+  // degrees clockwise of vertical on screen with the shaft high and to the
+  // right, 7.2 degrees out of the screen plane, and its flat 8.6 degrees off
+  // square to the camera — the second best face-on reading of any tool in the
+  // game, against the sword's 9.0. The two constraints this entry owns are
+  // untouched and were re-measured after it: `grip` is still 0.70, and 93% of
+  // the tool sits above the fist (the constraint is "roughly two thirds").
   //
   // `rot` is `Rxyz(-0.381, -0.55, 0.20) · Rz(π)` evaluated out. Both halves are
   // described above and neither is a dialled number; if this needs retuning,

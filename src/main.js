@@ -5706,7 +5706,12 @@ class Game {
     // Told every frame, including the frames it is zero: these are poses, not
     // events, and a listener that is only updated while drawing is a listener
     // that stays drawn after the shot.
-    this.viewModel.setDraw(b.t, arrowId);
+    // The drawing fist, not a guess: `b.slot` is the slot this draw was charged
+    // to a dozen lines up, so the bow, the arrow on its string and the arm that
+    // retreats under it are all the same hand. `_handOf` of a null slot would be
+    // `'right'` anyway (nothing is the offhand), but the draw is over on those
+    // frames and there is nothing to place.
+    this.viewModel.setDraw(b.t, arrowId, b.slot ? this._handOf(b.slot) : 'right');
     this.character.setDraw(b.t);
     this.ui.setCrosshairDraw(this.viewMode === VIEW_FIRST ? b.t : 0);
 

@@ -670,6 +670,48 @@ const _aimQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(...DRAW.aim.r)
 const _aimS = new THREE.Vector3(DRAW.aim.len, DRAW.aim.len, DRAW.aim.len);
 
 /**
+ * The same aim for a bow drawn in the **left** fist: `DRAW.aim` reflected in the
+ * screen's centre line, and *derived* from it rather than stated beside it.
+ *
+ * That matters more here than anywhere else in this file. `DRAW.aim` is the pose
+ * the player signed off — near-vertical stave, no arm in frame, the arrow
+ * crossing to the crosshair — and it took three passes and two reports to land
+ * (see the turn table on `DRAW`). A second literal triple for the other hand is a
+ * second thing to retune every time that one moves, and the first report after it
+ * drifted would be "the left hand's bow is wrong" with no way to tell which of
+ * the two was.
+ *
+ * **The reflection, and why it is a conjugation.** Mirroring the scene in the
+ * plane x = 0 is `S = diag(-1, 1, 1)`. A point goes to `S p`, which is the x
+ * negated below. An orientation goes to `S R S`, which is still a proper rotation
+ * (two sign flips in the determinant) — and since `S` is improper, conjugating by
+ * it reverses the turn: `S rot(n, θ) S = rot(S n, -θ)`. In quaternion terms that
+ * is exactly `(x, y, z, w) -> (x, -y, -z, w)`, which is the line below and is why
+ * there is no Euler anywhere in it. Composing Eulers by hand is what put a sign
+ * error in the offhand rest three revisions ago.
+ *
+ * **What it does to the bow, checked against its geometry rather than assumed.**
+ * The bow lies in its own XZ plane: stave along model X, symmetric tip to tip at
+ * x = ±0.9787, string a straight run at model z = -0.28, shot along +Z. Under
+ * `S R S`:
+ *
+ *   - the shot (`R ẑ`) goes to `S R ẑ` — mirrored, so it crosses the frame toward
+ *     the crosshair from the other side, which is the whole ask;
+ *   - the stave axis (`R x̂`) goes to `-S R x̂`. The extra sign is a tip-for-tip
+ *     swap, and the stave is symmetric tip to tip, so the picture is the mirror
+ *     picture and not a bow standing on its head;
+ *   - the string's offset from the grip is `-Z` in model space and therefore
+ *     rides the same mirror.
+ *
+ * And the nock is untouched by any of it: `_poseDraw` sites it at a model-space z
+ * on the bow's own matrix, so its distance to the string is a length in bow model
+ * units and a rotation — mirrored or not — cannot change it. Measured, not
+ * argued: identical to four decimals in both hands at draw 0.5 and 1.0.
+ */
+const _aimPL = new THREE.Vector3(-DRAW.aim.p[0], DRAW.aim.p[1], DRAW.aim.p[2]);
+const _aimQL = new THREE.Quaternion(_aimQ.x, -_aimQ.y, -_aimQ.z, _aimQ.w);
+
+/**
  * The stand-in arm's skin: a teal sleeve with a cuff and a bare hand.
  *
  * Kept, now that the real arm is the chosen character's own limb, because the
@@ -863,6 +905,13 @@ export class ViewModel {
     /** The nocked arrow's mesh, built on the first draw and then kept. */
     this.nock = null;
     this._nockItem = 0;
+    /**
+     * Which fist the bow is being drawn in, and therefore which arm retreats,
+     * which anchor carries the arrow and which of the two aims the bow is taken
+     * to. Told by `setDraw`; `'right'` until something says otherwise, so a
+     * caller that has no opinion gets what this did before there was a choice.
+     */
+    this._drawHand = 'right';
 
     this.swing = 1;
     /** Which arm the current swing belongs to. See `punch`. */
@@ -1029,11 +1078,12 @@ export class ViewModel {
    * What the left hand is holding.
    *
    * It used to have no swing track, on the reasoning that nothing is ever used
-   * from the offhand — it carried and it showed. `Inventory.active()` repealed
-   * that: with the main hand empty the offhand is the hand that mines, places
-   * and eats, so a pickaxe there has to swing like a pickaxe. The track is
-   * resolved per hand in `_equip` and `punch` picks the one belonging to the
-   * hand that acted.
+   * from the offhand — it carried and it showed. The right button's fall-through
+   * repealed that: when the main hand has no answer for what you are aiming at,
+   * the offhand is the hand that places, eats, feeds or draws a bow, so a tool
+   * there has to swing like that tool. The track is resolved per hand in `_equip`
+   * and `punch` picks the one belonging to the hand that acted — which `main.js`
+   * names explicitly, from the slot it charged the action to.
    *
    * It has its own equip clock so that swapping dips both arms on their own
    * schedules, which is what makes the swap read as one gesture.
@@ -1242,17 +1292,34 @@ export class ViewModel {
    * painter and the third-person body may be holding at the same time; hanging
    * anything off it would put an arrow on all of them.
    *
+   * **A bow can be drawn from either fist**, so the hand is an argument. It was
+   * `this.hand` throughout, back when a bow only ever drew from the main hand;
+   * once the offhand could draw one, that hard-coding put the bow in the left
+   * fist and the arrow floating out on the right, because the two are parented to
+   * different anchors and only the arrow's was fixed. Everything the draw touches
+   * — this anchor, the arm that retreats in `update`, and the aim `_poseDraw`
+   * carries the bow to — now reads `_drawHand`, so there is one answer rather
+   * than three chances to disagree.
+   *
+   * The arrow is reparented rather than rebuilt when the hand changes: it is the
+   * same model on the same string, and swapping a bow between fists mid-draw
+   * should not cost a mesh.
+   *
    * @param {number} t 0..1
    * @param {number} [arrowItem] the item id to draw on the string
+   * @param {'right'|'left'} [hand] the fist holding the bow. `main.js` passes
+   *   `_handOf(bow.slot)` — the slot the draw was actually charged to — rather
+   *   than letting this guess from what is in the fists.
    */
-  setDraw(t, arrowItem = 0) {
+  setDraw(t, arrowItem = 0, hand = 'right') {
+    this._drawHand = this.hands[hand] ? hand : 'right';
     this.draw = Math.max(0, Math.min(1, t));
     if (this.draw <= 0) {
       if (this.nock) this.nock.visible = false;
       return;
     }
     if (arrowItem && arrowItem !== this._nockItem) {
-      if (this.nock) { this.hand.remove(this.nock); this.nock = null; }
+      if (this.nock) { this.nock.parent?.remove(this.nock); this.nock = null; }
       this._nockItem = arrowItem;
       // `worldModel` and not `heldModel`: the held pose is the diagonal an arrow
       // takes when you are *carrying* one, which is the wrong object entirely
@@ -1269,12 +1336,19 @@ export class ViewModel {
         // the bow is in and whatever that file does to it next.
         m.scale.setScalar(DRAW.scale);
         this.nock = m;
-        this.hand.add(m);
       };
       const now = worldModel(arrowItem, build);
       if (now) build(now);
     }
-    if (this.nock) this.nock.visible = true;
+    if (this.nock) {
+      // Parented here and not in `build`, so that the late arrival of a lazily
+      // loaded arrow and a bow that changed hands mid-draw are the same one
+      // line. Guarded because three's `add` detaches and re-appends even when the
+      // parent is already this one, and this runs every frame of every draw.
+      const anchor = this.hands[this._drawHand].anchor;
+      if (this.nock.parent !== anchor) anchor.add(this.nock);
+      this.nock.visible = true;
+    }
   }
 
   /**
@@ -1306,10 +1380,26 @@ export class ViewModel {
    * @param {number} aw the same draw on the arm's slower clock
    */
   _poseDraw(t, aw) {
-    const h = this.hands.right;
+    const key = this._drawHand;
+    const h = this.hands[key];
     const limb = h.arm || h.stub;
     const drawing = t > 0 && h.mesh && h.modelled
       && ITEMS[h.item]?.tool?.kind === 'bow';
+    // The hand that is *not* drawing, every frame, whether or not the other one
+    // is. This used to be one hand's business because the draw was one hand's,
+    // and a bow moved from the right fist to the left would otherwise leave the
+    // right rig frozen at full draw — a bow-sized pickaxe hanging in front of the
+    // eye, held by an arm that is still hidden. Resetting a rig is three writes
+    // that are already the common case, so there is nothing to save by guessing.
+    for (const k of HANDS) {
+      if (k === key) continue;
+      const o = this.hands[k];
+      o.rig.position.set(0, 0, 0);
+      o.rig.quaternion.identity();
+      o.rig.scale.setScalar(1);
+      const ol = o.arm || o.stub;
+      if (ol) ol.visible = true;
+    }
     if (!drawing) {
       // Unconditional, and cheaply so: an item that is not a drawn bow always
       // finds its rig at rest, whatever left it posed.
@@ -1332,16 +1422,20 @@ export class ViewModel {
     // identity, so the chain is two local matrices and a multiply. Asking three
     // for `matrixWorld` here would mean an `updateMatrixWorld(true)` over the
     // whole arm subtree every frame, ahead of the one the renderer already does.
-    this.armPivot.updateMatrix();
-    this.hand.updateMatrix();
-    _mA.multiplyMatrices(this.armPivot.matrix, this.hand.matrix);   // hand -> view
+    h.pivot.updateMatrix();
+    h.anchor.updateMatrix();
+    _mA.multiplyMatrices(h.pivot.matrix, h.anchor.matrix);          // hand -> view
     h.mesh.updateMatrix();
 
     // Where the bow would be if nothing were drawing it, and where it is going.
+    // The destination is `DRAW.aim` for the right fist and its mirror for the
+    // left; see `_aimPL`. Only the target moves — the blend, the eases and the
+    // rig solve below are the same arithmetic for either hand, because the hand's
+    // own matrix above is already the mirrored one.
     _mB.multiplyMatrices(_mA, h.mesh.matrix).decompose(_pA, _qA, _sA);
     const dw = drawEase(t);
-    _pA.lerp(_aimP, dw);
-    _qA.slerp(_aimQ, turnEase(t));
+    _pA.lerp(key === 'left' ? _aimPL : _aimP, dw);
+    _qA.slerp(key === 'left' ? _aimQL : _aimQ, turnEase(t));
     _sA.lerp(_aimS, dw);
     _mB.compose(_pA, _qA, _sA);                                     // bow -> view
 
@@ -1369,16 +1463,20 @@ export class ViewModel {
   /**
    * The hand that would act if nobody says otherwise.
    *
-   * This is `Inventory.active()`'s rule read off the fists instead of off the
-   * slots: the offhand acts only when the main hand is empty and it is not. The
-   * rule is duplicated rather than plumbed through because the viewmodel is
-   * handed both slots' contents every frame — it already knows the answer — and
-   * a hand argument at all nine `punch` sites in main is nine chances for one of
-   * them to disagree with the inventory about who just mined.
+   * **A fallback, and no longer the rule.** It reads the one guess this view can
+   * make from what it is holding: the right arm swings whenever the right fist
+   * has anything in it, and the left only when the right is empty and the left is
+   * not. That is a guess because the real answer lives in the inventory and
+   * depends on the button and on what you are aiming at — the left button is the
+   * main hand's however empty it is, and the right button falls through to the
+   * offhand on whether the main hand has a *use* for the target, not on whether
+   * it is full. So `main.js` names the hand at every call site, from the slot it
+   * actually charged the action to (`_handOf`), and this is what is left for a
+   * caller that has no slot to point at.
    *
-   * The `left.item > 0` half matters: with both hands empty `active()` returns
-   * the empty offhand, but the offhand *arm* is not even drawn then, so a bare
-   * punch is the right arm's — which is also the arm you can see.
+   * The `left.item > 0` half is what keeps a bare-handed punch on the right arm:
+   * with both fists empty the offhand *arm* is not drawn at all, so swinging it
+   * would be an invisible punch.
    */
   actingHand() {
     return this.hands.right.item > 0 || this.hands.left.item <= 0 ? 'right' : 'left';
@@ -1483,9 +1581,17 @@ export class ViewModel {
     }
     const shown = this._drawShown;
     const aw = armEase(shown);
-    const drawX = DRAW.p[0] * aw;
-    const drawY = DRAW.p[1] * aw;
-    const drawZ = DRAW.p[2] * aw;
+    // Whose retreat this is. The arm that leaves is the arm holding the bow, and
+    // with a bow in the offhand that is the left one — the right may well be
+    // holding the pickaxe you are carrying it with, and sinking *that* out of
+    // frame is a tool the player did not put away. Split as two shares of the one
+    // clock rather than two clocks: only one hand can be drawing, so `rdw + ldw`
+    // is always exactly `aw` and there is no state that can drift.
+    const rdw = this._drawHand === 'left' ? 0 : aw;
+    const ldw = aw - rdw;
+    const drawX = DRAW.p[0] * rdw;
+    const drawY = DRAW.p[1] * rdw;
+    const drawZ = DRAW.p[2] * rdw;
 
     const px = rest.x + bx + _swingP.x * sw + drawX;
     const py = rest.y + by + _swingP.y * sw + equipY + drawY;
@@ -1508,13 +1614,10 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * aw,
-      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * aw,
-      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * aw,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * rdw,
+      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * rdw,
+      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * rdw,
     );
-
-    // The bow's own half of the draw, and the limb going dark behind it.
-    this._poseDraw(shown, aw);
 
     // The offhand arm, on the frames there is one. Everything above has already
     // run and is untouched by this — the two arms share the bob phase and the
@@ -1534,20 +1637,38 @@ export class ViewModel {
     // `bx` is negated so the two arms sway apart and together as you walk rather
     // than sliding across the screen in step, which is what a shared sign looked
     // like — one arm chasing the other.
+    //
+    // The draw's retreat is mirrored onto it by that same rule: the sideways
+    // offset and the two rotations that lean the limb inward — yaw and roll —
+    // change sign, the sink, the depth and the pitch do not. `ldw` is zero on
+    // every frame the offhand is not the drawing hand, so an offhand that is
+    // merely carrying is untouched by any of this.
     if (this.offArmPivot.visible) {
       if (this.offEquipT < 1) this.offEquipT = Math.min(1, this.offEquipT + dt * 5.0);
       const oeq = 1 - this.offEquipT;
       this.offArmPivot.position.set(
-        OFF_REST.x - bx - _swingP.x * osw,
-        OFF_REST.y + by + _swingP.y * osw - oeq * 0.42,
-        OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05,
+        OFF_REST.x - bx - _swingP.x * osw - DRAW.p[0] * ldw,
+        OFF_REST.y + by + _swingP.y * osw - oeq * 0.42 + DRAW.p[1] * ldw,
+        OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05 + DRAW.p[2] * ldw,
       );
       this.offArmPivot.rotation.set(
-        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55,
-        OFF_ARM_REST_ROT.y - _swingR.y * osw,
-        OFF_ARM_REST_ROT.z - _swingR.z * osw,
+        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55 + DRAW.r[0] * ldw,
+        OFF_ARM_REST_ROT.y - _swingR.y * osw - DRAW.r[1] * ldw,
+        OFF_ARM_REST_ROT.z - _swingR.z * osw - DRAW.r[2] * ldw,
       );
     }
+
+    // The bow's own half of the draw, and the limb going dark behind it.
+    //
+    // **After both shoulders, not between them.** `_poseDraw` builds the drawing
+    // hand's view-space matrix out of `pivot.matrix` and `anchor.matrix` by hand,
+    // so it has to run once this frame's shoulder is on them — and for a bow in
+    // the left fist that shoulder is the one set immediately above. Called from
+    // where it used to be, the offhand draw solved against last frame's arm and
+    // the bow lagged the walk cycle by a frame. Nothing about the right hand
+    // cares: `armPivot` was written well above and the offhand block does not
+    // touch it.
+    this._poseDraw(shown, aw);
 
     if (sky) {
       const p = sky.palette;

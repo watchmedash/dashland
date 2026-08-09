@@ -467,6 +467,92 @@ const SPAWN_RADIUS = stepsFor(DESPAWN_RADIUS - 25) - SPAWN_STEPS_MIN;
 const SEED_STEPS_MIN = stepsFor(8);
 const SEED_STEPS_SPAN = stepsFor(DESPAWN_RADIUS - 25) - SEED_STEPS_MIN;
 
+// --- the stalker -------------------------------------------------------------
+//
+// A figure that looks like you, standing where you were not looking a moment
+// ago. He is not a fight and he is not an encounter; he is a sighting, and
+// everything below exists to keep him one.
+//
+// He carries neither `hostile` nor `monster`, and that is the whole reason
+// there is a third flag. `hostile` is the husk — the night budget, the cave and
+// surface split, the grace wipe — and a stalker on it would eat a husk slot and
+// evaporate at dawn. `monster` is targeting: it is the flag that says "this
+// thing acquires the player and swings at them", which is precisely what this
+// one must never do. So `phantom` is its own thing, and unlike the other two it
+// mostly says what he is *exempt* from: damage, drops, prey lists, the census,
+// bedding down, the save file, the vocalisation budget.
+//
+// The rarity is the monsters' shape — a roll per spawn tick against a cap —
+// with a night term, which is the husk's shape. The two numbers below are per
+// SPAWN_PERIOD (2s), so a tick is 1,800 an hour:
+//
+//   night  0.0035   one roll succeeds every ~570s of darkness
+//   day    0.0004   one roll succeeds every ~5,000s of daylight
+//
+// Against MONSTER_CHANCE (0.05) that is 14x rarer at night and 125x by day, and
+// those are *ceilings*: the placement below then rejects most candidate ground
+// (it must be surface, unroofed, far, inside the view frustum, off-centre in it
+// and with a clear line to the eye), and STALKER_REST holds off another sighting
+// for five minutes after each one. A player who spends every night outdoors
+// should meet him a handful of times in a long session and go whole sessions
+// without. That is what the report asked for: "more at night but still rare".
+const STALKER_NIGHT_CHANCE = 0.0035;
+const STALKER_DAY_CHANCE = 0.0004;
+/** Seconds after a sighting before the planet may roll for another. */
+const STALKER_REST = 300;
+/**
+ * The band he may be placed in, in world units. The near edge is more than
+ * twice SPAWN_MIN_DIST on purpose — "we might see him from afar" is the whole
+ * brief, and a figure that resolves into a face is a mob rather than a rumour.
+ */
+const STALKER_NEAR = 46;
+const STALKER_FAR = 92;
+const STALKER_STEPS_MIN = stepsFor(STALKER_NEAR);
+const STALKER_STEPS_SPAN = Math.max(1, stepsFor(STALKER_FAR) - STALKER_STEPS_MIN);
+/**
+ * Close this much and he is simply not there any more.
+ *
+ * The backstop behind the retreat, and the reason "must never catch it" is a
+ * property of the code rather than a hope about the speed ladder. A chase that
+ * ends in a foot race is one the player can win with a stamina bar and a flat
+ * meadow; a chase that ends in an empty ridge cannot be won at all, which is
+ * the only ending this thing has.
+ */
+const STALKER_VANISH = 24;
+/** Inside this he stops watching and starts putting ground between you. */
+const STALKER_RUN = 42;
+/**
+ * Seconds he will stay even under an unbroken stare.
+ *
+ * Without it a player who spots him across a valley and simply keeps looking
+ * holds him there indefinitely, and a sighting you can study is not a sighting.
+ * Long enough to turn, look twice and reach for something; short enough that
+ * the second look is usually the one that finds nothing.
+ */
+const STALKER_LIFE = 13;
+/**
+ * Where in the frame he may arrive, as normalised device coordinates.
+ *
+ * Never dead centre: a figure that appears in the middle of the screen was
+ * spawned, and one that appears at the edge of it was *noticed*. The upper
+ * bound keeps him off the very rim, where the first frame of him would be half
+ * a body clipped by the screen edge.
+ */
+const STALKER_EDGE_MIN = 0.32;
+const STALKER_EDGE_MAX = 0.90;
+/**
+ * And the slack the observation test then allows, in the same units.
+ *
+ * Slightly outside the frame rather than exactly on it. The despawn is meant to
+ * fire when the player *looks away*, not when a body a hundred units off drifts
+ * one pixel past the edge while they walk — with no margin at all, a stalker
+ * placed at 0.90 is three or four frames from being culled by the player's own
+ * footsteps.
+ */
+const STALKER_MARGIN = 1.08;
+/** Sample spacing of the line-of-sight walk, in world units. */
+const LOS_STEP = 0.85;
+
 /**
  * The opening clearing: how far around the world spawn point nothing large and
  * nothing that hunts may be *placed*, in world units, and what counts as large.
@@ -629,6 +715,13 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _p = [0, 0, 0];
 const _probe = { f: 0, ci: 0, cj: 0, ck: 0 };
+/** The stalker's own scratch: view-projection, the point it puts on screen, and
+ * the marching head of the line-of-sight walk. */
+const _vpm = new THREE.Matrix4();
+const _ndc = new THREE.Vector3();
+const _eye = new THREE.Vector3();
+const _los = new THREE.Vector3();
+const _seen = new THREE.Vector3();
 
 const wrapAngle = (a) => {
   let x = (a + Math.PI) % TAU;
@@ -753,6 +846,55 @@ const CHAR_CLIPS = {
   idle: 'idle', walk: 'walk', run: 'sprint', graze: 'idle',
   attack: 'attack-melee-right', die: 'die',
 };
+
+// --- the stalker's eyes ------------------------------------------------------
+//
+// The one thing the Blocky Characters pack cannot give us. A face on this rig
+// is *painted*: the whole body is one material, one 1024² palette atlas, and
+// the eyes are two brown squares in it. There is no eye material to make
+// emissive, and there is no separating them from the shins without touching the
+// texture — which is the one thing `lit()` spends a paragraph telling you never
+// to do. Writing any property that forces a re-upload of these maps renders the
+// model flat white, because the ImageBitmap behind them has already been
+// consumed. Recolouring the atlas is that bug with extra steps.
+//
+// So the glow is geometry: two unlit quads sitting a hair proud of the face,
+// parented to the `head` node so they nod and tilt with every clip the rig
+// plays. No asset is added — a PlaneGeometry and a MeshBasicMaterial, both
+// shared by every stalker that ever spawns and therefore never disposed, which
+// is the same contract the model prototypes keep.
+//
+// Every number is measured, not guessed. The head is node `head` — translation
+// (0, 1.2, 0) under `torso`, uniform scale 0.1, mesh box (-4,0,-4)..(4,8,4) —
+// identically so in all eighteen `character-*.glb`, so these coordinates are
+// the head's own local space and hold for whichever body the player chose. The
+// face is the +Z side (see the orientation note in _animate: +Z is forward),
+// and it maps to u 0.130..0.245, v 0.120..0.248 of the atlas. Reading the eyes
+// out of that crop puts their centres at x = ±2.0, y = 3.72 — a shade below the
+// middle of the head — and makes each one about 1.0 x 1.05 units across.
+const EYE_X = 2.0;
+const EYE_Y = 3.72;
+/** Just proud of the face at z = 4, by enough to never z-fight at 90 units. */
+const EYE_Z = 4.15;
+/** A little wider than the painted eye, so it reads as a glow over it. */
+const EYE_GEOM = new THREE.PlaneGeometry(1.5, 1.15);
+/**
+ * Unlit, untonemapped, unfogged, and all three on purpose.
+ *
+ * MeshBasicMaterial is the one material in the file we *want* to leave unlit —
+ * `lit()` exists to stop a textured body ignoring the sun, and this is the
+ * opposite case: two lights that must not dim at midnight, which is exactly
+ * when they matter. `toneMapped: false` keeps them at full white through the
+ * exposure curve, and `fog: false` stops ninety units of atmosphere washing out
+ * the only part of him you are meant to be able to make out at that range.
+ *
+ * Deliberately *not* pushed onto `model.owned`. That list is the per-mob
+ * material clones and _release disposes it; this one is shared with every other
+ * stalker, and disposing it would blank the eyes of the next one.
+ */
+const EYE_MAT = new THREE.MeshBasicMaterial({
+  color: 0xe8f4ff, toneMapped: false, fog: false,
+});
 
 /**
  * How much one individual may differ from its species' height, as a fraction
@@ -1365,6 +1507,54 @@ const SPECIES = {
     burns: true,          // direct daylight sets it alight
   },
 
+  // --- the one thing that is only ever seen ---
+  //
+  // Written out as a literal rather than through `pet()`, for the reason the
+  // husk and the merchant are: those builders copy only the fields they have
+  // been told about, and a `phantom: true` handed to `pet()` would be dropped
+  // on the floor without a word. Everything this thing is depends on flags, so
+  // there is nothing here for a builder to save.
+  //
+  // `urls` is the fallback body only. He wears whichever character the player
+  // chose — that is the entire idea, "a herobrine version of ourself" — and
+  // spawn() takes `this.playerModel` for it when main has set one. The default
+  // character is listed here so MOB_MODEL_URLS preloads *something* and the
+  // spawn can never be the thing that discovers the model is missing.
+  stalker: {
+    label: 'Stalker', urls: [CHAR('a')], clips: CHAR_CLIPS,
+    // Exactly the player's 1.8, and no size variance. Every other species is
+    // jittered per head so a herd does not look stamped; this one is meant to
+    // look stamped. It is meant to look like you.
+    height: 1.8, sizeVar: 0,
+    // Health is a formality — `phantom` turns away every path into _damage and
+    // hurt() — but a spec with no health at all would put NaN into a dozen
+    // comparisons the moment someone forgets one of those guards.
+    health: 1,
+    // The wander pace, which is only ever used at the walk-away: at
+    // CHASE_SPEED it would be 6.9, past the player's sprint, and a figure that
+    // outpaces a sprinting player is a thing you are losing a race to rather
+    // than a thing that is leaving. He does not need to be faster than you.
+    // He needs to be gone, and STALKER_VANISH is what makes that certain.
+    speed: 1.55, skittish: 0, turn: 2.4, accel: 5.5,
+    drops: [],                  // and `phantom` means _die is never reached anyway
+    grazeChance: 0, idleMin: 2, idleMax: 5,
+    // --- what makes him a sighting ---
+    phantom: true,
+    /**
+     * How much of the texture survives. 0.10 is dark enough to read as a
+     * silhouette against grass in daylight and as an absence against the sky
+     * at night, while leaving just enough of the atlas to tell that it is a
+     * person wearing what you are wearing.
+     *
+     * Applied as a multiply into `color` on the per-mob material clones spawn()
+     * already makes, which is the one safe way to touch these materials: the
+     * map object is passed around untouched and nothing is re-uploaded. See the
+     * note in `lit()` for what happens to anything that is not that.
+     */
+    shade: 0.10,
+    eyes: true,
+  },
+
   // --- the one thing on the planet that will talk to you ---
   merchant: {
     label: 'Wandering Merchant', urls: [CHAR('d')],
@@ -1909,6 +2099,30 @@ export class Mobs {
     this._pendingHits = [];
     /** Animals taken by a predator this frame, removed once the tick is over. */
     this._kills = [];
+    /**
+     * Stalkers that stopped being looked at this frame, on exactly the same
+     * terms and for the same reason: update() walks `this.list` in reverse and
+     * a helper that splices out of it moves the cursor's own entry. Collected
+     * here, drained after the loop. Silent — `_die` would spill drops, play the
+     * death clip and fire onSound, and none of those is what "he is simply not
+     * there when you look back" means.
+     */
+    this._vanished = [];
+    /**
+     * The camera, for the one mob whose whole behaviour is a question about
+     * what the player can see. Supplied by main, exactly as blockLightAt is,
+     * and null in a headless harness — which reads as "nobody is looking",
+     * so a stalker that somehow existed there would be collected on its first
+     * frame rather than wandering the planet unobserved forever.
+     */
+    this.camera = null;
+    /**
+     * Which `character-*.glb` the player is wearing, so the stalker can wear
+     * it too. Null falls back to the species' own url.
+     */
+    this.playerModel = null;
+    /** Seconds before the planet may roll for another sighting. */
+    this.stalkerRest = 0;
     /** sun elevation at the player, refreshed each update */
     this.daylight = 1;
     // --- the night stalk's clocks, and why they are here and not on the cat ---
@@ -1932,6 +2146,13 @@ export class Mobs {
     for (const m of this.list) this._release(m);
     this.list.length = 0;
     this.merchantT = MERCHANT_FIRST;
+    // Both deferred-removal queues hold bodies that are already gone. Leaving
+    // them would be harmless — the drain looks each one up by indexOf and finds
+    // nothing — but a queue that survives the world it refers to is the shape
+    // of a bug, not a bug that has happened yet.
+    this._kills.length = 0;
+    this._vanished.length = 0;
+    this.stalkerRest = 0;
   }
 
   /** The live merchant, or null. There is never more than one. */
@@ -2059,7 +2280,13 @@ export class Mobs {
     const spread = spec.sizeVar ?? SIZE_VAR;
     const sizeJitter = 1 + (rng() * 2 - 1) * spread;
 
-    const url = spec.urls[variant];
+    // The stalker wears the player's own body. `playerModel` is a url main has
+    // already had `MobModels.prepare` fetch — it is the model standing on the
+    // screen — so `isReady` is a formality, and falling back to the species url
+    // rather than refusing means a picker mid-change can never eat a sighting.
+    const url = (spec.phantom && this.playerModel && MobModels.isReady(this.playerModel))
+      ? this.playerModel
+      : spec.urls[variant];
     const model = MobModels.instantiate(url);
     // The model may not have loaded — a failed fetch, or a spawn racing world
     // start. Refusing here is right: an invisible mob that still collides and
@@ -2104,7 +2331,22 @@ export class Mobs {
         // untouched. Nothing here writes to it — assigning it to a second
         // slot binds the WebGLTexture that is already uploaded — and it is
         // writing to it that renders the mob flat white.
-        if (m.map && m.emissive) { m.emissiveMap = m.map; m.needsUpdate = true; }
+        // Not for a phantom. `emissiveMap` is how a torch reaches an ordinary
+        // body, and a stalker that brightens when he walks past a lamp is a
+        // stalker who has stopped being a silhouette. He takes no block light
+        // at all — see the guard in _animate — so this slot stays empty, which
+        // also means the one `needsUpdate` in this file never fires for him.
+        if (m.map && m.emissive && !spec.shade) { m.emissiveMap = m.map; m.needsUpdate = true; }
+        // Darken, before the base colour is captured, so every later read of it
+        // — the damage tint, the block light — is already working against the
+        // dimmed figure rather than fighting it back to full brightness.
+        //
+        // A multiply into `color` on a material clone this mob owns. Nothing is
+        // written to `map`, nothing is re-uploaded, and no flag is set: this is
+        // the same safe operation the damage tint performs sixty times a second
+        // on every animal on the planet. See `lit()` for the version of this
+        // that renders the model flat white.
+        if (m.color && spec.shade) m.color.multiplyScalar(spec.shade);
         // The colour this material was authored with, kept so the damage tint
         // can multiply into it rather than replace it. Untextured models — the
         // fish — carry their whole appearance here.
@@ -2115,6 +2357,30 @@ export class Mobs {
       // against the camera, not against each object, so object layers cannot
       // select lights at all. The fill is a plain scene light now — see Sky.)
     });
+    // Two lights where the face is. Parented to the rig's `head` node rather
+    // than to the root, so they ride every nod and tilt the clips key — an eye
+    // that stays level while the head turns is a decal, and reads as one.
+    // Guarded on the node actually being there: this is the Blocky Characters
+    // rig and it always is, but a species flagged `eyes` on some future model
+    // that is not should lose its glow, not throw inside the spawn loop.
+    if (spec.eyes) {
+      const head = model.root.getObjectByName('head');
+      if (head) {
+        for (const sx of [-1, 1]) {
+          const q = new THREE.Mesh(EYE_GEOM, EYE_MAT);
+          q.position.set(EYE_X * sx, EYE_Y, EYE_Z);
+          // No shadow either way: a quad that casts one puts two black bars on
+          // the ground in front of him, and one that receives is not a light.
+          q.castShadow = false;
+          q.receiveShadow = false;
+          // The head is 0.8 cells across at the far end of a 90-unit sighting,
+          // and the eyes are a tenth of that. Three's per-object frustum test
+          // is not the thing that should be deciding whether they are drawn.
+          q.frustumCulled = false;
+          head.add(q);
+        }
+      }
+    }
     this.group.add(model.root);
 
     const ext = modelExtents(model.root, scale);
@@ -2163,6 +2429,7 @@ export class Mobs {
       swingT: 0,           // hostiles: cooldown left before the next blow
       lungeT: 0,           // seconds left of the pounce pop — see _lunge
       burnT: 0,            // hostiles: seconds alight in daylight
+      hauntT: 0,           // phantoms: seconds left before an unbroken stare ends
       // --- predation ---
       // The hunger clock is seeded from Math.random rather than from `rng` on
       // purpose: `rng` is the per-individual stream that decides the model
@@ -2346,7 +2613,7 @@ export class Mobs {
   _census() {
     let land = 0, water = 0, air = 0;
     for (const m of this.list) {
-      if (m.spec.hostile || m.spec.monster || m.spec.trader) continue;
+      if (m.spec.hostile || m.spec.monster || m.spec.trader || m.spec.phantom) continue;
       if (m.spec.aquatic) water++;
       else if (m.spec.flies) air++;
       else land++;
@@ -2402,7 +2669,7 @@ export class Mobs {
       for (let n = 0; n < this.list.length; n++) {
         const m = this.list[n];
         const s = m.spec;
-        if (s.hostile || s.monster || s.trader || s.aquatic) continue;
+        if (s.hostile || s.monster || s.trader || s.aquatic || s.phantom) continue;
         // Only from a category that is actually over its own budget.
         const flier = !!s.flies;
         if (flier ? air <= 0 : land <= 0) continue;
@@ -2471,6 +2738,203 @@ export class Mobs {
       n++;
     }
     return n;
+  }
+
+  // --- the stalker ----------------------------------------------------------
+
+  /** How many are abroad. There is never more than one, and this is why. */
+  _countStalkers() {
+    let n = 0;
+    for (const m of this.list) if (m.spec.phantom) n++;
+    return n;
+  }
+
+  /**
+   * The point on a body that decides whether it is being looked at.
+   *
+   * The head and not the feet, and not the centre either. Feet spend half their
+   * life behind the lip of whatever the body is standing on, so a line-of-sight
+   * test aimed at them says "occluded" about a figure whose whole upper half is
+   * against the sky — which for this mob does not mean a wrong shadow, it means
+   * he is deleted.
+   */
+  _headOf(mob, out) {
+    return out.copy(mob.pos).addScaledVector(mob.up, mob.spec.height * 0.85);
+  }
+
+  /**
+   * Is there a clear line from `from` to `to` through the voxels?
+   *
+   * A fixed-step walk rather than planet.raycast, which marches at 0.045 and
+   * would be two thousand samples across a sighting. Nothing here needs to know
+   * *which* block interrupts the line or where the face is — only whether one
+   * does — so the step can be most of a block wide. LOS_STEP is under one so no
+   * single block can sit entirely between two samples.
+   *
+   * Cross plants are not solid, which is the right answer for both of the
+   * places it matters: a stalker standing in waist-high grass is visible, and a
+   * stalker behind a trunk is not.
+   */
+  _lineOfSight(from, to) {
+    _los.copy(to).sub(from);
+    const len = _los.length();
+    if (len < 1e-3) return true;
+    _los.multiplyScalar(1 / len);
+    // Start clear of the observer and stop clear of the target: the first
+    // sample would otherwise be inside the camera's own block on a bad frame,
+    // and the last inside the body we are asking about.
+    for (let t = LOS_STEP; t < len - 0.4; t += LOS_STEP) {
+      if (this.planet.isSolidWorld(
+        from.x + _los.x * t, from.y + _los.y * t, from.z + _los.z * t,
+      )) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Is this body inside the camera's frame right now, and not behind anything?
+   *
+   * The camera is used rather than the player, and the two are genuinely not
+   * the same question in third person: the body stands in front of a camera
+   * that is several units behind it, and what the *player* can see is what the
+   * camera can see. This is also last frame's camera — update() runs before
+   * updateCamera — which is not a lag to be fixed. Last frame's camera is
+   * precisely the view that was rendered, i.e. the one the player actually
+   * looked at.
+   *
+   * @param {number} margin how far outside the frame still counts as seen, in
+   *   normalised device coordinates. 1 is the exact edge of the screen.
+   */
+  _inView(mob, margin) {
+    const cam = this.camera;
+    // Nobody is looking. Not "assume they are" — see the note on `this.camera`.
+    if (!cam) return false;
+    const e = cam.matrixWorld.elements;
+    this._headOf(mob, _eye);
+    // In front of the lens at all. The projective divide below flips the sign
+    // of everything behind the camera, so a body directly at your back lands
+    // inside the frame with every coordinate negated and reads as visible. This
+    // is the single test that stops "turn around" being the one direction he
+    // survives.
+    _seen.set(-e[8], -e[9], -e[10]);
+    if (_los.copy(_eye).sub(cam.position).dot(_seen) <= 0) return false;
+    _vpm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    _ndc.copy(_eye).applyMatrix4(_vpm);
+    if (Math.abs(_ndc.x) > margin || Math.abs(_ndc.y) > margin) return false;
+    if (_ndc.z > 1) return false;             // beyond the far plane
+    return this._lineOfSight(cam.position, _eye);
+  }
+
+  /**
+   * The whole of "he is gone the next time you look", in one predicate.
+   *
+   * Three ways to stop being a sighting, and they are three because each closes
+   * a different way the illusion ends:
+   *
+   *   - not observed. The one the request is actually about.
+   *   - too close. The backstop on never being caught, and the reason that is
+   *     a guarantee rather than a tuning exercise.
+   *   - out of time. A player who spots him and simply keeps staring would
+   *     otherwise hold him on the ridge forever, and a figure you can stand and
+   *     study is a mob.
+   */
+  _unobserved(mob, dist) {
+    if (mob.hauntT <= 0) return true;
+    if (dist < STALKER_VANISH) return true;
+    return !this._inView(mob, STALKER_MARGIN);
+  }
+
+  /**
+   * Ground for a sighting: far, on the surface, inside the frame and off to one
+   * side of it, with a clear line to the eye.
+   *
+   * Deliberately not `_findSpawnColumn` with different numbers. That one's job
+   * is the opposite of this one's — it exists to place bodies *outside* the
+   * view so nothing is seen to pop in, and the whole point here is that he must
+   * be seen, or the despawn takes him on the very next frame and the sighting
+   * never happens at all. The terrain half of the test is the same and is
+   * repeated rather than shared, because a parameter that inverts the meaning
+   * of a function is how one function becomes two functions in a trench coat.
+   */
+  _findStalkerSpot(nearCol, playerPos) {
+    const p = this.planet;
+    if (!this.camera) return null;
+    for (let tries = 0; tries < 24; tries++) {
+      const steps = STALKER_STEPS_MIN + Math.floor(Math.random() * STALKER_STEPS_SPAN);
+      const col = this._walkOut(nearCol, steps);
+      const k = p.surfaceK(col);
+      if (k < 0 || k > D - 6) continue;
+      const surf = p.at(col, k);
+      if (surf !== ID.grass && surf !== ID.sand && surf !== ID.snow) continue;
+      if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
+      if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
+      // A hearth is a place the player has made safe. Whatever else he is, he
+      // is not something that stands in the firelight.
+      if (this._warded(col, k)) continue;
+      if (this._nearHome(col, k)) continue;
+      const { f, i, j } = colParts(col);
+      cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
+      _eye.set(_p[0], _p[1], _p[2]);
+      const d = _eye.distanceTo(playerPos);
+      if (d < STALKER_NEAR || d > STALKER_FAR) continue;
+      // Where his head will be, which is what has to clear the terrain and
+      // what has to be on screen — his feet are behind the ridge by design.
+      // The local up is the outward radial on a sphere, which is what `_sync`
+      // would give this body once it existed — and it does not exist yet.
+      _eye.addScaledVector(_rel.copy(_eye).normalize(), SPECIES.stalker.height * 0.85);
+      const cam = this.camera;
+      const e = cam.matrixWorld.elements;
+      _seen.set(-e[8], -e[9], -e[10]);
+      if (_los.copy(_eye).sub(cam.position).dot(_seen) <= 0) continue;
+      _vpm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      _ndc.copy(_eye).applyMatrix4(_vpm);
+      const ax = Math.abs(_ndc.x);
+      if (ax < STALKER_EDGE_MIN || ax > STALKER_EDGE_MAX) continue;
+      if (Math.abs(_ndc.y) > 0.75 || _ndc.z > 1) continue;
+      if (!this._lineOfSight(cam.position, _eye)) continue;
+      return { col, k };
+    }
+    return null;
+  }
+
+  /**
+   * What he does while he is being looked at: watch, and back away.
+   *
+   * Returns true unconditionally, so the wander, the flee and the grazing state
+   * machine all stand down — he has exactly one thing on his mind and it is the
+   * player. Note that he only ever writes `want`; the heading is still the
+   * turn-limited one every other body uses, so he swings round to face you at a
+   * human rate instead of snapping.
+   *
+   * There is no path search here and there should not be. _findPath and _stepTo
+   * exist to get a hunter *to* the player; this one is trying to be somewhere
+   * else, and a retreat that walks into a wall and stands there is fine —
+   * better than fine. He is not supposed to escape convincingly. He is supposed
+   * to not be there.
+   */
+  _haunt(mob, dt, dist, player, fr) {
+    mob.hauntT -= dt;
+    _rel.copy(player.position).sub(mob.pos);
+    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
+    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    const toPlayer = Math.atan2(rb, ra);
+    if (dist < STALKER_RUN) {
+      // Close enough to be walked up to, so he leaves. `flee` rather than
+      // `walk` for the speed and the turn rate, and it costs nothing else: the
+      // only other thing that reads `state === 'flee'` is _bedDown, which
+      // already skips him.
+      mob.want = wrapAngle(toPlayer + Math.PI);
+      mob.state = 'flee';
+      mob.stateT = 1;
+    } else {
+      // Standing still and facing you is the whole performance at distance. A
+      // figure walking about on a ridge is a villager; a figure that is simply
+      // stopped, turned your way, is the thing being asked for.
+      mob.want = toPlayer;
+      mob.state = 'idle';
+      mob.stateT = 1;
+    }
+    return true;
   }
 
   /**
@@ -3492,6 +3956,11 @@ export class Mobs {
    */
   _tryVocalise(mob, dist, player) {
     if (!this.onSound) return;
+    // Silence, and deliberately. There is no sample for him — Audio.mob keys on
+    // the species name — and the brief is explicit that no asset is to be added
+    // for this. A sighting that announces itself is a jump scare; the whole
+    // effect here is that nothing happens at all.
+    if (mob.spec.phantom) return;
 
     // The merchant is meant to be found by ear, and every rule below was
     // written for herd noise: a shared one-call-per-second budget it has to win
@@ -4014,6 +4483,12 @@ export class Mobs {
     const ceiling = mob.spec.height * mob.grown * PREY_SIZE;
     for (const o of this.list) {
       if (o === mob || o.taken || o.released || o.dying > 0 || o.health <= 0) continue;
+      // Nothing hunts him. `preyOn` is written out by name and no list names
+      // him, so this is already true — it is here because the lists are data
+      // and "no one will ever add it" is not a guarantee, and because a tiger
+      // padding across a valley towards a figure on a ridge is a story the
+      // player would read as the two of them being in it together.
+      if (o.spec.phantom) continue;
       if (!preyOn.has(o.type)) continue;
       // A calf of a listed species is still on the list; the checks below are
       // about what this individual can actually manage and reach.
@@ -4375,6 +4850,12 @@ export class Mobs {
    * @returns {boolean} true if this killed it, so the caller stops touching it
    */
   _damage(mob, amount) {
+    // Lava, a fall, a cactus, a mined-out floor. The world cannot kill him
+    // either — "we can and must never catch it" is not only about running, and
+    // a figure that burns to death on the ridge you were watching is caught.
+    // Returning false and not true: true means "this body is gone", and every
+    // caller uses it to `continue` out of the frame.
+    if (mob.spec.phantom) return false;
     if (mob.dying > 0 || mob.health <= 0) return true;
     mob.health -= amount;
     mob.hurtT = 0.25;
@@ -4567,6 +5048,43 @@ export class Mobs {
         const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
         if (spot) this._spawnMonster(spot.col, spot.k);
       }
+      // The stalker. One at a time, on his own clock, and rolled against a
+      // chance that is an order of magnitude lower at noon than at midnight —
+      // the husk's shape (a night term) laid over the monsters' (a roll against
+      // a cap), because he wants both halves and neither budget.
+      //
+      // Not gated on `spawnGrace`. That exists so a new world's first minutes
+      // are not a fight, and this is not one: nothing here can hurt the player,
+      // so there is nothing for the grace to protect them from. `_nearHome` in
+      // the placement keeps him out of the opening clearing, which is the part
+      // of the grace that is actually about him.
+      //
+      // The MAX_MOBS guard is a slot he must never be the one to take. He is
+      // the last thing rolled for, and two under the ceiling rather than one so
+      // that a sighting can never be the reason the *next* husk fails to spawn.
+      if (this.stalkerRest > 0) this.stalkerRest -= SPAWN_PERIOD;
+      if (this.stalkerRest <= 0 && !this._countStalkers()
+          && this.list.length < MAX_MOBS - 2
+          && Math.random() < (night ? STALKER_NIGHT_CHANCE : STALKER_DAY_CHANCE)) {
+        const spot = this._findStalkerSpot(playerCol, player.position);
+        const seen = spot ? this.spawn('stalker', spot.col, spot.k) : null;
+        if (seen) {
+          seen.hauntT = STALKER_LIFE;
+          // Facing you from the first frame. `_haunt` would turn him round over
+          // the next second anyway, and a figure caught mid-turn on the frame
+          // he is noticed reads as one that walked there.
+          _rel.copy(player.position).sub(seen.pos);
+          const fr0 = seen.frame;
+          seen.heading = Math.atan2(
+            _rel.x * fr0.eb[0] + _rel.y * fr0.eb[1] + _rel.z * fr0.eb[2],
+            _rel.x * fr0.ea[0] + _rel.y * fr0.ea[1] + _rel.z * fr0.ea[2],
+          );
+          seen.want = seen.heading;
+          seen.placed = false;      // adopt that heading outright, do not slerp
+          this._animate(seen, 0, sky);
+          this.stalkerRest = STALKER_REST;
+        }
+      }
       // The merchant. Same surface search as the wildlife — it has to arrive on
       // ground it can walk on — but gated on its own clock rather than on the
       // headcount, so it is never crowded out by a full paddock.
@@ -4590,6 +5108,20 @@ export class Mobs {
         if (spec.trader) this._retireMerchant(mob, n);
         else { this._release(mob); this.list.splice(n, 1); }
         continue;
+      }
+
+      // The stalker, before anything else touches him.
+      //
+      // First, because every line below this is a thing he must not be seen to
+      // do. Getting this in the right place is the whole feel of the thing: he
+      // must never be watched walking off, never fade, never turn away. The
+      // frame the player stops looking is the frame he stops existing, and the
+      // next look finds an empty ridge.
+      //
+      // Collected rather than spliced, and `continue` rather than falling
+      // through, so nothing animates him on his last frame — see `_vanished`.
+      if (spec.phantom) {
+        if (this._unobserved(mob, dist)) { this._vanished.push(mob); continue; }
       }
 
       // A merchant has somewhere else to be. Letting one linger indefinitely
@@ -4659,8 +5191,15 @@ export class Mobs {
       // running while the cat is mid-chase, or sunrise never reaches it.
       // Committing hands _hunt a target and returns false, so the chase starts
       // on the same frame through the one code path that knows how to chase.
-      const prowling = this._prowl(mob, dt, dist, player, fr);
-      const hunting = !prowling && (spec.hostile || spec.monster || spec.predator)
+      // The stalker's own steering, ahead of all of it and exclusive of all of
+      // it. He carries none of the flags the four below are gated on — no
+      // `stalks`, no `hostile`/`monster`/`predator`, no `preyOn`, no `love` —
+      // so each of them would refuse him on its own; `haunting` is not there to
+      // stop them running, it is there to stop the *wander* underneath them.
+      const haunting = spec.phantom && this._haunt(mob, dt, dist, player, fr);
+      const prowling = !haunting && this._prowl(mob, dt, dist, player, fr);
+      const hunting = !prowling && !haunting
+        && (spec.hostile || spec.monster || spec.predator)
         && this._hunt(mob, dt, dist, player, fr);
       // Then the herd. Hunting the player wins over hunting dinner: something
       // that has decided on you should not wander off after a rabbit mid-fight.
@@ -4673,7 +5212,7 @@ export class Mobs {
 
       // --- behaviour: pick a *desired* heading, never assign the real one ---
       const wasFleeing = mob.state === 'flee';
-      if (!hunting && !prowling && !stalking && !courting && mob.stateT <= 0) {
+      if (!hunting && !prowling && !stalking && !courting && !haunting && mob.stateT <= 0) {
         if (wasFleeing) {
           mob.state = 'idle';
           mob.stateT = 1 + Math.random() * 2;
@@ -5280,6 +5819,20 @@ export class Mobs {
       this._kills.length = 0;
     }
 
+    // And anything that stopped being looked at, on the same terms and for the
+    // same reason. Not through `_die`: no drops, no death clip, no sound, no
+    // body left on the ground for a second and a bit. `_release` and a splice
+    // is the removal the despawn ring and `_bedDown` already use, which is the
+    // one that leaves nothing behind at all.
+    if (this._vanished.length) {
+      for (const gone of this._vanished) {
+        if (gone.released) continue;
+        const idx = this.list.indexOf(gone);
+        if (idx >= 0) { this._release(gone); this.list.splice(idx, 1); }
+      }
+      this._vanished.length = 0;
+    }
+
     // Bodies last: shove anything overlapping apart, then re-place the models
     // so the nudge shows this frame rather than the next.
     this._separate(dt, player);
@@ -5429,7 +5982,13 @@ export class Mobs {
     // fire still reddens: the tint darkens green and blue in the diffuse, and
     // without this the emissive would have gone on adding untinted firelight
     // over the top and washed the flash out at exactly the moment it matters.
-    if (this.blockLightAt) {
+    // ...and not for a phantom, whose entire appearance is that he does not
+    // pick anything up from the world he is standing in. He has no emissiveMap
+    // (see spawn), so this would add one flat colour over the whole body — the
+    // "coat of paint" the paragraph above warns about — and it would do it
+    // exactly where a torch or a lit doorway is, which is where he most needs
+    // to stay a shape.
+    if (this.blockLightAt && !spec.shade) {
       _lit.copy(mob.pos).addScaledVector(mob.up, mob.spec.height * 0.5);
       const bl = this.blockLightAt(_lit, _blockL);
       const er = bl.r * tr, eg = bl.g * tg, eb = bl.b * tb;
@@ -5450,6 +6009,12 @@ export class Mobs {
   raycast(origin, dir, maxDist) {
     let best = null, bestT = maxDist;
     for (const mob of this.list) {
+      // A phantom is not there to be aimed at. This is the single line that
+      // makes him undamageable, unfeedable and un-right-clickable, because
+      // every one of those in main.js starts from this raycast — and it is also
+      // what keeps the crosshair from lighting up over him, which would give
+      // away that the game considers him a thing at all.
+      if (mob.spec.phantom) continue;
       // Aim at the body, sized from the measured footprint. This used to derive
       // both from `scale`, which was ~1 for every hand-built species but is now
       // a model-specific conversion factor — a husk's is not a cow's.
@@ -5527,6 +6092,10 @@ export class Mobs {
 
   /** @param {number} knock 0..1 — how much of the shove this blow carries. */
   hurt(mob, damage, fromPos, knock = 1) {
+    // Belt and braces. `raycast` already refuses to hand a phantom to the
+    // swing, so main.js can never reach this — but `hurt` is the public door
+    // into the damage system and the next caller of it will not know that.
+    if (mob.spec.phantom) return false;
     if (mob.dying > 0) return false;
     mob.health -= damage;
     mob.hurtT = 0.25;
@@ -5614,7 +6183,12 @@ export class Mobs {
       // The merchant's wait has to outlive a session, or quitting and reloading
       // is a way to skip it.
       cooldown: +this.merchantT.toFixed(1),
-      mobs: this.list.map((m) => {
+      // A stalker is never written down. He exists only for as long as he is
+      // being looked at, and a save taken during a sighting that restored him
+      // to the same hillside on load would make him a landmark — which is the
+      // opposite of the only thing he is. `fromJSON` needs no matching guard:
+      // there is nothing in the file to skip.
+      mobs: this.list.filter((m) => !m.spec.phantom).map((m) => {
         const d = {
           t: m.type, c: [m.cell.f, m.cell.ci, m.cell.cj, m.cell.ck], h: m.health, s: m.seed,
           b: +m.baby.toFixed(1), l: +m.love.toFixed(1), d: +m.breedCooldown.toFixed(1),

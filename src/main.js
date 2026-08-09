@@ -4,7 +4,9 @@ import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
 import { Player, VIEW_FIRST, VIEW_COUNT } from './player/Player.js';
 import { ViewModel } from './player/ViewModel.js';
-import { PlayerCharacter, playerModelUrls, DEFAULT_CHARACTER } from './player/Character.js';
+import {
+  PlayerCharacter, playerModelUrls, characterUrl, DEFAULT_CHARACTER,
+} from './player/Character.js';
 import { Input } from './player/Input.js';
 import { Sky, MOON_FILL } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
@@ -532,6 +534,17 @@ class Game {
     // to ask (it already walks the herd once a frame) and the world owns the
     // answer.
     this.mobs.blockLightAt = (pos, out) => this._entityLight(pos, out);
+    // The stalker is the one mob whose behaviour is a question about what is on
+    // screen, so it needs the thing that decides that. Handed over the same way
+    // the light probe above is: a reference rather than a parameter, because
+    // `update` is called from one place and every other caller of it — the
+    // tests, a headless harness — is better off with no camera at all than with
+    // a fake one. See the note on `Mobs.camera` for what null means there.
+    //
+    // Set once. `this.camera` is built in _initRenderer, which runs before this
+    // constructor body reaches Mobs, and is never replaced afterwards — only
+    // its fov and aspect are rewritten.
+    this.mobs.camera = this.camera;
     this.drops.onBurn = (pos) => {
       _burnUp.copy(pos).normalize();
       this.particles.embers(pos, _burnUp, 5, 0.7);
@@ -560,7 +573,16 @@ class Game {
     // Game, load) — the fourth site added later would have been the one that
     // forgot, and both classes default to the same character so the
     // early-return on an unchanged id keeps them in step.
-    this.character.onCharacter = (id) => this.viewModel.setCharacter(id);
+    this.character.onCharacter = (id) => {
+      this.viewModel.setCharacter(id);
+      // ...and so does the stalker, which is the whole of what he is: your own
+      // body, in the dark, at a distance. Routed through this hook rather than
+      // read out of `this.character` at spawn time so that Mobs never has to
+      // know what a PlayerCharacter is — it gets a url, exactly like every
+      // other species. The model itself is already loaded: `playerModelUrls`
+      // is prepared at each of the three setCharacter sites.
+      this.mobs.playerModel = characterUrl(id);
+    };
     /**
      * Which camera the F5 cycle is on, restored from the last session.
      *

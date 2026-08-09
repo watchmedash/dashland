@@ -157,6 +157,52 @@ export const POSE = {
   // Positive pitch instead: the shaft leans back over the shoulder and the
   // blade drops forward and down where the ground is.
   //
+  // **That last sentence is the one that was wrong, and it survived the half
+  // turn below because the half turn does not touch it.** Reported after the
+  // flip shipped: "the shovel is fixed but its angle is leaning back to player,
+  // it should lean forward like how I am holding a torch." Measured as the
+  // angle of the tool's long axis out of the screen plane in the vertical plane,
+  // positive meaning the top tips *away* from the camera:
+  //
+  //     torch    +15.8 deg      (the player's reference, and the shallowest)
+  //     sword    +29.6
+  //     pickaxe  +35.7
+  //     axe      +39.0
+  //     shovel   -22.6          <- the only tool in the game leaning back
+  //
+  // **The flip did not cause this.** The shovel measured -22.5997 before it and
+  // -22.5997 after — bit for bit, against the exact product; the shipped triple
+  // reads -22.6123 and the whole of that 0.013 is the rounding to three decimal
+  // places, not the turn. That equality is not a coincidence: a half turn
+  // about the model's Z reverses which *end* of the long axis is up but leaves
+  // the axis line itself exactly where it was, so it can move the composition
+  // and never the lean. The lean has been backwards since `pitch` was first set
+  // positive, and the flip only made it visible by putting the tool the right
+  // way up to be looked at. Two faults, one pose, found one at a time — which is
+  // worth recording, because the obvious guess after a flip is that the flip
+  // inverted a sign, and here the measurement says plainly that it did not.
+  //
+  // So `pitch` goes from +0.50 to **-0.17**, which is the value that puts the
+  // shovel on the torch's +15.8 rather than a number picked by eye. Only the
+  // pitch moves; the yaw, the roll and the half turn are untouched, and the
+  // three things the flip settled all hold or improve:
+  //
+  //     above the fist   0.69 -> 0.67   (family 0.82-0.86; the constraint was ~0.69)
+  //     scoop toward us  0.75 -> 0.84   (model +Z's view z; higher is more face-on)
+  //     silhouette       0.0846 -> 0.0903
+  //
+  // The torch is not the outlier here and the shovel is: every other held tool
+  // already leans forward, and matching the reference the player named puts the
+  // shovel in the family rather than in tension with it. It lands at the shallow
+  // end of the band on purpose — the torch is what was asked for, and a shovel
+  // pitched like an axe is a shovel held ready to swing rather than carried.
+  //
+  // What the original reasoning was reaching for is still true and is now got at
+  // the other way round: the blade wants to read as the end that goes into the
+  // ground. Post-flip it is the end held high and forward, and the dig track
+  // drives it down and away from there, which is the same stroke described from
+  // the correct starting pose.
+  //
   // This note used to add that the scoop's hollow is the model's -Z face and
   // ends up pointing away, so you watch the back of the blade go in. Both
   // halves are wrong, and measuring the mesh is what settles it: across the
@@ -242,7 +288,11 @@ export const POSE = {
   // The icon is deliberately left alone. It has not been reported, it is a
   // different framing (a slot, not a fist), and the toolbar's convention is
   // head-up across every tool.
-  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [0.500, -0.550, -2.942],  pos: [-0.02, 0.12, -0.14], icon: [0.18, 0.52, -0.26] },
+  // `rot` is `Rxyz(-0.17, -0.55, 0.20) · Rz(π)` evaluated out. Both halves are
+  // described above and neither is a dialled number; if this needs retuning,
+  // change the pitch in that construction and re-evaluate rather than nudging
+  // the composed triple, whose first component is no longer the pitch.
+  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [-0.170, -0.550, -2.942],  pos: [-0.02, 0.12, -0.14], icon: [0.18, 0.52, -0.26] },
   // The roll is the whole of this entry's history. At `rot.z` 1.00 it was two
   // and a half times the next largest in the table — the axe's 0.40 — and the
   // number to read it by is where that leaves the blade: the tip sat **66° off

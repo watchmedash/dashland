@@ -1,0 +1,296 @@
+# Clover — the mat. The lowest thing in the set, and the only trefoil.
+#
+# This is the plains-and-meadow ground cover, so it has the `sea_grass` problem
+# doubled: it stands on green, it will be placed by the hundred, and `BlockModels`
+# normalises by the Y extent. Anything with a vertical axis becomes a lawn you
+# cannot see over. So clover is authored as a **mat** — five leaves splayed out
+# and barely off the floor, `assert width / height > 1.3` — and the only thing
+# with any height at all is the pair of flower heads, which exist precisely so
+# the patch is not a flat green disc from the player's eye line.
+#
+# **The trefoil is the entire read.** Nothing else about clover is distinctive:
+# the colour is grass green, the size is nothing, the stems are wire. What says
+# clover is three rounded lobes meeting at a point, and if those three lobes
+# merge into one blob at 32px the block is a smear. Hence the whole geometry
+# budget goes into keeping them separate — each leaf is three *individual*
+# flattened lofts fanned 115° apart around its stem tip, not one wide loft with
+# a scalloped edge, and each lobe tapers back to 0.035 at its own base so there
+# is real background visible in the notches between them. The
+# `assert dist(...)` battery below measures those gaps as numbers rather than
+# trusting a look at the sheet.
+#
+# **The lobes lie nearly flat and the stems do the leaning.** A trefoil is only a
+# trefoil from above, and the sheet's three-quarter view is the closest thing the
+# game camera has to that. So each petiole leaves the crown at a steep outward
+# tilt (55–62°) — that is what makes the patch wide — and then the lobes it
+# carries sit at a shallow `pitch` of a few degrees, near-horizontal in world
+# space. The first cut hung the lobes off the stem's own direction and they
+# stood on edge like little sails; from above the patch was five green lines.
+#
+# `frame=up` on every lobe, for the reason `sea_grass.wam` gives: a flattened
+# loft needs its depth axis pinned to world up or a nearly-horizontal part sits
+# right on the compiler's 45° auto-frame switch and half the lobes come out
+# standing on their edges. That was the actual bug, not a stylistic choice.
+#
+# **Four sides and three rings per lobe.** A clover leaflet wants a round outline
+# and six sides would give one, but fifteen lobes at six sides came out at 768
+# triangles for a block that will be instanced across an entire biome. Four sides
+# with a `dome` end cap and one wide middle ring reads round enough at the size
+# this is ever seen, and it lands at 648.
+#
+# **The sheet said "oars".** The first compile had lobes 0.30 long and 0.16 wide
+# and the mat read as a ring of little green paddles — the ratio, not the layout,
+# was the whole problem. They are now 0.22 by 0.24, i.e. slightly broader than
+# they are long, which is what a clover leaflet actually is, and the
+# `assert depth(lf1a) > width(lf1a) * 0.62` is there so nobody stretches them
+# back out. `lf1a` is the lobe to measure because its petiole sits at yaw 0, so
+# its bounding box's `width` is honestly its length.
+#
+# **The flower heads were banded and it was a mistake.** Pink at 0.24, white at
+# 0.60, pink at 0.88 was meant to break the head into floret rows; on the sheet
+# it read as a horizontal stripe round a beach ball from all four views, because
+# a band on a low-poly sphere is a band, not a texture. Reverted to white with a
+# single pink crown at the top, which is both what the plant looks like and the
+# only version where the head still reads as one round object.
+#
+# The flower heads are white going pink at the crown, on stems twice the leaves'
+# length: white is the one value that is guaranteed to separate from grass in
+# every light, and putting them well above the mat means the patch still reads
+# from a standing player who cannot see the trefoils at all.
+
+model clover
+  height 0.24
+  style chunky
+
+palette
+  Leaf  #5f9440
+  Deep  #47752f
+  Stem  #6ea24a
+  Bloom #f4f0e6
+  Pink  #edb9c8
+
+skeleton
+  root soil at 0.0
+  # Five petioles on five headings, 72° apart. On an `up` bone a negative `tilt`
+  # leans toward +X and `yaw` swings that lean around the circle (yaw=90 sends
+  # +X to -Z), so the pair (tilt, yaw) is "how far out" and "which way" — which
+  # is exactly the two decisions a splayed stem is. Each is rooted a little way
+  # out along its own heading, so no petiole straddles X=0 lopsidedly.
+  bone pet1 parent=soil side=0.045                dir=up tilt=-60 yaw=0   len=0.30
+  bone pet2 parent=soil side=0.030 fwd=-0.043     dir=up tilt=-56 yaw=72  len=0.27
+  bone pet3 parent=soil side=-0.036 fwd=-0.026    dir=up tilt=-62 yaw=144 len=0.29
+  bone pet4 parent=soil side=-0.036 fwd=0.026     dir=up tilt=-58 yaw=216 len=0.26
+  bone pet5 parent=soil side=0.014 fwd=0.043      dir=up tilt=-61 yaw=288 len=0.28
+  # Two flower stalks. Near-vertical and long — these are the only part of the
+  # model with a Y axis worth speaking of, and they set the model's height.
+  bone fst1 parent=soil side=0.020 fwd=0.018 dir=up tilt=-12 pitch=9  len=0.44
+  bone fst2 parent=soil side=-0.026 fwd=-0.020 dir=up tilt=14 pitch=-7 len=0.36
+
+parts
+  # Petioles. Wire — three rings, four sides. The flare at the foot is all that
+  # keeps them from looking pushed into the ground rather than grown out of it.
+  loft st1 bones=pet1..pet1 material=Stem sides=4
+    ring 0.00 w=0.040 d=0.038
+    ring 0.14 w=0.022 d=0.021
+    ring 1.00 w=0.018 d=0.017
+    cap start=flat end=flat
+  loft st2 bones=pet2..pet2 material=Stem sides=4
+    ring 0.00 w=0.038 d=0.036
+    ring 0.14 w=0.021 d=0.020
+    ring 1.00 w=0.017 d=0.016
+    cap start=flat end=flat
+  loft st3 bones=pet3..pet3 material=Stem sides=4
+    ring 0.00 w=0.040 d=0.038
+    ring 0.14 w=0.022 d=0.021
+    ring 1.00 w=0.018 d=0.017
+    cap start=flat end=flat
+  loft st4 bones=pet4..pet4 material=Stem sides=4
+    ring 0.00 w=0.038 d=0.036
+    ring 0.14 w=0.021 d=0.020
+    ring 1.00 w=0.017 d=0.016
+    cap start=flat end=flat
+  loft st5 bones=pet5..pet5 material=Stem sides=4
+    ring 0.00 w=0.038 d=0.036
+    ring 0.14 w=0.021 d=0.020
+    ring 1.00 w=0.017 d=0.016
+    cap start=flat end=flat
+
+  # Leaf 1 — the trefoil, three lobes off one petiole tip.
+  #
+  # Headings: a `fwd` bone yawed by ψ points at (sin ψ, 0, cos ψ), and a petiole
+  # yawed by φ runs out along (cos φ, 0, −sin φ), so the lobe that continues
+  # straight out is ψ = 90 + φ and the two flankers are that ±115°. 115 rather
+  # than the botanical 120 because at 120 the two back lobes sit exactly astride
+  # the petiole and hide it; four degrees of asymmetry is invisible and buys a
+  # clean stem.
+  #
+  # The narrow ring 0 is the notch: three lobes 0.035 wide where they meet leave
+  # actual daylight between them, and daylight is what makes three shapes read as
+  # three shapes.
+  loft lf1a bone=pet1 at=1.0 dir=fwd yaw=90  pitch=5   len=0.22 on=st1 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.035 d=0.020
+    ring 0.52 w=0.240 d=0.026
+    ring 1.00 w=0.149 d=0.018
+    cap start=flat end=dome
+  loft lf1b bone=pet1 at=1.0 dir=fwd yaw=-25 pitch=4   len=0.19 on=st1 material=Deep sides=4 frame=up
+    ring 0.00 w=0.035 d=0.020
+    ring 0.52 w=0.224 d=0.024
+    ring 1.00 w=0.139 d=0.017
+    cap start=flat end=dome
+  loft lf1c bone=pet1 at=1.0 dir=fwd yaw=205 pitch=6   len=0.19 on=st1 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.035 d=0.020
+    ring 0.52 w=0.224 d=0.024
+    ring 1.00 w=0.139 d=0.017
+    cap start=flat end=dome
+
+  # Leaf 2 — petiole yaw 72, so the lobes sit at 162 and 162±115.
+  loft lf2a bone=pet2 at=1.0 dir=fwd yaw=162 pitch=4   len=0.20 on=st2 material=Deep sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.232 d=0.025
+    ring 1.00 w=0.144 d=0.017
+    cap start=flat end=dome
+  loft lf2b bone=pet2 at=1.0 dir=fwd yaw=47  pitch=6   len=0.18 on=st2 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.217 d=0.023
+    ring 1.00 w=0.135 d=0.016
+    cap start=flat end=dome
+  loft lf2c bone=pet2 at=1.0 dir=fwd yaw=277 pitch=3   len=0.18 on=st2 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.217 d=0.023
+    ring 1.00 w=0.135 d=0.016
+    cap start=flat end=dome
+
+  # Leaf 3 — petiole yaw 144.
+  loft lf3a bone=pet3 at=1.0 dir=fwd yaw=234 pitch=5   len=0.21 on=st3 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.035 d=0.020
+    ring 0.52 w=0.236 d=0.026
+    ring 1.00 w=0.146 d=0.018
+    cap start=flat end=dome
+  loft lf3b bone=pet3 at=1.0 dir=fwd yaw=119 pitch=4   len=0.18 on=st3 material=Deep sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.221 d=0.024
+    ring 1.00 w=0.138 d=0.017
+    cap start=flat end=dome
+  loft lf3c bone=pet3 at=1.0 dir=fwd yaw=349 pitch=6   len=0.18 on=st3 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.221 d=0.024
+    ring 1.00 w=0.138 d=0.017
+    cap start=flat end=dome
+
+  # Leaf 4 — petiole yaw 216.
+  loft lf4a bone=pet4 at=1.0 dir=fwd yaw=306 pitch=4   len=0.19 on=st4 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.227 d=0.025
+    ring 1.00 w=0.141 d=0.017
+    cap start=flat end=dome
+  loft lf4b bone=pet4 at=1.0 dir=fwd yaw=191 pitch=6   len=0.17 on=st4 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.033 d=0.018
+    ring 0.52 w=0.213 d=0.023
+    ring 1.00 w=0.133 d=0.016
+    cap start=flat end=dome
+  loft lf4c bone=pet4 at=1.0 dir=fwd yaw=61  pitch=3   len=0.17 on=st4 material=Deep sides=4 frame=up
+    ring 0.00 w=0.033 d=0.018
+    ring 0.52 w=0.213 d=0.023
+    ring 1.00 w=0.133 d=0.016
+    cap start=flat end=dome
+
+  # Leaf 5 — petiole yaw 288.
+  loft lf5a bone=pet5 at=1.0 dir=fwd yaw=18  pitch=5   len=0.20 on=st5 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.232 d=0.025
+    ring 1.00 w=0.144 d=0.017
+    cap start=flat end=dome
+  loft lf5b bone=pet5 at=1.0 dir=fwd yaw=263 pitch=4   len=0.18 on=st5 material=Leaf sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.217 d=0.023
+    ring 1.00 w=0.135 d=0.016
+    cap start=flat end=dome
+  loft lf5c bone=pet5 at=1.0 dir=fwd yaw=133 pitch=6   len=0.18 on=st5 material=Deep sides=4 frame=up
+    ring 0.00 w=0.034 d=0.019
+    ring 0.52 w=0.217 d=0.023
+    ring 1.00 w=0.135 d=0.016
+    cap start=flat end=dome
+
+  # The two flower stalks and their heads. Thinner than the petioles — a clover
+  # flower rides a wire — and the heads are `squarish` with alternating `roll=`
+  # for the flower-clump reason: a smooth sphere at this size is a berry, and
+  # what a clover head actually is, is a ball of florets.
+  loft fs1 bones=fst1..fst1 material=Stem sides=4
+    ring 0.00 w=0.032 d=0.030
+    ring 0.14 w=0.018 d=0.017
+    ring 1.00 w=0.015 d=0.014
+    cap start=flat end=flat
+  loft fs2 bones=fst2..fst2 material=Stem sides=4
+    ring 0.00 w=0.030 d=0.028
+    ring 0.14 w=0.017 d=0.016
+    ring 1.00 w=0.014 d=0.013
+    cap start=flat end=flat
+  loft head1 bone=fst1 at=1.0 dir=up pitch=-5 len=0.17 on=fs1 material=Bloom sides=6 shape=squarish
+    ring 0.00 w=0.055 d=0.052 material=Bloom
+    ring 0.24 w=0.145 d=0.138 roll=18
+    ring 0.60 w=0.155 d=0.148 roll=-20
+    ring 0.88 w=0.110 d=0.105 roll=16 material=Pink
+    ring 1.00 w=0.045 d=0.043
+    cap start=flat end=flat
+  loft head2 bone=fst2 at=1.0 dir=up pitch=7 len=0.15 on=fs2 material=Bloom sides=6 shape=squarish
+    ring 0.00 w=0.050 d=0.048 material=Bloom
+    ring 0.24 w=0.132 d=0.126 roll=-19
+    ring 0.60 w=0.142 d=0.135 roll=21
+    ring 0.88 w=0.100 d=0.095 roll=-15 material=Pink
+    ring 1.00 w=0.040 d=0.038
+    cap start=flat end=flat
+
+checks
+  # A mat, not a plant. This is the check the whole model exists to satisfy, and
+  # the one that fails the moment somebody lengthens a flower stalk to make the
+  # block more visible. It is much wider than tall — 1.3 is the floor, not a
+  # target.
+  assert width / height > 1.3
+  assert depth / height > 1.3
+  # Rooted. Every petiole and both flower stalks start in the soil.
+  assert bottom(st1) < 0.02
+  assert bottom(st3) < 0.02
+  assert bottom(fs1) < 0.02
+  assert bottom(fs2) < 0.02
+  # The trefoil, stated as arithmetic. Three lobes on one stem tip, each of them
+  # substantially longer than it is thick, all three fanned far enough apart that
+  # their far ends are further from each other than one lobe is wide. If the
+  # lobes are ever fattened into a single blob this is what catches it.
+  assert dist(lf1a, lf1b) > width(lf1a) * 0.75
+  assert dist(lf1b, lf1c) > width(lf1b) * 0.75
+  assert dist(lf3a, lf3b) > width(lf3a) * 0.75
+  assert dist(lf5b, lf5c) > width(lf5b) * 0.75
+  # Lobes lie flat: each one is far thinner top-to-bottom than it is across, so
+  # the trefoil is visible from above rather than edge-on. This is the check that
+  # would have caught the sails.
+  assert height(lf1a) < width(lf1a) / 2.5
+  assert height(lf3a) < width(lf3a) / 2.5
+  assert height(lf4a) < width(lf4a) / 2.5
+  # The leaf mat stays below the flowers — the whole point of putting the heads
+  # on long stalks is that they clear the leaves and can be seen standing up.
+  assert top(head1) > top(lf1a) * 1.5
+  assert bottom(head1) > top(lf1a)
+  assert top(head1) > top(head2)
+  # ...and the heads are the tallest thing in the model, so the Y extent (which
+  # `BlockModels` normalises by) is set by them and not by an over-tilted leaf.
+  assert top(head1) > top(lf3a)
+  assert top(head1) > top(lf5a)
+  # White reads against grass; the head has to be big enough to see. Stated as a
+  # flat number and not as a multiple of `width(fs1)`, which was the first cut
+  # and immediately failed: the flower stalk is tilted, so its *bounding box*
+  # width is a tenth of the model rather than the 0.015 the tube actually is.
+  # There is no expression for "how thick the part is", so the bound goes on the
+  # thing that matters directly — the head is at least a sixth of the model
+  # across, which at icon size is a visible white dot.
+  assert width(head1) > 0.13
+  assert width(head1) > width(head2)
+  # Round lobes, not oars. `lf1a` points along +X by construction (its petiole is
+  # at yaw 0), so `width` is its length and `depth` is how broad it is — the
+  # first sheet had those at 0.31 by 0.16 and the mat read as a patch of little
+  # green paddles. A clover leaflet is nearly as broad as it is long.
+  assert depth(lf1a) > width(lf1a) * 0.62
+  assert depth(lf1a) < width(lf1a) * 1.30
+  assert parts == 24
+  assert tris < 700
+  measure spread width / height
+  measure lobegap dist(lf1a, lf1b)

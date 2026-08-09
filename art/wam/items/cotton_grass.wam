@@ -1,0 +1,243 @@
+# Cotton Grass — the one thing you can see on a flat tundra.
+#
+# Arctic cottongrass is a sedge, and if you model it as a sedge you get a small
+# dark tuft of blades on brown ground, which is invisible. What makes it worth a
+# block is the seed heads: three to five bare wiry stalks, each ending in a fat
+# white puff, standing clear above the blades. **The heads are the model.** The
+# blade tuft below them is a plinth whose only jobs are to give the stalks a
+# place to come from and to be dark, so the white has something to sit against.
+# That is why the blades here are shorter and thinner than `sea_grass.wam`'s and
+# there are six of them: they are a mass, not a silhouette.
+#
+# **A puff, not a pompom.** The first cut made each head a sphere on a pin, and
+# on the sheet it read as a dandelion clock at best and as a matchstick at worst
+# — a perfect circle at the top of a straight line is a lollipop, which is the
+# exact failure `flower_red.wam` names. Real cottongrass heads are lopsided
+# bundles of fibre, longer than they are wide, drooping a little to one side. So
+# each head is a short fat loft with a `squarish` section, alternating `roll=`
+# (the sapling/bloom trick — it breaks the facets out of alignment so the mass
+# reads as fibres rather than as a smooth spheroid), and no two of the four are
+# the same size or the same length. The sheet also moved `Cotton` two steps
+# brighter than the first pick: the renderer's shading pulls a #f3f1e6 head down
+# to a mid grey, and grey against a dark tuft is a different plant.
+#
+# **The stalks nod.** A stalk aimed dead vertical is a flagpole and four of them
+# are a fence. Each is a two-bone chain: upright for the run, then leaning over
+# by twenty-odd degrees for the last fifth, so the head sits *out* over the tuft
+# rather than directly above it. The lean is the reason the model looks like it
+# is standing in wind even though nothing here moves.
+#
+# Two-bone chains, and not a `sweep` with the head mounted `on=` it: `on=` snaps
+# to the nearest point on a surface, and the nearest point on a full-height stalk
+# to a mount at its foot is the foot — the failure the flower's stamen ran into.
+# With a bone chain the head lofts from `stalkN2` at `at=1.0`, which is the tip
+# by construction and needs no coordinate solved by hand.
+#
+# The heads are allowed to make this model taller than wide (`height / width in
+# 1.0..1.8`, where the tufts in this set assert the reverse) because a head that
+# does not clear the blades is a head nobody sees. It is still the loosest
+# upright ratio in the family — a cottongrass that has grown into a reed has
+# lost the point.
+
+model cotton_grass
+  height 0.50
+  style chunky
+
+palette
+  Cotton #fcfbf4
+  Shade  #ddd9c7
+  Sedge  #3c5a2e
+  Dark   #2a4222
+  Stalk  #6d7f42
+
+skeleton
+  root sod at 0.0
+  # Four stalks, each a straight run and then a nod. `pitch`/`tilt` on a bone are
+  # world aims, not deltas from the parent (see `marram.wam`, which learned this
+  # the hard way), so the second bone's angle is simply how far off vertical the
+  # nodding tip ends up — 22 to 31°, which is enough to throw the head clear of
+  # the stalk line without it reading as broken.
+  #
+  # The two that lean along X are rooted a little off the axis in the direction
+  # they lean, so each part is honestly one-sided; the two that lean along Z stay
+  # centred and are symmetric. `sea_grass.wam` sets that rule and the centreline
+  # lint enforces it.
+  bone stalkA  parent=sod side=-0.030 dir=up tilt=12 len=0.70
+  bone stalkA2 parent=stalkA dir=up tilt=31 len=0.20
+  bone stalkB  parent=sod side=0.026 dir=up tilt=-9 len=0.88
+  bone stalkB2 parent=stalkB dir=up tilt=-24 len=0.18
+  bone stalkC  parent=sod fwd=0.028 dir=up pitch=10 len=0.60
+  bone stalkC2 parent=stalkC dir=up pitch=28 len=0.17
+  bone stalkD  parent=sod fwd=-0.024 dir=up pitch=-7 len=0.78
+  bone stalkD2 parent=stalkD dir=up pitch=-22 len=0.19
+
+parts
+  # The plinth: six short dark blades, splayed hard. They are sea grass's idiom
+  # at two thirds the length and a third the width, and their `refaxis=` is
+  # horizontal for the reason `marram.wam` spells out — `frame=up` on a blade
+  # that is mostly going up pins the ring frame along the path, and the lint
+  # says so.
+  loft bladeA bone=sod at=0.0 offset=(-0.050,0,0.02) dir=up pitch=6 tilt=38 len=0.44 material=Sedge refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.040 d=0.022
+    ring 0.32 w=0.052 d=0.020
+    ring 0.78 w=0.038 d=0.016
+    ring 1.00 w=0.012 d=0.008 tip
+    cap start=flat end=point
+  loft bladeB bone=sod at=0.0 offset=(0.052,0,-0.03) dir=up pitch=-5 tilt=-34 len=0.50 material=Dark refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.040 d=0.022
+    ring 0.32 w=0.054 d=0.020
+    ring 0.78 w=0.040 d=0.016
+    ring 1.00 w=0.012 d=0.008 tip
+    cap start=flat end=point
+  loft bladeC bone=sod at=0.0 offset=(-0.044,0,-0.05) dir=up pitch=-9 tilt=27 len=0.38 material=Dark refaxis=(0.7,0,0.7) sides=4
+    ring 0.00 w=0.036 d=0.020
+    ring 0.32 w=0.048 d=0.018
+    ring 0.78 w=0.034 d=0.014
+    ring 1.00 w=0.011 d=0.007 tip
+    cap start=flat end=point
+  loft bladeD bone=sod at=0.0 offset=(0.046,0,0.05) dir=up pitch=11 tilt=-30 len=0.42 material=Sedge refaxis=(0.7,0,-0.7) sides=4
+    ring 0.00 w=0.036 d=0.020
+    ring 0.32 w=0.049 d=0.018
+    ring 0.78 w=0.035 d=0.014
+    ring 1.00 w=0.011 d=0.007 tip
+    cap start=flat end=point
+  # The two that lean in Z. Centred on X and therefore symmetric; they are what
+  # stops the plinth reading as a flat card from the front.
+  loft bladeE bone=sod at=0.0 offset=(0,0,0.05) dir=up pitch=36 len=0.46 material=Dark refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.040 d=0.022
+    ring 0.32 w=0.052 d=0.020
+    ring 0.78 w=0.038 d=0.016
+    ring 1.00 w=0.012 d=0.008 tip
+    cap start=flat end=point
+  loft bladeF bone=sod at=0.0 offset=(0,0,-0.05) dir=up pitch=-33 len=0.36 material=Sedge refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.036 d=0.020
+    ring 0.32 w=0.048 d=0.018
+    ring 0.78 w=0.034 d=0.014
+    ring 1.00 w=0.011 d=0.007 tip
+    cap start=flat end=point
+
+  # Four wiry stalks. Round, barely tapered, and thin enough that at icon size
+  # they are a hairline — which is what they should be, because a visible stalk
+  # competes with the head it is carrying. Olive-green rather than sedge-green so
+  # they separate from the blade mass they rise out of.
+  #
+  # `bones=stalkA..stalkA2` and **not** `bones=sod..stalkA2`, which is what these
+  # said first. A chain lofted from the root starts at the root's own position —
+  # dead on x=0 — and then jumps out to wherever `side=` put the stalk's head, so
+  # every stalk had a base ring straddling the centreline while the rest of it
+  # leaned 0.28 to one side. The lint caught all of it ("straddles the centerline
+  # but is lopsided"). Started at its own bone, each stalk is honestly one-sided,
+  # and since the bone heads sit at y=0 nothing is lost from the bottom.
+  loft stemA bones=stalkA..stalkA2 material=Stalk sides=4
+    ring 0.00 w=0.030 d=0.028
+    ring 0.10 w=0.019 d=0.018
+    ring 1.00 w=0.014 d=0.013
+    cap start=flat end=flat
+  loft stemB bones=stalkB..stalkB2 material=Stalk sides=4
+    ring 0.00 w=0.030 d=0.028
+    ring 0.10 w=0.019 d=0.018
+    ring 1.00 w=0.014 d=0.013
+    cap start=flat end=flat
+  loft stemC bones=stalkC..stalkC2 material=Stalk sides=4
+    ring 0.00 w=0.028 d=0.026
+    ring 0.10 w=0.018 d=0.017
+    ring 1.00 w=0.013 d=0.012
+    cap start=flat end=flat
+  loft stemD bones=stalkD..stalkD2 material=Stalk sides=4
+    ring 0.00 w=0.028 d=0.026
+    ring 0.10 w=0.018 d=0.017
+    ring 1.00 w=0.013 d=0.012
+    cap start=flat end=flat
+
+  # The four heads — the entire reason the block exists.
+  #
+  # Fat and short: each is about 0.20 long and 0.24 across at its widest, so it
+  # is a blob and not an ear of wheat, and the widest ring sits at 0.45 of its
+  # own length, i.e. through the middle, which is what separates a puff from a
+  # cone. The base ring is `Shade` and narrow so the puff appears to be gripped
+  # by the stalk rather than balanced on it.
+  #
+  # `shape=squarish` with `roll=` alternating sign on every ring is the only
+  # thing standing between this and a sphere. Seven sides, not the ten a mushroom
+  # cap wants, for the same reason inverted: a cap is meant to read as smooth and
+  # a seed head is meant to read as lumpy.
+  loft headA bone=stalkA2 at=1.0 dir=up tilt=31 len=0.185 material=Cotton sides=7 shape=squarish
+    ring 0.00 w=0.075 d=0.072 material=Shade
+    ring 0.18 w=0.185 d=0.175 roll=14 material=Cotton
+    ring 0.45 w=0.245 d=0.230 roll=-22
+    ring 0.74 w=0.215 d=0.205 roll=18
+    ring 0.92 w=0.140 d=0.135 roll=-13
+    ring 1.00 w=0.055 d=0.052
+    cap start=flat end=flat
+  loft headB bone=stalkB2 at=1.0 dir=up tilt=-24 len=0.205 material=Cotton sides=7 shape=squarish
+    ring 0.00 w=0.070 d=0.068 material=Shade
+    ring 0.18 w=0.180 d=0.170 roll=-16 material=Cotton
+    ring 0.45 w=0.235 d=0.220 roll=21
+    ring 0.74 w=0.205 d=0.195 roll=-17
+    ring 0.92 w=0.135 d=0.130 roll=12
+    ring 1.00 w=0.052 d=0.050
+    cap start=flat end=flat
+  loft headC bone=stalkC2 at=1.0 dir=up pitch=28 len=0.165 material=Cotton sides=7 shape=squarish
+    ring 0.00 w=0.062 d=0.060 material=Shade
+    ring 0.18 w=0.160 d=0.152 roll=17 material=Cotton
+    ring 0.45 w=0.210 d=0.198 roll=-24
+    ring 0.74 w=0.182 d=0.174 roll=15
+    ring 0.92 w=0.120 d=0.115 roll=-11
+    ring 1.00 w=0.046 d=0.044
+    cap start=flat end=flat
+  loft headD bone=stalkD2 at=1.0 dir=up pitch=-22 len=0.180 material=Cotton sides=7 shape=squarish
+    ring 0.00 w=0.066 d=0.064 material=Shade
+    ring 0.18 w=0.170 d=0.162 roll=-15 material=Cotton
+    ring 0.45 w=0.222 d=0.210 roll=20
+    ring 0.74 w=0.193 d=0.184 roll=-16
+    ring 0.92 w=0.127 d=0.122 roll=14
+    ring 1.00 w=0.049 d=0.047
+    cap start=flat end=flat
+
+checks
+  # Everything is rooted in the tundra. A stalk floating above the blades would
+  # read as four puffs hovering, which on a flat brown plain is exactly the sort
+  # of thing nobody notices in the source and everybody notices in the world.
+  assert bottom(bladeA) < 0.02
+  assert bottom(stemA) < 0.02
+  assert bottom(stemD) < 0.02
+  # THE check. Every head clears the entire blade tuft — not just its own blade,
+  # the tallest one — because the whole design is white against dark and a head
+  # buried in the plinth is white against white-flecked green.
+  assert bottom(headA) > top(bladeE)
+  assert bottom(headB) > top(bladeE)
+  assert bottom(headC) > top(bladeE)
+  assert bottom(headD) > top(bladeE)
+  # Puffs, not pompoms: each head is wider than its own length is long. This is
+  # what fails first if someone stretches a head to make it more visible, which
+  # turns it into a bulrush.
+  assert width(headA) > height(headA) * 1.05
+  assert width(headB) > height(headB) * 1.05
+  # ...and each carries far more mass than the stalk under it. This started life
+  # as `width(headA) > width(stemA) * 5` and was simply wrong: `width()` is a
+  # bounding box, and a stalk that leans 20° over its own length has a bbox width
+  # of 0.29 — five times the *head*. Volume is the measure that actually means
+  # "the puff is the model and the stalk is a hairline", and by it the margin is
+  # not five but nearer twenty.
+  assert volume(headA) > volume(stemA) * 3.0
+  assert volume(headC) > volume(stemC) * 3.0
+  # Four different heads at four different heights. A row of identical puffs at
+  # one height is a set of pins in a cushion, and this is the assertion that
+  # stops the sizes being "tidied up".
+  assert top(headB) > top(headA)
+  assert top(headD) > top(headA)
+  assert top(headA) > top(headC)
+  assert volume(headB) > volume(headC) * 1.3
+  # The nod is real: each head's centre sits a good way out from the tuft's axis,
+  # so it hangs over the plinth rather than balancing on top of it. Horizontal
+  # reach and not `abs(x)`, because two of the four nod in z (see the skeleton)
+  # and an x-only test reads those two as upright when they are not.
+  assert (x(headA) * x(headA) + z(headA) * z(headA)) ** 0.5 > 0.15
+  assert (x(headC) * x(headC) + z(headC) * z(headC)) ** 0.5 > 0.15
+  # Y stays the long axis, but only just — this is the one plant in the cold set
+  # allowed to be taller than wide, and 1.8 is the ceiling before
+  # `ItemModels.js`'s height normalisation starts delivering a reed.
+  assert height / width in 1.0..1.8
+  assert parts == 14
+  assert tris < 700
+  measure headroom bottom(headC) - top(bladeE)

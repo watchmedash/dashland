@@ -717,6 +717,177 @@ export const BLOCKS = [
     light: 11, lightColor: [0.31, 0.86, 0.78],
     particle: [0.31, 0.84, 0.75], sound: 'grass',
   }),
+
+  // -------------------------------------------------------------------------
+  // The land flora, and the cave floor.
+  //
+  // **Appended at the very end, for the reason stated above the reef and worth
+  // stating again**: a block's index is the byte a save stores. Sixteen more
+  // here takes the table from 195 to 211 of the 256 a `Uint8Array` can hold.
+  //
+  // Why sixteen and not four. Before this the whole planet's ground cover was
+  // `tall_grass` plus three flowers, all four of them keyed off one block —
+  // `ID.grass` — which meant a meadow, a plain, a forest floor and a mountain
+  // shoulder grew *literally the same thing*, and every biome that is not
+  // grass-topped (desert, badlands, tundra, snow, beach, and the whole
+  // underground) grew nothing at all. You could cross the planet and the only
+  // thing that changed underfoot was the colour of the dirt.
+  //
+  // So the set is organised by biome rather than by species, one or two per
+  // biome, chosen so that the *silhouette* differs even where the colour does
+  // not:
+  //
+  //   thornbrush    desert + badlands   the "there is life here, barely" twig
+  //   aloe          savanna + desert    a succulent, not a grass
+  //   golden_grass  savanna + plains    seed heads over a dry sward
+  //   firebloom     badlands            a red spike you can see from far off
+  //   cotton_grass  tundra              white heads over dark sedge
+  //   snowbell      snow                the one dark thing on white ground
+  //   alpine_aster  mountain            a cushion you find by looking down
+  //   marram        beach               a stiff sheaf, not a spray
+  //   lavender      meadow              vertical purple bars
+  //   clover        plains + meadow     a mat, the lowest layer there is
+  //   fern          forest              the arching fountain
+  //   lingonberry   pine forest         berries, and therefore a reason to stop
+  //   cave_mushroom underground         the common cave cover
+  //   shelf_fungus  underground         horizontal plates, the other fungus
+  //   crystal_cluster underground       the reward for looking down in the dark
+  //   driftwood     beach               the reward for walking the shoreline
+  //
+  // **Every one of them is fully modelled and carries no tile.** That is not a
+  // saving, it is a constraint: the tile atlas is baked by `scripts/
+  // bake-textures.mjs` from a texture pack that does not ship in this tree, so
+  // there is no way to add a billboard here even if one were wanted. Each name
+  // must therefore appear in `MODELLED_CROSS` (`world/Mesher.js`), in
+  // `MODELLED_PLANTS` (`main.js`) and in `POSE` + `BY_NAME`
+  // (`render/ItemModels.js`), and the `.gltf` must be in `public/models/wam/`.
+  // A name missing from any one of those four renders as *nothing at all* —
+  // there is no billboard to fall back on. See `art/wam/items/*.wam`.
+  //
+  // None of them is `submerged`, so `DROWNS` refuses all sixteen in water for
+  // free, and all sixteen take `needsFloor: true`: unlike `tall_grass`, which
+  // predates that flag and hangs in the air when you mine under it, these break
+  // when their floor goes. The worldgen passes that place them gate on
+  // `supports()` for the same reason the reef does.
+  //
+  // `sound: 'grass'` on everything soft. The three that are not soft say so:
+  // driftwood is wood, and the crystal cluster is stone.
+  // -------------------------------------------------------------------------
+
+  // Desert and badlands scrub. Drops a stick, which makes it the one renewable
+  // wood on a planet where the desert has no trees but a cactus — that is the
+  // whole reason it drops anything, and 0.15 hardness means bare hands.
+  block({
+    name: 'thornbrush', label: 'Thornbrush', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.15, needsFloor: true,
+    drop: 'stick', fuel: 1,
+    particle: [0.42, 0.36, 0.28], sound: 'grass',
+  }),
+  // A succulent. Slower to break than a grass because it is a thick-leaved
+  // thing, and the one green in a desert that is not a cactus.
+  block({
+    name: 'aloe', label: 'Aloe', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.2, needsFloor: true,
+    particle: [0.44, 0.60, 0.49], sound: 'grass',
+  }),
+  // Savanna sward. This is the biome's `tall_grass` and it is meant to be
+  // everywhere, so it is as soft as one.
+  block({
+    name: 'golden_grass', label: 'Golden Grass', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.78, 0.66, 0.30], sound: 'grass',
+  }),
+  // The badlands beacon. Rare, and the only saturated colour in a biome made
+  // entirely of red rock, so it is what a player walks toward.
+  block({
+    name: 'firebloom', label: 'Firebloom', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.90, 0.36, 0.12], sound: 'grass',
+  }),
+  block({
+    name: 'cotton_grass', label: 'Cotton Grass', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.86, 0.86, 0.82], sound: 'grass',
+  }),
+  block({
+    name: 'snowbell', label: 'Snowbell', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.80, 0.78, 0.90], sound: 'grass',
+  }),
+  block({
+    name: 'alpine_aster', label: 'Alpine Aster', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.42, 0.38, 0.78], sound: 'grass',
+  }),
+  block({
+    name: 'marram', label: 'Marram Grass', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.62, 0.68, 0.52], sound: 'grass',
+  }),
+  block({
+    name: 'lavender', label: 'Lavender', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.55, 0.40, 0.76], sound: 'grass',
+  }),
+  block({
+    name: 'clover', label: 'Clover', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.34, 0.56, 0.26], sound: 'grass',
+  }),
+  block({
+    name: 'fern', label: 'Fern', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.24, 0.44, 0.30], sound: 'grass',
+  }),
+  // Berries. `hardness` a little above a flower because you are stripping a
+  // shrub rather than picking a stem, and it drops two: a patch of these is
+  // meant to be worth kneeling down for.
+  block({
+    name: 'lingonberry', label: 'Lingonberry', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.15, needsFloor: true,
+    dropCount: 2,
+    particle: [0.72, 0.14, 0.18], sound: 'grass',
+  }),
+  // The cave floor's tall grass. No light of its own — that is the glowcap's
+  // job and the whole point of the glowcap is that it is the one you are glad
+  // to find. This is the one you walk past.
+  block({
+    name: 'cave_mushroom', label: 'Cave Mushroom', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, needsFloor: true,
+    particle: [0.52, 0.38, 0.26], sound: 'grass',
+  }),
+  block({
+    name: 'shelf_fungus', label: 'Shelf Fungus', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.1, needsFloor: true,
+    fuel: 1,
+    particle: [0.72, 0.46, 0.24], sound: 'grass',
+  }),
+  // The spelunker's find, and the only one of the sixteen that wants a tool.
+  //
+  // `tier: 1` and `tool: 'pick'` put it on the same footing as an ore: bare
+  // hands shatter it and get nothing, which is what makes finding one with a
+  // pick in your bag feel different from finding one without. It drops two
+  // amethysts, so a cluster is worth more than the wall it grew on.
+  //
+  // `light: 4` is deliberately the dimmest emitter on the planet — a torch is
+  // 13, the glowcap 6, the anemone 11. It does not light a room; it is just
+  // bright enough that you catch it out of the corner of your eye down a side
+  // passage, which is the entire feature.
+  block({
+    name: 'crystal_cluster', label: 'Crystal Cluster', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.7, tool: 'pick', tier: 1,
+    needsFloor: true, drop: 'amethyst', dropCount: 2,
+    light: 4, lightColor: [0.72, 0.52, 0.95],
+    particle: [0.66, 0.44, 0.88], sound: 'stone',
+  }),
+  // Beachcombing. Two sticks and it burns, which makes a long shoreline walk
+  // the answer to landing on a treeless coast with nothing.
+  block({
+    name: 'driftwood', label: 'Driftwood', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.3, tool: 'axe',
+    needsFloor: true, drop: 'stick', dropCount: 2, fuel: 4,
+    particle: [0.72, 0.70, 0.64], sound: 'wood',
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -1057,6 +1228,165 @@ export function supports(id, byte = 0) {
   if (STACKS[id]) return true;
   return crowds(id, byte) && blockTop(id, byte) === 1;
 }
+
+// ---------------------------------------------------------------------------
+// Soil — what each plant is allowed to grow *on*.
+// ---------------------------------------------------------------------------
+
+/**
+ * `supports()` answers a **structural** question: is there a surface here that
+ * a thing could sit on? It admits stone, gravel, glass and the top of a fence,
+ * and it is right to, because that is what it is for — it decides whether a
+ * block falls.
+ *
+ * It was also, until now, the *only* question anything asked before growing a
+ * plant, and the result is the bug this table exists to fix: tall grass in
+ * gravel, tall grass on bare stone. Structurally sound and botanically absurd.
+ *
+ * So suitability is now a separate, first-class fact per plant: the set of
+ * blocks it may root in. Not a set of "soil types" shared between plants —
+ * marram binds a dune and nothing else, a crystal grows on rock and not on
+ * clay, a snowbell comes up through snow — and expressing it per plant is what
+ * lets each entry be argued with individually.
+ *
+ * `FLORA_SOIL[plant]` is a dense `Uint8Array(N_BLOCKS)` for anything that
+ * grows, and `undefined` for everything else. `undefined` means "this is not a
+ * plant and the question does not apply", which is why `growsOn` returns true
+ * for it — a wall is not growing anywhere.
+ *
+ * **The pre-existing flora is in here too**, with sets defined retroactively.
+ * That is the whole point: a table that only covered the new plants would make
+ * the new ones correct and leave the complaint standing.
+ *
+ * The generator consults this (see `_floraSoilOk` and the placement passes in
+ * `WorldGen.js`) and it is exported so that `_placeBlock` in `main.js` can be
+ * held to the same rule — worldgen and the player disagreeing about where a
+ * plant may go is the same bug seen from the other side.
+ */
+const SOIL = {
+  /** Turf. What a flower, a sapling and a blade of grass actually root in. */
+  turf: ['grass', 'dirt', 'coarse_dirt', 'podzol'],
+  /** Desert grit. Sand and the rock it cements into, both colours. */
+  desert: ['sand', 'sandstone', 'red_sand', 'red_sandstone'],
+  /**
+   * Cave rock. Everything `WorldGen`'s CARVEABLE set counts as rock a passage
+   * can be cut through, which is the same list as "wall a cave actually has",
+   * plus the two mossy stones. Deliberately no soil: a crystal on clay is a
+   * crystal that grew in a puddle.
+   */
+  rock: ['stone', 'limestone', 'marble', 'granite', 'andesite', 'slate', 'tuff',
+    'azurite', 'magma_stone', 'geode_stone', 'crystal_stone', 'ash_stone',
+    'moss_stone'],
+  /**
+   * The seabed, and it is the exact list `fillColumn`'s OCEAN case can lay:
+   * slate, clay, basalt, gravel, packed ice, coarse dirt, moss block, sand and
+   * mud, plus the `stone` its own rocky-slope override can put over any of
+   * them. Derived from that switch rather than guessed, because a reef prop
+   * that refused one of the nine would leave holes in the reef.
+   */
+  seabed: ['sand', 'gravel', 'clay', 'mud', 'slate', 'basalt', 'packed_ice',
+    'coarse_dirt', 'moss_block', 'stone'],
+  /**
+   * What an ore vein can put where seabed or cave rock used to be.
+   *
+   * This group exists because the first measurement of the soil table found
+   * 1,510 reef props standing on ore — sea grass on iron, brain coral on
+   * crystal — and every one of them is *correct*: `oreAt` replaces a host rock
+   * with a vein after `fillColumn` has laid the floor, so an outcrop on the
+   * seabed is seabed with a seam showing in it. A rule that refused them would
+   * have punched a hole in every reef that happened to grow over one, which is
+   * exactly the kind of thing a table like this gets wrong when it is written
+   * from the biome switch alone and never measured.
+   *
+   * Moss stone is in here for the same reason from the other direction: it is
+   * laid by the cave pass over stone, not by `fillColumn`, so it never appeared
+   * in the ocean's list either.
+   *
+   * Derived from the table rather than listed, because the ore ladder has grown
+   * three times and a hand-written list would be wrong again the next time.
+   */
+  ore: BLOCKS.filter((b) => b.name.endsWith('_ore')).map((b) => b.name)
+    .concat(['moss_stone']),
+};
+
+export const FLORA_SOIL = [];
+const soil = (names, ...groups) => {
+  const set = new Uint8Array(N_BLOCKS);
+  for (const g of groups) for (const n of SOIL[g]) set[BLOCK_ID[n]] = 1;
+  for (const n of names) set[BLOCK_ID[n]] = 1;
+  return set;
+};
+const grows = (plants, set) => { for (const p of plants) FLORA_SOIL[BLOCK_ID[p]] = set; };
+
+// --- the flora that was already here ---------------------------------------
+// Tall grass takes peat as well as turf: a tundra bog is the one wet ground
+// something grass-shaped genuinely grows out of. It does NOT take gravel, sand
+// or bare stone, and that single line is the fix for the reported bug — the
+// canyon branch of `floraAt` used to scatter it over all three.
+grows(['tall_grass'], soil(['peat'], 'turf'));
+grows(['flower_red', 'flower_blue', 'flower_gold', 'sapling', 'pumpkin'], soil([], 'turf'));
+// The glowcap grows on cave rock, which is what it has always done and is
+// correct — it is the one plant in the game whose whole point is that it is
+// underground. Soil admitted alongside the rock because a cave floor is as
+// often dirt as it is stone.
+grows(['mushroom'], soil(['dirt', 'coarse_dirt', 'gravel', 'clay', 'mud', 'peat',
+  'moss_block', 'sandstone', 'red_sandstone'], 'rock', 'ore'));
+// A cactus stands on sand and on its own lower segments.
+grows(['cactus'], soil(['cactus'], 'desert'));
+// Crops belong in a field and nowhere else.
+grows(['wheat_0', 'wheat_1', 'wheat_2', 'wheat_3'], soil(['farmland', 'farmland_wet']));
+// The reef, the carpet and the deep light: the seabed, all of it. Kelp adds
+// itself, because a stalk is a run of one block (see STACKS).
+grows(['coral_branch', 'coral_fan', 'coral_brain', 'coral_dead', 'sea_sponge',
+  'sea_shell', 'sea_grass', 'sea_lettuce', 'sea_grape', 'abyss_anemone'],
+soil([], 'seabed', 'ore'));
+grows(['kelp'], soil(['kelp'], 'seabed', 'ore'));
+
+// --- the land flora --------------------------------------------------------
+// Scrub takes grit, and it is the only land plant that takes gravel: a thorn
+// bush growing out of a scree is the correct picture and is most of what makes
+// a badlands floor read as hostile rather than as bare.
+grows(['thornbrush'], soil(['coarse_dirt', 'gravel'], 'desert'));
+grows(['aloe'], soil(['grass', 'coarse_dirt'], 'desert'));
+grows(['golden_grass'], soil(['grass', 'dirt', 'coarse_dirt']));
+grows(['firebloom'], soil(['red_sand', 'red_sandstone', 'coarse_dirt']));
+grows(['cotton_grass'], soil(['snow', 'gravel', 'coarse_dirt', 'grass', 'dirt', 'peat']));
+// Snow and nothing else. It is the plant that only exists because the ground is
+// white, so any other ground makes it meaningless.
+grows(['snowbell'], soil(['snow']));
+grows(['alpine_aster'], soil(['grass', 'stone', 'gravel', 'coarse_dirt']));
+// A dune, and only a dune.
+grows(['marram'], soil(['sand']));
+grows(['lavender'], soil(['grass', 'dirt', 'coarse_dirt']));
+grows(['clover'], soil(['grass', 'dirt', 'podzol']));
+grows(['fern'], soil(['moss_block', 'moss_stone'], 'turf'));
+grows(['lingonberry'], soil([], 'turf'));
+// The cave floor. The two fungi take soil as well as rock for the glowcap's
+// reason; the crystal is rock only, and that is what makes finding one mean
+// you are in the deep stone rather than in a dirt pocket near the surface.
+grows(['cave_mushroom', 'shelf_fungus'], soil(['dirt', 'coarse_dirt', 'gravel',
+  'clay', 'mud', 'moss_block', 'sandstone', 'red_sandstone', 'peat'], 'rock', 'ore'));
+grows(['crystal_cluster'], soil([], 'rock', 'ore'));
+// Driftwood lands on the strand, which is sand and the shingle beside it.
+grows(['driftwood'], soil(['sand', 'gravel']));
+
+/**
+ * May `plant` root on `floor`?
+ *
+ * True for anything with no entry, because the question only applies to things
+ * that grow — asking it of a stair should not be an error and should not be a
+ * refusal. Every `R_CROSS` block in the table does have an entry, and the
+ * generator's harness asserts exactly that, so an unlisted plant is caught at
+ * the point it is added rather than discovered in a screenshot.
+ */
+export function growsOn(plant, floor) {
+  const set = FLORA_SOIL[plant];
+  return set === undefined || set[floor] === 1;
+}
+
+/** Every block that declares a soil set — the list the harness sweeps. */
+export const IS_FLORA = new Uint8Array(N_BLOCKS);
+for (let i = 0; i < N_BLOCKS; i++) if (FLORA_SOIL[i] !== undefined) IS_FLORA[i] = 1;
 
 for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];

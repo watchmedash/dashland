@@ -1,0 +1,264 @@
+# Snowbell — an alpine crocus pushing up through the snow.
+#
+# This is the snow biome's signature plant, and the biome is the whole design
+# problem: **the ground is white.** Every other flower in this set can be built
+# out of its bloom colour, because a red tulip on green sod or a blue aster on
+# grey scree separates itself. A white flower on snow does not. So the model is
+# built the other way round — the *dark* parts carry the silhouette, and the
+# white is a highlight sitting inside them.
+#
+# That is why the stems and leaves are a deep near-black green (#12300f is two
+# steps darker than anything in `flower_red.wam`), why they are thick rather
+# than wiry, and why the bells are violet over their whole lower half instead of
+# only at the rim. Against snow what you actually see is three dark stalks with a
+# cold lilac blob hanging off each; the white reads as the light on the blob, not
+# as the blob. Author it as white-with-a-violet-hint and it vanishes.
+#
+# **The nod is the read, and the nod is an inversion.** A crocus bell hangs
+# mouth-down: the flower's axis points down-and-out from the tip of the stem, and
+# the *wide* end of the bell is at the bottom. Say that any other way and you
+# have built a tulip — a cup opening upward is the single most common way this
+# shape goes wrong, and it is invisible in source, because the ring list looks
+# identical either way. Here it is unmissable: the bell's bone is `dir=down`, so
+# `ring 0.00` is where the flower joins the stem (up at the top, narrow) and
+# `ring 1.00` is the mouth (down at the bottom, widest). The `checks` restate it
+# as `y(bell) > bottom(bell) + height(bell) * 0.45` — the head's centre of volume
+# sits *above* the middle of its own bounding box, which is true of a hanging
+# bell and false of every upward-opening cup — so it cannot silently flip.
+#
+# **It is a bell, not a dome, and not a cone either.** It took three cuts to get
+# there and both failures were mushrooms. Widest ring in the middle: a cap.
+# Widest ring at the bottom with the sides opening all the way: a lampshade —
+# the sheet showed three white toadstools and nothing about it said flower. What
+# a bell has that neither of those does is **length and parallel sides**: about
+# twice as long as wide, walls that barely change over the middle half, and a
+# flare only in the last tenth. The full ring lists and the reasoning are on the
+# parts themselves; the short version is that the profile is a tube with a lip,
+# not a taper.
+#
+# The gold is a single ring plus the end cap, right at the mouth. It is not
+# trying to be an anther: it is the fact that the inside of the flower is a
+# different colour from the outside, which is the cue that says "this thing is
+# open at the bottom" without needing an actual opening. A real hole would want
+# `cap end=none`, and a one-sided surface at this size is the failure
+# `flower_red.wam` documents at length.
+#
+# Short and squat: 0.30 m and barely taller than it is wide. Snowbells are two
+# inches high in life, and a tall one on a snowfield reads as a weed.
+
+model snowbell
+  height 0.30
+  style chunky
+
+palette
+  Bell   #f6f4fb
+  Frost  #9c8ac9
+  Gold   #e6c34e
+  Stem   #12300f
+  Leaf   #1d3f1a
+
+skeleton
+  root soil at 0.0
+  # Three stems. Short and steep — 8 to 15° off vertical, where the flower clump
+  # splays its side stalks 40 — because a snowbell has no branching structure to
+  # show off: the interest is entirely in the three heads, and stems that splay
+  # just spread those heads out until the model is wider than tall.
+  #
+  # Each takes a different heading in the ground plane (`tilt` for X, `pitch` for
+  # Z) and not just a different amount of the same lean. The first cut used tilt
+  # alone and came out 0.94 wide by 0.29 deep — a flat fan, one flower thick, and
+  # edge-on it was a single stalk. This is the flower clump's yaw problem in a
+  # different dress.
+  #
+  # The two that lean in X are rooted off the axis in the direction they lean, so
+  # each part is honestly one-sided; the one that leans in Z stays centred and is
+  # symmetric. That is `sea_grass.wam`'s rule and the centreline lint enforces it.
+  bone stemA parent=soil side=-0.048 fwd=0.022 dir=up tilt=8 pitch=6 len=0.88
+  bone stemB parent=soil side=0.050 fwd=-0.020 dir=up tilt=-7 pitch=-6 len=0.70
+  bone stemC parent=soil fwd=0.030 dir=up pitch=10 len=0.80
+
+  # The nods, and the whole model turns on these three lines. `dir=down` aims
+  # each flower's own axis at the ground from the tip of its stem, and the
+  # tilt/pitch swing it *outward along the stem's own heading* so it hangs clear
+  # of the clump instead of back over it. Written `dir=up` these would be tulips.
+  #
+  # The signs are not the stems' signs. On an `up` bone +tilt leans toward −X; on
+  # a `down` bone +tilt splays the other way, so a bell written with the same
+  # sign as its stalk swings back across the centreline and through its
+  # neighbours — which is exactly what the first compile reported, four `noclip`
+  # failures and two lopsided-straddle warnings in one go.
+  bone nodA parent=stemA dir=down tilt=-20 pitch=-13 len=0.37
+  bone nodB parent=stemB dir=down tilt=18 pitch=12 len=0.33
+  bone nodC parent=stemC dir=down pitch=-24 len=0.35
+
+parts
+  # Thick stems, near-black. `sides=5` and w≈0.05 makes them read as stalks with
+  # some body at icon size — a wiry stem on snow is a scratch nobody sees.
+  loft stalkA bones=stemA..stemA material=Stem sides=5
+    ring 0.00 w=0.072 d=0.070
+    ring 0.14 w=0.042 d=0.040
+    ring 1.00 w=0.034 d=0.033
+    cap start=flat end=flat
+  loft stalkB bones=stemB..stemB material=Stem sides=5
+    ring 0.00 w=0.070 d=0.068
+    ring 0.14 w=0.041 d=0.039
+    ring 1.00 w=0.033 d=0.032
+    cap start=flat end=flat
+  loft stalkC bones=stemC..stemC material=Stem sides=5
+    ring 0.00 w=0.070 d=0.068
+    ring 0.14 w=0.041 d=0.039
+    ring 1.00 w=0.034 d=0.032
+    cap start=flat end=flat
+
+  # The bells. Read the ring list downward: t=0 is the neck where the flower
+  # joins the stalk, t=1 is the mouth, and the mouth is at the BOTTOM because the
+  # bone points down.
+  #
+  # These are the third cut and the first two are worth recording, because both
+  # were mushrooms. The first was a dome with its widest ring in the middle —
+  # obviously a cap. The fix, pushing the widest ring down to 0.90, produced the
+  # second: a **cone**, wide flat mouth, dark point on top, and the sheet showed
+  # three white toadstools standing in a row. A cone with the mass at the bottom
+  # is a lampshade whichever way up you build it.
+  #
+  # What actually distinguishes a bell is **proportion and parallel sides**: it
+  # is roughly twice as long as it is wide, and its walls run near-vertical over
+  # the middle half rather than opening steadily from the neck. So the profile
+  # here does most of its widening in the first quarter (0.04 → 0.13), coasts
+  # from 0.30 to 0.75 gaining almost nothing, and then flares in the last tenth
+  # — 0.185 out to 0.215 and tucked back to 0.195 at the lip. That last flare is
+  # the mouth of a bell and a cone cannot have one, because a cone is already
+  # opening everywhere.
+  #
+  # Each lofts along its own `nod` bone (`bones=nodA..nodA`) rather than as a
+  # free ray off the stem. Two things fall out of that for free: the flower
+  # starts exactly at the stalk tip by construction, with no `on=` and no offset
+  # to solve, and the bone is not left bare — the first version declared these
+  # bones, then lofted free rays alongside them, and the lint duly reported
+  # "bone 'bellB' has no geometry attached or near it".
+  #
+  # `shape=squarish` with alternating `roll=` for the flower clump's reason — it
+  # knocks the loft's facets out of alignment so the surface reads as a few
+  # overlapping tepals instead of as a smooth turned cone. Six sides, not eight:
+  # a crocus has six tepals and at this size the facet count is the petal count.
+  loft bellA bones=nodA..nodA material=Bell sides=6 shape=squarish
+    ring 0.00 w=0.042 d=0.040 material=Stem       # the neck, still stalk-coloured
+    ring 0.10 w=0.098 d=0.094 material=Bell
+    ring 0.30 w=0.140 d=0.134 roll=15
+    ring 0.56 w=0.158 d=0.151 roll=-20
+    ring 0.75 w=0.172 d=0.165 roll=16 material=Frost
+    ring 0.90 w=0.196 d=0.188 roll=-13            # the flare
+    ring 0.97 w=0.215 d=0.206 roll=10             # the lip — widest, and lowest
+    ring 1.00 w=0.190 d=0.182 material=Gold
+    cap start=flat end=flat
+  loft bellB bones=nodB..nodB material=Bell sides=6 shape=squarish
+    ring 0.00 w=0.040 d=0.038 material=Stem
+    ring 0.10 w=0.093 d=0.089 material=Bell
+    ring 0.30 w=0.133 d=0.127 roll=-17
+    ring 0.56 w=0.150 d=0.144 roll=19
+    ring 0.75 w=0.163 d=0.157 roll=-15 material=Frost
+    ring 0.90 w=0.186 d=0.179 roll=12
+    ring 0.97 w=0.204 d=0.196 roll=-9
+    ring 1.00 w=0.180 d=0.173 material=Gold
+    cap start=flat end=flat
+  loft bellC bones=nodC..nodC material=Bell sides=6 shape=squarish
+    ring 0.00 w=0.041 d=0.039 material=Stem
+    ring 0.10 w=0.095 d=0.091 material=Bell
+    ring 0.30 w=0.136 d=0.130 roll=16
+    ring 0.56 w=0.154 d=0.147 roll=-21
+    ring 0.75 w=0.167 d=0.160 roll=15 material=Frost
+    ring 0.90 w=0.190 d=0.183 roll=-12
+    ring 0.97 w=0.209 d=0.200 roll=9
+    ring 1.00 w=0.184 d=0.177 material=Gold
+    cap start=flat end=flat
+
+  # Two strap leaves at the base, and they are structural rather than botanical.
+  # They are also the reason the first three compiles came out 0.94 wide against
+  # 0.67 tall: at 44° of splay over 0.60 of length these reached further out than
+  # the flowers did, so the model that was "too wide" was too wide because of its
+  # leaves, not its bells. Shortened to 0.44 and pulled in to 32° they sit under
+  # the heads, which is where a basal leaf belongs anyway.
+  # Three dark stalks alone leave the model with nothing touching the ground but
+  # three points, so on snow it floats; a pair of low dark straps gives it a foot
+  # and a horizontal note against all that vertical. Flat lofts and not `web`s,
+  # for `flower_red.wam`'s reason: a web is one triangle thick and disappears
+  # edge-on at ankle height.
+  #
+  # `refaxis=` horizontal rather than `frame=up` — these run mostly upward, and
+  # naming "up" on a part that is going up pins the ring frame along the path.
+  loft leafA bone=soil at=0.0 offset=(-0.055,0,0.03) dir=up pitch=8 tilt=32 len=0.44 material=Leaf refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.050 d=0.028
+    ring 0.30 w=0.082 d=0.026
+    ring 0.76 w=0.066 d=0.022
+    ring 1.00 w=0.018 d=0.010 tip
+    cap start=flat end=point
+  loft leafB bone=soil at=0.0 offset=(0.058,0,-0.04) dir=up pitch=-6 tilt=-36 len=0.40 material=Leaf refaxis=(0.7,0,0.7) sides=4
+    ring 0.00 w=0.050 d=0.028
+    ring 0.30 w=0.080 d=0.026
+    ring 0.76 w=0.064 d=0.022
+    ring 1.00 w=0.018 d=0.010 tip
+    cap start=flat end=point
+
+checks
+  # On the ground, all of it. On snow a floating model is obvious, because the
+  # shadow and the surface are the same colour and the gap is the only cue.
+  assert bottom(stalkA) < 0.02
+  assert bottom(leafA) < 0.02
+  assert bottom(leafB) < 0.02
+
+  # THE check, three times over: **the bell hangs mouth-down.** Its widest point
+  # is below its own centre, which is only true for a bell and is false for every
+  # upward-opening cup. If someone ever writes `dir=up` on one of these bones,
+  # this is what refuses to compile clean.
+  assert y(bellA) > bottom(bellA) + height(bellA) * 0.45
+  assert y(bellB) > bottom(bellB) + height(bellB) * 0.45
+  assert y(bellC) > bottom(bellC) + height(bellC) * 0.45
+  # ...and the flower hangs below the tip of the stalk carrying it, rather than
+  # perching on it. The same fact stated where a reader will look for it.
+  assert bottom(bellA) < top(stalkA) - height(bellA) * 0.6
+  assert bottom(bellC) < top(stalkC) - height(bellC) * 0.6
+
+  # A bell and not a cap, and this is the number the two failed cuts moved.
+  # `mushroom.wam` asserts `width(hood) > height(hood) * 1.8` to keep its dome a
+  # plate; this asserts the reverse, and at 1.35 rather than a token 0.95,
+  # because 0.95 is satisfied by the cone that came out of the renderer looking
+  # like a toadstool. A bell is long. If this bound is ever relaxed, the model
+  # goes back to being a lampshade.
+  assert height(bellA) > width(bellA) * 1.25
+  assert height(bellC) > width(bellC) * 1.35
+  # The head is the bulk of the plant, or it is a bud. Volume and not width:
+  # `width()` is a bounding box and a stalk that leans 13° over two thirds of the
+  # model has a bbox width of 0.21, which is comparable to the bell's — the check
+  # failed on the first compile for that reason and the fix was to measure the
+  # thing I actually meant.
+  assert volume(bellA) > volume(stalkA) * 2.0
+  assert width(bellA) > 0.18
+
+  # The bells hang clear of each other — three overlapping flowers is one blob.
+  assert gap(bellA, bellB) > 0.01
+  assert gap(bellA, bellC) > 0.01
+  # ...and clear of the stalks they are not attached to.
+  noclip bellA vs stalkB,stalkC
+  noclip bellB vs stalkA,stalkC
+
+  # A clump with a leader, same hierarchy as the flowers and the mushrooms.
+  assert top(stalkA) > top(stalkB) * 1.1
+  assert bottom(bellA) > top(leafA) * 0.5
+
+  # Short and squat, but Y still the long axis: `ItemModels.js` normalises on the
+  # Y extent, so a snowbell as wide as it is tall arrives in the toolbar slot
+  # noticeably bigger than everything beside it. 1.15 is as squat as that allows.
+  assert height / width in 1.1..1.8
+  assert height / depth in 1.05..1.9
+  assert parts == 8
+  assert tris < 700
+  measure droop top(stalkA) - bottom(bellA)
+  # Reported, not policed: how far each bell sits off the clump's axis. These are
+  # the numbers the tilt/pitch pairs in the skeleton exist to move, and the three
+  # of them wanting different headings is what stopped the model being flat.
+  measure reachA (x(bellA) * x(bellA) + z(bellA) * z(bellA)) ** 0.5
+  measure bellAx x(bellA)
+  measure bellAz z(bellA)
+  measure bellBx x(bellB)
+  measure bellBz z(bellB)
+  measure bellCz z(bellC)

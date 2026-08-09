@@ -1,0 +1,197 @@
+# Aloe — a succulent rosette, and the one plant in the set with no stem at all.
+#
+# The savanna and the desert share a problem: the ground cover the game already
+# has is grass, and grass at any colour still says "there is water here". An aloe
+# says the opposite, and it says it through **section**, not silhouette. A grass
+# blade is a flat strap — that is what `sea_grass` builds, `frame=up` with a wide
+# `w` and a `d` of almost nothing — and a succulent leaf is a fat triangular prism
+# that holds water. If you build this out of flat straps you have built yellow
+# sea grass and the biome has learned nothing. So every leaf here is a keeled
+# section: `dtop` well under `dbot`, so the top face is nearly flat and the
+# underside drops into a ridge, which is the shape of every aloe leaf there has
+# ever been and reads as *thick* from any angle including straight down.
+#
+# **Everything radiates from one point on the ground.** A rosette has no stem and
+# no axis; it is the plant equivalent of a hand of cards. The eight leaves are
+# three mirrored pairs plus two centred ones, which is the arrangement
+# `sea_grass` arrived at for the same reason — a part that straddles X=0 and
+# leans off it is claiming a symmetry it does not have, so the leaves leaning
+# along X come in reflected pairs and the ones leaning along Z stay centred.
+#
+# **Two bones per leaf, not one.** The first cut lofted each leaf along a single
+# straight bone and the render sheet showed a starfish: eight rigid spokes at a
+# constant angle, dead flat, with no rise anywhere in the model. A real aloe
+# leaf leaves the crown *steeply* and only opens out over its length, so each
+# leaf is a chain — a base bone at 30-ish degrees off vertical and a tip bone at
+# 60-ish — and the loft runs across the joint. The compiler inserts a ring at
+# that joint so the bend is smooth rather than creased. That curve is the single
+# change that turned a starfish into a plant.
+#
+# **The teeth are in the outline.** Aloe leaves are toothed along the margin, and
+# at 32px a texture cannot say so. What can is the ring schedule: `w` alternates
+# up and down along the leaf (0.17, 0.14, 0.16, 0.13 …) so the silhouette edge
+# is sawn rather than smooth. It costs three extra rings per leaf and it is the
+# difference between this and a fat green banana.
+#
+# **The red tips are the species marker.** Sun-stressed aloe goes red-brown at
+# the leaf ends, and it is also the only warm colour available to separate a
+# blue-green rosette from anything behind it. `Blush` runs the last 15% of every
+# leaf and nowhere else. The greens themselves sit deliberately off the game's
+# grass: #6f9a7d is blue where grass is yellow, which is what stops the block
+# disappearing into a savanna floor.
+
+model aloe
+  height 0.44
+  style chunky
+
+palette
+  Flesh #6f9a7d
+  Deep  #547e66
+  Pale  #93b89b
+  Blush #a3503c
+
+skeleton
+  root soil at 0.0
+  mirror
+    # Three mirrored pairs. Each is a two-bone chain: steep at the base, opening
+    # out over the tip bone. `tilt` is negative on an `up` bone to lean toward
+    # +X (see `mushroom.wam` — +tilt goes the other way and put the whole clump
+    # back over itself), and `pitch` supplies the Z component so the six of them
+    # land on six different headings rather than three.
+    #
+    # The numbers here are the second pass. The first ran the tip bones out to
+    # 62-74 degrees off vertical and the sheet showed a starfish again by a
+    # different route: the leaves cleared the ground but then ran level and
+    # hooked *downward* at the ends, so from three of the four views the plant
+    # was a pair of arms lying flat. Width over height came out at 2.63, which
+    # for a Y-normalised block means it arrives in the world nearly three cells
+    # across. Every tip bone is pulled back by ten degrees and shortened, and
+    # every base bone steepened by six, which lands the ratio at a bit over
+    # 1.5 — still emphatically ground cover, no longer a pancake.
+    bone a1 parent=soil side=0.020 dir=up tilt=-24 pitch=14 len=0.30
+    bone a2 parent=a1 dir=up tilt=-50 pitch=26 len=0.23
+    bone b1 parent=soil side=0.020 dir=up tilt=-28 pitch=-18 len=0.28
+    bone b2 parent=b1 dir=up tilt=-54 pitch=-32 len=0.22
+    # The `pitch=-7` on the C pair buys nothing in the silhouette and is there
+    # anyway: with `tilt` alone this pair lies exactly in the XY plane, and the
+    # third sheet showed it stacked dead behind the A pair from the side view,
+    # two leaves reading as one. Seven degrees is enough to separate them.
+    bone c1 parent=soil side=0.022 dir=up tilt=-32 pitch=-7 len=0.30
+    bone c2 parent=c1 dir=up tilt=-58 pitch=-9 len=0.22
+  end
+  # The two that lean along Z. Centred on X and therefore symmetric, so they are
+  # exempt from the straddle rule and need no root offset. They are also what
+  # stops the rosette reading as a flat fan when the camera is edge-on to it.
+  bone d1 parent=soil dir=up pitch=32 len=0.29
+  bone d2 parent=d1 dir=up pitch=60 len=0.22
+  bone e1 parent=soil dir=up pitch=-30 len=0.26
+  bone e2 parent=e1 dir=up pitch=-58 len=0.20
+
+parts
+  # A four-sided section with `frame=up` is a diamond: one vertex up, one down,
+  # one either side. Set `dtop` small and `dbot` large and that diamond becomes a
+  # keel — flat-ish on top, ridged underneath. This is the whole succulent read
+  # and it is two numbers per ring.
+  #
+  # The leaf is widest at about a fifth of its length, not at its middle. A leaf
+  # whose widest point is halfway along is a canoe paddle; a rosette leaf is a
+  # broad base that starts tapering almost immediately.
+  mirror
+    loft leafA bones=a1..a2 material=Flesh frame=up sides=4
+      ring 0.00 w=0.11  dtop=0.045 dbot=0.055
+      ring 0.16 w=0.175 dtop=0.050 dbot=0.085
+      ring 0.28 w=0.120 dtop=0.045 dbot=0.075
+      ring 0.42 w=0.155 dtop=0.040 dbot=0.065
+      ring 0.56 w=0.098 dtop=0.033 dbot=0.052
+      ring 0.72 w=0.122 dtop=0.026 dbot=0.038
+      ring 0.88 w=0.056 dtop=0.018 dbot=0.024 material=Blush
+      ring 1.00 w=0.014 d=0.010 tip
+      cap start=flat end=point
+    loft leafB bones=b1..b2 material=Deep frame=up sides=4
+      ring 0.00 w=0.10  dtop=0.042 dbot=0.052
+      ring 0.16 w=0.165 dtop=0.048 dbot=0.080
+      ring 0.28 w=0.112 dtop=0.042 dbot=0.070
+      ring 0.42 w=0.145 dtop=0.038 dbot=0.060
+      ring 0.56 w=0.090 dtop=0.031 dbot=0.048
+      ring 0.72 w=0.114 dtop=0.024 dbot=0.035
+      ring 0.88 w=0.052 dtop=0.017 dbot=0.022 material=Blush
+      ring 1.00 w=0.013 d=0.010 tip
+      cap start=flat end=point
+    # The longest pair, and the flattest: an aloe's oldest leaves are the ones
+    # lying nearly along the ground on the outside of the rosette. They are what
+    # buys the model its width, and width is what a Y-normalised block wants.
+    loft leafC bones=c1..c2 material=Pale frame=up sides=4
+      ring 0.00 w=0.12  dtop=0.048 dbot=0.058
+      ring 0.16 w=0.185 dtop=0.052 dbot=0.090
+      ring 0.28 w=0.128 dtop=0.046 dbot=0.078
+      ring 0.42 w=0.165 dtop=0.041 dbot=0.068
+      ring 0.56 w=0.104 dtop=0.034 dbot=0.054
+      ring 0.72 w=0.128 dtop=0.027 dbot=0.040
+      ring 0.88 w=0.058 dtop=0.019 dbot=0.025 material=Blush
+      ring 1.00 w=0.015 d=0.011 tip
+      cap start=flat end=point
+  end
+
+  loft leafD bones=d1..d2 material=Deep frame=up sides=4
+    ring 0.00 w=0.11  dtop=0.045 dbot=0.055
+    ring 0.16 w=0.175 dtop=0.050 dbot=0.085
+    ring 0.28 w=0.120 dtop=0.045 dbot=0.075
+    ring 0.42 w=0.155 dtop=0.040 dbot=0.065
+    ring 0.56 w=0.098 dtop=0.033 dbot=0.052
+    ring 0.72 w=0.122 dtop=0.026 dbot=0.038
+    ring 0.88 w=0.056 dtop=0.018 dbot=0.024 material=Blush
+    ring 1.00 w=0.014 d=0.010 tip
+    cap start=flat end=point
+  loft leafE bones=e1..e2 material=Flesh frame=up sides=4
+    ring 0.00 w=0.10  dtop=0.042 dbot=0.052
+    ring 0.16 w=0.160 dtop=0.046 dbot=0.078
+    ring 0.28 w=0.108 dtop=0.041 dbot=0.068
+    ring 0.42 w=0.140 dtop=0.036 dbot=0.058
+    ring 0.56 w=0.086 dtop=0.030 dbot=0.046
+    ring 0.72 w=0.110 dtop=0.023 dbot=0.034
+    ring 0.88 w=0.050 dtop=0.016 dbot=0.021 material=Blush
+    ring 1.00 w=0.012 d=0.009 tip
+    cap start=flat end=point
+
+checks
+  # Every leaf grows out of the soil. There is no stem to hide a floating crown
+  # behind, so any leaf that starts above y=0 is visible as a gap from every
+  # angle the player has.
+  assert bottom(leafA.l) < 0.02
+  assert bottom(leafC.l) < 0.02
+  assert bottom(leafD) < 0.02
+  # Wider than tall, and by a wide margin. A rosette that grows upward stops
+  # being a rosette, and `BlockModels` normalises on Y, so a tall aloe arrives in
+  # the world at twice the size of everything beside it.
+  assert width / height > 0.9
+  assert depth / height > 0.9
+  # ...but with a ceiling. `sea_grass` sits at 1.30 and this is a bigger plant,
+  # so a bit under 1.9 is right; past two the block is wider than the cell it
+  # occupies and starts overlapping its neighbours in a scatter.
+  assert width / height in 1.2..1.9
+  # The leaves *rise*. This is the check the second bone in every chain exists to
+  # satisfy: the first cut was single straight bones and the render sheet showed
+  # a starfish lying flat on the ground. A leaf whose top is under a fifth of the
+  # model's height has no vertical component worth the name.
+  assert top(leafA.l) > height * 0.55
+  assert top(leafD) > height * 0.55
+  # ...and they curve rather than pointing. A straight leaf's bounding box is
+  # long in one direction only; a curved one is comparably long in two, so a
+  # bbox that is thin in the vertical is a spoke and not an arc.
+  assert height(leafC.l) > 0.18
+  # The tapered point is real. Widest low, and the tip is a fraction of the base
+  # — a leaf that stays the same width to the end is a strap and this model would
+  # be sea grass in a different palette.
+  assert width(leafC.l) > 0.20
+  # A rosette, not a fan: the eight leaves reach in every heading, so the two
+  # horizontal extents come out close to each other. The `pitch` on the mirrored
+  # pairs exists entirely to satisfy this — with tilt alone all six were coplanar.
+  assert width / depth in 0.75..1.35
+  # No leader. Every leaf is within a third of every other in height, because a
+  # rosette with a tallest leaf reads as a plant with a shoot coming out of it.
+  assert top(leafC.l) < top(leafA.l) * 1.4
+  assert top(leafE) < top(leafD) * 1.4
+  assert parts == 8
+  assert tris < 700
+  measure spread width / height
+  measure rise top(leafA.l) / height

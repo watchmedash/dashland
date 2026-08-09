@@ -50,7 +50,7 @@ import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
-  NEEDS_FLOOR, supports, IS_SUBMERGED,
+  NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED,
 } from './world/Blocks.js';
 import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
@@ -496,6 +496,38 @@ const MODELLED_PLANTS = {
   sea_lettuce: 0.48, sea_grape: 0.72, abyss_anemone: 0.44,
   // The stacking tile. Exactly one cell — see above.
   kelp: 1.0,
+  // The land flora, and the same rule applies to all of it: the number is a
+  // *bounding box height*, so a model authored wider than it is tall gets a
+  // small one. Every `.wam` source here asserts its own aspect and these were
+  // set from the aspects the compiler reported, not by eye.
+  //
+  // Three bands, and they are what makes a biome read as layered rather than as
+  // one carpet:
+  //
+  //   under 0.35   mats you look down at   clover, alpine_aster, driftwood
+  //   0.40 - 0.60  ankle-height cover      the rest of the tufts and fungi
+  //   0.70 - 0.90  things that break the horizon
+  //
+  // `firebloom` is the tallest land plant on the planet at 0.90, which is the
+  // whole point of it: a badlands has nothing else standing up in it, so the
+  // spike has to clear a player's knee from a long way off or the biome has no
+  // landmark at all.
+  //
+  // Three of these were re-set once the models existed and their aspects were
+  // measured rather than guessed, which is the check worth repeating for any
+  // new one: multiply the number below by the model's own width/height and the
+  // answer is how many cells across the plant arrives. The snowbell (1.24 tall
+  // for 1.0 wide) came out a third of a cell across and read as a speck, and
+  // the lingonberry (1.9 wide for 1.0 tall) came out 0.84 deep and grew through
+  // its neighbours. Nothing here should land past about 0.8 of a cell wide.
+  thornbrush: 0.54, aloe: 0.44, golden_grass: 0.74, firebloom: 0.90,
+  cotton_grass: 0.60, snowbell: 0.50, alpine_aster: 0.30, marram: 0.80,
+  lavender: 0.74, clover: 0.32, fern: 0.58, lingonberry: 0.38,
+  // Underground. Kept a touch lower than their surface cousins: a cave is a
+  // confined space and anything at knee height in a crawlway reads as an
+  // obstruction rather than as scenery.
+  cave_mushroom: 0.42, shelf_fungus: 0.44, crystal_cluster: 0.50,
+  driftwood: 0.34,
 };
 const FLOWER_NAMES = Object.keys(MODELLED_PLANTS);
 const FLOWER_KIND = [];
@@ -2764,6 +2796,21 @@ class Game {
     // and immediately fall: a placement that undoes itself reads as a dropped
     // input rather than as a rule.
     if (NEEDS_FLOOR[id] && !supports(this.planet.at(col, k - 1), this.planet.facingAt(col, k - 1))) {
+      this.ui.setHint('Nothing for a ' + BLOCKS[id].label.toLowerCase() + ' to grow on');
+      return false;
+    }
+
+    // ...and it will not grow in the wrong ground. The rule above is structural
+    // — is there a surface here — and it admits gravel, bare stone, glass and
+    // the top of a fence, which is exactly how the world came to have tall
+    // grass growing in scree. `growsOn` is the botanical half, and it lives in
+    // `Blocks.js` precisely so that this and `WorldGen`'s placement passes read
+    // the same table: a rule the generator obeys and the player can plant
+    // straight past is not a rule, it is a suggestion with a workaround.
+    //
+    // `growsOn` returns true for anything with no soil set, so this line is
+    // inert for every block that is not a plant.
+    if (!growsOn(id, this.planet.at(col, k - 1))) {
       this.ui.setHint('Nothing for a ' + BLOCKS[id].label.toLowerCase() + ' to grow on');
       return false;
     }

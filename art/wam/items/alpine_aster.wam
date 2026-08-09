@@ -1,0 +1,388 @@
+# Alpine Aster — the thing you find by looking down.
+#
+# A cushion aster on a mountain: a low mat of small dark leaves with a handful of
+# blue star-flowers sitting just above it. Two facts about how it gets seen drive
+# everything here.
+#
+# **You are above it.** Every other plant in this set is seen roughly side-on,
+# because the player walks past it at ankle height. This one grows on a slope you
+# are climbing, so the angle you actually meet it at is from above and in front.
+# That is why the flowers are flat, face-up rosettes rather than cups or balls:
+# the read is the star seen plan-view, and a cup seen from above is a hole. It is
+# also why they are built out of six separate petals instead of one wide loft —
+# see the long note on the heads, which is the one thing on this model that had
+# to be thrown away and rebuilt.
+#
+# **The mat is dark and the flowers are not.** Mountain ground is grey scree and
+# pale rock, so the leaves go deep and cold (#1b3324, nearly black-green) to give
+# the flowers something to sit on, and the flowers go a saturated violet-blue
+# with a gold disc — the one warm note in the model and the thing that catches
+# the eye at range.
+#
+# **Much wider than tall.** `BlockModels` normalises by the Y extent, so a
+# cushion authored upright arrives a metre high and the mountainside becomes a
+# meadow. This asserts `width / height > 1.15`, i.e. more strongly than
+# `sea_grass.wam`'s `> 0.9`: an aster cushion that is as tall as it is wide has
+# stopped being a cushion.
+#
+# The stems are almost not there — 0.26-0.30 long against rosettes 0.34 across,
+# and two rings apiece. A visible stem turns a cushion into a bouquet, and the
+# whole point of the plant is that the flowers appear to be lying on the mat.
+
+model alpine_aster
+  height 0.30
+  style chunky
+
+palette
+  Ray   #4b53b8
+  Deep  #333a8c
+  Gold  #f0c246
+  Leaf  #1b3324
+  Sage  #2c4a33
+
+skeleton
+  root scree at 0.0
+  # Four very short stems. The lean is large (27-32°) and the length is small, so
+  # the flowers spread sideways across the mat instead of stacking up over its
+  # centre — a cushion is a scatter of heads at one height, not a posy.
+  #
+  # The lean is also load-bearing for the lint, and this is why **all four** lean
+  # in X rather than two of them leaning in Z the way every other tuft in this
+  # set does. A rosette is six one-sided parts arranged in a circle: put its
+  # centre on x=0 and four of the six petals straddle the axis lopsidedly, which
+  # the centreline lint reports one petal at a time — eight warnings from two
+  # flowers on the first compile. There is no symmetric arrangement of a hexagon
+  # of separate lofts, so the only fix is to carry every rosette's centre clear
+  # of the axis: each flower's stem leans further than its own petals reach
+  # (0.19-0.21 of horizontal travel against a 0.145-0.17 petal), and depth comes
+  # from the four stems also taking different `pitch`, not from centring any of
+  # them.
+  bone flA parent=scree side=-0.055 dir=up tilt=32 len=0.30
+  bone flB parent=scree side=0.058 fwd=-0.020 dir=up tilt=-30 pitch=-8 len=0.28
+  bone flC parent=scree side=-0.058 fwd=0.048 dir=up tilt=30 pitch=26 len=0.28
+  bone flD parent=scree side=0.056 fwd=-0.046 dir=up tilt=-28 pitch=-24 len=0.26
+
+parts
+  # The mat. Six tiny straps splayed almost flat — 52 to 68° of tilt, where sea
+  # grass takes 22-34 — because this is a cushion plant and a cushion hugs the
+  # ground. They are short and dark and none of them is meant to be seen
+  # individually; collectively they are the dark plate the flowers sit on. The
+  # sheet shortened them by a quarter: at 0.34 they reached out past the rosettes
+  # and read as six big leaves with some flowers among them, which inverts what
+  # the plant is.
+  #
+  # `refaxis=` horizontal rather than `frame=up`: these still travel more up than
+  # sideways, and naming "up" on a part that is going up pins the ring frame
+  # along the path, which the lint reports.
+  loft matA bone=scree at=0.0 offset=(-0.060,0,0.02) dir=up pitch=8 tilt=57 len=0.27 material=Leaf refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.040 d=0.024
+    ring 0.34 w=0.070 d=0.022
+    ring 0.80 w=0.052 d=0.018
+    ring 1.00 w=0.014 d=0.008 tip
+    cap start=flat end=point
+  loft matB bone=scree at=0.0 offset=(0.062,0,-0.03) dir=up pitch=-7 tilt=-61 len=0.25 material=Sage refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.040 d=0.024
+    ring 0.34 w=0.068 d=0.022
+    ring 0.80 w=0.050 d=0.018
+    ring 1.00 w=0.014 d=0.008 tip
+    cap start=flat end=point
+  loft matC bone=scree at=0.0 offset=(-0.052,0,-0.05) dir=up pitch=-11 tilt=52 len=0.23 material=Sage refaxis=(0.7,0,0.7) sides=4
+    ring 0.00 w=0.036 d=0.022
+    ring 0.34 w=0.062 d=0.020
+    ring 0.80 w=0.046 d=0.016
+    ring 1.00 w=0.013 d=0.007 tip
+    cap start=flat end=point
+  loft matD bone=scree at=0.0 offset=(0.055,0,0.05) dir=up pitch=13 tilt=-54 len=0.24 material=Leaf refaxis=(0.7,0,-0.7) sides=4
+    ring 0.00 w=0.036 d=0.022
+    ring 0.34 w=0.064 d=0.020
+    ring 0.80 w=0.048 d=0.016
+    ring 1.00 w=0.013 d=0.007 tip
+    cap start=flat end=point
+  # The two that lean in Z. Centred on X and therefore symmetric; they are what
+  # stops the mat reading as a flat card from the front.
+  loft matE bone=scree at=0.0 offset=(0,0,0.055) dir=up pitch=59 len=0.26 material=Leaf refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.040 d=0.024
+    ring 0.34 w=0.068 d=0.022
+    ring 0.80 w=0.050 d=0.018
+    ring 1.00 w=0.014 d=0.008 tip
+    cap start=flat end=point
+  loft matF bone=scree at=0.0 offset=(0,0,-0.055) dir=up pitch=-56 len=0.22 material=Sage refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.036 d=0.022
+    ring 0.34 w=0.062 d=0.020
+    ring 0.80 w=0.046 d=0.016
+    ring 1.00 w=0.013 d=0.007 tip
+    cap start=flat end=point
+
+  # Four stems, two rings each — thin and short enough to be a hairline at icon
+  # size. A visible stem turns a cushion into a bouquet.
+  loft stemA bones=flA..flA material=Sage sides=4
+    ring 0.00 w=0.040 d=0.038
+    ring 1.00 w=0.021 d=0.020
+    cap start=flat end=flat
+  loft stemB bones=flB..flB material=Sage sides=4
+    ring 0.00 w=0.040 d=0.038
+    ring 1.00 w=0.021 d=0.020
+    cap start=flat end=flat
+  loft stemC bones=flC..flC material=Sage sides=4
+    ring 0.00 w=0.040 d=0.038
+    ring 1.00 w=0.021 d=0.020
+    cap start=flat end=flat
+  loft stemD bones=flD..flD material=Sage sides=4
+    ring 0.00 w=0.040 d=0.038
+    ring 1.00 w=0.021 d=0.020
+    cap start=flat end=flat
+
+  # The heads, and this is the second attempt.
+  #
+  # The first was one `shape=squarish` loft per flower at `sides=10`, with the
+  # two widest rings rolled half a facet against each other — the theory being
+  # that the corners of one section would land on the flats of the next and the
+  # rim would zigzag into points. On the sheet it did nothing of the kind. Ten
+  # facets on a disc that wide is already a circle, and rolling one ring against
+  # another only tilts the band between them; what came out was four navy
+  # **parasols** with a gold pip on top, and no amount of `roll=` was going to
+  # turn a closed convex section into a shape with gaps in it. Rays are gaps.
+  # A single loft cannot have them.
+  #
+  # So each flower is a ring of six separate petal lofts radiating from the stem
+  # tip, `dir=fwd` with `yaw=` stepping 60° round. Three things make it cheap
+  # enough to afford twenty-four of them: `sides=3`, three rings, and a `tip`.
+  # That is fourteen triangles a petal, which is less than the parasol cost per
+  # flower for a shape that actually reads.
+  #
+  # `pitch=-6` on each: `pitch` tips a `fwd` bone *downward*, so a negative value
+  # lifts the petal slightly above horizontal. Dead flat, the six petals and the
+  # gold centre are coplanar and the flower has no relief at all; six degrees is
+  # enough for the light to separate them.
+  #
+  # `refaxis=(0,1,0)` and not `frame=up`: same axis, but named explicitly because
+  # these petals run horizontally, so "up" here is genuinely *across* the part —
+  # this is the one place in the cold set where the up axis is the right one, and
+  # it makes `d` the petal's thickness and `w` its width, which is what a petal
+  # wants.
+  # A: six rays at 60° steps, reach 0.17.
+  loft rayA1 bone=flA at=1.0 dir=fwd yaw=0 pitch=-6 len=0.195 on=stemA material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayA2 bone=flA at=1.0 dir=fwd yaw=60 pitch=-6 len=0.195 on=stemA material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayA3 bone=flA at=1.0 dir=fwd yaw=120 pitch=-6 len=0.195 on=stemA material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayA4 bone=flA at=1.0 dir=fwd yaw=180 pitch=-6 len=0.195 on=stemA material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayA5 bone=flA at=1.0 dir=fwd yaw=240 pitch=-6 len=0.195 on=stemA material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayA6 bone=flA at=1.0 dir=fwd yaw=300 pitch=-6 len=0.195 on=stemA material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  # ...and the gold disc floret at the middle of them, sitting just proud so it
+  # is not buried in the six petal bases.
+  #
+  # It is small — 0.07 across against a 0.38 rosette, under a fifth. The first
+  # pass had it at 0.115 and the sheet came back with four **fried eggs**: a gold
+  # dome that big is the flower, and the blue rays read as a frill around it. A
+  # disc floret is a dot in the middle of a star, and the star has to win.
+  loft eyeA bone=flA at=1.0 offset=(0,0.010,0) dir=up len=0.038 material=Gold sides=6
+    ring 0.00 w=0.055 d=0.055
+    ring 0.55 w=0.070 d=0.070
+    ring 1.00 w=0.040 d=0.040
+    cap start=flat end=flat
+  # B: six rays at 60° steps, reach 0.16.
+  loft rayB1 bone=flB at=1.0 dir=fwd yaw=0 pitch=-6 len=0.185 on=stemB material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayB2 bone=flB at=1.0 dir=fwd yaw=60 pitch=-6 len=0.185 on=stemB material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayB3 bone=flB at=1.0 dir=fwd yaw=120 pitch=-6 len=0.185 on=stemB material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayB4 bone=flB at=1.0 dir=fwd yaw=180 pitch=-6 len=0.185 on=stemB material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayB5 bone=flB at=1.0 dir=fwd yaw=240 pitch=-6 len=0.185 on=stemB material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayB6 bone=flB at=1.0 dir=fwd yaw=300 pitch=-6 len=0.185 on=stemB material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  # ...and the gold disc floret at the middle of them, sitting just proud so it
+  # is not buried in the six petal bases.
+  #
+  # It is small — 0.07 across against a 0.38 rosette, under a fifth. The first
+  # pass had it at 0.115 and the sheet came back with four **fried eggs**: a gold
+  # dome that big is the flower, and the blue rays read as a frill around it. A
+  # disc floret is a dot in the middle of a star, and the star has to win.
+  loft eyeB bone=flB at=1.0 offset=(0,0.010,0) dir=up len=0.038 material=Gold sides=6
+    ring 0.00 w=0.055 d=0.055
+    ring 0.55 w=0.070 d=0.070
+    ring 1.00 w=0.040 d=0.040
+    cap start=flat end=flat
+  # C: six rays at 60° steps, reach 0.180.
+  loft rayC1 bone=flC at=1.0 dir=fwd yaw=0 pitch=-6 len=0.180 on=stemC material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayC2 bone=flC at=1.0 dir=fwd yaw=60 pitch=-6 len=0.180 on=stemC material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayC3 bone=flC at=1.0 dir=fwd yaw=120 pitch=-6 len=0.180 on=stemC material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayC4 bone=flC at=1.0 dir=fwd yaw=180 pitch=-6 len=0.180 on=stemC material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayC5 bone=flC at=1.0 dir=fwd yaw=240 pitch=-6 len=0.180 on=stemC material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayC6 bone=flC at=1.0 dir=fwd yaw=300 pitch=-6 len=0.180 on=stemC material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  # ...and the gold disc floret at the middle of them, sitting just proud so it
+  # is not buried in the six petal bases.
+  #
+  # It is small — 0.07 across against a 0.38 rosette, under a fifth. The first
+  # pass had it at 0.115 and the sheet came back with four **fried eggs**: a gold
+  # dome that big is the flower, and the blue rays read as a frill around it. A
+  # disc floret is a dot in the middle of a star, and the star has to win.
+  loft eyeC bone=flC at=1.0 offset=(0,0.010,0) dir=up len=0.038 material=Gold sides=6
+    ring 0.00 w=0.055 d=0.055
+    ring 0.55 w=0.070 d=0.070
+    ring 1.00 w=0.040 d=0.040
+    cap start=flat end=flat
+  # D: six rays at 60° steps, reach 0.170.
+  loft rayD1 bone=flD at=1.0 dir=fwd yaw=0 pitch=-6 len=0.170 on=stemD material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayD2 bone=flD at=1.0 dir=fwd yaw=60 pitch=-6 len=0.170 on=stemD material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayD3 bone=flD at=1.0 dir=fwd yaw=120 pitch=-6 len=0.170 on=stemD material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayD4 bone=flD at=1.0 dir=fwd yaw=180 pitch=-6 len=0.170 on=stemD material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayD5 bone=flD at=1.0 dir=fwd yaw=240 pitch=-6 len=0.170 on=stemD material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  loft rayD6 bone=flD at=1.0 dir=fwd yaw=300 pitch=-6 len=0.170 on=stemD material=Ray refaxis=(0,1,0) sides=3
+    ring 0.00 w=0.055 d=0.030 material=Deep
+    ring 0.40 w=0.098 d=0.024 material=Ray
+    ring 1.00 w=0.020 d=0.010 tip
+    cap start=flat end=point
+  # ...and the gold disc floret at the middle of them, sitting just proud so it
+  # is not buried in the six petal bases.
+  #
+  # It is small — 0.07 across against a 0.38 rosette, under a fifth. The first
+  # pass had it at 0.115 and the sheet came back with four **fried eggs**: a gold
+  # dome that big is the flower, and the blue rays read as a frill around it. A
+  # disc floret is a dot in the middle of a star, and the star has to win.
+  loft eyeD bone=flD at=1.0 offset=(0,0.010,0) dir=up len=0.038 material=Gold sides=6
+    ring 0.00 w=0.055 d=0.055
+    ring 0.55 w=0.070 d=0.070
+    ring 1.00 w=0.040 d=0.040
+    cap start=flat end=flat
+
+checks
+  assert bottom(matA) < 0.02
+  assert bottom(stemA) < 0.02
+  assert bottom(stemD) < 0.02
+  # A cushion, not a bouquet. This is the check the whole model is shaped by, and
+  # it is stated more strongly than `sea_grass.wam`'s `width / height > 0.9`:
+  # `ItemModels.js` normalises on the Y extent, so an aster as tall as it is wide
+  # arrives on the mountainside as a shrub.
+  assert width / height > 1.15
+  assert depth / height > 1.0
+  # The rosette is wide. Measured tip to tip across a pair of opposite petals —
+  # `ray1` points along +Z and `ray4` along −Z, so this is the flower's own
+  # diameter and not a bounding box that happens to contain it.
+  assert zmax(rayA1) - zmin(rayA4) > 0.34
+  assert zmax(rayC1) - zmin(rayC4) > 0.30
+  # ...and flat. The whole head, gold centre included, is a small fraction of its
+  # own diameter thick. A head approaching its width in height has become a cup
+  # or a ball, and a cup seen from above — the one angle this plant is met at —
+  # is a hole.
+  assert top(eyeA) - bottom(rayA1) < (zmax(rayA1) - zmin(rayA4)) * 0.40
+  # The rays are rays: long and narrow, which is the difference between a star
+  # and a cog. A petal wider than about a third of its length is a scallop.
+  assert width(rayA1) < 0.16
+  assert len(flA) > 0.2
+  # Face UP, not out and not down. Each petal sits within a few hundredths of the
+  # height of the stem tip it grows from, so the rosette is a plate lying on the
+  # cushion rather than a shuttlecock.
+  assert y(rayA1) > y(flA.tail) - 0.05
+  assert y(rayA4) > y(flA.tail) - 0.05
+  assert y(rayC4) > y(flC.tail) - 0.05
+  # The gold centre is visible: it stands above the petal bases rather than being
+  # swallowed by them. Without this the flower is a plain blue star and loses the
+  # one warm note in the model.
+  assert top(eyeA) > top(rayA1)
+  assert top(eyeC) > top(rayC1)
+  # ...and it is a dot, not the flower. The check that keeps the fried egg out.
+  assert width(eyeA) < (zmax(rayA1) - zmin(rayA4)) * 0.25
+  # The heads clear the mat, so the flowers lie ON the cushion and not IN it...
+  assert bottom(eyeA) > top(matA) * 0.55
+  # ...but only just. A head floating a stem's length above the leaves is a posy,
+  # which is exactly what the parasol version was: its heads sat at 0.34 over a
+  # mat topping out at 0.16.
+  assert bottom(eyeA) < top(matA) * 1.9
+  # Scattered, not stacked: adjacent flowers do not merge into one blue blob.
+  assert gap(eyeA, eyeB) > 0.05
+  assert gap(eyeC, eyeD) > 0.05
+  noclip rayA1 vs rayB1,rayC1,rayD1
+  # Four flowers at four sizes. Identical heads read as a printed pattern.
+  assert len(flA) > len(flD) * 1.12
+  assert parts == 38
+  assert tris < 700
+  measure cushion width / height
+  measure rosette zmax(rayA1) - zmin(rayA4)

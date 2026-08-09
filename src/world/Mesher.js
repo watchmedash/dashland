@@ -100,7 +100,15 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom',
   'coral_branch', 'coral_fan', 'coral_brain', 'coral_dead',
   'kelp', 'sea_grass', 'sea_sponge', 'sea_shell',
   // The two edible plants and the deep light, on exactly the same footing.
-  'sea_lettuce', 'sea_grape', 'abyss_anemone']) {
+  'sea_lettuce', 'sea_grape', 'abyss_anemone',
+  // The land flora and the cave floor, on exactly the same footing again: no
+  // tile, no billboard, the model is all there is. The tile atlas is baked from
+  // a texture pack that is not in this tree, so for these sixteen the model was
+  // never one of two options — it was the only one available.
+  'thornbrush', 'aloe', 'golden_grass', 'firebloom',
+  'cotton_grass', 'snowbell', 'alpine_aster', 'marram',
+  'lavender', 'clover', 'fern', 'lingonberry',
+  'cave_mushroom', 'shelf_fungus', 'crystal_cluster', 'driftwood']) {
   const i = BLOCKS.findIndex((b) => b.name === n);
   if (i > 0) MODELLED_CROSS[i] = 1;
 }

@@ -1,0 +1,212 @@
+# Crystal Cluster — the cave findable. The reward for looking down.
+#
+# There are already two violet-and-cyan gems in the item set and both are single
+# stones: `crystal.wam` is one big prism with one small companion, and
+# `amethyst.wam` is three stubby druse points sharing a root. This is neither,
+# and the thing that makes it neither is the **matrix**. A cluster is crystals
+# growing *out of something* — the dull grey rock they nucleated on is half the
+# read, and without it seven purple prisms fanned from a point are a starburst,
+# a caltrop, an explosion, anything but a mineral. So the rock is authored first,
+# it is deliberately the widest thing at the bottom, and every point roots inside
+# it.
+#
+# **The rock must be obviously rock.** Dull, desaturated, and a full value step
+# darker than the crystals, so the eye separates them instantly even in a cave
+# with one torch: purple sits on grey, the grey does nothing, and the purple is
+# the only saturated thing in frame. It is `squarish` with a `roll` on the middle
+# ring, which is the cheapest way to get a boulder that is not a barrel — seven
+# sides at two different rotations gives twelve unequal facets for the price of
+# four rings. `shape=round` here made it a pebble and pebbles look placed.
+#
+# **The fan is what says "geode".** Every point leans *out* from the centre, and
+# the amount it leans grows with how far out it is rooted — the near-vertical
+# leader in the middle, then 24–28° for the two flanking it, then 30–38° for the
+# outer four. That is how a druse actually grows (perpendicular to the cavity
+# wall it nucleated on) and it is also what stops the cluster reading as a bundle
+# of sticks. The headings are deliberately *not* evenly spaced round the circle —
+# seven points at an even 51° apart is a crown, and a crown is a made object. As
+# laid out, two of the seven are largely hidden behind their neighbours from any
+# given angle, which is what a real pocket of crystals looks like, and the sheet
+# confirms it: no two of the four views show the same arrangement.
+#
+# **Two to one, tallest to shortest.** That ratio is the model's own check. The
+# `amethyst` druse deliberately keeps its three points close in height because
+# its job is to be a *crust*; this one is a pocket, and a pocket has a leader.
+# Below about 1.6:1 the cluster flattens into a brush; above about 2.4:1 the
+# leader becomes the subject and the rest becomes debris, which is `crystal.wam`
+# again.
+#
+# `sides=6` and `shape=box` throughout, straight from the astral prism: six flat
+# panels are what makes a facet read as a facet rather than as a highlight on a
+# cylinder. Every point runs dark `Root` at the base, `Amethyst` up the shaft,
+# and `Tip` over the last fifth into `cap end=point` — the pale terminations are
+# the one thing everyone recognises about amethyst, and seven pale points is
+# seven bright specks catching a torch. That is the whole findability budget.
+#
+# Slightly taller than wide, which took work. The first layout rooted the outer
+# four 0.26 out and leaned them 42°, and that arithmetic came to 1.28 wide
+# against 1.01 tall — a splat. The roots came in to about 0.17 and the leans down
+# by 6°, and it now stands at 1.03 by 0.94. The game normalises on the Y extent,
+# so a cluster wider than it is tall arrives as a boulder that fills its cell.
+#
+# The one thing the render sheet changed: the matrix was too dark and too short
+# and read as the model's own cast shadow rather than as stone. It took two
+# passes. First the dark `Shade` band moved off the bottom and up to the
+# shoulder — which was worse, because the game's camera looks *down* at a floor
+# findable and the shoulder is the face you actually see. It is now a thin dark
+# skirt at the very bottom only, the body of the rock is a mid grey two steps
+# lighter than it started, and the rock grew from 0.20 to 0.24 tall. It reads as
+# a grey rock in all four views.
+
+model crystal_cluster
+  height 0.34
+  style chunky
+
+palette
+  Amethyst #9a5ad8
+  Tip      #dcb6ff
+  Root     #4e2b74
+  Rock     #8c8c96
+  Shade    #5f5f68
+
+skeleton
+  root matrix at 0.0
+  bone rockb parent=matrix dir=up pitch=3 len=0.24
+
+  # Seven points. `up=` puts each root a little way inside the rock so the prism
+  # emerges from the stone rather than balancing on it; `tilt` is the outward
+  # lean in X and `pitch` the outward lean in Z. A point that leans along X is
+  # rooted off the axis in the same direction so it is honestly one-sided; the
+  # two that lean along Z stay dead on X=0 and are symmetric. Same rule as
+  # `sea_grass` and `coral_branch`, and the only two arrangements the centreline
+  # lint accepts.
+  #
+  # Lengths: 0.86 down to 0.43, which is the 2:1 the checks police.
+  bone pA parent=matrix side=0     fwd=0     up=0.15 dir=up tilt=0   pitch=-5  len=0.86
+  bone pB parent=matrix side=0.15  fwd=0.06  up=0.14 dir=up tilt=-24 pitch=5   len=0.68
+  bone pC parent=matrix side=-0.16 fwd=-0.05 up=0.13 dir=up tilt=28  pitch=-7  len=0.60
+  bone pD parent=matrix side=0     fwd=0.17  up=0.13 dir=up tilt=0   pitch=30  len=0.54
+  bone pE parent=matrix side=0     fwd=-0.17 up=0.13 dir=up tilt=0   pitch=-30 len=0.50
+  bone pF parent=matrix side=0.20  fwd=-0.14 up=0.12 dir=up tilt=-36 pitch=-14 len=0.46
+  bone pG parent=matrix side=-0.19 fwd=0.15  up=0.12 dir=up tilt=38  pitch=12  len=0.43
+
+parts
+  # The matrix. Squat, wide, and the only thing touching the ground — everything
+  # else in the model is cantilevered off it. The `roll=` on the middle ring
+  # offsets its facets against the ones above and below, which is what turns a
+  # seven-sided drum into a chipped lump.
+  loft rock bones=matrix..rockb material=Rock sides=7 shape=squarish
+    ring 0.00 w=0.58 d=0.52 roll=90 material=Shade
+    ring 0.14 w=0.68 d=0.60 roll=115.714 material=Rock
+    ring 0.42 w=0.72 d=0.64 roll=90
+    ring 0.74 w=0.62 d=0.55 roll=115.714
+    ring 1.00 w=0.44 d=0.40 roll=90
+    cap start=flat end=flat
+
+  # The points. Six-sided boxes with the astral prism's proportions: parallel
+  # through the middle, a shoulder at 0.78 where the termination begins, and a
+  # 0.02 ring into `cap end=point` so the tip is a real pyramid apex and not a
+  # blunt stub. The `Root` band at the bottom is dark on purpose — it is the part
+  # buried in the matrix and the part that would otherwise glow oddly where the
+  # prism leaves the stone.
+  loft point_a bones=pA..pA material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.24 d=0.24 material=Root
+    ring 0.12 w=0.22 d=0.22 material=Amethyst
+    ring 0.70 w=0.215 d=0.215
+    ring 0.80 w=0.175 d=0.175 material=Tip
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+  loft point_b bones=pB..pB material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.21 d=0.21 material=Root
+    ring 0.12 w=0.19 d=0.19 material=Amethyst
+    ring 0.70 w=0.185 d=0.185
+    ring 0.80 w=0.15 d=0.15 material=Tip
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+  loft point_c bones=pC..pC material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.20 d=0.20 material=Root
+    ring 0.12 w=0.18 d=0.18 material=Amethyst
+    ring 0.70 w=0.175 d=0.175
+    ring 0.80 w=0.14 d=0.14 material=Tip
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+  loft point_d bones=pD..pD material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.19 d=0.19 material=Root
+    ring 0.12 w=0.17 d=0.17 material=Amethyst
+    ring 0.70 w=0.165 d=0.165
+    ring 0.80 w=0.135 d=0.135 material=Tip
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+  loft point_e bones=pE..pE material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.185 d=0.185 material=Root
+    ring 0.12 w=0.165 d=0.165 material=Amethyst
+    ring 0.70 w=0.16 d=0.16
+    ring 0.80 w=0.13 d=0.13 material=Tip
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+  loft point_f bones=pF..pF material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.175 d=0.175 material=Root
+    ring 0.12 w=0.155 d=0.155 material=Amethyst
+    ring 0.70 w=0.15 d=0.15
+    ring 0.80 w=0.12 d=0.12 material=Tip
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+  loft point_g bones=pG..pG material=Amethyst sides=6 shape=box
+    ring 0.00 w=0.17 d=0.17 material=Root
+    ring 0.12 w=0.15 d=0.15 material=Amethyst
+    ring 0.70 w=0.145 d=0.145
+    ring 0.80 w=0.115 d=0.115 material=Tip
+    ring 1.00 w=0.02 d=0.02
+    cap start=flat end=point
+
+checks
+  # The rock sits on the ground and it is the only thing that does. Every point
+  # roots above y=0, inside the stone.
+  assert bottom(rock) < 0.02
+  assert bottom(point_a) > 0.02
+  assert bottom(point_g) > 0.02
+  # The matrix is genuinely the base: wider than any crystal is, and squat.
+  assert width(rock) > width(point_a) * 2.2
+  assert width(rock) > height(rock) * 2.2
+  # ...and it is a rock, not a plinth: the crystals dwarf it in height, or the
+  # model reads as a stone with sprinkles.
+  assert height(point_a) > height(rock) * 2.5
+  # Two to one, tallest to shortest. The number this model is built around.
+  assert len(pA) / len(pG) in 1.8..2.3
+  assert top(point_a) > top(point_g) * 1.7
+  # A fan, not a bundle: every outer point leans well off vertical, and the
+  # leader does not. If the leans ever collapse the cluster becomes a brush.
+  assert elevation(pA) > 82
+  assert elevation(pF) in 45..66
+  assert elevation(pG) in 45..66
+  assert angle(pF, pG) > 60
+  assert angle(pB, pC) > 45
+  # Prisms, not lozenges — the astral crystal's own ratio, relaxed at the bottom
+  # because the outer points are shorter and stubbier by design.
+  assert height(point_a) / width(point_a) in 2.6..4.4
+  assert height(point_d) / width(point_d) in 1.6..3.4
+  # Slightly taller than wide. This is the check that the first layout failed
+  # (1.28 wide against 1.01 tall) and it is the one the game cares about, since
+  # it normalises on the Y extent.
+  assert height / width in 1.0..1.5
+  assert height / depth in 1.0..1.6
+  # Points that face away from each other must not touch **at all**. Named pairs
+  # forgive nothing, which is what makes them the right form here: seven prisms
+  # rooted in one small pocket legitimately share stone down at their bases (that
+  # is what a druse *is*, and the bare `noclip` sweep forgives it as a first-third
+  # overlap, which makes the bare sweep vacuous on this model), but two points
+  # leaning in opposite directions have no excuse.
+  noclip point_b vs point_c
+  noclip point_d vs point_e
+  noclip point_f vs point_g
+  # ...and the seven terminations are seven separate specks of light, not a
+  # bouquet with its tips bunched. This is the check that keeps the model
+  # readable at the distance a player actually spots it from.
+  assert dist(pA.tail, pB.tail) > 0.30
+  assert dist(pB.tail, pF.tail) > 0.25
+  assert dist(pD.tail, pE.tail) > 0.45
+  assert dist(pF.tail, pG.tail) > 0.55
+  assert parts == 8
+  assert tris < 700
+  measure aspect height / width
+  measure leaderratio len(pA) / len(pG)

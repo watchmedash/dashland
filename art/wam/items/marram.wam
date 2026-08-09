@@ -1,0 +1,209 @@
+# Marram — the grass that holds a dune together.
+#
+# This is the beach's ground layer, and it exists because bare sand with objects
+# standing on it reads as a diorama rather than a place. But it is deliberately
+# **not** `sea_grass.wam` in a different colour. Read those two side by side and
+# the difference has to be legible at 32px, or the shoreline has two grasses that
+# are one grass twice.
+#
+# **Sea grass is a spray; marram is a sheaf.** Sea grass splays its blades out at
+# 22-34° of tilt in four headings, because underwater a blade has no reason to
+# stand up — the water holds it. Marram grows on a dry windward dune and is stiff
+# enough to stand: the splay here is 15-21° in a single plane's worth of
+# headings, the blades run the full height of the model instead of two thirds of
+# it, the sections are half as wide, and the whole tuft is *taller than wide*
+# where sea grass is squatter than wide. That last ratio flip is most of the
+# read, and it is the pair of asserts at the bottom of this file.
+#
+# **The wind lives in two blades, not in all of them.** The first cut curved
+# every blade near its tip and the tuft came out as a fountain — which is sea
+# grass again, only bigger. What actually says "beachgrass" is a sheaf of stiff
+# near-vertical straps with one or two blades folded right over near the top, so
+# the eye gets a strong vertical rhythm *plus* one broken line. Those two are the
+# only parts in the file with a bone chain: a `loft` follows a bone path, so a
+# blade that bends needs a joint to bend at, and everything straight is a single
+# free ray with no bone of its own.
+#
+# **`frame=` is not decoration here.** A near-vertical blade with `frame=up` puts
+# the ring's depth axis along the path instead of across it — the lint says so —
+# because "up" is the direction the blade is *going*. So the straight blades name
+# a horizontal `refaxis=` each, and each one names a different heading. That does
+# two jobs at once: it keeps the sections honest, and it stops all seven flat
+# faces from being parallel, which is what made an early version vanish into a
+# single card when viewed from the side. The bent pair name X, the one axis that
+# stays across a blade folding through the whole quarter-turn from vertical to
+# past-horizontal — which costs them a `w`/`d` swap; see the note on them.
+#
+# Colour is the other half of the divergence. Sand is bright and warm, so a lush
+# meadow green sits on it as a stain; marram is a pale, desaturated, slightly
+# blue-grey green, and the base of the tuft goes to a dry straw so the clump has
+# a foot instead of dissolving into the ground.
+
+model marram
+  height 0.66
+  style chunky
+
+palette
+  Blade #9fb392
+  Pale  #b9c8aa
+  Shade #7d9077
+  Straw #c6bb8f
+
+skeleton
+  root sod at 0.0
+  # The only bones in the model, and they exist solely so two blades can bend.
+  # Both chains lean in Z alone and stay centred on X, so each is honestly
+  # symmetric and the centreline lint has nothing to say — the same rule
+  # `sea_grass.wam` follows for its bladeE/bladeF pair.
+  #
+  # The fold, and it takes **two** joints, not one. The first cut bent each of
+  # these once, 52° at a single joint near the top, and on the sheet it did not
+  # read as bent at all — it read as one more leaning blade, because a single
+  # kink at a shallow angle is indistinguishable from a blade that was always
+  # aimed that way. What reads is an accelerating curve that finishes *past* the
+  # horizontal, so the tip is pointing back down at the sand: that is the shape
+  # wind leaves, and it is the one line in the tuft that is not a spike.
+  #
+  # The numbers below look like they double up because the second attempt did
+  # too, and it failed for a reason worth writing down: **`pitch` on a bone is
+  # world-referenced, not relative to the parent.** Written 4 / 42 / 46 the chain
+  # bends 38° at the first joint and 4° at the second — a kink and then a
+  # straight run, which is exactly what the side view showed. Bone angles are
+  # absolute aims (`dir=` is a world direction; the SPEC says so in the first
+  # line of `skeleton`), so an accelerating curve has to be written as absolute
+  # elevations: upright, then leaning, then over the top. Note this is the
+  # opposite of `sweep`, whose `up=`/`down=` bends genuinely accumulate.
+  bone bendA  parent=sod dir=up pitch=5 len=0.60
+  bone bendA2 parent=bendA dir=up pitch=31 len=0.16
+  bone bendA3 parent=bendA2 dir=up pitch=63 len=0.14
+  bone bendA4 parent=bendA3 dir=up pitch=97 len=0.12
+  bone bendB  parent=sod dir=up pitch=-7 len=0.54
+  bone bendB2 parent=bendB dir=up pitch=-34 len=0.15
+  bone bendB3 parent=bendB2 dir=up pitch=-68 len=0.13
+  bone bendB4 parent=bendB3 dir=up pitch=-104 len=0.11
+
+parts
+  # Five stiff straps. The splay is 15-21° of `tilt` — wider than the first cut,
+  # which came out 2.4 tall for 1 wide and would have arrived in the world as a
+  # pencil, but still well under sea grass's 22-34 plus pitch. `assert height /
+  # width in 1.1..2.0` is what set that number; I did not pick it, the check did.
+  #
+  # The sections are narrow. At w=0.09 the sheet showed an agave — a rosette of
+  # broad fleshy swords — because a blade whose width is a tenth of its length is
+  # a leaf, not a grass. At w≈0.055 over a full-height blade the ratio is nearer
+  # one to twenty and the tuft reads as grass immediately.
+  #
+  # Each carries a horizontal `refaxis=` of its own so the flat faces fan around
+  # the tuft instead of stacking up parallel — an early version with one shared
+  # axis collapsed to a single card seen from the side.
+  loft bladeA bone=sod at=0.0 offset=(-0.035,0,0.01) dir=up tilt=19 pitch=3 len=0.98 material=Blade refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.050 d=0.030 material=Straw
+    ring 0.12 w=0.058 d=0.026 material=Blade
+    ring 0.55 w=0.047 d=0.022
+    ring 0.86 w=0.029 d=0.016
+    ring 1.00 w=0.011 d=0.007 tip
+    cap start=flat end=point
+  loft bladeB bone=sod at=0.0 offset=(0.038,0,-0.02) dir=up tilt=-17 pitch=-4 len=1.04 material=Shade refaxis=(0.7,0,0.7) sides=4
+    ring 0.00 w=0.050 d=0.030 material=Straw
+    ring 0.12 w=0.059 d=0.026 material=Shade
+    ring 0.55 w=0.048 d=0.022
+    ring 0.86 w=0.030 d=0.016
+    ring 1.00 w=0.011 d=0.007 tip
+    cap start=flat end=point
+  loft bladeC bone=sod at=0.0 offset=(-0.030,0,-0.03) dir=up tilt=15 pitch=-9 len=0.88 material=Pale refaxis=(0.7,0,-0.7) sides=4
+    ring 0.00 w=0.046 d=0.028 material=Straw
+    ring 0.12 w=0.054 d=0.024 material=Pale
+    ring 0.55 w=0.044 d=0.020
+    ring 0.86 w=0.027 d=0.015
+    ring 1.00 w=0.010 d=0.007 tip
+    cap start=flat end=point
+  loft bladeD bone=sod at=0.0 offset=(0.032,0,0.03) dir=up tilt=-21 pitch=8 len=0.92 material=Blade refaxis=(0,0,1) sides=4
+    ring 0.00 w=0.046 d=0.028 material=Straw
+    ring 0.12 w=0.055 d=0.024 material=Blade
+    ring 0.55 w=0.045 d=0.020
+    ring 0.86 w=0.028 d=0.015
+    ring 1.00 w=0.010 d=0.007 tip
+    cap start=flat end=point
+  # The leader, dead centre and the tallest thing here. Centred on X, so
+  # symmetric; a tuft with no tallest blade is a hedge cut.
+  loft bladeE bone=sod at=0.0 dir=up pitch=2 len=1.12 material=Pale refaxis=(1,0,0) sides=4
+    ring 0.00 w=0.052 d=0.030 material=Straw
+    ring 0.12 w=0.061 d=0.026 material=Pale
+    ring 0.55 w=0.050 d=0.022
+    ring 0.86 w=0.031 d=0.016
+    ring 1.00 w=0.011 d=0.007 tip
+    cap start=flat end=point
+
+  # The two wind-folded blades, and the one place in the file where `d` is the
+  # big number instead of `w`.
+  #
+  # These bend in the YZ plane, from vertical to past horizontal, so *no* fixed
+  # axis except X stays across the path for the whole run: `frame=fwd` was right
+  # at the root and parallel to the path at the tip, and the lint said exactly
+  # that ("pick a reference axis across the part, not along it"). X is
+  # perpendicular to the bend plane by construction, so `refaxis=(1,0,0)` is
+  # across the path at every ring — but naming X as the reference makes `d` the
+  # left-right span, and a grass blade is wide left-right and thin the other way.
+  # Hence the swap. The blade therefore folds over its flat face, the way a real
+  # one gives way, and the fold shows as a curve in silhouette rather than as an
+  # edge-on line.
+  loft bentA bones=sod..bendA4 material=Blade refaxis=(1,0,0) sides=4
+    ring 0.00 d=0.052 w=0.030 material=Straw
+    ring 0.10 d=0.060 w=0.026 material=Blade
+    ring 0.58 d=0.048 w=0.021
+    ring 0.84 d=0.032 w=0.015 material=Pale
+    ring 1.00 d=0.011 w=0.007 tip
+    cap start=flat end=point
+  loft bentB bones=sod..bendB4 material=Shade refaxis=(1,0,0) sides=4
+    ring 0.00 d=0.048 w=0.030 material=Straw
+    ring 0.10 d=0.056 w=0.026 material=Shade
+    ring 0.58 d=0.045 w=0.021
+    ring 0.84 d=0.030 w=0.015 material=Blade
+    ring 1.00 d=0.010 w=0.007 tip
+    cap start=flat end=point
+
+checks
+  # Rooted in the dune, every one of them. A blade starting above ground is a
+  # blade you can see under, and on bright sand that gap is the first thing the
+  # eye finds.
+  assert bottom(bladeA) < 0.02
+  assert bottom(bladeE) < 0.02
+  assert bottom(bentA) < 0.02
+  # THE divergence check. Sea grass asserts `width / height > 0.9`; this asserts
+  # the opposite relation. If marram ever goes wider than tall it has become sea
+  # grass and the beach has two of the same plant.
+  assert height / width in 1.1..2.0
+  assert height / depth in 1.1..2.0
+  # A sheaf, not a spray: read by eye off the sheet and written down. The whole
+  # tuft's horizontal spread is small next to its height — this is the same fact
+  # as the ratio above, stated against the blades themselves so it still fails if
+  # someone lengthens the model to compensate for widening the splay.
+  assert width(bladeE) < top(bladeE) * 0.35
+  # The leader leads, and the tuft has a ragged top rather than a mown one.
+  assert top(bladeE) > top(bladeC) * 1.12
+  assert top(bladeB) > top(bladeD)
+  # The wind fold is real: the bent blades' tips end up lower than the straight
+  # blades' do, because they have folded over. If a bend is ever flattened out
+  # "to tidy the silhouette" this is what catches it.
+  assert top(bentA) < top(bladeE)
+  assert top(bentB) < top(bentA)
+  # ...and the fold reaches out in Z further than any straight blade does, which
+  # is the visible half of the same thing.
+  assert zmax(bentA) > zmax(bladeD)
+  # The fold as a curve rather than a kink, checked joint by joint. Written down
+  # because it is a thing I looked at on the sheet and then re-tuned twice: a
+  # three-bone chain gave a straight blade with a right angle in it and read as a
+  # crossbar, and only a four-bone chain whose elevation steps down in roughly
+  # even bites reads as bending. If someone collapses these back to two joints,
+  # the middle assertion is what stops it.
+  assert elevation(bendA) > 80
+  assert elevation(bendA2) in 50..70
+  assert elevation(bendA3) in 20..40
+  assert elevation(bendA4) < 0
+  assert elevation(bendB4) < elevation(bendA4)
+  # Flat straps, not chives: every blade is at least twice as wide as it is
+  # thick. A round section at this scale is a clump of noodles.
+  assert width(bladeA) > depth(bladeA) * 1.6
+  assert parts == 7
+  assert tris < 320
+  measure sheaf width / height

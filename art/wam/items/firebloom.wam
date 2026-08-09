@@ -1,0 +1,254 @@
+# Firebloom — a red-hot poker, and the only model in this batch built to be seen
+# from the far side of a biome.
+#
+# The badlands are red rock on red sand under a red sky, and a findable in that
+# biome has a harder job than any ground cover: it has to be the thing a player
+# spots at two hundred metres and walks toward. Everything about this model is
+# subordinate to that. It is tall where the rest of the batch is squat, it is
+# vertical where `thornbrush` is a tangle, and it spends nearly half its triangle
+# budget on one object — the spike — because that spike is the entire read.
+#
+# **The gradient is the plant.** A torch lily is not a red flower; it is a flower
+# that is deep red at the bottom of the head, orange through the middle and
+# yellow at the tip, because the florets open from the bottom up and change
+# colour as they go. Nothing else in the game does that, which makes it the
+# strongest identity signal available for a couple of material bands and no extra
+# geometry: `material=` on a ring bands the loft from there along, so three named
+# rings buy the whole thing. Get the order backwards and it reads as a candle
+# that has been lit at the wrong end.
+#
+# **The spike is faceted, not smooth.** `shape=squarish` with `roll=` alternating
+# ring to ring is the trick `flower_red` uses to break a loft's facets out of
+# alignment so a head reads as overlapping petals. Here it does something more
+# specific: a poker's head is hundreds of separate tubular florets packed round a
+# column, and a smooth spheroid of the same size is a candle flame or a corn cob.
+# Twenty degrees of roll, reversed every ring, staggers the facet seams down the
+# spike so the surface breaks into rows. Without it this is a red crayon.
+#
+# **Fat, and low-shouldered.** The spike is 0.23 wide against a 0.035 stalk —
+# more than six times — and its widest ring sits at a third of its own length,
+# not halfway. That is `mushroom.wam`'s rule about the cap and it holds for the
+# same reason: a head whose widest point is at its middle is an egg, and an egg
+# on a stick is a bulrush. Low shoulders and a rounded taper to the tip are what
+# make a poker a poker.
+#
+# **Two stalks, not one.** A single bloom on a single stalk is a lollipop —
+# `flower_red` learned that and answered it with a clump. The answer here is
+# different because a poker really does grow one flower per culm: two stalks of
+# obviously different heights, the shorter one leaning off the other's plane, so
+# the silhouette has a leader and a follower rather than a pair. Three would have
+# been a bouquet and would have cost another 140 triangles.
+#
+# **The basal leaves are structural.** Six strap leaves at the ground, `frame=up`
+# and flat in section, because the model needs *something* at its foot or the two
+# stalks read as wires stuck in the sand with no plant attached. They are also
+# the only cool colour in the file, which is what stops the whole block reading
+# as one warm smear against red rock. They are kept deliberately short: this is
+# the one model in the batch policed for being narrow, since `BlockModels`
+# normalises on the Y extent and a firebloom with a wide skirt comes back shrunk
+# and stops clearing the horizon it exists to stand above.
+
+model firebloom
+  height 0.92
+  style chunky
+
+palette
+  Ember #b8301f
+  Flame #e2661a
+  Gold  #f5c53a
+  Stalk #5f7c3e
+  Leaf  #74924a
+
+skeleton
+  root soil at 0.0
+  # The leader. Bare all the way up — a poker's scape carries no leaves, which is
+  # what makes the head look like it is floating, which is exactly the effect
+  # wanted at distance.
+  #
+  # `tilt=0` on the leader is load-bearing and was `tilt=3` on the first pass.
+  # Three degrees of lean over 0.7 of stalk puts the head 0.035 off the axis, and
+  # a 0.24-wide spike hanging off centre by that much straddles X=0 unevenly —
+  # which the lint correctly reports as a central part claiming a symmetry it
+  # does not have. The leader now leans in Z only, where nothing is claimed.
+  bone culmA parent=soil dir=up pitch=-4 len=0.58
+  bone spineA parent=culmA dir=up pitch=-2 len=0.06
+  # The follower. Shorter by a quarter and leaning well off the leader's plane,
+  # so the two heads never stack from any camera angle.
+  bone culmB parent=soil side=0.045 dir=up pitch=7 tilt=-11 len=0.42
+  bone spineB parent=culmB dir=up pitch=5 len=0.05
+
+  # Six basal straps. Four mirrored (rooted a half-width off the axis in the
+  # direction they lean, so each is honestly one-sided) and two centred on X and
+  # therefore symmetric — the two arrangements the centreline lint accepts, same
+  # as `sea_grass`.
+  mirror
+    #
+    # These were a third shorter and twenty degrees steeper on the first pass,
+    # and the compile came back at 2.42 height-over-width and 3.22 over depth —
+    # a hairline. A findable that is a vertical line at icon size is a findable
+    # nobody recognises in the toolbar, and the fix has to come from the skirt,
+    # because widening anything above the ground would blunt the spike. Longer,
+    # flatter leaves cost eight triangles apiece and pull both ratios under two.
+    bone basA parent=soil side=0.020 dir=up tilt=-58 pitch=22 len=0.36
+    bone basB parent=soil side=0.020 dir=up tilt=-62 pitch=-18 len=0.32
+  end
+  bone basC parent=soil dir=up pitch=58 len=0.36
+  bone basD parent=soil dir=up pitch=-56 len=0.34
+
+parts
+  # The scapes. Straight, thin, barely tapered and green: the contrast between a
+  # stem this narrow and a head that wide is half of what sells the silhouette.
+  loft stemA bones=soil..spineA material=Stalk sides=5
+    ring 0.00 w=0.060 d=0.058
+    ring 0.08 w=0.038 d=0.036
+    ring 0.70 w=0.033 d=0.031
+    ring 1.00 w=0.030 d=0.029
+    cap start=flat end=flat
+  # `bones=culmB..spineB` and not `soil..spineB`: the side offset lives on
+  # culmB's *head*, so a chain starting at `soil` starts at x=0 and the stalk
+  # crosses the centreline for its first ring only — a lopsided straddle, and a
+  # lint warning. Starting the loft at culmB puts the whole part on one side,
+  # which is honest. It still reaches the ground: the offset is in x alone.
+  loft stemB bones=culmB..spineB material=Stalk sides=5
+    ring 0.00 w=0.055 d=0.053
+    ring 0.08 w=0.035 d=0.033
+    ring 0.70 w=0.030 d=0.028
+    ring 1.00 w=0.027 d=0.026
+    cap start=flat end=flat
+
+  # The head. Everything above is context for these nine rings.
+  #
+  # The bands run Ember at the collar and low shoulder, Flame from a bit past
+  # halfway, Gold over the last fifth. Note the boundaries are not evenly spaced:
+  # the red section is the longest because the bottom of a poker is the part that
+  # has been open longest, and because a gradient with three equal thirds reads
+  # as a striped toy rather than as a transition.
+  # The proportions here are the second pass and they are the biggest single
+  # change the render sheet forced. Authored at 0.36 long and 0.23 wide the heads
+  # came out as striped eggs — the sheet read them as strawberries, and no amount
+  # of colour was going to rescue a shape that squat. A poker's head is a *torch*:
+  # a third again as long and a quarter narrower turns the same eleven rings from
+  # an egg into a column, and the roll seams that were lost round the curve of the
+  # egg now stagger visibly down a straight flank.
+  #
+  # The band boundaries moved too, and so did the way they are written. The first
+  # cut named `material=` once per band — Flame at 0.52, Gold at 0.82 — on the
+  # assumption that a ring's material runs onward until the next one names a
+  # different one, which is what `material=` does on a `sweep`'s segments. It
+  # does **not** do that on a loft's rings. A ring with no `material=` falls back
+  # to the *part's* base material, not to the ring above it, so what the sheet
+  # actually showed was a thin orange stripe, red again, a thin yellow stripe,
+  # and a red dome on top: a candle with two ribbons round it. Every ring here
+  # names its own material for that reason, and the tip rings name Gold three
+  # times over so the crown of the spike is yellow rather than reverting.
+  #
+  # With that fixed the split is half red, a quarter orange, a quarter yellow,
+  # which is what reads as florets opening from the bottom up. Equal thirds read
+  # as a striped toy.
+  loft spikeA bone=spineA at=1.0 dir=up len=0.48 on=stemA material=Ember sides=8 shape=squarish
+    ring 0.00 w=0.062 d=0.062 material=Ember
+    ring 0.07 w=0.142 d=0.140 roll=16 material=Ember
+    ring 0.18 w=0.170 d=0.168 roll=-21 material=Ember
+    ring 0.30 w=0.176 d=0.173 roll=18 material=Ember
+    ring 0.42 w=0.173 d=0.170 roll=-22 material=Ember
+    ring 0.54 w=0.166 d=0.163 roll=17 material=Flame
+    ring 0.66 w=0.155 d=0.152 roll=-19 material=Flame
+    ring 0.78 w=0.138 d=0.135 roll=20 material=Gold
+    ring 0.89 w=0.106 d=0.104 roll=-16 material=Gold
+    ring 0.97 w=0.060 d=0.058 roll=14 material=Gold
+    ring 1.00 w=0.020 d=0.020 material=Gold
+    cap start=flat end=flat
+  loft spikeB bone=spineB at=1.0 dir=up pitch=6 len=0.40 on=stemB material=Ember sides=8 shape=squarish
+    ring 0.00 w=0.055 d=0.055 material=Ember
+    ring 0.07 w=0.126 d=0.124 roll=-18 material=Ember
+    ring 0.18 w=0.150 d=0.148 roll=20 material=Ember
+    ring 0.30 w=0.156 d=0.153 roll=-16 material=Ember
+    ring 0.42 w=0.153 d=0.150 roll=22 material=Ember
+    ring 0.54 w=0.147 d=0.144 roll=-17 material=Flame
+    ring 0.66 w=0.137 d=0.134 roll=19 material=Flame
+    ring 0.78 w=0.122 d=0.119 roll=-15 material=Gold
+    ring 0.89 w=0.094 d=0.092 roll=17 material=Gold
+    ring 0.97 w=0.053 d=0.051 roll=-13 material=Gold
+    ring 1.00 w=0.018 d=0.018 material=Gold
+    cap start=flat end=flat
+
+  # The basal skirt. Flat straps — wide `w`, near-nothing `d`, `frame=up` — which
+  # is the grass idiom, and correct: a kniphofia's basal leaves really are
+  # grass-like, and that is also what visually roots two bare wires in the sand.
+  mirror
+    loft strapA bones=basA..basA material=Leaf frame=up sides=4
+      ring 0.00 w=0.060 d=0.018
+      ring 0.32 w=0.105 d=0.022
+      ring 0.76 w=0.076 d=0.016
+      ring 1.00 w=0.018 d=0.008 tip
+      cap start=flat end=point
+    loft strapB bones=basB..basB material=Stalk frame=up sides=4
+      ring 0.00 w=0.056 d=0.017
+      ring 0.32 w=0.098 d=0.021
+      ring 0.76 w=0.070 d=0.015
+      ring 1.00 w=0.017 d=0.008 tip
+      cap start=flat end=point
+  end
+  loft strapC bones=basC..basC material=Stalk frame=up sides=4
+    ring 0.00 w=0.058 d=0.018
+    ring 0.32 w=0.100 d=0.021
+    ring 0.76 w=0.072 d=0.015
+    ring 1.00 w=0.017 d=0.008 tip
+    cap start=flat end=point
+  loft strapD bones=basD..basD material=Leaf frame=up sides=4
+    ring 0.00 w=0.054 d=0.016
+    ring 0.32 w=0.094 d=0.020
+    ring 0.76 w=0.068 d=0.014
+    ring 1.00 w=0.016 d=0.007 tip
+    cap start=flat end=point
+
+checks
+  # Rooted. Two stalks and six leaves, all out of the same patch of ground.
+  assert bottom(stemA) < 0.02
+  assert bottom(strapA.l) < 0.02
+  assert bottom(strapC) < 0.02
+  # Taller than wide by a good margin, which is the whole brief. `ItemModels`
+  # and `BlockModels` both normalise on the Y extent, so this ratio is what
+  # decides whether the block clears the horizon or arrives squashed. The upper
+  # bound is there because past two the toolbar icon is a vertical hairline.
+  assert height / width in 1.1..2.0
+  assert height / depth in 1.1..2.0
+  # The overhang, stated the way `mushroom.wam` states its cap: the head is many
+  # times the stalk it sits on, and if this ever fails someone has narrowed the
+  # spike to fit something and the model is a bulrush. The bound is against
+  # `width(stemA)`, which is a bounding box and therefore measures the flared
+  # foot — the real margin against the 0.03 shaft is twice what the number says.
+  assert width(spikeA) > width(stemA) * 2.6
+  # ...and the head is a column, not a ball. Comfortably taller than it is wide,
+  # which is what separates a poker from the closed teardrop `flower_red` uses.
+  # 2.4 and not the 1.3 the first cut asserted. 1.3 is a value an egg passes,
+  # and an egg is what the first sheet showed; the number was set from what the
+  # source said rather than from what the render did, which is the exact failure
+  # the checks section exists to prevent. A torch is at least twice as long as
+  # it is thick.
+  assert height(spikeA) > width(spikeA) * 2.4
+  assert height(spikeB) > width(spikeB) * 2.4
+  # The spike is in clear air above the leaves. This is the check that fails
+  # first if the basal skirt is ever lengthened to fill out the silhouette.
+  assert bottom(spikeA) > top(strapA.l) * 1.4
+  assert bottom(spikeB) > top(strapC)
+  # A leader and a follower, not a pair. Both the stalk heights and the head
+  # sizes have to differ or the two read as one forked plant.
+  assert top(spikeA) > top(spikeB) * 1.2
+  assert width(spikeA) > width(spikeB) * 1.08
+  # The follower stands off the leader's line rather than behind it — measured as
+  # horizontal reach and not `abs(x)`, because culmB carries both a tilt and a
+  # pitch and half its offset is in z.
+  assert (x(spikeB) * x(spikeB) + z(spikeB) * z(spikeB)) ** 0.5 > width(spikeA) / 2
+  # The two heads do not touch. A poker with its blooms fused is one lumpy blob
+  # at distance, which is the failure this model cannot afford.
+  assert gap(spikeA, spikeB) > 0.01
+  # The stalks are bare. Nothing between the skirt and the heads, which is what
+  # makes the blooms look like they are floating at range.
+  assert top(strapA.l) < bottom(spikeB)
+  # The skirt stays a skirt: short, and never the tallest thing here.
+  assert top(strapC) < top(spikeA) * 0.5
+  assert parts == 10
+  assert tris < 700
+  measure lean width / height
+  measure headratio width(spikeA) / width(spikeB)

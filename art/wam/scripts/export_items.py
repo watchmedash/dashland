@@ -108,6 +108,17 @@ ITEMS = [
     # the only sweetener on the planet, so every treat recipe runs through this
     # one file. A skipped rebuild here costs seven recipes their icon.
     "honeycomb",
+    # The land flora and the cave floor. Sixteen more world-geometry cross
+    # blocks on the reef's footing — `MODELLED_CROSS` + `MODELLED_PLANTS` +
+    # `POSE`/`BY_NAME` — except that for these the model is not the better of
+    # two options, it is the only one: the tile atlas is baked by
+    # `scripts/bake-textures.mjs` out of a texture pack that does not ship in
+    # this tree, so none of them could have had a billboard even if one were
+    # wanted. Skipping a name here empties a biome of that plant.
+    "thornbrush", "aloe", "golden_grass", "firebloom",
+    "cotton_grass", "snowbell", "alpine_aster", "marram",
+    "lavender", "clover", "fern", "lingonberry",
+    "cave_mushroom", "shelf_fungus", "crystal_cluster", "driftwood",
 ]
 
 # Models authored lying along +Z — bars, loaves, bundles — are stood up on

@@ -10,15 +10,65 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { createCutoutNormalMaterial, createMappedNormalMaterial } from './VoxelMaterial.js';
 
+/**
+ * Where the lens effects sit, and why they are all smaller than they were.
+ *
+ * These three — vignette, grain, chromatic aberration — are the cheapest way to
+ * make a render look processed and the cheapest way to make it look amateur, and
+ * the difference is entirely in the amount. They were set at 0.42 / 0.028 /
+ * 0.0016, which is *strong*: the old vignette multiplied the screen corners by
+ * 0.61 (smoothstep(0.18, 0.92, r2 * 1.6) reaches 0.93 at the corner, times
+ * 0.42), so nearly two fifths of the light was taken out of the outer quarter of
+ * every frame. On a game whose whole subject is a bright curved horizon that is
+ * a filter fighting the picture.
+ *
+ * Halved, roughly, and they now read as lens rather than as effect. Every one is
+ * still here — a perfectly clean frame reads as a tech demo — they are simply
+ * back under the threshold where you notice them individually.
+ *
+ * The corner falls to 0.76 instead of 0.61. Set VIGNETTE back to 0.42 to see
+ * exactly what was there before; nothing else in the grade depends on it.
+ */
+const VIGNETTE = 0.26;
+const GRAIN = 0.015;
+const ABERRATION = 0.0009;
+
+/**
+ * The response curve, which is the part that was missing rather than overdone.
+ *
+ * The frame arrives here already through ACES (OutputPass) at exposure 1.05.
+ * ACES is a sensible default and it does two things to a hand-painted palette
+ * that have to be answered: it desaturates as it approaches the shoulder, and it
+ * is deliberately neutral, so nothing in the chain ever says what this game's
+ * colour is *for*.
+ *
+ * SATURATION answers the first. It is up from 1.08, but it is no longer flat:
+ * HIGHLIGHT_DESAT eases it back toward 1.0 as a pixel approaches white, so the
+ * midtones — grass, stone, water, sky — get the lift and a sunlit cloud edge or
+ * a lava crack does not go neon on its way to clipping. Net effect on a midtone
+ * is +14% saturation; on anything above 0.8 luma it is about +5%.
+ *
+ * SHADOW_TINT / HIGHLIGHT_TINT answer the second, and are the only opinionated
+ * thing in this file: warm light, cool shade. It is the oldest trick in outdoor
+ * painting and it is what a sun and a blue sky physically do, so it holds at
+ * every hour — at night the whole frame is in the shadow half and gets the cool
+ * end, which is also correct. Both are within about 1% of luminance 1 (0.990 and
+ * 1.010 against the Rec.709 weights), so this rotates hue and costs no exposure:
+ * turning it off by setting both to vec3(1.0) should change the brightness of
+ * nothing.
+ */
+const SATURATION = 1.14;
+const CONTRAST = 1.06;
+
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
     uTime: { value: 0 },
-    uVignette: { value: 0.42 },
-    uGrain: { value: 0.028 },
-    uAberration: { value: 0.0016 },
-    uSaturation: { value: 1.08 },
-    uContrast: { value: 1.045 },
+    uVignette: { value: VIGNETTE },
+    uGrain: { value: GRAIN },
+    uAberration: { value: ABERRATION },
+    uSaturation: { value: SATURATION },
+    uContrast: { value: CONTRAST },
     uLift: { value: new THREE.Vector3(0.004, 0.006, 0.012) },
     uDamage: { value: 0 },
     uUnderwater: { value: 0 },
@@ -35,6 +85,11 @@ const GradeShader = {
     uniform vec3 uLift;
     uniform vec2 uResolution;
     varying vec2 vUv;
+
+    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+    const float HIGHLIGHT_DESAT = 0.62;
+    const vec3 SHADOW_TINT = vec3(0.965, 0.990, 1.065);
+    const vec3 HIGHLIGHT_TINT = vec3(1.045, 1.005, 0.955);
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
@@ -55,10 +110,22 @@ const GradeShader = {
       col.b = texture2D(tDiffuse, uv - c * ab).b;
 
       // grade
-      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-      col = mix(vec3(l), col, uSaturation);
+      float l = dot(col, LUMA);
+      // Saturation, eased off as a pixel approaches white. A flat multiplier
+      // pushes anything already near the top of a channel straight into a
+      // clipped primary — sunlit cloud edges, the lava crack, the sun disc —
+      // and those are exactly the pixels with no headroom to be more colourful
+      // in. See SATURATION.
+      float satW = 1.0 - HIGHLIGHT_DESAT * smoothstep(0.55, 1.0, l);
+      col = mix(vec3(l), col, mix(1.0, uSaturation, satW));
       col = (col - 0.5) * uContrast + 0.5;
       col += uLift * (1.0 - l);
+
+      // Warm light, cool shade. Multiplicative, so it is a hue rotation that
+      // leaves black at black and does not lift the toe; both tints sit at
+      // luminance ~1 so it costs no exposure. See SHADOW_TINT.
+      float tl = clamp(dot(col, LUMA), 0.0, 1.0);
+      col *= mix(SHADOW_TINT, HIGHLIGHT_TINT, smoothstep(0.06, 0.72, tl));
 
       // vignette
       float vig = 1.0 - uVignette * smoothstep(0.18, 0.92, r2 * 1.6);
@@ -110,12 +177,31 @@ export class PostFX {
     this.output = new OutputPass();
     this.composer.addPass(this.output);
 
+    // SMAA before the grade, not after it.
+    //
+    // The order used to be grade → SMAA, which put an edge-detecting blur on top
+    // of film grain, chromatic aberration and a vignette. Two things went wrong
+    // with that and both are one-way:
+    //
+    // - SMAA's first pass thresholds the *luma difference* between neighbouring
+    //   pixels to decide where an edge is. Grain is a per-pixel luma difference
+    //   by construction, so a grained frame is a frame with a false edge
+    //   candidate at every pixel: the pass does more work and blends along
+    //   gradients that are noise rather than geometry.
+    // - Whatever it does blend, it blends the grain away with it. Grain that is
+    //   then averaged with its neighbours is grain at a fraction of the amplitude
+    //   it was authored at, which is part of why the number was up at 0.028.
+    //
+    // Running SMAA on the clean tone-mapped image and laying the lens effects
+    // over the result costs nothing — it is the same three passes in the same
+    // colour space, since both still sit after OutputPass — and the grain lands
+    // at the amplitude it says it does.
+    this.smaa = new SMAAPass();
+    this.composer.addPass(this.smaa);
+
     this.grade = new ShaderPass(GradeShader);
     this.grade.uniforms.uResolution.value.copy(size);
     this.composer.addPass(this.grade);
-
-    this.smaa = new SMAAPass(size.x, size.y);
-    this.composer.addPass(this.smaa);
   }
 
   /**
@@ -335,7 +421,7 @@ export class PostFX {
       this.grade.uniforms.uSaturation.value = 0.86;
       this.grade.uniforms.uLift.value.set(0.0, 0.02, 0.05);
     } else {
-      this.grade.uniforms.uSaturation.value = 1.08;
+      this.grade.uniforms.uSaturation.value = SATURATION;
       this.grade.uniforms.uLift.value.set(0.004, 0.006, 0.012);
     }
     if (this.enabled) this.composer.render(dt);

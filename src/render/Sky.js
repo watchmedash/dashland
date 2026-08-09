@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { R_MAX } from '../world/Constants.js';
 import { makeRng } from '../util/Noise.js';
+import { voxelUniforms } from './VoxelMaterial.js';
 
 /**
  * Radius of the shadowed region around the player. The geometric horizon on a
@@ -100,7 +101,43 @@ export function compassFrame(up, east, north) {
   return Math.hypot(up.x, up.z);
 }
 
-const SKY_KEYS = [
+/**
+ * How far the sun's daily arc is tilted off the local zenith, in radians.
+ *
+ * Zero would send it straight through the point overhead, which is a sun with no
+ * arc at all: it would rise due east, pass exactly through the zenith and set due
+ * west, and noon would have no direction. 0.36 (~20.6°) leans the whole circle
+ * toward north so the sun crosses the southern sky, tops out at an elevation of
+ * cos(0.36) = 0.936 rather than 1, and — the part that matters on screen — casts
+ * a shadow at noon that points somewhere.
+ */
+const SOLAR_TILT = 0.36;
+
+/**
+ * The sun's world direction, for a player standing at `up`, at `dayFraction`.
+ *
+ * Split out of `setSolarTime` and exported so it can be checked without a WebGL
+ * context or a `Sky` instance (which needs a canvas for the moon texture). It is
+ * pure: same inputs, same output, no state touched.
+ *
+ * @param {THREE.Vector3} up  the player's radial up, need not be unit length
+ * @param {number} dayFraction 0 = midnight, 0.25 = sunrise, 0.5 = noon
+ * @param {THREE.Vector3} out written and returned
+ */
+export function solarDirection(up, dayFraction, out) {
+  const f = ((dayFraction % 1) + 1) % 1;
+  const th = (f - 0.25) * Math.PI * 2;      // 0 at sunrise, π/2 at noon
+  // a compass frame that varies smoothly as the player walks
+  compassFrame(up, _east, _north);
+  _zenith.copy(up).normalize().multiplyScalar(Math.cos(SOLAR_TILT))
+    .addScaledVector(_north, Math.sin(SOLAR_TILT)).normalize();
+  return out.copy(_east).multiplyScalar(Math.cos(th))
+    .addScaledVector(_zenith, Math.sin(th)).normalize();
+}
+
+// Exported for the offline palette checks (monotonicity, gamut) — nothing in
+// the game reads either of these from outside this file.
+export const SKY_KEYS = [
   // elevation, zenith, horizon, sun, fog, ambient, sunIntensity
   { e: -1.00, zen: 0x03050f, hor: 0x070a18, sun: 0x0a0e1e, fog: 0x070a16, amb: 0x0a1024, si: 0.00 },
   { e: -0.26, zen: 0x06091c, hor: 0x141a34, sun: 0x1c2140, fog: 0x11162c, amb: 0x121a34, si: 0.02 },
@@ -112,7 +149,7 @@ const SKY_KEYS = [
   { e: 1.00, zen: 0x2662c8, hor: 0x96c0ee, sun: 0xffffff, fog: 0xc4d9f2, amb: 0xa2bada, si: 1.62 },
 ];
 
-function lerpKeys(e) {
+export function lerpKeys(e) {
   let a = SKY_KEYS[0], b = SKY_KEYS[SKY_KEYS.length - 1];
   for (let i = 0; i < SKY_KEYS.length - 1; i++) {
     if (e >= SKY_KEYS[i].e && e <= SKY_KEYS[i + 1].e) { a = SKY_KEYS[i]; b = SKY_KEYS[i + 1]; break; }
@@ -160,8 +197,23 @@ void main() {
   // gradient with a tightened horizon band
   float g = pow(clamp(h, 0.0, 1.0), 0.42);
   vec3 col = mix(uHorizon, uZenith, g);
-  // below the horizon fades toward a deep ground haze
-  col = mix(col * 0.55, col, smoothstep(-0.25, 0.02, h));
+
+  // How far *below* the tangent plane the sky still reaches.
+  //
+  // On a planet this small the horizon is not at eye level: it dips by
+  // acos(R / (R + eye)) ~ sqrt(2 * eye / R) radians, which at R_SEA 282 and an
+  // eye 1.7 units up is 0.11 — and further still looking down from a hilltop.
+  // Everything above h = -HORIZON_DIP is therefore sky you can genuinely see,
+  // and it is the single most looked-at band in the game: the curved rim the
+  // whole planet reads as.
+  //
+  // The darkening this replaces started at h = 0.02 and was down to 0.70 of the
+  // sky colour by h = -0.12, so it painted a dull grey band across exactly that
+  // rim — a ground haze applied to a part of the dome the ground never covers.
+  // Pushed below the dip it only affects the deep underside of the dome, which
+  // is behind the planet and only ever seen through a hole in the terrain.
+  const float HORIZON_DIP = 0.16;
+  col = mix(col * 0.62, col, smoothstep(-0.55, -HORIZON_DIP, h));
 
   float sd = max(dot(d, uSunDir), 0.0);
   // mie forward scattering halo
@@ -593,6 +645,25 @@ export class Sky {
     this.domeUniforms.uSunDir.value.copy(this.sunDir);
     this.domeUniforms.uUp.value.copy(playerUp);
     this.domeUniforms.uNight.value = night;
+
+    // The dome's own two colours, handed to the voxel material unmodified.
+    //
+    // `main._updateSharedUniforms` already publishes derivatives of these — a
+    // whitened `uSkyColor` to light shaded faces with, a hue-preserving
+    // `uSkyReflect` for water — but both are *levels*, art-directed for one job
+    // each, and neither can answer "what colour is the sky in this direction".
+    // Aerial perspective and a reflected sky both need the raw pair, because
+    // what they are imitating is literally the dome above: distant terrain fades
+    // into the sky behind it, and a lake shows you the sky over it.
+    //
+    // Published from here rather than from main because this is the only place
+    // that holds the palette *before* anyone has an opinion about it, so the
+    // three surfaces cannot drift. Deliberately different uniform names from
+    // everything main writes, so the two never race — main runs after this every
+    // frame and touches a disjoint set.
+    voxelUniforms.uSkyHorizon.value.copy(p.horizon);
+    voxelUniforms.uSkyZenith.value.copy(p.zenith);
+
     this.dome.position.copy(camera.position);
     this.dome.scale.setScalar(1);
 
@@ -728,18 +799,8 @@ export class Sky {
    * @param {number} dayFraction 0 = midnight, 0.5 = noon
    */
   setSolarTime(up, dayFraction) {
-    const f = ((dayFraction % 1) + 1) % 1;
-    this.time = f;
-
-    const th = (f - 0.25) * Math.PI * 2;      // 0 at sunrise, π/2 at noon
-    // a compass frame that varies smoothly as the player walks
-    compassFrame(up, _east, _north);
-    // tilt the arc off the zenith so the sun tracks across the sky rather than
-    // straight overhead
-    const tilt = 0.36;
-    _zenith.copy(up).multiplyScalar(Math.cos(tilt)).addScaledVector(_north, Math.sin(tilt)).normalize();
-
-    this.sunDir.copy(_east).multiplyScalar(Math.cos(th)).addScaledVector(_zenith, Math.sin(th)).normalize();
+    this.time = ((dayFraction % 1) + 1) % 1;
+    solarDirection(up, this.time, this.sunDir);
     this.moonDir.copy(this.sunDir).negate();
   }
 

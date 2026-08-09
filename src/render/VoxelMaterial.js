@@ -121,6 +121,18 @@ export const voxelUniforms = {
   // does not paint shadowed faces blue. Reflecting that in water gives you a
   // white lake under a blue sky. This one keeps the palette's real hue.
   uSkyReflect: { value: new THREE.Color(0.35, 0.52, 0.78) },
+  /**
+   * The dome's own horizon and zenith colours, raw, written by `Sky.update`.
+   *
+   * Both of the sky uniforms above are *levels*: uSkyColor is desaturated so it
+   * can serve as an ambient fill, uSkyReflect is a single averaged swatch. These
+   * two are the gradient itself, and two things need the gradient rather than an
+   * average — aerial perspective, which fades distant terrain into the sky
+   * directly behind it, and the water fresnel, which shows you the sky in the
+   * direction the surface actually points. See the note in `Sky.update`.
+   */
+  uSkyHorizon: { value: new THREE.Color(0.30, 0.53, 0.86) },
+  uSkyZenith: { value: new THREE.Color(0.02, 0.12, 0.58) },
   // The turning year, applied to the biome tint a vertex already carries. See
   // SEASON_FRAG.
   uSeasonColor: { value: new THREE.Vector3(1, 1, 1) },
@@ -262,6 +274,8 @@ uniform vec3 uWaterTint;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uSkyReflect;
+uniform vec3 uSkyHorizon;
+uniform vec3 uSkyZenith;
 uniform float uTime;
 uniform vec3 uSeasonColor;
 uniform float uSeasonStrength;
@@ -639,6 +653,69 @@ varying vec3 vWorld;
 varying vec3 vTangent;
 varying float vWave;
 vec3 armSample;
+
+// --- aerial perspective ------------------------------------------------------
+//
+/**
+ * How much stronger the distance haze is than the density handed in.
+ *
+ * The fog was, in practice, switched off, and the arithmetic is not close. The
+ * curve is f = 1 - exp(-(d * dist)^2) and main sets d = 0.0013 in fair weather.
+ * On this planet the visible range is bounded at both ends and both ends are
+ * known: standing on flat ground the sea horizon is sqrt(2 * eye * R_SEA) ~ 33
+ * units away, the tallest terrain the generator can raise stays visible to ~190,
+ * and chunks stop being meshed at CHUNK_LOAD_DIST = 150. At 150 units the old
+ * density gives f = 0.037. **Three and a half percent, at the furthest thing on
+ * screen.** The far hills were rendered at essentially full contrast and full
+ * saturation, the near ground was too, and nothing in the frame said which was
+ * which — which is most of why a world with a genuinely curved, genuinely close
+ * horizon read as flat.
+ *
+ * 3.6 puts f at 0.38 at the load distance and 0.03 at 34 units. So the ground
+ * you are standing on is untouched (a third of one percent at ten units), the
+ * ridge behind the next valley is slightly softened, and the rim of the planet
+ * sits a third of the way into the sky it is silhouetted against. Weather still
+ * multiplies through it exactly as before: a storm's 1.9 makes that 0.83 at the
+ * horizon and 0.11 underfoot-to-mid-distance, which is a fog rather than a hint.
+ *
+ * Set to 1.0 to get precisely the old picture back; nothing else here depends on
+ * it. The whole term is four multiplies and an exp, on a fragment that has
+ * already run a full standard-material BRDF.
+ */
+const float AERIAL_GAIN = 3.6;
+/**
+ * How far the haze leans off the palette's fog colour toward the sky's own
+ * horizon colour.
+ *
+ * They are not the same thing and the difference is the point. "fog" is
+ * art-directed as a *veil* — at noon it is 0xc4d9f2, paler and less saturated
+ * than the sky. The colour distant terrain should actually approach is the sky
+ * immediately behind it, which is the dome's horizon band, 0x96c0ee. Sitting
+ * between them means the far rim of the planet fades into very nearly the exact
+ * colour it is silhouetted against, so the ground stops ending at a hard line
+ * and starts becoming sky — and at dusk the same term turns the far hills the
+ * colour of the sunset instead of a neutral grey-brown.
+ */
+const float AERIAL_HORIZON_MIX = 0.55;
+/**
+ * Forward inscatter: the haze goes warm when you look toward the sun.
+ *
+ * A single tinted veil in every direction is fog; haze that brightens toward the
+ * light and stays cool away from it is atmosphere, and it is the whole of why a
+ * low sun looks like a low sun. Gated on the *view* direction rather than on the
+ * surface, because scattering happens in the air between you and the surface and
+ * has nothing to do with which way the surface faces.
+ *
+ * uSunColor already carries the weather's 'sun' factor, so a storm gets no warm
+ * glow, and it is the palette's sun — near black once the sun is properly down —
+ * so this fades itself out at night without a second gate. Bounded at
+ * AERIAL_SUN_GAIN of the way to that colour, at the exact centre of the sun and
+ * nowhere else: pow 4 puts it at half strength 33 degrees off.
+ */
+const float AERIAL_SUN_POW = 4.0;
+const float AERIAL_SUN_GAIN = 0.30;
+
+const vec3 AERIAL_LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 /**
  * Cheap dancing-light pattern. Three interfering sine fields, thresholded so
@@ -1107,8 +1184,14 @@ const FOG_FRAG = /* glsl */`
     }
   }
 
-  float f = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist);
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogColor, clamp(f, 0.0, 1.0));
+  // Aerial perspective. See AERIAL_GAIN for why this is not the fog it replaces.
+  vec3 aerialDir = dist > 1e-4 ? (vWorld - uCamPos) / dist : vec3(0.0, 1.0, 0.0);
+  vec3 haze = mix(uFogColor, uSkyHorizon, AERIAL_HORIZON_MIX);
+  haze = mix(haze, uSunColor,
+             AERIAL_SUN_GAIN * pow(max(dot(aerialDir, uSunDir), 0.0), AERIAL_SUN_POW));
+  float aerialD = uFogDensity * AERIAL_GAIN;
+  float f = 1.0 - exp(-aerialD * aerialD * dist * dist);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, haze, clamp(f, 0.0, 1.0));
 
   if (uUnderwater > 0.5) {
     // thick, wavelength-shifted extinction: red falls off fastest
@@ -1159,7 +1242,38 @@ function patch(material, opts = {}) {
 
           // The reflected sky, dimmed a little: a real surface is never a
           // perfect mirror and the roughness here stands in for chop.
-          vec3 refl = uSkyReflect * 0.88;
+          //
+          // Shaped by where the reflected ray actually points, which is the
+          // difference between a lake and a sheet of coloured glass. uSkyReflect
+          // is one averaged swatch, so every water fragment on the planet
+          // reflected the same colour at every angle — and the angles are not
+          // close: look straight down and you are looking at the zenith, look
+          // across a lake and you are looking at the horizon, and by day the
+          // horizon is nearly four times the luminance of the zenith (measured
+          // off the noon palette: 0.50 against 0.13 linear).
+          //
+          // Only the *level* is taken from the gradient, and only within
+          // SKY_SHAPE_MIN..MAX of the swatch. The hue stays uSkyReflect's,
+          // because main tunes that with a night floor and an overcast lean that
+          // this has no business overriding, and the clamp is what keeps a
+          // grazing reflection from running away with the horizon's brightness
+          // at dawn. The one visible consequence is the one worth having: water
+          // seen across its length brightens toward the sky it meets, so the far
+          // shore of a lake and the sea at the rim of the planet stop reading as
+          // a flat blue cut-out.
+          const float SKY_SHAPE = 0.75;
+          const float SKY_SHAPE_MIN = 0.60;
+          const float SKY_SHAPE_MAX = 1.70;
+          vec3 rDir = reflect(vDir, normal);
+          vec3 wUp = normalize(vWorld - uPlanetCenter);
+          // The same 0.42 curve the dome shader draws its gradient with, so the
+          // sky in the water and the sky above it are the same sky.
+          vec3 grad = mix(uSkyHorizon, uSkyZenith,
+                          pow(clamp(dot(rDir, wUp), 0.0, 1.0), 0.42));
+          float shape = clamp(dot(grad, AERIAL_LUMA)
+                              / max(dot(uSkyReflect, AERIAL_LUMA), 1e-4),
+                              SKY_SHAPE_MIN, SKY_SHAPE_MAX);
+          vec3 refl = uSkyReflect * mix(1.0, shape, SKY_SHAPE) * 0.88;
           gl_FragColor.rgb = mix(gl_FragColor.rgb, refl, fres * 0.88);
 
           // Sun glint. The single strongest cue that a surface is liquid, and
@@ -1167,9 +1281,27 @@ function patch(material, opts = {}) {
           // rides the wave-perturbed normal, so it breaks into a scattering
           // path across the chop instead of one clean disc. Gated on skylight
           // so it does not shine out of a roofed cave.
+          //
+          // Two lobes, not one. pow 190 is a mirror: it is the specular of a
+          // surface with roughness ~0.1 and it draws the sun as a small hard
+          // disc that only ever lands on the handful of wave crests whose normal
+          // happens to point exactly right. What is missing from that is the
+          // *path* — the broad column of light that runs from a low sun across
+          // the water toward the viewer, which is the single most recognisable
+          // thing about water at dawn and dusk and is not made of highlights, it
+          // is made of the surface being slightly rough over a wide angle.
+          //
+          // SUN_PATH_POW 22 is roughly roughness 0.3; at a tenth of the tight
+          // lobe's weight it is invisible at midday (fresnel is 0.05 looking
+          // down at your feet, so the term lands at 0.014) and takes over
+          // completely at a grazing angle with a low sun, which is exactly the
+          // shot. Gated on vSun with the glint, so neither shines in a cave.
+          const float SUN_PATH_POW = 22.0;
+          const float SUN_PATH_GAIN = 0.35;
           vec3 half3 = normalize(uSunDir - vDir);
-          float glint = pow(clamp(dot(normal, half3), 0.0, 1.0), 190.0);
-          gl_FragColor.rgb += uSunColor * glint * fres * vSun * 9.0;
+          float ndh = clamp(dot(normal, half3), 0.0, 1.0);
+          gl_FragColor.rgb += uSunColor * fres * vSun
+                            * (pow(ndh, 190.0) * 9.0 + pow(ndh, SUN_PATH_POW) * SUN_PATH_GAIN);
 
           // Opacity follows the same curve: grazing water hides its bed.
           gl_FragColor.a = clamp(mix(gl_FragColor.a, 0.97, fres), 0.0, 0.97);

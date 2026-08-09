@@ -104,7 +104,49 @@ function food(file, height, flat = false, extra = {}) {
 }
 
 export const POSE = {
-  pick:   { file: 'pickaxe',      pack: 'tools',   height: 0.46, grip: 0.18, rot: [-0.42, -0.62, 0.34], pos: [0.02, -0.04, 0],     icon: TOOL_ICON },
+  // **The head is rolled, and the numbers below are a composition rather than a
+  // hand-tuned triple.** The head is a double-pointed bar: measured off the mesh
+  // (the metal vertices, via the same `isMetal` the draw groups use) its point
+  // axis is model X to three decimals and sits 89.6° to the haft, with its two
+  // extremes at x = ±0.724. Carried through this pose that axis landed at
+  // (0.769, 0.522, 0.369) — which projects to a bar leaning **55.8° off
+  // vertical on screen**, i.e. nearer horizontal than not, with a point out to
+  // each side. Reported as "the points are on the sides not up/down", and that
+  // is exactly what it was.
+  //
+  // The correction has to be a roll about the model's **own** long axis, which
+  // is not a change to any one component here: an Euler in this table is read
+  // in the *view* frame, so adding to a component turns the tool relative to
+  // the screen and drags the haft — and with it the aim of the swing — along
+  // with it. What is wanted is `R' = R · Ry(θ)`, post-multiplied, because
+  // post-multiplying composes in the model's own axes. Solved for the θ that
+  // zeroes the head's sideways component and evaluated once: θ = -0.9244 rad
+  // (-53.0°), giving the triple below. The haft is bit-identical afterwards —
+  // measured, it moves 0.0e+0 degrees — so the swing still aims where it aimed.
+  //
+  // After: the head bar sits at (0.000, 0.577, 0.817), 0.02° off vertical on
+  // screen, one point above the other, and the *lower* point leads into the
+  // screen — which is the end that should meet the block on a downward strike.
+  //
+  // One cost, measured and left in deliberately: standing the head up turns its
+  // flat away from the view model's key light, from 0.87 of square-on to 0.32.
+  // That is the effect the note on `TOOL_ICON` describes, and it is why the
+  // *icon* is not rolled to match — there the haft is near-vertical, so a head
+  // perpendicular to it can only be horizontal on screen anyway, and a
+  // pickaxe's icon is supposed to read as a bar across a shaft. If the head
+  // comes out too dark in the hand, rolling back toward -0.79 rad trades it
+  // back: at -45° the light returns to 0.43 for 12.5° of lean.
+  // `height` 0.46 -> 0.54 is a consequence of the roll and not a separate
+  // opinion. Turning the head out of the frame costs silhouette: measured, the
+  // pickaxe covered 0.1008 square view units before and 0.0383 after, a 62%
+  // loss, which took the game's signature tool below the sword (0.040) and the
+  // axe (0.044) and level with a torch. That is how a fixed orientation comes
+  // back as "the pickaxe looks small now" — the bow's report, one entry down.
+  // 0.54 restores it to 0.053, a shade above the shovel's 0.052, so the pick is
+  // once more the largest of the tools without being what it was; the rest of
+  // the loss is inherent to holding the head edge-on and is not recoverable by
+  // scaling. Revert this one number if it reads too big.
+  pick:   { file: 'pickaxe',      pack: 'tools',   height: 0.54, grip: 0.18, rot: [0.955, -1.296, 1.577], pos: [0.02, -0.04, 0],     icon: TOOL_ICON },
   axe:    { file: 'axe',          pack: 'tools',   height: 0.40, grip: 0.20, rot: [-0.35, -0.95, 0.40], pos: [0.03, 0.04, -0.02],  icon: TOOL_ICON },
   // The shovel is the one tool the pick's pose does not transfer to, and it had
   // the pick's rotation copied verbatim. It is modelled the other way up —

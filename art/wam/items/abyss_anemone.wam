@@ -1,0 +1,164 @@
+# Abyssal Anemone — the deep floor's one light, and the first light on the
+# planet you can dig for.
+#
+# It has a job no other model in the set has: it is the *only* thing visible in
+# the frame. A coral is seen against sand in daylight at eight metres; this
+# grows at fourteen to seventeen, where the water shader has taken everything to
+# near-black, and what a player sees before they see the shape is a small teal
+# glow in the dark. Every decision below follows from that.
+#
+# **The body is nearly black and the tentacles are the whole read.** A column
+# painted anything you could call a colour comes out as a grey stub at depth and
+# fights the glow for attention. `Stalk` is a deep indigo one step off the water
+# itself, so the anemone reads as a crown of light floating on nothing — which
+# is what a bioluminescent animal looks like, and it is also the cheapest
+# possible way to be legible in a dark cell.
+#
+# **The glow is banded onto the last two segments, not the whole tentacle.**
+# Lighting it end to end makes a starfish: an even blob with no depth cue. The
+# gradient — dark flesh at the base, teal at the bend, near-white at the tip —
+# is what tells the eye each tentacle is a tube going *away* from the body, and
+# it is the same trick `coral_branch` plays with its pale growing tips, pushed
+# much further because here it is doing all the work.
+#
+# **Eight tentacles, arching out and then hooking up at the very tip.**
+# Straight-up tentacles are a crown or a bundle of asparagus; what makes an
+# anemone an anemone is that they splay from a single disc. `sweep`'s `down=`
+# bends are world-referenced, so the arch is not a sign to guess at, and the
+# compiler prints the realised path of every one.
+#
+# Three things the render sheet decided and the source cannot show:
+#
+#  - **Six was a fork.** At six the crown reads as spokes off a hub from every
+#    angle — the sheet showed a menorah. The two diagonals below are what close
+#    the ring, and they cost 56 triangles each.
+#  - **The column was a mug.** The first cut had a 0.40 pedal disc on a 0.46
+#    column and the body outweighed the crown in all four panels; it is a third
+#    narrower now and the tentacles are the mass.
+#  - **The tips turn up, not down.** Every tentacle used to end on another
+#    `down=` and the sheet showed eight fingers pointing at the sand — a dead
+#    anemone. The last segment is `up=10`, which hooks the pale end back toward
+#    the viewer and is what puts the glow where a player swimming *above* the
+#    deep floor can see it. That is the only view that matters here: you find
+#    one of these by looking down into the dark.
+#
+# Tentacles leaning along X are rooted off the axis in the same direction so
+# each is honestly one-sided; the ones leaning along Z stay centred and are
+# symmetric. Same lint rule and same fix as `coral_branch.wam`.
+
+model abyss_anemone
+  height 0.68
+  style chunky
+
+palette
+  Foot  #141b2c
+  Stalk #1f2b45
+  Flesh #2f4d6e
+  Glow  #4fd7c0
+  Tip   #cffff2
+
+skeleton
+  root rock at 0.0
+  bone column parent=rock dir=up pitch=-2 len=0.44
+
+parts
+  # The column. Waisted like the sponge's barrel and for the same reason — a
+  # straight-sided tube is a pipe — but far darker, and flaring at the top into
+  # the collar the tentacles ring. The foot is the widest thing at the bottom
+  # because an anemone grips rock with a pedal disc.
+  loft stalk bones=rock..column material=Stalk sides=8
+    ring 0.00 w=0.32 d=0.30 material=Foot
+    ring 0.16 w=0.20 d=0.19 material=Stalk
+    ring 0.55 w=0.17 d=0.16
+    ring 0.86 w=0.23 d=0.22
+    ring 1.00 w=0.32 d=0.30 material=Flesh
+    cap start=flat end=flat
+
+  # The oral disc. Wider than the collar under it so it is a lip standing proud
+  # rather than a part buried inside another part, and only a sliver tall — this
+  # is a rim, not a head. The dark centre is the mouth: from directly above you
+  # look into it, which is the one view a swimming player above the seabed
+  # actually gets.
+  loft disc bone=column at=1.0 dir=up len=0.09 material=Flesh sides=10
+    ring 0.00 w=0.34 d=0.32
+    ring 0.55 w=0.42 d=0.40
+    ring 0.86 w=0.36 d=0.34 material=Glow
+    ring 1.00 w=0.18 d=0.17 material=Foot
+    cap start=flat end=flat
+
+  # Six tentacles off the rim, plus the two diagonals further down. Each leaves
+  # near-vertical, opens out over its first three segments and hooks up again on
+  # the last; the pale band starts at the third segment so the gradient runs
+  # base-dark to tip-white along the arch rather than across it.
+  sweep tentA bone=column at=1.0 offset=(-0.13,0.05,0.05) dir=up tilt=42 material=Flesh
+    seg len=0.13 r=0.048 down=6
+    seg len=0.12 r=0.040 down=16
+    seg len=0.11 r=0.030 down=22 material=Glow
+    seg len=0.07 r=0.014 up=10 material=Tip tip
+  sweep tentB bone=column at=1.0 offset=(0.14,0.05,-0.06) dir=up tilt=-40 material=Flesh
+    seg len=0.14 r=0.050 down=5
+    seg len=0.13 r=0.041 down=14
+    seg len=0.11 r=0.031 down=20 material=Glow
+    seg len=0.07 r=0.015 up=10 material=Tip tip
+  sweep tentC bone=column at=1.0 offset=(-0.11,0.05,-0.10) dir=up tilt=46 material=Flesh
+    seg len=0.12 r=0.045 down=8
+    seg len=0.11 r=0.037 down=18
+    seg len=0.10 r=0.028 down=24 material=Glow
+    seg len=0.06 r=0.013 up=10 material=Tip tip
+  sweep tentD bone=column at=1.0 offset=(0.12,0.05,0.11) dir=up tilt=-44 material=Flesh
+    seg len=0.13 r=0.046 down=7
+    seg len=0.12 r=0.038 down=17
+    seg len=0.10 r=0.029 down=23 material=Glow
+    seg len=0.06 r=0.014 up=10 material=Tip tip
+  # The two that lean along Z instead. Centred on X, so symmetric and exempt
+  # from the straddle rule, and they are what stops the crown reading as a flat
+  # fan from the front.
+  sweep tentE bone=column at=1.0 offset=(0,0.05,0.14) dir=up pitch=44 material=Flesh
+    seg len=0.14 r=0.049 down=6
+    seg len=0.13 r=0.040 down=15
+    seg len=0.11 r=0.030 down=21 material=Glow
+    seg len=0.07 r=0.014 up=10 material=Tip tip
+  sweep tentF bone=column at=1.0 offset=(0,0.05,-0.14) dir=up pitch=-42 material=Flesh
+    seg len=0.12 r=0.046 down=8
+    seg len=0.11 r=0.038 down=18
+    seg len=0.10 r=0.028 down=22 material=Glow
+    seg len=0.06 r=0.013 up=10 material=Tip tip
+
+  # Two more on the diagonals, which is what takes the crown from a fork to an
+  # animal: six arms at 60 degrees still read as spokes, eight close the ring.
+  sweep tentG bone=column at=1.0 offset=(-0.12,0.05,-0.03) dir=up tilt=36 pitch=-30 material=Flesh
+    seg len=0.13 r=0.047 down=7
+    seg len=0.12 r=0.039 down=17
+    seg len=0.10 r=0.029 down=22 material=Glow
+    seg len=0.06 r=0.014 up=10 material=Tip tip
+  sweep tentH bone=column at=1.0 offset=(0.13,0.05,0.03) dir=up tilt=-40 pitch=28 material=Flesh
+    seg len=0.14 r=0.048 down=6
+    seg len=0.12 r=0.040 down=16
+    seg len=0.11 r=0.030 down=21 material=Glow
+    seg len=0.07 r=0.015 up=10 material=Tip tip
+
+checks
+  # Cemented to the rock, with the pedal disc the widest thing at the foot.
+  assert bottom(stalk) < 0.01
+  # Nothing arches back into the seabed. This is what the `down=` bends are
+  # bounded by: a tentacle that comes over far enough to dip below the rim reads
+  # as a dead plant, and one that reaches the floor reads as a bug.
+  assert bottom(tentA) > 0.20
+  assert bottom(tentC) > 0.20
+  assert bottom(tentE) > 0.20
+  # The crown clears the column it sits on, and the disc is a proud lip rather
+  # than a plate buried in the collar.
+  assert top(tentA) > top(stalk)
+  assert width(disc) > width(stalk) * 0.9
+  # Every tentacle keeps its pale end. `Tip` and `Glow` only exist on the last
+  # two segments of eight sweeps, so if a material is ever dropped from a band
+  # this fails rather than quietly handing back an unlit anemone — which at
+  # depth is an invisible one.
+  assert materials == 5
+  # Wider than tall, which is what an open anemone is, but not so wide it grows
+  # into the next column. `BlockModels` scales by height alone.
+  assert width / height in 1.0..1.7
+  assert depth / height in 0.9..1.7
+  assert parts == 10
+  assert tris < 900
+  measure crown width / height

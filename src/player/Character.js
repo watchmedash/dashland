@@ -1146,32 +1146,33 @@ export class PlayerCharacter {
 // ---------------------------------------------------------------------------
 
 /**
- * Fifteen characters, five across and three down.
+ * How far apart the figures stand on the strip, in frustum units.
  *
- * Exported because the DOM grid the player actually clicks is laid over this
- * one and has to agree with it cell for cell — UI.js writes these into the
- * grid's `grid-template-*` and the canvas's `aspect-ratio` rather than keeping
- * a second copy of the numbers in the stylesheet.
+ * The frustum is one unit wide (see `_init`), so anything at a whole multiple
+ * of this is entirely off screen: at any moment exactly one character is
+ * visible and the other fourteen are waiting in the wings. That is what makes
+ * the carousel a *translation* of one strip rather than a rebuild — the slide
+ * from one face to the next is the same lerp that used to grow the selected
+ * cell, and nothing has to be created or destroyed to move between them.
  */
-export const GRID_COLS = 5;
-export const GRID_ROWS = 3;
+const SPACING = 1.25;
+
+/** How fast the strip chases the chosen character, in fraction per second. */
+const SLIDE_RATE = 11;
 
 /**
- * A figure's height as a fraction of its cell.
+ * A figure's height as a fraction of the frame.
  *
- * Small, and it has to be. This rig carries its head as a child of `torso`,
- * hanging two model units above the torso's pivot and occupying the top thirty
- * per cent of the body — and every clip, `idle` included, animates that pivot's
- * rotation. So a tilt of a few degrees swings the top of the head further than
- * any margin measured off the rest pose would predict. The first version fitted
- * the rest pose to 0.72 of the cell and grew the selected figure from its feet,
- * which left four hundredths of a cell above the head and the animation ate all
- * of it: the top row was decapitated by the edge of the frustum.
+ * Not the whole frame, and it cannot be. This rig carries its head as a child
+ * of `torso`, hanging two model units above the torso's pivot and occupying the
+ * top thirty per cent of the body — and every clip, `idle` included, animates
+ * that pivot's rotation. So a tilt of a few degrees swings the top of the head
+ * further than any margin measured off the rest pose would predict, and the
+ * grid this replaced was decapitating its top row at 0.72 for exactly that
+ * reason. One at a time affords more room than a five by three wall did, but
+ * the headroom still has to be real.
  */
-const PREVIEW_HEIGHT = 0.6;
-
-/** How much bigger the chosen one stands. Grows about the cell centre. */
-const SELECT_SCALE = 1.1;
+const PREVIEW_HEIGHT = 0.66;
 
 /**
  * Skins, kept for the session. Not disposed with the rest of the picker: they
@@ -1183,7 +1184,15 @@ const _skins = new Map();
 const _texLoader = new THREE.TextureLoader();
 
 /**
- * The wall of characters shown when a new planet is started.
+ * The character carousel shown when a new planet is started.
+ *
+ * One figure at a time, with the other fourteen standing off screen on the same
+ * strip. It was a five by three wall until a player said it should be "a
+ * carousel like 1 character at a time then navigational arrows to select", and
+ * they were right for a reason worth recording: fifteen figures at a fifth of
+ * the width each are fifteen thumbnails of people who differ only in face, hair
+ * and clothing, which is to say fifteen identical silhouettes. Shown alone, one
+ * is big enough to actually be a choice.
  *
  * The choice is only meaningful if you can see it — these fifteen differ in
  * face, hair and clothing and in nothing else, so a list of names would be a
@@ -1216,7 +1225,12 @@ export class CharacterPicker {
     this.camera = null;
     /** @type {{id:string, model:object, holder:THREE.Group, mat:THREE.Material}[]} */
     this.figures = [];
+    /** The strip every figure hangs off. Sliding this is the whole carousel. */
+    this.track = null;
     this.selected = DEFAULT_CHARACTER;
+    /** Where the strip is, and where it is heading, in frustum units. */
+    this._x = 0;
+    this._targetX = 0;
     this._raf = 0;
     this._last = 0;
     this._w = 0;
@@ -1224,14 +1238,16 @@ export class CharacterPicker {
   }
 
   /**
-   * Show the wall. `baseUrl` is a character whose GLB is already through
+   * Show the carousel. `baseUrl` is a character whose GLB is already through
    * `MobModels.prepare` — normally the one the player is currently wearing,
    * which the boot loader has fetched.
    */
   open(selected, baseUrl) {
     if (!this.renderer) this._init();
     if (!this.figures.length) this._build(baseUrl);
-    this.setSelected(selected);
+    // Snapped, not slid: reopening the picker on the character you last chose
+    // should not begin with a scroll past everyone in between.
+    this.setSelected(selected, true);
     this._last = performance.now();
     if (!this._raf) this._raf = requestAnimationFrame(this._loop);
   }
@@ -1252,21 +1268,44 @@ export class CharacterPicker {
     this.renderer?.renderLists.dispose();
   }
 
-  setSelected(id) { this.selected = id; }
+  /**
+   * Choose a character, and aim the strip at them.
+   *
+   * @param {string} id
+   * @param {boolean} [snap] put the strip there this instant rather than
+   *   sliding. Used on open, and on a wrap: stepping left off the first
+   *   character lands on the fifteenth, and *sliding* there would scroll past
+   *   all thirteen in between, which reads as the arrow having gone the wrong
+   *   way. Wrapping is a jump, so it looks like one.
+   */
+  setSelected(id, snap = false) {
+    this.selected = id;
+    const n = CHARACTER_IDS.indexOf(id);
+    if (n >= 0) this._targetX = -n * SPACING;
+    if (snap) {
+      this._x = this._targetX;
+      if (this.track) this.track.position.x = this._x;
+    }
+  }
 
   _init() {
-    // `alpha` so the card's own background shows through and the cells the
-    // player clicks — plain DOM buttons laid over this canvas — can tint
-    // themselves without a matching rectangle in the scene.
+    // `alpha` so the card's own background shows through — the stage behind the
+    // canvas is a lit panel, and these characters are mostly dark hair and dark
+    // clothing.
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, alpha: true, antialias: true });
     this.renderer.setClearColor(0x000000, 0);
     this.scene = new THREE.Scene();
-    // Orthographic, so every cell is framed identically. Under perspective the
-    // characters at the edges lean away from the middle and the one in the
-    // centre looks like the recommended choice.
-    this.camera = new THREE.OrthographicCamera(
-      -GRID_COLS / 2, GRID_COLS / 2, GRID_ROWS / 2, -GRID_ROWS / 2, 0.1, 20);
+    // Orthographic, and one unit square. Under perspective a figure sliding in
+    // from the side would lean away from the middle and only stand up straight
+    // once it arrived, which is a distortion nobody asked the arrows for. A
+    // square frustum on a square canvas also means one frustum unit is one
+    // canvas width, which is what `SPACING` is stated in.
+    this.camera = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0.1, 20);
     this.camera.position.z = 8;
+    // Every figure hangs off this, so the slide is one transform per frame
+    // rather than fifteen.
+    this.track = new THREE.Group();
+    this.scene.add(this.track);
 
     // Lifted wholesale from `Icons.js`, which paints item thumbnails through a
     // renderer with no ACES pass on it — exactly the situation here. Its comment
@@ -1316,15 +1355,8 @@ export class CharacterPicker {
 
       // Fit measured off this clone rather than taken from
       // `MobModels.modelHeight`. Same number today — 2.7 — but this also yields
-      // the box's *centre*, and centring is what keeps the head off the top of
-      // the cell.
-      //
-      // The rig's origin is between its feet, so the first version anchored
-      // there and the selected figure's 14% grew entirely upward: the top of
-      // the head landed about five pixels under the top of the frustum, with
-      // the selected cell's inset glow bleeding down over that same band. It
-      // read as decapitation. Centred, the growth is split between headroom and
-      // floor and neither runs out.
+      // the box's *centre*, and centring on it is what keeps the head off the
+      // top of the frustum once `idle` starts swinging the torso.
       _box.setFromObject(model.root);
       _box.getSize(_size);
       _box.getCenter(_centre);
@@ -1332,15 +1364,13 @@ export class CharacterPicker {
       model.root.scale.setScalar(scale);
       model.root.position.copy(_centre).multiplyScalar(-scale);
 
-      const col = n % GRID_COLS;
-      const row = (n / GRID_COLS) | 0;
-      // The holder sits at the middle of its cell and the figure is centred on
-      // it, so both the spin and the selection scale happen about the figure's
-      // own middle.
+      // One per station along the strip. The figure is centred on its holder,
+      // so the spin happens about its own middle wherever the strip has slid
+      // to.
       const holder = new THREE.Group();
-      holder.position.set(col - (GRID_COLS - 1) / 2, (GRID_ROWS - 1) / 2 - row, 0);
+      holder.position.set(n * SPACING, 0, 0);
       holder.add(model.root);
-      this.scene.add(holder);
+      this.track.add(holder);
 
       const fig = {
         id, model, holder, mat,
@@ -1433,13 +1463,20 @@ export class CharacterPicker {
     this._last = now;
     this._resize();
 
+    // The slide. One number, eased, and the whole strip follows it.
+    this._x += (this._targetX - this._x) * Math.min(1, dt * SLIDE_RATE);
+    if (Math.abs(this._targetX - this._x) < 1e-4) this._x = this._targetX;
+    this.track.position.x = this._x;
+
     for (const fig of this.figures) {
       fig.model.mixer.update(dt);
       const on = fig.id === this.selected;
       // The chosen one turns, because half of what distinguishes these is the
       // back of the coat and the hair. The others ease back to facing you —
       // wrapped into ±π first, or a figure that had spun three times would take
-      // three times as long to come back round.
+      // three times as long to come back round. That still matters with only
+      // one on screen: the character you arrive at must be facing you when it
+      // gets there, not mid-turn from the last time you looked at it.
       let r = fig.holder.rotation.y;
       if (on) {
         r += dt * 0.8;
@@ -1448,8 +1485,6 @@ export class CharacterPicker {
         r *= Math.max(0, 1 - dt * 6);
       }
       fig.holder.rotation.y = r;
-      const s = THREE.MathUtils.lerp(fig.holder.scale.x, on ? SELECT_SCALE : 1, Math.min(1, dt * 12));
-      fig.holder.scale.setScalar(s);
     }
     this.renderer.render(this.scene, this.camera);
   };

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Mojazer — Tiny Planet</title>
+<title>Mojazer: Tiny Planet</title>
 <link rel="stylesheet" href="/src/ui/style.css" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪐</text></svg>" />
 </head>
@@ -35,19 +35,37 @@
     </div>
   </div>
 
+  <!-- ── save slots ──────────────────────────────────────────
+       One screen for both Continue and New Game: the same ten rows, and only
+       what a click on one of them means changes. UI.js fills the list. -->
+  <div id="slots" class="overlay hidden">
+    <div class="panel slots-panel">
+      <header>
+        <h2 id="slots-title">Continue</h2>
+        <button class="ghost" data-close-slots>Back <kbd>Esc</kbd></button>
+      </header>
+      <p class="slots-hint" id="slots-hint"></p>
+      <div class="slot-list" id="slot-list"></div>
+    </div>
+  </div>
+
   <!-- ── who wakes up here (new game) ────────────────────────
        Sits above the loading screen, not instead of it: the planet is already
-       being generated behind this, so choosing costs no time at all. The grid
-       is fifteen transparent buttons laid over one canvas — UI.js builds them
-       and sizes both from the same two numbers. -->
+       being generated behind this, so choosing costs no time at all. One
+       character at a time, with the arrows either side of it. -->
   <div id="chargen" class="hidden">
     <div class="chargen-card">
       <h2>Who Wakes Up Here</h2>
       <p class="tagline">This one is yours for this planet. Or just begin.</p>
       <div class="chargen-stage">
         <canvas id="cg-canvas"></canvas>
-        <div id="cg-grid"></div>
+        <!-- The chevrons are drawn in CSS, not typed. A glyph here would be one
+             more character whose shape depends on whichever font the browser
+             happened to fall back to. -->
+        <button id="cg-prev" class="cg-arrow prev" aria-label="Previous character"><i></i></button>
+        <button id="cg-next" class="cg-arrow next" aria-label="Next character"><i></i></button>
       </div>
+      <p class="cg-name"><b id="cg-who">Character A</b><span id="cg-count">1 of 15</span></p>
       <div class="chargen-foot">
         <p class="status" id="cg-status">Shaping your planet…</p>
         <div class="chargen-actions">
@@ -162,13 +180,13 @@
           <div class="skill-tree" id="sk-tree"></div>
         </div>
         <aside class="skills-side">
-          <h3>Where points come from</h3>
+          <h3>Where XP comes from</h3>
           <div id="sk-earned"></div>
           <h3>Firsts</h3>
           <div id="sk-marks"></div>
-          <p class="note">Points are counted from what you have done, so nothing is
-            ever lost — and what you spend them on is yours for good. It does not
-            wear out, and you do not drop it when you die.</p>
+          <p class="note">Every point comes from a level, and levels come from XP.
+            All of it is lost when you die: your XP, your levels, and every skill
+            you bought. Staying alive is the skill.</p>
         </aside>
       </div>
     </div>
@@ -192,43 +210,56 @@
   <div id="settings" class="overlay hidden">
     <div class="panel">
       <header><h2>Settings</h2><button class="ghost" data-close-settings>Back</button></header>
+      <!-- Grouped, and stripped of prose. Every setting here used to carry a
+           sentence explaining itself; four headings do that job for the whole
+           screen, and the two that are still not obvious from their name keep a
+           six-word hint. Nothing was removed. -->
       <div class="settings">
-        <label>Mouse sensitivity <span class="val" id="sens-val">1.00</span>
+        <h3 class="set-head">Mouse</h3>
+        <label>Sensitivity <span class="val" id="sens-val">1.00</span>
           <input id="set-sens" type="range" min="0.2" max="3" step="0.05" value="1" />
         </label>
+        <label class="row"><input id="set-invert" type="checkbox" /> Invert up and down</label>
+
+        <h3 class="set-head">Sound</h3>
         <label>Master volume <span class="val" id="vol-val">70</span>
           <input id="set-vol" type="range" min="0" max="100" value="70" />
         </label>
-        <label>Music volume <span class="val" id="mus-val">35</span>
+        <label>Music <span class="val" id="mus-val">35</span>
           <input id="set-mus" type="range" min="0" max="100" value="35" />
         </label>
-        <!-- Named for what the player sees, not for what the renderer does.
-             "Post-processing" is the correct term and told nobody anything;
-             every setting here now says what turning it off would change. -->
+
+        <h3 class="set-head">Picture</h3>
         <label class="row"><input id="set-post" type="checkbox" checked /> Softer light and shadow
-          <small>Costs some speed. Turn it off if the game runs rough.</small></label>
+          <small>Turn off if the game runs rough.</small></label>
         <label class="row"><input id="set-bob" type="checkbox" checked /> Head movement while walking
-          <small>Turn it off if it makes you queasy.</small></label>
-        <label class="row"><input id="set-invert" type="checkbox" /> Invert mouse up and down</label>
+          <small>Turn off if it makes you queasy.</small></label>
+        <label class="row"><input id="set-minimap" type="checkbox" checked /> Minimap</label>
+        <label class="row"><input id="set-compass" type="checkbox" checked /> Compass</label>
+
+        <h3 class="set-head">Movement</h3>
         <label class="row"><input id="set-autojump" type="checkbox" /> Step up onto ledges automatically</label>
-        <p class="note credits">
-          <strong>Credits</strong>
-        </p>
-        <ul class="credit-list">
-          <li><strong>Lynocs</strong> — Stylized Texture Pack: the block textures.
-            Used with permission; not CC0, and not for resale.</li>
-          <li><strong>Kenney</strong> — Cube Pets, Blocky Characters and Food Kit:
-            every animal, the husk, the merchant, the fifteen you can play as, and
-            the food. CC0.</li>
-          <li><strong>Kay Lousberg</strong> — KayKit Bits: the pickaxe, axe, shovel,
-            torch, bucket and sword. CC0.</li>
-          <li><strong>Squareish Design</strong> — Fruits and Vegetables: the apple
-            and the pumpkin. CC0.</li>
-          <li><strong>three.js</strong> — the renderer everything above is drawn
-            with. MIT.</li>
-          <li>Plants, ores, tools, machines and every raw material are generated by
-            the game itself.</li>
-        </ul>
+
+        <!-- Folded away. Credits are owed and are not what anyone opened this
+             screen for. -->
+        <details class="credits">
+          <summary>Credits</summary>
+          <ul class="credit-list">
+            <li><strong>Lynocs</strong>, Stylized Texture Pack: the block textures.
+              Used with permission; not CC0, and not for resale.</li>
+            <li><strong>Kenney</strong>, Cube Pets, Blocky Characters and Food Kit:
+              every animal, the husk, the merchant, the fifteen you can play as, and
+              the food. CC0.</li>
+            <li><strong>Kay Lousberg</strong>, KayKit Bits: the pickaxe, axe, shovel,
+              torch, bucket and sword. CC0.</li>
+            <li><strong>Squareish Design</strong>, Fruits and Vegetables: the apple
+              and the pumpkin. CC0.</li>
+            <li><strong>three.js</strong>, the renderer everything above is drawn
+              with. MIT.</li>
+            <li>Plants, ores, tools, machines and every raw material are generated by
+              the game itself.</li>
+          </ul>
+        </details>
       </div>
     </div>
   </div>
@@ -237,76 +268,53 @@
   <div id="controls" class="overlay hidden">
     <div class="panel">
       <header><h2>Controls</h2><button class="ghost" data-close-controls>Back</button></header>
+      <!-- Keys and what they do, and nothing else. This page used to carry
+           several hundred words of prose about farming, seasons, fences, the
+           hearth, husks, crates and the merchant, which is a manual filed under
+           the wrong heading: a player opens Controls to find one binding. The
+           four headings are what replaced it. The six right-click lines are
+           gathered under one so the eye reads them as a set rather than as six
+           near-identical rows. -->
+      <h3 class="ctl-head">Move</h3>
       <div class="controls-grid">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>
-        <div><kbd>Space</kbd><span>Jump / Swim up</span></div>
+        <div><kbd>Space</kbd><span>Jump, or swim up</span></div>
         <div><kbd>Shift</kbd><span>Sprint</span></div>
-        <div><kbd>Ctrl</kbd><span>Sneak / Swim down</span></div>
+        <div><kbd>Ctrl</kbd><span>Sneak, or swim down</span></div>
+      </div>
+
+      <h3 class="ctl-head">Hands</h3>
+      <div class="controls-grid">
         <div><kbd>LMB</kbd><span>Mine (hold)</span></div>
-        <div><kbd>RMB</kbd><span>Place / Use</span></div>
+        <div><kbd>RMB</kbd><span>Place or use</span></div>
         <div><kbd>Ctrl</kbd>+<kbd>RMB</kbd><span>Lay a log along the way you face</span></div>
-        <div><kbd>1</kbd>–<kbd>9</kbd><span>Hotbar</span></div>
+        <div><kbd>1</kbd>..<kbd>9</kbd><span>Hotbar</span></div>
         <div><kbd>Wheel</kbd><span>Cycle hotbar</span></div>
-        <div><kbd>E</kbd><span>Inventory</span></div>
+        <div><kbd>F</kbd><span>Swap held item with the left hand</span></div>
         <div><kbd>Q</kbd><span>Drop held item</span></div>
-        <div><kbd>F</kbd><span>Swap hands — held ⇄ offhand</span></div>
-        <div><kbd>K</kbd><span>Growth — spend skill points</span></div>
-        <div><kbd>RMB</kbd><span>Hold to eat food</span></div>
-        <div><kbd>RMB</kbd><span>Trade with a merchant</span></div>
-        <div><kbd>RMB</kbd><span>Open a crate</span></div>
-        <div><kbd>RMB</kbd><span>Set a bed as home</span></div>
-        <div><kbd>RMB</kbd><span>Open or shut a door</span></div>
-        <div><kbd>RMB</kbd><span>Cast and strike with a rod</span></div>
+      </div>
+
+      <h3 class="ctl-head">Right click on</h3>
+      <div class="controls-grid">
+        <div><kbd>RMB</kbd><span>Food, to eat (hold)</span></div>
+        <div><kbd>RMB</kbd><span>A merchant, to trade</span></div>
+        <div><kbd>RMB</kbd><span>A crate, to open it</span></div>
+        <div><kbd>RMB</kbd><span>A bed, to set home</span></div>
+        <div><kbd>RMB</kbd><span>A door, to swing it</span></div>
+        <div><kbd>RMB</kbd><span>Water with a rod, to cast</span></div>
+      </div>
+
+      <h3 class="ctl-head">Screens</h3>
+      <div class="controls-grid">
+        <div><kbd>E</kbd><span>Inventory</span></div>
+        <div><kbd>K</kbd><span>Growth, spend skill points</span></div>
+        <div><kbd>Shift</kbd>+<kbd>Click</kbd><span>Move a whole stack</span></div>
+        <div><kbd>Shift</kbd>+<kbd>Click</kbd><span>Craft as many as you can</span></div>
         <div><kbd>V</kbd><span>Camera: first person, behind, facing you</span></div>
+        <div><kbd>C</kbd><span>Hold to zoom in</span></div>
         <div><kbd>F3</kbd><span>Debug overlay</span></div>
         <div><kbd>Esc</kbd><span>Pause</span></div>
       </div>
-      <p class="note">Your <strong>left hand</strong> is the slot beside the hotbar. Drag anything into it
-        in the inventory, or press <kbd>F</kbd> to trade it for whatever you are holding. It carries and
-        it shows — a torch in it burns and lights your way — but everything is <em>used</em> from the
-        right hand, so <kbd>F</kbd> is how you use what is in it.<br />
-        Dig soil with a <strong>shovel</strong> to make farmland, sow <strong>seeds</strong> on it, and harvest the wheat once it ripens — farmland near water grows twice as fast.<br />
-        Items on the ground are picked up automatically when you walk near them.
-        A <strong>fishing rod</strong> is three sticks and two hides. Aim at open water and click to cast, then watch
-        the float: when it dips, click again. Strike too early or too late and it is gone. Fish grill on a kiln.<br />
-        A <strong>door</strong> is six planks and stands two blocks tall — right-click to swing it. Shut, it seals
-        a doorway against the night; open, you walk straight through.<br />
-        <strong>Ladders</strong> are seven sticks for three. Hang them on a wall and hold <kbd>Space</kbd> to climb,
-        <kbd>Ctrl</kbd> to go down; let go and you simply hang there. Catching one cancels a fall.<br />
-        The year turns every three days — <strong>spring, summer, autumn, winter</strong>, shown next to
-        the weather. Crops race through spring and barely stir in winter, so sow early; in deep winter
-        the rain falls as snow wherever you are, not just in the north.<br />
-        <strong>Fences</strong> are four planks and two sticks for three, and they join themselves up
-        as you place them. One stands higher than a block, so nothing walks or hops over a line of
-        them — a ring of fence keeps a herd where you left it, and you can still see across it.<br />
-        A <strong>sign</strong> is six planks and a stick, for three. Place one and type a line; after that
-        just look at it to read it, so a row of signs at a junction reads itself as you turn.<br />
-        Build a <strong>bed</strong> early and use it: you wake up there when you die, and on a planet this
-        size that is the difference between losing a night and losing your house. It does not skip the
-        night — the planet keeps your own clock, so its evening is your evening.<br />
-        The planet has a <strong>core</strong>, about thirty layers down through basalt and lava. Reach it
-        and it gives you a <strong>hearth</strong> — the only one there will ever be. Set it down and
-        nothing will spawn for a long way around it, which is what turns a camp into a home.<br />
-        The planet keeps your clock, so a new world can begin at any hour. If yours begins after dark
-        you get <strong>a few torches and three quiet minutes</strong> to find your feet — after that
-        the night is yours to deal with.<br />
-        Husks come out after dark, and out of any unlit space at any hour. <strong>Torches keep them out</strong> —
-        light a mine as you dig it and nothing will spawn behind you.<br />
-        You get tougher by <strong>playing</strong>, not by carrying. Press <kbd>K</kbd> for
-        <strong>Growth</strong>: six branches — health, damage tolerance, agility, lungs, hands and reach —
-        bought with points earned from everything you have already done, plus a few for firsts like
-        reaching the core or putting down a husk. Nothing in it wears out, nothing is dropped when you
-        die, and you can unlearn the lot and spend the points again for free. Three branches sit behind
-        another, so the first dozen points are a choice about who you are.<br />
-        A <strong>crate</strong> holds twenty-seven stacks — shift-click to move a whole stack in or out,
-        and break one to get everything back. Crates you find already standing in the world have something in them.
-        Listen for a <strong>bell</strong>: it means a wandering merchant is somewhere within earshot.
-        He buys almost anything and sells a pack of oddments — click a line to trade one, shift-click for ten.
-        Most traders are also <strong>after something</strong>, and pay well over the odds for it — bring what he asks
-        and hand it over at the top of his screen. Each trader wants his own thing, so the next one is a new errand.
-        He carries what he carries, and he only has so many coins, so sell the good stuff while he can still pay.
-        In the inventory, the <strong>Can Craft</strong> sidebar lists everything your materials allow —
-        click to craft one, shift-click to craft as many as you can.</p>
     </div>
   </div>
 

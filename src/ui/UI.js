@@ -9,9 +9,8 @@ import { findRecipe, availableRecipes, craftFromInventory } from '../game/Recipe
 import {
   COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest,
 } from '../game/Trade.js';
-import {
-  CharacterPicker, CHARACTER_IDS, GRID_COLS, GRID_ROWS, characterUrl,
-} from '../player/Character.js';
+import { CharacterPicker, CHARACTER_IDS, characterUrl } from '../player/Character.js';
+import { Save } from '../game/Save.js';
 import { BIOME_COLORS, R_SEA, F, cidx } from '../world/Constants.js';
 import { patchColumn } from '../world/Sphere.js';
 import { compassFrame, POLAR_REF_SWAP } from '../render/Sky.js';
@@ -181,6 +180,40 @@ export function mapColumns(f, i, j, out = new Int32Array(MAP_SAMPLES * MAP_SAMPL
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * Seconds of play, as something a player recognises their own world by.
+ *
+ * Rounded hard on purpose: "3h 20m" is the fact, "3h 22m 41s" is a stopwatch.
+ */
+function playedFor(seconds) {
+  const s = Math.max(0, seconds | 0);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m`;
+  return 'a few seconds';
+}
+
+/**
+ * How long ago a slot was written, in the coarsest unit that is still true.
+ *
+ * A date would be exact and useless: what tells two of your own planets apart
+ * is that one is from this afternoon and the other from last month.
+ */
+function agoText(at) {
+  const ms = Date.now() - (at || 0);
+  if (!(at > 0) || ms < 0) return 'recently';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? '' : 's'} ago`;
+}
+
 export class UI {
   constructor(game) {
     this.game = game;
@@ -212,8 +245,10 @@ export class UI {
       recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeEmpty: $('recipe-empty'),
       pause: $('pause'), settings: $('settings'), controls: $('controls'), death: $('death'),
       deathCause: $('death-cause'),
-      chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgGrid: $('cg-grid'),
-      cgStatus: $('cg-status'),
+      slots: $('slots'), slotList: $('slot-list'),
+      slotsTitle: $('slots-title'), slotsHint: $('slots-hint'),
+      chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgStatus: $('cg-status'),
+      cgWho: $('cg-who'), cgCount: $('cg-count'),
       skills: $('skills'), skPoints: $('sk-points'), skSub: $('sk-sub'),
       skTree: $('sk-tree'), skEarned: $('sk-earned'), skMarks: $('sk-marks'),
     };
@@ -222,6 +257,9 @@ export class UI {
     this._picker = null;
     this._chosen = null;
     this._cgKey = (e) => this._characterKey(e);
+    /** 'continue' or 'new': what clicking a slot row means right now. */
+    this._slotMode = 'continue';
+    this._slotKey = (e) => { if (e.key === 'Escape') { this.closeSlots(); e.preventDefault(); e.stopPropagation(); } };
 
     this._buildNavigation();
     this._bind();
@@ -319,33 +357,12 @@ export class UI {
     this.el.compass = cmp;
     this.el.cmpPolar = polar;
 
-    // ---- the two settings rows ---------------------------------------------
-    // Inserted before the credits, which is where the last checkbox ends and
-    // the reading matter begins.
-    const settings = document.querySelector('#settings .settings');
-    const credits = settings?.querySelector('.note.credits');
-    const check = (id, text, hint) => {
-      const l = document.createElement('label');
-      l.className = 'row';
-      l.innerHTML = `<input id="${id}" type="checkbox" /> ${text}`
-        + (hint ? `<small>${hint}</small>` : '');
-      settings.insertBefore(l, credits);
-    };
-    // Not guarded. `syncSettings` reads both of these by id on every open, so a
-    // missing settings panel has to be a throw here rather than two checkboxes
-    // that quietly never exist.
-    check('set-minimap', 'Minimap', 'The disc top-left. It has no global north, it turns with you.');
-    check('set-compass', 'Compass', 'Bearings across the top. North is where the sun says it is.');
-
-    // ---- the Controls sheet ------------------------------------------------
-    const grid = document.querySelector('.controls-grid');
-    if (grid) {
-      const row = document.createElement('div');
-      row.innerHTML = '<kbd>C</kbd><span>Hold to zoom in on what you are looking at</span>';
-      // After V, which is the other line about what the camera is doing.
-      const v = [...grid.children].find((d) => d.querySelector('kbd')?.textContent === 'V');
-      grid.insertBefore(row, v ? v.nextSibling : null);
-    }
+    // The two settings rows and the Controls line these used to build in here
+    // now live in `index.html` beside every other setting and binding, which is
+    // what the note above asked the next pass to do. They were injected because
+    // the change that added them was scoped away from the markup; that reason
+    // expired, and a settings screen assembled from two files is a settings
+    // screen nobody can read end to end.
   }
 
   /**
@@ -519,13 +536,18 @@ export class UI {
 
   _bind() {
     const g = this.game;
-    $('mm-continue').onclick = () => g.continueGame();
-    $('mm-new').onclick = () => g.newGame();
+    // Both menu buttons open the same list of ten. Neither goes anywhere near a
+    // world until a slot has been named.
+    $('mm-continue').onclick = () => this.openSlots('continue');
+    $('mm-new').onclick = () => this.openSlots('new');
     $('mm-settings').onclick = () => this.openSettings();
     $('mm-controls').onclick = () => this.openControls();
+    document.querySelector('[data-close-slots]').onclick = () => this.closeSlots();
 
     $('cg-begin').onclick = () => g.beginWorld(this._chosen);
     $('cg-back').onclick = () => g.abandonNewGame();
+    $('cg-prev').onclick = () => this.stepCharacter(-1);
+    $('cg-next').onclick = () => this.stepCharacter(1);
 
     $('pz-resume').onclick = () => g.resume();
     $('pz-settings').onclick = () => this.openSettings();
@@ -603,22 +625,141 @@ export class UI {
     setTimeout(() => this.el.loader.remove(), 650);
   }
 
-  showMenu(meta) {
+  showMenu() {
     this.el.menu.classList.remove('hidden');
+    this.closeSlots();
     this.showHud(false);
-    // Just "Continue". The button used to carry the biome, the minutes played
-    // and the date of the save, which is a paragraph answering a question
-    // nobody asked: there is one save, and pressing this returns you to it.
-    // The only part that was ever load-bearing is whether it works at all.
-    this.el.mmContinue.disabled = !meta;
+    // Still just "Continue": what it opens is the list, and the list is where
+    // a planet's day, its age and who lives on it belong. All this button has
+    // to say is whether there is anything to continue at all.
+    this.el.mmContinue.disabled = !Save.hasSave();
   }
 
   hideMenu() { this.el.menu.classList.add('hidden'); }
 
+  // --- the ten save slots ---------------------------------------------------
+
+  /**
+   * The slot list, in one of its two moods.
+   *
+   * One screen rather than two, because it is the same ten rows either way and
+   * the only difference is what a click on one means. Continue can only open a
+   * planet that exists; New Game can write to any of them, and to a full one
+   * only after saying so out loud.
+   *
+   * @param {'continue'|'new'} mode
+   */
+  openSlots(mode) {
+    this._slotMode = mode;
+    this.el.slotsTitle.textContent = mode === 'new' ? 'Where to Keep It' : 'Continue';
+    this.el.slotsHint.textContent = mode === 'new'
+      ? 'Pick a slot for the new planet. A slot that already holds one will ask first.'
+      : 'Pick a planet to go back to.';
+    this._paintSlots();
+    this.el.slots.classList.remove('hidden');
+    window.addEventListener('keydown', this._slotKey, true);
+  }
+
+  closeSlots() {
+    this.el.slots.classList.add('hidden');
+    window.removeEventListener('keydown', this._slotKey, true);
+  }
+
+  get slotsOpen() { return !this.el.slots.classList.contains('hidden'); }
+
+  /**
+   * Draw the ten rows.
+   *
+   * Each filled one carries the four things that make a planet recognisable at
+   * a glance and nothing else: who lives on it, what day it is there, how long
+   * has been spent on it, and when it was last written. Character, day and
+   * saved-when were asked for by name; playtime is in the same breath because
+   * `savedAt` alone cannot tell a world you played for an evening from one you
+   * looked at once, and the summary has carried it since before slots existed.
+   */
+  _paintSlots() {
+    const list = this.el.slotList;
+    const slots = Save.slots();
+    const newGame = this._slotMode === 'new';
+    list.innerHTML = '';
+
+    slots.forEach((meta, i) => {
+      const row = document.createElement('div');
+      row.className = `slot-row${meta ? ' filled' : ''}`;
+
+      const open = document.createElement('button');
+      open.className = 'slot-open';
+      // A slot with nothing in it is not a thing Continue can do.
+      open.disabled = !meta && !newGame;
+      const num = `Slot ${i + 1}`;
+      if (meta) {
+        open.innerHTML = `<b>${num}</b>`
+          + `<span class="slot-who">${this._characterName(meta.character)}</span>`
+          + `<span class="slot-when">Day ${meta.day || 1}, ${playedFor(meta.playtime)} played</span>`
+          + `<span class="slot-ago">Saved ${agoText(meta.savedAt)}</span>`;
+      } else {
+        open.innerHTML = `<b>${num}</b><span class="slot-who empty">Empty</span>`;
+      }
+      open.onclick = () => this._pickSlot(i, meta);
+      row.appendChild(open);
+
+      if (meta) {
+        const del = document.createElement('button');
+        del.className = 'slot-del';
+        del.textContent = 'Delete';
+        del.title = `Delete the planet in slot ${i + 1}`;
+        del.onclick = (e) => { e.stopPropagation(); this._deleteSlot(i, meta); };
+        row.appendChild(del);
+      }
+      list.appendChild(row);
+    });
+  }
+
+  /**
+   * A row was clicked.
+   *
+   * The confirm on a full slot is the whole reason New Game routes through this
+   * screen rather than grabbing the first empty one: with ten slots the day
+   * comes when they are all full, and at that point starting a new planet is an
+   * act that destroys an old one. It has to be said in words, with the slot
+   * named, before anything is claimed.
+   */
+  _pickSlot(i, meta) {
+    if (this._slotMode === 'new') {
+      if (meta && !window.confirm(
+        `Slot ${i + 1} holds a planet: ${this._characterName(meta.character)}, day ${meta.day || 1}.`
+        + '\n\nStarting a new planet here will replace it. This cannot be undone.')) return;
+      this.closeSlots();
+      this.game.newGame(i);
+      return;
+    }
+    if (!meta) return;
+    this.closeSlots();
+    this.game.continueGame(i);
+  }
+
+  _deleteSlot(i, meta) {
+    if (!window.confirm(
+      `Delete the planet in slot ${i + 1}: ${this._characterName(meta.character)}, day ${meta.day || 1}?`
+      + '\n\nThis cannot be undone.')) return;
+    Save.erase(i).then(() => {
+      this._paintSlots();
+      // The main menu is behind this screen and its Continue button may have
+      // just become the last thing pointing at nothing.
+      this.el.mmContinue.disabled = !Save.hasSave();
+      this.game.audio.ui(320);
+    });
+  }
+
+  /** A character id as something a player can read. */
+  _characterName(id) {
+    return id ? `Character ${String(id).toUpperCase()}` : 'Character A';
+  }
+
   // --- the New Game character picker ----------------------------------------
 
   /**
-   * Put the wall of characters up. The planet is already generating behind it,
+   * Put the carousel up. The planet is already generating behind it,
    * so this screen is time the player was going to spend waiting anyway — which
    * is the whole reason it is allowed to exist at all.
    *
@@ -630,15 +771,16 @@ export class UI {
   openCharacterPicker(selected) {
     if (!this._picker) {
       this._picker = new CharacterPicker(this.el.cgCanvas);
-      this._buildCharacterCells();
+      // One figure, framed square, so the canvas is square too.
+      this.el.cgCanvas.style.aspectRatio = '1 / 1';
     }
-    this._chosen = selected;
+    this._chosen = CHARACTER_IDS.includes(selected) ? selected : CHARACTER_IDS[0];
     this.el.chargen.classList.remove('hidden');
     this.characterPickerReady(false);
-    this._syncCharacterCells();
+    this._syncCharacterName();
     // After the overlay is visible, never before: the canvas has no measurable
     // size while its parent is `display: none`.
-    this._picker.open(selected, characterUrl(selected));
+    this._picker.open(this._chosen, characterUrl(this._chosen));
     // Capture, so the picker's Escape and arrows never reach `Input`, which
     // listens on the same window and would bank them for the next frame.
     window.addEventListener('keydown', this._cgKey, true);
@@ -659,52 +801,53 @@ export class UI {
     this.el.cgStatus.classList.toggle('ready', !!ready);
   }
 
-  _buildCharacterCells() {
-    const grid = this.el.cgGrid;
-    // Both the buttons and the 3D layout come from the same two numbers, so the
-    // hit target is always over the figure it belongs to.
-    grid.style.gridTemplateColumns = `repeat(${GRID_COLS}, 1fr)`;
-    grid.style.gridTemplateRows = `repeat(${GRID_ROWS}, 1fr)`;
-    this.el.cgCanvas.style.aspectRatio = `${GRID_COLS} / ${GRID_ROWS}`;
-    for (const id of CHARACTER_IDS) {
-      const b = document.createElement('button');
-      b.className = 'cg-cell';
-      b.dataset.id = id;
-      // There is nothing to read in these cells, so the label is all a screen
-      // reader has. The letter is the character's actual name in the pack.
-      b.setAttribute('aria-label', `Character ${id.toUpperCase()}`);
-      b.onclick = () => this.chooseCharacter(id);
-      // Double-click is "this one, go" — the same shortcut a file list gives you.
-      b.ondblclick = () => this.game.beginWorld(id);
-      grid.appendChild(b);
-    }
+  /**
+   * One step along the carousel, wrapping at both ends.
+   *
+   * Wrapping rather than stopping: there is no first or last character, only
+   * fifteen of them in a ring, and an arrow that goes dead at one end tells the
+   * player they have seen everything when the answer is that they have seen
+   * everything *this way round*.
+   */
+  stepCharacter(dir) {
+    const n = CHARACTER_IDS.length;
+    const at = Math.max(0, CHARACTER_IDS.indexOf(this._chosen));
+    // The wrap is a jump, not a slide — see `CharacterPicker.setSelected`.
+    const next = (at + dir + n) % n;
+    this.chooseCharacter(CHARACTER_IDS[next], Math.abs(next - at) > 1);
   }
 
-  chooseCharacter(id) {
+  chooseCharacter(id, snap = false) {
     if (id === this._chosen) return;
     this._chosen = id;
-    this._picker?.setSelected(id);
-    this._syncCharacterCells();
+    this._picker?.setSelected(id, snap);
+    this._syncCharacterName();
     this.game.audio.ui(560);
   }
 
-  _syncCharacterCells() {
-    for (const b of this.el.cgGrid.children) b.classList.toggle('on', b.dataset.id === this._chosen);
+  /** The name under the figure, and where you are in the ring. */
+  _syncCharacterName() {
+    const at = Math.max(0, CHARACTER_IDS.indexOf(this._chosen));
+    this.el.cgWho.textContent = `Character ${CHARACTER_IDS[at].toUpperCase()}`;
+    this.el.cgCount.textContent = `${at + 1} of ${CHARACTER_IDS.length}`;
   }
 
   /**
-   * Keyboard on the wall: arrows walk it, Enter starts, Escape backs out.
+   * Keyboard on the carousel: left and right turn it, Enter starts, Escape
+   * backs out.
+   *
+   * Up and down are the same as left and right rather than nothing at all: the
+   * grid this replaced used them for rows, and a key that used to move and now
+   * does nothing reads as the screen having frozen.
    *
    * Escape is deliberately not "accept" — the picker is skippable by pressing
    * the button that is already focused, and a key that both dismisses a screen
    * and commits a world would be the one way to start a planet by accident.
    */
   _characterKey(e) {
-    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -GRID_COLS, ArrowDown: GRID_COLS }[e.key];
+    const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
     if (step !== undefined) {
-      const n = CHARACTER_IDS.indexOf(this._chosen);
-      const next = Math.max(0, Math.min(CHARACTER_IDS.length - 1, (n < 0 ? 0 : n) + step));
-      this.chooseCharacter(CHARACTER_IDS[next]);
+      this.stepCharacter(step);
     } else if (e.key === 'Enter') {
       this.game.beginWorld(this._chosen);
     } else if (e.key === 'Escape') {
@@ -1016,7 +1159,7 @@ export class UI {
       name.textContent = def.label;
       const yield_ = document.createElement('span');
       yield_.className = 'ryield';
-      yield_.textContent = recipe.count > 1 ? `×${recipe.count}` : '';
+      yield_.textContent = recipe.count > 1 ? `x${recipe.count}` : '';
 
       const costEl = document.createElement('span');
       costEl.className = 'rcost';
@@ -1330,7 +1473,7 @@ export class UI {
     text.className = 'errand-text';
     text.innerHTML = req.done
       ? `<b>Thank you.</b> That is exactly what I needed.`
-      : `<b>Wanted:</b> ${req.count} × ${def?.label ?? '?'} <em>(you have ${have})</em>`;
+      : `<b>Wanted:</b> ${req.count} x ${def?.label ?? '?'} <em>(you have ${have})</em>`;
 
     const tag = document.createElement('span');
     tag.className = 'shop-price';
@@ -1375,7 +1518,7 @@ export class UI {
     name.textContent = def?.label ?? '?';
     const have = document.createElement('span');
     have.className = 'ryield';
-    have.textContent = `×${qty}`;
+    have.textContent = `x${qty}`;
 
     const tag = document.createElement('span');
     tag.className = 'shop-price';
@@ -1446,7 +1589,7 @@ export class UI {
           // selling and filling his errand are three ways of doing the one
           // thing the mark is for, which is meeting the merchant at all.
           g._mark('trade');
-          this.toast(`Sold ${sold} × ${ITEMS[item].label}`, COIN_ITEM, 1400);
+          this.toast(`Sold ${sold} x ${ITEMS[item].label}`, COIN_ITEM, 1400);
           // Say so when the purse is what stopped the sale, or it reads as a bug.
           if (sold < n && mob?.purse && mob.purse.coins < sellPriceOf(item)) {
             this.toast('The merchant is out of coin', COIN_ITEM, 2200);
@@ -1502,7 +1645,7 @@ export class UI {
     // with nothing left to find, and the tree costs 91, so the last number is
     // also the quiet statement that it can never all be bought.
     this.el.skSub.textContent = `${left === 1 ? '1 point' : `${left} points`} to spend`
-      + ` · ${sk.spent} spent · ${sk.points} of ${MAX_POINTS} ever earned`;
+      + ` · ${sk.spent} spent · ${sk.points} of ${MAX_POINTS} in this life`;
 
     const tree = this.el.skTree;
     tree.innerHTML = '';
@@ -1639,15 +1782,15 @@ export class UI {
 
     const marks = this.el.skMarks;
     marks.innerHTML = '';
-    let got = 0, gotPts = 0, allPts = 0;
+    let got = 0, gotXp = 0, allXp = 0;
     for (const key in MARKS) {
-      allPts += MARKS[key].points;
-      if (sk.marks.has(key)) { got++; gotPts += MARKS[key].points; }
+      allXp += MARKS[key].xp;
+      if (sk.marks.has(key)) { got++; gotXp += MARKS[key].xp; }
     }
     const sum = document.createElement('p');
     sum.className = 'earn-lead';
     sum.textContent = `${got} of ${Object.keys(MARKS).length} done`
-      + ` · ${gotPts} of ${allPts} points · paid in points, not xp`;
+      + ` · ${gotXp} of ${allXp} XP · paid once, and only once`;
     marks.appendChild(sum);
 
     for (const key in MARKS) {
@@ -1662,7 +1805,7 @@ export class UI {
       // done, and a tick or an empty ring says which without relying on colour.
       row.innerHTML = `<i class="mk">${has ? '✓' : ''}</i>`
         + `<span>${m.label}<em>${has ? 'Earned' : m.hint}</em></span>`
-        + `<b>${has ? '' : '+'}${m.points}</b>`;
+        + `<b>${has ? '' : '+'}${m.xp}</b>`;
       marks.appendChild(row);
     }
   }

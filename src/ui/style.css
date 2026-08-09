@@ -72,7 +72,6 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
 .menu-card .tagline { margin-bottom: 16px; }
 .menu-actions { display: flex; flex-direction: column; gap: 5px; margin-top: 14px; }
 .death-title { color: #f0a08a !important; }
-.note.credits { border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 10px; margin-bottom: 4px; }
 /* One line per source, so no one is a clause inside somebody else's sentence. */
 .credit-list { list-style: none; font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
 .credit-list li { padding-left: 10px; text-indent: -10px; margin-bottom: 3px; }
@@ -122,6 +121,31 @@ button.primary:hover { filter: brightness(1.06); }
 .bar-fill { height: 100%; width: 0%; border-radius: 99px; background: linear-gradient(90deg, var(--teal), var(--accent-2)); box-shadow: 0 0 12px rgba(242, 180, 92, .55); transition: width .3s cubic-bezier(.3, .9, .3, 1); }
 .status { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: rgba(247, 238, 222, .45); }
 
+/* ── save slots ────────────────────────────────────────── */
+
+.slots-panel { width: min(520px, 93vw); }
+.slots-hint { font-size: 12px; color: var(--ink-soft); margin: -4px 0 10px; }
+.slot-list { display: flex; flex-direction: column; gap: 5px; }
+.slot-row { display: flex; gap: 5px; align-items: stretch; }
+/* The row is a button, so the whole card is the hit target rather than the
+   words in it. Delete is a second, deliberately smaller one beside it. */
+.slot-open {
+  flex: 1; display: grid; gap: 0 10px; text-align: left;
+  grid-template-columns: 82px 1fr auto;
+  align-items: center; padding: 9px 12px;
+}
+.slot-open b { grid-row: 1 / span 2; align-self: center; font-weight: 650; font-size: 13px; color: var(--ink); }
+.slot-open .slot-who { font-size: 12.5px; color: var(--ink); }
+.slot-open .slot-who.empty { color: var(--ink-soft); opacity: .7; font-style: italic; }
+.slot-open .slot-when { grid-column: 2; font-size: 11.5px; color: var(--ink-soft); }
+.slot-open .slot-ago {
+  grid-column: 3; grid-row: 1 / span 2; align-self: center;
+  font: 600 11px var(--mono); color: var(--ink-soft); opacity: .8; white-space: nowrap;
+}
+.panel .slot-row.filled .slot-open { background: rgba(0, 0, 0, .085); }
+.slot-del { padding: 8px 11px; font-size: 11.5px; }
+.panel .slot-del:hover { background: rgba(207, 70, 48, .16); color: #a33a28; }
+
 /* ── character picker ──────────────────────────────────── */
 
 /* Above the loader, which is z-index 100 and is running underneath this the
@@ -133,7 +157,7 @@ button.primary:hover { filter: brightness(1.06); }
   animation: fade .22s ease;
 }
 .chargen-card {
-  width: min(760px, 94vw); padding: 22px 22px 16px; border-radius: 12px;
+  width: min(420px, 94vw); padding: 22px 22px 16px; border-radius: 12px;
   background: linear-gradient(170deg, rgba(28, 34, 54, .8), rgba(12, 15, 26, .88));
   border: 1px solid rgba(255, 255, 255, .11);
   box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .9), 0 1px 0 rgba(255, 255, 255, .1) inset;
@@ -155,22 +179,34 @@ button.primary:hover { filter: brightness(1.06); }
   background-color: #6b7590;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), inset 0 -16px 30px -18px rgba(0, 0, 0, .65);
 }
-/* The canvas keeps the grid's own aspect ratio — set inline from GRID_COLS and
-   GRID_ROWS — so a cell is square in the orthographic frustum and the buttons
-   above line up with the figures below. */
+/* Square, set inline by UI.js, matching the picker's square frustum: one
+   character fills the frame and the arrows sit either side of it. */
 #cg-canvas { display: block; width: 100%; }
-#cg-grid { position: absolute; inset: 0; display: grid; gap: 4px; }
-.cg-cell {
-  padding: 0; border-radius: 8px; background: transparent;
-  border: 1px solid transparent; transition: background .16s ease, border-color .16s ease;
+.cg-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 40px; height: 56px; padding: 0; border-radius: 8px;
+  background: rgba(12, 15, 26, .34); border: 1px solid rgba(255, 255, 255, .18);
 }
-.cg-cell:hover { background: rgba(255, 255, 255, .16); border-color: rgba(255, 255, 255, .3); transform: none; }
-.cg-cell.on {
-  background: rgba(242, 180, 92, .2);
-  border-color: var(--accent-2);
-  box-shadow: 0 0 0 1px rgba(242, 180, 92, .45), 0 8px 22px -12px rgba(0, 0, 0, .8);
+.cg-arrow.prev { left: 8px; }
+.cg-arrow.next { right: 8px; }
+.cg-arrow:hover:not(:disabled) { background: rgba(12, 15, 26, .5); transform: translateY(-50%); }
+.cg-arrow:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+/* The chevron itself: two borders of an empty box, turned 45 degrees. Drawn
+   rather than typed, so it is the same shape in every font. */
+.cg-arrow i {
+  display: block; width: 11px; height: 11px; margin: 0 auto;
+  border-left: 2.5px solid rgba(247, 238, 222, .9);
+  border-bottom: 2.5px solid rgba(247, 238, 222, .9);
+  border-radius: 2px;
 }
-.cg-cell:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.cg-arrow.prev i { transform: rotate(45deg) translate(1px, -1px); }
+.cg-arrow.next i { transform: rotate(-135deg) translate(1px, -1px); }
+.cg-name {
+  display: flex; align-items: baseline; justify-content: center; gap: 10px;
+  margin-top: 12px;
+}
+.cg-name b { color: var(--parchment); font-size: 15px; font-weight: 650; letter-spacing: .04em; }
+.cg-name span { font: 600 11px var(--mono); color: rgba(247, 238, 222, .45); }
 .chargen-foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .chargen-foot .status { flex: 1; text-align: left; }
 .chargen-foot .status.ready { color: rgba(242, 180, 92, .8); }
@@ -843,6 +879,22 @@ button.danger {
 .settings input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: linear-gradient(170deg, var(--accent-2), var(--accent)); box-shadow: 0 2px 5px rgba(0, 0, 0, .3); cursor: pointer; }
 .settings select { width: 100%; margin-top: 5px; padding: 6px 9px; border-radius: 5px; border: 1px solid var(--edge); background: rgba(255, 255, 255, .7); font: inherit; font-size: 13.5px; color: var(--ink); cursor: pointer; }
 .settings input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+/* Group headings. Both screens are long because they genuinely have a lot of
+   rows, so the fix is somewhere for the eye to stop, not an explanation of each
+   row. */
+.set-head, .ctl-head {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-soft); opacity: .65;
+  margin-top: 6px; padding-bottom: 4px; border-bottom: 1px solid rgba(0, 0, 0, .09);
+}
+.ctl-head { margin-top: 14px; margin-bottom: 7px; }
+.ctl-head:first-of-type, .set-head:first-of-type { margin-top: 0; }
+.settings details.credits { margin-top: 12px; border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 9px; }
+.settings details.credits summary {
+  cursor: pointer; font-size: 12px; font-weight: 650; color: var(--ink-soft); letter-spacing: .02em;
+}
+.settings details.credits .credit-list { margin-top: 8px; }
 
 .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 18px; font-size: 12px; color: var(--ink-soft); }
 .controls-grid > div { display: flex; align-items: center; gap: 4px; }

@@ -16,10 +16,11 @@
 //      sixty lines pricing eight species against each other and a chestplate
 //      flattened all of it.
 //
-// So: points you earn by playing, spent permanently on six branches. Nothing
-// here breaks, nothing here is dropped on death, and nothing here is rendered,
-// clicked or saved by this file — it is the model only. It imports nothing, so
-// it can be reasoned about, and eventually tested, on its own.
+// So: points you earn by playing, spent on six branches. Nothing here breaks
+// and nothing here wears out — but all of it is lost when you die, which is the
+// one thing this file used to promise the opposite of. See `ON_DEATH`. Nothing
+// here is rendered, clicked or saved by this file — it is the model only. It
+// imports nothing, so it can be reasoned about, and tested, on its own.
 //
 // --- the shape ---------------------------------------------------------------
 // Three roots and three leaves, each leaf behind a root:
@@ -222,10 +223,10 @@ export const POINTS_PER_LEVEL = 1;
 /**
  * The last level that pays. 64 rather than "no ceiling", and the number is not
  * arbitrary: the retired model's five capped sources added up to exactly 64
- * derived points, and the seven marks to 12, for a lifetime maximum of 76
- * against a tree that costs 91. That gap is load-bearing — see MAX_POINTS — so
- * the level ceiling is set to the number the thing it replaced was worth, and
- * the ceiling comes out unchanged.
+ * derived points, so the level ceiling is set to the number the thing it
+ * replaced was worth. It is now the *whole* lifetime maximum, against a tree
+ * that costs 91, because the marks no longer pay points. That gap is
+ * load-bearing — see MAX_POINTS.
  *
  * An uncapped level ladder would have quietly destroyed that: the tree would
  * become finishable by anyone who played long enough, and the branch choice
@@ -427,59 +428,118 @@ export const EARNED = {
 };
 
 /**
- * One-off awards for firsts. These are the part that cannot be derived — the
- * game does not count husks killed or kilns lit — so they are the only earned
- * points that have to be written to the save.
+ * One-off awards for firsts, paid in XP.
  *
- * They stayed as *points* rather than becoming a lump of xp, and that is a
- * decision worth defending, because everything else on the screen is now one
- * currency and a second one is a cost.
+ * These are the part that cannot be derived — the game does not count husks
+ * killed or kilns lit — so a mark, once earned, is written to the save.
  *
- * A mark paid in xp is worth wildly different amounts depending on when you
- * earn it. 1,000 xp for reaching the core is ten levels to a new player and two
- * thirds of one to a veteran — so the moment the game most wants to say "that
- * was the thing worth doing", it says it in a unit whose value has quietly
- * changed by a factor of fifteen. A point is a point at every level, and the
- * marks are the one place in the design that rewards *what* you did rather than
- * how much of it, which is exactly the thing that should not be denominated in
- * a grind. Killing a husk is worth 22 xp because it is a fight; killing your
- * *first* husk is worth 2 points because it is a first.
+ * They used to grant *points* directly, and the argument for that is preserved
+ * here because it is the argument this version has to answer. A mark paid in xp
+ * is worth wildly different amounts depending on when you earn it: 400 xp for
+ * reaching the core is five levels to a new player and a quarter of one to a
+ * veteran, so the moment the game most wants to say "that was the thing worth
+ * doing" says it in a unit whose value has quietly changed by a factor of
+ * twenty. A point was a point at every level.
  *
- * The practical benefit is that the ceiling arithmetic survives intact: 64 from
- * levels plus 12 from marks is the 76 the tree was balanced against.
+ * What overrules it is the rule the whole file now serves: **levels are the
+ * only source of points**, so that every point a player holds is a thing they
+ * can lose by dying, and staying alive is therefore worth something. A currency
+ * that a death cannot touch is a currency that opts out of the design. Marks
+ * paid in points would have been exactly that — 12 points of permanent floor
+ * under a system whose entire premise is that there is no floor.
+ *
+ * So they route through the ladder like everything else, and the design job
+ * they were doing survives: they are still the only reward in the game for
+ * *what* you did rather than how much of it, they still fire once, they are
+ * still announced, and the tree still lists them. Only the unit changed.
+ *
+ * The values are the old points at 100 xp each, so the relative weights are
+ * exactly preserved — 1:1:1:1:2:2:4, 1,200 xp in all. 100 is chosen because it
+ * is about what a level costs across the first five (80, 84, 88, 93, 97), which
+ * is precisely when the four one-point marks are earned: a first night out is
+ * still worth "about a level", which is what a point meant when it was one. The
+ * later marks are worth less in levels than they used to be, and that is the
+ * accepted cost of one currency: a player reaching the core at level 30 has
+ * thirty points already, and 4 more was never the reason they went.
  */
+export const XP_PER_MARK_POINT = 100;
 export const MARKS = {
-  dawn: { points: 1, label: 'First Light', hint: 'Survive a night outdoors.' },
-  forge: { points: 1, label: 'Smelter', hint: 'Fire a kiln.' },
-  harvest: { points: 1, label: 'Farmer', hint: 'Harvest a crop you planted.' },
-  trade: { points: 1, label: 'Custom', hint: 'Trade with the merchant.' },
-  slayer: { points: 2, label: 'Cinder', hint: 'Put down a husk.' },
-  abyss: { points: 2, label: 'The Deep', hint: 'Find lava underground.' },
-  core: { points: 4, label: 'The Core', hint: 'Reach the heart of the planet.' },
+  dawn: { xp: 100, label: 'First Light', hint: 'Survive a night outdoors.' },
+  forge: { xp: 100, label: 'Smelter', hint: 'Fire a kiln.' },
+  harvest: { xp: 100, label: 'Farmer', hint: 'Harvest a crop you planted.' },
+  trade: { xp: 100, label: 'Custom', hint: 'Trade with the merchant.' },
+  slayer: { xp: 200, label: 'Cinder', hint: 'Put down a husk.' },
+  abyss: { xp: 200, label: 'The Deep', hint: 'Find lava underground.' },
+  core: { xp: 400, label: 'The Core', hint: 'Reach the heart of the planet.' },
 };
+
+// --- what death costs --------------------------------------------------------
+//
+// The tree used to survive you, and it was written to say so in as many words.
+// It does not any more, and the reason is the one the player gave: if nothing
+// is ever lost then nothing is ever at stake, and a game that hands out points
+// for staying alive while charging nothing for failing to is not asking you to
+// stay alive, it is asking you to keep playing. So dying costs the ladder.
+//
+// This is a harsh mechanic and it is meant to be dialled. Everything about it
+// is `ON_DEATH` and `DEATH_XP_KEPT` below, and `die()` is the only code that
+// reads them.
+
+/**
+ * What a death takes. Change this ONE line to soften the mechanic.
+ *
+ *   'wipe'    xp, levels and every point spent. You wake at level 0 with an
+ *             untouched tree. The default, and the strongest reading.
+ *   'unlearn' the tree only. Levels and xp are kept, every branch is set back
+ *             to 0 and the points come back unspent — a forced respec, so you
+ *             lose the build you had, not the hours behind it.
+ *   'toll'    a fraction of xp, per `DEATH_XP_KEPT`. Levels fall out of the new
+ *             total; anything that leaves you unable to afford what you have
+ *             already bought is honoured rather than clawed back, so `available`
+ *             can go negative and the tree stays as it was.
+ *   'keep'    nothing. The behaviour before this change.
+ *
+ * @type {'wipe'|'unlearn'|'toll'|'keep'}
+ */
+export const ON_DEATH = 'wipe';
+
+/** Fraction of xp kept under 'toll'. 0.7 is "you lost about three levels". */
+export const DEATH_XP_KEPT = 0.7;
 
 /** Every point in the tree, so the balance claim below is checkable in code. */
 export const TOTAL_COST = BRANCH_ORDER.reduce(
   (n, k) => n + BRANCHES[k].costs.reduce((a, b) => a + b, 0), 0,
 );
 /**
- * The most a player can ever hold: every level, plus every mark.
+ * The most a player can ever hold: every level, and nothing else.
  *
- * `MAX_LEVEL * POINTS_PER_LEVEL` is 64 and the marks are 12, so this is 76 —
- * the same 76 the retired five-capped-sources model produced, which is why
- * `MAX_LEVEL` is 64 and not a rounder number. The tree's price did not change,
- * so neither did the gap.
+ * 64, and the expression is deliberately trivial now — it is `MAX_LEVEL`, and
+ * the point of writing it as a product rather than as the literal is that it
+ * stays true if either half moves. It was 76 while the marks paid 12 points on
+ * top; they pay xp now, so the only door left is the ladder.
  */
-export const MAX_POINTS =
-  MAX_LEVEL * POINTS_PER_LEVEL +
-  Object.values(MARKS).reduce((n, m) => n + m.points, 0);
+export const MAX_POINTS = MAX_LEVEL * POINTS_PER_LEVEL;
 
-// TOTAL_COST is 91 and MAX_POINTS is 76, and the gap is deliberate. A tree you
-// finish is a tree that stops being a decision on the day you finish it; at 84%
+// TOTAL_COST is 91 and MAX_POINTS is 64, and the gap is deliberate. A tree you
+// finish is a tree that stops being a decision on the day you finish it; at 70%
 // the last few levels are always a trade of one branch's top rung against
-// another's, however long you play. It is a small enough gap that no branch is
-// unreachable — any two branches can be completed outright — and large enough
-// that "everything" never is.
+// another's, however long you play.
+//
+// The gap was 15 and is now 27, and the shape survives the widening because the
+// two properties it was chosen for are both still true. No branch is
+// unreachable: the dearest pair is vigour 15 + tolerance 26 = 41, and even
+// three full branches (vigour, tolerance and hands, 57) fit inside 64. And
+// "everything" still never does: a fourth branch takes it to 69 at best.
+//
+// What actually changed is that the ceiling is now close to theoretical. With
+// death wiping the ladder (see `ON_DEATH`) the number a player holds in practice
+// is what they have earned since they last died, which for most runs is well
+// under 30 — so the branch costs are being read at the *bottom* of the ladder
+// far more often than at the top. They are not adjusted for it, on purpose: the
+// bottom rungs are already the cheap ones (1, 1, 1, 2 across vigour, agility
+// and hands), so a fresh run buys something inside its first ten minutes, and
+// cutting costs at the same moment a wipe is introduced would soften the change
+// in two places at once and make neither measurable.
 
 // --- the effect curves -------------------------------------------------------
 // Each is stated as the whole formula rather than as a per-level constant, so
@@ -589,6 +649,21 @@ export class Skills {
     this.legacyLive = true;
     /** XP from time survived, derived on every `observe`. Never persisted. */
     this.survive = 0;
+    /**
+     * Survival xp already taken away by a death, and the reason `survive` can
+     * be derived and still be losable.
+     *
+     * `survive` is a pure function of `playtime`, which only ever goes up — so
+     * a wipe that merely zeroed it would see it refilled by the very next
+     * `observe`, and dying would hand back up to six free levels. This is the
+     * subtraction that stops that, and unlike `survive` it *is* persisted.
+     *
+     * It also settles the question the cap raises: the six levels are a
+     * lifetime allowance, not a per-life one. Surviving pays for the first three
+     * hours of the character and never again, exactly as it did before, which
+     * is the only reading under which it stays a floor rather than a strategy.
+     */
+    this.surviveLost = 0;
     /** Level from total xp. Not `this.level`, which is the branch table. */
     this.xpLevel = 0;
     /** Last `points` announced, so `observe` can report a change of any kind. */
@@ -687,10 +762,10 @@ export class Skills {
   observe(stats, playtime = 0) {
     // Time survived, capped. Recomputed rather than accumulated, so it is a
     // pure function of a number the save already carries.
-    const surv = Math.min(
+    const surv = Math.max(0, Math.min(
       xpToLevel(XP_SURVIVE_LEVELS),
       Math.floor(playtime / 60) * XP_SURVIVE_PER_MIN,
-    );
+    ) - this.surviveLost);
     if (surv > this.survive) this.survive = surv;
 
     if (this.legacyLive) {
@@ -721,31 +796,42 @@ export class Skills {
     return true;
   }
 
-  /** Every point ever earned, spent or not. */
-  get points() {
-    let n = this.xpLevel * POINTS_PER_LEVEL + this.bonus;
-    for (const key of this.marks) n += MARKS[key]?.points ?? 0;
-    return n;
-  }
+  /**
+   * Every point held, spent or not.
+   *
+   * Levels, and the one-off armour conversion, and nothing else. The marks used
+   * to be added on here; they pay xp now, which means they are already inside
+   * `xpLevel` by the time this is asked, and adding them again would be paying
+   * them twice.
+   */
+  get points() { return this.xpLevel * POINTS_PER_LEVEL + this.bonus; }
 
   /**
    * Points left to spend. Can in principle go negative if a future patch makes
    * a branch dearer than it was when it was bought; that is reported honestly
    * rather than clamped, because a UI showing 0 while `canBuy` refuses
-   * everything is a bug report. Nothing is ever taken back from the player.
+   * everything is a bug report. Death is the one thing that takes points back,
+   * and it takes the levels with them, so it cannot leave that state either.
    */
   get available() { return this.points - this.spent; }
 
   /**
-   * Award a one-off mark. Idempotent by key, which is what lets a caller fire
-   * it from inside a hot path — `skills.mark('abyss')` every time lava comes
-   * into view is fine.
+   * Award a one-off mark, and the xp that comes with it.
+   *
+   * Idempotent by key, which is what lets a caller fire it from inside a hot
+   * path — `skills.mark('abyss')` every time lava comes into view is fine — and
+   * the key is kept in the set for ever, including through a death. The xp is
+   * gone with everything else when you die; the record that you were the sort
+   * of player who once did it is not, and it is what stops a respawned player
+   * farming their own firsts.
    *
    * @returns {boolean} true only the first time, so the caller can toast it
    */
   mark(key) {
-    if (!MARKS[key] || this.marks.has(key)) return false;
+    const m = MARKS[key];
+    if (!m || this.marks.has(key)) return false;
     this.marks.add(key);
+    this.gainXp(m.xp);
     return true;
   }
 
@@ -844,6 +930,77 @@ export class Skills {
     this._apply();
   }
 
+  /**
+   * You died. Take what `ON_DEATH` says to take, and report it.
+   *
+   * The caller has to do three things with the answer and none of them are this
+   * file's job: reconcile `player.maxHealth` (a wiped vigour branch is ten
+   * health the player no longer has), tell them what happened, and save — a
+   * wipe a reload undoes is not a wipe.
+   *
+   * Four things have to go for 'wipe' to actually mean it, and three of them
+   * are not obvious:
+   *
+   *   `xp`          the earned total. Obvious.
+   *   `legacy`      the migration credit. A save from before xp existed carries
+   *                 its history as a lump of credited xp; left alone, a
+   *                 twenty-hour character would respawn at level fifty.
+   *   `survive`     the time-survived trickle, which is *derived* from playtime
+   *                 and would refill itself on the next `observe`. See
+   *                 `surviveLost`, which is the subtraction that makes it stay
+   *                 gone.
+   *   `bonus`       the armour conversion. It is points a player is holding, and
+   *                 the rule is that death takes points. `converted` stays true,
+   *                 so it cannot be claimed a second time by dying.
+   *
+   * `marks` are kept. They are a record of what you have done, not a balance.
+   * `legacyLive` is forced off, so a character who somehow died before the
+   * history floor was taken cannot have it credited afterwards.
+   *
+   * @returns {{mode:string,level:number,points:number,spent:number,xp:number}|null}
+   *   what was lost, or null if nothing was
+   */
+  die() {
+    if (ON_DEATH === 'keep') return null;
+    const lost = {
+      mode: ON_DEATH,
+      level: this.xpLevel,
+      points: this.points,
+      spent: this.spent,
+      xp: this.totalXp,
+    };
+
+    if (ON_DEATH === 'wipe' || ON_DEATH === 'toll') {
+      const keep = ON_DEATH === 'toll' ? clamp(DEATH_XP_KEPT, 0, 1) : 0;
+      this.xp = Math.floor(this.xp * keep);
+      this.legacy = Math.floor(this.legacy * keep);
+      // Derived, so it is not enough to zero it: the loss has to be remembered
+      // or `observe` hands it straight back.
+      const shed = this.survive - Math.floor(this.survive * keep);
+      this.surviveLost += shed;
+      this.survive -= shed;
+      if (ON_DEATH === 'wipe') this.bonus = 0;
+      this.legacyLive = false;
+      this._level();
+    }
+
+    // The tree itself. Not touched by 'toll' — see the flag: a player who is
+    // three levels poorer keeps what they had already bought, and `available`
+    // is allowed to report the shortfall honestly rather than repossess it.
+    if (ON_DEATH === 'wipe' || ON_DEATH === 'unlearn') this.reset();
+    else this._apply();
+
+    // So the caller's next `observe` does not announce the new, smaller balance
+    // as though the player had just earned it.
+    this._lastPoints = this.points;
+
+    lost.level -= this.xpLevel;
+    lost.points -= this.points;
+    lost.spent -= this.spent;
+    lost.xp -= this.totalXp;
+    return lost;
+  }
+
   // --- queries --------------------------------------------------------------
 
   /**
@@ -914,18 +1071,25 @@ export class Skills {
    * their history re-credited on every load, on top of everything they have
    * earned since — which is the exact double-count the freeze exists to stop.
    *
-   * Zero levels are omitted, so a fresh character's tree is `{ v: 2 }`.
+   * Zero levels are omitted, so a fresh character's tree is `{ v: 3 }`.
+   *
+   * `v: 3` is the build in which marks pay xp rather than points, and the
+   * version is what stops the compensating credit in `fromJSON` being paid
+   * twice. It is the whole reason the number moved.
    */
   toJSON() {
     const lv = {};
     for (const key of BRANCH_ORDER) if (this.level[key]) lv[key] = this.level[key];
-    const out = { v: 2 };
+    const out = { v: 3 };
     if (Object.keys(lv).length) out.lv = lv;
     if (this.marks.size) out.marks = [...this.marks];
     if (this.bonus) out.bonus = this.bonus;
     if (this.converted) out.converted = 1;
     if (this.xp) out.xp = this.xp;
     if (this.legacy) out.legacy = this.legacy;
+    // The one piece of state a death creates. Without it a reload is a full
+    // refund of every survival level the player has ever been charged for.
+    if (this.surviveLost) out.slost = this.surviveLost;
     // Written only when the floor has been retired, so its absence means "still
     // live" and a v1 save — which has no idea what any of this is — reads as
     // live, which is exactly what it needs to be.
@@ -949,8 +1113,12 @@ export class Skills {
    *     same number that build would have shown. Such a player logs in with the
    *     identical balance, to the point, and nothing they had bought is lost.
    *
-   *  3. `v: 2` — this build. `xp` and `legacy` are read back verbatim and the
-   *     floor is whatever it was when the save was written.
+   *  3. `v: 2` — the build in which marks still paid points. `xp` and `legacy`
+   *     are read back verbatim, and the marks it holds are paid their xp on the
+   *     way in to make up for the points they are about to stop granting.
+   *
+   *  4. `v: 3` — this build. Everything verbatim, and no compensation, because
+   *     the marks in it were already paid in xp when they were earned.
    *
    * Unknown branch and mark keys are dropped rather than kept, so a save
    * written by a build with a branch this one does not have loads instead of
@@ -965,6 +1133,7 @@ export class Skills {
     this.legacy = 0;
     this.legacyLive = true;
     this.survive = 0;
+    this.surviveLost = 0;
     this.xpLevel = 0;
     this._lastPoints = 0;
     if (data && typeof data === 'object') {
@@ -978,12 +1147,30 @@ export class Skills {
       this.converted = !!data.converted;
       if (typeof data.xp === 'number' && data.xp > 0) this.xp = Math.floor(data.xp);
       if (typeof data.legacy === 'number' && data.legacy > 0) this.legacy = Math.floor(data.legacy);
+      if (typeof data.slost === 'number' && data.slost > 0) this.surviveLost = Math.floor(data.slost);
       // Absent means live, which is what makes a v1 save migrate itself. Only a
       // save that has seen real xp says so.
       if ('lgl' in data) this.legacyLive = !!data.lgl;
       // Belt and braces: a hand-edited save with xp but no `lgl` would otherwise
       // keep a live floor and re-credit its history on top of earned xp.
       if (this.xp > 0) this.legacyLive = false;
+
+      // Marks used to pay points and now pay xp, so a save written before that
+      // change is holding marks it has already been paid for in a currency that
+      // no longer exists. Left alone it would load up to 12 points poorer than
+      // it was shut down, which is the one thing this file is not allowed to do
+      // quietly. So the xp is credited on the way in, once, gated on the version
+      // — a `v: 3` save has already had it and must not be paid twice.
+      //
+      // Strictly after the `legacyLive` decision above, because it writes to
+      // `this.xp` and that field is the signal for "this save has seen the xp
+      // model". Crediting first would freeze the history floor of a v1 save and
+      // cost a twenty-hour character every point they had.
+      if (!(data.v >= 3)) {
+        let owed = 0;
+        for (const key of this.marks) owed += MARKS[key]?.xp ?? 0;
+        this.xp += owed;
+      }
     }
     this._level();
     this._lastPoints = this.points;

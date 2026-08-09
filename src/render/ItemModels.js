@@ -395,6 +395,30 @@ const POSE = {
   // treatment. Square-on it is two grey shells and nothing else.
   sea_shell:    { file: 'wam/sea_shell',    pack: 'wam', height: 0.24, grip: 0.36, rot: [0.46, -0.40, 0.16],  pos: [0.02, 0.10, -0.04], icon: [0.72, 0.34, -0.08] },
   pearl:        { file: 'wam/pearl',        pack: 'wam', height: 0.15, grip: 0.50, rot: [0.10, -0.30, 0.10],  pos: [0.02, 0.12, -0.05], icon: [0.12, 0.26, 0] },
+
+  // The larder and the lamp, on the same three rules as the reef above.
+  //
+  // Sea lettuce has the sea fan's problem in a milder form: it is four broad
+  // sheets and edge-on it is four lines, so both its rotations turn it well off
+  // square and its icon takes a steep pitch as well — a rosette is read from
+  // above, which is also how a swimmer meets it. The grapes are an upright with
+  // a silhouette that is the whole story (beads on a string), so they take the
+  // branching coral's shallow pose unchanged.
+  //
+  // The anemone is the one that has to show its *inside*, exactly as the clam
+  // does: the glow is on the tentacle tips and they hook up and inward over an
+  // oral disc, so square-on from the side it is a dark cup with some pale
+  // specks past the rim. Both rotations pitch it forward hard, and the icon
+  // nearly all the way, which is the food kit's `flat` treatment used for a
+  // block — the crown, seen from above, is the thing worth putting in a slot.
+  sea_lettuce:   { file: 'wam/sea_lettuce',   pack: 'wam', height: 0.26, grip: 0.30, rot: [0.10, -1.10, 0.24], pos: [0.02, 0.11, -0.02], icon: [0.42, 1.15, -0.14] },
+  sea_grape:     { file: 'wam/sea_grape',     pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.06, -0.50, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.44, -0.18] },
+  abyss_anemone: { file: 'wam/abyss_anemone', pack: 'wam', height: 0.24, grip: 0.36, rot: [0.44, -0.40, 0.16],  pos: [0.02, 0.10, -0.04], icon: [0.70, 0.34, -0.08] },
+  // Dried kelp is item-only and is a stack of flat sheets, so it is held and
+  // shown the way the food kit holds anything flat: gripped low at the fold,
+  // turned enough that the stepped margins read rather than the back sheet's
+  // blank face.
+  dried_kelp:    { file: 'wam/dried_kelp',    pack: 'wam', height: 0.22, grip: 0.34, rot: [0.14, -0.44, 0.20],  pos: [0.02, 0.11, -0.03], icon: [0.24, 0.38, -0.10] },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -479,6 +503,12 @@ const BY_NAME = {
   // map. Delete the line and the reef loses its clams.
   sea_shell: 'sea_shell',
   pearl: 'pearl',
+  // The larder and the lamp, at the flowers' stage like the reef: fist, icon,
+  // ground and planted, with no billboard behind any of them.
+  sea_lettuce: 'sea_lettuce',
+  sea_grape: 'sea_grape',
+  abyss_anemone: 'abyss_anemone',
+  dried_kelp: 'dried_kelp',
   // The one place this map is not an identity, and deliberately: raw and
   // steamed crab are one model. A claw is a claw cooked or not — the shell is
   // already the orange it turns — so the pair share `crab_claw` rather than

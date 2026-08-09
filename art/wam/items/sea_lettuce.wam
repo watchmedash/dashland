@@ -1,0 +1,117 @@
+# Sea Lettuce — the seabed's leaf vegetable, and the first thing down there you
+# can put in your mouth.
+#
+# It shares a cell and a silhouette problem with `sea_grass.wam`, and the two
+# have to be told apart at a glance or the shelf reads as one texture. They are
+# separated on the one axis a swimming player can actually resolve at distance:
+# **blade width**. Sea grass is six thin straps; this is four broad ruffled
+# sheets, each three to four times as wide as a grass blade. A player who has
+# learned "wide and pale means food" can then read a bed from ten metres up,
+# which is the whole point of a forageable — a plant you have to swim down and
+# inspect to identify is a plant nobody eats twice.
+#
+# **The ruffle is `roll=`, not extra geometry.** Ulva grows in sheets one or two
+# cells thick and the edges buckle because the margin grows faster than the
+# middle. A flat strap with a `roll=` that alternates sign up its length is that
+# buckle for free: the section turns as it climbs, so the silhouette waves and
+# the lit side changes down the blade. The first cut had flat un-rolled sheets
+# and the render sheet showed exactly what that is — four playing cards stuck in
+# the sand, and from the front view they vanished edge-on into nothing.
+#
+# **Paler than anything else on the seabed.** Ulva is a bright spring green and
+# it grows in the shallows where light still reaches; kelp is olive and sea
+# grass is a mid meadow green. Going *up* in value is what makes it visible in
+# water that is eating the warm end of everything — the same argument the
+# sponge's orange makes, played in the other direction.
+#
+# Blades that lean along X are rooted a half-width off the axis in the same
+# direction so each is honestly one-sided; the ones leaning along Z stay centred
+# and are symmetric. Those are the only two arrangements the centreline lint
+# accepts. See `sea_grass.wam`, same rule, same reason.
+
+model sea_lettuce
+  height 0.50
+  style chunky
+
+palette
+  Frond #86d152
+  Deep  #5da339
+  Sun   #bdee7c
+  Hold  #6f6a3c
+
+skeleton
+  root bed at 0.0
+
+parts
+  # The holdfast. Barely there — a lettuce is anchored by a disc the size of a
+  # thumbnail, not by a stem — but without it the four sheets appear to grow out
+  # of nothing and the model reads as leaves lying on sand rather than as a
+  # plant rooted in it.
+  loft hold bone=bed at=0.0 dir=up len=0.10 material=Hold sides=6
+    ring 0.00 w=0.20 d=0.19
+    ring 0.55 w=0.14 d=0.13
+    ring 1.00 w=0.09 d=0.09 material=Deep
+    cap start=flat end=flat
+
+  # Four sheets. `frame=up` with a large `w` and a tiny `d` is the flat-blade
+  # idiom the whole family uses; what makes these lettuce rather than grass is
+  # that `w` peaks around 0.5 of model height instead of 0.2, and that the
+  # widest ring is halfway up rather than near the root, so each sheet is a leaf
+  # with a waist and not a tapering strap.
+  loft leafA bone=bed at=0.0 offset=(-0.12,0,0.03) dir=up pitch=8 tilt=30 len=0.94 material=Frond frame=up sides=4
+    ring 0.00 w=0.13 d=0.014
+    ring 0.10 w=0.26 d=0.016
+    ring 0.24 w=0.42 d=0.017 roll=5
+    ring 0.52 w=0.52 d=0.018 roll=-4
+    ring 0.84 w=0.55 d=0.016 roll=5
+    ring 1.00 w=0.49 d=0.013 roll=-15 material=Sun
+    cap start=flat end=flat
+  loft leafB bone=bed at=0.0 offset=(0.13,0,-0.04) dir=up pitch=-6 tilt=-34 len=1.00 material=Deep frame=up sides=4
+    ring 0.00 w=0.14 d=0.015
+    ring 0.10 w=0.27 d=0.017
+    ring 0.24 w=0.44 d=0.018 roll=-5
+    ring 0.52 w=0.55 d=0.019 roll=4
+    ring 0.84 w=0.58 d=0.017 roll=-4
+    ring 1.00 w=0.51 d=0.014 roll=9 material=Frond
+    cap start=flat end=flat
+  # The two that lean along Z. Centred on X, so symmetric and exempt from the
+  # straddle rule, and they are what stops the plant reading as a flat card from
+  # the front — the failure the first render sheet actually showed.
+  loft leafC bone=bed at=0.0 offset=(0,0,0.09) dir=up pitch=32 tilt=0 len=0.88 material=Sun frame=up sides=4
+    ring 0.00 w=0.12 d=0.013
+    ring 0.10 w=0.24 d=0.015
+    ring 0.24 w=0.38 d=0.016 roll=-5
+    ring 0.52 w=0.48 d=0.017 roll=4
+    ring 0.84 w=0.50 d=0.015 roll=-5
+    ring 1.00 w=0.44 d=0.012 roll=6 material=Frond
+    cap start=flat end=flat
+  loft leafD bone=bed at=0.0 offset=(0,0,-0.09) dir=up pitch=-28 tilt=0 len=0.76 material=Frond frame=up sides=4
+    ring 0.00 w=0.12 d=0.013
+    ring 0.10 w=0.23 d=0.015
+    ring 0.24 w=0.36 d=0.016 roll=5
+    ring 0.52 w=0.45 d=0.017 roll=-4
+    ring 0.84 w=0.47 d=0.015 roll=5
+    ring 1.00 w=0.41 d=0.012 roll=-14 material=Deep
+    cap start=flat end=flat
+
+checks
+  # Rooted in the seabed. A sheet that starts above the sand is a sheet the
+  # player can see under, which is the one thing a forageable must never do —
+  # it stops reading as growing and starts reading as dropped.
+  assert bottom(hold) < 0.02
+  assert bottom(leafA) < 0.03
+  assert bottom(leafD) < 0.03
+  # Broad. This is the check that keeps it distinguishable from sea grass after
+  # someone tidies a ring: every sheet must be wider than the holdfast it grows
+  # out of by a factor no strap could reach.
+  assert width(leafB) > width(hold) * 2.2
+  assert width(leafC) > width(hold) * 1.8
+  # A low, spreading plant rather than an upright one — it shares the ground
+  # layer with sea grass and must not stand up into the corals' band.
+  assert width / height > 0.95
+  assert depth / height > 0.6
+  # Ragged, not a hedge cut: three distinct heights across the four sheets.
+  assert top(leafB) > top(leafD) * 1.12
+  assert parts == 5
+  assert tris < 340
+  measure spread width / height

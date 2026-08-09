@@ -95,6 +95,15 @@ ITEMS = [
     "coral_branch", "coral_fan", "coral_brain", "coral_dead",
     "kelp", "sea_grass", "sea_sponge", "sea_shell",
     "pearl",
+    # The larder and the lamp. Three more world-geometry cross blocks on the
+    # same footing as the reef above — `MODELLED_CROSS` + `MODELLED_PLANTS` —
+    # so skipping one here empties the seabed of that species rather than
+    # emptying a toolbar slot. Two are food you can pick up and one is the only
+    # light on the planet you can dig for.
+    "sea_lettuce", "sea_grape", "abyss_anemone",
+    # Dried kelp is item-only: it is what a kiln makes out of a kelp block and
+    # it is never a block itself.
+    "dried_kelp",
 ]
 
 # Models authored lying along +Z — bars, loaves, bundles — are stood up on

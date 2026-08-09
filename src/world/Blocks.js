@@ -651,6 +651,72 @@ export const BLOCKS = [
     light: 5, lightColor: [0.35, 0.85, 1.0],
     particle: [0.88, 0.84, 0.76], sound: 'grass',
   }),
+
+  // -------------------------------------------------------------------------
+  // The larder and the lamp.
+  //
+  // **Appended at the very end of the table, and that is the whole of the
+  // rule.** A block's index *is* the byte a save stores, so a new entry pushed
+  // in beside the reef it belongs with would renumber every block after it and
+  // turn every existing world into confetti. Three more here takes the table to
+  // 195 of the 256 a `Uint8Array` can hold.
+  //
+  // All three carry the reef's three properties — `submerged`, `needsFloor`,
+  // and no billboard because `MODELLED_CROSS` suppresses it — for the reasons
+  // spelled out above that family. What is new is what they are *for*.
+  //
+  // The reef was eight things to look at and one thing (the clam) to take. It
+  // fed nothing: you could swim a coral bank end to end and come home with
+  // decoration. These are the answer to that, and they are deliberately three
+  // different kinds of answer rather than three plants:
+  //
+  //   sea_lettuce   food you can eat where you find it, and the leaf the
+  //                 kitchen wants. Common, shallow, the whole shelf.
+  //   sea_grape     the same idea one rung up and much rarer — warm reef only.
+  //   abyss_anemone a light. Not food, not a crop; the reason to go *deep*.
+  // -------------------------------------------------------------------------
+
+  // Ulva. The seabed's tall grass, except that it feeds you: it drops itself,
+  // the item carries `food`, and it is an ingredient in three recipes. Soft as
+  // sea grass to break — a leaf is a leaf — and it is `tier: 0` on purpose,
+  // because the point of a forageable is that a swimmer with nothing in their
+  // hands can still come up with lunch.
+  block({
+    name: 'sea_lettuce', label: 'Sea Lettuce', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, submerged: true, needsFloor: true,
+    particle: [0.52, 0.82, 0.32], sound: 'grass',
+  }),
+  // Caulerpa. Scarcer than the lettuce and it grows only on the warm reef, so
+  // it is the find rather than the staple — which is why it is worth more raw
+  // than anything else you can pick up down there and why it is the one sea
+  // ingredient the cake-tier recipes take.
+  block({
+    name: 'sea_grape', label: 'Sea Grapes', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.1, submerged: true, needsFloor: true,
+    particle: [0.60, 0.85, 0.32], sound: 'grass',
+  }),
+  // The deep light, and the first one on the planet you can dig for.
+  //
+  // Sunstone is light 15 and merchant-only; a torch is 13 and costs coal. This
+  // is 11 — bright enough to light a room and read as a lamp, dark enough that
+  // it never makes either of those redundant — and it is a *cross* block, so it
+  // cannot be tiled into a lit wall the way sunstone can. What it does to the
+  // light economy is give a player with no coal, no iron and no trader a way to
+  // light a base, paid for in breath rather than in coins. That is the same
+  // trade the pearl already offers and it is the reason to go deeper than the
+  // reef: the anemone lives at the foot of the slope, below every coral.
+  //
+  // `tier: 1` for the clam's reason — a light you can take with bare hands is a
+  // light you find by accident. The colour is a cold blue-green, deliberately
+  // nothing like a flame: every other light in the game is on the orange side
+  // of white, so at a glance a teal glow in the dark is *only* ever this.
+  block({
+    name: 'abyss_anemone', label: 'Abyssal Anemone', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.5, tier: 1,
+    submerged: true, needsFloor: true,
+    light: 11, lightColor: [0.31, 0.86, 0.78],
+    particle: [0.31, 0.84, 0.75], sound: 'grass',
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));

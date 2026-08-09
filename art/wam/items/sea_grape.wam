@@ -1,0 +1,148 @@
+# Sea Grapes — the seabed's berry, and the one thing down there that is a treat
+# rather than a ration.
+#
+# Caulerpa lentillifera: a runner creeping over the sand with upright shoots
+# coming off it, each shoot strung with little translucent beads. Two decisions
+# carry the whole model.
+#
+# **The beads are ring widths, not spheres.** The obvious build is a stalk with
+# twenty `attach kind=sphere` beads on it, and it costs twenty closed solids and
+# a great deal of guessed placement for a shape that is read at swimming
+# distance as "knobbly". A single loft whose rings alternate fat and thin *is*
+# the knobble — one tube, one material band, six sides, and the bumps land on
+# the axis by construction instead of by twenty coordinates. It also means the
+# beads cannot drift off the stalk when someone lengthens it.
+#
+# **The runner is what says "grapes" and not "moss".** Without it the three
+# shoots are three separate lumpy sticks and the plant has no organising idea.
+# The stolon runs along Z through the origin, so it is centred on X and honestly
+# symmetric; the shoots come off it at three different points and three
+# different heights, which is what turns a repeated stamp into a colony.
+#
+# Colour is the brightest green in the whole underwater set, and warmer than
+# `sea_lettuce`: this is the rarer find of the two, it grows on the warm reef
+# rather than across the whole shelf, and a forageable nobody spots is a
+# forageable nobody eats. The pale `Sun` caps only the topmost bead of each
+# shoot — a highlight, not a wash, so the beads still read as beads.
+
+model sea_grape
+  height 0.46
+  style chunky
+
+palette
+  Bead #9ada53
+  Deep #4f8a33
+  Stem #6ea63c
+  Sun  #ddf7a2
+
+skeleton
+  root bed at 0.0
+
+parts
+  # The stolon. Nearly horizontal, running back to front through the origin, and
+  # slightly knobbled itself so it does not read as a laid cable. It is the part
+  # that touches the sand along its whole length, which is why every shoot below
+  # can start clear of the ground without the plant floating.
+  loft runner bone=bed at=0.0 offset=(0,0.05,-0.34) dir=fwd len=0.72 material=Stem sides=6
+    ring 0.00 w=0.05 d=0.05
+    ring 0.22 w=0.09 d=0.08
+    ring 0.45 w=0.06 d=0.06
+    ring 0.70 w=0.09 d=0.08
+    ring 1.00 w=0.05 d=0.05
+    cap start=dome end=dome
+
+  # Three beaded shoots. The alternating rings are the beads; the narrow rings
+  # between them are the thread the beads are on, and the ratio between the two
+  # (about 3:1) is the only number here that matters — closer than 2:1 and the
+  # shoot is a smooth taper, further apart and it is a string of balls with the
+  # stalk gone.
+  #
+  # The two that lean along X are rooted off the axis in the same direction so
+  # each is honestly one-sided; the tall middle one stays centred and is
+  # symmetric. See `coral_branch.wam` — same lint rule, same fix.
+  loft shootA bone=bed at=0.0 offset=(-0.07,0.04,-0.20) dir=up pitch=4 tilt=14 len=0.74 material=Deep sides=6
+    ring 0.000 w=0.03 d=0.03
+    ring 0.120 w=0.03 d=0.03 material=Bead
+    ring 0.142 w=0.105 d=0.105
+    ring 0.233 w=0.105 d=0.105
+    ring 0.255 w=0.03 d=0.03 material=Deep
+    ring 0.340 w=0.03 d=0.03 material=Bead
+    ring 0.362 w=0.115 d=0.115
+    ring 0.453 w=0.115 d=0.115
+    ring 0.475 w=0.03 d=0.03 material=Deep
+    ring 0.560 w=0.03 d=0.03 material=Bead
+    ring 0.582 w=0.110 d=0.110
+    ring 0.673 w=0.110 d=0.110
+    ring 0.695 w=0.03 d=0.03 material=Deep
+    ring 0.780 w=0.03 d=0.03 material=Sun
+    ring 0.802 w=0.092 d=0.092
+    ring 0.893 w=0.092 d=0.092
+    ring 0.915 w=0.03 d=0.03 material=Deep
+    ring 1.000 w=0.021 d=0.021
+    cap start=flat end=dome
+  # The leader: centred, tallest, and the one that carries the silhouette.
+  loft shootB bone=bed at=0.0 offset=(0,0.05,0.02) dir=up pitch=2 tilt=0 len=0.94 material=Deep sides=6
+    ring 0.000 w=0.03 d=0.03
+    ring 0.090 w=0.03 d=0.03 material=Bead
+    ring 0.112 w=0.104 d=0.104
+    ring 0.183 w=0.104 d=0.104
+    ring 0.205 w=0.03 d=0.03 material=Deep
+    ring 0.270 w=0.03 d=0.03 material=Bead
+    ring 0.292 w=0.116 d=0.116
+    ring 0.363 w=0.116 d=0.116
+    ring 0.385 w=0.03 d=0.03 material=Deep
+    ring 0.450 w=0.03 d=0.03 material=Bead
+    ring 0.472 w=0.118 d=0.118
+    ring 0.543 w=0.118 d=0.118
+    ring 0.565 w=0.03 d=0.03 material=Deep
+    ring 0.630 w=0.03 d=0.03 material=Bead
+    ring 0.652 w=0.108 d=0.108
+    ring 0.723 w=0.108 d=0.108
+    ring 0.745 w=0.03 d=0.03 material=Deep
+    ring 0.810 w=0.03 d=0.03 material=Sun
+    ring 0.832 w=0.092 d=0.092
+    ring 0.903 w=0.092 d=0.092
+    ring 0.925 w=0.03 d=0.03 material=Deep
+    ring 1.000 w=0.021 d=0.021
+    cap start=flat end=dome
+  loft shootC bone=bed at=0.0 offset=(0.08,0.04,0.22) dir=up pitch=-3 tilt=-16 len=0.62 material=Deep sides=6
+    ring 0.000 w=0.03 d=0.03
+    ring 0.140 w=0.03 d=0.03 material=Bead
+    ring 0.162 w=0.098 d=0.098
+    ring 0.278 w=0.098 d=0.098
+    ring 0.300 w=0.03 d=0.03 material=Deep
+    ring 0.440 w=0.03 d=0.03 material=Bead
+    ring 0.462 w=0.108 d=0.108
+    ring 0.578 w=0.108 d=0.108
+    ring 0.600 w=0.03 d=0.03 material=Deep
+    ring 0.740 w=0.03 d=0.03 material=Sun
+    ring 0.762 w=0.088 d=0.088
+    ring 0.878 w=0.088 d=0.088
+    ring 0.900 w=0.03 d=0.03 material=Deep
+    ring 1.000 w=0.021 d=0.021
+    cap start=flat end=dome
+
+checks
+  # The runner lies on the sand and every shoot starts on it. A shoot whose foot
+  # floats is the failure this arrangement exists to avoid.
+  assert bottom(runner) < 0.06
+  assert bottom(shootA) < 0.08
+  assert bottom(shootC) < 0.08
+  # It is beaded. Every shoot has to be visibly fatter than the stolon it grows
+  # off, or someone has smoothed the profile out and the plant has become a
+  # sprig of something else. Measured against the runner rather than against a
+  # literal because both are hexagons and a hexagon's bounding box is a good
+  # deal narrower than its nominal `w` — a literal here reads as a bug the first
+  # time someone changes `sides=`.
+  assert width(shootB) > width(runner) * 1.05
+  assert width(shootA) > width(runner) * 1.05
+  # A colony with a leader, and three clearly different heights.
+  assert top(shootB) > top(shootA) * 1.18
+  assert top(shootA) > top(shootC) * 1.12
+  # Upright, and narrow enough not to grow into the next column. `BlockModels`
+  # scales by height alone, so a wide model arrives wide.
+  assert height > width
+  assert width / height in 0.45..0.9
+  assert parts == 4
+  assert tris < 900
+  measure aspect width / height

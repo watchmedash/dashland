@@ -165,6 +165,32 @@ const RAW = [
   { out: 'cake', count: 1, table: true, shape: ['BBB', 'WWW'], key: { B: 'berries', W: 'wheat' } },
   { out: 'cookie', count: 2, in: ['wheat', 'berries'] },
 
+  // --- food from the sea ---
+  //
+  // Three second recipes for three meals that already exist, and deliberately
+  // not three new meals. The reef pass gave the player a reason to dive and
+  // nothing to do with what they brought up; the answer to that is not a
+  // parallel kitchen with its own tier ladder, it is the *existing* kitchen
+  // accepting what the sea grows. A player who has learned what a Garden Salad
+  // is has learned everything they need to know about this.
+  //
+  // Each one is the land recipe with the land ingredient swapped for its
+  // nearest sea equivalent, which is also why none of them is cheaper than what
+  // it copies. `Trade.js` prices an item at its *cheapest* recipe, so a sea
+  // version that undercut the original would quietly devalue the meal for
+  // everyone — measured, all three come out well above (see the harness
+  // numbers), and the meals keep the prices they had.
+  //
+  //  - the salad is the only one that needs no farm and no fire at all: three
+  //    things you can pick with your hands, holding your breath. That is the
+  //    recipe a coastal spawn actually reaches first.
+  //  - the sandwich is a fish sandwich, which needs a rod rather than a herd.
+  //  - the stew is a chowder: it is the bench recipe, and the one that pays for
+  //    having bothered to dry the kelp.
+  { out: 'salad', count: 1, in: ['sea_lettuce', 'sea_grape', 'kelp'] },
+  { out: 'sandwich', count: 1, in: ['bread', 'cooked_fish', 'sea_lettuce'] },
+  { out: 'stew', count: 1, table: true, in: ['cooked_fish', 'dried_kelp', 'carrot', 'mushroom'] },
+
   // --- tools ---
   ...['wood:planks', 'stone:cobblestone', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder'].flatMap((spec) => {
     const [tier, mat] = spec.split(':');
@@ -261,6 +287,12 @@ export const SMELTING = [
   // An egg is the cheapest thing the trader sells and the fastest thing the kiln
   // cooks, which is the intended on-ramp: buy a dozen, walk away with breakfast.
   { in: 'egg', out: 'cooked_egg', count: 1, time: 4 },
+  // Kelp on the rack. The one thing the sea gives you that a fire genuinely
+  // transforms — everything else down there is eaten as it comes up — and the
+  // cheapest cooked food in the game, because its input grows in forests and
+  // costs nothing but the swim. 5 seconds puts it between an egg and a fish:
+  // a leaf dries faster than a fillet cooks.
+  { in: 'kelp', out: 'dried_kelp', count: 1, time: 5 },
 ].map((s) => ({ in: itemIdOf(s.in), out: itemIdOf(s.out), count: s.count, time: s.time }))
   .filter((s) => s.in && s.out);
 

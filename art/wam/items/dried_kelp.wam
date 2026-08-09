@@ -1,0 +1,101 @@
+# Dried Kelp — three sheets of kelp off the kiln rack, still stuck together.
+#
+# This is the one item in the underwater set that is *not* a living thing, and
+# it has to say so at toolbar size or it reads as another green plant. Three
+# cues do it, and they are all inversions of what `kelp.wam` does:
+#
+# **It is dark and desaturated.** A live stipe is olive with pale sun-tips; this
+# is nearly black-green with a grey bloom on the cut edges, which is what dried
+# seaweed actually looks like and, more to the point, is the only way a cooked
+# thing reads as cooked when the raw thing was already green. The `cooked: true`
+# flag in the registry pays the player in food value; the colour is what pays
+# them in recognition.
+#
+# **It is flat and it is stacked.** A kelp blade in the water is a ribbon that
+# waves; a dried one is a pressed sheet in a pile with two more behind it. The
+# three sheets are three different heights and lean three different ways, which
+# is the whole difference between a stack and a single card seen from an angle —
+# and it means the silhouette survives the hand swinging past the camera, which
+# a single sheet's does not (see `hide.wam` for the same argument reaching the
+# opposite conclusion: a pelt solved it by rolling, this solves it by stacking).
+#
+# **The edges are torn, not cut.** Every sheet's top ring is wide, rolled and
+# capped `flat`, so the top is a ragged slanted margin rather than a scissored
+# line. A rectangle with square corners is a sheet of paper.
+#
+# Authored standing rather than lying: `render/ItemModels.js` normalises by the
+# Y extent and closes the fist somewhere along Y, so a pad of sheets lying flat
+# would be scaled by its own thickness and gripped across its face.
+
+model dried_kelp
+  height 0.30
+  style chunky
+
+palette
+  Leaf #6d8341
+  Dark #4a5c2a
+  Salt #c3ce9c
+
+skeleton
+  root bed at 0.0
+
+parts
+  # The front sheet: tallest, widest, and the only one whose whole face the
+  # player sees. Its `roll=` is the press mark � a dried sheet does not lie
+  # perfectly flat, it buckles where it dried against the rack.
+  #
+  # `frame=fwd` and not `frame=up`: on a near-vertical part the up axis runs
+  # *along* the path, so `d` had nothing across the part to span and the three
+  # sheets came out as one solid brick. Pinning the depth axis to +Z is what
+  # makes `d` the paper thickness and `w` the width of the sheet.
+  loft sheetA bone=bed at=0.0 offset=(0,0,-0.10) dir=up pitch=-6 tilt=0 len=0.72 material=Leaf frame=fwd sides=4
+    ring 0.00 w=0.62 d=0.036
+    ring 0.14 w=0.86 d=0.042 roll=6
+    ring 0.50 w=0.92 d=0.045 roll=-5
+    ring 0.82 w=0.88 d=0.040 roll=6 material=Salt
+    ring 1.00 w=0.74 d=0.032 roll=-9
+    cap start=flat end=flat
+
+  # Two in *front* of it, each shorter and narrower than the one behind. That
+  # ordering is the whole model and it took two render sheets to find: with the
+  # big sheet at the front it occludes both others exactly, and the four panels
+  # showed a green brick. Smallest nearest the camera and all three margins
+  # step into view.
+  loft sheetB bone=bed at=0.0 offset=(0,0,0.00) dir=up pitch=-3 tilt=0 len=0.60 material=Dark frame=fwd sides=4
+    ring 0.00 w=0.50 d=0.034
+    ring 0.14 w=0.70 d=0.040 roll=-6
+    ring 0.50 w=0.76 d=0.042 roll=5
+    ring 0.82 w=0.72 d=0.038 roll=-6 material=Salt
+    ring 1.00 w=0.60 d=0.030 roll=4
+    cap start=flat end=flat
+  loft sheetC bone=bed at=0.0 offset=(0,0,0.10) dir=up pitch=11 tilt=0 len=0.48 material=Dark frame=fwd sides=4
+    ring 0.00 w=0.40 d=0.032
+    ring 0.14 w=0.56 d=0.038 roll=5
+    ring 0.50 w=0.62 d=0.040 roll=-5
+    ring 0.82 w=0.58 d=0.036 roll=6 material=Salt
+    ring 1.00 w=0.48 d=0.028 roll=-7
+    cap start=flat end=flat
+
+checks
+  # All three sit on the same surface — a stack with one sheet floating is a
+  # stack that has come apart.
+  assert bottom(sheetA) < 0.02
+  assert bottom(sheetB) < 0.02
+  assert bottom(sheetC) < 0.02
+  # Three clearly different heights, front to back. This is what the eye reads
+  # as "several of them" and it is the first thing a tidy-up would flatten.
+  assert top(sheetA) > top(sheetB) * 1.08
+  assert top(sheetB) > top(sheetC) * 1.08
+  # Sheets, not slabs: each is at least eight times as wide as it is thick.
+  assert width(sheetA) > depth(sheetA) * 2.0
+  assert width(sheetA) > width(sheetC) * 1.25
+  # Squat, and no taller than it is wide: `ItemModels` normalises by the Y
+  # extent, and a tall thin item arrives as a plank held like a sword.
+    assert width / height in 0.7..1.3
+  # The salt bloom survives. It exists only on the three top rings, so a ring
+  # edit that drops it fails here instead of quietly handing back three plain
+  # green sheets, which is the raw plant again.
+  assert materials == 3
+  assert parts == 3
+  assert tris < 260
+  measure aspect width / height

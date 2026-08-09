@@ -660,6 +660,72 @@ const REEF_SHELL = 0.055;
 /** One coral head in five is bleached, so a reef is not uniformly bright. */
 const REEF_DEAD = 0.20;
 /**
+ * Sea grapes, which are a reef thing and only a reef thing.
+ *
+ * Taken out of the *grass skirt* rather than out of the coral, and that is not
+ * an implementation detail. Caulerpa grows on the open sand between heads, not
+ * on the heads; putting the band after the coral term means a reef's coral
+ * count is exactly what it was before this pass existed, and what changes is
+ * that some of the carpet at the edges and in the gaps is now something you can
+ * eat. A band inserted before the coral would have quietly thinned every reef
+ * on the planet to pay for a vegetable.
+ *
+ * Warm-scaled like the coral, and rising toward the rim (`1 - w`) for the same
+ * reason the grass does: the middle of a reef is heads, the edge is sand.
+ *
+ * Measured planet-wide at this value: 2,441 grapes, against 1,136-1,698 of each
+ * coral and 1,581 sponges � the most common thing on a reef that is not carpet,
+ * which is right for the plant a diver is supposed to come home with. The coral
+ * counts are unchanged to the block by this pass, which is what taking the band
+ * out of the skirt rather than out of the heads bought.
+ */
+const REEF_GRAPE = 0.30;
+/**
+ * Sea lettuce: the third kind of cover, and the one you can eat.
+ *
+ * Its own noise field at its own frequency and offset, exactly as the kelp and
+ * the grass have theirs — three fields, so a lettuce bed, a kelp forest and a
+ * grass meadow are three different places rather than one place wearing three
+ * hats. The peak is under two thirds of the grass's and the exponent is higher,
+ * which measures out at 7,994 planet-wide against sea grass's 26,891 and kelp's
+ * 13,646 — common enough that a hungry swimmer finds one without hunting, rare
+ * enough that a shelf does not read as a salad bar. Almost all of it comes out
+ * of the *empty* cells rather than out of the carpet: the same measurement puts
+ * sea grass down only 1,623 for a pass that added 7,994.
+ *
+ * Warmer-limited than the grass (which will grow anywhere that is not polar)
+ * because Ulva is a shallow, sunlit plant and because the two need to be
+ * separable — a player has to be able to learn "the pale broad one is food",
+ * and that is easier where they are not perfectly co-extensive.
+ */
+const LETTUCE_PEAK = 0.40;
+const LETTUCE_TEMP_MIN = 0.05;
+/**
+ * The abyssal anemone: the deep floor's light, and the rarest thing that grows.
+ *
+ * Depth is the whole gate. The reef band tops out at 16 and the ocean bottoms
+ * out at R_SEA - R_SEABED_MIN = 17, so "below the reef" is not a clean cut —
+ * instead this fades in from 13.5 and is only at full strength at 16.5, which
+ * in practice means the flat floor beyond the foot of the continental slope.
+ * The two bands do overlap between 13.5 and 16, and the overlap is thin twice
+ * over: a reef needs warm water and a lattice hit, and the anemone's own
+ * probability there is a fraction of its full one. Where they do land on the
+ * same column the reef wins, because `reefAt` runs first and `_propAt` refuses
+ * a cell that is not water — that is an ordering, not a race.
+ *
+ * ABYSS_CHANCE is a per-column probability at full depth and in the middle of a
+ * patch, so the planet-wide count is far below what it looks like: measured, 341
+ * over the whole world against the giant clam's 440, and 58% of them are on the
+ * flat bottom at depth 17. The clump exponent is what stops those few hundred being an even
+ * dusting — an anemone you meet is usually within sight of another, so finding
+ * one is worth swimming around for, and the dark floor between the patches is
+ * genuinely empty.
+ */
+const ABYSS_DEPTH_MIN = 13.5;
+const ABYSS_DEPTH_FULL = 16.5;
+const ABYSS_CHANCE = 0.060;
+const ABYSS_CLUMP = 6.0;
+/**
  * Sea grass and kelp: cover rather than landmark.
  *
  * A wider depth band than the coral and a much wider climate one — grass grows
@@ -3677,6 +3743,8 @@ export class WorldGen {
         const pCoral = Math.min(0.90,
           site.rich * site.warm * 1.25 * smoothstep(0, 0.42, w));
         const pGrass = 0.28 + 0.34 * (1 - w);
+        // Grapes come out of the carpet, not out of the coral — see REEF_GRAPE.
+        const pGrape = REEF_GRAPE * site.warm * (0.30 + 0.70 * (1 - w));
 
         let id;
         if (r < pShell) {
@@ -3691,7 +3759,9 @@ export class WorldGen {
           // all the same, so the stream does not fork on which head came up.
           const bleach = rng() < REEF_DEAD;
           if (id !== ID.sea_sponge && bleach) id = ID.coral_dead;
-        } else if (r < pShell + pCoral + pGrass) {
+        } else if (r < pShell + pCoral + pGrape) {
+          id = ID.sea_grape;
+        } else if (r < pShell + pCoral + pGrape + pGrass) {
           id = ID.sea_grass;
         } else {
           continue;
@@ -3743,8 +3813,12 @@ export class WorldGen {
     // grass bed are not the same patch wearing two hats.
     const gf = this.nDetail.fbm3(dir[0] * 7.5, dir[1] * 7.5, dir[2] * 7.5, 3, 2, 0.5);
     const kf = this.nDetail.fbm3(dir[0] * 5.0 + 31.7, dir[1] * 5.0, dir[2] * 5.0 - 12.3, 3, 2, 0.5);
+    // The third field. Its own frequency and its own offsets for the reason the
+    // second one has them: two beds drawn from one field are one bed.
+    const lf = this.nDetail.fbm3(dir[0] * 6.2 - 18.4, dir[1] * 6.2, dir[2] * 6.2 + 24.1, 3, 2, 0.5);
     const gDens = clamp(gf * 0.5 + 0.55, 0, 1);
     const kDens = clamp(kf * 0.5 + 0.42, 0, 1);
+    const lDens = clamp(lf * 0.5 + 0.46, 0, 1);
 
     const rng = this.colRng(col, 0x5ea9);
     const r = rng();
@@ -3752,16 +3826,65 @@ export class WorldGen {
 
     const canGrass = inLake || temp > GRASS_TEMP_MIN;
     const canKelp = inLake || (temp > KELP_TEMP_MIN && temp < KELP_TEMP_MAX);
+    // Salt water only. Lakes never reach this line today — LAKE_WEED is empty,
+    // so `inLake` has already returned above — but writing the condition out
+    // says what the answer would be if a weed were ever let back into a pond:
+    // sea lettuce is food, and a food that grows in every puddle is a food
+    // nobody has to swim for.
+    const canLettuce = !inLake && temp > LETTUCE_TEMP_MIN;
     const pKelp = canKelp ? KELP_PEAK * Math.pow(kDens, 2.6) : 0;
     const pGrass = canGrass ? GRASS_PEAK * Math.pow(gDens, 2.2) : 0;
+    const pLettuce = canLettuce ? LETTUCE_PEAK * Math.pow(lDens, 2.4) : 0;
 
     if (r < pKelp) {
       // A stalk that does not fit falls through to nothing rather than to
       // grass: the alternative is a kelp bed in deep water that turns into a
       // lawn wherever the bottom rises, which reads as a bug.
       this._kelpAt(blocks, col, Math.min(n, topK - floorK - 1), floorK, topK);
-    } else if (r < pKelp + pGrass) {
+    } else if (r < pKelp + pLettuce) {
+      this._propAt(blocks, col, ID.sea_lettuce, floorK, topK);
+    } else if (r < pKelp + pLettuce + pGrass) {
       this._propAt(blocks, col, ID.sea_grass, floorK, topK);
+    }
+  }
+
+  /**
+   * The deep floor's anemones, for one column.
+   *
+   * A separate pass rather than a fourth band in `seabedFloraAt`, and the
+   * reason is the depth bands: that pass stops at SEAB_DEPTH_MAX (13) and this
+   * one starts at 13.5, so the two are disjoint by construction and neither can
+   * take a cell the other wanted. Folding them together would mean one function
+   * whose two halves share nothing but a floor lookup.
+   *
+   * Writes only into its own column, like `floraAt` and `seabedFloraAt`, so it
+   * needs no region clip. It runs last of everything, which means a reef prop
+   * that reached this deep is already standing here — `_propAt` refuses a cell
+   * that is not water, so the reef simply wins, deterministically, rather than
+   * the two passes overwriting each other in whatever order they happened to
+   * run. Every decision is off the terrain tables and this column's own
+   * `colRng`, so a region boundary cannot disagree with itself.
+   */
+  abyssAt(blocks, col) {
+    if (this.colBiome[col] !== BIOME.OCEAN || !this.submerged[col]) return;
+    if (this.lakeKind[col]) return;
+    const topK = this._topWaterK(col);
+    if (topK < 2) return;
+    const floorK = this._reefFloorK(blocks, col);
+    if (floorK < 0 || floorK + 1 >= topK) return;
+    const depth = depthOfK(floorK);
+    if (depth < ABYSS_DEPTH_MIN) return;
+
+    const dir = _reefDir;
+    this._dirOf(col, dir);
+    // A low frequency and a high exponent: patches a few columns across with
+    // long empty floor between them. See ABYSS_CLUMP.
+    const af = this.nDetail.fbm3(dir[0] * 3.1 + 57.3, dir[1] * 3.1 - 9.7, dir[2] * 3.1 + 41.5, 3, 2, 0.5);
+    const aDens = clamp(af * 0.5 + 0.5, 0, 1);
+    const deep = clamp((depth - ABYSS_DEPTH_MIN) / (ABYSS_DEPTH_FULL - ABYSS_DEPTH_MIN), 0, 1);
+    const rng = this.colRng(col, 0x2b9f);
+    if (rng() < ABYSS_CHANCE * Math.pow(aDens, ABYSS_CLUMP) * deep) {
+      this._propAt(blocks, col, ID.abyss_anemone, floorK, topK);
     }
   }
 
@@ -3821,5 +3944,8 @@ export class WorldGen {
     // cell outright and a boulder is only ever laid into air.
     for (let n = 0; n < margin.length; n++) this.reefAt(blocks, margin[n], rid);
     for (let n = 0; n < cols.length; n++) this.seabedFloraAt(blocks, cols[n]);
+    // The deep floor, last. Disjoint from the cover pass by depth and beaten by
+    // the reef where the two bands overlap — see `abyssAt`.
+    for (let n = 0; n < cols.length; n++) this.abyssAt(blocks, cols[n]);
   }
 }

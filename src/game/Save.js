@@ -10,8 +10,34 @@
 
 const DB_NAME = 'dashcraft';
 const STORE = 'worlds';
-const META_KEY = 'dashcraft.meta.v1';
-const SLOT = 'slot0';
+
+/** How many planets a player may keep at once. */
+export const SLOT_COUNT = 10;
+
+/**
+ * The index of slot summaries, and the single save's summary that came before
+ * it.
+ *
+ * The index is a ten-entry array in localStorage — the same "small enough to
+ * read synchronously at boot" argument the single summary was written under,
+ * multiplied by ten and still under a kilobyte.
+ */
+const INDEX_KEY = 'dashcraft.slots.v1';
+const LEGACY_META = 'dashcraft.meta.v1';
+
+/**
+ * Where a slot's world actually lives, and the reason migration moves no bytes.
+ *
+ * The single save was stored under `slot0`. Numbering the slots from zero
+ * internally makes `slot0` the natural address of slot 1, so a player with a
+ * world in progress keeps it by *not touching it*: the only thing migration
+ * writes is the index in localStorage, and the four megabytes in IndexedDB are
+ * never read, copied, or risked. Slot 1 is `slot0` for the same reason the
+ * database is still called `dashcraft` — see the note at the top of this file.
+ *
+ * @param {number} i zero-based slot index. The player is shown `i + 1`.
+ */
+const dataKey = (i) => `slot${i}`;
 
 /**
  * Open the database, creating the store if the upgrade happens to run.
@@ -99,36 +125,126 @@ async function del(key) {
   });
 }
 
+/** An empty index: ten slots, none of them holding anything. */
+const blankIndex = () => new Array(SLOT_COUNT).fill(null);
+
+/**
+ * The ten summaries, migrating the pre-slot single save into slot 1 on the way
+ * past.
+ *
+ * Migration fires exactly once and only when there is something to migrate: an
+ * index already in localStorage is authoritative, so a player who *deletes*
+ * slot 1 does not have it walk back in on the next launch. It moves no world
+ * data at all — see `dataKey`, which hands slot 1 the address the single save
+ * was already written under. The old summary key is left where it is rather
+ * than removed; nothing reads it once the index exists, and an untouched key is
+ * one less thing that can go wrong halfway.
+ */
+function readIndex() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null'); } catch { raw = null; }
+  if (Array.isArray(raw)) {
+    const out = blankIndex();
+    for (let i = 0; i < SLOT_COUNT; i++) out[i] = raw[i] || null;
+    return out;
+  }
+  const out = blankIndex();
+  let legacy = null;
+  try { legacy = JSON.parse(localStorage.getItem(LEGACY_META) || 'null'); } catch { legacy = null; }
+  if (!legacy) return out;
+  out[0] = legacy;
+  writeIndex(out);
+  return out;
+}
+
+function writeIndex(index) {
+  localStorage.setItem(INDEX_KEY, JSON.stringify(index));
+}
+
+const inRange = (i) => Number.isInteger(i) && i >= 0 && i < SLOT_COUNT;
+
 export const Save = {
-  /** Lightweight summary for the main menu, readable without touching IndexedDB. */
-  meta() {
-    try { return JSON.parse(localStorage.getItem(META_KEY) || 'null'); } catch { return null; }
+  SLOT_COUNT,
+
+  /**
+   * Every slot's summary, in slot order. Readable without touching IndexedDB,
+   * which is what lets the menu draw the list before anything is clicked.
+   * @returns {(object|null)[]} always `SLOT_COUNT` long
+   */
+  slots() { return readIndex(); },
+
+  /** One slot's summary, or null if it is empty. */
+  slot(i) { return inRange(i) ? readIndex()[i] : null; },
+
+  /** The slot saved most recently, or -1 if every one of them is empty. */
+  newest() {
+    const index = readIndex();
+    let best = -1;
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      if (index[i] && (best < 0 || (index[i].savedAt | 0) > (index[best].savedAt | 0))) best = i;
+    }
+    return best;
   },
 
-  hasSave() { return !!this.meta(); },
+  /**
+   * The most recently saved summary, or null.
+   *
+   * Kept under its old name because its old caller is the boot loader, which
+   * has to decide which single character model to fetch before anything has
+   * been clicked and cannot afford to open IndexedDB to find out. With ten
+   * slots the best guess is the one the player last played.
+   */
+  meta() {
+    const i = this.newest();
+    return i < 0 ? null : readIndex()[i];
+  },
 
-  async write(payload) {
-    await put(SLOT, payload);
-    localStorage.setItem(META_KEY, JSON.stringify({
+  hasSave() { return this.newest() >= 0; },
+
+  /**
+   * Write a world into a slot, replacing whatever was there.
+   *
+   * The index entry is written after the world, never before: a summary for a
+   * planet that failed to land is a menu row that cannot be opened.
+   *
+   * @param {number} i zero-based slot index
+   */
+  async write(i, payload) {
+    if (!inRange(i)) throw new Error(`no such save slot: ${i}`);
+    await put(dataKey(i), payload);
+    const index = readIndex();
+    index[i] = {
       savedAt: Date.now(),
       seed: payload.seed,
       playtime: payload.playtime | 0,
       biome: payload.biome ?? 2,
-      // Not for the menu to show — for the boot loader, which has to decide
-      // which single character model to fetch before anything has been clicked
-      // and cannot afford to open IndexedDB to find out. `null` for a planet
-      // saved before the picker existed; the caller supplies the default.
+      // The in-game day, 1-based. `season` is the day count itself, so this is
+      // a restatement rather than new state, and it is here because "day 14" is
+      // what a player recognises a planet by.
+      day: Math.floor(payload.season || 0) + 1,
+      // `null` for a planet saved before the picker existed; the caller
+      // supplies the default.
       character: payload.player?.character ?? null,
       blocksPlaced: payload.stats?.placed | 0,
       blocksMined: payload.stats?.mined | 0,
-    }));
+    };
+    writeIndex(index);
   },
 
-  async read() { return get(SLOT); },
+  /** @param {number} i zero-based slot index */
+  async read(i) { return inRange(i) ? get(dataKey(i)) : null; },
 
-  async erase() {
-    await del(SLOT);
-    localStorage.removeItem(META_KEY);
+  /**
+   * Empty one slot, and only that one.
+   *
+   * @param {number} i zero-based slot index
+   */
+  async erase(i) {
+    if (!inRange(i)) return;
+    await del(dataKey(i));
+    const index = readIndex();
+    index[i] = null;
+    writeIndex(index);
   },
 
   settings() {

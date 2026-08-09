@@ -98,7 +98,9 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom',
   // and `MODELLED_PLANTS` in `main.js` have to agree or the seabed is empty:
   // a name here and not there draws nothing at all.
   'coral_branch', 'coral_fan', 'coral_brain', 'coral_dead',
-  'kelp', 'sea_grass', 'sea_sponge', 'sea_shell']) {
+  'kelp', 'sea_grass', 'sea_sponge', 'sea_shell',
+  // The two edible plants and the deep light, on exactly the same footing.
+  'sea_lettuce', 'sea_grape', 'abyss_anemone']) {
   const i = BLOCKS.findIndex((b) => b.name === n);
   if (i > 0) MODELLED_CROSS[i] = 1;
 }

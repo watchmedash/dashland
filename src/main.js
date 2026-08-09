@@ -36,7 +36,7 @@ import {
   bowShot, bowDrawStep,
 } from './game/Items.js';
 import { Arrows } from './game/Arrows.js';
-import { Skills, MARKS } from './game/Skills.js';
+import { Skills, MARKS, ON_DEATH } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
@@ -478,6 +478,13 @@ const MODELLED_PLANTS = {
   coral_branch: 0.82, coral_dead: 0.78, coral_fan: 0.86, sea_sponge: 0.80,
   // Squat. These measure wide, so they are given less height to be scaled by.
   coral_brain: 0.52, sea_shell: 0.42, sea_grass: 0.46,
+  // The larder and the lamp. Sea lettuce shares the ground layer with sea grass
+  // and is given the same low scale so a bed of the two reads as one carpet
+  // with two leaf shapes in it; the grapes stand up into the coral band because
+  // that is where they grow. The anemone is squat and wide by construction —
+  // its crown measures 1.46 times its height — so it gets the least of all
+  // three, or it would arrive most of a cell across on the deep floor.
+  sea_lettuce: 0.48, sea_grape: 0.72, abyss_anemone: 0.44,
   // The stacking tile. Exactly one cell — see above.
   kelp: 1.0,
 };
@@ -575,6 +582,17 @@ class Game {
     this._emitters = [];
     this._emitPool = [];
     this.seed = 0;
+    /**
+     * Which of the ten slots this session belongs to, zero-based, or -1 when
+     * there is no world open.
+     *
+     * Every write goes here and nowhere else — the autosave, the tab-hide
+     * write, the one right after worldgen, Save Game and Quit to Menu all go
+     * through `saveGame`, which is the single place that names a slot. It is
+     * set exactly twice: by `continueGame`, to the slot that was loaded, and by
+     * `newGame`, to the slot the player chose to write to.
+     */
+    this.saveSlot = -1;
     this.worldReady = false;
     /** The character picker is up and the world behind it must wait. */
     this._choosing = false;
@@ -986,7 +1004,7 @@ class Game {
     this.ui.progress(1, 'Ready');
     this.ui.loaded();
     this.state = 'menu';
-    this.ui.showMenu(Save.meta());
+    this.ui.showMenu();
   }
 
   // --- world lifecycle ------------------------------------------------------
@@ -1095,8 +1113,14 @@ class Game {
    * screen was not allowed to do.
    *
    * The cost of that is `_onWorldReady` having to wait — see the guard there.
+   *
+   * @param {number} slot zero-based, already chosen (and confirmed, if it was
+   *   holding a planet) on the slot screen. Nothing is written here: the slot
+   *   is only claimed, and the world that was in it survives until the first
+   *   autosave lands on it.
    */
-  newGame() {
+  newGame(slot) {
+    this.saveSlot = slot | 0;
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
     this.ui.progress(0, 'Igniting the core');
@@ -1144,12 +1168,14 @@ class Game {
     this.ui.closeCharacterPicker();
     if (this.worldWorker) { this.worldWorker.terminate(); this.worldWorker = null; }
     this._resetWorld();
+    this.saveSlot = -1;
     document.getElementById('loader')?.remove();
     this.state = 'menu';
-    this.ui.showMenu(Save.meta());
+    this.ui.showMenu();
   }
 
-  async continueGame() {
+  /** @param {number} slot zero-based, picked off the slot screen */
+  async continueGame(slot) {
     // The read half of the same problem `saveGame` has. An exception here used
     // to escape the click handler as an unhandled rejection, so pressing
     // Continue on an unreadable store did *nothing at all* — no load, no menu
@@ -1164,10 +1190,10 @@ class Game {
     // this time".
     let data = null;
     try {
-      data = await Save.read();
+      data = await Save.read(slot);
     } catch (err) {
       console.error(err);
-      this.ui.showMenu(Save.meta());
+      this.ui.showMenu();
       this.ui.toast('Could not read your planet. Nothing is lost, try again', 0, 5200);
       return;
     }
@@ -1176,16 +1202,17 @@ class Game {
       // two can disagree: a browser that cleared site data of one kind and not
       // the other leaves a menu entry pointing at nothing. Say so, rather than
       // letting a planet appear to vanish between launches.
-      const meta = Save.meta();
-      this.ui.showMenu(meta);
-      if (meta) this.ui.toast('That planet is not in this browser any more', 0, 5200);
+      const had = !!Save.slot(slot);
+      this.ui.showMenu();
+      if (had) this.ui.toast('That planet is not in this browser any more', 0, 5200);
       return;
     }
     if (!this._saveFitsWorld(data)) {
-      this.ui.showMenu(Save.meta());
+      this.ui.showMenu();
       this.ui.toast('That planet was made by an older version and cannot be opened', 0, 5200);
       return;
     }
+    this.saveSlot = slot | 0;
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
     this.ui.progress(0, 'Recalling your planet');
@@ -1693,7 +1720,11 @@ class Game {
   _mark(key) {
     if (!this.skills.mark(key)) return;
     const m = MARKS[key];
-    this.ui.toast(`${m.label}: ${m.points} skill point${m.points > 1 ? 's' : ''}`, 0, 4000);
+    // The xp, not the level it may or may not have just bought. `_tickSkills`
+    // is a second away at most and it announces the balance, so a mark that
+    // levels you gets both messages in the right order: what you did, then what
+    // it was worth.
+    this.ui.toast(`${m.label}: ${m.xp} XP`, 0, 4000);
     this.audio.ui(760);
     this.ui.refreshSkills();
   }
@@ -1838,7 +1869,46 @@ class Game {
     // See `_tickNightOut`: a night you did not live through does not count.
     this._nightOut = 0;
     this.ui.refresh();
-    this.ui.showDeath(cause);
+    this.ui.showDeath(cause + this._loseSkills());
+  }
+
+  /**
+   * Take the skill tree away, and say what it cost.
+   *
+   * Every death in the game arrives here — the three `_die` callers are a fall,
+   * a drowning, and `_takeHit`, which is itself the single door for blows,
+   * lava, fire and cactus. Starving cannot kill (`_tickVitals` floors health at
+   * 1), so there is no fourth path to miss.
+   *
+   * What is taken is entirely `ON_DEATH` in Skills.js; this end only reconciles
+   * the body, tells the player, and writes it down.
+   *
+   * @returns {string} a sentence for the death screen, or '' if nothing was lost
+   */
+  _loseSkills() {
+    const lost = this.skills.die();
+    // Strictly after: `_applySkills` is what takes back the health a wiped
+    // vigour branch was paying for, and `respawn` heals to `maxHealth` — so a
+    // player who is not clamped here wakes up at 30 out of 20.
+    this._applySkills();
+    this.ui.refreshSkills();
+    // A wipe a reload undoes is not a wipe. Not awaited: the death screen is
+    // already up, and the write is the same one the ninety-second autosave does.
+    this.saveGame(false);
+    if (!lost || !(lost.level > 0 || lost.spent > 0 || lost.xp > 0)) return '';
+    if (ON_DEATH === 'unlearn') {
+      return ` Every skill is unlearned, and your ${lost.spent} points are back.`;
+    }
+    if (ON_DEATH === 'toll') {
+      return lost.level > 0
+        ? ` You lost ${lost.xp} XP, and ${lost.level} level${lost.level > 1 ? 's' : ''} with it.`
+        : ` You lost ${lost.xp} XP.`;
+    }
+    // 'wipe'. Two facts, in the order they hurt: the ladder, then the tree.
+    const lvl = lost.level > 0 ? `Level ${lost.level} is gone` : 'Your XP is gone';
+    return lost.spent > 0
+      ? ` ${lvl}, and every skill with it. You start again at level 0.`
+      : ` ${lvl}. You start again at level 0.`;
   }
 
   respawn() {
@@ -1913,7 +1983,8 @@ class Game {
     this.ui.showHud(false);
     this.input.exitLock();
     this.state = 'menu';
-    this.ui.showMenu(Save.meta());
+    this.saveSlot = -1;
+    this.ui.showMenu();
   }
 
   /**
@@ -2054,8 +2125,12 @@ class Game {
    */
   async saveGame(notify) {
     if (!this.worldReady) return false;
+    // No slot, no write. Every path into a world sets one, so this is a guard
+    // against a future path that forgets rather than a state the game reaches —
+    // and the failure it prevents is writing somebody else's planet over.
+    if (this.saveSlot < 0) return false;
     try {
-      await Save.write(this._savePayload());
+      await Save.write(this.saveSlot, this._savePayload());
       if (this.saveFailures > 0) {
         // Say so, and only here. Recovery is worth interrupting for precisely
         // because the failure was: someone who has been playing under a red
@@ -5057,25 +5132,34 @@ class Game {
     }
 
     // --- eating: hold RMB on any food ---
+    //
+    // With one exception, which the sea plants introduced and which had to be
+    // handled or they could not have existed: **food that is also a block**.
+    //
+    // Kelp, sea lettuce and sea grapes are all three at once — a block in the
+    // world, an item in the bag, and a meal — and this branch used to `return`
+    // before the placement attempt at the very bottom of the method. So the
+    // moment an item declared `food`, it became impossible to put down: sea
+    // lettuce would have been unplaceable, and so would kelp, which has been
+    // placeable since the reef shipped. That is a regression you would only
+    // find by trying to plant one.
+    //
+    // The rule is "place it if you can, eat it if you cannot", which is decided
+    // *after* the placement attempt rather than guessed at before it — see the
+    // tail of this method. It also happens to read exactly right for seaweed:
+    // `IS_SUBMERGED` means these only go down under water, so holding the
+    // button while you swim plants a bed and holding it on dry land eats the
+    // plant, and neither needed a new control.
     const heldSlot = this.inventory.active();
     const heldItem = ITEMS[heldSlot.item];
-    if (heldItem?.food && input.buttons[2] && input.locked) {
-      this.eating += dt;
-      if (Math.random() < dt * 9) {
-        this.audio.step('grass');
-        this.particles.footDust(this.player.eye, this.player.up, ID.dirt);
+    const edibleBlock = !!(heldItem?.food && heldItem.block !== undefined);
+    if (!edibleBlock) {
+      if (heldItem?.food && input.buttons[2] && input.locked) {
+        this._tickEating(dt, heldSlot, heldItem);
+        return;
       }
-      if (this.eating >= 1.3) {
-        this.eating = 0;
-        this.energy = Math.min(1, this.energy + heldItem.food * FOOD_TO_ENERGY);
-        this.player.health = Math.min(this.player.maxHealth, this.player.health + Math.ceil(heldItem.food * 0.35));
-        this.inventory.consumeHeld(1);
-        this.audio.pickup();
-        this.ui.toast(`Ate ${heldItem.label}`, heldSlot.item, 1400);
-      }
-      return;
+      this.eating = 0;
     }
-    this.eating = 0;
 
     // --- bucket: scoop or pour ------------------------------------------
     // Handled before the `hit` gate below, because filling needs a ray that
@@ -5135,9 +5219,49 @@ class Game {
         return;
       }
     }
+    let placed = false;
     if (input.buttons[2] && hit && this.placeCooldown === 0 && input.locked) {
-      this.placeCooldown = this._placeBlock(hit) ? 0.2 : 0.12;
+      placed = this._placeBlock(hit);
+      this.placeCooldown = placed ? 0.2 : 0.12;
     }
+
+    // The other half of the edible-block rule (see the eating note above).
+    //
+    // A successful placement arms a short timer rather than simply zeroing the
+    // chew, because placement is rate-limited to five a second and `placed` is
+    // therefore false on most frames of a press that is very much planting. The
+    // timer has to outlive one `placeCooldown` and nothing more: at 0.35 a
+    // player laying a kelp bed never starts to eat, and a player holding the
+    // button somewhere the block will not go waits a third of a second before
+    // the meal begins — which they will not notice, because eating takes 1.3.
+    if (edibleBlock) {
+      this._plantHold = Math.max(0, (this._plantHold || 0) - dt);
+      if (placed) this._plantHold = 0.35;
+      if (placed || this._plantHold > 0 || !input.buttons[2] || !input.locked) this.eating = 0;
+      else this._tickEating(dt, heldSlot, heldItem);
+    }
+  }
+
+  /**
+   * One frame of chewing. Extracted from `_interact` so that the two cases that
+   * reach it — ordinary food up front, and a food you could also have placed
+   * after the placement attempt has declined — run the same code rather than
+   * two copies that drift.
+   */
+  _tickEating(dt, heldSlot, heldItem) {
+    this.eating += dt;
+    if (Math.random() < dt * 9) {
+      this.audio.step('grass');
+      this.particles.footDust(this.player.eye, this.player.up, ID.dirt);
+    }
+    if (this.eating < 1.3) return;
+    this.eating = 0;
+    this.energy = Math.min(1, this.energy + heldItem.food * FOOD_TO_ENERGY);
+    this.player.health = Math.min(this.player.maxHealth,
+      this.player.health + Math.ceil(heldItem.food * 0.35));
+    this.inventory.consumeHeld(1);
+    this.audio.pickup();
+    this.ui.toast(`Ate ${heldItem.label}`, heldSlot.item, 1400);
   }
 
   /**

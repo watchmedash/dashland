@@ -27,9 +27,45 @@ const NOT_OBTAINABLE = new Set([
   'log_oak_i', 'log_oak_j', 'log_birch_i', 'log_birch_j', 'log_pine_i', 'log_pine_j',
 ]);
 
+/**
+ * Blocks you can eat, and how much good it does.
+ *
+ * A block item is built from its block by the loop below and carries nothing
+ * but a name, a label and an id — which was fine while every edible thing in
+ * the game was a loose item. It is not fine for seaweed: a sea plant has to be
+ * both, because you pick it up by breaking the block and you plant it back by
+ * placing it, and splitting that into a block plus a separate "handful of
+ * lettuce" item would mean two ids, a drop table entry and a recipe to get from
+ * one to the other, all to describe one leaf.
+ *
+ * So the property is attached here instead. Everything that reads `food` —
+ * eating, the trader's larder, the value formula — finds it exactly as it finds
+ * it on an apple, and nothing else in the game had to learn a new shape.
+ *
+ * All three sit at the bottom of the raw tier (see FOOD below), and that is the
+ * whole point of them: a diver who runs their air down chasing a pearl surfaces
+ * with something to eat, not with a meal. Cooking is what turns kelp into
+ * dinner, and there is a kiln recipe for exactly that.
+ */
+const BLOCK_FOOD = {
+  // Already in the world in enormous numbers and always has been — a kelp
+  // forest is the largest single thing on the seabed — so this is deliberately
+  // the least nourishing food in the game. It is worth picking because it
+  // smelts into `dried_kelp`, not because a mouthful of it does anything.
+  kelp: 2,
+  sea_lettuce: 3,
+  // The best raw food on the planet, level with an apple and above every
+  // vegetable, and the only forageable gated behind a warm-water reef *and* a
+  // dive. Still raw tier: 4 is the ceiling of "edible in a pinch", and nothing
+  // you can pick up without a fire goes above it.
+  sea_grape: 4,
+};
+
 for (const b of BLOCKS) {
   if (NOT_OBTAINABLE.has(b.name)) continue;
-  add({ name: b.name, label: b.label, block: ID[b.name], sound: b.sound });
+  const def = { name: b.name, label: b.label, block: ID[b.name], sound: b.sound };
+  if (BLOCK_FOOD[b.name]) def.food = BLOCK_FOOD[b.name];
+  add(def);
 }
 
 // --- food -------------------------------------------------------------------
@@ -329,6 +365,28 @@ export const BOW_ID = add({
 export const ARROW_ID = add({
   name: 'arrow', label: 'Arrow', art: 'stick',
   color: '#8a6a3a', shine: '#c9a86a',
+});
+
+/**
+ * Dried Kelp — the sea's entry into the cooked tier, and the only one of these
+ * additions that is not also a block.
+ *
+ * Appended here for the reason the bow's comment gives at length: ids are what
+ * saves store, and `MATERIALS` is added before the tool and armour loops, so a
+ * line pushed into that array renumbers every tool and every piece of armour in
+ * every existing save. It belongs beside `cooked_fish` and it lives here.
+ *
+ * 6 is the bottom of the simple-cooked band, and it is chosen against the raw
+ * item rather than picked: kelp is 2, so a kiln triples it — the same multiple
+ * a fire pays on raw fish (3 → 8) and on meat (3 → 8), scaled down because the
+ * raw material is the most abundant food on the planet and is free. Cooking
+ * beating raw is the ladder's one invariant and this keeps it. That it is not
+ * *quite* a grilled fish is also the point: an ocean full of kelp that cooked
+ * into an 8 would make fishing pointless, and the rod is the better toy.
+ */
+export const DRIED_KELP_ID = add({
+  name: 'dried_kelp', label: 'Dried Kelp', food: 6, cooked: true,
+  color: '#4a5c2a', shine: '#8d9a70',
 });
 
 /**

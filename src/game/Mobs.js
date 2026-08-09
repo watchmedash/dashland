@@ -147,6 +147,16 @@ const FLIER_PER_TICK = 6;
 // individually escapable, is a night you can walk home through if you keep
 // moving — and cannot stand still in.
 const MAX_HOSTILE_SURFACE = 8;
+/**
+ * How many monsters may be abroad at once, and how often one is tried.
+ *
+ * The cap is the thing that makes them rare in the sense that matters: not
+ * how often you see one, but how many can be on you at a time. Three across
+ * the whole planet means meeting one is an event and meeting two is bad luck.
+ * The roll is per spawn tick, the same tick the wildlife top-up runs on.
+ */
+const MAX_MONSTERS = 3;
+const MONSTER_CHANCE = 0.05;
 const MAX_HOSTILE_CAVE = 4;
 /**
  * How far a placed light keeps husks out, in columns and layers. Eight columns
@@ -654,6 +664,60 @@ const FISH_KINDS = [
   'clownfish', 'bluetang', 'butterflyfish', 'moorishidol',
   'yellowtang', 'royalgramma', 'koi', 'tetra',
 ];
+
+// --- the monsters ------------------------------------------------------------
+//
+// A third category beside the animals and the husk, and it has to be a third
+// rather than a variety of husk, because `hostile` does not mean "attacks you".
+// It means husk specifically: it drives the night spawn budget, the cave and
+// surface split, and the wipe that clears a new world's first evening. A
+// monster carrying it would eat that budget and evaporate at the grace wipe.
+//
+// So `monster` is its own flag, and the split falls along what each thing
+// answers. Targeting is shared — a monster acquires you exactly as a husk does,
+// because once something has decided on you the chase is the same. Budgets,
+// the census, bedding-down and the wipe stay keyed on `hostile` alone, which is
+// what lets these walk about in daylight.
+const MON = (n) => `models/monsters/monster-${n}.glb`;
+/**
+ * They speak the pack's own animation language, and there are two dialects: the
+ * walkers carry Idle and Walk, the fliers carry only Flying. So a flier maps
+ * every gait onto the one clip it has, which is right — a bat does not stand
+ * still.
+ */
+const MONSTER_CLIPS = {
+  idle: 'Idle', walk: 'Walk', run: 'Walk', graze: 'Idle',
+  die: 'Death', attack: 'Bite_Front',
+};
+const FLYER_CLIPS = {
+  idle: 'Flying', walk: 'Flying', run: 'Flying', graze: 'Flying',
+  die: 'Death', attack: 'Bite_Front',
+};
+
+/**
+ * @param {string} file model basename
+ * @param {object} o the same shape `pet` takes, plus `flies`
+ */
+const monster = (file, o) => ({
+  ...pet(file, { ...o, diet: 'carnivore' }),
+  urls: [MON(file)],
+  // Which clip set, decided by what the model actually carries rather than by
+  // whether it flies — the two are not the same question. Only the bat, the
+  // cthulhu and the dragon are built on the pack's flying rig; the ghost hovers
+  // in this game but is animated as a walker, and handing it the flying map
+  // left it with no clip at all. A monster standing perfectly still in its rest
+  // pose while gliding at you is not the effect anyone wanted.
+  clips: (o.flyAnim ?? o.flies) ? FLYER_CLIPS : MONSTER_CLIPS,
+  monster: true,
+  fights: true,
+  // How far off it notices you. Deliberately shorter than a husk's, because a
+  // monster is a thing you come across rather than a thing that comes for you.
+  aggroRange: o.aggro ?? 13,
+  damage: o.dmg ?? 4,
+  reach: o.reach ?? 1.5,
+  swing: o.swing ?? 1.3,
+  ...(o.flies ? { flies: true, hover: o.hover ?? 2.2 } : null),
+});
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
   idle: 'idle', walk: 'walk', run: 'sprint', graze: 'idle',
@@ -1121,6 +1185,73 @@ const SPECIES = {
     clips: FISH_CLIPS,
   },
 
+  // --- the things that want you dead in broad daylight ---
+  //
+  // Rare, and each one belongs somewhere: see MONSTER_BY_BIOME. Sizes are in
+  // cells against a player of 1.8, so a cyclops looms and a mushroom does not.
+  yeti: monster('yeti', {
+    label: 'Yeti', h: 2.3, hp: 26, spd: 1.15, shy: 0, turn: 3.0, accel: 6.5,
+    dmg: 7, reach: 1.8, swing: 1.7, aggro: 15, drops: [['hide', 1, 2]],
+  }),
+  cyclops: monster('cyclops', {
+    label: 'Cyclops', h: 2.6, hp: 30, spd: 1.05, shy: 0, turn: 2.6, accel: 6.0,
+    dmg: 8, reach: 2.0, swing: 1.9, aggro: 14, drops: [['hide', 1, 2], ['cinder', 1, 1]],
+  }),
+  demon: monster('demon', {
+    label: 'Demon', h: 1.9, hp: 22, spd: 1.35, shy: 0, turn: 3.6, accel: 8.0,
+    dmg: 6, reach: 1.5, swing: 1.2, aggro: 15, drops: [['cinder', 1, 2]],
+  }),
+  greendemon: monster('greendemon', {
+    label: 'Imp', h: 1.5, hp: 16, spd: 1.45, shy: 0, turn: 4.2, accel: 8.5,
+    dmg: 4, reach: 1.3, swing: 1.1, aggro: 14, drops: [['cinder', 1, 1]],
+  }),
+  skull: monster('skull', {
+    label: 'Skull', h: 1.6, hp: 18, spd: 1.30, shy: 0, turn: 3.8, accel: 8.0,
+    // `bone` was the obvious drop and does not exist — `itemIdOf` would have
+    // returned 0 and the skull would have dropped nothing, silently, forever.
+    dmg: 5, reach: 1.4, swing: 1.2, aggro: 14, drops: [['flint', 1, 2], ['sulfur', 1, 1]],
+  }),
+  alien: monster('alien', {
+    label: 'Alien', h: 1.7, hp: 20, spd: 1.40, shy: 0, turn: 4.0, accel: 8.5,
+    dmg: 5, reach: 1.4, swing: 1.2, aggro: 15, drops: [['crystal', 1, 1]],
+  }),
+  alien_tall: monster('alien_tall', {
+    label: 'Tall Alien', h: 2.2, hp: 24, spd: 1.25, shy: 0, turn: 3.2, accel: 7.0,
+    dmg: 6, reach: 1.7, swing: 1.5, aggro: 16, drops: [['crystal', 1, 2]],
+  }),
+  cactus_monster: monster('cactus', {
+    label: 'Prickler', h: 1.6, hp: 18, spd: 1.10, shy: 0, turn: 3.0, accel: 6.0,
+    dmg: 5, reach: 1.4, swing: 1.4, aggro: 12, drops: [['cactus', 1, 2]],
+  }),
+  mushroom_monster: monster('mushroom', {
+    label: 'Sporeling', h: 1.2, hp: 14, spd: 1.20, shy: 0, turn: 4.0, accel: 7.5,
+    dmg: 3, reach: 1.2, swing: 1.1, aggro: 12, drops: [['mushroom', 1, 3]],
+  }),
+  // --- and the ones with wings ---
+  bat: monster('bat', {
+    label: 'Bat', h: 0.7, hp: 8, spd: 1.90, shy: 0, turn: 5.5, accel: 10.0,
+    dmg: 2, reach: 1.0, swing: 0.9, aggro: 12, flies: true, hover: 2.6,
+    drops: [['hide', 1, 1]],
+  }),
+  cthulhu: monster('cthulhu', {
+    label: 'Cthulhu', h: 1.9, hp: 26, spd: 1.55, shy: 0, turn: 3.4, accel: 8.0,
+    dmg: 7, reach: 1.7, swing: 1.5, aggro: 16, flies: true, hover: 3.0,
+    drops: [['crystal', 1, 2]],
+  }),
+  dragon: monster('yellowdragon', {
+    label: 'Dragon', h: 2.1, hp: 34, spd: 1.75, shy: 0, turn: 3.0, accel: 8.5,
+    dmg: 9, reach: 1.9, swing: 1.8, aggro: 18, flies: true, hover: 3.4,
+    drops: [['cinder', 2, 3], ['gold_ingot', 1, 2]],
+  }),
+  ghost: monster('ghost', {
+    label: 'Ghost', h: 1.6, hp: 14, spd: 1.60, shy: 0, turn: 4.4, accel: 9.0,
+    dmg: 4, reach: 1.4, swing: 1.2, aggro: 14, flies: true, hover: 2.4,
+    // Drifts, but is animated as a walker — the pack gave it the ten-clip rig,
+    // not the four-clip flying one.
+    flyAnim: false,
+    drops: [],
+  }),
+
   // --- the one thing that wants you dead ---
   husk: {
     label: 'Husk', urls: [CHAR('l'), CHAR('o')], clips: CHAR_CLIPS, height: 1.72,
@@ -1529,6 +1660,33 @@ const BLOOM = new Set(
   ['flower_red', 'flower_blue', 'flower_gold', 'tall_grass', 'sapling']
     .map((n) => ID[n]).filter(Boolean),
 );
+
+/**
+ * Where each monster belongs, and nowhere else.
+ *
+ * Deliberately not folded into `SPAWN_BY_BIOME`: that table is drawn from
+ * constantly to keep the wildlife budget full, and anything in it is common by
+ * construction. These are drawn from their own tick, at their own rate, against
+ * their own cap — which is what makes "rare" a property of the code rather than
+ * a hope about a weight.
+ *
+ * A biome with no entry has no monsters at all, and that is the point: the
+ * meadow you build your hut in stays yours.
+ */
+const MONSTER_BY_BIOME = {
+  SNOW: ['yeti', 'yeti', 'ghost'],
+  TUNDRA: ['yeti', 'skull'],
+  MOUNTAIN: ['cyclops', 'bat', 'dragon'],
+  DESERT: ['cactus_monster', 'cactus_monster', 'skull'],
+  BADLANDS: ['demon', 'greendemon', 'demon', 'skull', 'dragon'],
+  SAVANNA: ['greendemon', 'skull'],
+  FOREST: ['mushroom_monster', 'mushroom_monster', 'ghost'],
+  PINE_FOREST: ['mushroom_monster', 'ghost', 'bat'],
+  OCEAN: ['cthulhu'],
+  BEACH: ['cthulhu', 'ghost'],
+  PLAINS: ['alien', 'alien_tall'],
+  // MEADOW is missing on purpose — see above.
+};
 
 const COMMON = ['bunny', 'bunny', 'bee', 'caterpillar', 'fox'];
 const SPAWN_BY_BIOME = {
@@ -1993,6 +2151,31 @@ export class Mobs {
     return this._drawFrom(col, true);
   }
 
+  /** How many monsters are abroad, counted rather than tracked. */
+  _countMonsters() {
+    let n = 0;
+    for (const m of this.list) if (m.spec.monster) n++;
+    return n;
+  }
+
+  /**
+   * One monster on this ground, if this biome has any.
+   *
+   * Keyed off the biome rather than the block underfoot, for the reason the
+   * wildlife draw gives: a patch of sand inside a forest is a riverbank, not a
+   * desert. A biome absent from the table spawns nothing, which is how the
+   * meadow stays safe.
+   */
+  _spawnMonster(col, k) {
+    const list = MONSTER_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]];
+    if (!list || !list.length) return false;
+    // Never in the opening clearing. A monster is the one thing that should
+    // not be waiting for a player who has just been handed six torches.
+    if (this._nearHome(col, k)) return false;
+    const type = list[(Math.random() * list.length) | 0];
+    return !!this.spawn(type, col, k);
+  }
+
   /**
    * The biome's list, and one species drawn from the half of it that flies or
    * the half that does not.
@@ -2042,7 +2225,7 @@ export class Mobs {
   _census() {
     let land = 0, water = 0, air = 0;
     for (const m of this.list) {
-      if (m.spec.hostile || m.spec.trader) continue;
+      if (m.spec.hostile || m.spec.monster || m.spec.trader) continue;
       if (m.spec.aquatic) water++;
       else if (m.spec.flies) air++;
       else land++;
@@ -2098,7 +2281,7 @@ export class Mobs {
       for (let n = 0; n < this.list.length; n++) {
         const m = this.list[n];
         const s = m.spec;
-        if (s.hostile || s.trader || s.aquatic) continue;
+        if (s.hostile || s.monster || s.trader || s.aquatic) continue;
         // Only from a category that is actually over its own budget.
         const flier = !!s.flies;
         if (flier ? air <= 0 : land <= 0) continue;
@@ -3300,7 +3483,9 @@ export class Mobs {
     // night stalk — and by nothing else. Everything past this point is shared:
     // the chase, the stall test, the swing, because a provoked fox and a husk
     // want precisely the same thing once they have decided on you.
-    const acquires = spec.hostile;
+    // A monster hunts you the same way, which is the whole of what these two
+    // have in common — the budgets and the dawn wipe stay husk-only.
+    const acquires = spec.hostile || spec.monster;
     if (acquires && dist < spec.aggroRange) {
       if (mob.target !== 'player') { mob.bestDist = dist; mob.stallT = 0; }
       mob.target = 'player';
@@ -4163,6 +4348,20 @@ export class Mobs {
         const spot = this._findDarkColumn(playerCol, player.position);
         if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = true; }
       }
+      // The monsters. Their own clock, their own cap, and no night condition:
+      // these are the things that do not care about the sun.
+      //
+      // A roll this low is what "rare" means here. At MONSTER_CHANCE per spawn
+      // tick a monster is a thing you meet on an expedition rather than a thing
+      // that turns up outside the door, and the cap keeps two from becoming
+      // four while you are dealing with the first. `spawnGrace` covers them for
+      // the same reason it covers husks — a new world's opening minutes are not
+      // where this belongs.
+      if (!this.spawnGrace && this._countMonsters() < MAX_MONSTERS
+          && Math.random() < MONSTER_CHANCE) {
+        const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
+        if (spot) this._spawnMonster(spot.col, spot.k);
+      }
       // The merchant. Same surface search as the wildlife — it has to arrive on
       // ground it can walk on — but gated on its own clock rather than on the
       // headcount, so it is never crowded out by a full paddock.
@@ -4256,7 +4455,7 @@ export class Mobs {
       // Committing hands _hunt a target and returns false, so the chase starts
       // on the same frame through the one code path that knows how to chase.
       const prowling = this._prowl(mob, dt, dist, player, fr);
-      const hunting = !prowling && (spec.hostile || spec.predator)
+      const hunting = !prowling && (spec.hostile || spec.monster || spec.predator)
         && this._hunt(mob, dt, dist, player, fr);
       // Then the herd. Hunting the player wins over hunting dinner: something
       // that has decided on you should not wander off after a rabbit mid-fight.
@@ -5143,7 +5342,7 @@ export class Mobs {
     // a physics glitch: a bunny should leave, an elephant should rock and stay
     // exactly where it was standing. See knockMass for the ladder.
     const mass = knockMass(mob.baseHeight ? mob.baseHeight * mob.grown : mob.spec.height);
-    const push = (mob.spec.hostile || mob.spec.predator ? KNOCK_HOSTILE
+    const push = (mob.spec.hostile || mob.spec.monster || mob.spec.predator ? KNOCK_HOSTILE
       : mob.spec.trader ? KNOCK_HOSTILE * 0.5 : KNOCK_WILDLIFE) * weight * mass;
     if (push > 0) {
       mob.knockA = (ra / rl) * push;
@@ -5156,7 +5355,7 @@ export class Mobs {
       mob.tumbling = true;
     }
 
-    if (mob.spec.hostile || mob.spec.predator) {
+    if (mob.spec.hostile || mob.spec.monster || mob.spec.predator) {
       // Hitting a husk makes it angry, not skittish: it takes the knock but
       // keeps coming, and it now knows exactly where you are.
       //

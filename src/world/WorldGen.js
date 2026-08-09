@@ -1660,7 +1660,26 @@ export class WorldGen {
     // Tested here rather than in `stampTree` because this is where a tree is
     // *decided*: a trunk has the same problem for the same reason, and one
     // guard covers every kind rather than one per stamp.
-    if (blocks[col * D + k + 1] !== ID.air) return;
+    // Liquid specifically, not "anything but air", which is what this said and
+    // is the one thing it must not say.
+    //
+    // `treeAt` is run over the *margin* — columns belonging to neighbouring
+    // regions — precisely so that a canopy overhanging a boundary is decided
+    // the same way from both sides. That only works while it reads terrain and
+    // nothing else, because terrain is written before any decoration anywhere.
+    // `k + 1` is exactly the layer decoration lands in: a neighbour's leaves,
+    // its grass, another trunk. So "is it air?" quietly became "has the region
+    // next door been decorated yet?", and the answer depended on which way the
+    // player walked in. Measured at 152 differing cells across four regions
+    // generated forwards versus backwards — pines sliced off flat along a
+    // straight boundary, which is what half a canopy missing looks like.
+    //
+    // Liquid is terrain, so testing for it keeps the guard doing its job — the
+    // sand shore one cell under the water line that used to grow a cactus
+    // standing on the sea — while leaving the answer a pure function of the
+    // ground.
+    const above = blocks[col * D + k + 1];
+    if (above === ID.water || above === ID.lava) return;
     const rng = this.colRng(col, 0x7a11);
 
     let kind = null, chance = 0;

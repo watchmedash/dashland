@@ -216,7 +216,16 @@ export const BIOME_COLORS = [
   { grass: [0.38, 0.60, 0.38], foliage: [0.26, 0.48, 0.32], water: [0.16, 0.42, 0.56] },
   { grass: [0.80, 0.74, 0.42], foliage: [0.68, 0.66, 0.36], water: [0.26, 0.60, 0.72] },
   { grass: [0.74, 0.76, 0.38], foliage: [0.62, 0.66, 0.32], water: [0.24, 0.56, 0.68] },
-  { grass: [0.60, 0.68, 0.56], foliage: [0.48, 0.60, 0.48], water: [0.28, 0.54, 0.68] },
+  // Tundra, and the same complaint as the snow row below it. Tundra ground is
+  // drifts of snow over frost-heaved gravel — measured, 37% of its surface
+  // columns are the snow block — so a player standing in one is standing in a
+  // snow biome whatever the biome table calls it, and its conifers were coming
+  // out at [0.43, 0.59, 0.45] after the needle multiplier: an ordinary summer
+  // green. Pulled cold and desaturated so the product lands at
+  // [0.38, 0.53, 0.50], which is short of the snow row's blue-grey and well
+  // clear of the pine forest's [0.31, 0.59, 0.26]. The grass term is left
+  // alone: tundra grows no grass block for it to tint.
+  { grass: [0.60, 0.68, 0.56], foliage: [0.42, 0.54, 0.54], water: [0.28, 0.54, 0.68] },
   // Snow. The foliage term is a *multiplier* on an already green needle tile, so
   // a pale green multiplier still leaves a green tree: "trees growing in snow
   // biomes looks green af" was this row. Green pulled well under red and blue so

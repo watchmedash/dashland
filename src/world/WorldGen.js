@@ -198,7 +198,11 @@ const CANYON_SCRUB = [];
 CANYON_SCRUB[BIOME.DESERT] = ID.thornbrush;
 CANYON_SCRUB[BIOME.BADLANDS] = ID.thornbrush;
 CANYON_SCRUB[BIOME.MOUNTAIN] = ID.alpine_aster;
-CANYON_SCRUB[BIOME.TUNDRA] = ID.cotton_grass;
+// Tundra used to be here with `cotton_grass`, and it is a hole now for the
+// snow biome's reason: the sedge lost gravel when the soil table was tightened
+// (see FLORA_SOIL), and a canyon's grit is gravel and red sand. Leaving the
+// entry in would have been dead code — `_floraSoilOk` refuses every column it
+// could reach — and dead code that looks like an intent is worse than the hole.
 
 /**
  * Ore bands, deepest and rarest first. The loop takes the first vein that
@@ -944,6 +948,13 @@ STAND_SPEC[BIOME.PINE_FOREST] = { id: ID.lingonberry, chance: 0.22 };
 STAND_SPEC[BIOME.SAVANNA] = { id: ID.aloe, chance: 0.14 };
 STAND_SPEC[BIOME.MOUNTAIN] = { id: ID.alpine_aster, chance: 0.18 };
 STAND_SPEC[BIOME.SNOW] = { id: ID.snowbell, chance: 0.12 };
+// The tundra stand is the one that no longer fills its disc. The sedge now
+// takes coarse dirt and nothing else, so `standAt`'s soil test drops every
+// column of the disc that came out snow or gravel — and that is wanted rather
+// than tolerated: the drift field this ground is cut from is smooth fbm at
+// frequency 16, so the soil comes in contiguous patches a dozen columns across,
+// and a sedge bog that stops at the edge of the thawed ground reads as a bog
+// rather than as a circle stamped on the biome.
 STAND_SPEC[BIOME.TUNDRA] = { id: ID.cotton_grass, chance: 0.20 };
 
 /**
@@ -4082,8 +4093,19 @@ export class WorldGen {
         if (r < 0.32 * dp) id = ID.fern;
         else if (r < 0.58 * dp) id = ID.lingonberry;
         break;
+      // The one biome whose ground is three different blocks under one carpet,
+      // so it is the one biome that picks its species by what it is standing
+      // on. Sedge on the thawed soil, snowbell in the drifts, nothing in the
+      // scree — see the cotton grass entry in FLORA_SOIL for why the sedge no
+      // longer takes all three.
+      //
+      // Reading `surf` to choose is safe and is not the "decisions read terrain
+      // only" rule being bent: `surf` *is* terrain, written by `fillColumn`
+      // before any region is decorated, so a column answers this the same from
+      // either side of a boundary. The roll is spent before the branch, so the
+      // column's stream is unchanged and so is the carpet's density.
       case BIOME.TUNDRA:
-        if (r < 0.45 * dp) id = ID.cotton_grass;
+        if (r < 0.45 * dp) id = surf === ID.snow ? ID.snowbell : ID.cotton_grass;
         break;
       // Five percent, and it is the highest-value five percent here. A snow
       // field is an hour of white; the snowbell is the only thing in it.

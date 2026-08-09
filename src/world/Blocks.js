@@ -1544,13 +1544,23 @@ grows(['thornbrush'], soil(['coarse_dirt', 'gravel'], 'desert'));
 grows(['aloe'], soil(['grass', 'coarse_dirt'], 'desert'));
 grows(['golden_grass'], soil(['grass', 'dirt', 'coarse_dirt']));
 grows(['firebloom'], soil(['red_sand', 'red_sandstone', 'coarse_dirt']));
-// Tundra ground and nothing that reads as temperate. The carpet pass already
-// gates it to the tundra biome, and tundra floor really is dirt, gravel and
-// snow, so most of "it grows everywhere" was the biome being varied rather than
-// the plant being loose. `grass` and plain `dirt` are out anyway: those two are
-// what a meadow is made of, so a sedge standing on either looks like it wandered
-// out of its biome even when it has not.
-grows(['cotton_grass'], soil(['snow', 'gravel', 'coarse_dirt', 'peat']));
+// Soil, and only soil. Tundra ground comes out of `fillColumn` as three
+// blocks — snow drift, frost-heaved gravel, coarse dirt — and the first cut of
+// this line took all three, on the reasoning that a sedge is a tundra plant and
+// the tundra is what those blocks are. Measured, that put 304 of the biome's
+// 814 tufts in a snow drift and 175 in scree, and it is what "cotton grass
+// growing on gravel, dirt, snow" was pointing at: the plant reads as a green
+// temperate sedge whatever the biome around it says, so a tuft of it standing
+// in white or in bare stones reads as a plant that landed in the wrong place.
+//
+// So it keeps the one third of the ground that is actually soil. The snow half
+// is the snowbell's, which is what that plant is for and is the swap
+// `landFloraAt` now makes; the scree keeps nothing, which is what scree is.
+// `grass` and plain `dirt` stay out for the older reason: those two are what a
+// meadow is made of, so a sedge on either looks temperate even when it is not.
+// Peat is in for the dug bog — it is a subsurface block in the tundra, so it
+// never carries a generated tuft, only a planted one.
+grows(['cotton_grass'], soil(['coarse_dirt', 'peat']));
 // Snow and nothing else. It is the plant that only exists because the ground is
 // white, so any other ground makes it meaningless.
 grows(['snowbell'], soil(['snow']));

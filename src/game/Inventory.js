@@ -193,6 +193,30 @@ export class Inventory {
     return this.slots.some((s) => s.empty || (s.item === itemId && s.count < max));
   }
 
+  /**
+   * Is there room for *this many*, not merely for one?
+   *
+   * `hasRoom` answers the one-item question, which is the right question for
+   * picking a drop up off the floor and the wrong one everywhere a transaction
+   * hands over a batch. Three places asked it and then added more than one
+   * without reading the result: crafting from the sidebar, selling to the
+   * merchant, and handing over an errand. Each destroyed the surplus — craft
+   * planks with one free slot and three of the four vanish; sell a gold ingot
+   * with 63 coins in your last stack and eleven coins evaporate after the
+   * merchant has already paid for them.
+   */
+  roomFor(itemId, count = 1) {
+    if (!itemId || count <= 0) return true;
+    const max = ITEMS[itemId]?.stack ?? 64;
+    let room = 0;
+    for (const s of this.slots) {
+      if (s.empty) room += max;
+      else if (max > 1 && s.item === itemId && s.count < max) room += max - s.count;
+      if (room >= count) return true;
+    }
+    return false;
+  }
+
   /** Consume one of the held stack (placing a block). */
   consumeHeld(n = 1) {
     // `active()`, not `held()`: whichever hand did the thing pays for it. With
@@ -242,8 +266,11 @@ export class Inventory {
     const spill = [];
     for (const s of this.craft) {
       if (s.empty) continue;
-      const taken = this.add(s.item, s.count);
-      if (taken < s.count) spill.push({ item: s.item, count: s.count - taken });
+      // Wear rides along, both into the slot and into whatever spills onto the
+      // floor. Without it, parking a nearly-broken sword in the craft grid and
+      // closing the screen handed it back pristine.
+      const taken = this.add(s.item, s.count, s.wear);
+      if (taken < s.count) spill.push({ item: s.item, count: s.count - taken, wear: s.wear });
       s.clear();
     }
     this.changed();
@@ -260,6 +287,14 @@ export class Inventory {
     return {
       slots: this.slots.map((s) => s.toJSON()),
       selected: this.selected,
+      // The two places items can be sitting that are not `slots`.
+      //
+      // Closing a screen returns both, and every deliberate exit routes through
+      // that — but `beforeunload` and the ninety-second autosave do not. Shut
+      // the tab with a stack on the cursor, or with anything in the craft grid,
+      // and the save was written from `slots` alone and the stack was gone.
+      cursor: this.cursor.toJSON(),
+      craft: this.craft.map((s) => s.toJSON()),
     };
   }
 
@@ -289,6 +324,11 @@ export class Inventory {
     // and saves from after it was removed both have no `armour` key, and both
     // want the same answer — nothing to convert.
     this.legacyArmour = (data.armour || []).map((v) => Slot.fromJSON(v));
+    // Restored, not dropped on the floor: a save written mid-drag should put
+    // you back exactly where you were. Absent in older saves, where
+    // `Slot.fromJSON(undefined)` is an empty slot, which is the right answer.
+    this.cursor = Slot.fromJSON(data.cursor);
+    this.craft = Array.from({ length: 9 }, (_, i) => Slot.fromJSON(data.craft?.[i]));
     this.selected = data.selected || 0;
     this.changed();
   }

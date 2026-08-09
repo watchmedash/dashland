@@ -404,6 +404,11 @@ export function rollRequest(rng = Math.random) {
 export function fulfilRequest(inventory, request, purse) {
   if (!request || request.done) return false;
   if (inventory.count(request.item) < request.count) return false;
+  // Check before taking the goods. There was no room check on this path at all:
+  // with a full inventory and no coin stack, the errand took sixteen planks,
+  // added nothing, marked itself done and toasted a payment. Goods gone, reward
+  // gone, and the request cannot be offered again.
+  if (!inventory.roomFor(COIN, request.reward)) return false;
   // He pays from his own purse like any other trade, and a request he cannot
   // cover is one he should not have asked for — but if his float has run dry
   // since, honour it anyway rather than eating the goods.
@@ -465,7 +470,10 @@ export function sellTo(inventory, itemId, want = 1, purse = null) {
   let n = 0;
   while (n < want) {
     if (inventory.count(itemId) <= 0) break;
-    if (!inventory.hasRoom(COIN)) break;
+    // Room for the whole price. `hasRoom` only promised somewhere to put one
+    // coin, so a sale into a nearly full purse-stack paid the merchant's float
+    // out into nothing.
+    if (!inventory.roomFor(COIN, price)) break;
     // A trader carries a float, not a treasury. Without one, every renewable
     // block in the world is a coin printer: cobblestone regrows as fast as you
     // can swing, and cutting it into slabs first doubled the rate because two

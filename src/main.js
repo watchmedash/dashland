@@ -2449,13 +2449,15 @@ class Game {
     const spill = this.inventory.clearCraft();
     const cur = this.inventory.cursor;
     if (!cur.empty) {
-      const taken = this.inventory.add(cur.item, cur.count);
-      if (taken < cur.count) spill.push({ item: cur.item, count: cur.count - taken });
+      // Same wear rule as everywhere else: picking a tool up onto the cursor and
+      // pressing Escape used to put it back repaired.
+      const taken = this.inventory.add(cur.item, cur.count, cur.wear);
+      if (taken < cur.count) spill.push({ item: cur.item, count: cur.count - taken, wear: cur.wear });
       cur.clear();
     }
     for (const s of spill) {
       _v1.copy(this.player.position).addScaledVector(this.player.up, 1);
-      this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count);
+      this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count, s.wear || 0);
     }
     this.ui.closeScreen();
     this.ui.refresh();

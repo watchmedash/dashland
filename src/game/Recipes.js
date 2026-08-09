@@ -321,7 +321,10 @@ export function craftFromInventory(inventory, recipe, times = 1) {
   for (let n = 0; n < times; n++) {
     const cost = recipeCost(recipe);
     if (!cost.every((c) => inventory.count(c.item) >= c.count)) break;
-    if (!inventory.hasRoom(recipe.out)) break;
+    // Room for the whole yield, not for one of it. `hasRoom` is true when a
+    // single partial stack exists, so a four-plank recipe with one space left
+    // consumed the log and threw three planks away.
+    if (!inventory.roomFor(recipe.out, recipe.count)) break;
     for (const c of cost) inventory.remove(c.item, c.count);
     inventory.add(recipe.out, recipe.count);
     made++;

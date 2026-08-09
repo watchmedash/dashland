@@ -1228,24 +1228,33 @@ const SPECIES = {
     dmg: 3, reach: 1.2, swing: 1.1, aggro: 12, drops: [['mushroom', 1, 3]],
   }),
   // --- and the ones with wings ---
+  //
+  // `hover` has to sit *inside* `reach`, and that is not obvious until you
+  // watch one try. A flier holds station at `hover` above the ground while
+  // the contact test measures straight-line distance to a player standing on
+  // it, so a bat hovering at 2.6 with an effective reach of 1.82 was
+  // permanently outside its own range: measured at one hit in two hundred
+  // seconds, against a cyclops that kills in six. The dragon had the same
+  // fault more mildly and took eleven seconds to land three blows worth nine
+  // each. Every hover here is now comfortably under the reach beside it.
   bat: monster('bat', {
     label: 'Bat', h: 0.7, hp: 8, spd: 1.90, shy: 0, turn: 5.5, accel: 10.0,
-    dmg: 2, reach: 1.0, swing: 0.9, aggro: 12, flies: true, hover: 2.6,
+    dmg: 2, reach: 1.2, swing: 0.9, aggro: 12, flies: true, hover: 1.2,
     drops: [['hide', 1, 1]],
   }),
   cthulhu: monster('cthulhu', {
     label: 'Cthulhu', h: 1.9, hp: 26, spd: 1.55, shy: 0, turn: 3.4, accel: 8.0,
-    dmg: 7, reach: 1.7, swing: 1.5, aggro: 16, flies: true, hover: 3.0,
+    dmg: 7, reach: 1.7, swing: 1.5, aggro: 16, flies: true, hover: 2.0,
     drops: [['crystal', 1, 2]],
   }),
   dragon: monster('yellowdragon', {
     label: 'Dragon', h: 2.1, hp: 34, spd: 1.75, shy: 0, turn: 3.0, accel: 8.5,
-    dmg: 9, reach: 1.9, swing: 1.8, aggro: 18, flies: true, hover: 3.4,
+    dmg: 9, reach: 1.9, swing: 1.8, aggro: 18, flies: true, hover: 2.4,
     drops: [['cinder', 2, 3], ['gold_ingot', 1, 2]],
   }),
   ghost: monster('ghost', {
     label: 'Ghost', h: 1.6, hp: 14, spd: 1.60, shy: 0, turn: 4.4, accel: 9.0,
-    dmg: 4, reach: 1.4, swing: 1.2, aggro: 14, flies: true, hover: 2.4,
+    dmg: 4, reach: 1.4, swing: 1.2, aggro: 14, flies: true, hover: 1.8,
     // Drifts, but is animated as a walker — the pack gave it the ten-clip rig,
     // not the four-clip flying one.
     flyAnim: false,

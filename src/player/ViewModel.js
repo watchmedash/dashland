@@ -505,12 +505,20 @@ const DRAW = {
  * `turnEase` is the roll that presents the bow's plane, and it is far faster
  * than either. The turn from the carrying grip to the aim is very nearly a half
  * roll, and a half roll passes through edge-on whichever way it goes — there is
- * no path around it. What there is, is the option to have it over before there
- * is a bow on screen to look at: at ^8 the crossing happens at 7% of the charge,
- * with the bow still at its resting 1.3% of the frame down in the corner, and
- * from the moment the bow covers 2% of the frame the plane is never more than
- * 31 degrees off face-on. On the rise's clock instead it is 77 degrees — edge-on
- * while the bow is already large, which is the thing being fixed.
+ * no path around it. ^8 is there to spend as little of the charge as possible in
+ * that crossing: the slerp is 57% done by the tenth of the charge and 83% by the
+ * fifth, so the edge-on frames are few and early rather than spread across the
+ * pull.
+ *
+ * What this does NOT do, despite what this note used to claim, is get the turn
+ * over before the bow is worth looking at. Measured on the shipped constants
+ * through the real glTF at 16:9: the worst plane angle is 88.4 degrees at draw
+ * 0.10 for the right hand and 87.3 at 0.06 for the left, and the bow is not
+ * small when it happens — it never drops below 2.4% of the frame, because that
+ * is its coverage at rest. The old sentence assumed the carried bow was
+ * effectively off screen and picked a threshold ("2% of the frame") the bow is
+ * always above. There is no exponent that hides the crossing; only one that
+ * shortens it, which is what ^8 buys. Retune only against a rendered frame.
  */
 const drawEase = (t) => t * (2 - t);
 const armEase = (t) => t * Math.sqrt(t);

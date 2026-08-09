@@ -10,7 +10,7 @@ import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn } from './Sphere.js';
 import {
   BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
   TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
-  FACING_DEFAULT, sideTile, capTile, blockBoxes, IS_FENCE, fenceLinks,
+  FACING_DEFAULT, sideTile, capTile, axisOf, blockBoxes, IS_FENCE, fenceLinks,
 } from './Blocks.js';
 
 /**
@@ -42,8 +42,9 @@ const LEVEL_SOURCE = 7;
  * `dir` is 0:+i 1:-i 2:+j 3:-j 4:top 5:bottom.
  */
 function grainRot(id, facing, dir) {
-  if (!IS_AXIS[id] || !facing) return 0;
-  if (facing === 1) return (dir === 2 || dir === 3 || dir >= 4) ? 1 : 0;
+  const ax = axisOf(id, facing);
+  if (!ax) return 0;
+  if (ax === 1) return (dir === 2 || dir === 3 || dir >= 4) ? 1 : 0;
   return (dir === 0 || dir === 1) ? 1 : 0;
 }
 

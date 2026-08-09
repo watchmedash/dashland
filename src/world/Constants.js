@@ -138,7 +138,19 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  * middle of terrain that no longer joins up with it, which is a much worse
  * outcome than being told the save cannot be opened.
  */
-export const GEN_VERSION = 2;   // D 66 -> 99, sea 290 -> 282: every column moved
+/*
+ * 3: aquifers and hot springs.
+ *
+ * Both write voxels no previous generator wrote. The aquifer pass puts water —
+ * and the stone shell that keeps it in — into the limestone band of every
+ * column whose lens field clears its threshold, which also re-seals cave cells
+ * the carve pass had opened there. The hot spring pass digs a pool into the
+ * surface of a handful of snow, tundra and mountain columns. A save made
+ * against version 2 has neither, and regenerating its unvisited regions with
+ * this generator would leave visited ground riddled with sealed cavities its
+ * neighbours do not have.
+ */
+export const GEN_VERSION = 3;
 
 // All five keep their distance from R_MIN, so the crust reads the same from
 // below: core three layers up, mantle eight. What changed is the room above

@@ -18,6 +18,13 @@ function add(def) {
 const NOT_OBTAINABLE = new Set([
   'air', 'water', 'lava', 'core', 'farmland_wet', 'kiln_lit',
   'wheat_0', 'wheat_1', 'wheat_2', 'wheat_3',
+  // The fallen logs. Their axis is baked into the id rather than stored per
+  // cell, so the place-block path — which reads the face you clicked and writes
+  // an orientation — has no way to pick between the two, and a held one would
+  // go down pointing whichever way its id happened to say. They drop the
+  // ordinary upright log when chopped, so nothing puts one in a hand anyway;
+  // this only stops a stray item existing for the trader to price.
+  'log_oak_i', 'log_oak_j', 'log_birch_i', 'log_birch_j', 'log_pine_i', 'log_pine_j',
 ]);
 
 for (const b of BLOCKS) {

@@ -170,6 +170,9 @@ function block(o) {
     // A log's orientation is an axis (upright / along i / along j), not one of
     // four horizontal facings, so it picks its tiles by a different rule.
     axis: o.axis ?? false,
+    // The same axis, but baked into the block id instead of stored per cell:
+    // 1 = lying along i, 2 = lying along j. See AXIS_FIXED.
+    fixedAxis: o.fixedAxis ?? 0,
     light: o.light ?? 0,           // 0..15 emission
     lightColor: o.lightColor ?? [1, 1, 1],
     hardness: o.hardness ?? 1,
@@ -517,6 +520,39 @@ export const BLOCKS = [
     hardness: hardness * 0.85, tool, sound: 'stone',
     particle: [0.55, 0.55, 0.55],
   })),
+
+  // -------------------------------------------------------------------------
+  // Fallen logs — the same three trunks, lying down.
+  //
+  // Two ids per species because a horizontal axis on a cube-sphere face is
+  // either i or j and there is no third option; `fixedAxis` is 1 for the first
+  // and 2 for the second. They reuse their parent's two tiles exactly, so six
+  // blocks cost nothing in the atlas: `sideTile` puts the end grain on the two
+  // faces the trunk runs out of and bark on the other four, `capTile` puts bark
+  // on the cell's top and bottom, and `grainRot` in the mesher turns the bark a
+  // quarter so the grain runs along the trunk rather than up the sky.
+  //
+  // They drop the ordinary upright log, which is the whole reason `drop` names
+  // a block rather than defaulting to the name: chopping a windfall should fill
+  // the same slot as chopping a tree, not a second inventory stack that no
+  // recipe accepts. Hardness is a touch lower than a standing trunk's — dead
+  // wood — but the tool and the fuel value match, so nothing downstream has to
+  // learn about them.
+  //
+  // Appended at the very end of the table on purpose. Block ids are what a save
+  // file stores; inserting these beside `log_oak` where they read better would
+  // renumber four hundred blocks and turn every existing world to gravel.
+  // -------------------------------------------------------------------------
+  ...[
+    ['log_oak', 'Oak Log', 'log_oak', 'log_oak_top', [0.42, 0.31, 0.19]],
+    ['log_birch', 'Birch Log', 'log_birch', 'log_birch_top', [0.82, 0.8, 0.72]],
+    ['log_pine', 'Pine Log', 'log_pine', 'log_pine_top', [0.3, 0.22, 0.14]],
+  ].flatMap(([base, label, bark, rings, particle]) => [1, 2].map((ax) => block({
+    name: `${base}_${ax === 1 ? 'i' : 'j'}`, label,
+    top: rings, side: bark, bottom: rings,
+    fixedAxis: ax, hardness: 1.2, tool: 'axe', drop: base,
+    particle, sound: 'wood', fuel: 6,
+  }))),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -550,6 +586,30 @@ export const TILE_FRONT = new Uint16Array(N_BLOCKS);
 export const IS_DIRECTIONAL = new Uint8Array(N_BLOCKS);
 /** Blocks whose orientation is an axis (logs), not a horizontal facing. */
 export const IS_AXIS = new Uint8Array(N_BLOCKS);
+/**
+ * A log lying down whose axis is part of *which block it is*, rather than a byte
+ * in the side-table: 0 upright (or not a log at all), 1 lying along i, 2 lying
+ * along j.
+ *
+ * The side-table already carries an axis and the mesher already draws one
+ * correctly, but nothing that generates terrain can reach that table. WorldGen
+ * writes block ids straight into the voxel array in the worker; `Planet.facing`
+ * is a separate sparse Map that only an *edit* — a player placing a block — ever
+ * touches. So a fallen tree stamped by the generator could only ever have come
+ * out upright, wearing its end grain on the sky.
+ *
+ * Baking the axis into the id costs six block ids and no plumbing at all: the
+ * generator writes `ID.log_oak_i` where it wants a log lying east-west and every
+ * layer downstream — worker, mesher, save file, collision — treats it as an
+ * ordinary opaque cube it already knows how to carry.
+ *
+ * Deliberately *not* also `axis: true`. That flag means "this block keeps an
+ * orientation in the side-table", and setting it would give these ids a second,
+ * contradictory axis: `Planet.applyFacing` would start storing bytes for them
+ * and the placement path in main.js would compute one from the face you clicked.
+ * The whole point of them is that their orientation is not stored anywhere.
+ */
+export const AXIS_FIXED = new Uint8Array(N_BLOCKS);
 /** 1 for half-height blocks, whose side-table byte is which half they fill. */
 export const IS_SLAB = new Uint8Array(N_BLOCKS);
 /** 1 for stairs: a slab plus a half-depth riser, oriented by the same byte. */
@@ -650,6 +710,19 @@ export const FACING_MJ = 3;
 export const FACING_DEFAULT = FACING_PI;
 
 /**
+ * Which way this cell's log runs: 0 upright (or not a log), 1 along i,
+ * 2 along j. The one place the two ways of saying it are reconciled — an id
+ * that *is* a lying log answers from AXIS_FIXED and ignores the side-table
+ * byte entirely, everything else falls back to the byte.
+ *
+ * `facing` is -1 for a cell the mesher knows has no side-table entry, which is
+ * why the AXIS_FIXED term has to come first and short-circuit.
+ */
+export function axisOf(id, facing) {
+  return AXIS_FIXED[id] || (IS_AXIS[id] ? (facing > 0 ? facing : 0) : 0);
+}
+
+/**
  * Tile for one tangential face of a cell.
  * @param {number} id block id
  * @param {number} dir face direction, 0:+i 1:-i 2:+j 3:-j
@@ -661,16 +734,15 @@ export function sideTile(id, dir, facing) {
   // through, and bark on the other four. axis 0 = upright, 1 = along i,
   // 2 = along j. Placing one sideways and still seeing bark on the cut ends
   // is the giveaway that a block ignored how it was placed.
-  if (IS_AXIS[id]) {
-    if (facing === 1) return (dir === 0 || dir === 1) ? TILE_TOP[id] : TILE_SIDE[id];
-    if (facing === 2) return (dir === 2 || dir === 3) ? TILE_TOP[id] : TILE_SIDE[id];
-  }
+  const ax = axisOf(id, facing);
+  if (ax === 1) return (dir === 0 || dir === 1) ? TILE_TOP[id] : TILE_SIDE[id];
+  if (ax === 2) return (dir === 2 || dir === 3) ? TILE_TOP[id] : TILE_SIDE[id];
   return TILE_SIDE[id];
 }
 
 /** Top/bottom tile for a block, accounting for a log's axis. */
 export function capTile(id, facing, isTop) {
-  if (IS_AXIS[id] && facing) return TILE_SIDE[id];   // lying down: caps show bark
+  if (axisOf(id, facing)) return TILE_SIDE[id];   // lying down: caps show bark
   return isTop ? TILE_TOP[id] : TILE_BOTTOM[id];
 }
 
@@ -786,7 +858,11 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_OPAQUE[i] = b.opaque ? 1 : 0;
   IS_SOLID[i] = b.solid ? 1 : 0;
   IS_LEAF[i] = b.name.startsWith('leaves') ? 1 : 0;
-  IS_TREE[i] = (IS_LEAF[i] || b.name.startsWith('log_')) ? 1 : 0;
+  // A *standing* tree. The lying logs are deliberately out: IS_TREE answers
+  // "can a climber hold on to this?", and a log on the forest floor is a thing
+  // you step over, not a handhold. In it, a monkey beside a one-cell-high
+  // fallen trunk would take it as a trunk and start climbing a ladder of air.
+  IS_TREE[i] = (IS_LEAF[i] || (b.name.startsWith('log_') && !b.fixedAxis)) ? 1 : 0;
   RENDER_TYPE[i] = b.render;
   LIGHT_EMIT[i] = b.light;
   LIGHT_R[i] = Math.round(b.lightColor[0] * 255);
@@ -798,6 +874,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   TILE_FRONT[i] = b.front ?? b.side ?? 0;
   IS_DIRECTIONAL[i] = b.directional ? 1 : 0;
   IS_AXIS[i] = b.axis ? 1 : 0;
+  AXIS_FIXED[i] = b.fixedAxis | 0;
   IS_SLAB[i] = b.render === R_SLAB ? 1 : 0;
   IS_STAIR[i] = b.render === R_STAIR ? 1 : 0;
   IS_LADDER[i] = b.render === R_LADDER ? 1 : 0;

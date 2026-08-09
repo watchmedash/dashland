@@ -237,8 +237,81 @@ for (let k = 0; k < D; k++) {
   ORE_BY_LAYER.push(ORES.filter((o) => r >= o.lo && r <= o.hi));
 }
 
+/**
+ * Aquifers: water that lives in the rock rather than on top of it.
+ *
+ * The band is the limestone one and a little either side of it, because that
+ * is the rock a cavern belongs in and because it is where a player digging
+ * straight down first meets something that is not dirt. In absolute terms it is
+ * roughly 268..279, which under ordinary land (h around 283) is six to fifteen
+ * blocks below the surface — deep enough that the roof is never a skylight,
+ * shallow enough to be found by digging rather than by spelunking.
+ *
+ * The lens is a two-octave field sampled on the *direction* alone, so an
+ * aquifer is a broad flat sheet rather than a ball: one field says where, a
+ * second says how deep the middle of it sits, and the amount by which the first
+ * clears its threshold says how thick it is there. Sampling a 3D field at the
+ * voxel's own position instead gives isolated blobs a block or two across
+ * scattered through the crust, which is not an aquifer and reads as generator
+ * noise. Low frequency for the same reason: 5.5 over a unit sphere is a feature
+ * about fifty columns across, so one aquifer is a place you can swim along.
+ *
+ * AQ_ROOF is the one number the enclosure argument rests on — see
+ * `_aqRecord`, which takes it against the *minimum* of the column's own height
+ * and its four neighbours'.
+ */
+const AQ_LO = BAND_LIMESTONE - 3.0;
+const AQ_HI = BAND_STONE + 1.5;
+const AQ_MID = (AQ_LO + AQ_HI) * 0.5;
+const AQ_ROOF = 6;             // blocks of rock that must stand over the top cell
+const AQ_THR = 0.42;           // lens field cutoff — how much of the planet has one
+/**
+ * 18 and not the 13 first tried. The lens field only just clears its cutoff
+ * over most of the ground it claims, so the thickness is dominated by the
+ * multiplier and not by the cap: at 13 the mean aquifer was two blocks deep and
+ * only a sixth of its cells were roomy enough to be given an air pocket, which
+ * is a wet seam rather than somewhere to swim.
+ */
+const AQ_THICK = 18;           // blocks of lens per unit of field over the cutoff
+const AQ_MAX_THICK = 7;
+const AQ_AIR = 2;              // layers of air left under the roof, at most
+/**
+ * The layer window the pass touches, one guard layer wider than the band on
+ * each side. The guard is not decoration: the seal has to be able to write the
+ * cell directly above the topmost water and directly below the lowest, and
+ * those can only fall outside the window if the window is exactly the band.
+ */
+const AQ_K0 = Math.max(1, Math.floor(AQ_LO - R_MIN - 0.5) - 1);
+const AQ_K1 = Math.min(D - 2, Math.ceil(AQ_HI - R_MIN - 0.5) + 1);
+
+/**
+ * Hot springs. Small, rare, and deliberately on a lattice.
+ *
+ * A pool is three columns across, so whether a column is inside one is a
+ * question every other decoration pass has to be able to answer — a tree
+ * standing in the water is exactly the kind of thing a region boundary makes
+ * inconsistent. Answering it by searching the neighbourhood for a spring means
+ * evaluating the whole spring test for forty-nine columns per column, per
+ * region, over the margin as well. Restricting centres to one column in
+ * SPRING_LATTICE^2 makes the search O(1): a seven-wide window contains at most
+ * one column congruent to SPRING_LI, so there is at most one candidate to test.
+ *
+ * The cost is that spring positions are quantised to an eight-column grid,
+ * which nobody can see at a density of one per several thousand candidates.
+ */
+const SPRING_LATTICE = 8;
+const SPRING_LI = 3;
+const SPRING_LJ = 5;
+const SPRING_R = 2.6;          // rim radius, in columns
+const SPRING_RI = 1.6;         // water radius — every 4-neighbour of a water
+const SPRING_CHANCE = 0.085;   // column is therefore inside the rim
+const SPRING_BIOMES = [BIOME.SNOW, BIOME.TUNDRA, BIOME.MOUNTAIN];
+
 /** Shared scratch for the per-column passes — they are called a million times. */
 const _fillDir = [0, 0, 0];
+/** Aquifers and springs get their own, because they run inside the others. */
+const _aqDir = [0, 0, 0];
+const _spParts = { f: 0, i: 0, j: 0 };
 
 /**
  * Volcano geometry. Module scope rather than locals now that choosing a site
@@ -283,6 +356,19 @@ export class WorldGen {
     this.nOre = new Noise(seed + 303);
     this.nBiome = new Noise(seed + 404);
     this.nDetail = new Noise(seed + 505);
+    this.nAq = new Noise(seed + 606);
+    /**
+     * One packed aquifer record per column, built on demand.
+     *
+     * Four bytes: computed flag, first water layer, last layer, first air
+     * layer (255 for none). Empty is encoded as bot > top. A flat array rather
+     * than a Map because every column asks for its four neighbours' records as
+     * well as its own — the hit rate is 80% and a Map's overhead per entry is
+     * twenty times the record. 5 MB against a voxel field of 770.
+     */
+    this._aq = null;
+    /** Spring centres, keyed by column. Only lattice columns are ever asked. */
+    this._spring = new Map();
   }
 
   height(dx, dy, dz) {
@@ -1057,6 +1143,124 @@ export class WorldGen {
     }
   }
 
+  /**
+   * The aquifer record for one column, computed once and kept.
+   *
+   * Reads the height field and two noise fields and nothing else — no blocks,
+   * no neighbours' records — so it is a pure function of (seed, column) and can
+   * be asked at any time, in any order, from either side of a region boundary.
+   * That is what the seal in `aquiferColumn` needs: a column decides which of
+   * *its own* cells must be solid by asking what its neighbours' water looks
+   * like, and both sides of every boundary get the same answer.
+   *
+   * The roof is measured against the lowest of the column's own height and its
+   * four neighbours', and this is the whole enclosure argument. A water cell at
+   * radius r therefore satisfies r <= colHeight[nb] - AQ_ROOF for every
+   * tangential neighbour nb, so the cell the seal writes beside it is six
+   * blocks under that neighbour's surface — solid rock, never a stone block
+   * hanging in the air over a hillside, and never a hole in the sky above the
+   * water.
+   *
+   * @returns {number} the record's offset into `_aq`
+   */
+  _aqRecord(col) {
+    let a = this._aq;
+    if (a === null) a = this._aq = new Uint8Array(COLUMNS * 4);
+    const o = col * 4;
+    if (a[o]) return o;
+    a[o] = 1; a[o + 1] = 1; a[o + 2] = 0; a[o + 3] = 255;   // empty: bot > top
+
+    let hMin = this.colHeight[col];
+    for (let d = 0; d < 4; d++) {
+      const hh = this.colHeight[colNeighbor(col, d)];
+      if (hh < hMin) hMin = hh;
+    }
+    const roof = hMin - AQ_ROOF;
+    if (roof <= AQ_LO) return o;
+
+    const dir = this._dirOf(col, _aqDir);
+    const lens = this.nAq.fbm3(dir[0] * 5.5, dir[1] * 5.5, dir[2] * 5.5, 2, 2, 0.5);
+    if (lens <= AQ_THR) return o;
+    const thick = Math.min(AQ_MAX_THICK, (lens - AQ_THR) * AQ_THICK);
+    if (thick < 1) return o;
+
+    // Where the sheet sits within the band. Without this an aquifer is a
+    // perfectly concentric shell, which is the same complaint the strata had:
+    // two shafts sunk a hundred columns apart would meet the water at exactly
+    // the same depth.
+    const mid = AQ_MID + this.nAq.simplex3(
+      dir[0] * 3.1 + 19.4, dir[1] * 3.1, dir[2] * 3.1,
+    ) * 3.2;
+    const top = Math.min(mid + thick * 0.5, AQ_HI, roof);
+    const bot = Math.max(mid - thick * 0.5, AQ_LO);
+    if (top < bot) return o;
+
+    const kBot = Math.max(AQ_K0 + 1, Math.ceil(bot - R_MIN - 0.5));
+    const kTop = Math.min(AQ_K1 - 1, Math.floor(top - R_MIN - 0.5));
+    if (kTop < kBot) return o;
+    // An air gap under the roof, so a big aquifer is somewhere to surface
+    // rather than somewhere to drown. Only when there is room for one: a
+    // three-block lens with two blocks of air in it is a cave with a puddle.
+    const air = (kTop - kBot + 1) >= 4 ? kTop - Math.min(AQ_AIR - 1, 1) : 256;
+
+    a[o + 1] = kBot; a[o + 2] = kTop; a[o + 3] = Math.min(255, air);
+    return o;
+  }
+
+  /** 0 nothing, 1 water, 2 air — the aquifer's own cells. */
+  _aquiferAt(col, k) {
+    const o = this._aqRecord(col);
+    const a = this._aq;
+    if (k < a[o + 1] || k > a[o + 2]) return 0;
+    return k >= a[o + 3] ? 2 : 1;
+  }
+
+  /**
+   * Aquifers, for one already-carved column, and the stone that holds them in.
+   *
+   * Runs after the cave pass on purpose. A cave cannot eat water — water is not
+   * CARVEABLE — but it can very happily open a passage in the column *next
+   * door* at the same layer, and worldgen liquid is registered as a permanent
+   * source by the water sim (see `Water` and `_seedWaterRegion`): one open side
+   * is not a leak, it is a spring that fills the cave system and never stops.
+   * So every cell of this column that touches aquifer water — above, below, or
+   * across any of the four tangential neighbours — is put back to rock if the
+   * carve pass took it. The neighbours do the same for their own cells when
+   * their turn comes, and because `_aqRecord` reads nothing but the height
+   * field and noise, the two sides cannot disagree about where the water is.
+   *
+   * Before the ore pass rather than after, so the seal weathers like the rock
+   * around it instead of standing out as a clean shell of bare stone.
+   */
+  aquiferColumn(blocks, col) {
+    const oOwn = this._aqRecord(col);
+    const a = this._aq;
+    const nb0 = colNeighbor(col, 0), nb1 = colNeighbor(col, 1);
+    const nb2 = colNeighbor(col, 2), nb3 = colNeighbor(col, 3);
+    // Cheapest possible rejection, and it is the common case by a long way:
+    // if neither this column nor any of its four neighbours holds water in the
+    // band, there is nothing to place and nothing to seal.
+    const oA = this._aqRecord(nb0), oB = this._aqRecord(nb1);
+    const oC = this._aqRecord(nb2), oD = this._aqRecord(nb3);
+    if (a[oOwn + 1] > a[oOwn + 2] && a[oA + 1] > a[oA + 2] && a[oB + 1] > a[oB + 2]
+      && a[oC + 1] > a[oC + 2] && a[oD + 1] > a[oD + 2]) return;
+
+    const base = col * D;
+    const dir = this._dirOf(col, _aqDir);
+    for (let k = AQ_K0; k <= AQ_K1; k++) {
+      const mine = this._aquiferAt(col, k);
+      if (mine) { blocks[base + k] = mine === 1 ? ID.water : ID.air; continue; }
+      const touching = this._aquiferAt(col, k - 1) || this._aquiferAt(col, k + 1)
+        || this._aquiferAt(nb0, k) || this._aquiferAt(nb1, k)
+        || this._aquiferAt(nb2, k) || this._aquiferAt(nb3, k);
+      if (!touching) continue;
+      const cur = blocks[base + k];
+      if (cur === ID.air || cur === ID.water || cur === ID.lava) {
+        blocks[base + k] = this.stratum(R_MIN + k + 0.5, dir[0], dir[1], dir[2]);
+      }
+    }
+  }
+
   /** Ore veins, for one already-carved column. See ORE_BY_LAYER. */
   oreColumn(blocks, col) {
     const no = this.nOre;
@@ -1094,10 +1298,16 @@ export class WorldGen {
    * buys is that the column is touched once instead of three times, and — the
    * point of the whole exercise — that a column can be built without building
    * its neighbours.
+   *
+   * The aquifer pass is the one that bends "reads no column but its own", and
+   * only as far as four neighbours' *height field* entries and their aquifer
+   * records — never their blocks. See `_aqRecord` for why that is still
+   * independent of the order regions are built in.
    */
   terrainColumn(blocks, col) {
     this.fillColumn(blocks, col);
     this.carveColumn(blocks, col);
+    this.aquiferColumn(blocks, col);
     this.oreColumn(blocks, col);
   }
 
@@ -1690,6 +1900,160 @@ export class WorldGen {
   }
 
   /**
+   * Is this column the centre of a hot spring, and if so at what layer does its
+   * pool sit? -1 for no.
+   *
+   * Every test here reads the global per-column tables and nothing else. That
+   * is not a style preference: `_springNear` is asked by the tree, boulder and
+   * flora passes, all three of which run over a *margin* of neighbouring
+   * regions so that a decision comes out the same from either side. A single
+   * block read would make the answer depend on which region the player walked
+   * into first, and a pine growing out of the middle of the pool from one
+   * approach and not the other is exactly the seam that costs.
+   *
+   * The footprint is kept inside one cube face, the same rule the volcano and
+   * the structures follow: a pool folded over a seam loses cells, and — more
+   * to the point here — a column on the far side of a seam has different face
+   * coordinates and would never find this centre on the lattice.
+   */
+  _springCenter(col) {
+    const hit = this._spring.get(col);
+    if (hit !== undefined) return hit;
+    const kb = this._springCenterUncached(col);
+    this._spring.set(col, kb);
+    return kb;
+  }
+
+  _springCenterUncached(col) {
+    const p = colParts(col, _spParts);
+    if (p.i % SPRING_LATTICE !== SPRING_LI || p.j % SPRING_LATTICE !== SPRING_LJ) return -1;
+    const edge = Math.ceil(SPRING_R) + 2;
+    if (p.i < edge || p.i >= F - edge || p.j < edge || p.j >= F - edge) return -1;
+    if (!SPRING_BIOMES.includes(this.colBiome[col])) return -1;
+    // Flat, dry, well clear of the waterline and out of any gorge. The height
+    // test is what keeps a pool from ever meeting the sea: the water surface
+    // ends up a block below this and the sea cannot reach uphill.
+    if (this.colSlope[col] > 0.35) return -1;
+    if (this.canyonNear[col] < CANYON_NEAR_MAX) return -1;
+    if (this.colHeight[col] < R_SEA + 3.0) return -1;
+    if (this.colRng(col, 0x8b17)() > SPRING_CHANCE) return -1;
+    // Not on a volcano's apron. Mountain is a host biome for both, and the cone
+    // is stamped from the *block array* after the height field says the ground
+    // is flat — so a pool sited by height would be cut into the middle of a
+    // scorched slope it knows nothing about. The sites are chosen planet-wide
+    // before any region exists, so reading them here is as deterministic as
+    // reading the height field.
+    if (this.volcanoes) {
+      for (let v = 0; v < this.volcanoes.length; v++) {
+        const s = this.volcanoes[v];
+        if (s.f !== p.f) continue;
+        if (Math.hypot(s.i - p.i, s.j - p.j) <= APRON + SPRING_R + 1) return -1;
+      }
+    }
+
+    const kc = this.groundKOf(col);
+    if (kc < 6 || kc > D - 6) return -1;
+    let lo = kc, hi = kc;
+    const ri = Math.ceil(SPRING_R);
+    for (let di = -ri; di <= ri; di++) {
+      for (let dj = -ri; dj <= ri; dj++) {
+        if (Math.hypot(di, dj) > SPRING_R) continue;
+        const c = patchColumn(p.f, p.i, p.j, di, dj);
+        const bi = this.colBiome[c];
+        if (bi === BIOME.OCEAN || bi === BIOME.BEACH) return -1;
+        const g = this.groundKOf(c);
+        if (g < 0) return -1;
+        if (g < lo) lo = g;
+        if (g > hi) hi = g;
+      }
+    }
+    // A pool needs a level shelf to sit in. One layer of step is absorbed by
+    // laying the rim at the lowest of them; two is a slope, and cutting a bowl
+    // into a slope leaves a wall of water on the downhill side.
+    if (hi - lo > 1) return -1;
+    return lo;
+  }
+
+  /**
+   * The hot spring covering this column, or -1.
+   *
+   * O(1): a seven-column window contains at most one column congruent to
+   * SPRING_LI modulo SPRING_LATTICE, so there is at most one centre that could
+   * possibly reach here. See SPRING_LATTICE for why that matters.
+   */
+  _springNear(col) {
+    const p = colParts(col, _spParts);
+    const ri = ((p.i - SPRING_LI) % SPRING_LATTICE + SPRING_LATTICE) % SPRING_LATTICE;
+    const i0 = ri <= SPRING_R ? p.i - ri
+      : (SPRING_LATTICE - ri <= SPRING_R ? p.i + (SPRING_LATTICE - ri) : -1);
+    if (i0 < 0 || i0 >= F) return -1;
+    const rj = ((p.j - SPRING_LJ) % SPRING_LATTICE + SPRING_LATTICE) % SPRING_LATTICE;
+    const j0 = rj <= SPRING_R ? p.j - rj
+      : (SPRING_LATTICE - rj <= SPRING_R ? p.j + (SPRING_LATTICE - rj) : -1);
+    if (j0 < 0 || j0 >= F) return -1;
+    if (Math.hypot(p.i - i0, p.j - j0) > SPRING_R) return -1;
+    return this._springCenter(cidx(p.f, i0, j0));
+  }
+
+  /**
+   * One column's hot spring, if it has one, clipped to a region.
+   *
+   * The pool is cut two blocks into the ground and filled, and the ring around
+   * it is laid flat at the same layer in a mineral crust — sulfur over tuff,
+   * which is the palette's nearest thing to a travertine terrace and shares no
+   * block with an ordinary lake shore. The rim is what makes the feature read:
+   * a three-column puddle in the snow with a snow edge is a puddle.
+   *
+   * Enclosure, which the water sim makes a correctness question rather than a
+   * cosmetic one — every worldgen liquid cell is a permanent source. The water
+   * surface is at kb-1, one *below* the rim's own top at kb, so at the water's
+   * own layer every tangential neighbour of every water column is either more
+   * water or rim: SPRING_RI is one less than SPRING_R, so a water column's four
+   * neighbours cannot leave the footprint. Underneath, the pass writes its own
+   * floor at kb-3 rather than trusting the ground: the cave carve is allowed
+   * within 2.2 blocks of the surface, so a passage can already be running
+   * directly beneath, and a pool with a hole in the bottom empties into it
+   * forever.
+   *
+   * Every write is unconditional and every draw from the stream happens before
+   * the region clip, so what a cell ends up holding does not depend on what was
+   * there or on which region stamped it.
+   */
+  springAt(blocks, col, rid) {
+    const kb = this._springCenter(col);
+    if (kb < 0) return;
+    const p = colParts(col, _spParts);
+    const rng = this.colRng(col, 0x3c0d);
+    const ri = Math.ceil(SPRING_R);
+    for (let di = -ri; di <= ri; di++) {
+      for (let dj = -ri; dj <= ri; dj++) {
+        const d = Math.hypot(di, dj);
+        if (d > SPRING_R) continue;
+        const c = patchColumn(p.f, p.i, p.j, di, dj);
+        const crust = rng() < 0.42 ? ID.sulfur_ore : ID.tuff;
+        if (regionOfCol(c) !== rid) continue;
+        const b = c * D;
+        if (d <= SPRING_RI) {
+          blocks[b + kb - 3] = ID.tuff;
+          blocks[b + kb - 2] = ID.water;
+          blocks[b + kb - 1] = ID.water;
+        } else {
+          blocks[b + kb - 3] = ID.tuff;
+          blocks[b + kb - 2] = ID.tuff;
+          blocks[b + kb - 1] = ID.tuff;
+          blocks[b + kb] = crust;
+        }
+        // Clear the headroom either way. On the rim this is what levels a
+        // one-layer step into the terrace; over the water it is what stops a
+        // drift of snow sitting on top of the pool.
+        for (let k = kb + (d <= SPRING_RI ? 0 : 1); k <= kb + 2 && k < D; k++) {
+          blocks[b + k] = ID.air;
+        }
+      }
+    }
+  }
+
+  /**
    * One column's tree, if it has one, clipped to a region.
    *
    * `rid` is the region whose cells are allowed to be written; a caller running
@@ -1701,6 +2065,9 @@ export class WorldGen {
   treeAt(blocks, col, rid) {
     const bi = this.colBiome[col];
     if (this.colSlope[col] > 1.5) return;
+    // Nothing takes root in a hot spring. Asked of the terrain rather than of
+    // the blocks — see `_springCenter`.
+    if (this._springNear(col) >= 0) return;
     // The gorge and its rim. See CANYON_TREE_THIN.
     const thin = CANYON_TREE_THIN[this.canyonNear[col]];
     if (thin <= 0) return;
@@ -1828,6 +2195,7 @@ export class WorldGen {
     if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) return;
     // A boulder is scenery, and a gorge floor already has rock lying about it.
     if (this.canyonNear[col] === 0) return;
+    if (this._springNear(col) >= 0) return;
     const rad = 1 + Math.floor(rng() * 2);
     const mossy = rng() < 0.4;
     const bp = colParts(col);
@@ -2022,6 +2390,7 @@ export class WorldGen {
    * tree that can reach here, because `surfaceK` under a canopy is the canopy.
    */
   floraAt(blocks, col) {
+    if (this._springNear(col) >= 0) return;
     const k = this.surfaceK(blocks, col);
     if (k < 0 || k >= D - 2) return;
     const base = col * D;
@@ -2102,6 +2471,10 @@ export class WorldGen {
    */
   decorateRegion(blocks, cols, margin) {
     const rid = regionOfCol(cols[0]);
+    // Springs first: they move the ground, and the three passes after them all
+    // ask `_springNear` rather than looking at what is there, so this ordering
+    // is for the blocks' sake and not for the decisions'.
+    for (let n = 0; n < margin.length; n++) this.springAt(blocks, margin[n], rid);
     for (let n = 0; n < margin.length; n++) this.treeAt(blocks, margin[n], rid);
     for (let n = 0; n < margin.length; n++) this.boulderAt(blocks, margin[n], rid);
     for (let n = 0; n < cols.length; n++) this.floraAt(blocks, cols[n]);

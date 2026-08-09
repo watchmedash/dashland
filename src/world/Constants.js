@@ -23,7 +23,27 @@
 // an ocean trench and a canyon can both exist without meeting in the middle.
 export const FACES = 6;
 export const F = 464;                // cells per face axis
-export const D = 66;                 // radial layers
+/*
+ * 66 -> 99. Mountains, which the planet did not have room for.
+ *
+ * The ceiling was R_TERRAIN_MAX 314 against a waterline of 290: twenty-four
+ * blocks of relief, about eleven player-heights for the tallest thing on the
+ * planet. That is a hill, and no amount of tuning the noise makes it a
+ * mountain — the roof was the limit, not the generator.
+ *
+ * Widening the sphere does not help and is the intuitive wrong answer: F is
+ * the horizontal cell count, so 5x F is the same twenty-four-block hills
+ * further apart, at five times the memory. Height lives here.
+ *
+ * Still a multiple of CHUNK_K = 11, because CK below divides by it and a
+ * fractional chunk count would silently lose the top of the world.
+ *
+ * The bill, and it is not small: every per-voxel array grows by half. Blocks
+ * are one byte each and exist twice (the main thread's mirror and the worker's
+ * authority), and the light field is four more — sun, r, g, b. At 66 that was
+ * about 510 MB; at 99 it is about 770.
+ */
+export const D = 99;                 // radial layers
 export const R_MIN = 250;            // radius of layer 0
 export const R_MAX = R_MIN + D;      // 316
 
@@ -118,7 +138,7 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  * middle of terrain that no longer joins up with it, which is a much worse
  * outcome than being told the save cannot be opened.
  */
-export const GEN_VERSION = 1;
+export const GEN_VERSION = 2;   // D 66 -> 99, sea 290 -> 282: every column moved
 
 // All five keep their distance from R_MIN, so the crust reads the same from
 // below: core three layers up, mantle eight. What changed is the room above
@@ -126,9 +146,24 @@ export const GEN_VERSION = 1;
 // ceiling 24 over the waterline instead of 12.
 export const R_CORE = 253;           // unbreakable core shell
 export const R_MANTLE = 258;
-export const R_SEA = 290;            // ocean surface radius
-export const R_SURFACE = 290.9;      // mean land radius
-export const R_TERRAIN_MAX = 314;
+/*
+ * The waterline drops eight layers as well, and that part is free.
+ *
+ * Every block of it is a block of relief that costs no memory at all: the
+ * terrain ceiling is measured from here, so lowering the sea raises the
+ * mountains without touching D. Eight rather than the twelve first considered,
+ * because the crust between the mantle and the waterline is where the caves and
+ * the ore live — that band goes from 32 layers to 24, and taking twelve would
+ * have left twenty, which starts to squeeze the deep ore against the mantle.
+ */
+export const R_SEA = 282;            // ocean surface radius
+export const R_SURFACE = 282.9;      // mean land radius
+/*
+ * Two below R_MAX (349), because a clamp that bites is a plateau where a peak
+ * should be. Against the new waterline this is 65 blocks of relief where there
+ * were 24.
+ */
+export const R_TERRAIN_MAX = 347;
 
 /**
  * How far down the two subtractive surface passes are allowed to reach.

@@ -302,21 +302,31 @@ export class WorldGen {
     const detail = this.nDetail.fbm3(x * 8, y * 8, z * 8, 3, 2, 0.5);
     const mask = smoothstep(0.25, 0.75, this.n.fbm3(x * 1.9 + 9.1, y * 1.9, z * 1.9, 3, 2, 0.5) * 0.5 + 0.5);
 
-    // Amplitudes in blocks. These were tuned against a ceiling only 12 blocks
-    // over the waterline, and the enlarged shell gives 24 — so the mountains
-    // are let out rather than left tuned for a roof that has moved. Peaks carry
-    // most of the increase because they are the ridged term and the only one
-    // that makes a summit; raising `continent` instead would just lift whole
-    // landmasses and read as nothing at all from the ground.
+    // Amplitudes in blocks, and the third time they have been let out to meet a
+    // roof that moved. The relief available over the waterline was 12, then 24,
+    // and is now 65 — D went to 99 and the sea came down eight — so a ceiling
+    // that was the binding constraint on every summit is no longer the thing
+    // deciding what a mountain looks like.
     //
-    // Their sum still has to clear R_TERRAIN_MAX with room to spare: at the
-    // extreme this reaches R_SURFACE + 7.5 + 12 = 310.4 against a clamp of 314,
-    // and a clamp that bites is a plateau where a peak should be.
+    // Peaks take most of it, as before and for the same reason: it is the
+    // ridged term and the only one that makes a summit. Putting the increase
+    // into `continent` instead lifts whole landmasses uniformly, which from the
+    // ground reads as nothing at all. `hills` goes up too, so the land between
+    // the summits stops being a plain.
+    //
+    // The basin term is deepened as well. With the waterline eight lower the
+    // sea would otherwise have become a puddle over the old floor; -5 puts the
+    // deepest ocean at about 266, comfortably clear of the mantle at 258, and
+    // keeps enough water column for the deep-water fish that need eight layers.
+    //
+    // The sum still has to clear R_TERRAIN_MAX with room: at the extreme this
+    // is R_SURFACE + 12 + 46 + 3 = 343.9 against a clamp of 347, and a clamp
+    // that bites is a plateau where a peak should be.
     let h = R_SURFACE;
-    h += continent * 7.5;
-    h += Math.min(0, continent) * 3.0;              // carve real ocean basins
-    h += land * peaks * 12.0 * (0.35 + mask * 0.65);
-    h += land * hills * 1.6;
+    h += continent * 12.0;
+    h += Math.min(0, continent) * 5.0;              // carve real ocean basins
+    h += land * peaks * 46.0 * (0.35 + mask * 0.65);
+    h += land * hills * 3.0;
     h += detail * 0.18;
     if (h < R_SEA + 1.2 && h > R_SEA - 3) h = lerp(h, R_SEA - 0.4, 0.4);
     return clamp(h, R_MIN + 6, R_TERRAIN_MAX);
@@ -847,9 +857,69 @@ export class WorldGen {
       // the deep where nothing settles.
       case BIOME.OCEAN: {
         const depth = R_SEA - h;
-        if (depth < 4) { top = patch > 0.10 ? ID.sand : ID.gravel; sub = ID.sand; }
-        else if (depth < 11) { top = patch > 0.16 ? ID.mud : ID.gravel; sub = ID.dirt; }
-        else { top = patch > 0.22 ? ID.clay : (patch < -0.30 ? ID.stone : ID.gravel); sub = ID.stone; }
+        // Bands against the ocean this planet actually has, which is
+        // R_SEA - R_SEABED_MIN = 17 layers. The numbers here were 4 and 11 for
+        // a 15-layer sea and were never checked again when the shell grew; they
+        // are re-derived rather than carried, because a threshold tuned to a
+        // depth the world no longer reaches is a band that never fires.
+        //
+        // Climate splits the shallows and deliberately not the deep. Light,
+        // ice and anything that grows stop mattering below the slope, so a
+        // polar deep and a tropical deep are the same cold dark rock.
+        //
+        // `temp` is the temperature term of the biome climate, recomputed here
+        // rather than stored: a Float32Array(COLUMNS) would be 5 MB resident
+        // for a value only seabed columns ever read, against one extra fbm on
+        // those same columns.
+        const temp = 1 - Math.abs(dir[1]) * 1.35
+          + this.nBiome.fbm3(dir[0] * 2.2, dir[1] * 2.2, dir[2] * 2.2, 3, 2, 0.5) * 0.45;
+        // `patch` is frequency 14 — a blob about twenty columns across, which
+        // on its own still reads as flat ground with a smear on it. `grit` is
+        // the single-column speckle that makes a bed look like a bed at the
+        // range you swim over it. Salt 0x5eab is unused: 0x7a11 is trees,
+        // 0xb0d1 boulders, 0xf10a flora.
+        const grit = this.colRng(col, 0x5eab)();
+        if (depth > 13) {
+          // The deep floor. Nothing settles and nothing lights it, so it is
+          // rock rather than soil. Basalt for the majority on purpose — it is
+          // in neither CARVEABLE nor ORE_HOST, so it is one surface the ore
+          // pass cannot freckle and the cave pass cannot open. The slate
+          // outcrops *are* ORE_HOST, which is the point: a seam showing on the
+          // floor of the deep is a reason to have swum down.
+          top = patch > 0.26 ? ID.slate : ((patch < -0.22 || grit < 0.06) ? ID.clay : ID.basalt);
+          sub = patch > 0.26 ? ID.stone : ID.slate;
+        } else if (depth > 8) {
+          // The foot of the slope, where the silt fans out and stops. Clay
+          // majority with the first slate showing through, so the descent has
+          // a middle instead of switching from mud straight to bedrock.
+          top = patch > 0.20 ? ID.gravel : ((patch < -0.24 || grit < 0.10) ? ID.slate : ID.clay);
+          sub = grit < 0.4 ? ID.slate : ID.clay;
+        } else if (temp < -0.05) {
+          // A polar sea. No sand at all, and that is a rule rather than a
+          // preference: a frozen coast is kept out of BIOME.BEACH by the
+          // shoreline pass, so sand running under the water there would be
+          // sand coming from nowhere.
+          top = depth < 3
+            ? (patch > 0.24 ? ID.packed_ice : (patch < -0.18 ? ID.coarse_dirt : ID.gravel))
+            : (patch > 0.14 ? ID.clay : (grit < 0.12 ? ID.coarse_dirt : ID.gravel));
+          sub = depth < 3 ? (grit < 0.35 ? ID.coarse_dirt : ID.gravel) : ID.clay;
+        } else if (temp > 0.45) {
+          // A warm sea. The shallows are the one place with light, warmth and
+          // water at once, so they get the only green ground that is not turf.
+          // Moss over pale sand is as close to a reef as a palette with no
+          // coral in it gets.
+          top = depth < 3
+            ? (patch > 0.20 ? ID.moss_block : ((patch < -0.24 || grit < 0.08) ? ID.clay : ID.sand))
+            : (patch > 0.18 ? ID.clay : (patch < -0.20 ? ID.mud : ID.sand));
+          sub = depth < 3 ? ID.sand : (grit < 0.4 ? ID.mud : ID.sand);
+        } else {
+          // A temperate sea: sand in the shallows so a beach keeps going under
+          // the water it runs into, silt and gravel down the slope.
+          top = depth < 3
+            ? (patch > 0.22 ? ID.gravel : ((patch < -0.26 || grit < 0.07) ? ID.clay : ID.sand))
+            : (patch > 0.16 ? ID.gravel : ((patch < -0.14 || grit < 0.10) ? ID.clay : ID.mud));
+          sub = depth < 3 ? ID.sand : (grit < 0.5 ? ID.mud : ID.dirt);
+        }
         break;
       }
       case BIOME.BEACH: top = ID.sand; sub = ID.sand; break;
@@ -894,7 +964,18 @@ export class WorldGen {
     // of the biome, which is the other half of why the planet looked like
     // one continuous beach — a column could be labelled Plains and still
     // be built entirely out of sand.
-    if (h < R_SEA + 0.4 && bi !== BIOME.SNOW && shoreDist[col] <= BEACH_REACH + 1) {
+    //
+    // `bi !== BIOME.OCEAN` is the whole seabed fix, and it is one clause.
+    // `shoreDist` is seeded at 0 on every ocean column — that is how the beach
+    // ring is grown *outward from* the water — so this distance test was true
+    // for the entire ocean rather than for its rim, and repainted every seabed
+    // on the planet sand over sand. The depth-varied seabed in the switch above
+    // had never once reached a player. What this rule is actually for is
+    // carrying a beach the last half block into water the height field put
+    // below the line without the biome pass calling it Ocean, and it still
+    // does exactly that.
+    if (h < R_SEA + 0.4 && bi !== BIOME.OCEAN && bi !== BIOME.SNOW
+      && shoreDist[col] <= BEACH_REACH + 1) {
       top = ID.sand; sub = ID.sand;
     }
 

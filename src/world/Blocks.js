@@ -714,21 +714,37 @@ export const BLOCKS = [
   // *glowing slightly* rather than as a lamp, and bleached coral emits nothing
   // at all, which is one more way the dead heads read as dead.
   // -------------------------------------------------------------------------
+  // `tier: 1` on all three colonies and on the sponge, for the reason written
+  // out on the Giant Clam below and for a measured one on top of it.
+  //
+  // Every reef block is `R_CROSS` with no `tool` named, so `miningTime`'s
+  // blade-through-undergrowth branch applied to them: any wooden sword hit the
+  // 0.05s floor, against a cinder pickaxe's 0.525s. Priced through, that is
+  // coral at 43 to 53 coins a second and the sponge at 60, against stone's
+  // 2.55 — twenty times the reference for swimming along a reef swinging the
+  // cheapest weapon in the game. The bonus is for undergrowth, and a reef is
+  // not undergrowth.
+  //
+  // The gate is the one the two neighbours in this same pass already carry, so
+  // this is the reef agreeing with itself rather than a new rule: the anemone
+  // and the clam are `tier: 1`, and the sponge at 18 coins is dearer than the
+  // pearl-bearing clam. `sea_grape` deliberately stays ungated - it is food,
+  // and picking food off the seabed bare-handed is the point of it.
   block({
     name: 'coral_branch', label: 'Branching Coral', render: R_CROSS,
-    solid: false, opaque: false, hardness: 0.4, submerged: true, needsFloor: true,
+    solid: false, opaque: false, hardness: 0.4, tier: 1, submerged: true, needsFloor: true,
     light: 4, lightColor: [1.0, 0.55, 0.68],
     particle: [0.89, 0.36, 0.49], sound: 'grass',
   }),
   block({
     name: 'coral_fan', label: 'Sea Fan', render: R_CROSS,
-    solid: false, opaque: false, hardness: 0.35, submerged: true, needsFloor: true,
+    solid: false, opaque: false, hardness: 0.35, tier: 1, submerged: true, needsFloor: true,
     light: 4, lightColor: [0.72, 0.45, 1.0],
     particle: [0.63, 0.37, 0.77], sound: 'grass',
   }),
   block({
     name: 'coral_brain', label: 'Brain Coral', render: R_CROSS,
-    solid: false, opaque: false, hardness: 0.5, submerged: true, needsFloor: true,
+    solid: false, opaque: false, hardness: 0.5, tier: 1, submerged: true, needsFloor: true,
     light: 4, lightColor: [1.0, 0.82, 0.42],
     particle: [0.85, 0.65, 0.24], sound: 'grass',
   }),
@@ -757,7 +773,7 @@ export const BLOCKS = [
   }),
   block({
     name: 'sea_sponge', label: 'Sea Sponge', render: R_CROSS,
-    solid: false, opaque: false, hardness: 0.35, submerged: true, needsFloor: true,
+    solid: false, opaque: false, hardness: 0.35, tier: 1, submerged: true, needsFloor: true,
     particle: [0.76, 0.35, 0.17], sound: 'grass',
   }),
   // The reason to swim down. It drops a pearl and nothing else — you never hold

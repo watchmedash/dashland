@@ -103,6 +103,42 @@ export const VIEW_COUNT = 3;
  */
 const THIRD_DIST = 3.6;
 /**
+ * How far above the eye and to the player's right the boom is anchored, in
+ * cells.
+ *
+ * Both are measured in the *tangent frame* — `this.up` and `forward x up` —
+ * and not in world +Y, which on a sphere is only "up" at one point on the
+ * planet.
+ *
+ * The side offset is the whole of the fix for "the held pickaxe is behind the
+ * body". A camera on the look axis sees the back of a torso and nothing else,
+ * because the torso is exactly what is between it and the right hand. 0.55 puts
+ * the body about nine degrees off centre at rest, which is enough to clear the
+ * shoulder and not enough to read as a camera that has come loose.
+ *
+ * Both scale down with the pull-in (see `updateCamera`), so a camera squeezed
+ * against a wall is not also being pushed sideways into it.
+ */
+const CAM_LIFT = 0.35;
+const CAM_SIDE = 0.55;
+/**
+ * The steepest the boom may be aimed *downward*, in radians.
+ *
+ * Without it the boom is the exact reverse of the look direction, so looking
+ * *up* drives the camera *down* — and on flat ground it is underground well
+ * before the pitch limit. Measured against the real terrain march: at 30 degrees
+ * of up-pitch the pull-in already had the camera at 2.97 cells, at 40 at 2.25
+ * and at 60 at 1.57, i.e. a player who merely looked up at a hilltop got the
+ * back of their own head. This is not the ground being hit "too aggressively";
+ * the boom was pointed into it.
+ *
+ * 0.35 rad (20 degrees) keeps the camera 0.74 cells above the feet at full
+ * extension, which clears flat ground with the pad to spare. Rising is not
+ * clamped — a boom that swings *up* when you look down is the ordinary
+ * over-the-head view, and a ceiling is what the pull-in is for.
+ */
+const CAM_DEPRESS = 0.35;
+/**
  * Clearance kept between the camera and whatever the ray hit.
  *
  * Not a taste value — the camera has a frustum, and stopping the *point* at the
@@ -111,8 +147,62 @@ const THIRD_DIST = 3.6;
  * the near rectangle at the default fov with room to spare.
  */
 const CAM_PAD = 0.32;
-/** Nearer than this and there is no third person left to have; fall back. */
-const THIRD_MIN = 0.55;
+/**
+ * The most of the frame's height a 1.8-cell body may occupy before third person
+ * stops being worth having.
+ *
+ * This is the number the old `THIRD_MIN = 0.55` should always have been. A
+ * distance floor cannot answer the question on its own, because how large the
+ * body draws is set by the distance *and* the fov, and the fov is now composed
+ * from the base setting, the sprint kick, the bow's 16% narrowing and the zoom.
+ * Inverting "how much of the screen is the body" gives a floor that moves with
+ * all four: 1.8 / (2 d tan(fov/2)) = BODY_MAX_FRAC.
+ *
+ * At the default 75 degrees that is 1.89 cells. The measured failure was a
+ * camera resting at 1.17 with the body drawn — 1.01 of the frame height, a head
+ * and nothing else — because the only two thresholds in the file were 0.55
+ * (give up) and Character.js's 0.9 (stop drawing the body), and everything
+ * between 0.9 and roughly 2.0 is the band where the body fills the screen.
+ * Nothing occupied that band deliberately; it was simply never named.
+ */
+const BODY_MAX_FRAC = 0.65;
+/**
+ * A floor under the floor, in cells, so a very wide fov cannot decide that a
+ * camera all but touching the player's back is fine.
+ *
+ * There is deliberately no ceiling to match it. If the fov narrows far enough
+ * that no reachable distance would keep the body small — full zoom is 22
+ * degrees, which wants nine cells of boom — the floor simply exceeds anything
+ * the boom can offer and the view collapses to first person, which is the right
+ * answer and needs no special case. (`main.js` only lets the zoom key run in
+ * first person today, so this is a guard rather than a behaviour.)
+ */
+const CAM_MIN_LO = 1.6;
+/**
+ * How much further than the floor the camera must be able to sit before a view
+ * that gave up takes itself back.
+ *
+ * Hysteresis, and it is the whole of the anti-jitter argument: without it the
+ * obstacle distance wandering by a hair would flip the view between third and
+ * first person at frame rate, which is worse than either. A ratio rather than a
+ * fixed gap so that it stays hysteresis when the fov moves the floor: drawing a
+ * bow narrows the view and so raises the floor, and a fixed gap measured
+ * against the *narrow* floor could sit above the distance that was fine a
+ * moment ago — leaving the view stuck in first person after the shot.
+ */
+const CAM_RESUME_K = 1.18;
+/**
+ * How the boom moves. Coming *in* is instant — a camera that eases into a wall
+ * is a camera inside a wall — and going back out is an exponential rate per
+ * second, so stepping out of a doorway is a push rather than a snap.
+ *
+ * The collapse to first person is the one shrink that is eased instead of
+ * taken, in cells per second, and that is safe for a reason worth stating:
+ * collapsing moves the camera *toward* the player, which is away from whatever
+ * caused it, so no intermediate position can be inside the obstacle.
+ */
+const CAM_OUT_RATE = 6;
+const CAM_COLLAPSE_RATE = 12;
 
 /**
  * Vertical fov at full zoom, in degrees.
@@ -172,6 +262,7 @@ const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
+const _aim = new THREE.Vector3();
 const _p = [0, 0, 0];
 const _nc = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
 const _hit = { depth: 0, axis: -1, push: 0 };
@@ -246,8 +337,23 @@ export class Player {
      * that had to give up because there was nowhere to put the camera. The body
      * model reads this to decide whether it can be drawn without the camera
      * ending up inside its head.
+     *
+     * It is 0 from the *instant* the view gives up rather than when the camera
+     * finishes sliding home, because the two questions are different: where to
+     * put the camera is a position that may be eased, and whether the body can
+     * be drawn is a decision that has already been taken. Easing the published
+     * distance instead would draw the body for the tenth of a second the
+     * collapse takes, at exactly the range where it is nothing but a head.
      */
     this.cameraDist = 0;
+    /**
+     * The boom's own state: the eased distance the camera is actually at, and
+     * whether third person has given up for now. Both live across frames — see
+     * `updateCamera`, where they are the difference between a camera that
+     * settles and one that chatters against a slope.
+     */
+    this._camD = 0;
+    this._camGive = false;
     /** Set by main once Mobs exists, so the box can be kept out of bodies. */
     this.mobs = null;
   }
@@ -1182,36 +1288,11 @@ export class Player {
       this.eye.addScaledVector(right, Math.cos(this.bob) * 0.05 * b);
     }
 
-    const camPos = _a.copy(this.eye);
-    this.cameraDist = 0;
-    if (view !== VIEW_FIRST) {
-      // Out along the view axis: behind for the over-the-shoulder view, ahead
-      // for the one that looks back at you.
-      _v4.copy(this.lookDir).multiplyScalar(view === VIEW_BACK ? -1 : 1);
-      // March the world and stop short of the first solid thing. Without this
-      // the camera happily sits inside the hillside you are standing against
-      // and you are looking at the inside of the terrain — the standard failure
-      // of a fixed-offset third-person camera, and `planet.raycast` is exactly
-      // the tool for it. Liquids are deliberately not hit: swimming would
-      // otherwise slam the camera to the surface every stroke, and the
-      // underwater post pass already sells being submerged.
-      let dist = THIRD_DIST;
-      const hit = this.planet.raycast(this.eye, _v4, dist + CAM_PAD);
-      if (hit) dist = hit.dist - CAM_PAD;
-      if (dist >= THIRD_MIN) {
-        camPos.addScaledVector(_v4, dist);
-        this.cameraDist = dist;
-      }
-    }
-    camera.position.copy(camPos);
-    // Both third-person modes aim at the eye, which for the rear view is the
-    // same thing as aiming along lookDir and for the front view is the reverse
-    // of it — one line instead of a branch, and the two can never drift apart.
-    if (this.cameraDist > 0) _m.lookAt(camPos, this.eye, this.up);
-    else _m.lookAt(camPos, _b.copy(camPos).add(this.lookDir), this.up);
-    camera.quaternion.setFromRotationMatrix(_m);
-    if (b > 0.001) camera.rotateZ(Math.cos(this.bob) * 0.011 * b);
-
+    // The fov is settled *before* the boom, not after, because the boom's
+    // give-up threshold is derived from it — see BODY_MAX_FRAC. Drawing a bow
+    // narrows the view in every mode, and a floor that did not follow it would
+    // let the body swell by a sixth at exactly the moment you are aiming.
+    //
     // The sprint kick is faded out as the zoom comes in rather than added to
     // it. Six degrees on a 75-degree view is a lean forward; the same six on a
     // 22-degree one is a 27% error in the magnification, and you can be
@@ -1221,5 +1302,79 @@ export class Player {
       camera.fov += (targetFov - camera.fov) * Math.min(1, 8 * dt);
       camera.updateProjectionMatrix();
     }
+
+    const camPos = _a.copy(this.eye);
+    // Where the camera would like to be, as an offset from the eye — and where
+    // it is allowed to be, after the world has had its say.
+    //
+    // Everything below is built in the player's own tangent frame: `this.up`
+    // and `right`. On a sphere those are the only "up" and "sideways" there
+    // are, and world +Y is up at exactly one point on the planet.
+    this.cameraDist = 0;
+    if (view === VIEW_FIRST) {
+      this._camD = 0;
+      this._camGive = false;
+      _aim.copy(camPos).add(this.lookDir);
+    } else {
+      const back = view === VIEW_BACK;
+      // The boom's own elevation, which is the look pitch only until the look
+      // pitch would bury it. See CAM_DEPRESS.
+      const elev = back ? Math.min(this.pitch, CAM_DEPRESS) : Math.max(this.pitch, -CAM_DEPRESS);
+      _v3.copy(this.forward).multiplyScalar(Math.cos(elev))
+        .addScaledVector(this.up, Math.sin(elev))
+        .multiplyScalar(back ? -1 : 1);
+      // The whole offset, boom and shoulder together, as one vector. Marching
+      // *it* rather than the boom alone is what keeps the pull-in honest: the
+      // camera slides along this line toward the eye, so the lift and the side
+      // step shrink with the distance and cannot push it into the wall the
+      // boom just backed away from.
+      _v4.copy(_v3).multiplyScalar(THIRD_DIST)
+        .addScaledVector(this.up, CAM_LIFT)
+        .addScaledVector(right, CAM_SIDE);
+      const len = _v4.length();
+      _v4.multiplyScalar(1 / len);
+      // March the world and stop short of the first solid thing. Without this
+      // the camera happily sits inside the hillside you are standing against
+      // and you are looking at the inside of the terrain — the standard failure
+      // of a fixed-offset third-person camera, and `planet.raycast` is exactly
+      // the tool for it. Liquids are deliberately not hit: swimming would
+      // otherwise slam the camera to the surface every stroke, and the
+      // underwater post pass already sells being submerged.
+      const hit = this.planet.raycast(this.eye, _v4, len + CAM_PAD);
+      const avail = hit ? Math.max(0, Math.min(len, hit.dist - CAM_PAD)) : len;
+
+      // How close the camera may sit before the body stops being a body and
+      // becomes a head filling the frame. Inverted from the fov, so it is right
+      // at 75 degrees, while sprinting, and with a bow drawn.
+      const minD = Math.max(CAM_MIN_LO,
+        HEIGHT / (2 * BODY_MAX_FRAC * Math.tan(camera.fov * Math.PI / 360)));
+      if (this._camGive) { if (avail >= minD * CAM_RESUME_K) this._camGive = false; }
+      else if (avail < minD) this._camGive = true;
+
+      const want = this._camGive ? 0 : avail;
+      if (want < this._camD) {
+        // Straight to it when a wall arrives, eased only for the collapse — the
+        // one shrink that moves away from the thing that caused it.
+        this._camD = this._camGive
+          ? Math.max(want, this._camD - CAM_COLLAPSE_RATE * dt)
+          : want;
+      } else {
+        this._camD += (want - this._camD) * Math.min(1, CAM_OUT_RATE * dt);
+      }
+      camPos.addScaledVector(_v4, this._camD);
+      this.cameraDist = this._camGive ? 0 : this._camD;
+      // Aim along the look axis rather than at the head. With the camera on
+      // that axis the two are identical — which is what they were before the
+      // shoulder offset existed — but once it is off the axis, aiming at the
+      // head swings the whole picture toward the body every time the camera
+      // pulls in, and what you are looking at slides off the screen. A fixed
+      // point out along the look direction keeps the view pointing where the
+      // player is pointing, whatever the boom had to do.
+      _aim.copy(this.eye).addScaledVector(this.lookDir, back ? THIRD_DIST : -THIRD_DIST);
+    }
+    camera.position.copy(camPos);
+    _m.lookAt(camPos, _aim, this.up);
+    camera.quaternion.setFromRotationMatrix(_m);
+    if (b > 0.001) camera.rotateZ(Math.cos(this.bob) * 0.011 * b);
   }
 }

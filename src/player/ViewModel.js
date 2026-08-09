@@ -61,58 +61,125 @@ const OFF_REST = new THREE.Vector3(-0.48, -0.56, -0.23);
 const OFF_ARM_REST_ROT = new THREE.Euler(0.30, -0.16, -0.12);
 
 /**
- * The bow draw, as a single table rather than six loose terms in `update`.
+ * The bow draw.
  *
- * `p` is added to the shoulder's rest point and `r` to its rest rotation, both
- * scaled by the eased draw; `nock` is where the arrow sits on the string at zero
- * draw and `pull` how far back along the shot it travels by full draw.
+ * **The subject of this animation is the bow, and the arm is not in it.** That
+ * is the whole of the redesign, and it is worth stating why, because the two
+ * things it replaced were each a reasonable idea that produced the same wrong
+ * picture.
  *
- * **These are not amplitudes, they are a destination, and it was solved for
- * rather than dialled in.** The fist hangs at `HAND_LOCAL` off the shoulder, so
- * a rotation moves the bow as much as a translation does and the two cannot be
- * tuned apart. The rotation was chosen first — it is the gesture, the limb
- * coming across the body and rolling the stave's flat toward the camera so the
- * string is edge-on to you and its travel is visible at all — and then `p` is
- * whatever puts the resulting fist on the target point, `(0.02, -0.22, -0.52)`
- * in view space. That point is the whole of the fix and it is worth stating in
- * screen terms, because that is where the complaint was:
+ * The draw used to be six numbers added to the *shoulder*: the limb came in
+ * across the body, up toward eye level and 0.20 units back toward the eye, and
+ * everything hanging off it — the fist, the sleeve, the bow — grew by the 38%
+ * that buys. The nearest and largest thing on that chain is the player's own
+ * hand, so what the gesture actually showed was a hand looming at the camera
+ * with a bow somewhere behind it. Measured on the real chain, the arm went from
+ * 2.6% of the frame to 9.6% while the bow went from 1.05% to 1.48%: the arm
+ * gained six times what the bow did, and ended up covering nearly three times
+ * as much of the screen. "The hand got bigger instead" is exactly correct.
  *
- *   draw   fist in view space        on screen        a 0.40-unit bow fills
- *   0.00   ( 0.396, -0.399, -0.717)  22.2% right, 40% low   40% of the height
- *   0.50   ( 0.108, -0.268, -0.582)   7.5% right, 33% low   49%
- *   1.00   ( 0.017, -0.220, -0.520)   1.3% right, 30% low   55%
+ * So the bow gets its own transform, in `aim`, and the arm gets out of the way:
  *
- * So the bow crosses a fifth of the screen's width to arrive under the
- * crosshair, lifts about a tenth of its height, and — being 0.20 units nearer
- * the eye — grows 38% on the way. What it replaced travelled half as far, grew
- * 17%, and actually sank 5% of the screen on the way (coming toward the camera
- * costs apparent height, and the old rise did not pay for it), which is the
- * arithmetic behind "the draw is a small motion".
+ *  - `p` / `r` are still the shoulder's offsets, but they now *retreat* — the
+ *    limb sinks and its far end drops out of the bottom of the frame. By 40% of
+ *    the charge the arm covers no pixels at all, and `hide` then stops drawing
+ *    it entirely, at a point where it has already been off screen for a tenth of
+ *    the draw (so there is nothing to pop).
+ *  - `aim` is where the *bow* goes, stated in view space — the frame the player
+ *    is actually looking at — rather than as an offset from a hand that is on
+ *    its way out of shot. `p` is the middle of the stave, `r` the bow model's
+ *    orientation on screen, `len` the stave's length in view units (the model is
+ *    normalised to one unit on its longest axis, so `len` is literally how long
+ *    it is drawn). At 0.85 out and 1.41 long, the stave over-fills the viewport
+ *    — 2.48 of 2.00 in NDC, cropped top and bottom — and its centre line sits
+ *    three quarters of the way across, on the right.
+ *  - `r` was solved, not dialled: the bow lies in its own XZ plane (stave along
+ *    model X, string a straight run at model z = -0.28, shot along +Z), so
+ *    standing the stave up 12 degrees off vertical and running the shot LEFT
+ *    across the frame — 22 degrees of it turned away into the screen — pins all
+ *    three axes. That leaves the plane 22 degrees off face-on, which is what
+ *    makes the arc and the string read; the shipped draw ended at 70 degrees,
+ *    which is a bow seen very nearly edge-on.
  *
- * The remaining half of "the bow looks small in hand" is the model's own scale
- * and pose, which live in `render/ItemModels.js` and are not this file's to set.
+ * What that does to the frame, measured off the real glTF through the real
+ * chain at 16:9 (bow and arm as rasterised screen coverage, not bounding boxes):
+ *
+ *   draw   bow    arm     plane off face-on   stave off vertical   bow height
+ *   0.00   1.05%  2.56%   39 deg              6 deg                1.45 NDC
+ *   0.25   1.94%  1.05%   34 deg             10 deg                1.89
+ *   0.50   2.63%  0.00%   23 deg             12 deg                2.20
+ *   0.75   3.32%  0.00%   23 deg             12 deg                2.42
+ *   1.00   3.56%  0.00%   22 deg             12 deg                2.48
+ *
+ * The bow rises the whole way (its centre goes -0.65 -> -0.17 NDC), which is the
+ * property the previous rebuild bought and this must not give back: coming
+ * toward the camera costs apparent height, and a draw that sinks reads as a
+ * shrug. It rises because the bow is carried to `aim` in *view* space, so its
+ * path on screen is a straight line to the destination whatever the arm is doing
+ * underneath it.
+ *
+ * `string` and `pull` are the nocked arrow, and both are in the bow model's own
+ * space now rather than in the hand's — see `_poseDraw`. That is what re-sites
+ * the arrow against the bow's pose instead of against a constant that was true
+ * of a pose two revisions ago: at the old hand-space `nock`, the arrow's nock
+ * point lands a full bow-length from the grip.
  */
 const DRAW = {
-  p: [-0.17, 0.33, 0.14],
-  r: [-0.30, 0.44, -0.24],
-  nock: [0.02, 0.055, -0.34],
-  pull: 0.28,
-  /** How big the nocked arrow is drawn, against a bow that is now 38% nearer. */
-  scale: 0.50,
+  p: [-0.02, -0.42, 0.04],
+  r: [-0.85, 0.26, -0.14],
+  /** Where the bow goes, in view space. */
+  aim: { p: [0.42, -0.07, -0.85], r: [-2.675, -1.129, -1.063], len: 1.41 },
+  /** The limb stops being drawn once its retreat is this far along. */
+  hide: 0.35,
+  /**
+   * The string's straight run of verts, in the bow model's normalised space.
+   * Measured: raw z = -0.28 on a model 1.9575 units tip to tip and recentred,
+   * which is -0.066. The grip is at +0.078.
+   */
+  string: -0.066,
+  /** How far back along the shot the nock travels by full draw, in view units. */
+  pull: 0.36,
+  /** How long the nocked arrow is drawn, in view units. */
+  scale: 1.10,
 };
 
 /**
- * How the arm's half of the draw is spread over the charge: fast out of rest,
- * then holding.
+ * The three clocks the draw runs on, and they are three because they are three
+ * different jobs.
  *
- * Ease-out and not linear, and the split from the string is the point. The bow
- * coming up is the part that has to read *immediately* — it is the feedback
- * that the button did something — so 94% of the arm's travel is done by
- * three-quarters of the charge. The string keeps pulling linearly for the whole
- * of it (see `setDraw`), so the last quarter, where the damage curve is steepest,
- * still has something moving in it. One gesture, two speeds.
+ * `drawEase` is the rise: ease-out, so the bow is most of the way up almost at
+ * once — it is the feedback that the button did something — and then holds while
+ * the charge fills.
+ *
+ * `armEase` is the arm's retreat, and it is slower than the rise on purpose.
+ * The limb is what the player's eye is already on when the draw starts, so it
+ * leaves under the bow rather than ahead of it; ^1.5 puts it off screen by 40%
+ * of the charge, monotonically, with no frame where it grows.
+ *
+ * `turnEase` is the roll that presents the bow's plane, and it is far faster
+ * than either. The turn from the carrying grip to the aim is very nearly a half
+ * roll, and a half roll passes through edge-on whichever way it goes — there is
+ * no path around it. What there is, is the option to have it over before there
+ * is a bow on screen to look at: at ^8 the crossing happens at 7% of the charge,
+ * with the bow still at its resting 1.3% of the frame down in the corner, and
+ * from the moment the bow covers 2% of the frame the plane is never more than
+ * 31 degrees off face-on. On the rise's clock instead it is 77 degrees — edge-on
+ * while the bow is already large, which is the thing being fixed.
  */
 const drawEase = (t) => t * (2 - t);
+const armEase = (t) => t * Math.sqrt(t);
+const turnEase = (t) => 1 - (1 - t) ** 8;
+
+/**
+ * How fast the draw pose lets go, in units per second.
+ *
+ * Only the falling edge is eased. The rise is already a ramp — `main.js` hands
+ * over a charge clock that takes about a second to fill — but releasing is one
+ * frame, and the arm now travels far enough out of frame that snapping it back
+ * is a limb appearing from nowhere. `PlayerCharacter._drawW` eases its own
+ * release for the same reason and this is the first-person half of it.
+ */
+const DRAW_FALL = 12;
 
 // --- swing animations -------------------------------------------------------
 // Every tool used to play the same forward-and-down jab, so a pickaxe, a sword
@@ -237,6 +304,22 @@ function sampleSwing(track, s, outP, outR) {
 
 const _swingP = new THREE.Vector3();
 const _swingR = new THREE.Vector3();
+
+// Scratch for `_poseDraw`, which runs every frame of a draw and must not
+// allocate. `_mA`..`_mC` are matrices in view space, `_pA`/`_qA`/`_sA` the
+// pieces a transform decomposes into.
+const _mA = new THREE.Matrix4();
+const _mB = new THREE.Matrix4();
+const _mC = new THREE.Matrix4();
+const _pA = new THREE.Vector3();
+const _qA = new THREE.Quaternion();
+const _sA = new THREE.Vector3();
+const _pB = new THREE.Vector3();
+const _qB = new THREE.Quaternion();
+const _sB = new THREE.Vector3();
+const _aimP = new THREE.Vector3(...DRAW.aim.p);
+const _aimQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(...DRAW.aim.r));
+const _aimS = new THREE.Vector3(DRAW.aim.len, DRAW.aim.len, DRAW.aim.len);
 
 /**
  * The stand-in arm's skin: a teal sleeve with a cuff and a bare hand.
@@ -368,15 +451,39 @@ export class ViewModel {
     this.hands = {
       right: {
         anchor: this.hand, pivot: this.armPivot, stub: this.arm, arm: null,
-        item: -1, mesh: null, owns: false, track: SWINGS.default,
+        rig: null,
+        item: -1, mesh: null, owns: false, modelled: false, track: SWINGS.default,
         glow: createItemBlockMaterial(),
       },
       left: {
         anchor: this.offHand, pivot: this.offArmPivot, stub: this.offArm, arm: null,
-        item: -1, mesh: null, owns: false, track: SWINGS.default,
+        rig: null,
+        item: -1, mesh: null, owns: false, modelled: false, track: SWINGS.default,
         glow: createItemBlockMaterial(),
       },
     };
+
+    /**
+     * A group between each fist and what it is holding, so an item can be posed
+     * *relative to the hand* instead of only with it.
+     *
+     * Identity on every frame of every other animation, and that is the point:
+     * the swing tracks, the bob and the equip dip all still drive the shoulder
+     * and the item still rides the limb exactly as it did. What the rig buys is
+     * the one case where they must come apart — the bow draw, where the bow has
+     * to grow and turn while the arm does the opposite of growing. Posing the
+     * shoulder cannot express that, because everything on that chain grows
+     * together and the biggest, nearest thing on it is the hand.
+     *
+     * One per hand rather than one for the drawing hand, so `_setMesh` has a
+     * single rule and there is no branch that could put an item in the wrong
+     * parent. The offhand's is never touched.
+     */
+    for (const key of HANDS) {
+      const h = this.hands[key];
+      h.rig = new THREE.Group();
+      h.anchor.add(h.rig);
+    }
 
     /**
      * Whose arms these are. Defaulted rather than left null so that the common
@@ -396,6 +503,11 @@ export class ViewModel {
      * ran to the end of a track and let go on its own.
      */
     this.draw = 0;
+    /**
+     * The draw the *pose* is at, which lags `draw` on the way down only. See
+     * `DRAW_FALL`.
+     */
+    this._drawShown = 0;
     /** The nocked arrow's mesh, built on the first draw and then kept. */
     this.nock = null;
     this._nockItem = 0;
@@ -658,7 +770,7 @@ export class ViewModel {
       // and swaps itself in when the geometry lands — and if the models aren't
       // there at all, the sprite is simply what you keep.
       const model = heldModel(itemId, (m) => this._adoptModel(h, itemId, m));
-      if (model) { this._setMesh(h, model, false); return; }
+      if (model) { this._setMesh(h, model, false, true); return; }
     }
     if (!isCube) {
       let mat = this.spriteCache.get(itemId);
@@ -699,20 +811,35 @@ export class ViewModel {
    *   the only thing holding it — sprite planes are per-equip and have to be
    *   released. Block and model geometry is shared out of a cache and must not
    *   be disposed here.
+   * @param {boolean} [modelled] true only for authored 3D art out of
+   *   `ItemModels` — a real model, at its authored pose, normalised to one unit
+   *   on its longest axis. The bow draw needs to know, because it sizes the bow
+   *   in view units against exactly that normalisation: applied to the flat
+   *   sprite the fist holds for the frame or two before the GLB lands, it would
+   *   blow a 0.36-unit card up to 1.41.
    */
-  _setMesh(h, mesh, owned) {
+  _setMesh(h, mesh, owned, modelled = false) {
     this._clearMesh(h);
-    h.anchor.add(mesh);
+    h.rig.add(mesh);
     h.mesh = mesh;
     h.owns = owned;
+    h.modelled = modelled;
   }
 
   _clearMesh(h) {
     if (!h.mesh) return;
-    h.anchor.remove(h.mesh);
+    h.rig.remove(h.mesh);
     if (h.owns) h.mesh.geometry.dispose();
     h.mesh = null;
     h.owns = false;
+    h.modelled = false;
+    // The rig belongs to the item that has just left, not to the hand. Left
+    // posed, the next thing put in this fist would arrive wearing the last one's
+    // draw — which for a bow released and swapped in the same frame is a torch
+    // the size of the screen.
+    h.rig.position.set(0, 0, 0);
+    h.rig.quaternion.identity();
+    h.rig.scale.setScalar(1);
   }
 
   /**
@@ -724,7 +851,7 @@ export class ViewModel {
    */
   _adoptModel(h, itemId, mesh) {
     if (itemId !== h.item) return;
-    this._setMesh(h, mesh, false);
+    this._setMesh(h, mesh, false, true);
   }
 
   /**
@@ -760,31 +887,109 @@ export class ViewModel {
       // points.
       const build = (m) => {
         if (this.nock || this._nockItem !== arrowItem) return;
-        // The model is normalised to one unit on its longest axis and its head
-        // is on +Z (see the arrow's pose note in ItemModels), so a half turn
-        // about Y aims it down the screen's -Z — where the camera, and the
-        // shot, are going.
+        // Neither posed nor aimed here. Both are `_poseDraw`'s, every frame,
+        // off the bow's own matrix: the model is normalised to one unit on its
+        // longest axis with its head on +Z, and the bow's shot is *also* its
+        // +Z (see the archery note in ItemModels), so an arrow that simply
+        // wears the bow's rotation is an arrow on the string — whatever pose
+        // the bow is in and whatever that file does to it next.
         m.scale.setScalar(DRAW.scale);
-        m.rotation.set(0, Math.PI, 0);
         this.nock = m;
         this.hand.add(m);
       };
       const now = worldModel(arrowItem, build);
       if (now) build(now);
     }
-    if (!this.nock) return;
-    this.nock.visible = true;
-    // Slides back along the aim as the string comes with it. The arrow starts a
-    // third of a unit out in front of the fist and its nock travels 0.28 back —
-    // against a shaft drawn 0.50 long, that is over half the arrow disappearing
-    // behind the hand, which is what makes the pull legible as a pull rather
-    // than as a twitch. (It was 0.20 of travel on a 0.44 shaft.)
-    //
-    // Linear in `this.draw`, deliberately *not* the eased `drawEase` the arm
-    // uses: the arm's job is to arrive, the string's is to keep going. See the
-    // note on `drawEase`.
-    this.nock.position.set(
-      DRAW.nock[0], DRAW.nock[1], DRAW.nock[2] + DRAW.pull * this.draw);
+    if (this.nock) this.nock.visible = true;
+  }
+
+  /**
+   * Carry the bow to `DRAW.aim`, take the limb out of the picture, and put the
+   * arrow on the string.
+   *
+   * **The blend is in view space, not on the rig's own local numbers, and that
+   * is load-bearing.** What the rig gets set to is whatever makes the bow's
+   * world transform equal a straight interpolation from where the hand happens
+   * to be holding it to a fixed pose in front of the eye. Two things follow, and
+   * neither is available from a local offset:
+   *
+   *  - the bow's path across the screen is a straight line to the destination,
+   *    so it rises the whole way even though the arm underneath it is on its way
+   *    *down* and out of frame. Blending the rig's local transform instead sends
+   *    the bow diving with the arm for the first quarter of the charge and then
+   *    hauling back up, which measured as -0.65 -> -0.92 -> -0.08 NDC: it sinks
+   *    before it rises, which is the exact fault the previous rebuild fixed.
+   *  - at full draw the bow is *anchored*, not offset: the walking bob, the
+   *    sprint pull-back and the equip dip all still move the shoulder and none
+   *    of them move the bow. A held aim that is rock steady is the correct
+   *    reading of a pose the player is holding to line up a shot, and it comes
+   *    out of the frame choice rather than out of a special case.
+   *
+   * The turn runs on `turnEase` and everything else on `drawEase`; see the note
+   * on the eases for why the roll has to be the fast one.
+   *
+   * @param {number} t the draw the pose is at, 0..1
+   * @param {number} aw the same draw on the arm's slower clock
+   */
+  _poseDraw(t, aw) {
+    const h = this.hands.right;
+    const limb = h.arm || h.stub;
+    const drawing = t > 0 && h.mesh && h.modelled
+      && ITEMS[h.item]?.tool?.kind === 'bow';
+    if (!drawing) {
+      // Unconditional, and cheaply so: an item that is not a drawn bow always
+      // finds its rig at rest, whatever left it posed.
+      h.rig.position.set(0, 0, 0);
+      h.rig.quaternion.identity();
+      h.rig.scale.setScalar(1);
+      if (limb) limb.visible = true;
+      return;
+    }
+
+    // The limb, once its retreat has taken it off screen. Measured: it covers
+    // no pixels from `armEase` 0.25 onward, and `DRAW.hide` is 0.35 — a tenth
+    // of the draw later — so this can only ever hide something that is already
+    // invisible. `h.arm || h.stub` so the character's own arm is hidden when
+    // there is one and the stand-in when there is not; writing to both would
+    // put the stand-in back on top of the real limb.
+    if (limb) limb.visible = aw < DRAW.hide;
+
+    // The hand's transform in view space, built rather than read: `root` is at
+    // identity, so the chain is two local matrices and a multiply. Asking three
+    // for `matrixWorld` here would mean an `updateMatrixWorld(true)` over the
+    // whole arm subtree every frame, ahead of the one the renderer already does.
+    this.armPivot.updateMatrix();
+    this.hand.updateMatrix();
+    _mA.multiplyMatrices(this.armPivot.matrix, this.hand.matrix);   // hand -> view
+    h.mesh.updateMatrix();
+
+    // Where the bow would be if nothing were drawing it, and where it is going.
+    _mB.multiplyMatrices(_mA, h.mesh.matrix).decompose(_pA, _qA, _sA);
+    const dw = drawEase(t);
+    _pA.lerp(_aimP, dw);
+    _qA.slerp(_aimQ, turnEase(t));
+    _sA.lerp(_aimS, dw);
+    _mB.compose(_pA, _qA, _sA);                                     // bow -> view
+
+    // rig = hand^-1 . bow . mesh^-1
+    _mC.copy(_mA).invert().multiply(_mB).multiply(_mA.copy(h.mesh.matrix).invert());
+    _mC.decompose(h.rig.position, h.rig.quaternion, h.rig.scale);
+
+    if (!this.nock || !this.nock.visible) return;
+    // The arrow, sited in the bow's own model space and then carried into the
+    // hand's by the bow's matrix — which is the whole of "re-sited against the
+    // new bow pose". `DRAW.string` is the string's own z on the model, so the
+    // nock is on the string by construction and stays there if `ItemModels`
+    // retunes the bow's rotation, position or height again.
+    _mC.multiply(h.mesh.matrix);                                    // bow -> hand
+    const bowScale = _sB.setFromMatrixColumn(_mC, 0).length() || 1;
+    // Half the shaft, so that the *nock* — not the arrow's middle — lands on the
+    // string. Both lengths are view units and the bow's model is not, hence the
+    // divide.
+    const half = (DRAW.scale / 2) / bowScale;
+    const pull = (DRAW.pull * t) / bowScale;
+    this.nock.position.set(0, 0, DRAW.string - pull + half).applyMatrix4(_mC);
+    this.nock.quaternion.setFromRotationMatrix(_mB.extractRotation(_mC));
   }
 
   /**
@@ -891,22 +1096,22 @@ export class ViewModel {
     // the recoil `punch()` plays on release lands on an arm that is already on
     // its way back from the draw.
     //
-    // The shoulder comes *in* toward the centre line (the bow crosses the view
-    // rather than sitting out at the edge), *up* toward eye level, and *back*
-    // toward the eye, and the arm turns and rolls as it goes. Where that puts
-    // the bow on screen, and why it is a destination rather than an amplitude,
-    // is in `DRAW`.
+    // What the shoulder does here is *leave*: it sinks and drops the far end of
+    // the limb out of the bottom of the frame, so that by 40% of the charge the
+    // arm covers no pixels and the bow is the only held thing on screen. The bow
+    // itself is not posed from here at all any more — see `_poseDraw`.
     //
-    // The old note here warned to keep every term under 0.2 units and 0.3 rad
-    // because "a radian at the shoulder throws the item off screen". That is
-    // true of the swing tracks, which are transients nobody is looking at, and
-    // it is exactly wrong for the draw, which is a pose the player is holding
-    // and staring at: the constraint is not "stay small", it is "land here",
-    // and the landing point is checked in view space instead of guessed.
-    const dw = drawEase(this.draw);
-    const drawX = DRAW.p[0] * dw;
-    const drawY = DRAW.p[1] * dw;
-    const drawZ = DRAW.p[2] * dw;
+    // Only the fall is eased (`DRAW_FALL`); the rise is already a ramp.
+    if (this.draw >= this._drawShown) this._drawShown = this.draw;
+    else {
+      this._drawShown += (this.draw - this._drawShown) * Math.min(1, dt * DRAW_FALL);
+      if (this._drawShown < 0.002) this._drawShown = 0;
+    }
+    const shown = this._drawShown;
+    const aw = armEase(shown);
+    const drawX = DRAW.p[0] * aw;
+    const drawY = DRAW.p[1] * aw;
+    const drawZ = DRAW.p[2] * aw;
 
     const px = rest.x + bx + _swingP.x * sw + drawX;
     const py = rest.y + by + _swingP.y * sw + equipY + drawY;
@@ -929,10 +1134,13 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * dw,
-      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * dw,
-      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * dw,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * aw,
+      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * aw,
+      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * aw,
     );
+
+    // The bow's own half of the draw, and the limb going dark behind it.
+    this._poseDraw(shown, aw);
 
     // The offhand arm, on the frames there is one. Everything above has already
     // run and is untouched by this — the two arms share the bob phase and the

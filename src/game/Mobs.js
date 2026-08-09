@@ -1061,6 +1061,12 @@ const HIDE_MEAT = [['hide', 1, 1], ['meat', 1, 1]];
 //   tiger      6 / 1.15s   5.2 dps  3.8s   the most dangerous thing that hunts
 //   elephant   8 / 2.00s   4.0 dps  5.0s   but three blows and you are dead
 //
+// Every number in that column is the *normal* ladder. The world's difficulty
+// multiplies all of them by one factor — 0.5, 1 or 1.5 — on the one wire these
+// blows cross, `Mobs.onAttack` in main.js, so the ratios priced here survive
+// exactly and nothing but a mob's blow is touched. See MOB_DAMAGE_SCALE in
+// game/NewGame.js for why those three.
+//
 // The elephant is deliberately the odd one out: mid-table on DPS and top of the
 // table per blow. It is slow, it telegraphs, and walking away always works, so
 // the lesson it teaches has to be carried by the single hit rather than by

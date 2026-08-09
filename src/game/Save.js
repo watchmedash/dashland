@@ -225,6 +225,11 @@ export const Save = {
       // `null` for a planet saved before the picker existed; the caller
       // supplies the default.
       character: payload.player?.character ?? null,
+      // How hard this planet's animals hit. Summarised rather than derived
+      // because the menu draws its rows out of localStorage and cannot open a
+      // four-megabyte world to find out. A planet written before difficulty
+      // existed has no field, and the row shows the game it was played under.
+      difficulty: payload.difficulty ?? 'normal',
       blocksPlaced: payload.stats?.placed | 0,
       blocksMined: payload.stats?.mined | 0,
     };

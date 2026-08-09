@@ -21,6 +21,12 @@ import {
 import { loadTileAtlas } from './render/TileAtlas.js';
 import { Audio } from './audio/Audio.js';
 import { UI } from './ui/UI.js';
+// The loadout table, read through the namespace rather than as a named import
+// on purpose: it is the UI's list and the UI is where it must stay, but a named
+// import of an export that does not exist yet is a build error, and this half of
+// the feature has to survive the other half not being there. Absent, the start
+// kit falls back to the six torches — see `loadoutStacks`.
+import * as UIModule from './ui/UI.js';
 import { IconFactory } from './ui/Icons.js';
 import { Inventory, Slot, HOTBAR } from './game/Inventory.js';
 import { Drops } from './game/Drops.js';
@@ -31,6 +37,9 @@ import * as MobModels from './game/MobModels.js';
 import { Farming } from './game/Farming.js';
 import { Water } from './game/Water.js';
 import { Save } from './game/Save.js';
+import {
+  DEFAULT_DIFFICULTY, normalizeDifficulty, mobDamageScale, normalizeLoadout, loadoutStacks,
+} from './game/NewGame.js';
 import {
   ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, armourPoints,
   bowShot, bowDrawStep,
@@ -593,6 +602,17 @@ class Game {
      * `newGame`, to the slot the player chose to write to.
      */
     this.saveSlot = -1;
+    /**
+     * How hard the animals hit on this planet: 'easy', 'normal' or 'hard'.
+     *
+     * A fact about the world, not about the person, so it is chosen once on the
+     * New Game screen, written into the save, and read back on load. It scales
+     * mob blows and nothing else — not health, not spawn rates, not hunger, not
+     * a fall. See `mobDamageMul`.
+     */
+    this.difficulty = DEFAULT_DIFFICULTY;
+    /** The loadout keys picked for this world, in pick order. */
+    this.loadout = [];
     this.worldReady = false;
     /** The character picker is up and the world behind it must wait. */
     this._choosing = false;
@@ -689,7 +709,22 @@ class Game {
     // Creatures speak for themselves — idle calls, pain and death, all anchored
     // in the world so you can hear which direction the herd is in.
     this.mobs.onSound = (kind, mob) => this.audio.mob(mob.type, kind, mob.pos);
-    this.mobs.onAttack = (dmg, mob) => this._takeHit(dmg, mob);
+    // Difficulty lives here, on the one wire every mob blow crosses, and not
+    // inside `_takeHit`.
+    //
+    // `_takeHit` is the door for *all* damage — lava, fire, drowning, a fall,
+    // a cactus — and the player asked for mobs only, so scaling in there would
+    // quietly make hard a harder planet rather than a harder ecology. This is
+    // the only call `Mobs.onAttack` makes (see `_resolveHits`), so it is the
+    // narrowest point that still catches every species.
+    //
+    // Before `skills.soak` rather than after, and it does not matter which:
+    // tolerance is a proportion of the blow, not a flat subtraction, so
+    // soak(dmg * m) and soak(dmg) * m are the same number. Scaling here means
+    // hard is 1.5x the damage a player would otherwise have taken whatever
+    // their tolerance, instead of hard eating the skill or the skill eating
+    // hard.
+    this.mobs.onAttack = (dmg, mob) => this._takeHit(dmg * this.mobDamageMul, mob);
     this.mobs.onBurn = (mob) => this.particles.embers(mob.pos, mob.up, 2, 0.55);
     // A torch on the ground has to light the animal standing next to it, and
     // nothing in the scene graph can tell it so — see `_entityLight`. Handed
@@ -1015,7 +1050,16 @@ class Game {
     this.worldWorker.onmessage = (e) => this._onWorldMessage(e.data);
   }
 
+  /** What a mob's blow is multiplied by before it reaches the player. */
+  get mobDamageMul() { return mobDamageScale(this.difficulty); }
+
   _resetWorld() {
+    // Both are world state, and both are set again by whichever path is opening
+    // a world — `newGame` from the choices, `_placeEntities` from the save. The
+    // reset is what stops a planet you quit from lending its difficulty to the
+    // next one, on the paths that set neither (`abandonNewGame`).
+    this.difficulty = DEFAULT_DIFFICULTY;
+    this.loadout = [];
     this.planet.clearMeshes();
     // The mirror is reused rather than reallocated — it is 85MB, and two of
     // them alive at once while the old one is collected is a stall you can see.
@@ -1097,9 +1141,15 @@ class Game {
     this.graceT = NEW_WORLD_GRACE;
     this.mobs.spawnGrace = true;
     for (const m of [...this.mobs.list]) if (m.spec.hostile) this.mobs._die(m, []);
-    // Enough to light a camp with, which is the thing you actually want in the
-    // first five minutes and cannot make without finding coal first.
-    this.inventory.add(itemIdOf('torch'), 6);
+    // What the player chose to bring, or the six torches if they chose nothing.
+    // The stacks come from the UI's own option table, so the button and the bag
+    // cannot disagree; an item name that no longer exists is skipped rather than
+    // added as air.
+    for (const [name, count] of loadoutStacks(UIModule.LOADOUT_OPTIONS, this.loadout)) {
+      const id = itemIdOf(name);
+      if (id) this.inventory.add(id, count);
+      else console.warn(`loadout: no such item "${name}"`);
+    }
   }
 
   /**
@@ -1118,9 +1168,18 @@ class Game {
    *   holding a planet) on the slot screen. Nothing is written here: the slot
    *   is only claimed, and the world that was in it survives until the first
    *   autosave lands on it.
+   * @param {{character?: string, loadout?: string[], difficulty?: string}} [opts]
+   *   the answers from the New Game screen. Every one of them is optional and
+   *   every one of them has a default that is exactly today's behaviour, because
+   *   this is called from more than one place. A `character` here means the
+   *   screen already asked who you are, so the carousel is skipped; without one
+   *   the picker goes up as it always has and `beginWorld` brings the answer
+   *   back.
    */
-  newGame(slot) {
+  newGame(slot, opts = {}) {
     this.saveSlot = slot | 0;
+    this.difficulty = normalizeDifficulty(opts.difficulty);
+    this.loadout = normalizeLoadout(opts.loadout);
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
     this.ui.progress(0, 'Igniting the core');
@@ -1131,7 +1190,8 @@ class Game {
     this.worldWorker.postMessage({ type: 'init', seed: this.seed });
     this._choosing = true;
     this._readyHeld = false;
-    this.ui.openCharacterPicker(this.character.id);
+    if (opts.character) this.beginWorld(opts.character);
+    else this.ui.openCharacterPicker(this.character.id);
   }
 
   /**
@@ -1139,9 +1199,18 @@ class Game {
    * watching the bar, which is where a player who picked instantly would have
    * been the whole time.
    */
-  beginWorld(id) {
+  /**
+   * @param {{loadout?: string[], difficulty?: string}} [opts] the other two
+   *   answers, for a screen that collects them alongside the face rather than
+   *   before it. Only what is passed is taken, so a caller that answered in
+   *   `newGame` and a caller that answers here both work and neither wipes the
+   *   other.
+   */
+  beginWorld(id, opts = {}) {
     if (!this._choosing) return;
     this._choosing = false;
+    if (opts.difficulty !== undefined) this.difficulty = normalizeDifficulty(opts.difficulty);
+    if (opts.loadout !== undefined) this.loadout = normalizeLoadout(opts.loadout);
     this.ui.closeCharacterPicker();
     this.character.setCharacter(id || DEFAULT_CHARACTER);
     // Not awaited. A character that is not the one preloaded at boot is a
@@ -1521,6 +1590,13 @@ class Game {
       this.frozen = new Set(save.frozen || []);
       this.hearths = new Set(save.hearths || []);
       this.coreFound = !!save.coreFound;
+      // A world started on hard loads as hard. Saves written before this
+      // existed carry no field and `normalizeDifficulty` reads them as normal,
+      // which is the game they were played under. The loadout is a record of
+      // what this planet was started with — it is only spent once, in
+      // `_beginGrace`, which a load never reaches.
+      this.difficulty = normalizeDifficulty(save.difficulty);
+      this.loadout = normalizeLoadout(save.loadout);
       this._refreshWards();
       this._pendingSave = null;
     } else {
@@ -2097,6 +2173,12 @@ class Game {
       frozen: [...this.frozen],
       hearths: [...this.hearths],
       coreFound: this.coreFound,
+      // Top level rather than inside `player`: how hard the animals hit is a
+      // rule of this planet, not a fact about the person walking on it, and it
+      // has to be true of whoever loads it. `Save.write` copies it into the slot
+      // summary so the menu can say so without opening the world.
+      difficulty: this.difficulty,
+      loadout: this.loadout,
       playtime: this.playtime,
       dayT: +this.dayT.toFixed(5),
       season: this.seasons.toJSON(),

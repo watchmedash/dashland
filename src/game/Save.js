@@ -13,16 +13,61 @@ const STORE = 'worlds';
 const META_KEY = 'dashcraft.meta.v1';
 const SLOT = 'slot0';
 
-function openDb() {
+/**
+ * Open the database, creating the store if the upgrade happens to run.
+ * @param {number} [version] omitted to take whatever version exists — which
+ *   also creates the database at version 1 if there is none, firing the
+ *   upgrade. Passing a number is how the repair below forces one.
+ */
+function openAt(version) {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = version === undefined
+      ? indexedDB.open(DB_NAME)
+      : indexedDB.open(DB_NAME, version);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+    // Another tab holding the old version open. Rejecting beats hanging: the
+    // caller reports a failed save, which is true, and the next attempt works
+    // once that tab goes.
+    req.onblocked = () => reject(new Error('save database busy in another tab'));
   });
+}
+
+/**
+ * Open the database and guarantee the store is actually in it.
+ *
+ * The obvious version of this — open at version 1, create the store in
+ * `onupgradeneeded` — has a failure it can never recover from, and this
+ * browser was sitting in it: a `dashcraft` database at version 1 containing
+ * **no stores at all**. An upgrade transaction that is interrupted before it
+ * commits (close the tab during the very first save, and that is the whole
+ * recipe) leaves the database created and the store not. From then on the
+ * requested version matches the existing one, so `onupgradeneeded` never fires
+ * again, and every transaction throws NotFoundError — for good. The world
+ * cannot be saved, cannot be loaded, and nothing the player can do inside the
+ * game fixes it, because the code kept politely asking for the same version it
+ * already had.
+ *
+ * So don't trust the open: check for the store, and if it is missing, bump the
+ * version to force an upgrade that creates it. This repairs a bricked database
+ * on the next launch, whatever left it that way — an interrupted upgrade, or a
+ * store some past build named differently.
+ */
+async function openDb() {
+  let db = await openAt();
+  if (db.objectStoreNames.contains(STORE)) return db;
+  const next = db.version + 1;
+  db.close();
+  db = await openAt(next);
+  if (!db.objectStoreNames.contains(STORE)) {
+    db.close();
+    throw new Error(`could not create the "${STORE}" store`);
+  }
+  return db;
 }
 
 async function put(key, value) {

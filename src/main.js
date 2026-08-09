@@ -1260,6 +1260,12 @@ class Game {
         this.kilns.set(k.key, {
           input: Slot.fromJSON(k.in), fuel: Slot.fromJSON(k.fu), output: Slot.fromJSON(k.out),
           burn: k.b, burnMax: k.bm, progress: k.p, progressMax: k.pm, col: k.c, k: k.k,
+          // Taken from the slot rather than saved, because it is not really new
+          // state — it is a restatement of whose progress `p` is, and the input
+          // slot already says. Deriving it here rather than defaulting to 0 is
+          // what stops a load from being a free swap: the first tick after a
+          // load would otherwise adopt whatever was in the slot by then.
+          progressItem: Slot.fromJSON(k.in).item,
         });
       }
       for (const c of save.crates || []) {
@@ -2520,6 +2526,8 @@ class Game {
       s = {
         input: new Slot(), fuel: new Slot(), output: new Slot(),
         burn: 0, burnMax: 1, progress: 0, progressMax: 1, col, k,
+        // Which item the banked progress belongs to — see `_tickKilns`.
+        progressItem: 0,
       };
       this.kilns.set(key, s);
     }
@@ -2529,6 +2537,21 @@ class Game {
   _tickKilns(dt) {
     for (const k of this.kilns.values()) {
       const recipe = k.input.empty ? null : smeltingFor(k.input.item);
+
+      // Progress belongs to the item that earned it, not to the kiln.
+      //
+      // Without this it belonged to the kiln, and the kiln did not care what
+      // was cooking: bank eight seconds on an iron ore, swap the ore for an
+      // egg, and the very next frame handed over a cooked egg, because 8 is
+      // more than the egg's 4. One slow smelt you never finish buys one fast
+      // smelt for free, over and over. Emptying the slot still only *decays*
+      // the progress below — that is a deliberate grace for taking something
+      // out and putting it straight back — but changing what is in there
+      // starts the clock again.
+      if (!k.input.empty && k.progressItem !== k.input.item) {
+        k.progress = 0;
+        k.progressItem = k.input.item;
+      }
       const canOutput = recipe && (k.output.empty
         || (k.output.item === recipe.out && k.output.count + recipe.count <= (ITEMS[recipe.out]?.stack ?? 64)));
 

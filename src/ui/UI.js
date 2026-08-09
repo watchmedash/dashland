@@ -368,7 +368,7 @@ export class UI {
       recipePanel: $('recipe-panel'),
       recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeEmpty: $('recipe-empty'),
       pause: $('pause'), settings: $('settings'), controls: $('controls'), death: $('death'),
-      deathCause: $('death-cause'),
+      deathCause: $('death-cause'), deathLost: $('death-lost'),
       slots: $('slots'), slotList: $('slot-list'), slotsTitle: $('slots-title'),
       chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgStatus: $('cg-status'),
       cgWho: $('cg-who'), cgKit: $('cg-kit'), cgDiff: $('cg-diff'),
@@ -1048,17 +1048,32 @@ export class UI {
     const kit = this.el.cgKit;
     if (!kit) return;
     kit.innerHTML = '';
+    // The tiles are painted through `IconFactory.item`, which is the same call
+    // the hotbar and the inventory grid make — so a pickaxe on this screen is
+    // the pickaxe model, not a flat sprite or a generated cube.
+    //
+    // Two things make that non-obvious, and both are why the `img` is created
+    // unconditionally and kept in a list. First, this screen is up *while*
+    // `_loadAssets` runs, so `this.icons` is frequently still null when the
+    // tiles are built. Second, a modelled item's icon is painted only once its
+    // GLB lands, which is later again — `IconFactory` hands back the drawn art
+    // in the meantime and fires its update hook when the real one is ready.
+    // `_paintKit` is therefore called from three places: here, from
+    // `setIcons`, and from that hook. Whichever arrives last wins, and nothing
+    // ever renders an empty tile waiting for it.
+    this._kitIcons = [];
     for (const opt of LOADOUT_OPTIONS) {
       const b = document.createElement('button');
       b.className = 'cg-opt';
       b.dataset.key = opt.key;
       const [name, count] = opt.items[0];
-      if (this.icons) {
-        const img = document.createElement('img');
-        img.src = this.icons.item(itemIdOf(name));
-        img.alt = '';
-        b.appendChild(img);
-      }
+      const img = document.createElement('img');
+      img.alt = '';
+      // A one-pixel transparent GIF, so a tile whose icon has not been painted
+      // yet is an empty square rather than a broken-image glyph.
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+      b.appendChild(img);
+      this._kitIcons.push({ img, id: itemIdOf(name) });
       if (count > 1) {
         const q = document.createElement('span');
         q.className = 'qty';
@@ -1069,7 +1084,23 @@ export class UI {
       b.onclick = () => this._toggleKit(opt.key);
       kit.appendChild(b);
     }
+    this._paintKit();
     this._syncKit();
+  }
+
+  /**
+   * Point every loadout tile at the current best icon for its item.
+   *
+   * Idempotent and cheap: the factory caches, and an unchanged data URL is not
+   * reassigned, so calling this on every late-icon repaint costs one string
+   * compare per tile.
+   */
+  _paintKit() {
+    if (!this.icons || !this._kitIcons) return;
+    for (const { img, id } of this._kitIcons) {
+      const url = this.icons.item(id);
+      if (url && img.src !== url) img.src = url;
+    }
   }
 
   /**
@@ -1195,12 +1226,22 @@ export class UI {
   closePause() { this.el.pause.classList.add('hidden'); this.closeSettings(); this.closeControls(); }
   get pauseOpen() { return !this.el.pause.classList.contains('hidden'); }
 
-  showDeath(cause) {
-    // Just what killed you. The screen used to add a sentence promising your
-    // pack was still where you fell and would wait for you — reassuring the
-    // first time and padding every time after, and the death marker already
-    // says it on the map without spending a line of the death screen on it.
+  /**
+   * The reason, and one line about what it cost, if anything.
+   *
+   * `cause` is one or two words: `Fell`, `Drowned`, `Lava`, or the name of
+   * whatever killed you. `lost` is empty on almost every death and is a short
+   * phrase on the ones that wipe the tree. Nothing here consoles, explains
+   * where the pack went, or says what happens next — the pack has a marker on
+   * the map and the buttons say what happens next.
+   *
+   * @param {string} cause
+   * @param {string} [lost]
+   */
+  showDeath(cause, lost = '') {
     this.el.deathCause.textContent = cause;
+    this.el.deathLost.textContent = lost;
+    this.el.deathLost.classList.toggle('hidden', !lost);
     this.el.death.classList.remove('hidden');
   }
   hideDeath() { this.el.death.classList.add('hidden'); }
@@ -1220,8 +1261,12 @@ export class UI {
     this.icons = icons;
     // Icons for modelled items are rendered off the game's own renderer, and
     // arrive a beat after the model does — hence the repaint hook.
-    icons.attach(this.game.renderer, () => this.refresh());
+    // The character picker is usually still on screen when this runs — it is
+    // put up before `_loadAssets` finishes on purpose — so its tiles are
+    // repainted alongside the inventory both now and on every late arrival.
+    icons.attach(this.game.renderer, () => { this.refresh(); this._paintKit(); });
     this.refresh();
+    this._paintKit();
   }
 
   _buildSlots() {
@@ -1852,7 +1897,6 @@ export class UI {
     tag.append(coin, document.createTextNode(String(price)));
 
     row.append(img, name, have, tag);
-    row.title = 'Click 1, shift-click 10';
     row.addEventListener('click', (e) => onClick(e.shiftKey ? 10 : 1));
     return row;
   }

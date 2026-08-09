@@ -31,6 +31,36 @@
   --parchment-2: #e9dcc4;
   --edge: #d8c7aa;
 
+  /* The parchment's own bevel set, and it is deliberately the exact mirror of
+     the plate's below: a hard warm keyline on the outside so a card never
+     dissolves into the dimmed world behind it, a bright line inside so it
+     reads as a lifted face, and a matching sunk shadow for anything the
+     material is supposed to be cut *into* rather than laid on top of. Every
+     card, row, cell and well on every screen is one of these three and
+     nothing else. */
+  --paper:
+    linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, 0) 34%),
+    linear-gradient(168deg, var(--parchment), var(--parchment-2));
+  --paper-cell:
+    linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, .22));
+  --paper-hard: rgba(122, 94, 54, .38);
+  --emboss:
+    0 0 0 1px var(--paper-hard),
+    inset 0 1px 0 rgba(255, 255, 255, .8),
+    inset 0 -1px 0 rgba(122, 94, 54, .14);
+  --emboss-lift:
+    0 0 0 1px var(--paper-hard),
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    inset 0 -1px 0 rgba(122, 94, 54, .16),
+    0 8px 18px -10px rgba(56, 40, 20, .55);
+  /* Cut into the sheet: the inventory tray, a slider groove, a segment track. */
+  --sunk:
+    inset 0 0 0 1px rgba(122, 94, 54, .26),
+    inset 0 2px 5px rgba(74, 54, 28, .2);
+  /* The warm ring that means "this one". Same accent as the hotbar's live cell,
+     so a selected inventory slot and a selected hotbar slot are one idea. */
+  --ring: 0 0 0 2px var(--accent), 0 0 14px -3px rgba(221, 124, 56, .7);
+
   /* --- accent ---------------------------------------------------------- */
   --accent: #dd7c38;
   --accent-2: #f2b45c;
@@ -60,10 +90,19 @@
   --r-sm: 3px;
   --r-md: 5px;
   --r-lg: 9px;
+  --r-xl: 13px;
+
+  /* One easing curve for everything that opens, lifts or settles, and one
+     duration scale. A screen that comes up on a different curve to the row
+     inside it reads as two pieces of software. */
+  --ease: cubic-bezier(.2, .8, .25, 1);
+  --t-fast: .12s;
+  --t-mid: .2s;
 
   /* --- type ------------------------------------------------------------
      A real scale, fourth-ish, so nothing on screen is a size picked by hand.
      Everything below refers to these and to nothing else. */
+  --fs-2xs: 9px;
   --fs-xs: 10px;
   --fs-sm: 11.5px;
   --fs-md: 13px;
@@ -103,32 +142,71 @@ html, body {
 
 /* ── overlays ──────────────────────────────────────────── */
 
+/* The overlay is the stop. It darkens and desaturates the world, and the card
+   arrives a beat later out of the same point the darkening came from, so the
+   two read as one movement rather than as a box appearing on a dim photo.
+   `backdrop-filter` is allowed here and only here: an overlay is painted once
+   when the game has already stopped, which is the exact opposite of the HUD's
+   per-frame budget. */
 .overlay {
   position: fixed; inset: 0; z-index: 50;
   display: grid; place-items: center;
   background: radial-gradient(120% 90% at 50% 0%, rgba(10, 14, 26, .5), rgba(3, 5, 11, .88));
   backdrop-filter: blur(13px) saturate(118%);
-  animation: fade .22s ease;
+  animation: fade var(--t-mid) ease;
 }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
-@keyframes rise { from { opacity: 0; transform: translateY(12px) scale(.99) } to { opacity: 1; transform: none } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.985) } to { opacity: 1; transform: none } }
 
+/* PARCHMENT, the material. A sheet with a warm keyline, light falling on the
+   top edge, and a fibre tooth fine enough that you read it as paper rather
+   than as a pattern. The tooth is two repeating gradients, painted once, and
+   it is the single thing that stops a light card looking like a browser
+   dialog. */
 .panel {
+  position: relative;
   width: min(660px, 93vw); max-height: 88vh; overflow: auto;
-  padding: 18px 20px; border-radius: var(--r-lg);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 40%),
-              linear-gradient(165deg, var(--parchment), var(--parchment-2));
-  border: 1px solid var(--edge); box-shadow: var(--shadow);
-  animation: rise .28s cubic-bezier(.2, .8, .25, 1);
+  padding: 20px 22px; border-radius: var(--r-xl);
+  background:
+    repeating-linear-gradient(92deg, rgba(122, 94, 54, .035) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
+    repeating-linear-gradient(2deg, rgba(122, 94, 54, .03) 0 1px, rgba(0, 0, 0, 0) 1px 5px),
+    var(--paper);
+  box-shadow:
+    0 0 0 1px rgba(122, 94, 54, .5),
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    inset 0 -20px 40px -30px rgba(74, 54, 28, .5),
+    var(--shadow);
+  animation: rise .26s var(--ease);
+}
+/* The screens the game stops for get one warm hairline along the top edge of
+   the sheet, which is the parchment's answer to the plate's bright inner
+   keyline. It is what makes a menu and the hotbar look struck from the same
+   set of rules. */
+.panel::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  background: linear-gradient(90deg, rgba(221, 124, 56, 0), var(--accent-2), rgba(221, 124, 56, 0));
+  opacity: .55; pointer-events: none;
 }
 .panel header {
   display: flex; align-items: center; gap: 10px;
-  margin: -2px 0 14px; padding-bottom: 10px;
-  border-bottom: 1px solid rgba(0, 0, 0, .1);
+  margin: -2px 0 16px; padding-bottom: 11px;
+  /* Two lines, one dark one light, so the rule is cut into the sheet rather
+     than drawn on it. Same trick as every bevel in the game. */
+  border-bottom: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .8);
 }
 .panel header h2 { flex: 1; }
-.panel h2 { font-size: var(--fs-lg); font-weight: 700; letter-spacing: var(--ls-disp); }
+.panel h2 {
+  font-size: var(--fs-lg); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: var(--ink);
+}
 .note { margin-top: 14px; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .panel, .menu-card, .chargen-card { animation: none; }
+}
 
 h1 {
   font-size: var(--fs-3xl); font-weight: 200; letter-spacing: .26em;
@@ -143,24 +221,60 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
 
 /* ── menu cards ────────────────────────────────────────── */
 
+/* PLATE, at card scale. The menus that sit over the world rather than being a
+   workspace in it — the title screen, pause, death, the confirm — are the same
+   material as the HUD one size up: dark, top-lit, hard outer keyline. */
 .menu-card {
-  width: min(340px, 90vw); padding: 28px 24px 20px; text-align: center;
-  border-radius: 12px;
+  width: min(340px, 90vw); padding: 26px 22px 20px; text-align: center;
+  border-radius: var(--r-xl);
   background:
     radial-gradient(120% 70% at 50% 0%, rgba(90, 116, 170, .22), rgba(0, 0, 0, 0) 62%),
-    linear-gradient(170deg, rgba(28, 34, 54, .84), rgba(10, 13, 24, .9));
-  border: 1px solid rgba(255, 255, 255, .12);
-  box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .92), inset 0 1px 0 rgba(255, 255, 255, .12);
-  animation: rise .32s cubic-bezier(.2, .8, .25, 1);
+    var(--plate-solid);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .6),
+    inset 0 1px 0 rgba(255, 255, 255, .2),
+    inset 0 -1px 0 rgba(0, 0, 0, .5),
+    0 30px 70px -28px rgba(0, 0, 0, .92);
+  animation: rise .28s var(--ease);
 }
-.menu-card.small { width: min(320px, 90vw); padding: 24px 22px 18px; }
+.menu-card.small { width: min(320px, 90vw); padding: 22px 20px 18px; }
 .menu-card h2 {
   color: var(--parchment); font-size: var(--fs-xl); font-weight: 600;
-  letter-spacing: .08em; text-align: center;
+  letter-spacing: var(--ls-disp); text-align: center;
 }
 .menu-card .tagline { margin-bottom: 16px; }
+/* Every card action is the full width of the card. A row of differently sized
+   buttons has to be read; a stack of identical ones is a list you point at. */
 .menu-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
-.death-title { color: #f0a08a !important; }
+.menu-actions button { width: 100%; padding: 10px 15px; }
+/* Death. A red keyline round the plate, the word "Died" as the smallest thing
+   on it, and the cause as the biggest. */
+.death-card {
+  box-shadow:
+    0 0 0 1px rgba(226, 88, 66, .55),
+    inset 0 1px 0 rgba(255, 190, 175, .25),
+    inset 0 -1px 0 rgba(0, 0, 0, .5),
+    0 0 40px -10px rgba(190, 50, 34, .5),
+    0 30px 70px -28px rgba(0, 0, 0, .92);
+}
+.death-kicker {
+  font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: rgba(240, 160, 138, .72);
+}
+.menu-card h2.death-title {
+  margin-top: 5px;
+  font-size: var(--fs-2xl); font-weight: 200;
+  letter-spacing: var(--ls-disp);
+  color: #ffd8ce;
+  text-shadow: 0 2px 18px rgba(190, 50, 34, .85);
+}
+/* On screen only when something really was taken, and only ever one line. */
+.death-lost {
+  margin-top: 10px; font-size: var(--fs-sm); font-weight: 600;
+  color: rgba(247, 238, 222, .5);
+}
+
 .credit-list { list-style: none; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
 .credit-list li { padding-left: 10px; text-indent: -10px; margin-bottom: 3px; }
 .credit-list strong { color: var(--ink); font-weight: 700; }
@@ -189,14 +303,22 @@ button.primary {
   text-shadow: 0 1px 0 rgba(255, 255, 255, .28);
 }
 button.primary:hover { filter: brightness(1.05); }
+/* A button cut from parchment: the same emboss as every other raised thing on
+   the sheet, so a control and a row are visibly the same material. */
 .panel button {
-  color: var(--ink-soft); text-shadow: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(0, 0, 0, .05));
-  border-color: rgba(0, 0, 0, .12);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6);
+  color: var(--ink-soft); text-shadow: none; border: none;
+  border-radius: var(--r-md);
+  background: var(--paper-cell);
+  box-shadow: var(--emboss);
 }
-.panel button:hover { background: #fff; color: var(--ink); }
-.panel button.ghost { padding: 6px 10px; font-size: var(--fs-sm); display: flex; gap: 6px; align-items: center; }
+.panel button:hover:not(:disabled) { background: #fff; color: var(--ink); box-shadow: var(--emboss-lift); }
+.panel button:active:not(:disabled) { filter: none; box-shadow: var(--sunk); transform: translateY(1px); }
+.panel button:disabled { box-shadow: var(--sunk); background: rgba(122, 94, 54, .06); }
+.panel button.ghost {
+  padding: 6px 10px; font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  display: flex; gap: 6px; align-items: center;
+}
 
 /* ── loader ────────────────────────────────────────────── */
 
@@ -234,19 +356,36 @@ button.primary:hover { filter: brightness(1.05); }
 /* ── save slots ────────────────────────────────────────── */
 
 .slots-panel { width: min(520px, 93vw); }
-.slot-list { display: flex; flex-direction: column; gap: 6px; }
-.slot-row { display: flex; gap: 6px; align-items: stretch; }
+/* The ten rows sit in one tray cut into the sheet, so the list is an object
+   with a shape rather than ten cards floating on a background. Same well as
+   the inventory grid, and for the same reason. */
+.slot-list {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 6px; border-radius: var(--r-lg);
+  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+}
+.slot-row { display: flex; gap: 5px; align-items: stretch; }
 /* The row is a button, so the whole card is the hit target rather than the
    words in it. Delete is a second, deliberately smaller one beside it. */
-.slot-open {
+.panel .slot-open {
   flex: 1; display: grid; gap: 0 12px; text-align: left;
-  grid-template-columns: 76px 1fr auto;
-  align-items: center; padding: 10px 13px;
+  grid-template-columns: 62px 1fr auto;
+  align-items: center; padding: 10px 13px; border-radius: var(--r-md);
+  background: var(--paper-cell); border: none; box-shadow: var(--emboss);
+  transition: box-shadow var(--t-fast) ease, background var(--t-fast) ease, transform var(--t-fast) var(--ease);
 }
+.panel .slot-open:hover:not(:disabled) {
+  transform: none; background: #fff; color: var(--ink);
+  box-shadow: var(--emboss-lift), var(--ring);
+}
+/* The index, in a well of its own: it is a fixed label on the furniture, not
+   part of what is saved in the slot. */
 .slot-open b {
-  grid-row: 1 / span 2; align-self: center;
+  grid-row: 1 / span 2; align-self: center; justify-self: start;
+  padding: 4px 7px; border-radius: var(--r-sm);
   font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: var(--ls-cap);
-  text-transform: uppercase; color: var(--ink-faint);
+  text-transform: uppercase; color: var(--ink-soft);
+  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
 }
 .slot-open .slot-who { font-size: var(--fs-md); font-weight: 700; color: var(--ink); }
 .slot-open .slot-who.empty { color: var(--ink-faint); font-weight: 600; }
@@ -255,9 +394,18 @@ button.primary:hover { filter: brightness(1.05); }
   grid-column: 3; grid-row: 1 / span 2; align-self: center;
   font: 600 var(--fs-xs) var(--mono); color: var(--ink-soft); opacity: .75; white-space: nowrap;
 }
-.panel .slot-row.filled .slot-open { background: linear-gradient(180deg, #fff, rgba(255, 255, 255, .3)); }
-.slot-del { padding: 8px 12px; font-size: var(--fs-sm); }
-.panel .slot-del:hover { background: rgba(207, 70, 48, .14); color: #a33a28; border-color: rgba(207, 70, 48, .3); }
+/* An empty slot is a hole in the tray, not a card in it. */
+.panel .slot-row:not(.filled) .slot-open {
+  background: rgba(122, 94, 54, .05); box-shadow: var(--sunk);
+}
+.panel .slot-del {
+  padding: 8px 12px; font-size: var(--fs-sm); border-radius: var(--r-md);
+  box-shadow: var(--emboss);
+}
+.panel .slot-del:hover {
+  background: linear-gradient(180deg, #e2634b, #a33a28); color: #fff5f2;
+  box-shadow: var(--emboss-lift), 0 0 0 1px rgba(120, 34, 22, .5);
+}
 
 /* ── character select ──────────────────────────────────── */
 
@@ -270,14 +418,19 @@ button.primary:hover { filter: brightness(1.05); }
   animation: fade .22s ease;
   overflow: auto; padding: 16px 0;
 }
+/* The same plate as `.menu-card`, one size wider, because it is the same
+   material doing the same job. */
 .chargen-card {
-  width: min(440px, 94vw); padding: 22px 22px 16px; border-radius: 12px;
+  width: min(440px, 94vw); padding: 22px 22px 16px; border-radius: var(--r-xl);
   background:
     radial-gradient(120% 60% at 50% 0%, rgba(90, 116, 170, .2), rgba(0, 0, 0, 0) 60%),
-    linear-gradient(170deg, rgba(28, 34, 54, .86), rgba(10, 13, 24, .92));
-  border: 1px solid rgba(255, 255, 255, .12);
-  box-shadow: 0 30px 70px -28px rgba(0, 0, 0, .92), inset 0 1px 0 rgba(255, 255, 255, .12);
-  animation: rise .32s cubic-bezier(.2, .8, .25, 1);
+    var(--plate-solid);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .6),
+    inset 0 1px 0 rgba(255, 255, 255, .2),
+    inset 0 -1px 0 rgba(0, 0, 0, .5),
+    0 30px 70px -28px rgba(0, 0, 0, .92);
+  animation: rise .28s var(--ease);
 }
 .chargen-card h2 {
   color: var(--parchment); font-size: var(--fs-lg); font-weight: 700;
@@ -342,7 +495,7 @@ button.primary:hover { filter: brightness(1.05); }
 .cg-opt img { width: 28px; height: 28px; pointer-events: none; }
 .cg-opt .qty {
   position: absolute; top: 3px; right: 4px;
-  font: 700 9px var(--mono); color: rgba(247, 238, 222, .5);
+  font: 700 var(--fs-2xs) var(--mono); color: rgba(247, 238, 222, .5);
 }
 .cg-opt:hover:not(:disabled) { transform: none; color: rgba(247, 238, 222, .92); }
 .cg-opt.on {
@@ -666,7 +819,7 @@ button.primary:hover { filter: brightness(1.05); }
 .slot img { width: 34px; height: 34px; pointer-events: none; }
 .slot .num {
   position: absolute; top: 2px; left: 4px;
-  font: 700 8.5px var(--mono); color: rgba(255, 255, 255, .3);
+  font: 700 var(--fs-2xs) var(--mono); color: rgba(255, 255, 255, .3);
 }
 .slot .count {
   position: absolute; right: 3px; bottom: 1px;
@@ -768,28 +921,51 @@ button.primary:hover { filter: brightness(1.05); }
 
 /* ── craftable sidebar ─────────────────────────────────── */
 
+/* Ruled off with a cut line rather than a hairline, so the sidebar is a
+   division of the sheet and not a second sheet laid beside it. */
 .recipe-panel {
   width: 236px; flex: none; align-self: stretch;
   display: flex; flex-direction: column;
-  padding-left: 18px; border-left: 1px solid rgba(0, 0, 0, .1);
+  padding-left: 18px;
+  border-left: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, .7);
 }
 .recipe-panel h3, .shop-col h3 {
   color: var(--ink-faint); margin-bottom: 9px;
   display: flex; align-items: center; gap: 6px;
 }
+/* The count is the one number the sidebar is about, so it is a chip and not
+   part of the heading's own type. */
 .recipe-panel h3 span {
-  font: 700 var(--fs-xs) var(--mono); color: #fff; background: var(--accent);
-  padding: 1px 5px; border-radius: 3px; letter-spacing: 0;
+  font: 700 var(--fs-xs) var(--mono); color: #fff2e2;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  padding: 2px 6px; border-radius: var(--r-sm); letter-spacing: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 0 0 1px rgba(140, 74, 26, .4);
 }
-#recipe-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 330px; }
+#recipe-list {
+  display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 330px;
+  padding: 5px; border-radius: var(--r-md);
+  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+}
 .recipe-row {
+  position: relative; overflow: hidden;
   display: flex; align-items: center; gap: 9px;
   padding: 5px 7px; border-radius: var(--r-md); cursor: pointer;
-  background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, .28));
-  border: 1px solid rgba(0, 0, 0, .08);
-  transition: background .12s, border-color .12s, transform .1s;
+  background: var(--paper-cell); box-shadow: var(--emboss);
+  transition: background var(--t-fast) ease, box-shadow var(--t-fast) ease, transform var(--t-fast) var(--ease);
 }
-.recipe-row:hover { background: #fff; border-color: var(--accent); transform: translateX(2px); }
+/* A warm bar wipes in down the leading edge on hover: the same "the game is
+   offering you this" mark the toasts carry, on the same side. */
+.recipe-row::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent); transform: scaleY(0); transform-origin: 50% 50%;
+  transition: transform var(--t-fast) var(--ease);
+}
+.recipe-row:hover {
+  background: #fff; transform: translateX(2px);
+  box-shadow: var(--emboss-lift), 0 0 0 1px var(--accent);
+}
+.recipe-row:hover::before { transform: scaleY(1); }
 .recipe-row img { width: 30px; height: 30px; flex: none; }
 .recipe-row .rname { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recipe-row .rcost { display: flex; gap: 4px; align-items: center; flex: none; }
@@ -802,7 +978,14 @@ button.primary:hover { filter: brightness(1.05); }
 .recipe-empty { font-size: var(--fs-sm); color: var(--ink-faint); line-height: 1.5; }
 
 .craft-area { display: flex; align-items: center; justify-content: center; gap: 14px; }
-.craft-grid { display: grid; gap: 4px; }
+/* The bench, in its own well: the cells you put things into are a different
+   object to the cell the thing comes out of, and the well is what says so
+   without a caption on either. */
+.craft-grid {
+  display: grid; gap: 4px;
+  padding: 6px; border-radius: var(--r-lg);
+  background: rgba(122, 94, 54, .09); box-shadow: var(--sunk);
+}
 .craft-grid.g2 { grid-template-columns: repeat(2, 1fr); }
 .craft-grid.g3 { grid-template-columns: repeat(3, 1fr); }
 /* Drawn, not typed. An arrow glyph is a different shape in every fallback
@@ -813,10 +996,22 @@ button.primary:hover { filter: brightness(1.05); }
   border: 7px solid transparent;
   border-left: 11px solid var(--ink-faint);
 }
-.craft-out .islot { width: 58px; height: 58px; }
+/* The result. Bigger, and warm, because it is the one cell on the bench that
+   is an outcome rather than an ingredient. */
+.craft-out .islot {
+  width: 60px; height: 60px; border-radius: var(--r-lg);
+  background: linear-gradient(180deg, #fff8ec, rgba(255, 224, 178, .5));
+  box-shadow: var(--emboss-lift), 0 0 0 1px rgba(200, 132, 54, .5);
+}
+.craft-out .islot img { width: 50px; height: 50px; }
+.craft-out .islot:hover { box-shadow: var(--emboss-lift), var(--ring); }
 
-.smelt-area { display: flex; align-items: center; justify-content: center; gap: 14px; }
-.smelt-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.smelt-area {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  padding: 12px 16px; border-radius: var(--r-lg); align-self: center;
+  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+}
+.smelt-col { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .smelt-label { color: var(--ink-faint); font-family: var(--mono); }
 .flame { width: 18px; height: 22px; position: relative; }
 .flame i {
@@ -825,17 +1020,23 @@ button.primary:hover { filter: brightness(1.05); }
   clip-path: inset(var(--burn, 100%) 0 0 0);
 }
 .flame::after { content: ''; position: absolute; inset: 0; border-radius: 50% 50% 45% 45%; border: 1.5px solid rgba(0, 0, 0, .18); }
-.progress-arrow { width: 46px; height: 9px; border-radius: 4px; background: rgba(0, 0, 0, .14); overflow: hidden; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18); }
-.progress-arrow i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.progress-arrow {
+  width: 52px; height: 9px; border-radius: 99px; overflow: hidden;
+  background: rgba(122, 94, 54, .12); box-shadow: var(--sunk);
+}
+.progress-arrow i {
+  display: block; height: 100%; width: 0%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45);
+}
 
 /* ── merchant ──────────────────────────────────────────── */
 
 .shop-area { display: flex; flex-direction: column; gap: 12px; }
 .shop-purse {
   display: flex; align-items: center; gap: 8px; align-self: stretch;
-  padding: 5px 12px 5px 7px; border-radius: 999px;
-  background: linear-gradient(180deg, #fff, rgba(255, 255, 255, .35));
-  border: 1px solid rgba(0, 0, 0, .1);
+  padding: 6px 13px 6px 8px; border-radius: 999px;
+  background: var(--paper-cell); box-shadow: var(--emboss);
 }
 .shop-purse img { width: 22px; height: 22px; }
 .shop-purse b { font: 700 var(--fs-lg) var(--font); color: var(--ink); }
@@ -848,8 +1049,16 @@ button.primary:hover { filter: brightness(1.05); }
 
 .shop-cols { display: flex; gap: 18px; align-items: flex-start; }
 .shop-col { flex: 1; min-width: 0; }
-.shop-col + .shop-col { padding-left: 18px; border-left: 1px solid rgba(0, 0, 0, .1); }
-.shop-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 250px; }
+.shop-col + .shop-col {
+  padding-left: 18px;
+  border-left: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, .7);
+}
+.shop-list {
+  display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 250px;
+  padding: 5px; border-radius: var(--r-md);
+  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+}
 .shop-row .shop-price {
   display: flex; align-items: center; gap: 4px; flex: none;
   font: 700 var(--fs-md) var(--mono); color: var(--ink);
@@ -860,9 +1069,9 @@ button.primary:hover { filter: brightness(1.05); }
    lands here first. */
 .shop-errand {
   display: flex; align-items: center; gap: 10px;
-  margin: 0; padding: 9px 12px; border-radius: var(--r-lg);
-  background: rgba(196, 148, 58, .16);
-  border: 1px solid rgba(150, 108, 34, .28);
+  margin: 0; padding: 10px 13px; border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(242, 200, 118, .34), rgba(196, 148, 58, .2));
+  box-shadow: var(--emboss), 0 0 0 1px rgba(150, 108, 34, .3);
 }
 .shop-errand img { width: 26px; height: 26px; }
 .errand-text { flex: 1; font-size: var(--fs-md); color: var(--ink); }
@@ -888,14 +1097,21 @@ button.primary:hover { filter: brightness(1.05); }
 
 .skills-panel { width: min(560px, 94vw); }
 
-/* The balance, and the one destructive button on the screen, on one line. */
-.skills-bar { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+/* The balance, and the one destructive button on the screen, on one line. The
+   number is the largest thing on the panel because every row below it is a
+   question about whether this number is big enough. */
+.skills-bar {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px;
+  padding: 8px 14px; border-radius: var(--r-lg);
+  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+}
 .skill-points {
   font: 200 var(--fs-3xl)/1 var(--font); color: var(--ink);
   letter-spacing: -.02em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
 }
 /* Nothing to spend is not an error, so it goes quiet rather than red. */
-.skill-points.none { opacity: .3; }
+.skill-points.none { opacity: .3; text-shadow: none; }
 .skill-sub {
   flex: 1; color: var(--ink-faint);
   font-size: var(--fs-xs); font-weight: 700;
@@ -905,71 +1121,138 @@ button.primary:hover { filter: brightness(1.05); }
 
 .skill-tree { display: flex; flex-direction: column; gap: 6px; }
 .skill-row {
+  position: relative;
   display: grid; grid-template-columns: 1fr auto; gap: 3px 14px;
   align-items: center;
-  padding: 10px 13px; border-radius: var(--r-lg);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .58), rgba(255, 255, 255, .25));
-  border: 1px solid rgba(0, 0, 0, .08);
+  padding: 11px 14px; border-radius: var(--r-lg);
+  background: var(--paper-cell); box-shadow: var(--emboss);
+  transition: box-shadow var(--t-fast) ease;
 }
-/* A leaf is indented under its root and ruled off on the left, so the shape of
-   the tree is visible without reading a single prerequisite. */
-.skill-row.leaf { margin-left: 24px; border-left: 3px solid rgba(90, 130, 200, .4); }
-.skill-row.maxed { background: rgba(120, 170, 110, .2); border-color: rgba(80, 130, 70, .24); }
+.skill-row:hover { box-shadow: var(--emboss-lift); }
+/* A leaf is indented under its root and joined to it by a drawn elbow, so the
+   shape of the tree is visible without reading a single prerequisite. The
+   elbow is two borders of an empty box, which is the same way every other
+   arrow and chevron in this game is made. */
+.skill-row.leaf { margin-left: 26px; }
+.skill-row.leaf::before {
+  content: ''; position: absolute; right: 100%; top: -3px;
+  width: 14px; height: calc(50% + 3px);
+  margin-right: 6px;
+  border-left: 2px solid rgba(122, 94, 54, .4);
+  border-bottom: 2px solid rgba(122, 94, 54, .4);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
+}
+/* Bought out. Green, and quieter than an unbought row rather than louder:
+   there is nothing left to do here. */
+.skill-row.maxed {
+  background: linear-gradient(180deg, rgba(190, 226, 176, .8), rgba(150, 200, 136, .45));
+  box-shadow: var(--emboss), 0 0 0 1px rgba(80, 130, 70, .3);
+}
 .skill-head-row { display: flex; align-items: center; gap: 10px; }
-.skill-name { font: 700 var(--fs-md) var(--font); color: var(--ink); letter-spacing: .01em; }
-.skill-pips { display: flex; gap: 3px; }
+.skill-name {
+  font: 700 var(--fs-md) var(--font); color: var(--ink);
+  letter-spacing: .01em;
+}
+/* The pips ride in a groove, so an empty level is a socket with nothing in it
+   rather than a grey dot. */
+.skill-pips {
+  display: flex; gap: 4px; align-items: center;
+  padding: 3px 5px; border-radius: 99px;
+  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+}
 .skill-pips i {
   width: 8px; height: 8px; border-radius: 50%;
-  background: rgba(0, 0, 0, .13);
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .16);
+  background: rgba(74, 54, 28, .16);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .28);
 }
 .skill-pips i.on {
-  background: linear-gradient(170deg, var(--accent-2), var(--accent));
-  box-shadow: 0 0 0 1px rgba(180, 100, 40, .35);
+  background: linear-gradient(170deg, var(--accent-hi), var(--accent) 70%);
+  box-shadow: 0 0 0 1px rgba(160, 88, 32, .45), 0 0 6px rgba(242, 180, 92, .8);
 }
-.skill-blurb { grid-column: 1; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.45; }
+/* Not prose: one line of what the level does, set as a spec rather than as a
+   sentence about the game. */
+.skill-blurb {
+  grid-column: 1; font-size: var(--fs-sm); font-weight: 500;
+  color: var(--ink-soft); line-height: 1.4;
+}
 /* Spans both rows of the row's grid so the button is centred against the name
    and the blurb together. */
 .skill-buy { grid-column: 2; grid-row: 1 / 3; align-self: center; }
 .panel .skill-buy {
-  border: 1px solid rgba(40, 96, 30, .4); border-radius: 7px; cursor: pointer; min-width: 108px;
-  padding: 8px 13px; font: 700 var(--fs-sm)/1 var(--font); color: #fff;
+  border: none; border-radius: var(--r-md); cursor: pointer; min-width: 108px;
+  padding: 9px 13px; font: 700 var(--fs-sm)/1 var(--font); color: #fff;
+  letter-spacing: var(--ls-disp);
   text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
   background: linear-gradient(180deg, #7ac45f, var(--good) 50%, #3f8232);
-  box-shadow: 0 8px 16px -9px rgba(40, 96, 30, .9), inset 0 1px 0 rgba(255, 255, 255, .35);
+  box-shadow:
+    0 0 0 1px rgba(40, 96, 30, .5),
+    inset 0 1px 0 rgba(255, 255, 255, .4),
+    0 8px 16px -9px rgba(40, 96, 30, .9);
 }
-.panel .skill-buy:hover:not(:disabled) { filter: brightness(1.07); }
+.panel .skill-buy:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
+.panel .skill-buy:active:not(:disabled) { transform: translateY(0); }
+/* A refusal is a sunk plate, not a faded button: it is part of the sheet now
+   and there is nothing to press. */
 .panel .skill-buy:disabled {
-  cursor: default; background: rgba(0, 0, 0, .06); box-shadow: none;
-  border-color: rgba(0, 0, 0, .08);
-  color: var(--ink-faint); font-weight: 600; text-shadow: none;
+  cursor: default; opacity: 1; transform: none;
+  background: rgba(122, 94, 54, .08); box-shadow: var(--sunk);
+  color: var(--ink-faint); font-weight: 700; text-shadow: none;
 }
-.panel .skill-buy.short { opacity: .72; }
+.panel .skill-buy.short { color: var(--ink-soft); }
 
 /* The level bar, at the head of the tree because it is the thing the whole
    column is downstream of. */
+/* The level bar heads the tree because every row below it is downstream of it.
+   It is the parchment's version of a vital: the same anatomy as the health bar
+   in the HUD — a ticked groove, a lit fill, a mono number on the right — cut
+   into paper instead of laid on a plate. */
 .xp-block {
-  padding: 11px 13px 10px; border-radius: var(--r-lg); margin-bottom: 8px;
-  background: rgba(0, 0, 0, .05); border: 1px solid rgba(0, 0, 0, .07);
+  padding: 12px 14px 11px; border-radius: var(--r-lg); margin-bottom: 10px;
+  background: var(--paper-cell); box-shadow: var(--emboss);
 }
-.xp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
-.xp-head b { font: 700 var(--fs-md) var(--font); color: var(--ink); letter-spacing: .02em; }
+.xp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+.xp-head b {
+  font: 700 var(--fs-lg) var(--font); color: var(--ink);
+  letter-spacing: var(--ls-disp);
+}
 .xp-bar {
-  height: 8px; border-radius: 4px; overflow: hidden;
-  background: rgba(0, 0, 0, .14);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .2);
+  height: 11px; border-radius: 99px; overflow: hidden;
+  background:
+    repeating-linear-gradient(90deg, rgba(74, 54, 28, .12) 0 1px, rgba(0, 0, 0, 0) 1px 10%),
+    rgba(122, 94, 54, .14);
+  box-shadow: var(--sunk);
 }
 .xp-bar i {
-  display: block; height: 100%; border-radius: 4px; min-width: 2px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4);
+  display: block; height: 100%; border-radius: 99px; min-width: 3px;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 0 10px -2px rgba(242, 180, 92, .9);
+  transition: width .4s var(--ease);
 }
-.xp-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
+.xp-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; }
 .xp-foot span { font: 700 var(--fs-xs) var(--mono); color: var(--ink); }
-.xp-foot em { flex: 1; text-align: right; font-style: normal; font-size: var(--fs-xs); color: var(--ink-faint); font-family: var(--mono); }
-.xp-block.maxed { background: rgba(120, 170, 110, .2); border-color: rgba(80, 130, 70, .24); }
+.xp-foot em {
+  flex: 1; text-align: right; font-style: normal;
+  font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint);
+}
+.xp-block.maxed {
+  background: linear-gradient(180deg, rgba(190, 226, 176, .8), rgba(150, 200, 136, .45));
+  box-shadow: var(--emboss), 0 0 0 1px rgba(80, 130, 70, .3);
+}
+.xp-block.maxed .xp-bar i { background: linear-gradient(180deg, #b6e6a4, var(--good) 55%, #3f8232); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5); }
 
-.inv-section { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+/* The tray.
+   The grid is the screen the player spends the most time looking at, and the
+   thing that was missing from it was a container: thirty-six pale cells on a
+   pale sheet had no edge, so the eye had nothing to bound. It is one well cut
+   into the parchment now, with the nine hotbar cells inside the same well
+   below a ruled line, because they are the same thirty-six-slot object the
+   hotbar is the bottom row of. */
+.inv-section {
+  display: flex; flex-direction: column; gap: 5px; align-items: center;
+  padding: 7px; border-radius: var(--r-lg);
+  background: rgba(122, 94, 54, .09); box-shadow: var(--sunk);
+}
 .inv-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
 
 /* The sign writing field. Sized to the card rather than the text so a short
@@ -1026,81 +1309,216 @@ button.danger {
   color: var(--ink-faint); font-family: var(--mono);
   display: flex; align-items: center; gap: 4px;
 }
-.slot-cap kbd { font-size: 9px; padding: 1px 4px; }
+.slot-cap kbd { font-size: var(--fs-2xs); padding: 1px 4px; }
 
 .crate-area { display: flex; justify-content: center; }
 .crate-grid {
   padding: 7px; border-radius: var(--r-lg);
-  background: rgba(150, 106, 58, .14);
-  border: 1px solid rgba(120, 84, 44, .24);
+  background: rgba(150, 106, 58, .16);
+  box-shadow: var(--sunk);
 }
-.inv-hot { padding-top: 6px; margin-top: 3px; border-top: 1px dashed rgba(0, 0, 0, .16); }
+/* The nine cells your hands are on, inside the same tray as the rest, under a
+   cut line. Not a separate box: it is the bottom row of one bag. */
+.inv-hot {
+  padding-top: 6px; margin-top: 2px;
+  border-top: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, .55);
+}
 
+/* The cell. Raised out of the tray, so an item sits on something and an empty
+   slot is a place where something could sit. Hover lifts it and warms the
+   keyline; selection fills it and rings it in the same accent the live hotbar
+   cell uses, because they are the same statement. */
 .islot {
   position: relative; width: 46px; height: 46px; border-radius: var(--r-md);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, .3));
-  border: 1px solid rgba(0, 0, 0, .1);
+  background: var(--paper-cell);
+  box-shadow: var(--emboss);
   display: grid; place-items: center; cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
-  transition: background .13s, border-color .13s, transform .1s, box-shadow .13s;
+  transition: background var(--t-fast) ease, transform var(--t-fast) var(--ease), box-shadow var(--t-fast) ease;
 }
-.islot:hover { background: #fff; border-color: var(--accent); transform: translateY(-1px); }
-.islot.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(242, 180, 92, .6), inset 0 1px 0 rgba(255, 255, 255, .8); }
+.islot:hover {
+  background: #fff; transform: translateY(-2px);
+  box-shadow: var(--emboss-lift), 0 0 0 1px var(--accent);
+}
+.islot.sel {
+  background: linear-gradient(180deg, #fff6e6, rgba(255, 219, 168, .55));
+  box-shadow: var(--emboss), var(--ring);
+}
+.islot.sel:hover { box-shadow: var(--emboss-lift), var(--ring); }
 .islot img { width: 40px; height: 40px; pointer-events: none; }
-.islot .count { position: absolute; right: 4px; bottom: 1px; font: 700 var(--fs-md) var(--mono); color: var(--ink); text-shadow: 0 1px 0 rgba(255, 255, 255, .95); pointer-events: none; }
-.islot .wear { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, .24); overflow: hidden; }
-.islot .wear i { display: block; height: 100%; background: #57a844; }
+.islot .count {
+  position: absolute; right: 3px; bottom: 0;
+  font: 700 var(--fs-md) var(--mono); color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .95), 0 0 3px rgba(255, 255, 255, .9);
+  pointer-events: none;
+}
+.islot .wear { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(48, 34, 18, .3); overflow: hidden; }
+.islot .wear i { display: block; height: 100%; background: linear-gradient(180deg, #82d06b, #3f8232); }
 
-#cursor-stack { position: fixed; z-index: 130; pointer-events: none; width: 40px; height: 40px; transform: translate(-50%, -50%); }
-#cursor-stack img { width: 100%; height: 100%; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .5)); }
-#cursor-stack span { position: absolute; right: 0; bottom: -2px; font: 700 var(--fs-md) var(--mono); color: #fff; text-shadow: 0 1px 3px #000; }
+/* Carried on the pointer. Tilted a couple of degrees and dropped a real
+   shadow, so a held stack visibly is not in the grid. */
+#cursor-stack {
+  position: fixed; z-index: 130; pointer-events: none;
+  width: 40px; height: 40px; transform: translate(-50%, -50%) rotate(-5deg);
+}
+#cursor-stack img { width: 100%; height: 100%; filter: drop-shadow(0 5px 7px rgba(0, 0, 0, .6)); }
+#cursor-stack span {
+  position: absolute; right: -4px; bottom: -5px;
+  padding: 1px 4px; border-radius: var(--r-sm);
+  font: 700 var(--fs-sm) var(--mono); color: #fff;
+  background: var(--plate-solid); box-shadow: var(--bevel);
+}
 
+/* A tooltip is over the world and over a screen both, so it is a plate: the
+   same material as the hotbar it names things for. */
 #tooltip {
   position: fixed; z-index: 132; pointer-events: none;
-  padding: 6px 10px; border-radius: var(--r-md);
-  font-size: var(--fs-md); font-weight: 600;
-  background: var(--plate-solid); color: #f3ece0;
-  box-shadow: var(--bevel);
-  transform: translate(12px, 12px); max-width: 220px; line-height: 1.45;
+  padding: 7px 11px; border-radius: var(--r-md);
+  font-size: var(--fs-md); font-weight: 600; letter-spacing: .01em;
+  background: var(--plate-solid); color: #f7eede;
+  box-shadow: var(--bevel-lift);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
+  transform: translate(14px, 14px); max-width: 230px; line-height: 1.4;
+  animation: fade .1s ease;
 }
+/* The second line is a spec, so it is set in mono under a hairline rather than
+   in the same voice as the name. */
 #tooltip em {
-  display: block; font-style: normal; font-weight: 600;
+  display: block; font-style: normal; font-weight: 700;
   font-size: var(--fs-xs); font-family: var(--mono);
-  color: rgba(243, 236, 224, .5); margin-top: 3px;
+  letter-spacing: .02em; color: var(--accent-2);
+  margin-top: 5px; padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, .12);
 }
 
 /* ── settings + controls ───────────────────────────────── */
 
-.settings { display: flex; flex-direction: column; gap: 10px; }
-.settings label { display: block; font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
-.settings label.row { display: flex; align-items: center; gap: 9px; cursor: pointer; }
-.settings .val { float: right; font: 700 var(--fs-sm) var(--mono); color: var(--accent); }
-.settings input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; margin-top: 9px; border-radius: 99px; background: var(--edge); outline: none; }
-.settings input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: linear-gradient(170deg, var(--accent-hi), var(--accent)); box-shadow: 0 2px 5px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .5); cursor: pointer; }
-.settings input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+.settings { display: flex; flex-direction: column; gap: 5px; }
+/* Every setting is a card in the same material as an inventory cell or a skill
+   row. The screen used to be a column of bare labels on the sheet, which is
+   why it read as a form and not as part of the game. */
+.settings label {
+  display: block; padding: 10px 13px; border-radius: var(--r-md);
+  font-size: var(--fs-md); font-weight: 600; color: var(--ink);
+  background: var(--paper-cell); box-shadow: var(--emboss);
+  transition: box-shadow var(--t-fast) ease;
+}
+.settings label:hover { box-shadow: var(--emboss-lift); }
+/* Reversed, so the switch lands on the right edge of every card and the eye
+   runs down one column of them. The label is still the whole hit target. */
+.settings label.row {
+  display: flex; align-items: center; gap: 11px; cursor: pointer;
+  flex-direction: row-reverse; justify-content: space-between;
+}
+/* The value, in a well, in mono, on the right. It is a readout, so it is
+   built like every other readout in the game. */
+.settings .val {
+  float: right; font: 700 var(--fs-sm) var(--mono); color: var(--ink);
+  padding: 2px 7px; border-radius: var(--r-sm);
+  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+}
+
+/* A groove cut into the card, with a knob sitting in it. */
+.settings input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  display: block; width: 100%; height: 10px; margin-top: 11px;
+  border-radius: 99px; outline: none; cursor: pointer;
+  background:
+    repeating-linear-gradient(90deg, rgba(74, 54, 28, .12) 0 1px, rgba(0, 0, 0, 0) 1px 10%),
+    rgba(122, 94, 54, .14);
+  box-shadow: var(--sunk);
+}
+.settings input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 20px; height: 20px; margin-top: 0;
+  border-radius: 50%; cursor: pointer;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  box-shadow:
+    0 0 0 1px rgba(140, 74, 26, .55),
+    inset 0 1px 0 rgba(255, 255, 255, .65),
+    0 3px 7px -2px rgba(56, 40, 20, .7);
+}
+.settings input[type=range]::-moz-range-thumb {
+  width: 20px; height: 20px; border: none; border-radius: 50%; cursor: pointer;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  box-shadow:
+    0 0 0 1px rgba(140, 74, 26, .55),
+    inset 0 1px 0 rgba(255, 255, 255, .65),
+    0 3px 7px -2px rgba(56, 40, 20, .7);
+}
+.settings input[type=range]:focus-visible { box-shadow: var(--sunk), 0 0 0 2px var(--accent-2); }
+
+/* A switch, drawn: a two-position segmented control with the same track and
+   the same warm live face as `.seg` on the character screen. It is still a
+   real checkbox, so nothing in `syncSettings` or the change handlers changed
+   for it. */
+.settings input[type=checkbox] {
+  -webkit-appearance: none; appearance: none;
+  position: relative; flex: none; margin: 0;
+  width: 38px; height: 21px; border-radius: 99px; cursor: pointer;
+  background: rgba(122, 94, 54, .16); box-shadow: var(--sunk);
+  transition: background var(--t-fast) ease;
+}
+.settings input[type=checkbox]::after {
+  content: ''; position: absolute; left: 2px; top: 2px;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: linear-gradient(180deg, #fff, #e3d6bf);
+  box-shadow: 0 0 0 1px rgba(122, 94, 54, .35), 0 2px 4px -1px rgba(56, 40, 20, .6);
+  transition: transform var(--t-fast) var(--ease), background var(--t-fast) ease;
+}
+.settings input[type=checkbox]:checked {
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  box-shadow: inset 0 1px 3px rgba(120, 56, 12, .45), 0 0 0 1px rgba(140, 74, 26, .45);
+}
+.settings input[type=checkbox]:checked::after { transform: translateX(17px); }
+.settings input[type=checkbox]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .settings input[type=checkbox]::after { transition: none; }
+}
 
 /* Group headings. Both screens are long because they genuinely have a lot of
    rows, so the fix is somewhere for the eye to stop, not an explanation of
    each row. */
+/* Cut into the sheet, like the panel header, so a group heading and the screen
+   title are the same kind of mark at two sizes. */
 .set-head, .ctl-head {
   color: var(--ink-faint);
-  margin-top: 8px; padding-bottom: 5px; border-bottom: 1px solid rgba(0, 0, 0, .1);
+  margin-top: 14px; padding-bottom: 6px;
+  border-bottom: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .8);
 }
-.ctl-head { margin-top: 16px; margin-bottom: 8px; }
+.set-head { margin-bottom: 3px; }
+.ctl-head { margin-top: 18px; margin-bottom: 9px; }
 .ctl-head:first-of-type, .set-head:first-of-type { margin-top: 0; }
-.settings details.credits { margin-top: 14px; border-top: 1px solid rgba(0, 0, 0, .1); padding-top: 10px; }
-.settings details.credits summary {
-  cursor: pointer; font-size: var(--fs-md); font-weight: 700; color: var(--ink-soft);
+.settings details.credits {
+  margin-top: 16px; padding-top: 12px;
+  border-top: 1px solid rgba(122, 94, 54, .3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8);
 }
-.settings details.credits .credit-list { margin-top: 9px; }
+.settings details.credits summary {
+  cursor: pointer; font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.settings details.credits .credit-list { margin-top: 10px; }
 
-.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; font-size: var(--fs-md); color: var(--ink-soft); }
-.controls-grid > div { display: flex; align-items: center; gap: 4px; }
-.controls-grid span { margin-left: 6px; }
+/* Key, then what it does. The key caps carry the meaning, so they get the
+   contrast and the label sits back. */
+.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; }
+.controls-grid > div {
+  display: flex; align-items: center; gap: 4px;
+  padding: 7px 11px; border-radius: var(--r-md);
+  font-size: var(--fs-md); color: var(--ink-soft);
+  background: var(--paper-cell); box-shadow: var(--emboss);
+}
+.controls-grid span { margin-left: auto; padding-left: 10px; text-align: right; color: var(--ink); font-weight: 600; }
 kbd {
-  font: 700 var(--fs-xs)/1 var(--mono); padding: 3px 6px; border-radius: 3px;
-  background: linear-gradient(180deg, #fff, rgba(255, 255, 255, .55));
-  border: 1px solid var(--edge); box-shadow: 0 1.5px 0 var(--edge); color: var(--ink);
+  font: 700 var(--fs-xs)/1 var(--mono); padding: 4px 6px; border-radius: var(--r-sm);
+  background: linear-gradient(180deg, #fff, #ece0cb);
+  color: var(--ink);
+  box-shadow:
+    0 0 0 1px rgba(122, 94, 54, .4),
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    0 2px 0 rgba(122, 94, 54, .35);
 }
 .menu-card kbd, #hint kbd, .panel button kbd {
   background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .2);

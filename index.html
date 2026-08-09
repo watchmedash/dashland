@@ -322,10 +322,16 @@
   </div>
 
   <!-- ── death ───────────────────────────────────────────── -->
+  <!-- The reason, and the two things you can do about it. It used to carry a
+       title, a consoling line, a sentence promising your pack was still where
+       you fell, and a paragraph about the skill tree. Four statements for one
+       event. What is left is the label, the cause in the card's largest type,
+       and one line only when something was actually taken. -->
   <div id="death" class="overlay hidden">
-    <div class="menu-card small">
-      <h2 class="death-title">You Blacked Out</h2>
-      <p class="tagline" id="death-cause">The planet keeps turning.</p>
+    <div class="menu-card small death-card">
+      <p class="death-kicker">Died</p>
+      <h2 class="death-title" id="death-cause">Fell</h2>
+      <p class="death-lost hidden" id="death-lost"></p>
       <div class="menu-actions">
         <button id="dz-respawn" class="primary">Wake Up</button>
         <button id="dz-quit">Quit to Menu</button>

@@ -37,7 +37,7 @@ import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
-  NEEDS_FLOOR, supports,
+  NEEDS_FLOOR, supports, IS_SUBMERGED,
 } from './world/Blocks.js';
 import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
@@ -361,10 +361,34 @@ for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID
  * texture more than an object — it is the thing that carpets every meadow, so
  * it is by far the worst candidate for a model, and it is the one whose loss of
  * the wind sway would actually be felt.
+ *
+ * The reef joins the same table, and it is why the height is now per kind
+ * rather than one constant. `BlockModels` scales a model so its **bounding box
+ * height** matches this number, and the reef models are not all uprights: a
+ * brain coral is authored 1.8x wider than it is tall and a sea grass tuft
+ * wider still, so giving either of them the flowers' 0.62 would deliver a
+ * boulder a full cell across, growing through its neighbours. Each number below
+ * is chosen against that model's own aspect (asserted in its `.wam` checks), so
+ * the two files have to move together — widen a model and its height here comes
+ * down.
+ *
+ * Kelp is the exception at 1.0: it is the one block authored as a *tile* rather
+ * than as an organism, a single segment of a stalk that stacks, so it has to
+ * fill its cell exactly or a run of them is a dashed line. See `wam/items/
+ * kelp.wam`.
  */
-const FLOWER_NAMES = ['flower_red', 'flower_blue', 'flower_gold', 'mushroom'];
+const MODELLED_PLANTS = {
+  flower_red: 0.62, flower_blue: 0.62, flower_gold: 0.62, mushroom: 0.62,
+  // Uprights: a little under a cell, so a reef has air above it and does not
+  // read as a hedge.
+  coral_branch: 0.82, coral_dead: 0.78, coral_fan: 0.86, sea_sponge: 0.80,
+  // Squat. These measure wide, so they are given less height to be scaled by.
+  coral_brain: 0.52, sea_shell: 0.42, sea_grass: 0.46,
+  // The stacking tile. Exactly one cell — see above.
+  kelp: 1.0,
+};
+const FLOWER_NAMES = Object.keys(MODELLED_PLANTS);
 const FLOWER_KIND = [];
-const FLOWER_HEIGHT = 0.62;
 for (const n of FLOWER_NAMES) if (ID[n]) FLOWER_KIND[ID[n]] = n;
 
 /** Seconds under an open night sky that count as having survived a night. */
@@ -2366,6 +2390,26 @@ class Game {
       this.ui.setHint(IS_TORCH[id] ? 'It would go out' : 'It would wash away');
       return false;
     }
+    // ...and the reef, which is the same rule pointing the other way: coral,
+    // kelp, sea grass, sponges and clams may *only* go into water.
+    //
+    // The second half of it is not fussiness, it is the ocean's surface. A
+    // column's topmost water cell is the one that owns the quad you see the sea
+    // as, and a plant standing in that cell replaces the water — so the sea
+    // gets a one-block hole in it that you can look down through from the
+    // shore. Requiring water overhead costs the player nothing (a reef belongs
+    // under the surface anyway) and makes the hole unreachable. Worldgen is
+    // asked for the same discipline; see the note above IS_SUBMERGED.
+    if (IS_SUBMERGED[id]) {
+      if (RENDER_TYPE[existing] !== R_LIQUID) {
+        this.ui.setHint('It only grows under water');
+        return false;
+      }
+      if (RENDER_TYPE[this.planet.at(col, k + 1)] !== R_LIQUID) {
+        this.ui.setHint('It needs deeper water');
+        return false;
+      }
+    }
     if (IS_SOLID[id] && this._intersectsPlayer(col, k)) return false;
     if (RENDER_TYPE[id] === R_CROSS && !this.planet.solidAt(col, k - 1)) return false;
     // A torch needs something to stand on or hang from, and which of those it
@@ -3892,7 +3936,7 @@ class Game {
   _syncBlockModels() {
     const bm = this.blockModels;
     bm.prime('torch', itemIdOf('torch'), { height: 0.95, lean: true });
-    for (const n of FLOWER_NAMES) bm.prime(n, itemIdOf(n), { height: FLOWER_HEIGHT });
+    for (const n of FLOWER_NAMES) bm.prime(n, itemIdOf(n), { height: MODELLED_PLANTS[n] });
 
     const c = this.player.cell;
     const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);

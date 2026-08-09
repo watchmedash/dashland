@@ -201,6 +201,11 @@ function block(o) {
     // Distinct from `gravity` above, which nothing reads yet and which means the
     // sand rule — keep the block, move it down until it lands. See NEEDS_FLOOR.
     needsFloor: o.needsFloor ?? false,
+    // 1 for reef life: a block that lives *inside* the water rather than beside
+    // it. See IS_SUBMERGED.
+    submerged: o.submerged ?? false,
+    // 1 for a block that holds up another of its own kind. See `supports`.
+    stacks: o.stacks ?? false,
   };
 }
 
@@ -553,6 +558,99 @@ export const BLOCKS = [
     fixedAxis: ax, hardness: 1.2, tool: 'axe', drop: base,
     particle, sound: 'wood', fuel: 6,
   }))),
+
+  // -------------------------------------------------------------------------
+  // The reef.
+  //
+  // Eight blocks that only make sense under water, and the first family in the
+  // table that is *entirely* modelled: every one is an `R_CROSS` whose
+  // billboard the mesher deliberately does not draw (see MODELLED_CROSS in
+  // `world/Mesher.js`) because `render/BlockModels.js` instances a WAM model at
+  // it instead. That is the road the three flowers and the glowcap already
+  // took; these are the first blocks that were *born* on it, so none of them
+  // adds a tile to TILES and the baked atlas is untouched by the whole set.
+  // Their `top`/`side` fall through to layer 0, which nothing ever samples.
+  //
+  // Three properties are shared by all eight and each is doing real work:
+  //
+  //  - `submerged` — the mesher must not draw a water face against one of
+  //    these, or every coral punches a cell-sized bubble through the ocean and
+  //    a kelp stalk is a chimney of air. See IS_SUBMERGED.
+  //  - `drowns: false` — `DROWNS` refuses to let a cross block be placed into a
+  //    liquid cell, which is right for a flower ("it would wash away") and
+  //    exactly backwards for a plant that only grows submerged. `main.js`
+  //    inverts the rule for these: they may *only* be placed under water, and
+  //    not in the topmost water cell of a column. See _placeBlock.
+  //  - `needsFloor` — a reef grows on the seabed. Mine the sand out from under
+  //    a coral and it comes away with it, the cactus rule, and for kelp the
+  //    whole stalk above goes with the cell that was holding it up.
+  //
+  // The three living corals emit a little light and the clam emits a little
+  // more. That is a deliberate departure from realism and it is the same
+  // departure the Glowcap already makes: at ten metres down, on a planet whose
+  // water shader eats the red end of everything, an unlit reef is a grey lump.
+  // Four is low — it lights its own cell and one neighbour — so a reef reads as
+  // *glowing slightly* rather than as a lamp, and bleached coral emits nothing
+  // at all, which is one more way the dead heads read as dead.
+  // -------------------------------------------------------------------------
+  block({
+    name: 'coral_branch', label: 'Branching Coral', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.4, submerged: true, needsFloor: true,
+    light: 4, lightColor: [1.0, 0.55, 0.68],
+    particle: [0.89, 0.36, 0.49], sound: 'grass',
+  }),
+  block({
+    name: 'coral_fan', label: 'Sea Fan', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.35, submerged: true, needsFloor: true,
+    light: 4, lightColor: [0.72, 0.45, 1.0],
+    particle: [0.63, 0.37, 0.77], sound: 'grass',
+  }),
+  block({
+    name: 'coral_brain', label: 'Brain Coral', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.5, submerged: true, needsFloor: true,
+    light: 4, lightColor: [1.0, 0.82, 0.42],
+    particle: [0.85, 0.65, 0.24], sound: 'grass',
+  }),
+  // The same colony as `coral_branch`, dead. It is a separate id rather than a
+  // state byte because the two are different models and a block's model is
+  // chosen by its id — and because worldgen wants to place them at different
+  // rates, which a per-cell byte would make awkward for no gain.
+  block({
+    name: 'coral_dead', label: 'Bleached Coral', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.4, submerged: true, needsFloor: true,
+    particle: [0.77, 0.74, 0.68], sound: 'grass',
+  }),
+  // The one block in the game that stacks into a column of itself. `stacks`
+  // makes a kelp segment count as a floor for the segment above — see
+  // `supports()` — which is what lets a stalk be four to nine cells tall and
+  // still come apart from the bottom when you cut its holdfast.
+  block({
+    name: 'kelp', label: 'Kelp', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.1, submerged: true, needsFloor: true,
+    stacks: true, particle: [0.37, 0.54, 0.23], sound: 'grass',
+  }),
+  block({
+    name: 'sea_grass', label: 'Sea Grass', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.05, submerged: true, needsFloor: true,
+    particle: [0.44, 0.61, 0.24], sound: 'grass',
+  }),
+  block({
+    name: 'sea_sponge', label: 'Sea Sponge', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.35, submerged: true, needsFloor: true,
+    particle: [0.76, 0.35, 0.17], sound: 'grass',
+  }),
+  // The reason to swim down. It drops a pearl and nothing else — you never hold
+  // the shell — which is the ore pattern (`coal_ore` drops `coal`) applied to
+  // the one thing on the seabed worth finding. It is `tier: 1` so that a bare
+  // hand comes away with nothing: a treasure you can take with no tool at all
+  // is a treasure the player finds by accident rather than by preparing.
+  block({
+    name: 'sea_shell', label: 'Giant Clam', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.6, tier: 1, drop: 'pearl',
+    submerged: true, needsFloor: true,
+    light: 5, lightColor: [0.35, 0.85, 1.0],
+    particle: [0.88, 0.84, 0.76], sound: 'grass',
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -695,6 +793,41 @@ export const NEEDS_ROOM = new Uint8Array(N_BLOCKS);
  * cannot hang off a wall.
  */
 export const NEEDS_FLOOR = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for a block that stands *in* the water rather than next to it — coral,
+ * kelp, sea grass, sponges, clams.
+ *
+ * It answers one question and it is a rendering question first: **does water
+ * have a face to draw against this cell?** No. A cell holds one block id, so a
+ * coral standing on the seabed is a cell that is not water in the middle of a
+ * body that is, and the mesher's ordinary rule ("a liquid draws a face against
+ * anything that is not the same liquid") gives every one of them a cell-sized
+ * bubble of visible water-underside around it. A kelp stalk gets a chimney. It
+ * is the single most likely way this family looks broken in game, and the fix
+ * is to let the liquid treat these exactly as it treats more of itself. See
+ * `faceVisible` in `world/Mesher.js`.
+ *
+ * It also inverts `DROWNS` for these blocks — they are refused *out* of water
+ * rather than *into* it — and it is what `main.js` tests to keep one out of the
+ * topmost water cell of a column. That cell's water is the one that owns the
+ * ocean's surface quad, and a plant standing in it leaves a hole in the sea.
+ */
+export const IS_SUBMERGED = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for a block that can hold up another of its own kind: kelp, and nothing
+ * else today.
+ *
+ * Every other NEEDS_FLOOR block in the game is a cactus — a solid cube — so
+ * `supports()` could be built out of "is this something you could stand on?"
+ * and a stack came out right for free. Kelp is a cross block, which is not
+ * solid by construction, so a kelp segment could not hold the segment above it
+ * and a stalk placed by worldgen would have collapsed to one cell the first
+ * time anything edited a neighbouring column.
+ *
+ * Deliberately narrower than "any cross block supports any cross block", which
+ * would let you plant a cactus on a flower.
+ */
+export const STACKS = new Uint8Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -850,6 +983,12 @@ export function crowds(id, byte = 0) {
  * is to build the fence first and plant on it deliberately.
  */
 export function supports(id, byte = 0) {
+  // A kelp segment holds up the segment above it. It is the one exception to
+  // "a surface is something you could stand on", and it has to be an exception
+  // rather than a loosening of the rule: a stalk is a run of one block, and a
+  // rule that let any cross block hold up any other would let a cactus grow out
+  // of a daisy. See STACKS.
+  if (STACKS[id]) return true;
   return crowds(id, byte) && blockTop(id, byte) === 1;
 }
 
@@ -882,7 +1021,13 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_SIGN[i] = b.render === R_SIGN ? 1 : 0;
   IS_FENCE[i] = b.render === R_FENCE ? 1 : 0;
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
-  DROWNS[i] = (b.render === R_TORCH || b.render === R_CROSS) ? 1 : 0;
+  IS_SUBMERGED[i] = b.submerged ? 1 : 0;
+  STACKS[i] = b.stacks ? 1 : 0;
+  // Reef life is exempt: `DROWNS` means "the water would destroy this", and
+  // water is the only place a coral or a kelp stalk can be. The opposite rule —
+  // these may only be placed *in* water — lives in `main.js`, where the cell
+  // above can be looked at too.
+  DROWNS[i] = ((b.render === R_TORCH || b.render === R_CROSS) && !b.submerged) ? 1 : 0;
   CONTACT_HURT[i] = b.hurt;
   NEEDS_ROOM[i] = b.needsRoom ? 1 : 0;
   NEEDS_FLOOR[i] = b.needsFloor ? 1 : 0;

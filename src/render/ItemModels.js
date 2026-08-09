@@ -315,6 +315,44 @@ const POSE = {
   // a dark cave without washing the mint out of the gills to white.
   mushroom:    { file: 'wam/mushroom',    pack: 'wam', height: 0.26, grip: 0.38, rot: [0.02, -0.45, 0.22],  pos: [0.02, 0.10, -0.04], icon: [0.04, 0.42, -0.16],
                  glowMatch: { hex: '#b6efd0', color: [0.42, 0.60, 0.49] } },
+
+  // --- the reef -------------------------------------------------------------
+  //
+  // Eight blocks and one material, all WAM, and all eight blocks are also world
+  // geometry — `render/BlockModels.js` instances them where the blocks are, the
+  // way it does the flowers. So unlike every pose above, the numbers here are
+  // *only* about the fist and the icon: the size a coral is on the seabed comes
+  // from `MODELLED_PLANTS` in `main.js`, which scales each model to a fraction
+  // of a cell.
+  //
+  // The poses divide by what each model's read is:
+  //
+  //  - the branching corals and the kelp are upright things whose silhouette is
+  //    the whole story, so they take the flowers' shallow pitch and a yaw that
+  //    turns the forks across the frame rather than pointing them at the
+  //    camera;
+  //  - the sea fan is a *plane* and has the daisy's problem in its purest form
+  //    — square-on to the icon camera it is a purple line. Both its rotations
+  //    are near a quarter turn in yaw so the fan faces the viewer;
+  //  - the brain coral, the sponge cluster and the clam are masses, and a mass
+  //    reads from anywhere, so those take the family pose unchanged.
+  //
+  // `grip` runs low on all of them: these are held by the stem or the base,
+  // which is where a hand would take a piece of coral, and a fist closing
+  // halfway up a branching colony hides the forks that identify it.
+  coral_branch: { file: 'wam/coral_branch', pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.55, 0.24], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.50, -0.18] },
+  coral_fan:    { file: 'wam/coral_fan',    pack: 'wam', height: 0.30, grip: 0.24, rot: [0.02, -1.35, 0.22],  pos: [0.02, 0.12, -0.02], icon: [0.12, 1.40, -0.10] },
+  coral_brain:  { file: 'wam/coral_brain',  pack: 'wam', height: 0.24, grip: 0.42, rot: [0.10, -0.45, 0.16],  pos: [0.02, 0.10, -0.04], icon: [0.22, 0.40, -0.10] },
+  coral_dead:   { file: 'wam/coral_dead',   pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.75, 0.24], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.70, -0.18] },
+  kelp:         { file: 'wam/kelp',         pack: 'wam', height: 0.34, grip: 0.30, rot: [-0.12, -0.40, 0.28], pos: [0.02, 0.14, -0.02], icon: [0.08, 0.36, -0.20] },
+  sea_grass:    { file: 'wam/sea_grass',    pack: 'wam', height: 0.24, grip: 0.30, rot: [-0.06, -0.50, 0.26], pos: [0.02, 0.10, -0.02], icon: [0.10, 0.46, -0.16] },
+  sea_sponge:   { file: 'wam/sea_sponge',   pack: 'wam', height: 0.26, grip: 0.40, rot: [0.06, -0.50, 0.18],  pos: [0.02, 0.11, -0.04], icon: [0.16, 0.46, -0.12] },
+  // The clam is the one that has to show its inside. Its mantle — the bright
+  // strip between the valves and the only saturated thing on the model — faces
+  // straight up, so both rotations pitch it well forward, the food kit's `flat`
+  // treatment. Square-on it is two grey shells and nothing else.
+  sea_shell:    { file: 'wam/sea_shell',    pack: 'wam', height: 0.24, grip: 0.36, rot: [0.46, -0.40, 0.16],  pos: [0.02, 0.10, -0.04], icon: [0.72, 0.34, -0.08] },
+  pearl:        { file: 'wam/pearl',        pack: 'wam', height: 0.15, grip: 0.50, rot: [0.10, -0.30, 0.10],  pos: [0.02, 0.12, -0.05], icon: [0.12, 0.26, 0] },
 };
 
 /** Item name -> pose key, for the items that carry no `tool` block. */
@@ -379,6 +417,22 @@ const BY_NAME = {
   // without the suppression is a model inside a billboard, and the suppression
   // without the model is an empty cell.
   mushroom: 'mushroom',
+  // The reef, at the flowers' stage rather than the glowcap's: model in the
+  // fist, in the icon grid, on the ground *and* planted. There is no billboard
+  // behind any of these to fall back on — see the note above their poses.
+  coral_branch: 'coral_branch',
+  coral_fan: 'coral_fan',
+  coral_brain: 'coral_brain',
+  coral_dead: 'coral_dead',
+  kelp: 'kelp',
+  sea_grass: 'sea_grass',
+  sea_sponge: 'sea_sponge',
+  // A clam is never in your hand — it drops a pearl, not itself — but the entry
+  // has to exist all the same: `BlockModels.prime` borrows a *kind's* art from
+  // the matching item, so the model the seabed draws is reached through this
+  // map. Delete the line and the reef loses its clams.
+  sea_shell: 'sea_shell',
+  pearl: 'pearl',
   // The one place this map is not an identity, and deliberately: raw and
   // steamed crab are one model. A claw is a claw cooked or not — the shell is
   // already the orange it turns — so the pair share `crab_claw` rather than

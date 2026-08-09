@@ -121,6 +121,15 @@ const MATERIALS = [
   { name: 'sapphire', label: 'Sapphire', art: 'crystal', color: '#2f56c7', shine: '#8fa8ff' },
   { name: 'void_shard', label: 'Void Shard', art: 'crystal', color: '#6b3fbf', shine: '#c9a4ff' },
   { name: 'flint', label: 'Flint', art: 'lump', color: '#3a3f47', shine: '#6e7783' },
+  // The only thing on the planet you can only get by holding your breath.
+  //
+  // A giant clam drops one and nothing else drops one at all — there is no ore,
+  // no smelt and no recipe — so its whole supply is "how many clams have you
+  // found on the seabed", which is the point: the reef needed a reason to be
+  // swum down to rather than looked at. `crystal` is the model art it is
+  // closest to, but it has its own (`wam/items/pearl.wam`); these two colours
+  // are only the fallback sprite's, for the frame before the model lands.
+  { name: 'pearl', label: 'Pearl', color: '#e8e6dd', shine: '#ffffff' },
   // Husks only. Nothing in the ground yields cinder, and husks only walk after
   // dark — so this is the one material you cannot mine your way to. It exists
   // because night was all threat and no payoff: walling up until dawn was

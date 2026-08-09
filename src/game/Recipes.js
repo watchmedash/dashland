@@ -62,6 +62,16 @@ const RAW = [
   { out: 'gold_ingot', count: 9, in: ['gold_block'] },
   { out: 'lantern', count: 1, table: true, shape: [' I ', 'IGI', ' I '], key: { I: 'iron_ingot', G: 'glowstone' } },
   { out: 'lantern', count: 1, table: true, shape: [' I ', 'ICI', ' I '], key: { I: 'iron_ingot', C: 'crystal' } },
+  // The pearl's one use, and deliberately only one.
+  //
+  // A lantern already has two recipes and this is a third of the same shape, so
+  // it teaches nothing new and cannot be got wrong — which is exactly what a
+  // find wants. The alternative was a new block to build round the pearl, and a
+  // block nobody has seen is a worse reward than a lamp they already want, lit
+  // by the thing they held their breath for. It also gives the reef a use for a
+  // player who has iron but no crystal and no merchant nearby, which is roughly
+  // the point in the game where a coastline is what you have.
+  { out: 'lantern', count: 1, table: true, shape: [' I ', 'IPI', ' I '], key: { I: 'iron_ingot', P: 'pearl' } },
   { out: 'bucket', count: 1, table: true, shape: ['I I', ' I '], key: { I: 'iron_ingot' } },
   { out: 'farmland', count: 1, in: ['dirt', 'stick'] },
   { out: 'dirt_path', count: 1, in: ['dirt', 'gravel'] },
@@ -96,6 +106,12 @@ const RAW = [
   { out: 'plaster', count: 2, in: ['clay', 'sand'] },
   { out: 'mosaic_white', count: 2, in: ['clay', 'glass'] },
   { out: 'mosaic_blue', count: 2, in: ['clay', 'glass', 'flower_blue'] },
+  // The reef's colours join the family that already turns whatever the planet
+  // grows into a wall finish. Coral is the obvious colourant a coastline has
+  // and nowhere else does — and it means a diver comes home with something a
+  // builder wants, without a new item, a new block or a dye system.
+  { out: 'mosaic_blue', count: 2, in: ['clay', 'glass', 'coral_fan'] },
+  { out: 'mosaic_green', count: 2, in: ['clay', 'glass', 'kelp'] },
   { out: 'mosaic_green', count: 2, in: ['clay', 'glass', 'cactus'] },
   { out: 'shingle_red', count: 4, table: true, in: ['clay', 'clay', 'brick'] },
   { out: 'shingle_green', count: 4, table: true, in: ['clay', 'clay', 'cactus'] },

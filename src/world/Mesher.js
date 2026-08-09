@@ -10,6 +10,7 @@ import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn } from './Sphere.js';
 import {
   BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
   TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
+  IS_SUBMERGED,
   FACING_DEFAULT, sideTile, capTile, axisOf, blockBoxes, IS_FENCE, fenceLinks,
 } from './Blocks.js';
 
@@ -91,7 +92,13 @@ for (let i = 0; i < N_BLOCKS; i++) {
  * chunk's baked voxel light and the wind sway.
  */
 const MODELLED_CROSS = new Uint8Array(N_BLOCKS);
-for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom']) {
+for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom',
+  // The reef. Unlike the flowers these have no billboard to fall back on —
+  // they were authored as models and carry no tile of their own — so this list
+  // and `MODELLED_PLANTS` in `main.js` have to agree or the seabed is empty:
+  // a name here and not there draws nothing at all.
+  'coral_branch', 'coral_fan', 'coral_brain', 'coral_dead',
+  'kelp', 'sea_grass', 'sea_sponge', 'sea_shell']) {
   const i = BLOCKS.findIndex((b) => b.name === n);
   if (i > 0) MODELLED_CROSS[i] = 1;
 }
@@ -260,6 +267,23 @@ function faceVisible(a, b) {
   // a mantle pool leaves them side by side. Neither cell drew the shared quad,
   // which left a hole straight through into the inside of the pool.
   if (ga === GROUP_LIQUID && GROUP[b] === GROUP_LIQUID && b === a) return false;
+  // Reef life is *inside* the water, so the water has no face there either.
+  //
+  // Without this every coral is a cell-sized bubble: the ocean draws its own
+  // underside all round the plant's cell and you swim through a reef looking at
+  // the inside surface of the sea. A kelp stalk, being a run of them up one
+  // column, is a chimney of it. The cell genuinely does not hold water — a
+  // voxel is one id — but nothing about that is worth showing the player, and
+  // the honest picture is the one where the water carries on through.
+  //
+  // One-way on purpose. This asks "should the *liquid* draw a wall against a
+  // submerged plant", and the answer is no; the plant is a cross block and
+  // never reaches this test at all, so there is no matching case for `a` being
+  // the plant. The cost of the rule is at the boundary of a water body, where a
+  // coral placed against open air would leave the sea's flank open — which is
+  // why worldgen is asked to keep the reef under a covering cell of water, and
+  // why `_placeBlock` refuses to plant one anywhere else.
+  if (ga === GROUP_LIQUID && IS_SUBMERGED[b]) return false;
   return true;
 }
 

@@ -42,11 +42,18 @@ per tier.
 [squareishdesign.com](https://squareishdesign.com) — **CC0**. The apple and the
 pumpkin.
 
-## Raw materials — original models, authored in WAM
+## Raw materials and reef life — original models, authored in WAM
 
-Not third-party art: twenty-nine models written for this project as `.wam`
+Not third-party art: forty-three models written for this project as `.wam`
 source in `wam/items/`, compiled by the toolchain in `wam/`, under the same
 licence as the rest of the game. See `wam/SPEC.md`.
+
+The nine most recent are the reef — the three living corals, the bleached one,
+kelp, sea grass, the sponge cluster, the giant clam and the pearl it drops. All
+nine are procedural geometry over a named palette with no imported texture of
+any kind, which is also the reason they exist as models rather than as tiles:
+the block atlas is baked partly from a licensed pack, and nothing about this
+family needed to go near it.
 
 ## Engine
 

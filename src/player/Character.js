@@ -65,22 +65,30 @@ export const CHARACTER_IDS = [
  * Keyed by id and not an array, so that the order of `CHARACTER_IDS` can change
  * without silently renaming everyone. Consumers should fall back to the id: a
  * missing entry is a caption reading `q`, not a crash.
+ *
+ * Five of these were assigned blind and were wrong. The first pass named the
+ * ids without looking at the models, and b, h, j, k and q are visibly men
+ * wearing women's names, which the player noticed immediately. They are Bram,
+ * Soren, Milo, Dario and Lasse now. The atlases are unwrapped skins and are not
+ * legible enough to settle this from the files, so anyone changing a name here
+ * should look at the figure in the character picker first rather than reasoning
+ * from the texture.
  */
 export const CHARACTER_NAMES = {
   a: 'Rowan',
-  b: 'Mira',
+  b: 'Bram',
   c: 'Tomas',
   e: 'Ines',
   f: 'Nadia',
   g: 'Kofi',
-  h: 'Sanne',
+  h: 'Soren',
   i: 'Yusuf',
-  j: 'Bela',
-  k: 'Priya',
+  j: 'Milo',
+  k: 'Dario',
   m: 'Otto',
   n: 'Amara',
   p: 'Halvard',
-  q: 'Lucia',
+  q: 'Lasse',
   r: 'Emeka',
 };
 

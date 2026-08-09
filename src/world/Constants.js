@@ -217,7 +217,12 @@ export const BIOME_COLORS = [
   { grass: [0.80, 0.74, 0.42], foliage: [0.68, 0.66, 0.36], water: [0.26, 0.60, 0.72] },
   { grass: [0.74, 0.76, 0.38], foliage: [0.62, 0.66, 0.32], water: [0.24, 0.56, 0.68] },
   { grass: [0.60, 0.68, 0.56], foliage: [0.48, 0.60, 0.48], water: [0.28, 0.54, 0.68] },
-  { grass: [0.70, 0.80, 0.78], foliage: [0.56, 0.70, 0.66], water: [0.36, 0.62, 0.76] },
+  // Snow. The foliage term is a *multiplier* on an already green needle tile, so
+  // a pale green multiplier still leaves a green tree: "trees growing in snow
+  // biomes looks green af" was this row. Green pulled well under red and blue so
+  // the product lands cold and desaturated rather than merely lighter, which is
+  // what a conifer under snow reads as.
+  { grass: [0.70, 0.80, 0.78], foliage: [0.52, 0.58, 0.62], water: [0.36, 0.62, 0.76] },
   { grass: [0.48, 0.62, 0.44], foliage: [0.38, 0.54, 0.36], water: [0.24, 0.52, 0.68] },
   { grass: [0.62, 0.84, 0.46], foliage: [0.50, 0.76, 0.38], water: [0.22, 0.54, 0.72] },
   { grass: [0.76, 0.60, 0.36], foliage: [0.66, 0.54, 0.30], water: [0.30, 0.50, 0.56] },

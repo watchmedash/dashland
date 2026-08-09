@@ -1388,7 +1388,13 @@ grows(['thornbrush'], soil(['coarse_dirt', 'gravel'], 'desert'));
 grows(['aloe'], soil(['grass', 'coarse_dirt'], 'desert'));
 grows(['golden_grass'], soil(['grass', 'dirt', 'coarse_dirt']));
 grows(['firebloom'], soil(['red_sand', 'red_sandstone', 'coarse_dirt']));
-grows(['cotton_grass'], soil(['snow', 'gravel', 'coarse_dirt', 'grass', 'dirt', 'peat']));
+// Tundra ground and nothing that reads as temperate. The carpet pass already
+// gates it to the tundra biome, and tundra floor really is dirt, gravel and
+// snow, so most of "it grows everywhere" was the biome being varied rather than
+// the plant being loose. `grass` and plain `dirt` are out anyway: those two are
+// what a meadow is made of, so a sedge standing on either looks like it wandered
+// out of its biome even when it has not.
+grows(['cotton_grass'], soil(['snow', 'gravel', 'coarse_dirt', 'peat']));
 // Snow and nothing else. It is the plant that only exists because the ground is
 // white, so any other ground makes it meaningless.
 grows(['snowbell'], soil(['snow']));

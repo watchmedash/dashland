@@ -1,5 +1,30 @@
 // Fully procedural audio — no asset files. Noise-shaped impacts for footsteps
-// and block interaction, a layered wind bed, and a slow generative pad.
+// and block interaction, a layered ambient bed, and a slow generative pad.
+//
+// Buses
+// -----
+// Everything lands on one of four buses and every bus goes through the same
+// master trim, a muffle filter and a compressor:
+//
+//   sfx  ─┬─────────────────────────┐
+//         └─ send → reverb ─────────┤
+//   amb  ────────────────────────── ├→ master → muffle → comp → destination
+//   ui   ────────────────────────── │
+//   music ───┬───────────────────── ┘
+//            └─ long reverb ────────┘
+//
+// The muffle is a lowpass that sits wide open at 20kHz and closes to a few
+// hundred Hz underwater — that one node is what makes going under read as being
+// under, far more than any level change does.
+//
+// Voice budget
+// ------------
+// Every voice-producing call takes a token from `_take()` before it builds
+// anything, and returns it on a timer sized to the voice's own length. Costs
+// are weighted by how many nodes a category actually builds, so a herd of mobs
+// and a landslide of block breaks compete for one budget instead of each having
+// their own unbounded one. Over budget, the call returns without building a
+// graph; it is never queued, because a late footstep is worse than none.
 //
 // Positional model
 // ----------------
@@ -9,6 +34,8 @@
 // never drift with head movement. The listener is driven from the camera every
 // frame by `setListener()` — this is a sphere world, so "up" is the player's
 // local up, not world +Y.
+
+import { Ambience } from './Ambience.js';
 
 const MATERIAL_TUNING = {
   stone: { lo: 480, hi: 2400, decay: 0.10, tone: 0.20, noise: 1.0, body: 150 },
@@ -69,6 +96,20 @@ const VOX_MODE = {
   death: { pitch: 0.92, dur: 1.75, gain: 1.15, drop: 0.42, thump: 0.9 },
 };
 
+// Concurrent-voice budget, in weighted units. The weights are roughly the node
+// count each category builds, so the ceiling means something: at the cap the
+// graph holds on the order of 500 transient nodes, which measures as noise
+// beside the voxel meshes this game already keeps resident.
+const VOICE_BUDGET = 64;
+const VOICE_COST = {
+  step: 2, block: 3, mob: 7, hit: 3, player: 3, ui: 1, amb: 3, weather: 10,
+};
+// Per-category ceilings on top of the global one, so no single source can eat
+// the whole budget. A cave-in must not be able to silence your own footsteps.
+const VOICE_CAP = {
+  step: 8, block: 24, mob: 28, hit: 12, player: 9, ui: 6, amb: 12, weather: 20,
+};
+
 export class Audio {
   constructor() {
     this.ctx = null;
@@ -78,11 +119,17 @@ export class Audio {
     this.started = false;
     // debug/verification counters — cheap, and the only way to confirm the
     // graph is doing anything at all in a headless browser
-    this.stats = { panners: 0, mobCalls: 0, thunder: 0, throttled: 0 };
+    this.stats = {
+      panners: 0, mobCalls: 0, thunder: 0, throttled: 0,
+      voicesTaken: 0, voicesDropped: 0, peakVoices: 0,
+    };
     this._lastIdleVox = -99;
     // panners following a live position object (a mob's own vector), re-read
     // every frame so a call from a running animal moves with it
     this._tracked = [];
+    this._used = 0;
+    this._cat = {};
+    this._muffle = 0;
   }
 
   start() {
@@ -94,13 +141,31 @@ export class Audio {
 
     this.master = this.ctx.createGain();
     this.master.gain.value = this.masterVolume;
+
+    // The underwater filter. Wide open is a no-op the browser optimises away;
+    // it only costs anything while it is actually closed.
+    this.muffle = this.ctx.createBiquadFilter();
+    this.muffle.type = 'lowpass';
+    this.muffle.frequency.value = 20000;
+    this.muffle.Q.value = 0.6;
+
     const comp = this.ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 22; comp.ratio.value = 5;
     comp.attack.value = 0.004; comp.release.value = 0.22;
-    this.master.connect(comp).connect(this.ctx.destination);
+    this.master.connect(this.muffle).connect(comp).connect(this.ctx.destination);
 
     this.sfxBus = this.ctx.createGain(); this.sfxBus.gain.value = 1;
     this.sfxBus.connect(this.master);
+
+    // UI sits on its own bus so menu clicks keep a steady level whatever the
+    // world is doing, and so it can duck out from under the muffle later.
+    this.uiBus = this.ctx.createGain(); this.uiBus.gain.value = 0.9;
+    this.uiBus.connect(this.master);
+
+    // Ambience is separate from sfx: it must not be pushed around by the
+    // reverb send, and its level has to be trimmable on its own.
+    this.ambBus = this.ctx.createGain(); this.ambBus.gain.value = 1;
+    this.ambBus.connect(this.master);
 
     // small convolution space so impacts don't sound dry
     this.reverb = this.ctx.createConvolver();
@@ -112,6 +177,35 @@ export class Audio {
     this._startAmbience();
     this._startMusic();
   }
+
+  // --- voice budget ----------------------------------------------------------
+
+  /**
+   * Reserve budget for one voice of `cat` lasting `life` seconds. False means
+   * the caller must build nothing at all — checking this after wiring up half a
+   * graph would defeat the point.
+   */
+  _take(cat, life = 0.5) {
+    const cost = VOICE_COST[cat] || 3;
+    const cap = VOICE_CAP[cat] || 12;
+    const used = this._cat[cat] || 0;
+    if (this._used + cost > VOICE_BUDGET || used + cost > cap) {
+      this.stats.voicesDropped++;
+      return false;
+    }
+    this._used += cost;
+    this._cat[cat] = used + cost;
+    this.stats.voicesTaken++;
+    if (this._used > this.stats.peakVoices) this.stats.peakVoices = this._used;
+    setTimeout(() => {
+      this._used = Math.max(0, this._used - cost);
+      this._cat[cat] = Math.max(0, (this._cat[cat] || 0) - cost);
+    }, Math.max(60, life * 1000 + 120));
+    return true;
+  }
+
+  /** Weighted units currently held. Zero when nothing is sounding. */
+  get voiceLoad() { return this._used; }
 
   resume() { if (this.ctx?.state === 'suspended') this.ctx.resume(); }
 
@@ -252,11 +346,12 @@ export class Audio {
     return buf;
   }
 
-  _burst(mat, { gain = 0.5, pitch = 1, dur = 1, pos = null } = {}) {
-    if (!this._live()) return;
-    const t = this.ctx.currentTime;
+  _burst(mat, { gain = 0.5, pitch = 1, dur = 1, pos = null, cat = 'block' } = {}) {
+    if (!this._live()) return false;
     const cfg = MATERIAL_TUNING[mat] || MATERIAL_TUNING.stone;
     const life = cfg.decay * dur;
+    if (!this._take(cat, life * 1.6 + 0.1)) return false;
+    const t = this.ctx.currentTime;
     const out = this._dest(pos, life * 1.6 + 0.1);
 
     const src = this.ctx.createBufferSource();
@@ -288,35 +383,201 @@ export class Audio {
       o.connect(og).connect(out);
       o.start(t); o.stop(t + life * 1.6);
     }
+    return true;
   }
 
   // Player-centric by default; `pos` (a THREE.Vector3 or [x,y,z]) makes any of
   // these world-anchored.
-  step(mat, pos) { this._burst(mat, { gain: 0.22, pitch: 0.85 + Math.random() * 0.25, dur: 0.9, pos }); }
+
+  /**
+   * A footstep. Two layers, not one: the impact of the boot, plus a quieter
+   * scuff a few milliseconds behind it as the foot rolls. A single burst is
+   * what made every surface sound like the same tap at different pitches.
+   * Sand, snow and grass get a long soft scuff; stone and wood get a short one.
+   */
+  step(mat, pos) {
+    const cfg = MATERIAL_TUNING[mat] || MATERIAL_TUNING.stone;
+    if (mat === 'water') return this._waterStep(pos);
+    const pitch = 0.85 + Math.random() * 0.25;
+    if (!this._burst(mat, { gain: 0.20, pitch, dur: 0.9, pos, cat: 'step' })) return;
+    const soft = mat === 'sand' || mat === 'snow' || mat === 'grass' || mat === 'soil';
+    const t = this.ctx.currentTime + 0.012 + Math.random() * 0.02;
+    const d = (soft ? 0.11 : 0.05) * (0.8 + Math.random() * 0.5);
+    const out = this._dest(pos, d + 0.2);
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.8 + Math.random() * 0.5;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(cfg.hi * 0.7 * pitch, t);
+    bp.frequency.exponentialRampToValueAtTime(Math.max(60, cfg.lo * 0.8), t + d);
+    bp.Q.value = 0.5;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.075 * (soft ? 1.25 : 0.8), t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+  }
+
   dig(mat, pos) { this._burst(mat, { gain: 0.18, pitch: 1.1, dur: 0.55, pos }); }
   break_(mat, pos) { this._burst(mat, { gain: 0.5, pitch: 0.9, dur: 1.7, pos }); }
   place(mat, pos) { this._burst(mat, { gain: 0.42, pitch: 1.15, dur: 1.1, pos }); }
-  splash(pos) { this._burst('water', { gain: 0.45, pitch: 1, dur: 1.6, pos }); }
 
+  /** Walking through shallow water: a wet slosh with no hard transient at all. */
+  _waterStep(pos) {
+    if (!this._live() || !this._take('step', 0.45)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.18 + Math.random() * 0.12;
+    const out = this._dest(pos, d + 0.3);
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.9 + Math.random() * 0.5;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(400 + Math.random() * 300, t);
+    bp.frequency.exponentialRampToValueAtTime(2200 + Math.random() * 1400, t + d * 0.6);
+    bp.Q.value = 0.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.20, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+  }
+
+  /**
+   * Water displaced. A broadband slap, a body of noise falling away behind it,
+   * and a short run of rising bubble resonances — the rise is what makes it
+   * water rather than a burst of static. Scale 1 is a body entering; the
+   * fishing float and a bucket pass smaller numbers.
+   */
+  splash(pos, scale = 1) {
+    if (!this._live() || !this._take('player', 1.0)) return;
+    const t = this.ctx.currentTime;
+    const d = (0.5 + Math.random() * 0.35) * scale;
+    const out = this._dest(pos, d * 1.6 + 0.4);
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.9 + Math.random() * 0.4;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2600 + Math.random() * 1800, t);
+    bp.frequency.exponentialRampToValueAtTime(320, t + d);
+    bp.Q.value = 0.6;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.34 * scale, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    const n = 2 + ((Math.random() * 4 * scale) | 0);
+    for (let i = 0; i < n; i++) {
+      const tn = t + 0.02 + i * (0.02 + Math.random() * 0.06);
+      const bd = 0.04 + Math.random() * 0.06;
+      const f = 300 + Math.random() * 800;
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, tn);
+      o.frequency.exponentialRampToValueAtTime(f * (2 + Math.random() * 1.6), tn + bd);
+      const bg = this.ctx.createGain();
+      bg.gain.setValueAtTime(0.0001, tn);
+      bg.gain.linearRampToValueAtTime(0.10 * scale, tn + 0.004);
+      bg.gain.exponentialRampToValueAtTime(0.0004, tn + bd);
+      o.connect(bg).connect(out);
+      o.start(tn); o.stop(tn + bd + 0.03);
+    }
+  }
+
+  /** One swimming stroke. Deliberately soft; it repeats every second or so. */
+  swim(pos) {
+    if (!this._live() || !this._take('step', 0.5)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.3 + Math.random() * 0.2;
+    const out = this._dest(pos, d + 0.3);
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.5 + Math.random() * 0.3;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900 + Math.random() * 500, t);
+    lp.frequency.exponentialRampToValueAtTime(200, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.11, t + d * 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(lp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+  }
+
+  /** Breaking the surface: the splash plus a gasp. */
+  surface() {
+    this.splash(null, 0.7);
+    if (!this._live() || !this._take('player', 0.5)) return;
+    const t = this.ctx.currentTime + 0.05;
+    const d = 0.34;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 1.1;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(500, t);
+    bp.frequency.exponentialRampToValueAtTime(1500, t + d * 0.5);
+    bp.Q.value = 1.6;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(this.sfxBus);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+  }
+
+  /**
+   * Taking a hit. The original was one sawtooth drop, which read as an arcade
+   * buzzer; the sharp intake of breath over the top is what makes it a body.
+   */
   hurt() {
-    if (!this._live()) return;
+    if (!this._live() || !this._take('player', 0.5)) return;
     const t = this.ctx.currentTime;
     const o = this.ctx.createOscillator();
     o.type = 'sawtooth';
-    o.frequency.setValueAtTime(220, t);
+    o.frequency.setValueAtTime(220 * (0.9 + Math.random() * 0.2), t);
     o.frequency.exponentialRampToValueAtTime(70, t + 0.28);
     const f = this.ctx.createBiquadFilter();
     f.type = 'lowpass'; f.frequency.value = 900;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.3, t + 0.01);
+    g.gain.linearRampToValueAtTime(0.26, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
     o.connect(f).connect(g).connect(this.sfxBus);
     o.start(t); o.stop(t + 0.36);
+    this._noiseHit(this.sfxBus, t, { gain: 0.13, lo: 900, hi: 300, q: 1.4, dur: 0.2, at: 0.02 });
+  }
+
+  /** Player death: the hurt, then everything falling away underneath it. */
+  death() {
+    this.hurt();
+    if (!this._live() || !this._take('player', 2.2)) return;
+    const t = this.ctx.currentTime + 0.12;
+    const d = 1.8;
+    for (const [mul, amt] of [[1, 1], [0.5, 0.7], [1.5, 0.28]]) {
+      const o = this.ctx.createOscillator();
+      o.type = mul === 1.5 ? 'triangle' : 'sine';
+      o.frequency.setValueAtTime(196 * mul, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(24, 44 * mul), t + d);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.16 * amt, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+      o.connect(g).connect(this.sfxBus);
+      o.start(t); o.stop(t + d + 0.1);
+    }
   }
 
   pickup() {
-    if (!this._live()) return;
+    if (!this._live() || !this._take('ui', 0.3)) return;
     const t = this.ctx.currentTime;
     [660, 880].forEach((f, i) => {
       const o = this.ctx.createOscillator();
@@ -325,22 +586,263 @@ export class Audio {
       g.gain.setValueAtTime(0, t + i * 0.06);
       g.gain.linearRampToValueAtTime(0.14, t + i * 0.06 + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0005, t + i * 0.06 + 0.16);
-      o.connect(g).connect(this.sfxBus);
+      o.connect(g).connect(this.uiBus);
       o.start(t + i * 0.06); o.stop(t + i * 0.06 + 0.2);
     });
   }
 
+  /**
+   * The generic interface blip. Still one square, because dozens of call sites
+   * pass nothing but a frequency and expect a click — but now with a fast pitch
+   * drop and a lowpass on it, which is the difference between a click and the
+   * flat beep this used to be. Everything menu-shaped runs through here.
+   */
   ui(freq = 520) {
-    if (!this._live()) return;
+    if (!this._live() || !this._take('ui', 0.15)) return;
     const t = this.ctx.currentTime;
     const o = this.ctx.createOscillator();
-    o.type = 'square'; o.frequency.value = freq;
+    o.type = 'square';
+    o.frequency.setValueAtTime(freq * 1.06, t);
+    o.frequency.exponentialRampToValueAtTime(freq, t + 0.03);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = Math.min(9000, freq * 5.5); lp.Q.value = 0.7;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(0.05, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0004, t + 0.09);
-    o.connect(g).connect(this.sfxBus);
+    o.connect(lp).connect(g).connect(this.uiBus);
     o.start(t); o.stop(t + 0.1);
+  }
+
+  /** Refused. A flat, dull two-tone fall; unmistakably not a confirmation. */
+  deny() {
+    if (!this._live() || !this._take('ui', 0.3)) return;
+    const t = this.ctx.currentTime;
+    [[230, 0], [172, 0.075]].forEach(([f, dt]) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'square'; o.frequency.value = f;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 1100;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, t + dt);
+      g.gain.linearRampToValueAtTime(0.055, t + dt + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + dt + 0.10);
+      o.connect(lp).connect(g).connect(this.uiBus);
+      o.start(t + dt); o.stop(t + dt + 0.12);
+    });
+  }
+
+  /** Something went wrong and the player needs to know without reading. */
+  saveFail() {
+    if (!this._live() || !this._take('ui', 0.7)) return;
+    const t = this.ctx.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const tn = t + i * 0.13;
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(150, tn);
+      o.frequency.exponentialRampToValueAtTime(96, tn + 0.11);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 800;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, tn);
+      g.gain.linearRampToValueAtTime(0.09, tn + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + 0.12);
+      o.connect(lp).connect(g).connect(this.uiBus);
+      o.start(tn); o.stop(tn + 0.14);
+    }
+  }
+
+  /** Progress. A rising arpeggio with a bell on top; the only fanfare here. */
+  levelUp() {
+    if (!this._live() || !this._take('ui', 1.4)) return;
+    const t = this.ctx.currentTime;
+    const root = 440;
+    [0, 4, 7, 12].forEach((semi, i) => {
+      const f = root * Math.pow(2, semi / 12);
+      const tn = t + i * 0.085;
+      for (const [mul, amt, type] of [[1, 1, 'sine'], [2, 0.3, 'triangle']]) {
+        const o = this.ctx.createOscillator();
+        o.type = type; o.frequency.value = f * mul;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0, tn);
+        g.gain.linearRampToValueAtTime(0.085 * amt, tn + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.0004, tn + (i === 3 ? 0.9 : 0.28));
+        o.connect(g).connect(this.uiBus);
+        if (this.reverbGain) g.connect(this.reverbGain);
+        o.start(tn); o.stop(tn + (i === 3 ? 1.0 : 0.32));
+      }
+    });
+  }
+
+  /** Chewing, then a swallow. Four irregular wet grains, no two the same. */
+  eat() {
+    if (!this._live() || !this._take('player', 0.9)) return;
+    const t = this.ctx.currentTime;
+    const bites = 3 + ((Math.random() * 2) | 0);
+    for (let i = 0; i < bites; i++) {
+      const tn = t + i * (0.13 + Math.random() * 0.08);
+      const d = 0.07 + Math.random() * 0.05;
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.playbackRate.value = 0.7 + Math.random() * 0.6;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(900 + Math.random() * 1400, tn);
+      bp.frequency.exponentialRampToValueAtTime(300, tn + d);
+      bp.Q.value = 1.1;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tn);
+      g.gain.linearRampToValueAtTime(0.13, tn + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + d);
+      src.connect(bp).connect(g).connect(this.sfxBus);
+      src.start(tn, Math.random() * 2); src.stop(tn + d + 0.03);
+    }
+    // the gulp: a short rising resonance, the same trick as a bubble
+    const gt = t + bites * 0.15 + 0.05;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, gt);
+    o.frequency.exponentialRampToValueAtTime(430, gt + 0.12);
+    const gg = this.ctx.createGain();
+    gg.gain.setValueAtTime(0.0001, gt);
+    gg.gain.linearRampToValueAtTime(0.10, gt + 0.02);
+    gg.gain.exponentialRampToValueAtTime(0.0004, gt + 0.14);
+    o.connect(gg).connect(this.sfxBus);
+    o.start(gt); o.stop(gt + 0.16);
+  }
+
+  /** Bench work: a couple of knocks and a scrape. Not a chime, not a coin. */
+  craft() {
+    if (!this._live() || !this._take('player', 0.7)) return;
+    const t = this.ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const tn = t + i * (0.10 + Math.random() * 0.05);
+      const d = 0.12;
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      const f = 190 * (i ? 0.8 : 1) * (0.9 + Math.random() * 0.2);
+      o.frequency.setValueAtTime(f, tn);
+      o.frequency.exponentialRampToValueAtTime(f * 0.55, tn + d);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tn);
+      g.gain.linearRampToValueAtTime(0.18, tn + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + d);
+      o.connect(g).connect(this.sfxBus);
+      o.start(tn); o.stop(tn + d + 0.03);
+      this._noiseHit(this.sfxBus, tn, { gain: 0.13, lo: 500, hi: 2600, q: 1.0, dur: 0.09 });
+    }
+    this._noiseHit(this.sfxBus, t + 0.24, { gain: 0.08, lo: 900, hi: 4200, q: 0.7, dur: 0.22, at: 0.05 });
+  }
+
+  /**
+   * Drawing a bow. `power` is 0..1; the creak climbs with it, so holding at
+   * full draw sounds like holding at full draw. Called repeatedly while held —
+   * the step budget throttles it if the caller is generous with the rate.
+   */
+  bowDraw(power = 0.5) {
+    if (!this._live() || !this._take('step', 0.35)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.22;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.35 + Math.random() * 0.2;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(420 + power * 700, t);
+    bp.frequency.linearRampToValueAtTime(620 + power * 1200, t + d);
+    bp.Q.value = 5;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.06 + power * 0.05, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(this.sfxBus);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+  }
+
+  /** Loosing it: string thwip plus the shaft leaving, both scaled by draw. */
+  bowRelease(power = 1) {
+    if (!this._live() || !this._take('player', 0.6)) return;
+    const t = this.ctx.currentTime;
+    const p = 0.35 + power * 0.65;
+
+    // string: a fast damped low twang
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    const f = 150 + power * 130;
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 0.45, t + 0.11);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.24 * p, t + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.13);
+    o.connect(g).connect(this.sfxBus);
+    o.start(t); o.stop(t + 0.15);
+
+    // shaft: bright noise sweeping down and away
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 1.3;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(3800 + power * 2600, t);
+    bp.frequency.exponentialRampToValueAtTime(700, t + 0.28);
+    bp.Q.value = 1.3;
+    const ng = this.ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.linearRampToValueAtTime(0.16 * p, t + 0.006);
+    ng.gain.exponentialRampToValueAtTime(0.0004, t + 0.28);
+    src.connect(bp).connect(ng).connect(this.sfxBus);
+    src.start(t, Math.random() * 2); src.stop(t + 0.32);
+  }
+
+  /**
+   * A swing that hit nothing. Cheap, and the reason a miss feels different from
+   * standing still — the whole point of a whoosh is that it is not a hit.
+   */
+  swing() {
+    if (!this._live() || !this._take('step', 0.3)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.19;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.9 + Math.random() * 0.3;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(360, t);
+    bp.frequency.exponentialRampToValueAtTime(1500 + Math.random() * 700, t + d * 0.45);
+    bp.frequency.exponentialRampToValueAtTime(300, t + d);
+    bp.Q.value = 1.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.10, t + d * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(this.sfxBus);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.03);
+  }
+
+  /**
+   * An arrow arriving. A hard tick tuned by what it hit, plus a shaft ring on
+   * anything that is not flesh. `dig('stone')` stood in for this everywhere,
+   * which meant an arrow into a tree sounded like a pickaxe.
+   */
+  impact(mat = 'wood', pos = null) {
+    if (!this._live() || !this._take('hit', 0.5)) return;
+    const cfg = MATERIAL_TUNING[mat] || MATERIAL_TUNING.wood;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.6, false);
+    this._noiseHit(out, t, { gain: 0.30, lo: cfg.lo, hi: cfg.hi * 1.4, q: 1.0, dur: 0.07 });
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    const f = Math.max(90, (cfg.body || 240) * 1.4);
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 0.6, t + 0.16);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.18);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.2);
   }
 
   // --- creatures -------------------------------------------------------------
@@ -384,6 +886,9 @@ export class Audio {
     const jitter = 0.9 + Math.random() * 0.22;
     const pitch = mode.pitch * jitter;
     const dur = v.dur * mode.dur * (0.88 + Math.random() * 0.28);
+    // A death is the last thing an animal ever does; it outbids a herd of idles
+    // for the last slot in the budget rather than being dropped by them.
+    if (kind !== 'death' && !this._take('mob', dur * 2 + 0.4)) return false;
     const gain = v.gain * mode.gain;
     const out = this._dest(pos, dur * 2 + 0.4, true, !!v.far);
     const f0 = v.base * pitch;
@@ -519,7 +1024,7 @@ export class Audio {
    * like the crisp grass footstep this replaced.
    */
   mobHit(pos = null, amt = 1) {
-    if (!this._live()) return;
+    if (!this._live() || !this._take('hit', 0.5)) return;
     const t = this.ctx.currentTime;
     const dur = 0.17 + Math.random() * 0.06;
     const out = this._dest(pos, dur * 2 + 0.3, true);
@@ -564,11 +1069,16 @@ export class Audio {
    * Non-positional: it is the whole sky.
    */
   thunder(strength = 1) {
-    if (!this._live()) return;
+    if (!this._live() || !this._take('weather', 7)) return;
     const t = this.ctx.currentTime;
     const near = Math.random();                 // 0 distant roll → 1 overhead crack
     const boom = 2.6 + Math.random() * 3.4;     // total decay in seconds
-    const amp = (0.55 + near * 0.5) * strength;
+    // Clamped: the caller passes up to 1.2, and an overhead strike at that
+    // strength used to schedule a gain of 1.26 on the bus. The compressor
+    // caught it, but catching it is not the same as it not happening — a
+    // limiter working that hard on the loudest event in the game is what makes
+    // a storm sound small instead of frightening.
+    const amp = Math.min(0.95, (0.5 + near * 0.42) * strength);
     const out = this.sfxBus;
     this.stats.thunder++;
 
@@ -657,40 +1167,40 @@ export class Audio {
   }
 
   _startAmbience() {
-    const mk = (type, freq, q, gain) => {
-      const src = this.ctx.createBufferSource();
-      src.buffer = this.noiseBuf; src.loop = true;
-      const f = this.ctx.createBiquadFilter();
-      f.type = type; f.frequency.value = freq; f.Q.value = q;
-      const g = this.ctx.createGain(); g.gain.value = gain;
-      src.connect(f).connect(g).connect(this.master);
-      src.start();
-      return { src, f, g };
-    };
-    this.wind = mk('bandpass', 520, 0.7, 0.0);
-    this.windHi = mk('highpass', 2400, 0.5, 0.0);
-    this.waterAmb = mk('bandpass', 900, 0.6, 0.0);
-    this.caveAmb = mk('lowpass', 180, 1.0, 0.0);
-
-    // slow gusts
-    const lfo = this.ctx.createOscillator();
-    lfo.frequency.value = 0.055;
-    const lg = this.ctx.createGain(); lg.gain.value = 260;
-    lfo.connect(lg).connect(this.wind.f.frequency);
-    lfo.start();
+    this.ambience = new Ambience(
+      this.ctx, this.ambBus, this.reverbGain, this.noiseBuf,
+      (cat) => this._take(cat, 3),
+    );
   }
 
-  setAmbience({ wind = 0, water = 0, cave = 0, underwater = 0 }) {
+  /**
+   * Called every frame. Only `wind`, `water`, `cave` and `underwater` are
+   * required; the rest colour the bed by where and when you are, and a caller
+   * that does not know them still gets a working ambience. See the hook list in
+   * the module notes for what each extra field wants.
+   */
+  setAmbience(s) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime, k = 0.4;
-    // Trimmed a touch from the original bed: with mob calls and thunder now in
-    // the mix, the wind was eating the headroom a distant bleat needs.
-    this.wind.g.gain.setTargetAtTime(wind * 0.046, t, k);
-    this.windHi.g.gain.setTargetAtTime(wind * 0.013, t, k);
-    this.waterAmb.g.gain.setTargetAtTime(water * 0.044, t, k);
-    this.caveAmb.g.gain.setTargetAtTime(cave * 0.08, t, k);
-    if (this.musicBus) this.musicBus.gain.setTargetAtTime(this.musicVolume * (underwater ? 0.4 : 1), t, 0.6);
-    this.master.gain.setTargetAtTime(this.masterVolume * (underwater ? 0.55 : 1), t, 0.3);
+    if (this.ambience) this.ambience.set(s);
+    const t = this.ctx.currentTime;
+    const under = s.underwater || 0;
+
+    // The muffle. 20kHz is transparent, 420Hz is submerged, and the ramp across
+    // is what sells the moment your head goes under rather than the level drop.
+    if (Math.abs(under - this._muffle) > 0.01) {
+      this._muffle = under;
+      const cut = 20000 * Math.pow(420 / 20000, under);
+      this.muffle.frequency.setTargetAtTime(cut, t, 0.12);
+      // Underwater the reverb send opens up: a hard surface a body-length away
+      // in every direction, which is exactly what being in a lake is.
+      if (this.reverbGain) {
+        this.reverbGain.gain.setTargetAtTime(0.16 + under * 0.30, t, 0.2);
+      }
+      if (this.musicBus) {
+        this.musicBus.gain.setTargetAtTime(this.musicVolume * (1 - under * 0.6), t, 0.6);
+      }
+      this.master.gain.setTargetAtTime(this.masterVolume * (1 - under * 0.45), t, 0.3);
+    }
   }
 
   _startMusic() {
@@ -742,10 +1252,28 @@ export class Audio {
     this._musicTimer = setTimeout(tick, 1500);
   }
 
+  /**
+   * Master and music levels, 0..1, straight from the settings sliders. Both are
+   * scaled by the current underwater duck rather than overwriting it — setting
+   * the raw value here while submerged used to snap the mix back to dry until
+   * the next time the player's head crossed the surface.
+   */
   setVolumes(master, music) {
     this.masterVolume = master;
     this.musicVolume = music;
-    if (this.master) this.master.gain.value = master;
-    if (this.musicBus) this.musicBus.gain.value = music;
+    const u = this._muffle || 0;
+    if (this.master) this.master.gain.value = master * (1 - u * 0.45);
+    if (this.musicBus) this.musicBus.gain.value = music * (1 - u * 0.6);
+  }
+
+  /** Everything off, immediately, without tearing down the graph. */
+  setEnabled(on) {
+    this.enabled = !!on;
+    if (this.master) {
+      this.master.gain.setTargetAtTime(
+        on ? this.masterVolume * (1 - (this._muffle || 0) * 0.45) : 0,
+        this.ctx.currentTime, 0.05,
+      );
+    }
   }
 }

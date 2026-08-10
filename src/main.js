@@ -53,7 +53,7 @@ import { Skills, MARKS, ON_DEATH } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
-  IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
+  IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
 } from './world/Blocks.js';
 import {
@@ -3880,6 +3880,30 @@ class Game {
     return 1 + (this._ladderFacing(hit, col, k) & 3);
   }
 
+  /**
+   * A sign's byte: which way the writing faces, and whether it hangs on a wall.
+   *
+   * Same shape as `_torchFacing` and for the same reason - the face you
+   * clicked is the whole of the intent. Click the side of a block and the sign
+   * is nailed to it, reading away from it. Click the ground, or anything else,
+   * and it stands on its post facing you, which is what every sign did before
+   * walls were an option.
+   */
+  _signFacing(hit, col, k) {
+    if (!hit || hit.col === col) return this._facingToward(col, k) & 3;
+    // `_ladderFacing` points AT the wall; a sign reads away from the one it is
+    // nailed to, so the writing is the opposite of the ladder's answer.
+    return ((this._ladderFacing(hit, col, k) & 3) ^ 1) | SIGN_WALL;
+  }
+
+  /** Is there anything for a sign in this cell, with this byte, to hold on to? */
+  _signSupported(col, k, byte) {
+    if (!(byte & SIGN_WALL)) return this.planet.solidAt(col, k - 1);
+    // The wall is behind the writing, so step the opposite way to the facing.
+    const wall = stepColumn(col, ...TORCH_WALL_STEP[((byte & 3) ^ 1) & 3]);
+    return this.planet.solidAt(wall, k);
+  }
+
   /** Is there anything for a torch in this cell, facing this way, to hold on to? */
   _torchSupported(col, k, byte) {
     if (byte === 0) return this.planet.solidAt(col, k - 1);
@@ -4097,6 +4121,19 @@ class Game {
       }
     }
 
+    // A sign hangs on the wall you clicked or stands on its post, and it falls
+    // back the same way a torch does rather than eating the click: aim at a
+    // wall that is not there and you get the post sign, and only if there is
+    // no ground either does the placement refuse.
+    let signByte = 0;
+    if (IS_SIGN[id]) {
+      signByte = this._signFacing(hit, col, k);
+      if (!this._signSupported(col, k, signByte)) {
+        signByte = this._facingToward(col, k) & 3;
+        if (!this._signSupported(col, k, signByte)) return false;
+      }
+    }
+
     // A cactus will not stand beside anything. Refusing the placement is the
     // half of the rule the player can see coming; the other half — a wall built
     // up against one already in the ground — is in `_applyEdits`, because that
@@ -4155,6 +4192,7 @@ class Game {
     const edit = { col, k, id };
     if (IS_TORCH[id]) edit.facing = torchByte;
     else if (IS_LADDER[id]) edit.facing = this._ladderFacing(hit, col, k);
+    else if (IS_SIGN[id]) edit.facing = signByte;
     else if (IS_DOOR[id]) edit.facing = this._facingToward(col, k) & 3;
     else if (IS_DIRECTIONAL[id]) edit.facing = this._facingToward(col, k);
     else if (IS_AXIS[id]) edit.facing = this._axisFromFace(hit, col, k);
@@ -6280,7 +6318,7 @@ class Game {
       const fr = tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5);
       list.push({
         pos, ea: fr.ea, eb: fr.eb, up: fr.up, arcA: fr.arcA, arcB: fr.arcB,
-        dir: this.planet.facingAt(col, k) & 3, text,
+        dir: this.planet.facingAt(col, k) & 7, text,
       });
     }
     this.signText.sync(list);

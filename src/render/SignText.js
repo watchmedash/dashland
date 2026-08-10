@@ -43,7 +43,15 @@ const LINES = 4;
 const BOARD_W = 0.88 * 0.94;
 const BOARD_H = 0.46 * 0.86;
 const BOARD_MID_K = 0.75;        // centre of the board's height, cell-local
-const SIGN_THICK = 0.13;
+/** A wall board has no post under it, so it sits centred in its own cell. */
+const WALL_MID_K = 0.5;
+/** Bit 2 of a sign's byte hangs it on a wall. Mirrors SIGN_WALL in Blocks.js. */
+const SIGN_WALL = 4;
+/** The wall board is taller than the post board: it spans 0.14..0.86, not 0.52..0.98. */
+const WALL_BOARD_H = 0.72 * 0.86;
+// Matches SIGN_THICK in Blocks.js; it read 0.13 here against the real 0.12,
+// which pushed the writing a hundredth of a cell further out than the plank.
+const SIGN_THICK = 0.12;
 /** How wide a drawn glyph is against its height, for fitting text to a board. */
 const GLYPH_ASPECT = 0.62;
 /** Clear of the board face, or the writing z-fights with the plank. */
@@ -142,7 +150,7 @@ export class SignText {
       // The board's outward normal, and the two axes of the writing on it.
       // `dir` is the facing byte's low bits: 0 +i, 1 -i, 2 +j, 3 -j.
       const ea = s.ea, eb = s.eb, up = s.up;
-      const alongI = s.dir < 2;
+      const alongI = (s.dir & 3) < 2;
       const sgn = (s.dir & 1) ? -1 : 1;
       if (alongI) _n.set(ea[0], ea[1], ea[2]).multiplyScalar(sgn);
       else _n.set(eb[0], eb[1], eb[2]).multiplyScalar(sgn);
@@ -153,11 +161,21 @@ export class SignText {
 
       // Centre of the writing, in world units: out of the cell centre to the
       // board's front face, then up to the middle of the board.
-      const face = 0.5 + sgn * (SIGN_THICK / 2 + LIFT);
+      //
+      // A wall sign is a different board in a different place - flush against
+      // the face behind it and centred in its cell, where a post sign's board
+      // rides high on its post - so the two carry their own front face and
+      // their own mid-height. Reading `face` off the post geometry for both
+      // put a wall sign's writing floating out in the middle of the cell.
+      const wall = !!(s.dir & SIGN_WALL);
+      const face = wall
+        ? (sgn > 0 ? SIGN_THICK + LIFT : 1 - SIGN_THICK - LIFT)
+        : 0.5 + sgn * (SIGN_THICK / 2 + LIFT);
+      const midK = wall ? WALL_MID_K : BOARD_MID_K;
       const outward = (face - 0.5) * (alongI ? s.arcA : s.arcB) * sgn;
       _o.copy(s.pos)
         .addScaledVector(_n, outward)
-        .addScaledVector(_up, BOARD_MID_K - 0.5);
+        .addScaledVector(_up, midK - 0.5);
 
       // Letters are sized to the writing, not to the 12x4 worst case: a sign
       // that says GATE says it in letters four times the height of one
@@ -172,7 +190,8 @@ export class SignText {
       // for its letters and leaves no room for the leading between them. A
       // three-line sign overran the plank by 4% and its top line was cut off
       // against the board's edge.
-      const perH = BOARD_H / (lines.length * 1.16);
+      const boardH = wall ? WALL_BOARD_H : BOARD_H;
+      const perH = boardH / (lines.length * 1.16);
       // A drawn glyph is about 0.62 as wide as it is tall, so width is the
       // binding constraint on a long line and height on a short one. Take
       // whichever runs out first.

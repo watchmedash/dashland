@@ -1349,6 +1349,12 @@ const TINTS = { grass: 1, foliage: 2, foliage_dark: 3, moss: 4 };
 export const DOOR_THICK = 0.13;
 /** And a sign board, which is a plank rather than a slab. */
 export const SIGN_THICK = 0.12;
+/**
+ * The bit in a sign's byte that hangs it on a wall instead of standing it on a
+ * post. Bits 0-1 stay the facing either way, so a sign saved before this
+ * existed reads back as exactly the post sign it was.
+ */
+export const SIGN_WALL = 4;
 
 /** How thick a torch shaft is. */
 export const TORCH_THICK = 0.14;
@@ -1794,6 +1800,18 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     // A board across the top of the cell and a post under it, both thin along
     // the direction you read from.
     const dir = byte & 3, t = SIGN_THICK, m = 0.5 - t / 2;
+    // Bit 2 hangs the board flat on the wall behind it instead: no post, and
+    // the board sits against the face it is nailed to rather than in the
+    // middle of the cell. Same low bits, so an old sign — every one of which
+    // has this bit clear — is still a post sign and nothing in a save moves.
+    if (byte & SIGN_WALL) {
+      // The wall is on the far side from the writing, so the board hugs the
+      // low edge when the writing faces +, and the high edge when it faces -.
+      const lo = (dir & 1) ? 1 - t : 0, hi = (dir & 1) ? 1 : t;
+      if (dir < 2) out.push([lo, 0.06, 0.14, hi, 0.94, 0.86]);
+      else out.push([0.06, lo, 0.14, 0.94, hi, 0.86]);
+      return out;
+    }
     if (dir < 2) {
       out.push([m, 0.06, 0.52, m + t, 0.94, 0.98]);   // board
       out.push([m, 0.42, 0, m + t, 0.58, 0.55]);      // post

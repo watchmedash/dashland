@@ -802,6 +802,24 @@ export class Sky {
     // a midnight husk lands on the same screen value as the stone and grass
     // around it. Below 0.17 it is a silhouette with nothing in it; above, it
     // starts glowing again, which is the bug this constant was born to fix.
+    // The `shelter` term stays, and that is a decision rather than an oversight
+    // now that every mob carries its own sky exposure (see `SKY_PROBE_PERIOD` in
+    // Mobs.js). The obvious tidy-up is to delete it, on the grounds that a body
+    // dimmed by its own roof and by the player's is dimmed twice - but this
+    // light is not only on mobs. Drops and debris have no probe of their own, so
+    // this term is the only thing that darkens a dropped pickaxe in a cave, and
+    // removing it would trade a mob fault for an item one.
+    //
+    // What it costs, stated: outdoors nothing at all, because at shelter 1 the
+    // multiplier is exactly 1.0, so the night floor solved above is untouched
+    // and this is the case the player is in almost all of the time. Indoors, an
+    // animal under its own roof while the player is under theirs is darker than
+    // either fact alone would make it, and an animal in open sunlight while the
+    // player stands in a cave is dimmer than it should be. Both are pre-existing
+    // and both are the rarer arrangement.
+    //
+    // The honest fix is to give drops the same per-body probe and then delete
+    // this term, not to delete it now.
     this.entityFill.intensity =
       (0.07 + 0.10 * n2 + p.sunIntensity * 0.93) * (0.25 + 0.75 * shelter);
   }

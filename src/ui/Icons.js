@@ -165,6 +165,37 @@ const HALO = [
 ];
 
 /**
+ * The same icon, dressed for the fishing bar: a pale rim instead of a dark one,
+ * and the model's own colours lifted.
+ *
+ * The bar wanted the species that is actually on the line rather than a CSS
+ * lozenge, and the obvious answer — hand it the inventory icon — was measured
+ * and does not work. The icon is built for parchment: a soft rig, and a dark
+ * outline whose whole job is to hold a pale object against a pale panel. The
+ * bar's groove is dark timber, so both of those are backwards there, and a
+ * clownfish rendered into it at 38px is a brown smudge. Rendered again at 30,
+ * 38, 44, 52 and 60px it stays a smudge, so it is the values and not the size.
+ *
+ * So this is the same render with the two things that are about the panel
+ * reversed, and nothing else: a parchment rim, and the colours pushed up.
+ * ~1.75x plus a tenth of white, which is `lighter` at 0.75 followed by a
+ * `source-atop` wash — enough that an orange fish reads orange on timber and a
+ * blue one reads blue, which is the whole ask. It is emphatically not new art:
+ * change the model and this changes with it.
+ *
+ * A flat silhouette was tried first and rejected on the same evidence. A
+ * clownfish, a tang and a puffer are all deep-bodied ovals in outline; without
+ * colour the fifteen come out as one cloud shape, which is the generic lozenge
+ * again with extra steps.
+ */
+const MARK_RIM = 'rgba(255, 246, 224, .92)';
+/** Wider than `HALO`: it is a rim rather than an edge, and it is all the contrast there is. */
+const MARK_HALO = [
+  [-3, 0], [3, 0], [0, -3], [0, 3],
+  [-2, -2], [2, -2], [-2, 2], [2, 2],
+];
+
+/**
  * Paints one item model into an icon-sized data URL.
  *
  * Uses the game's own renderer — a second WebGL context would mean a second
@@ -224,9 +255,13 @@ class ModelIconPainter {
 
   /**
    * @param {THREE.Mesh} mesh already rotated into its icon pose
+   * @param {boolean} [mark] dress it for the fishing bar instead of the
+   *   inventory — see `MARK_RIM`. One flag rather than a second class, because
+   *   everything above the last few composites is identical and duplicating it
+   *   would be duplicating the framing, the lights and the readback.
    * @returns {string} data URL
    */
-  paint(mesh) {
+  paint(mesh, mark = false) {
     const r = this.renderer;
     const N = ICON * SS;
 
@@ -293,7 +328,7 @@ class ModelIconPainter {
     // keeps the destination's alpha and takes the source's colour, so this is
     // the model's exact silhouette in the outline colour.
     hg.globalCompositeOperation = 'source-in';
-    hg.fillStyle = 'rgba(18,14,12,.62)';
+    hg.fillStyle = mark ? MARK_RIM : 'rgba(18,14,12,.62)';
     hg.fillRect(0, 0, ICON, ICON);
     hg.globalCompositeOperation = 'source-over';
 
@@ -301,8 +336,21 @@ class ModelIconPainter {
     o.clearRect(0, 0, ICON, ICON);
     o.imageSmoothingEnabled = true;
     o.imageSmoothingQuality = 'high';
-    for (const [dx, dy] of HALO) o.drawImage(this.halo, dx, dy);
+    for (const [dx, dy] of (mark ? MARK_HALO : HALO)) o.drawImage(this.halo, dx, dy);
     o.drawImage(this.big, 0, 0, ICON, ICON);
+    if (mark) {
+      // The lift. `lighter` adds, so a second draw at 0.75 is x1.75, and the
+      // wash is the +26 that keeps the darkest facets off black. `source-atop`
+      // so it lands on the model and not on the rim it is sitting inside.
+      o.globalCompositeOperation = 'lighter';
+      o.globalAlpha = 0.75;
+      o.drawImage(this.big, 0, 0, ICON, ICON);
+      o.globalAlpha = 1;
+      o.globalCompositeOperation = 'source-atop';
+      o.fillStyle = 'rgba(255,255,255,.10)';
+      o.fillRect(0, 0, ICON, ICON);
+      o.globalCompositeOperation = 'source-over';
+    }
     return this.out.toDataURL();
   }
 
@@ -330,7 +378,10 @@ export class IconFactory {
     this.painter = null;
     this.onUpdate = null;
     this.modelIcons = new Map();   // item id -> data URL painted from the model
+    /** The same, dressed for the fishing bar. See `mark`. */
+    this.markIcons = new Map();
     this.asked = new Set();        // item ids already handed to the painter
+    this.askedMarks = new Set();
     this._queued = false;
   }
 
@@ -531,6 +582,42 @@ export class IconFactory {
     (ART[def.art] || ART.lump)(g, def);
     const url = c.toDataURL();
     this.cache.set(key, url);
+    return url;
+  }
+
+  /**
+   * The item's model painted for a dark panel: parchment rim, colours lifted.
+   *
+   * One caller — the fishing bar, which shows the species on the line. Null
+   * while the model loads or when there is no model at all, and the caller is
+   * expected to keep asking or to fall back to `item`; nothing here is worth a
+   * missing bar.
+   *
+   * Cached separately from `item`'s, and painted separately: it is a second
+   * render of the same mesh, once per species you have ever hooked. See
+   * `MARK_RIM` for why it is not simply `item(id)` on a dark background.
+   */
+  mark(id) {
+    const have = this.markIcons.get(id);
+    if (have) return have;
+    if (!this.painter || !hasModel(id)) return null;
+    if (this.askedMarks.has(id)) return null;
+    this.askedMarks.add(id);
+    const mesh = iconModel(id, (m) => this._paintMark(id, m));
+    return mesh ? this._paintMark(id, mesh) : null;
+  }
+
+  _paintMark(id, mesh) {
+    if (this.markIcons.has(id)) return this.markIcons.get(id);
+    let url = null;
+    try {
+      url = this.painter.paint(mesh, true);
+    } catch (err) {
+      console.warn('[Icons] bar mark failed', err);
+      return null;
+    }
+    this.markIcons.set(id, url);
+    this._notify();
     return url;
   }
 

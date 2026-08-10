@@ -5,7 +5,7 @@ import { Planet } from './world/Planet.js';
 import {
   Player, VIEW_FIRST, VIEW_COUNT, stepZoom, lookScaleFor,
 } from './player/Player.js';
-import { ViewModel } from './player/ViewModel.js';
+import { ViewModel, CAST_RELEASE } from './player/ViewModel.js';
 import {
   PlayerCharacter, playerModelUrls, characterUrl, DEFAULT_CHARACTER,
 } from './player/Character.js';
@@ -19,6 +19,7 @@ import {
   occupancyTexture, occupancyData, OCC_NI, OCC_NJ, OCC_NK, OCC_ANG,
 } from './render/VoxelMaterial.js';
 import { loadTileAtlas } from './render/TileAtlas.js';
+import { bobberGeometry } from './render/ItemModels.js';
 import { Audio } from './audio/Audio.js';
 import { UI } from './ui/UI.js';
 // The loadout table, read through the namespace rather than as a named import
@@ -101,6 +102,8 @@ const _burnUp = new THREE.Vector3();
 const _castP = new THREE.Vector3();
 const _castV = new THREE.Vector3();
 const _castU = new THREE.Vector3();
+/** Model up for the float, which is a constant and never anything else. */
+const _bobY = new THREE.Vector3(0, 1, 0);
 
 /** Three rows of nine, so a crate is worth the eight planks it costs. */
 const CRATE_SLOTS = 27;
@@ -970,6 +973,8 @@ class Game {
     /** The cast currently in the water, or null. */
     this.fishing = null;
     this.bobber = null;
+    /** Whether the float has been swapped for the rod model's own. See `_showBobber`. */
+    this.bobberModelled = false;
     /** Sign text, keyed like the kilns and crates. */
     this.signs = new Map();
     /**
@@ -7294,7 +7299,9 @@ class Game {
         // reading; a cast is up for the best part of a minute and belongs with
         // the clock and the bearing, at a size you can see without looking for
         // it. One word, and it stays one word.
-        this.ui.fishWait(!this.fishing.fight);
+        // Not while the float is still in the air: "Waiting" over a throw that
+        // has not landed is the plate answering a question nobody asked yet.
+        this.ui.fishWait(!this.fishing.fight && !this.fishing.cast);
         return;
       }
     } else if (this.fishing) {
@@ -7410,11 +7417,22 @@ class Game {
    * lake is the cell above its bed, and asking "solid?" first at a grazing
    * entry angle would call a shallow shelf a bank.
    *
+   * **`path` is what the player watches.** The march has always known the whole
+   * flight — the shape and the clock both — and used to throw all of it away and
+   * return one cell, which is why the float appeared on the water on the frame
+   * of the click. Handed an array, it writes the flight into it as flat
+   * `x, y, z, t` quadruples, and `_tickFishing` flies the float along them. The
+   * curve you see is then the curve that was integrated, not a second one drawn
+   * to look like it, and there is no way for the two to disagree about where it
+   * lands.
+   *
    * @param {THREE.Vector3} from where the weight leaves the rod
    * @param {THREE.Vector3} dir unit aim direction
+   * @param {number[]} [path] filled with x, y, z, t per step when given
    * @returns {{col:number, k:number}|null} the water cell it entered, or null
    */
-  _castArc(from, dir) {
+  _castArc(from, dir, path) {
+    if (path) path.length = 0;
     const p = _castP.copy(from);
     const v = _castV.copy(dir).normalize().multiplyScalar(FISH_CAST_SPEED);
     const g = GRAVITY * FISH_CAST_G;
@@ -7431,6 +7449,7 @@ class Game {
       p.addScaledVector(v, dt);
       _castU.copy(p).normalize();
       v.addScaledVector(_castU, -g * dt);
+      if (path) path.push(p.x, p.y, p.z, t);
 
       if (p.distanceTo(from) > FISH_CAST_RANGE) return null;
       const cell = this.planet.cellAt(p.x, p.y, p.z);
@@ -7474,7 +7493,8 @@ class Game {
       // arc has run, to measure how far the throw went.
       const tip = this.player.eye.clone()
         .addScaledVector(this.player.lookDir, 0.5);
-      const wet = this._castArc(tip, this.player.lookDir);
+      const path = [];
+      const wet = this._castArc(tip, this.player.lookDir, path);
       if (!wet) {
         this.ui.setHint('Cast at open water');
         return;
@@ -7518,19 +7538,31 @@ class Game {
         from: this.player.position.clone(),
         wait: FISH_WAIT_MIN + Math.random() * (FISH_WAIT_MAX - FISH_WAIT_MIN),
         bob: 0,
+        // The hand with the rod in it, found the same way `_landCatch` finds it
+        // for the wear — cast left-handed and the left arm casts. Kept on the
+        // cast because the lean is turned on at the release and not here.
+        hand: this._handOf(this.inventory.actingSlot(
+          (s) => ITEMS[s.item]?.tool?.kind === 'rod')),
+        // The throw, in flight. `t` starts negative: that is the arm's wind-up,
+        // over which nothing is on screen but the rod, and it is `CAST_RELEASE`
+        // long — the moment `SWINGS.rod` finishes its flick. From zero the float
+        // is out and flying the arc that was integrated above, and at `dur` it
+        // touches the water and the wait begins.
+        //
+        // The path's last point is the cell the march entered; the float belongs
+        // on `c`, which is that column climbed to the surface. Overwriting the
+        // last quadruple rather than appending one keeps the flight's clock
+        // honest — the correction is under a cell and the arc already spent the
+        // time getting there.
+        cast: {
+          path, t: -CAST_RELEASE, dur: path[path.length - 1] ?? 0, out: false,
+        },
       };
-      this._showBobber(c);
-      this.audio.splash(c);
+      path[path.length - 4] = c.x;
+      path[path.length - 3] = c.y;
+      path[path.length - 2] = c.z;
       this.player.swing();
-      // The hand with the rod in it, found the same way `_landCatch` finds it
-      // for the wear — cast left-handed and the left arm casts.
-      const hand = this._handOf(this.inventory.actingSlot(
-        (s) => ITEMS[s.item]?.tool?.kind === 'rod'));
-      this.viewModel.punch(hand);
-      // The rod leans out over the water for as long as the line is in it, and
-      // the sight goes away for the same span. Both are "there is a cast out",
-      // said once here and undone once in `_stopFishing`.
-      this.viewModel.setCast(true, hand);
+      this.viewModel.punch(this.fishing.hand);
       this._syncCrosshair();
       return;
     }
@@ -7670,6 +7702,49 @@ class Game {
       on: true,
       wasOn: true,
     };
+    this._showFightFish(c.id);
+  }
+
+  /**
+   * Put the species you actually hooked on the bar.
+   *
+   * The runner in the groove was a CSS lozenge with a triangle for a tail — one
+   * anonymous fish for all fifteen, at the one moment the game knows exactly
+   * which one is on the line. `_rollCatch` has already decided the species by
+   * the time the bar goes up (it has to: the fight's difficulty *is* the
+   * rarity), so the bar can simply be told.
+   *
+   * The picture is the item's **own inventory icon**, painted from its own
+   * model by `Icons.item` — the same image the toolbar will show when it lands,
+   * cached after the first paint and free every time after. Nothing new is
+   * drawn for the bar, which is the point: the thing fighting you and the thing
+   * you win are visibly one object.
+   *
+   * Written as a custom property on the bar rather than through `UI`, and
+   * `document.getElementById` rather than `this.ui.el`: this is the one game
+   * event the HUD has no method for, and inventing a private reach into `UI`'s
+   * element table would be worse than one honest query. It belongs in
+   * `UI.fishFight` as a second argument and should move there.
+   *
+   * Called every frame of the fight and not once at the start, because
+   * `Icons.item` is synchronous over an asynchronous thing: a species whose
+   * model has not been painted yet answers with its drawn sprite and paints the
+   * real one a beat later. Guarded on the URL, so the frames after that are a
+   * map lookup and a string compare.
+   *
+   * @param {number} [id] the item on the line, or nothing to clear it
+   */
+  _showFightFish(id) {
+    const el = document.getElementById('fish-bar');
+    if (!el) return;
+    // `mark` and not `item`: the inventory icon is built for parchment and the
+    // groove is dark timber, so the same picture comes out a smudge there. It
+    // falls back to the plain icon for the moment before the model has been
+    // painted twice, which is one frame of a fight that lasts seconds.
+    const url = id ? (this.ui.icons?.mark(id) || this.ui.icons?.item(id)) : null;
+    if (url === this._fbFishUrl) return;
+    this._fbFishUrl = url;
+    el.style.setProperty('--fb-img', url ? `url("${url}")` : 'none');
   }
 
   /**
@@ -7683,6 +7758,7 @@ class Game {
   _tickFight(dt, f) {
     const g = f.fight;
     const held = !!(this.input.buttons[2] && this.input.locked);
+    this._showFightFish(f.catch?.id);
 
     // --- the shuttle ---
     g.v += (held ? g.pull : -(g.fall ?? FIGHT_GRAV)) * dt;
@@ -7747,6 +7823,11 @@ class Game {
       this._stopFishing();
       return;
     }
+
+    // Still in the air. Nothing about the cast has begun yet: the wait does not
+    // run down, nothing can bite, and the float is somewhere between the rod
+    // and the water rather than on it.
+    if (f.cast && !this._tickCast(f, dt)) return;
 
     if (f.fight) {
       this._tickFight(dt, f);
@@ -7871,21 +7952,152 @@ class Game {
     this._stopFishing();
   }
 
+  /**
+   * The float on the water, which is the float on the rod.
+   *
+   * Reported: *"make the bobber match the one in rod model"*. It was a red
+   * sphere, and the rod in the same fist carries a modelled two-tone bobber —
+   * the part the item's whole silhouette is built around. So the geometry is cut
+   * out of the rod (see `bobberGeometry`) rather than approximated, and the
+   * thing you throw is the thing you were holding.
+   *
+   * The sphere stays as the stand-in, for exactly the frame or two before the
+   * rod's model lands and for good if `public/models/` is missing — the same
+   * bargain every other model in the game makes with its sprite art. When the
+   * real one arrives the mesh is swapped underneath, because a cast in flight
+   * must not blink.
+   *
+   * `MeshBasicMaterial` and not a lit one, as before: this is a marker as much
+   * as an object, it is often thirty cells away over water that is already
+   * bright, and the pale-over-red banding is the read. Lighting it would make it
+   * a dark speck at dusk, which is when people fish.
+   */
   _showBobber(pos) {
     if (!this.bobber) {
-      const geo = new THREE.SphereGeometry(0.09, 10, 8);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xd94f3d });
-      this.bobber = new THREE.Mesh(geo, mat);
+      this.bobber = new THREE.Mesh(
+        new THREE.SphereGeometry(0.09, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xd94f3d }));
       this.bobber.renderOrder = 6;
       this.scene.add(this.bobber);
     }
+    // Asked once and not once a frame: this runs every frame of every flight,
+    // and an unresolved model would otherwise hang a fresh `.then` off the same
+    // load ten times a second for as long as the line is out.
+    if (!this.bobberModelled && !this._bobberAsked) {
+      this._bobberAsked = true;
+      const take = (geo) => {
+        // Once. `worldModel` either answers now or calls back later and never
+        // both, but the geometry being disposed here is the shared one — a
+        // second pass through would throw the float away for good.
+        if (this.bobberModelled) return;
+        this.bobberModelled = true;
+        this.bobber.geometry.dispose();
+        this.bobber.geometry = geo;
+        this.bobber.material = new THREE.MeshBasicMaterial({ vertexColors: true });
+        // `bobberGeometry` normalises the float to one unit on its longest axis,
+        // so this is the float's size in cells and the only place it is stated.
+        // 0.22 against the sphere's 0.18 diameter: the banding needs the extra
+        // to read at all, and it is still under a quarter of a block.
+        this.bobber.scale.setScalar(0.22);
+      };
+      const geo = bobberGeometry(itemIdOf('fishing_rod'), take);
+      if (geo) take(geo);
+    }
+    // Stand it up. The extracted float is authored pale over red about a
+    // waterline, which is the whole of why it reads as a bobber and not as a
+    // berry — and it only reads that way if its own +Y is the local up. Left
+    // unrotated it inherits the world axes, and on a planet that is a different
+    // direction at every lake: the first frame of this showed the waterline
+    // running corner to corner.
+    this.bobber.quaternion.setFromUnitVectors(_bobY, this.player.up);
     _v1.copy(pos).addScaledVector(this.player.up, BOBBER_FLOAT);
     this.bobber.position.copy(_v1);
     this.bobber.visible = true;
   }
 
+  /**
+   * One frame of the throw, from the click to the splash.
+   *
+   * The owner's report was that the cast was *"just straight throw and sudden
+   * cast"*, and it was two separate faults wearing one sentence. The arm did not
+   * move (`SWINGS.rod` is the other half of the fix) and the float did not
+   * travel: `_castArc` integrated the whole flight and returned only the cell it
+   * ended in, so the marker appeared on the water on the frame of the click,
+   * thirty cells away, having crossed the gap in no time at all.
+   *
+   * So the arc is flown. `f.cast.path` is that same integration written down —
+   * the shape and its clock — and the float is read out of it by time, which
+   * means what you watch is by construction the curve that decided where the
+   * line went in. Interpolated between marched steps rather than snapped to
+   * them: the march is by length (`FISH_CAST_STEP`), so its steps are 20ms apart
+   * at the top of a lob and 5ms apart near the water, and snapping would stutter
+   * exactly where the arc is prettiest.
+   *
+   * Three phases, and the negative clock is the first of them:
+   *
+   *   t < 0        the wind-up. `CAST_RELEASE` long, nothing on screen but the
+   *                rod coming back. No float, no line — the line especially,
+   *                because a string running to a bobber that has not left yet is
+   *                the teleport this exists to remove.
+   *   0 <= t < dur in the air. The lean goes on at t = 0, so the rod settles into
+   *                holding a line at the moment there is one to hold.
+   *   t >= dur     the water. Splash, sound, `cast` deleted, and the wait starts
+   *                from here rather than from the click — the flight is not part
+   *                of the four-to-thirteen seconds you are being asked to wait.
+   *
+   * @returns {boolean} true once the float is on the water and the rest of the
+   *   cast may run
+   */
+  _tickCast(f, dt) {
+    const c = f.cast;
+    const was = c.t;
+    c.t += dt;
+    if (c.t < 0) {
+      // Between the click and the flick. `_stopFishing` is what normally hides
+      // these, and it has not run: this is a cast that exists but has not left.
+      if (this.bobber) this.bobber.visible = false;
+      if (this.fishLine) this.fishLine.visible = false;
+      return false;
+    }
+    if (was < 0) {
+      // The rod leans out over the water for as long as the line is in it, and
+      // the sight goes away for the same span. Both are "there is a cast out",
+      // said once here and undone once in `_stopFishing`.
+      this.viewModel.setCast(true, f.hand);
+      this._syncCrosshair();
+    }
+    if (c.t < c.dur) {
+      const p = c.path;
+      // Walk forward from where the last frame left off. The path is monotone in
+      // time and this runs every frame of a flight, so the scan is a step or two
+      // rather than a search.
+      let i = c.i ?? 0;
+      while (i + 7 < p.length && p[i + 7] < c.t) i += 4;
+      c.i = i;
+      const t0 = p[i + 3], t1 = p[i + 7];
+      const u = t1 > t0 ? Math.min(1, Math.max(0, (c.t - t0) / (t1 - t0))) : 0;
+      _v1.set(
+        p[i] + (p[i + 4] - p[i]) * u,
+        p[i + 1] + (p[i + 5] - p[i + 1]) * u,
+        p[i + 2] + (p[i + 6] - p[i + 2]) * u,
+      );
+      this._showBobber(_v1);
+      // `_showBobber` floats it half a cell up, which is right for something
+      // resting on water and wrong for something in the air.
+      this.bobber.position.copy(_v1);
+      this._updateFishLine(_v1);
+      return false;
+    }
+    f.cast = null;
+    this._showBobber(f.pos);
+    this.audio.splash(f.pos);
+    this.particles.splash(f.pos, this.player.up, 0.35);
+    return true;
+  }
+
   _stopFishing() {
     this.fishing = null;
+    this._showFightFish(null);
     if (this.bobber) this.bobber.visible = false;
     if (this.fishLine) this.fishLine.visible = false;
     this.ui.fishFight(null);

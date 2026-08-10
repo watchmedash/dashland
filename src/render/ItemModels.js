@@ -226,23 +226,50 @@ function food(file, height, flat = false, extra = {}) {
  *  - `grip` at 0.16 is a sixth of the way up from the tail fin, in the meat of
  *    the wrist of the tail. It carries to the third-person body, unlike `pos`.
  *  - `rot` is **solved, not dialled**, on the three metrics `HAND_TILT` is
- *    stated in — the same three the shipped `fish` pose above was re-solved on.
- *    The target is that pose itself, measured through the same chain rather
- *    than read off its comment: long axis 64.8 degrees on screen (its note says
- *    25, which is the same line measured off the other axis), 0 out of the
- *    screen plane, flank dead face-on. Solved: **64.8 / 0.0 / 0.0**, head up.
+ *    stated in, through the real chain: flank dead face-on, nothing of the
+ *    length pointing into the screen, and a chosen screen angle for that
+ *    length. Solved: **36.0 degrees on screen / 0.000 out of plane / 1.000
+ *    face-on**, back up.
  *
  *    Both of the last two matter here more than they do for a pickaxe. A fish
  *    seen along its length is a diamond with two eyes on it, and the whole point
  *    of fifteen species is that a clownfish and a koi are different objects at
- *    toolbar size — which they only are in profile. The first attempt was
- *    dialled by hand and got exactly that wrong: it stood the fish up nose-on to
+ *    toolbar size — which they only are in profile. The very first attempt was
+ *    dialled by hand and got that wrong outright: it stood the fish nose-on to
  *    the camera and filled a fifth of the frame with an eyeball.
+ *
+ *    **36 degrees and not 64.8, which is what this said before and is the one
+ *    number that was still wrong.** The profile was already exact — re-measured
+ *    with the arm allowed to settle it reads 1.000 face-on and 0.000
+ *    foreshortened, so that half of the note was true — but the fish was stood
+ *    up on its tail at nearer vertical than horizontal, and a vertical fish is a
+ *    lump with an eye whatever else is right about it. Measured on the shipped
+ *    pose, a clownfish drew 196px wide by 238px tall in a 1280x720 frame:
+ *    portrait, in a frame that is not. At 36 it draws 252 x 198 — landscape,
+ *    which is the shape the animal is. It is the same reasoning `icon` below
+ *    already used and the hand did not, and the hand needs it *more*, because
+ *    16:9 is further from square than an icon slot is.
+ *
+ *    Size was measured at the same time and deliberately **not** changed. The
+ *    silhouette a held fish paints is 1.5% to 3.6% of the frame across the
+ *    fifteen; the food family it belongs to runs 1.2% (cooked poultry) to 9.5%
+ *    (roast), with bread at 4.1% and an apple at 5.0%. The fish are already at
+ *    the small end of their own family, and rotating in the screen plane cannot
+ *    change a silhouette's area anyway — so `height` stands where it was.
+ *
+ *  - `pos` is solved *after* `rot` and only exists because of it. Turning a
+ *    model about its grip swings its bulk somewhere else: at 36 degrees the body
+ *    ran off the bottom-right corner, which cost half the silhouette to the
+ *    frame edge (3.1% -> 1.5%) and clipped every species. Three Newton steps on
+ *    a measured Jacobian put the centre back at (0.79, 0.80) of the frame, where
+ *    bread (0.79, 0.83) and the food kit's own fillet (0.79, 0.84) sit. After
+ *    it, **no species clips any edge**.
  *
  * `icon` is solved the same way against its own framing, which has no
  * `HAND_TILT` in it: 40 degrees across the slot, face-on, no foreshortening. A
  * fish is half again as long as it is deep, so a diagonal is what lets it be
- * drawn largest in a square.
+ * drawn largest in a square. Untouched here, and now doing the same job as the
+ * hand rather than the opposite one.
  *
  * No `fitMax`: after the spin the length *is* the height, so the shared
  * normalisation already fits the axis that matters.
@@ -252,8 +279,8 @@ function fish(file, height, extra = {}) {
     file: `fish/fish-${file}`, pack: 'fish', height,
     spin: [-Math.PI / 2, 0, 0],
     grip: 0.16,
-    rot: [-0.972, -2.135, -0.650],
-    pos: [0.007, 0.044, -0.020],
+    rot: [1.5708, 0.6283, -1.5708],
+    pos: [-0.1367, 0.1433, -0.0312],
     icon: [1.571, 0.698, -1.571],
     ...extra,
   };
@@ -2236,6 +2263,107 @@ export function tipPoint(itemId, out) {
     tipCache.set(spec.key, p);
   }
   return out.set(p[0], p[1], p[2]);
+}
+
+/**
+ * The two colours the rod's float is made of, as they sit in the model's
+ * `COLOR_0` attribute.
+ *
+ * The WAM exporter writes vertex colour as normalised unsigned bytes in the
+ * *linear* working space, which is what glTF specifies and what three.js reads
+ * back through `getX`. So these are not the hex codes in `fishing_rod.wam` —
+ * they are those codes decoded. Measured off the shipped buffer:
+ *
+ *     Float #f2ece0  ->  (226, 214, 190) / 255
+ *     Red   #cf3b2c  ->  (159,  11,   6) / 255
+ *
+ * Every other vertex in the model wears one of the five remaining palette
+ * entries (Grip, Pole, Dark, Metal, Cord), so these two identify the float
+ * exactly, with no per-triangle authoring and nothing to keep in sync. If the
+ * `.wam` palette changes, this list is what fails — loudly, by handing back a
+ * geometry with no triangles in it, which the caller reports.
+ */
+const BOBBER_COLORS = [
+  [226 / 255, 214 / 255, 190 / 255],
+  [159 / 255, 11 / 255, 6 / 255],
+];
+/** Colour match tolerance. An eighth of a byte step; the palette entries are far apart. */
+const BOBBER_TOL = 0.02;
+
+let bobberBase = null;   // the extracted geometry, built once
+
+/**
+ * The float on the water, cut out of the rod that threw it.
+ *
+ * The report was *"make the bobber match the one in rod model"*, and the rod
+ * genuinely carries one: `art/wam/items/fishing_rod.wam` builds a two-tone
+ * loft called `bobber` hanging off the tip, and it is the thing that stops the
+ * item icon reading as a stick. What was on the water was a plain red sphere,
+ * so the rod in your fist and the float thirty cells away were two different
+ * objects.
+ *
+ * There is no separate node to take: the pack compiles one mesh, one material
+ * and one merged primitive, and `loadGeometry` merges further still. What
+ * survives the merge is the vertex colour, so the float is identified by its
+ * two palette entries (see `BOBBER_COLORS`) and the triangles wearing them are
+ * copied into a geometry of their own. One triangle's first corner decides it:
+ * WAM splits vertices at every material band, so a triangle is never half one
+ * colour and half another.
+ *
+ * The result is recentred and normalised to one unit on its longest axis, so
+ * the caller scales it to whatever a float should be in cells rather than
+ * inheriting the rod's proportions. Model +Y stays up: the loft is authored
+ * pale above the waterline and red below, which is the way round it has to be
+ * placed on the water.
+ *
+ * @param {number} rodItemId the fishing rod
+ * @param {(geo: THREE.BufferGeometry) => void} [onReady]
+ * @returns {THREE.BufferGeometry|null} null while the rod is still loading
+ */
+export function bobberGeometry(rodItemId, onReady) {
+  if (bobberBase) return bobberBase;
+  const cut = (mesh) => {
+    if (bobberBase) return bobberBase;
+    const src = mesh.geometry;
+    const pos = src.getAttribute('position');
+    const col = src.getAttribute('color');
+    const nrm = src.getAttribute('normal');
+    if (!col) { console.warn('[ItemModels] rod has no vertex colour; float stays generic'); return null; }
+    const idx = src.getIndex();
+    const n = idx ? idx.count : pos.count;
+    const at = (i) => (idx ? idx.getX(i) : i);
+    const isFloat = (v) => BOBBER_COLORS.some(([r, g, b]) =>
+      Math.abs(col.getX(v) - r) < BOBBER_TOL
+      && Math.abs(col.getY(v) - g) < BOBBER_TOL
+      && Math.abs(col.getZ(v) - b) < BOBBER_TOL);
+    const P = [], C = [], N = [];
+    for (let t = 0; t < n; t += 3) {
+      if (!isFloat(at(t))) continue;
+      for (let k = 0; k < 3; k++) {
+        const v = at(t + k);
+        P.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+        C.push(col.getX(v), col.getY(v), col.getZ(v));
+        if (nrm) N.push(nrm.getX(v), nrm.getY(v), nrm.getZ(v));
+      }
+    }
+    if (!P.length) { console.warn('[ItemModels] no float found on the rod model'); return null; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+    if (N.length) geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const c = bb.getCenter(new THREE.Vector3());
+    geo.translate(-c.x, -c.y, -c.z);
+    const span = Math.max(bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z);
+    geo.scale(1 / span, 1 / span, 1 / span);
+    bobberBase = geo;
+    return geo;
+  };
+  // The *world* template, not the held one: the held pose bakes in a carrying
+  // rotation and a hand-flattering scale, and a float on a lake wants neither.
+  const mesh = worldModel(rodItemId, onReady ? (m) => { const g = cut(m); if (g) onReady(g); } : null);
+  return mesh ? cut(mesh) : null;
 }
 
 /** True when this item has (or is expected to have) a 3D model at all. */

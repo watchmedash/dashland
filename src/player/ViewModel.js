@@ -557,6 +557,12 @@ const DRAW_FALL = 12;
  * cast's own swing rather than fighting any of them. It is mirrored onto the
  * offhand by the same rule everything else is: the sideways offset and the two
  * rotations that lean the limb inward change sign, and the rest does not.
+ *
+ * **This is the hold, not the throw.** The throw is `SWINGS.rod`, a track like
+ * every other tool's, and the two are layered rather than sequenced: the flick
+ * plays out of the swing clock while this eases in underneath it at
+ * `CAST_RATE`. `main.js` turns it on at the release rather than at the click,
+ * so the lean arrives as the line does.
  */
 const CAST = {
   p: [-0.02, -0.07, 0.06],
@@ -565,6 +571,20 @@ const CAST = {
 
 /** How fast the rod leans out and comes back, in units per second. */
 const CAST_RATE = 6;
+
+/**
+ * Where in the rod's swing the float leaves the tip.
+ *
+ * A fraction of the normalised swing clock, and it is the *end of the flick* —
+ * key 3 of `SWINGS.rod` — because that is the frame the tip is travelling
+ * fastest and pointing where the throw is going. Released at the click instead,
+ * as it used to be, the float was already in the air before the arm had begun
+ * to move and the animation was decoration bolted onto a teleport.
+ *
+ * Stated here and turned into seconds by `CAST_RELEASE`, so `main.js` never
+ * hard-codes a delay that a re-timed track would silently invalidate.
+ */
+const CAST_RELEASE_KEY = 0.56;
 
 // --- swing animations -------------------------------------------------------
 // Every tool used to play the same forward-and-down jab, so a pickaxe, a sword
@@ -651,6 +671,39 @@ const SWINGS = {
       { t: 1.00, p: [0, 0, 0], r: [0, 0, 0], e: 'linear' },
     ],
   },
+  // The cast. Reported: *"add animation when throwing cast ... instead of just
+  // straight throw and sudden cast"* — the rod went from the idle carry to the
+  // lean below with nothing in between, and the float was in the water on the
+  // same frame as the click.
+  //
+  // A wind-up and a flick, and it is the only track here whose *timing* is
+  // load-bearing rather than only its shape: `CAST_RELEASE_KEY` names the key
+  // the float leaves at, and `main.js` holds the throw back until then. So the
+  // three keys after t=0 are read as a sentence — take the tip back over the
+  // shoulder, whip it forward and down, ride out the follow-through — and the
+  // float leaves on the second of them.
+  //
+  // `rate` 2.9 makes the whole clock 345ms and the release land at 193ms. That
+  // is deliberately at the fast end of this table: a cast is a flick of the
+  // wrist, and anything slower reads as a bowler's run-up. The wind-up gets
+  // 117ms of it, which is enough to see the direction reverse and not enough to
+  // wait for.
+  //
+  // Amplitudes are the pickaxe's, not the sword's: the wind-up is +0.52 rad of
+  // pitch against the pick's +0.46, and the flick -0.46 against its -0.44. The
+  // rod is long and light and the same shoulder angle throws its tip further
+  // than a pick head, which is what pays for the extra motion being legible
+  // without the arm leaving the frame.
+  rod: {
+    rate: 2.9,
+    keys: [
+      { t: 0.00, p: [0, 0, 0], r: [0, 0, 0], e: 'out' },
+      { t: 0.34, p: [0.03, 0.09, 0.13], r: [0.52, 0.10, -0.12], e: 'in3' },   // wind up
+      { t: 0.56, p: [-0.02, -0.06, -0.20], r: [-0.46, -0.08, 0.14], e: 'out3' }, // flick — the float goes
+      { t: 0.72, p: [-0.01, -0.02, -0.10], r: [-0.22, -0.04, 0.06], e: 'out3' }, // follow through
+      { t: 1.00, p: [0, 0, 0], r: [0, 0, 0], e: 'linear' },
+    ],
+  },
   // Blocks, torches, food, bare hands: the old short jab, which is still the
   // right motion for placing and for a plain punch.
   default: {
@@ -662,6 +715,15 @@ const SWINGS = {
     ],
   },
 };
+
+/**
+ * Seconds from the click to the float leaving the rod's tip.
+ *
+ * Derived from the track rather than restated beside it, so that re-timing the
+ * cast moves the throw with it and the two can never disagree. Currently
+ * 0.56 / 2.9 = **193ms**.
+ */
+export const CAST_RELEASE = CAST_RELEASE_KEY / SWINGS.rod.rate;
 
 /**
  * Sample a swing track at clock position s (0..1) into `outP` / `outR`.

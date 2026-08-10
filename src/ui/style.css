@@ -1641,28 +1641,35 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    14px lozenge was a smudge, and the silhouette is what the eye tracks. Small
    enough against the shuttle that the shuttle is plainly a window it sits
    inside rather than a second bar. */
+/* The fish. The species actually on the line, painted from its own model:
+   `main.js` writes `--fb-img` when the bar goes up and clears it when the cast
+   ends. It was an ink lozenge with a border-triangle tail - one anonymous fish
+   for all fifteen, at the one moment the game knows exactly which one is
+   pulling.
+
+   The picture is `Icons.mark`, not `Icons.item`. The inventory icon is built
+   for parchment - soft rig, dark outline - and both of those are backwards in a
+   dark groove; measured at 30, 38, 44, 52 and 60px it stays a brown smudge at
+   every size. `mark` is the same render with a parchment rim and the colours
+   lifted, so it holds against the timber and against the pale shuttle alike.
+
+   No `filter` and no `box-shadow`, for the reason the old tail had none: this
+   element is moved by `left` sixty times a second, and a shadow on something
+   that moves is a re-filter on the compositor every frame. The rim is baked
+   into the image and costs nothing.
+
+   42px in a 46px groove. The icon is drawn at 74% fill inside its own square,
+   so the fish itself lands near 31px across the diagonal - the size the old
+   lozenge was, with a species in it. */
 .fb-fish {
-  position: absolute; top: 11px; height: 24px; width: 30px;
+  position: absolute; top: 2px; height: 42px; width: 42px;
   left: calc(var(--fb-fish, .5) * 100%);
-  margin-left: -15px;
-  border-radius: 13px 5px 5px 13px;
-  background: linear-gradient(180deg, #5a4526, #14100a);
-  box-shadow:
-    0 0 0 1px rgba(255, 245, 220, .5),
-    0 2px 4px rgba(0, 0, 0, .7);
+  margin-left: -21px;
+  background: var(--fb-img, none) center / contain no-repeat;
+  border-radius: 0;
+  box-shadow: none;
 }
-/* The tail. A triangle and no `filter` on it, deliberately: this element is
-   moved by `left` every frame, and a drop-shadow on something that moves is a
-   re-filter on the compositor sixty times a second — rule (b) at the top of
-   this file. The pale rim the rest of the fish gets from a box-shadow is not
-   available on a border triangle, so it goes without one; at 30px against a
-   dark groove the silhouette carries itself. */
-.fb-fish::after {
-  content: ''; position: absolute; right: -9px; top: 5px;
-  width: 0; height: 0;
-  border: 7px solid transparent;
-  border-left: 10px solid #1b140c;
-}
+.fb-fish::after { content: none; }
 
 /* How tired it is, and the only brass on the screen while this is up. A second
    groove in the same carcass, at a third of the track's height so it is a

@@ -3941,6 +3941,36 @@ class Game {
     // one every player already has in their hands.
     const replacing = IS_REPLACEABLE[hit.id] === 1;
     if (!replacing && hit.prevCol < 0) return false;
+    // Two slabs of one stone make the stone. "Slabs can't be placed above each
+    // other to form a plank like in minecraft - placing one above another just
+    // leaves a wide slab height space between them": the second slab went into
+    // the next cell up, because that is where the ray was before it hit, so you
+    // got two half blocks with a half block of air between them and no way to
+    // make a solid course out of a stack of slabs.
+    //
+    // A slab is named `slab_<base>` where the base is its own full block, so
+    // the merge needs no table: it is the aimed cell, the same material, and
+    // the half you clicked being the empty one. Only then, and the cell becomes
+    // the full block rather than a second slab going somewhere else.
+    if (IS_SLAB[id] && !replacing) {
+      const there = this.planet.at(hit.col, hit.k);
+      if (IS_SLAB[there] && there === id) {
+        const full = ID[BLOCKS[id].name.slice(5)];
+        const filled = this.planet.facingAt(hit.col, hit.k) & 1;   // 1 upper, 0 lower
+        const adding = this._slabHalf(hit, hit.col, hit.k);
+        if (full && adding !== filled) {
+          this._applyEdits([{ col: hit.col, k: hit.k, id: full }]);
+          this.audio.place(BLOCKS[full].sound,
+            this.planet.centerOf(hit.col, hit.k, new THREE.Vector3()));
+          held.count--;
+          if (held.count <= 0) held.clear();
+          this.inventory.changed();
+          this.player.swing();
+          this.viewModel.punch(this._handOf(held));
+          return true;
+        }
+      }
+    }
     const col = replacing ? hit.col : hit.prevCol;
     const k = replacing ? hit.k : hit.prevK;
     if (k < 0 || k >= D) return false;

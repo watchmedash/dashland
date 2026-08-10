@@ -301,6 +301,8 @@ export class Player {
      */
     this.skills = null;
     this.headInWater = false;
+    /** feet in hot spring water — see the tuff test in `update` */
+    this.inSpring = false;
     /** seconds still alight after leaving the lava */
     this.burning = 0;
     this.sprinting = false;
@@ -846,6 +848,22 @@ export class Player {
     this.inWater = feet ? p.liquidAt(feet.col, feet.k) : false;
     this.inLava = feetId === ID.lava;
     this.headInWater = p.isLiquidWorld(headP.x, headP.y, headP.z) && !this.inLava;
+
+    // A hot spring is the only water on the planet with tuff under it: the four
+    // lake beds are mud/peat/clay/sand/gravel/slate/basalt and the seabed is
+    // sand and gravel, so three block reads identify a pool without the worker
+    // having to ship the per-column water style (1.3 MB) to the main thread.
+    //
+    // Two reads down rather than one because the pool is two deep in the middle
+    // and one on the shelf, and `feet` sits at a different k in each. One read
+    // up because the *other* water that can rest on tuff is a deep aquifer lens
+    // inside the granite band, where `stratum` also returns tuff — but a spring
+    // is built exactly two deep, so air within two of the feet excludes it.
+    // This is the same predicate `_tickSteam` uses to place the steam, which is
+    // what stops the visible cue and the effect ever disagreeing.
+    this.inSpring = !!feet && this.inWater && !this.inLava
+      && (p.at(feet.col, feet.k - 1) === ID.tuff || p.at(feet.col, feet.k - 2) === ID.tuff)
+      && p.at(feet.col, feet.k + 2) === 0;
 
     // ---- desired tangential velocity, expressed in cells/second ----
     // Agility scales all three gaits by the same small factor rather than only

@@ -466,6 +466,53 @@ const STEAM_RADIUS = 16;
 const MAX_STEAM_CELLS = 28;
 /** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
 const HURT_IMMUNITY = 0.5;
+
+/**
+ * Soaking in a hot spring.
+ *
+ * The pools generate 93-134 to a planet across Mountain, Snow and Tundra and
+ * until now they were scenery: a hole with milky water in it. What a spring is
+ * *for* has to be something you can feel without being told, because nothing
+ * here is allowed to explain itself in the UI — so it is the nourishment bar,
+ * which already reveals itself the moment it drops below full and already
+ * counts up in percent. You sit in the water, the bar you can see climbs, and
+ * then the water turns on you. Nobody has to write "you feel warm".
+ *
+ * Stamina was the other candidate and it is the wrong meter: it refills on its
+ * own in 8.3 seconds standing still (Player.update, +0.12/s), so a spring that
+ * restored it faster would be a buff the player cannot perceive, and you cannot
+ * sprint while sitting in a pool anyway.
+ *
+ * Priced against the pantry rather than guessed. A full soak is worth exactly
+ * one loaf of bread — 8 nourishment, the same as Grilled Fish or Cooked Meat,
+ * the middle rung of the cooking ladder and, per FOOD_TO_ENERGY's own note,
+ * "roughly five minutes of hard travelling". That is worth the climb and it is
+ * nowhere near the meals above it, so the whole top of the cooking chain keeps
+ * its reason to exist. Deriving the rate from the food table instead of typing
+ * a number keeps the two in step if FOOD_TO_ENERGY is ever retuned.
+ *
+ * The bar is what actually caps this, and it caps it hard: nourishment tops out
+ * at 1, so a soak is worth 8 only if you arrive at least 48% empty and worth
+ * nothing at all if you arrive full. There is no stockpiling a pool the way you
+ * stockpile a pantry — it tops you up before you set off and that is its whole
+ * yield. Camping one cannot beat eating, because eating is what you do with the
+ * bar you already filled.
+ *
+ * The clock bleeds off at a third speed rather than resetting, the way
+ * `burning` lingers: without it you would hop out and straight back in to clear
+ * the timer and farm the warmth. At 1/3 a full 28-second soak owes 84 seconds
+ * on the bank, capping a camper at 8 nourishment per 112s against a walking
+ * drain of 1.5 per minute. Generous, bounded, and it costs you the daylight.
+ */
+const SOAK_WARM = 28;
+const SOAK_ENERGY = (8 * FOOD_TO_ENERGY) / SOAK_WARM;
+const SOAK_COOL = 1 / 3;
+/** Seconds between the warmth ending and the first sting, and between stings. */
+const SOAK_STING = 3;
+const SCALD_PERIOD = 3.5;
+/** Above this you are wading through, not soaking. `_tickVitals` uses the same
+ *  number for "moving", so the game has one definition of it. */
+const SOAK_STILL = 0.6;
 /**
  * How fast a spectator drifts, in cells per second, and how fast with Shift.
  *
@@ -998,6 +1045,7 @@ class Game {
     this.zoom = 0;
     this.breath = 1;
     this.energy = 1;      // nourishment: gates health regeneration
+    this.soakT = 0;       // seconds in a hot spring, bled off slowly once out
     this.eating = 0;      // seconds held on a food item
     this.shelter = 1;     // 0 under cover, 1 in open sky — gates precipitation
     this._hlCol = -1; this._hlK = -1; this._hlSeq = -1;
@@ -1443,6 +1491,7 @@ class Game {
     this.player.health = this.player.maxHealth;
     this.breath = 1;
     this.energy = 1;
+    this.soakT = 0;
     this.graceT = 0;
     // Cleared here as well as when it runs out: quitting to the menu mid-grace
     // and loading a save would otherwise leave the flag set on the mob system
@@ -2561,6 +2610,10 @@ class Game {
     this.player.knockT = 0;
     this.bow.t = 0;
     this.breath = 1;
+    // Respawning in a scalded state would mean the next pool you stepped into
+    // burned you on contact, with no warmth first and nothing on screen to say
+    // why. Cleared with breath for the same reason breath is cleared.
+    this.soakT = 0;
     this.ui.refresh();
     this.input.requestLock();
   }
@@ -4240,6 +4293,7 @@ class Game {
       this.breath = 1;
       this._drownTimer = 0;
       this.player.burning = 0;
+      this.soakT = 0;
     } else if (this.player.headInWater) {
       // Nine seconds of air, stretched by the lungs branch — 27 at lungs 4.
       // The bar is still 0..1, so what the skill changes is how long it takes
@@ -4264,6 +4318,7 @@ class Game {
     if (!ghost) {
       this._tickFire(dt);
       this._tickContact(dt);
+      this._tickSoak(dt);
     }
 
     // Four times a second is plenty: a sprint covers about 2 units in that time
@@ -4568,6 +4623,57 @@ class Game {
     if (this._contactTimer > 0) return;
     this._contactTimer = CONTACT_PERIOD;
     this._takeHit(hurt, 'Cactus', false, 'blow');
+  }
+
+  /**
+   * A hot spring feeds you while you sit in it and scalds you if you stay.
+   *
+   * The shape is deliberately the arc of one visit rather than a toggle: the
+   * bar climbs for 28 seconds, the water starts steaming around your head, and
+   * three seconds after that it stings. A player who is watching leaves at the
+   * steam and never takes a point of damage, which is the whole tutorial and it
+   * is taught by the pool. See the SOAK_* block for the pricing.
+   *
+   * No skill soaks 'scald' — it is deliberately not one of Skills' SOAKED kinds
+   * ('blow', 'fall', 'fire', 'lava'). Heat tolerance shaving this to nothing is
+   * the one route by which a late-game player could sit in a pool indefinitely
+   * and never cook again, and the ceiling on the whole feature is that you
+   * cannot stay. Difficulty is untouched for the same reason the other
+   * environment sources are: `mobDamageMul` is applied at the mob callsite, so
+   * easy/normal/hard/extreme scale mobs and only mobs.
+   */
+  _tickSoak(dt) {
+    const p = this.player;
+    if (!p.inSpring) {
+      this.soakT = Math.max(0, this.soakT - dt * SOAK_COOL);
+      this._scaldT = 0;
+      return;
+    }
+    this.soakT += dt;
+
+    if (this.soakT < SOAK_WARM) {
+      // Only while you are actually still. Swimming a pool on the way somewhere
+      // is not a soak, and gating the *gain* rather than the clock means you
+      // cannot wade in circles to dodge the scald either.
+      if (p.moveAmount <= SOAK_STILL) {
+        this.energy = Math.min(1, this.energy + dt * SOAK_ENERGY);
+      }
+      return;
+    }
+
+    // Past the warmth. Steam right on the player rather than out on the water,
+    // so the cue is unmistakably about you and not about the pool. Four a
+    // second, not more: `_tickSteam` already runs about eighty of Particles'
+    // 128 steam instances when you are stood over a pool, and four against a
+    // 2.6-4.8s life is fifteen more — which leaves the waterfall spray the
+    // headroom that comment says it needs.
+    if (Math.random() < dt * 4) this.particles.steam(p.eye, p.up, 0.35, 1);
+    if (this.soakT < SOAK_WARM + SOAK_STING) return;
+
+    this._scaldT = (this._scaldT || 0) + dt;
+    if (this._scaldT < SCALD_PERIOD) return;
+    this._scaldT = 0;
+    this._takeHit(1, 'Scalded', false, 'scald');
   }
 
   /**

@@ -336,6 +336,18 @@ export const compassLit = (polar) =>
 /**
  * The columns the map samples around (f, i, j), row-major, `dj` outer.
  *
+ * THE CONVENTION, and it is the whole of what the map has to get right: on the
+ * unrotated image +i runs to the right and **+j runs UP**, i.e. `dj` decreases
+ * as the image row index increases. That is not a taste: `Sphere.js` picks its
+ * face bases so that R x U = N (outward), so (ea, eb, up) is right handed, and
+ * a top-down picture of the ground seen from above is only unmirrored when its
+ * screen-right and screen-up axes cross to `up` the same way. Writing +j down
+ * the image instead makes the picture a reflection, and no rotation can undo a
+ * reflection: it was measured as agreeing with the world at 0 of 12 heading and
+ * site combinations, and agreeing at 12 of 12 once the reader mirrored itself
+ * back. `updateMinimap` derives its CSS rotation from this same convention, so
+ * the two cannot be flipped independently.
+ *
  * `patchColumn` rather than a walk with `colNeighbor`, and rather than any
  * arithmetic at all on a column index — the seams are real and index arithmetic
  * across one is a bug this codebase has already paid for. Of the two safe
@@ -359,7 +371,7 @@ export const compassLit = (polar) =>
 export function mapColumns(f, i, j, out = new Int32Array(MAP_SAMPLES * MAP_SAMPLES)) {
   const N = MAP_SAMPLES;
   for (let sy = 0; sy < N; sy++) {
-    const dj = (sy - MAP_RADIUS) * MAP_STEP;
+    const dj = (MAP_RADIUS - sy) * MAP_STEP;
     for (let sx = 0; sx < N; sx++) {
       out[sy * N + sx] = patchColumn(f, i, j, (sx - MAP_RADIUS) * MAP_STEP, dj);
     }
@@ -661,10 +673,19 @@ export class UI {
     // is (di, dj) offsets, so this is the same question as "what are forward's
     // cell components".
     player.tangentToCell(player.forward, _cellF);
-    // Image space has y downward, so this angle is clockwise from the +i axis
-    // on screen; bringing it to the top of the frame is a quarter turn back.
+    // The map is a zoomed-out view centred on the player with the direction
+    // they are facing at the top, and nothing mirrored: left on the map is
+    // their left. That is the entire specification, and both halves of it are
+    // this one line plus `mapColumns`.
+    //
+    // `mapColumns` paints +i to the right and +j UP, so a tangent vector with
+    // cell components (i, j) sits at `atan2(j, i)` measured anticlockwise from
+    // screen right, like any other picture drawn the right way round. A CSS
+    // `rotate` of a positive angle turns the canvas clockwise, which subtracts
+    // from that, so putting `forward` at the top (a quarter turn round) is a
+    // spin of exactly its own angle minus a quarter turn.
     const face = Math.atan2(_cellF.j, _cellF.i);
-    const spin = -face - Math.PI / 2;
+    const spin = face - Math.PI / 2;
     const q = Math.round(spin * 500);
     if (q !== this._mmTurn) {
       this._mmTurn = q;
@@ -680,7 +701,13 @@ export class UI {
     pipEl.style.opacity = lit.toFixed(2);
     if (lit > 0) {
       player.tangentToCell(_north, _cellN);
-      const at = Math.atan2(_cellN.j, _cellN.i) + spin;
+      // North's angle on the canvas, the same way `face` was read, less the
+      // spin the canvas has since been given; then negated, because `northPip`
+      // works in image space where y is downward and this does not. Facing
+      // north makes `_cellN` and `_cellF` the same vector, so `at` collapses to
+      // -PI/2 and the pip sits at the top of the frame, which is the one value
+      // of this expression that can be checked by reading it.
+      const at = spin - Math.atan2(_cellN.j, _cellN.i);
       const p = northPip(at, MAP_RIM);
       pipEl.style.transform =
         `translate(-50%,-50%) translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px)`;

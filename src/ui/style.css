@@ -1516,6 +1516,83 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 }
 #hint kbd { margin: 0 3px; }
 
+/* ── the fishing fight ─────────────────────────────────────
+   A tool, not a widget: a wooden case with a groove routed into it, a pale
+   shuttle riding the groove, a dark fish running along it, and one strip of
+   brass underneath that fills as the fish tires. Three materials, and the
+   brass is the only live thing on it — which is exactly what the player has to
+   read, because the brass reaching the end is the catch.
+
+   Everything moves off four custom properties written once a frame by
+   `UI.fishFight`, all of them 0..1 in track widths, so nothing here has a
+   pixel in it that has to agree with a number in main.js. `left: calc(...)`
+   rather than a transform because the shuttle's *width* changes with the rod
+   as well as its position, and one property doing both would be a matrix. */
+#fish-bar {
+  width: min(320px, 44vw);
+  padding: 6px 7px 7px;
+  border-radius: var(--r-md);
+  background: var(--wood);
+  box-shadow: var(--hud-edge);
+  margin-bottom: 3px;
+}
+#fish-bar.hidden { display: none; }
+
+.fb-track {
+  position: relative; height: 20px; border-radius: var(--r-sm);
+  background: var(--pocket-floor);
+  box-shadow: var(--sunk-hud);
+  overflow: hidden;
+}
+
+/* The shuttle. A face of parchment on a lit edge, the one thing on the bar
+   that answers the button. It carries no colour of its own until it is on the
+   fish, and then it takes a warm rim — the same "this one" the brass ring
+   means everywhere else in the kit, at a weight that survives a bright sea. */
+.fb-shuttle {
+  position: absolute; top: 2px; bottom: 2px;
+  left: calc((var(--fb-x, .5) - var(--fb-half, .1)) * 100%);
+  width: calc(var(--fb-half, .1) * 200%);
+  border-radius: var(--r-sm);
+  background: var(--paper-hud-cell);
+  box-shadow:
+    0 0 0 1px var(--hud-hard),
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    inset 0 -2px 0 rgba(122, 94, 54, .3);
+}
+#fish-bar.on .fb-shuttle {
+  background: var(--brass);
+  box-shadow:
+    0 0 0 1px var(--brass-line),
+    inset 0 1px 0 rgba(255, 240, 205, .9),
+    0 0 12px -2px rgba(242, 168, 80, .9);
+}
+
+/* The fish. Ink, nose to the right, and small enough that the shuttle is
+   plainly a window it can sit inside rather than a second bar. */
+.fb-fish {
+  position: absolute; top: 4px; height: 12px; width: 14px;
+  left: calc(var(--fb-fish, .5) * 100%);
+  margin-left: -7px;
+  border-radius: 6px 3px 3px 6px;
+  background: linear-gradient(180deg, #4a381f, #171009);
+  box-shadow: 0 0 0 1px rgba(255, 245, 220, .45), 0 1px 2px rgba(0, 0, 0, .6);
+}
+
+/* How tired it is. A groove in the same carcass with one strip of brass in
+   it — the only brass on the screen while this is up. */
+.fb-gauge {
+  margin-top: 5px; height: 6px; border-radius: 3px;
+  background: var(--pocket-floor);
+  box-shadow: var(--sunk-hud);
+  overflow: hidden;
+}
+.fb-gauge b {
+  display: block; height: 100%; width: calc(var(--fb-p, 0) * 100%);
+  background: var(--brass);
+  box-shadow: inset 0 -1px 0 rgba(86, 41, 10, .5);
+}
+
 #debug {
   position: absolute; top: 10px; left: 10px;
   font: var(--fs-sm)/1.6 var(--mono); color: var(--ink);

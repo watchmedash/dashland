@@ -424,7 +424,7 @@ export class UI {
       chipPack: $('chip-pack'), packDist: $('pack-dist'), chipSave: $('chip-save'),
       pzQuit: $('pz-quit'),
       toasts: $('toasts'), debug: $('debug'), hint: $('hint'),
-      fishBar: $('fish-bar'), fishGauge: $('fish-bar')?.querySelector('.fb-gauge b'),
+      fishBar: $('fish-bar'),
       screenEl: $('screen'), screenTitle: $('screen-title'), screenTop: $('screen-top'),
       invMain: $('inv-main'), invHot: $('inv-hot'),
       cursor: $('cursor-stack'), tooltip: $('tooltip'),

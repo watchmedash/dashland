@@ -248,6 +248,19 @@ const FISH_LEASH = 9;
  * to `reach` — reach is how far your arm goes, and this is how far a lead
  * weight goes when you throw it.
  */
+/**
+ * How far the crosshair will name something, as distinct from how far you can
+ * reach it. Mining stops at `player.reach`, which is 3; a label has no such
+ * excuse, and stopping it at arm's length meant you could stare at a mountain
+ * and be told nothing about it.
+ *
+ * 48 cells is a little over the 34 unit horizon at eye height and well inside
+ * the 132 the tallest terrain stays visible from, so it names the hillside you
+ * are looking at without reaching across a whole continent. It is only cast on
+ * frames where nothing was found within reach.
+ */
+const LOOK_RANGE = 48;
+
 const FISH_CAST_RANGE = 28;
 /**
  * The throw itself. A cast is a lead weight leaving a rod, not a laser.
@@ -6988,9 +7001,28 @@ class Game {
     // which of the two won. A second cast would be the same work twice and
     // could disagree with the highlight box on the frame they straddle a face.
     // The creature takes precedence for the same reason it takes the hit.
-    this.ui.setLookAt(mobHit && (!hit || mobHit.dist < hit.dist)
+    // ...and when there is nothing within arm's length, say what you are
+    // looking at anyway. "Breaking/mining have max reach but the crosshair
+    // shouldn't - show a toast of what we are looking at from far distance, not
+    // just what's near."
+    //
+    // The note above still holds and is why this is an `else` rather than a
+    // replacement: inside reach the answer comes from the cast that already
+    // happened, so the name and the highlight box can never disagree. The far
+    // cast only runs on frames where the near one found nothing, which is
+    // exactly when there is no highlight to disagree with, and it stops at the
+    // first thing it meets so a wall still hides what is behind it.
+    let named = mobHit && (!hit || mobHit.dist < hit.dist)
       ? (mobHit.mob.spec.label ?? null)
-      : (hit ? (BLOCKS[this.planet.at(hit.col, hit.k)]?.label ?? null) : null));
+      : (hit ? (BLOCKS[this.planet.at(hit.col, hit.k)]?.label ?? null) : null);
+    if (!named) {
+      const far = this.planet.raycast(this.player.eye, this.player.lookDir, LOOK_RANGE);
+      const farMob = this.mobs.raycast(this.player.eye, this.player.lookDir, LOOK_RANGE);
+      named = farMob && (!far || farMob.dist < far.dist)
+        ? (farMob.mob.spec.label ?? null)
+        : (far ? (BLOCKS[this.planet.at(far.col, far.k)]?.label ?? null) : null);
+    }
+    this.ui.setLookAt(named);
 
     // The hand the *right* button is speaking to, for the whole of this method.
     //

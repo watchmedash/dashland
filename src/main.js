@@ -1582,7 +1582,7 @@ class Game {
     voxelUniforms.uArm.value = arrays.arm;
     voxelUniforms.uCrack.value = buildCrackTexture(tex.crack);
 
-    const icons = new IconFactory(tex.tiles.albedo, tex.tiles.size, tex.tiles.layers);
+    const icons = new IconFactory(tex.tiles.albedo, tex.tiles.size, tex.tiles.layers, tex.tiles.arm);
     this.ui.setIcons(icons);
     this.drops.setIcons(icons);
 

@@ -360,9 +360,21 @@ class ModelIconPainter {
 }
 
 export class IconFactory {
-  constructor(albedo, size, layers) {
+  constructor(albedo, size, layers, arm = null) {
     this.size = size;
     this.tiles = [];
+    /**
+     * Per texel "may this be tinted", read out of the arm atlas's alpha, which
+     * is unused everywhere else and is where the baker writes the grass fringe.
+     *
+     * Without it a grass block's icon took the grass tint over the whole tile,
+     * including the band of soil down its lower two thirds - so the block in
+     * your hotbar had olive dirt while the dirt block next to it was brown, the
+     * same fault that was fixed for the world's faces and for a dropped block.
+     * Null when no arm atlas is handed over, and then every texel tints, which
+     * is exactly the old behaviour.
+     */
+    this.tintMask = arm ? [] : null;
     for (let i = 0; i < layers; i++) {
       const c = document.createElement('canvas');
       c.width = c.height = size;
@@ -371,6 +383,13 @@ export class IconFactory {
       img.data.set(albedo.subarray(i * size * size * 4, (i + 1) * size * size * 4));
       g.putImageData(img, 0, 0);
       this.tiles.push(c);
+      if (this.tintMask) {
+        const n = size * size;
+        const m = new Uint8Array(n);
+        const off = i * n * 4;
+        for (let t = 0; t < n; t++) m[t] = arm[off + t * 4 + 3];
+        this.tintMask.push(m);
+      }
     }
     this.cache = new Map();
     /** "layer|tintId" -> a copy of that tile with the biome tint multiplied in. */
@@ -426,11 +445,18 @@ export class IconFactory {
     g.drawImage(base, 0, 0);
     const img = g.getImageData(0, 0, S, S);
     const d = img.data;
+    const mask = this.tintMask && this.tintMask[layer];
     for (let i = 0; i < d.length; i += 4) {
       if (!d[i + 3]) continue;
-      d[i] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i]] * rgb[0]) * 255);
-      d[i + 1] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i + 1]] * rgb[1]) * 255);
-      d[i + 2] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i + 2]] * rgb[2]) * 255);
+      // The same `mix(white, tint, mask)` the block shader does, so the icon and
+      // the block in the world are the one picture.
+      const w = mask ? mask[i >> 2] / 255 : 1;
+      const r = 1 + (rgb[0] - 1) * w;
+      const gg = 1 + (rgb[1] - 1) * w;
+      const b = 1 + (rgb[2] - 1) * w;
+      d[i] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i]] * r) * 255);
+      d[i + 1] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i + 1]] * gg) * 255);
+      d[i + 2] = Math.round(toSRGB(SRGB_TO_LINEAR[d[i + 2]] * b) * 255);
     }
     g.putImageData(img, 0, 0);
     this.tinted.set(key, out);

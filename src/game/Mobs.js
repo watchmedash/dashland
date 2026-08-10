@@ -1318,6 +1318,10 @@ const monster = (file, o) => ({
   reach: o.reach ?? 1.5,
   swing: o.swing ?? 1.3,
   ...(o.flies ? { flies: true, hover: o.hover ?? 2.2 } : null),
+  // Self-lit, 0 for everything that is not. `pet()` and this builder both drop
+  // fields they do not name, so a spec can carry `glow` only because this line
+  // exists - a typo here is invisible rather than loud.
+  ...(o.glow ? { glow: o.glow } : null),
 });
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
@@ -2080,6 +2084,14 @@ const SPECIES = {
   }),
   ghost: monster('ghost', {
     label: 'Ghost', h: 1.6, hp: 14, spd: 1.60, shy: 0, turn: 4.4, accel: 9.0,
+    // "The ghost looks dark grey instead of white." It was lit like flesh, and
+    // a ghost is not flesh. Everything else in the roster stays on the scene
+    // lights, whose night floor is solved at 0.17 through the tone-mapping pass
+    // and must not be raised - the comment in `Sky.js` records that above it the
+    // whole roster starts glowing, which is the bug that constant was born to
+    // fix. So this is one mob carrying its own light rather than the world
+    // being brightened for it.
+    glow: 0.55,
     dmg: 4, reach: 1.4, swing: 1.2, aggro: 14, flies: true, hover: 1.8,
     // Drifts, but is animated as a walker — the pack gave it the ten-clip rig,
     // not the four-clip flying one.
@@ -3461,6 +3473,13 @@ export class Mobs {
         // on every animal on the planet. See `lit()` for the version of this
         // that renders the model flat white.
         if (m.color && spec.shade) m.color.multiplyScalar(spec.shade);
+        // A self-lit mob. `emissiveMap` is already the albedo for anything that
+        // has one (see above), so this only has to set how much of it survives
+        // the dark; without a map the flat emissive colour carries it.
+        if (m.emissive && spec.glow) {
+          m.emissive.setRGB(spec.glow, spec.glow, spec.glow);
+          if (m.map) { m.emissiveMap = m.map; m.needsUpdate = true; }
+        }
         // The colour this material was authored with, kept so the damage tint
         // can multiply into it rather than replace it. Untextured models — the
         // fish — carry their whole appearance here.

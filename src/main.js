@@ -35,7 +35,7 @@ import { Seasons } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import * as MobModels from './game/MobModels.js';
 import { Farming, roofsSoil } from './game/Farming.js';
-import { Water } from './game/Water.js';
+import { Water, LEVEL_MAX } from './game/Water.js';
 import { Save } from './game/Save.js';
 import {
   DEFAULT_DIFFICULTY, normalizeDifficulty, mobDamageScale, normalizeLoadout, loadoutStacks,
@@ -58,7 +58,7 @@ import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
-  NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns,
+  NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns, regionOfCol,
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
@@ -245,6 +245,8 @@ const FREEZE_RADIUS = 24;
 const GRAVITY_TICK = 0.1;
 const GRAVITY_PER_TICK = 256;
 const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
+/** Scratch for the steam emitter, which asks for a cell centre twice a tick. */
+const _steamAt = [0, 0, 0];
 /** Scratch for `_crossLightAt`, which runs once per modelled instance per frame. */
 const _clParts = { f: 0, i: 0, j: 0 };
 /** Scratch for the player body's own block-light probe. */
@@ -450,6 +452,18 @@ const MAX_FLAMES = 14;
  */
 const MAX_ENTITY_EMITTERS = 24;
 const FLAME_PERIOD = 0.14;
+/**
+ * Steam off a hot spring, and spray off a waterfall.
+ *
+ * Faster than the flames because a plume has to be continuous to read as one:
+ * at a flame's seventh of a second the puffs come out as a dotted line. Twelve
+ * a second against a two-to-five-second life is about forty in the air at once,
+ * comfortably inside Particles' MAX_STEAM.
+ */
+const STEAM_PERIOD = 0.085;
+/** How far the pool scan reaches, in columns, and how many pools it will hold. */
+const STEAM_RADIUS = 16;
+const MAX_STEAM_CELLS = 28;
 /** Seconds of immunity after a guarded hit, so a crowd cannot burst you down. */
 const HURT_IMMUNITY = 0.5;
 /**
@@ -638,6 +652,8 @@ class Game {
     this.coreFound = false;
     /** Burning cells near the player, refilled by the hand-light scan. */
     this._flameCells = [];
+    /** Hot-spring surface cells near the player. See `_tickSteam`. */
+    this._steamCells = [];
     /**
      * Every *light-emitting* cell near the player — torches, lanterns, lit
      * kilns, glowstone, crystal, lava — in world space, refilled by the same
@@ -1706,12 +1722,73 @@ class Game {
     const level = this.water.level;
     const sources = this.water.sources;
     for (let n = 0; n < REGION_COLS; n++) {
-      const base = cols[n] * D;
+      const col = cols[n];
+      const base = col * D;
       for (let k = 0; k < D; k++) {
         const i = base + k;
-        if (RENDER_TYPE[blocks[i]] === R_LIQUID && !level.has(i)) sources.add(i);
+        if (RENDER_TYPE[blocks[i]] !== R_LIQUID || level.has(i)) continue;
+        if (this._isFallingCell(col, k)) level.set(i, LEVEL_MAX);
+        else sources.add(i);
       }
     }
+  }
+
+  /**
+   * Is this worldgen liquid cell the middle of a WATERFALL rather than the
+   * inside of a lake?
+   *
+   * It matters because the two want opposite bookkeeping and the difference is
+   * a flood. A spring never drains and, once anything wakes it, spreads six
+   * columns into any open side it has — which is fine for a lake, whose every
+   * cell is walled by construction (see LAKE_FREEBOARD), and catastrophic for a
+   * fall, whose whole point is open air beside the water. Flowing water with
+   * liquid above AND below it is the one thing the sim treats as the middle of
+   * a falling column and refuses to spread at all, so registering a fall that
+   * way makes it inert. It also makes it honest: plug the spring at the lip and
+   * the fall drains, one layer a tick, exactly as a player would expect.
+   *
+   * The test is four clauses and each one is load-bearing:
+   *
+   *   liquid above    the cell is not the head of the fall. The head has rock
+   *                   over it, has nothing feeding it, and must stay a spring
+   *                   or the whole column drains from the top down. WorldGen
+   *                   walls and roofs it so that a spring there is inert.
+   *   liquid below    the cell is not the foot. A foot spreads, and that is
+   *                   correct: a fall always lands in water that is already
+   *                   there, so its lowest cell is still a middle cell.
+   *   no liquid beside it, and at least one open side beside it
+   *                   this pair is what tells a fall from the inside of the
+   *                   ocean next to a cave mouth, which also has water above
+   *                   and below and an air neighbour. A fall is one column wide
+   *                   by construction and WorldGen puts its candidates on a
+   *                   checkerboard so that two can never touch, so nothing that
+   *                   is falling has a liquid neighbour and nothing that is a
+   *                   lake lacks one.
+   *
+   * Neighbours outside this region are skipped rather than guessed. They read
+   * as air here whether or not they have been built, so counting them would
+   * turn the middle of the sea into a waterfall along every region seam;
+   * skipping them can only ever withhold the evidence for a fall, and WorldGen
+   * refuses to site one whose footprint leaves its region for exactly that
+   * reason. The direction of the error is the safe one either way: a fall
+   * wrongly called a spring is the only failure that spreads, and it cannot
+   * happen without a site that reaches across a boundary.
+   */
+  _isFallingCell(col, k) {
+    if (k < 1 || k + 1 >= D) return false;
+    const base = col * D + k;
+    if (RENDER_TYPE[this.planet.blocks[base + 1]] !== R_LIQUID) return false;
+    if (RENDER_TYPE[this.planet.blocks[base - 1]] !== R_LIQUID) return false;
+    const rid = regionOfCol(col);
+    let open = 0;
+    for (let d = 0; d < 4; d++) {
+      const nb = colNeighbor(col, d);
+      if (nb < 0 || regionOfCol(nb) !== rid) continue;
+      const id = this.planet.blocks[nb * D + k];
+      if (RENDER_TYPE[id] === R_LIQUID) return false;
+      if (id === 0) open++;
+    }
+    return open > 0;
   }
 
   /** Player, inventory and world state — everything that needs real voxels. */
@@ -4102,6 +4179,7 @@ class Game {
     // After both, because it converts the positions those two just wrote.
     this._safeTick('lightOcclusion', () => this._updateLightOcclusion());
     this._safeTick('flames', () => this._tickFlames(dt));
+    this._safeTick('steam', () => this._tickSteam(dt));
     this._safeTick('blockModels', () => this._syncBlockModels());
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     // `shelter` doubles as the entity fill's occlusion — animals cannot read
@@ -4442,6 +4520,13 @@ class Game {
       // thing that would make the thaw below dishonest — it can only give back
       // standing water, so it must only ever take standing water.
       if (!this.water.sources.has(key)) continue;
+      // A hot spring does not ice over, and that is the whole claim the feature
+      // makes: 122 of the 179 sites are in Mountain and the rest are in Snow and
+      // Tundra, so without this every one of them spends winter under a lid and
+      // the one warm thing on the planet is indistinguishable from a puddle.
+      // Told by the tuff floor the spring pass lays under its own pool, which is
+      // the same three-block test the steam emitter uses -- see `_tickSteam`.
+      if (this.planet.at(col, k - 1) === ID.tuff || this.planet.at(col, k - 2) === ID.tuff) continue;
       this.frozen.add(key);
       edits.push({ col, k, id: ID.ice });
     }
@@ -5012,6 +5097,121 @@ class Game {
     tangentFrame(p.f, p.i + 0.5, p.j + 0.5, f.k + 0.5, _frame);
     _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
     this.particles.embers(_v1, _v2, 1, 0.10);
+  }
+
+  /**
+   * Steam off the hot springs, and spray off the waterfalls.
+   *
+   * Two emitters in one tick because they are the same shape of problem — find
+   * the cells nearby, throw one puff at one of them per tick, round-robin — and
+   * they want opposite particles, which `Particles.steam` takes as its `heat`
+   * argument.
+   *
+   * ---- finding a hot spring ------------------------------------------------
+   *
+   * By what is UNDER the water, not by asking the generator. A spring pool is
+   * the only water in the world with tuff beneath it: the four lake beds are
+   * mud, peat, clay, sand, gravel, slate and basalt, the seabed is sand and
+   * gravel, and the spring pass lays its own tuff floor precisely so the pool
+   * cannot drain into whatever was there. Two layers down as well as one,
+   * because the middle of the pool is two deep over its floor while the shelf
+   * round it is one -- see SPRING_RI in WorldGen.
+   *
+   * That keeps the whole test on the main thread's own block array. The
+   * alternative was to ship the per-column water identity across from the
+   * worker, which is 1.3 MB of transfer and a second copy to keep in step, to
+   * answer a question three block reads already answer.
+   *
+   * The scan is strided by two and that is not a saving, it is the design: a
+   * pool is five to seven columns across, so a lattice of every other column
+   * cannot step over one, and it turns a 33x33 sweep into a 17x17. Cached on
+   * the player's column, layer and the edit counter, exactly like the hand
+   * light, so walking about does not re-walk it every frame.
+   *
+   * ---- finding a waterfall -------------------------------------------------
+   *
+   * Off `water.level`, which is already the exact answer. That map holds every
+   * cell of flowing water in the world and nothing else -- the falls put
+   * themselves in it when their region is seeded (see `_isFallingCell`), and a
+   * player's own spill lands in it too, which is why a bucket poured off a
+   * ledge throws spray as well. It is a few hundred entries at most, so it is
+   * walked rather than scanned.
+   */
+  _tickSteam(dt) {
+    this._steamT = (this._steamT ?? 0) - dt;
+    if (this._steamT > 0) return;
+    this._steamT = STEAM_PERIOD;
+    const c = this.player.cell;
+    const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
+    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
+
+    const cells = this._steamCells;
+    if (this._stCol !== baseCol || this._stK !== ck || this._stSeq !== this.editSeq) {
+      this._stCol = baseCol; this._stK = ck; this._stSeq = this.editSeq;
+      cells.length = 0;
+      const p = this.planet;
+      for (let di = -STEAM_RADIUS; di <= STEAM_RADIUS && cells.length < MAX_STEAM_CELLS; di += 2) {
+        for (let dj = -STEAM_RADIUS; dj <= STEAM_RADIUS && cells.length < MAX_STEAM_CELLS; dj += 2) {
+          const col = stepColumn(baseCol, di, dj);
+          // Wide in k, and it has to be: a pool sits in a terrace cut into the
+          // ground, so standing on the rim above it already puts its surface
+          // six layers under your feet, and a window of -4 found nothing from
+          // anywhere you would actually be standing to look at one.
+          for (let dk = -9; dk <= 5; dk++) {
+            const k = ck + dk;
+            if (k < 2 || k + 1 >= D) continue;
+            if (p.at(col, k) !== ID.water || p.at(col, k + 1) !== 0) continue;
+            if (p.at(col, k - 1) !== ID.tuff && p.at(col, k - 2) !== ID.tuff) continue;
+            cells.push({ col, k });
+            break;
+          }
+        }
+      }
+    }
+
+    // Two cells a tick, not one. A pool is twenty-odd columns of surface and the
+    // emitter is round-robin, so at one a tick each column only steams every two
+    // seconds -- which came out of the first screenshots as a couple of stray
+    // wisps rather than as a pool that is visibly warm. Two against a
+    // three-to-five-second life is about eighty puffs standing over a spring,
+    // which is inside Particles' MAX_STEAM with room for a waterfall as well.
+    for (let e = 0; e < 2 && cells.length; e++) {
+      this._steamNext = ((this._steamNext ?? 0) + 1) % cells.length;
+      const h = cells[this._steamNext];
+      const pp = colParts(h.col);
+      tangentFrame(pp.f, pp.i + 0.5, pp.j + 0.5, h.k + 1, _frame);
+      _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
+      // Integer i and j. `cellCenterPos` INDEXES the direction table with them
+      // -- unlike `tangentFrame` above, which interpolates -- so a half-column
+      // offset reads past the end of the array, and the puff comes out at NaN
+      // and is silently never drawn. Sixty-six live instances and an empty
+      // frame is exactly what that looks like.
+      _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, h.k, _steamAt));
+      _v1.addScaledVector(_v2, 0.55);
+      this.particles.steam(_v1, _v2, 0.9, 1);
+    }
+
+    // Spray. One cell of falling water per tick, and only if it is near enough
+    // to be worth drawing -- the level map is planet-wide, so the distance test
+    // is what keeps a waterfall on the far side of the world out of your face.
+    const lv = this.water.level;
+    if (lv.size) {
+      const n = (this._sprayNext ?? 0) % lv.size;
+      this._sprayNext = n + 1;
+      let i = 0;
+      for (const key of lv.keys()) {
+        if (i++ !== n) continue;
+        const k = key % D;
+        const col = (key - k) / D;
+        const pp = colParts(col);
+        _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, k, _steamAt));
+        if (_v1.distanceToSquared(this.player.position) > 900) break;
+        tangentFrame(pp.f, pp.i + 0.5, pp.j + 0.5, k, _frame);
+        _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
+        this.particles.steam(_v1, _v2, 0.8, 0);
+        break;
+      }
+    }
   }
 
   /**

@@ -15,6 +15,17 @@ const MAX_DEBRIS = 900;
 
 const MAX_BUBBLES = 64;
 
+/**
+ * Steam and spray.
+ *
+ * 96 rather than the bubbles' 64 because these are the only ambient emitter in
+ * the game that runs continuously off the world rather than off an event: a hot
+ * spring you are standing beside and a waterfall you are looking at are both
+ * always going, and a pool that puffs once a second reads as a smoking hole
+ * rather than as warm water.
+ */
+const MAX_STEAM = 128;
+
 export class Particles {
   constructor(scene, planet) {
     this.planet = planet;
@@ -54,12 +65,21 @@ export class Particles {
     this.bubbleMesh.layers.enable(1);
     scene.add(this.bubbleMesh);
 
+    // --- steam ---
+    // Its own mesh and its own material, and it cannot borrow either of the
+    // other two. Debris is opaque lit cubes; bubbles are small, hard-edged and
+    // blue. Steam is the opposite of both: large, soft, and it has to FADE, and
+    // a per-instance fade is impossible with a shared material's `opacity` --
+    // three has one alpha per material, not per instance. So it carries an
+    // instanced alpha attribute and a four-line shader that reads it.
+    this.steamMesh = this._buildSteam(scene);
+
     this.pool = [];
     for (let i = 0; i < MAX_DEBRIS; i++) {
       this.pool.push({
         alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(),
         rot: new THREE.Quaternion(), spin: new THREE.Vector3(), life: 0, maxLife: 1, size: 0.1,
-        color: new THREE.Color(), buoyant: false,
+        color: new THREE.Color(), buoyant: false, steam: 0,
       });
     }
 
@@ -71,6 +91,71 @@ export class Particles {
     this.weatherMode = 'clear';
     this.weatherIntensity = 0;
     this.submerged = false;
+  }
+
+  /**
+   * A puff: a low-poly sphere drawn with a soft rim so it does not read as a
+   * ball, additive so a cloud of them accumulates into something thicker in the
+   * middle, and unlit.
+   *
+   * Additive is the one choice here worth arguing about. Steam scatters light
+   * rather than blocking it, so adding is closer to the physics than blending
+   * is, and it fades to nothing on its own -- an alpha-blended white puff over
+   * a bright sky has to be faded by alpha AND colour or it leaves a grey ghost.
+   * The cost is that steam is weakest against a bright sky, which is the one
+   * background a hot spring in the snow rarely has behind it.
+   */
+  _buildSteam(scene) {
+    const geo = new THREE.IcosahedronGeometry(0.5, 1);
+    const alpha = new Float32Array(MAX_STEAM);
+    geo.setAttribute('aAlpha', new THREE.InstancedBufferAttribute(alpha, 1));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color(0xdff0f4) } },
+      vertexShader: /* glsl */`
+        attribute float aAlpha;
+        varying float vA;
+        varying vec3 vN;
+        void main() {
+          vA = aAlpha;
+          // VIEW space, not world. The rim term below is abs(n.z), which is
+          // only a silhouette in the camera's frame; in world space it is a
+          // band round an arbitrary planetary axis, so a puff faded out in
+          // stripes that had nothing to do with where you were standing.
+          vN = normalize(mat3(modelViewMatrix * instanceMatrix) * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform vec3 uColor;
+        varying float vA;
+        varying vec3 vN;
+        void main() {
+          // Soft edge: the rim of the sphere, where the normal turns away from
+          // the eye, fades out. Without it every puff is a hard-edged ball and
+          // a hot spring looks like it is boiling ping-pong balls.
+          // Squared rather than a smoothstep: a step still has a shoulder, and
+          // a shoulder on a sphere is a hard-edged disc. Vapour has no edge at
+          // all, so the falloff runs the whole way from the centre out.
+          float rim = abs(normalize(vN).z);
+          gl_FragColor = vec4(uColor, vA * rim * rim);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.FrontSide,
+    });
+    const mesh = new THREE.InstancedMesh(geo, mat, MAX_STEAM);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.count = 0;
+    mesh.renderOrder = 12;
+    mesh.layers.enable(1);
+    this.steamAlpha = geo.getAttribute('aAlpha');
+    scene.add(mesh);
+    return mesh;
   }
 
   _buildMotes(scene) {
@@ -217,6 +302,7 @@ export class Particles {
     for (let i = 0; i < this.pool.length; i++) {
       if (!this.pool[i].alive) {
         this.pool[i].buoyant = false;   // only bubbles opt back in
+        this.pool[i].steam = 0;         // and only steam opts back into this
         return this.pool[i];
       }
     }
@@ -301,6 +387,49 @@ export class Particles {
     }
   }
 
+  /**
+   * Steam off hot water, or spray off falling water.
+   *
+   * One call is one puff, not a burst: the callers are ambient scanners that
+   * run every frame over whatever is nearby, so the rate is theirs to set and
+   * the shape of the plume comes from the spread and the lifetime rather than
+   * from a count. `heat` 1 is a hot spring -- slow, tall, long-lived, straight
+   * up, because still water over hot rock convects and does not blow about.
+   * `heat` 0 is the spray at the foot of a waterfall: fast, wide, short-lived
+   * and thrown sideways, because that is air being dragged down and pushed out
+   * rather than rising of its own accord.
+   */
+  steam(pos, up, spread = 0.5, heat = 1) {
+    const p = this._spawn();
+    if (!p) return;
+    p.alive = true;
+    p.steam = 1;
+    p.buoyant = false;
+    p.pos.copy(pos);
+    p.pos.x += (Math.random() - 0.5) * spread;
+    p.pos.y += (Math.random() - 0.5) * spread;
+    p.pos.z += (Math.random() - 0.5) * spread;
+    const rise = heat > 0.5 ? 0.55 + Math.random() * 0.5 : 1.5 + Math.random() * 1.4;
+    p.vel.copy(up).multiplyScalar(rise);
+    const drift = heat > 0.5 ? 0.16 : 0.9;
+    p.vel.x += (Math.random() - 0.5) * drift;
+    p.vel.y += (Math.random() - 0.5) * drift;
+    p.vel.z += (Math.random() - 0.5) * drift;
+    p.rot.identity();
+    p.spin.set(0, 0, 0);
+    p.life = 0;
+    p.maxLife = heat > 0.5 ? 2.6 + Math.random() * 2.2 : 0.9 + Math.random() * 0.7;
+    // The size here is the START size; `update` grows it. A puff that does not
+    // expand reads as a cotton ball travelling upward rather than as vapour.
+    p.size = (heat > 0.5 ? 0.26 : 0.18) + Math.random() * 0.18;
+    // The peak of the fade, carried in `color` so the two callers can differ in
+    // density without a second material. 0.30 was the first try and it was
+    // nearly invisible in a screenshot: additive white over a lit snowfield has
+    // to be much stronger than it looks in isolation before it reads as vapour
+    // rather than as a lens artefact.
+    p.color.setScalar(heat > 0.5 ? 0.62 : 0.48);
+  }
+
   /** A few bubbles rising past the player's face while submerged. */
   bubbles(pos, up, count = 3) {
     for (let i = 0; i < count; i++) {
@@ -355,14 +484,21 @@ export class Particles {
 
   update(dt, camera, up, sky) {
     // debris
-    let count = 0, bub = 0;
+    let count = 0, bub = 0, stm = 0;
     const g = GRAVITY * 0.72;
     for (const p of this.pool) {
       if (!p.alive) continue;
       p.life += dt;
       if (p.life >= p.maxLife) { p.alive = false; continue; }
       _v.copy(p.pos).sub(this.center).normalize();
-      if (p.buoyant) {
+      if (p.steam) {
+        // Rises, and slows as it cools and spreads. No collision test: vapour
+        // goes round a rock, and a puff bouncing off the rim of its own pool is
+        // both wrong and the one thing that would make it read as a solid.
+        p.vel.addScaledVector(_v, 0.55 * dt);
+        p.vel.multiplyScalar(Math.max(0, 1 - 0.9 * dt));
+        p.pos.addScaledVector(p.vel, dt);
+      } else if (p.buoyant) {
         // bubbles rise and are heavily damped by the water
         p.vel.addScaledVector(_v, 3.4 * dt);
         p.vel.multiplyScalar(Math.max(0, 1 - 2.4 * dt));
@@ -382,10 +518,22 @@ export class Particles {
         p.rot.multiply(_q);
       }
       const t = p.life / p.maxLife;
-      const sz = p.size * (1 - t * t * 0.7);
+      // Steam is the one thing here that GROWS. Everything else is debris and
+      // shrinks away; vapour expands as it cools, and the expansion plus the
+      // fade is what turns a line of puffs into a plume.
+      const sz = p.steam ? p.size * (1 + t * 1.9) : p.size * (1 - t * t * 0.7);
       _s.set(sz, sz, sz);
       _m.compose(p.pos, p.rot, _s);
-      if (p.buoyant) {
+      if (p.steam) {
+        if (stm < MAX_STEAM) {
+          this.steamMesh.setMatrixAt(stm, _m);
+          // In and out: a puff that appears at full strength reads as a pop.
+          // p.color carries the peak, which is how the two callers differ in
+          // density without a second material.
+          this.steamAlpha.setX(stm, p.color.r * Math.sin(Math.PI * Math.min(1, t)) );
+          stm++;
+        }
+      } else if (p.buoyant) {
         if (bub < MAX_BUBBLES) { this.bubbleMesh.setMatrixAt(bub, _m); bub++; }
       } else {
         this.debris.setMatrixAt(count, _m);
@@ -401,6 +549,11 @@ export class Particles {
     }
     this.bubbleMesh.count = bub;
     if (bub > 0) this.bubbleMesh.instanceMatrix.needsUpdate = true;
+    this.steamMesh.count = stm;
+    if (stm > 0) {
+      this.steamMesh.instanceMatrix.needsUpdate = true;
+      this.steamAlpha.needsUpdate = true;
+    }
 
     // motes: sunlit dust by day, fireflies at night
     const mu = this.motes.material.uniforms;

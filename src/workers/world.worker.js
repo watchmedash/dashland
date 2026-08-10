@@ -105,7 +105,8 @@ function transfers(groups, crossLight) {
 }
 
 function meshAndPost(f, ci, cj, ck) {
-  const { groups, crossLight } = meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck);
+  const { groups, crossLight } = meshChunk(blocks, colBiome, gen.colWaterStyle,
+    light, facing, f, ci, cj, ck);
   // `crossLight` rides with the geometry rather than in a message of its own,
   // because it must land in the same tick as the mesh it belongs to: it is the
   // light of blocks this chunk deliberately did *not* mesh, and the main thread

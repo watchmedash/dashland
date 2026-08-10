@@ -30,8 +30,14 @@ import { D } from '../world/Constants.js';
 import { colNeighbor } from '../world/Sphere.js';
 import { ID, RENDER_TYPE, R_LIQUID, DROWNS } from '../world/Blocks.js';
 
-/** A full source block. Sideways flow loses one level per cell. */
-const LEVEL_MAX = 7;
+/**
+ * A full source block. Sideways flow loses one level per cell.
+ *
+ * Exported because main.js seeds worldgen waterfalls at exactly this level --
+ * see `_isFallingCell` -- and a second copy of the number in that file would be
+ * a copy that could drift.
+ */
+export const LEVEL_MAX = 7;
 /** Seconds between flow ticks — water should visibly creep, not teleport. */
 const TICK = 0.22;
 /** Ceiling on cells processed per tick, so a huge breach can't stall a frame. */

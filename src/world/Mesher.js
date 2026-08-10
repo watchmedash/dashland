@@ -251,8 +251,9 @@ class Group {
 
 /**
  * For liquids the tint attribute is repurposed: x carries normalised water
- * depth and y a shoreline flag, which is what the liquid shader needs to grade
- * shallow-to-deep colour and lay foam along the coast.
+ * depth, y a shoreline flag, and z the body of water's identity — a marsh, a
+ * tarn, a hot spring, a waterfall or the ocean. See WATER_OCEAN in WorldGen for
+ * why that rides here rather than in a block id of its own.
  */
 function tintOf(id, biomeId) {
   const t = TINT_ID[id];
@@ -361,6 +362,9 @@ function cornerLerp(f, i, j, k, out) {
  * Mesh one chunk.
  * @param {Uint8Array} blocks
  * @param {Uint8Array} colBiome  per-column biome
+ * @param {Uint8Array} colWater  per-column water identity — see WATER_OCEAN in
+ *   WorldGen. Absent on a world built before it existed, which reads as 0 for
+ *   every column and is the ocean, so nothing has to test for it.
  * @param {{sun,r,g,b}} light
  * @param {Map<number,number>} facing sparse cell index —  facing 0..3; only
  *   directional blocks have an entry, so this is never touched for ordinary
@@ -369,7 +373,7 @@ function cornerLerp(f, i, j, k, out) {
  *   groups as before, plus the baked light of every modelled-cross cell in this
  *   chunk (null when there are none). See CROSS_LIGHT_ADDR_SHIFT.
  */
-export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
+export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, ck) {
   const groups = [new Group(), new Group(), new Group(), new Group()];
   const crossLight = new CrossLightBuf();
   const i0 = ci * CHUNK_T, j0 = cj * CHUNK_T, k0 = ck * CHUNK_K;
@@ -429,7 +433,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
    * four fifths of whatever height the film actually has.
    */
   const WAVE_HEADROOM = 0.2;
-  let liquidDepth = 0, liquidShore = 0;
+  let liquidDepth = 0, liquidShore = 0, liquidStyle = 0;
   // per-corner water depth, so the shallow-to-deep gradient and the foam band
   // interpolate across the surface instead of stepping block by block
   const liquidCorner = [0, 0, 0, 0];
@@ -587,7 +591,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
     _t[0] = ax / al; _t[1] = ay / al; _t[2] = az / al;
 
     const tint = GROUP[id] === GROUP_LIQUID
-      ? [liquidDepth, liquidShore, 0]
+      ? [liquidDepth, liquidShore, liquidStyle]
       : tintOf(id, biomeId);
     const wave = WAVE[id];
     const uv = [[0, 0], [uMax, 0], [uMax, vMax], [0, vMax]];
@@ -605,7 +609,7 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
       g.aux.push4(layer, AO_CURVE[aoData[c]], cornerData[c][0],
         wave === 0 ? 0 : wave + (useWaveAmt ? waveAmt[c] * 0.99 : 0.99));
       g.blk.push3(cornerData[c][1], cornerData[c][2], cornerData[c][3]);
-      if (useCornerDepth) g.tint.push3(liquidCorner[c], tint[1], 0);
+      if (useCornerDepth) g.tint.push3(liquidCorner[c], tint[1], tint[2]);
       else g.tint.push3(tint[0], tint[1], tint[2]);
     }
     g.idxb.quad(v0);
@@ -667,6 +671,11 @@ export function meshChunk(blocks, colBiome, light, facing, f, ci, cj, ck) {
           liquidDepth = Math.min(1, d / 7);
           liquidShore = (IS_OPAQUE[at(nPi, k)] || IS_OPAQUE[at(nMi, k)]
             || IS_OPAQUE[at(nPj, k)] || IS_OPAQUE[at(nMj, k)]) ? 1 : 0;
+          // Per column, not per cell, so every quad of one body of water agrees
+          // and there is no seam down the middle of a lake. Lava takes it too
+          // and ignores it: the shader branches on the wave id long before it
+          // looks at this.
+          liquidStyle = colWater ? colWater[col] : 0;
         }
 
         // Surface height at each of the cell's four top corners, in corner order

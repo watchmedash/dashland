@@ -898,11 +898,28 @@ ${SEASON_FRAG}
 `;
 
 // --- liquid-only variants ---------------------------------------------------
-// `tint` carries (depth, shoreline, -) for liquids rather than a biome colour.
+// The tint attribute carries (depth, shoreline, identity) for liquids rather
+// than a biome colour. See WATER_OCEAN in WorldGen for what the identity is and
+// why it arrives here in a vertex attribute instead of in a block id.
 
 const LIQUID_MAP_FRAG = /* glsl */`
   float wDepth = vTint.x;
   float wShore = vTint.y;
+  /*
+   * How mirror-like this water is. Read again by the fresnel block after
+   * <opaque_fragment>, which is why it is declared out here rather than inside
+   * the branch below: a variable declared in that else goes out of scope at its
+   * closing brace and the reflection would not compile.
+   *
+   * It exists because the sky reflection is the strongest single thing this
+   * shader does and it was the same strength on every body of water. That is
+   * right for a tarn and wrong for everything murky: peat water and mineral
+   * water scatter at the surface instead of reflecting it, and a sheet of
+   * falling water has no flat surface to reflect with at all. Without this a
+   * marsh seen across its length is a mirror with brown paint behind it, which
+   * reads exactly like the sea again.
+   */
+  float wGloss = 1.0;
 
   if (vWave > 2.5) {
     // Lava shares the liquid pass but wants none of the water treatment: keep
@@ -945,12 +962,102 @@ const LIQUID_MAP_FRAG = /* glsl */`
   // the shallows and making that colour strong enough to survive the average.
   // The shallow end stays see-through — the bed's ripples still read through
   // it, which is the thing worth keeping — it is simply water-coloured now.
+  /*
+   * ---- what kind of water this is ----------------------------------------
+   *
+   * Everything below this line used to be four constants: one shallow colour,
+   * one deep colour, one ramp and one alpha range, for every drop of water on
+   * the planet. So the only thing that made a marsh look different from a tarn
+   * was how deep it happened to be, which is the same axis the ocean already
+   * spends on its own shelf-to-abyss gradient. A wide shallow marsh and a
+   * three-block bay were literally the same pixels.
+   *
+   * Four things per kind, and they are ordered so that the one you notice first
+   * is not the hue:
+   *
+   *   dScale  is CLARITY and does most of the work. It is how many blocks of
+   *           depth the colour ramp saturates over, so a small number is water
+   *           you cannot see into and a large one is water you can read a bed
+   *           through. Peat at 0.10 closes up inside one block; a mountain tarn
+   *           at 0.62 shows you six blocks of slate.
+   *   aLo/aHi is the same axis in the blend, and has to move with dScale or the
+   *           colour arrives and the bed shows straight through it anyway.
+   *   wGloss  scales the sky reflection and the sun glint.
+   *   the two colours come last on purpose.
+   *
+   * The values are 0..7 exactly as WorldGen writes them. A column with no
+   * identity sends 0, which is the ocean, so there is nothing to fall back to.
+   */
+  int ws = int(vTint.z + 0.5);
   vec3 shallow = vec3(0.13, 0.55, 0.60);
   vec3 deep    = vec3(0.02, 0.16, 0.34);
-  float dRamp = smoothstep(0.0, 0.42, wDepth);
+  float dScale = 0.42;
+  float aLo = 0.46, aHi = 0.90;
+  float foamK = 1.0;
+  float bodyGain = 1.12;
+
+  if (ws == 1) {
+    // Pond. Standing lowland water over mud: green rather than blue, and it
+    // closes up faster than the sea because there is silt in it.
+    shallow = vec3(0.17, 0.47, 0.36); deep = vec3(0.04, 0.18, 0.15);
+    dScale = 0.30; aLo = 0.56; aHi = 0.93; foamK = 0.7; wGloss = 0.85;
+  } else if (ws == 2) {
+    // Tarn. Snowmelt on bare rock: the clearest water on the planet and the
+    // coldest colour. The long ramp is the point of it. You can see the floor
+    // of a five-block tarn, and past that it goes black rather than blue.
+    shallow = vec3(0.11, 0.44, 0.55); deep = vec3(0.01, 0.06, 0.19);
+    dScale = 0.62; aLo = 0.32; aHi = 0.95; foamK = 1.0; wGloss = 1.15;
+  } else if (ws == 3) {
+    // Marsh. Peat-stained, and the one body of water on the planet you cannot
+    // see into at all: brown-green, opaque within a block and nearly matte, so
+    // it reads as a surface rather than as a volume. No foam, because a marsh
+    // has no wave to break and a white rim round it read as a lagoon.
+    shallow = vec3(0.21, 0.25, 0.13); deep = vec3(0.09, 0.11, 0.05);
+    dScale = 0.10; aLo = 0.78; aHi = 0.94; foamK = 0.0; wGloss = 0.45;
+    bodyGain = 1.30;
+  } else if (ws == 4) {
+    // Oasis. Clean water over pale sand under a desert sun. The turquoise is
+    // not a stylisation, it is what a bright sand bed does to clear water, and
+    // it is most of the reason an oasis is worth walking to.
+    shallow = vec3(0.22, 0.74, 0.72); deep = vec3(0.03, 0.34, 0.46);
+    dScale = 0.55; aLo = 0.34; aHi = 0.88; foamK = 0.8; wGloss = 1.1;
+  } else if (ws == 5) {
+    // Plunge basin. Deep, cold and full of air off the fall standing in it: a
+    // tarn's colour with a tarn's clarity taken back out.
+    shallow = vec3(0.16, 0.52, 0.55); deep = vec3(0.02, 0.13, 0.26);
+    dScale = 0.34; aLo = 0.46; aHi = 0.93; foamK = 1.35; wGloss = 0.95;
+  } else if (ws == 6) {
+    // Hot spring. Mineral water is MILKY, and that is the whole read: bright
+    // rather than dark, opaque within a block, and barely reflective. Against
+    // snow it has to be the warm thing in the frame, so the gain is high enough
+    // that the pool stays luminous in shade.
+    shallow = vec3(0.46, 0.78, 0.71); deep = vec3(0.26, 0.60, 0.60);
+    dScale = 0.16; aLo = 0.84; aHi = 0.96; foamK = 0.35; wGloss = 0.5;
+    bodyGain = 1.34;
+  } else if (ws == 7) {
+    // A waterfall, and the one column of the pool it lands in. Aerated water is
+    // white rather than blue and reflects nothing.
+    shallow = vec3(0.62, 0.79, 0.85); deep = vec3(0.52, 0.70, 0.80);
+    dScale = 0.50; aLo = 0.64; aHi = 0.84; foamK = 3.0; wGloss = 0.30;
+    bodyGain = 1.20;
+    /*
+     * The one thing that actually makes it read as falling rather than as a
+     * blue wall: a third sample scrolling hard along +v.
+     *
+     * On a side quad u runs tangentially and v runs up the column, so adding
+     * time to v samples further up the texture every frame and the pattern
+     * travels DOWN. Squeezed to 0.45 across so the streaks come out long, and
+     * mixed over the two ambling surface layers rather than replacing them,
+     * which keeps the top face of the plunge pool off the conveyor belt.
+     */
+    vec2 uvF = vTexUv * vec2(1.7, 0.45) + vec2(0.0, uTime * 1.35);
+    surf = mix(surf, texture(uMap, vec3(uvF, vLayer)).rgb, 0.72);
+  }
+
+  float dRamp = smoothstep(0.0, dScale, wDepth);
   vec3 body = mix(shallow, deep, dRamp);
-  diffuseColor.rgb = surf * body * 1.12;
-  diffuseColor.a = mix(0.46, 0.90, dRamp);
+  diffuseColor.rgb = surf * body * bodyGain;
+  diffuseColor.a = mix(aLo, aHi, dRamp);
 
   // Foam where the water actually touches land. Tight and bright: a hard rim
   // is what tells the eye the surface has an edge in the world rather than
@@ -961,8 +1068,12 @@ const LIQUID_MAP_FRAG = /* glsl */`
   // neighbour is land" flag, so pairing it with a wide depth window turned
   // every shallow bay into a white field — the rim has to be narrow in depth
   // to stay a rim.
-  float edge = wShore * (1.0 - smoothstep(0.0, 0.13, wDepth));
-  float foam = 0.72 * smoothstep(0.50, 0.92, edge * (0.42 + ripple * 0.62 + ripple2 * 0.4));
+  // A waterfall is foam everywhere and not only where it meets land, so its
+  // edge term ignores the shoreline flag. Everything else keeps the narrow rim,
+  // scaled by how much white that kind of water has any business having.
+  float edge = ws == 7 ? 1.0 : (wShore * (1.0 - smoothstep(0.0, 0.13, wDepth)));
+  float foam = clamp(0.72 * foamK, 0.0, 0.85)
+    * smoothstep(0.50, 0.92, edge * (0.42 + ripple * 0.62 + ripple2 * 0.4));
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.99, 1.0), foam);
   diffuseColor.a = clamp(max(diffuseColor.a, foam * 0.9), 0.0, 0.94);
   }
@@ -1439,7 +1550,9 @@ function patch(material, opts = {}) {
                               / max(dot(uSkyReflect, AERIAL_LUMA), 1e-4),
                               SKY_SHAPE_MIN, SKY_SHAPE_MAX);
           vec3 refl = uSkyReflect * mix(1.0, shape, SKY_SHAPE) * 0.88;
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, refl, fres * 0.88);
+          // wGloss is what stops every body of water being the same mirror.
+          // See where it is set, above <map_fragment>.
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, refl, fres * 0.88 * wGloss);
 
           // Sun glint. The single strongest cue that a surface is liquid, and
           // the thing whose absence made this read as painted-on colour. It
@@ -1465,7 +1578,7 @@ function patch(material, opts = {}) {
           const float SUN_PATH_GAIN = 0.35;
           vec3 half3 = normalize(uSunDir - vDir);
           float ndh = clamp(dot(normal, half3), 0.0, 1.0);
-          gl_FragColor.rgb += uSunColor * fres * vSun
+          gl_FragColor.rgb += uSunColor * fres * vSun * wGloss
                             * (pow(ndh, 190.0) * 9.0 + pow(ndh, SUN_PATH_POW) * SUN_PATH_GAIN);
 
           // Opacity follows the same curve: grazing water hides its bed.

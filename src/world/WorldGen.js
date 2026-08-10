@@ -5,7 +5,7 @@ import { Noise, makeRng, hash3, clamp, lerp, smoothstep } from '../util/Noise.js
 import {
   F, D, FACES, R_MIN, R_MAX, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX,
   R_SEABED_MIN, R_CANYON_MIN,
-  COLUMNS, NUM_VOXELS, vidx, cidx, BIOME, regionOfCol,
+  COLUMNS, NUM_VOXELS, CHUNK_T, vidx, cidx, BIOME, regionOfCol,
 } from './Constants.js';
 import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
@@ -338,10 +338,106 @@ const AQ_K1 = Math.min(D - 2, Math.ceil(AQ_HI - R_MIN - 0.5) + 1);
 const SPRING_LATTICE = 8;
 const SPRING_LI = 3;
 const SPRING_LJ = 5;
-const SPRING_R = 2.6;          // rim radius, in columns
-const SPRING_RI = 1.6;         // water radius — every 4-neighbour of a water
-const SPRING_CHANCE = 0.085;   // column is therefore inside the rim
+/**
+ * Three radii, not two, and the pool got half as wide again.
+ *
+ * At 2.6/1.6 the water was three columns across and two blocks deep against a
+ * 1.8-block player, so the only thing you could do in a hot spring was swim in
+ * it — head under, breath meter running — which is what a well is for. A bath
+ * you can sit in is a floor at chest height, and a voxel world has exactly two
+ * offers: one block of water (shin) or two (over your head). So it is both. The
+ * middle stays two deep, the ring around it is one, and the step between them
+ * is a ledge you stand on with the water at your waist.
+ *
+ * SPRING_RI is SPRING_R minus exactly 1 and has to stay that way: it is what
+ * makes the enclosure structural. A unit step moves a column's radius by at
+ * most 1, so every 4-neighbour of a water column is inside the rim, and no
+ * water cell can have an open side. See `springAt`.
+ */
+const SPRING_R = 3.7;          // rim radius, in columns
+const SPRING_RI = 2.7;         // water radius — SPRING_R - 1, see above
+const SPRING_RD = 1.5;         // the deep middle; outside it the pool is a shelf
+/**
+ * 0.14 and not the old 0.085. The flatness test runs over the rim radius, so
+ * widening the pool made it much harder to satisfy — a 3.7-column disc has to
+ * be level to within one block where a 2.6-column one did. Measured over the
+ * whole planet: at the old chance the wider pool gave 71 springs against 179,
+ * which is a feature you would not find. This puts it back to the same order.
+ */
+const SPRING_CHANCE = 0.14;
 const SPRING_BIOMES = [BIOME.SNOW, BIOME.TUNDRA, BIOME.MOUNTAIN];
+
+/**
+ * Waterfalls: a seep in a cliff face, falling into water that is already there.
+ *
+ * ---- why there were none, and why relaxing anything is the wrong fix -------
+ *
+ * Every cell of worldgen liquid becomes a permanent `sources` entry the first
+ * time its region is seeded, and a source never drains. So the generator has
+ * exactly one obligation about water and it is absolute: whatever it writes has
+ * to be a FIXED POINT of `Water.update`, or the first player edit anywhere near
+ * it wakes the cell and it starts spreading. LAKE_FREEBOARD and LAKE_CAVE_CLEAR
+ * are that obligation discharged for lakes, and they are load-bearing. Nothing
+ * here loosens them.
+ *
+ * Read against the tick, a source cell is inert when both of these hold:
+ *
+ *   - the cell below it is not somewhere the liquid can go (rule: fall first),
+ *   - every tangential neighbour is solid or is liquid at least as deep
+ *     (rule: creep outward, losing a level a step).
+ *
+ * A visible fall breaks the second one by definition: the whole point is open
+ * air beside the water. What makes this possible anyway is the sim's OTHER
+ * rule, the one that exists so a filled shaft does not become a thirty-storey
+ * wall of water walking across the floor: a NON-source cell with liquid both
+ * above and below it is the middle of a falling column, and it does not creep
+ * at all. So the body of a fall is inert for free — provided it is registered as
+ * flowing water rather than as a spring, which is what `_seedWaterRegion` is
+ * for, and provided it never runs out of liquid above or below it.
+ *
+ * That fixes the shape of the feature completely, and every constraint below is
+ * one of those two ends:
+ *
+ *   THE FOOT is submerged. The fall lands in water that already exists — the
+ *   sea, or a lake — so the lowest falling cell has liquid beneath it and is
+ *   still a middle cell. Landing on dry rock would make it a FOOT cell, which
+ *   spreads six columns at full strength, and on a slope those six columns fall
+ *   again and spread six more. That is the unbounded case, and it is excluded
+ *   by never generating it. No plunge pool is dug, because a dug pool is a new
+ *   basin to prove watertight and the planet already has two that are proven.
+ *
+ *   THE HEAD is roofed and walled. The topmost cell has air above it, so it is
+ *   not a middle cell and cannot be flowing water either — nothing feeds it, and
+ *   `_maybeDry` would drain the fall from the top down. It has to be a spring,
+ *   and a spring is only inert if all four of its sides are shut. So the pass
+ *   writes stone into all four tangential neighbours at the head layer and one
+ *   cell of roof over it, unconditionally, whatever was there. The water
+ *   emerges from under a rock lip one layer down, where the column is already
+ *   inert. Containment at the head is therefore structural — it is written, not
+ *   tested — which is the only kind that survives a cave the site test never
+ *   asked about.
+ *
+ * The fall is ONE column wide and that is a correctness constraint, not a
+ * style: `_seedWaterRegion` identifies falling water by "liquid above, liquid
+ * below, no tangential liquid, at least one tangential air", and the third
+ * clause is what tells a waterfall apart from the inside of the ocean beside a
+ * cave mouth. Two adjacent falling columns would each veto the other.
+ *
+ * The whole footprint is required to sit inside one region, for the same
+ * reason: the seed pass runs per region and can only read its own blocks, so a
+ * fall straddling a boundary would have its air neighbours read as unbuilt and
+ * come back a spring.
+ */
+const FALL_CHANCE = 0.5;
+/** Layers of drop. Under seven reads as a spill, not a fall. */
+const FALL_MIN_DROP = 7;
+/**
+ * 40 and not D. Every falling cell is a `level` entry that is written to the
+ * save, and the cap is what bounds that: a 40-layer fall is 40 entries.
+ */
+const FALL_MAX_DROP = 40;
+/** Head clearance: the lip sits this far under the cliff-top column's surface. */
+const FALL_LIP = 2;
 
 /**
  * Fallen logs: a windfall lying on the forest floor.
@@ -441,6 +537,8 @@ const _logNb = { f: 0, i: 0, j: 0 };
  * centre halfway through the sweep.
  */
 const _cactusParts = { f: 0, i: 0, j: 0 };
+/** And one for the waterfalls, which run in their own sweep. */
+const _fallParts = { f: 0, i: 0, j: 0 };
 
 /**
  * Inland lakes.
@@ -474,6 +572,35 @@ const LAKE_POND = 1;
 const LAKE_TARN = 2;
 const LAKE_MARSH = 3;
 const LAKE_OASIS = 4;
+/**
+ * A plunge basin: the fifth kind, and the one that exists to have a waterfall
+ * come into it.
+ *
+ * The planet had no waterfalls and could not have one, and the reason turned
+ * out not to be the water rules at all — it was that the height field has no
+ * cliffs next to water. Measured over every one of the 448 000 columns that
+ * hold water, the largest step between a water column and a tangential
+ * neighbour on the whole planet is EIGHT layers, and only one column on the
+ * planet reaches it; the median is under two. Ground six columns inland of a
+ * shore is typically five layers up. There is nowhere for water to fall from.
+ *
+ * So the basin makes its own. It is a tarn in shape — steep walls, flat floor —
+ * but it is sited by the two tests that all four older kinds use to REJECT a
+ * hillside, run the other way round. LAKE_TOL is how far the rim may tower over
+ * its own lowest point before the site is called a cliff rather than a shore,
+ * and LAKE_CUT is how much ground, per bed column, had to be dug away to reach
+ * the waterline. Every other kind wants both small. This one wants them large,
+ * which is exactly a bowl bitten out of a mountainside with one wall standing
+ * fifteen or twenty layers over the water.
+ *
+ * Nothing about the containment argument changes and nothing about it is
+ * relaxed. The surface is still `rim - LAKE_FREEBOARD` with `rim` the MINIMUM
+ * ground over a ring that is never carved, so the basin is still provably
+ * sealed at every layer it holds water; LAKE_CAVE_CLEAR still applies, because
+ * `lakeSurf` is what the cave carve reads. TOL and CUT were only ever site
+ * taste, and this kind's taste is the opposite one.
+ */
+const LAKE_PLUNGE = 5;
 /** Bank rather than bed: not carved, re-surfaced, and never holds water. */
 const LAKE_SHORE = 0x80;
 /** Bed raised back above the waterline: an islet in a large pond. */
@@ -603,9 +730,65 @@ LAKE_CHANCE[LAKE_OASIS] = 0.45;
 LAKE_TOL[LAKE_OASIS] = 5.0;
 LAKE_CUT[LAKE_OASIS] = 2.0;
 LAKE_MIN_ALT[LAKE_OASIS] = R_SEA - 0.25;
+LAKE_R[LAKE_PLUNGE] = [3.4, 5.4];
+LAKE_DEPTH[LAKE_PLUNGE] = [4.0, 6.0];
+LAKE_WOBBLE[LAKE_PLUNGE] = [0.12, 0.06];
+LAKE_BED_ROUGH[LAKE_PLUNGE] = 0.7;
+LAKE_CHANCE[LAKE_PLUNGE] = 0.6;
+/**
+ * 26 and 15, against a tarn's 9 and 3.2, and these two numbers ARE the feature.
+ *
+ * TOL lets one side of the rim stand 26 layers over the lowest side, which is
+ * the wall the water comes over. CUT lets fifteen layers of ground per bed
+ * column be dug away to reach the waterline, which is what a bowl bitten into
+ * a mountainside costs. Both are site taste and neither touches the seal — see
+ * LAKE_PLUNGE. What they cannot be is unbounded: a basin whose rim towers 40
+ * layers is a mineshaft, and the drop is capped again at the fall itself by
+ * FALL_MAX_DROP.
+ */
+LAKE_TOL[LAKE_PLUNGE] = 26.0;
+LAKE_CUT[LAKE_PLUNGE] = 15.0;
+/** Mountain country only, and well clear of the sea. */
+LAKE_MIN_ALT[LAKE_PLUNGE] = R_SEA + 8;
 /** The least water a site has to hold to be worth being a lake at all. */
 const LAKE_MIN_DEPTH = 1.5;
 const LAKE_MIN_CELLS = 8;
+
+/**
+ * What KIND of water a column holds, for the renderer and nothing else.
+ *
+ * Every body of water on the planet was one block, one shader and one pair of
+ * hardcoded colours, graded only by depth — so a peat marsh, a slate tarn and
+ * the open ocean differed exactly as much as the shallow end of a bay differs
+ * from the deep end of it, which is to say a marsh read as "ocean, three blocks
+ * down". The beds and the banks were already four different materials; the
+ * water above them was not.
+ *
+ * This is a per-column byte the mesher hands to the liquid shader through the
+ * spare third channel of the `tint` attribute, which the liquid path already
+ * repurposes for depth and shoreline and leaves at zero. Deliberately NOT a new
+ * block id: water is the most-touched id in the game — the flow sim, buckets,
+ * freezing, drowning, the reef's cover rule, six `=== ID.water` tests in
+ * main.js — and five more of it would be five more chances for one of those to
+ * miss a case. A byte the renderer reads and nothing else reads cannot break
+ * the sim by construction.
+ *
+ * It is worker-resident and never transferred or saved: 1.3 MB against the
+ * 128 MB block array, and it is a pure function of the seed, so regenerating it
+ * on load is the same work as regenerating the terrain it describes.
+ *
+ * 1..5 are exactly LAKE_POND..LAKE_PLUNGE, so the lake pass can assign
+ * `lakeKind & 7` straight across. Do not reorder them apart. 7 is the last
+ * value the three spare bits hold; a sixth body of water needs a wider field.
+ */
+export const WATER_OCEAN = 0;
+export const WATER_POND = 1;
+export const WATER_TARN = 2;
+export const WATER_MARSH = 3;
+export const WATER_OASIS = 4;
+export const WATER_PLUNGE = 5;
+export const WATER_SPRING = 6;
+export const WATER_FALL = 7;
 
 /** Scratch for the lake pass. It runs once, planet-wide, before any voxel. */
 const _lakeDir = [0, 0, 0];
@@ -1088,6 +1271,10 @@ export class WorldGen {
     this.lakeSurf = null;
     /** Kind, plus the shore and islet flags. See LAKE_POND and friends. */
     this.lakeKind = null;
+    /** Per-column water identity for the renderer. See WATER_OCEAN. */
+    this.colWaterStyle = null;
+    /** How many waterfalls this generator has actually written. Diagnostics. */
+    this.fallCount = 0;
     /**
      * One packed aquifer record per column, built on demand.
      *
@@ -1497,6 +1684,21 @@ export class WorldGen {
     onProgress(0.95, 'Filling the lakes');
     this.carveLakes(colHeight, colBiome, canyonMask, submerged, shoreDist);
 
+    /**
+     * Water identity, straight off the lake pass. See WATER_OCEAN.
+     *
+     * A single sweep here rather than a write inside the commit loop, because
+     * `lakeSurf > 0` is exactly "this column can hold lake water" — bed and
+     * ring both — and restating that test inside the four branches of the
+     * commit is how the two would drift apart. Everything else on the planet
+     * is 0, which is the ocean and is also the honest default for the aquifers
+     * and for any water a player pours.
+     */
+    this.colWaterStyle = new Uint8Array(COLUMNS);
+    for (let col = 0; col < COLUMNS; col++) {
+      if (this.lakeSurf[col] > 0) this.colWaterStyle[col] = this.lakeKind[col] & 7;
+    }
+
     // slope from the finished height field — exact, unlike sampling the noise
     for (let col = 0; col < COLUMNS; col++) {
       const h = colHeight[col];
@@ -1886,6 +2088,12 @@ export class WorldGen {
           case LAKE_OASIS:
             top = grit < 0.25 ? ID.moss_block : ID.sand;
             sub = ID.sand; break;
+          case LAKE_PLUNGE:
+            // Wet rock and moss. The bank of a plunge basin is the foot of a
+            // cliff, so it wears the cliff's own material with the damp on it
+            // rather than anything that grew there.
+            top = patch > 0.1 ? ID.moss_block : (grit < 0.4 ? ID.gravel : ID.stone);
+            sub = ID.stone; break;
           default:
             top = patch > 0.14 ? ID.moss_block : (grit < 0.3 ? ID.mud : top);
             sub = grit < 0.5 ? ID.coarse_dirt : ID.dirt; break;
@@ -1902,6 +2110,11 @@ export class WorldGen {
           case LAKE_OASIS:
             top = grit < 0.2 ? ID.clay : ID.sand;
             sub = ID.sandstone; break;
+          case LAKE_PLUNGE:
+            // Scoured to bare rock and shingle, with none of a tarn's slate:
+            // this floor is what a falling column of water has been grinding.
+            top = patch > 0.2 ? ID.stone : (grit < 0.45 ? ID.gravel : ID.cobblestone);
+            sub = ID.stone; break;
           default:
             top = patch > 0.24 ? ID.gravel : (grit < 0.38 ? ID.clay : ID.mud);
             sub = ID.clay; break;
@@ -2253,7 +2466,11 @@ export class WorldGen {
           const isleRoll = rng(), isleAng = rng(), isleRad = rng();
 
           let kind = 0;
-          if (bi === BIOME.MOUNTAIN || bi === BIOME.SNOW) kind = LAKE_TARN;
+          // The high country hosts two, and the plunge basin is the rarer of
+          // them because it is a much bigger intervention in the hillside.
+          if (bi === BIOME.MOUNTAIN || bi === BIOME.SNOW) {
+            kind = pickMix < 0.40 ? LAKE_PLUNGE : LAKE_TARN;
+          }
           else if (bi === BIOME.DESERT || bi === BIOME.BADLANDS) kind = LAKE_OASIS;
           else if (bi === BIOME.PLAINS || bi === BIOME.MEADOW || bi === BIOME.TUNDRA) {
             kind = pickMix < 0.45 ? LAKE_MARSH : LAKE_POND;
@@ -2383,6 +2600,9 @@ export class WorldGen {
             let prof;
             switch (kind) {
               case LAKE_TARN: prof = Math.min(1, (1 - u) * 2.6); break;
+              // Steeper again than a tarn, and flat-floored: what the water
+              // under a fall has cut for itself is a shaft, not a bowl.
+              case LAKE_PLUNGE: prof = Math.min(1, (1 - u) * 3.2); break;
               case LAKE_MARSH: prof = 1 - u * u * u * u; break;
               case LAKE_OASIS: prof = 1 - u * u * u; break;
               default: prof = 1 - u * u;
@@ -2458,11 +2678,12 @@ export class WorldGen {
       }
     }
 
-    const counts = [0, 0, 0, 0, 0];
+    const counts = [0, 0, 0, 0, 0, 0];
     for (let t = 0; t < this.lakes.length; t++) counts[this.lakes[t].kind]++;
     this.lakeCounts = {
       pond: counts[LAKE_POND], tarn: counts[LAKE_TARN],
       marsh: counts[LAKE_MARSH], oasis: counts[LAKE_OASIS],
+      plunge: counts[LAKE_PLUNGE],
       total: this.lakes.length,
     };
   }
@@ -3214,11 +3435,21 @@ export class WorldGen {
         if (d > SPRING_R) continue;
         const c = patchColumn(p.f, p.i, p.j, di, dj);
         const crust = rng() < 0.42 ? ID.sulfur_ore : ID.tuff;
+        // Before the region clip, like every draw from the stream above it: the
+        // style of a column has to come out the same whichever region stamps
+        // the pool, and a column outside this region is one the neighbouring
+        // region will write the same value into when its turn comes.
+        if (d <= SPRING_RI) this.colWaterStyle[c] = WATER_SPRING;
         if (regionOfCol(c) !== rid) continue;
         const b = c * D;
         if (d <= SPRING_RI) {
+          // The bath. Two deep in the middle, one on the shelf around it, and
+          // the water surface at kb-1 either way — which is what keeps the
+          // enclosure argument above intact: there is exactly one water layer
+          // that reaches the rim, and its neighbours are rim or more water.
+          const deep = d <= SPRING_RD;
           blocks[b + kb - 3] = ID.tuff;
-          blocks[b + kb - 2] = ID.water;
+          blocks[b + kb - 2] = deep ? ID.water : ID.tuff;
           blocks[b + kb - 1] = ID.water;
         } else {
           blocks[b + kb - 3] = ID.tuff;
@@ -3234,6 +3465,151 @@ export class WorldGen {
         }
       }
     }
+  }
+
+  /**
+   * The surface of the water a column already holds, as a radius, or 0.
+   *
+   * A lake first and the sea second, because a lake column can be both — a
+   * coastal pond sits over ground the flood fill also reached — and the lake is
+   * the one whose surface is actually there. A bank column is not water: it has
+   * `lakeSurf` so the cave carve can keep away from it, and its ground stands
+   * over that surface by construction.
+   */
+  _fallBaseR(col) {
+    const ls = this.lakeSurf[col];
+    if (ls > 0) return this.inLakeBed(col) ? ls : 0;
+    return this.submerged[col] ? R_SEA : 0;
+  }
+
+  /**
+   * Does a waterfall come down this column, and between which layers?
+   *
+   * Terrain tables only, like every other decoration decision — see
+   * `_treeKind` — so the answer is the same from either side of a boundary and
+   * can be asked before a single voxel of the site exists.
+   */
+  _fallSite(col) {
+    const wsR = this._fallBaseR(col);
+    if (wsR <= 0) return null;
+    const kW = Math.floor(wsR - R_MIN - 0.5);
+    if (kW < 2 || kW > D - 6) return null;
+    // Two layers of water under the fall. One would put the foot cell on the
+    // bed, where a single mined block turns it into a spreading foot; two is
+    // somewhere it can land.
+    if (this.groundKOf(col) > kW - 2) return null;
+    /**
+     * The whole 3x3 footprint inside one region. `_seedWaterRegion` can only
+     * read the region it is seeding, so a fall with a neighbour on the far side
+     * of a boundary would have that neighbour read as unbuilt, fail the "open
+     * side" test, and come back a spring — which is the flood. A region is
+     * CHUNK_T columns square, so keeping one column off each edge is the whole
+     * of it, and it also keeps the patch on one cube face.
+     */
+    const p = colParts(col, _fallParts);
+    const li = p.i % CHUNK_T, lj = p.j % CHUNK_T;
+    if (li < 1 || li > CHUNK_T - 2 || lj < 1 || lj > CHUNK_T - 2) return null;
+    /**
+     * A checkerboard, and it is the cheapest possible way to make two falls
+     * tangentially adjacent IMPOSSIBLE rather than merely unlikely. Two
+     * 4-neighbours always differ in (i + j) parity, so no two candidates can
+     * touch. That matters because `_seedWaterRegion` tells falling water from
+     * the inside of a lake by "no tangential liquid": a pair of neighbouring
+     * falls would each veto the other, both would come back springs, and a
+     * spring with an open side is the flood this whole feature is built to
+     * avoid. The parity costs half the candidates and FALL_CHANCE pays it back.
+     */
+    if ((p.i + p.j) % 2 !== 0) return null;
+    if (this.colRng(col, 0x4f13)() > FALL_CHANCE) return null;
+
+    // The lip hangs off the tallest neighbour, set FALL_LIP into its rock so
+    // there is something over the head cell to be a roof.
+    let maxG = -1, openFull = 0;
+    for (let d = 0; d < 4; d++) {
+      const n = colNeighbor(col, d);
+      if (n < 0) return null;
+      const g = this.groundKOf(n);
+      if (g > maxG) maxG = g;
+    }
+    const kTop = maxG - FALL_LIP;
+    const drop = kTop - kW;
+    if (drop < FALL_MIN_DROP || drop > FALL_MAX_DROP) return null;
+    // At least one side has to be open for the fall's whole height, or the
+    // water is a shaft inside a hill and nobody ever sees it. Open means the
+    // neighbour's ground is under the waterline too; a neighbour that is rock
+    // partway up simply walls that part of the fall, which is fine and is what
+    // a fall in a corner looks like.
+    for (let d = 0; d < 4; d++) {
+      if (this.groundKOf(colNeighbor(col, d)) <= kW) openFull++;
+    }
+    if (openFull < 1) return null;
+
+    // Not on a volcano, for the reason the hot springs are not: the cone is
+    // stamped from the block array after the height field is settled, so a
+    // fall sited by height alone would be a column of water hanging inside a
+    // scorched slope the site test knows nothing about.
+    if (this.volcanoes) {
+      for (let v = 0; v < this.volcanoes.length; v++) {
+        const s = this.volcanoes[v];
+        if (s.f !== p.f) continue;
+        if (Math.hypot(s.i - p.i, s.j - p.j) <= APRON + 2) return null;
+      }
+    }
+    return { kW, kTop };
+  }
+
+  /**
+   * One column's waterfall. See FALL_CHANCE for why it is shaped like this;
+   * this is only the writing.
+   *
+   * No region clip inside the loop, unlike every other pass here, because there
+   * is nothing to clip: `_fallSite` refuses any site whose footprint leaves its
+   * region, so either the whole feature belongs to `rid` or none of it does.
+   * That is also why this is called over a region's own columns rather than
+   * over its margin — a fall in the next region along cannot reach in.
+   */
+  fallAt(blocks, col, rid) {
+    if (regionOfCol(col) !== rid) return;
+    const site = this._fallSite(col);
+    if (!site) return;
+    const { kW, kTop } = site;
+    const b = col * D;
+
+    // What the cliff is made of, so the lip is not a grey patch on red rock.
+    // Read off terrain rather than chosen, and terrain is region-independent —
+    // but a cave can have taken it, so there is a fallback.
+    let rock = ID.stone;
+    for (let d = 0; d < 4; d++) {
+      const n = colNeighbor(col, d);
+      const id = blocks[n * D + kTop];
+      if (IS_OPAQUE[id] && id !== ID.core) { rock = id; break; }
+    }
+
+    // The water. Head at kTop, body below it, down to the cell that sits on the
+    // sea or the lake. Unconditional: these cells are air by construction — the
+    // ground of this column is under the waterline — and writing them anyway is
+    // what makes the result independent of which pass ran first.
+    for (let k = kW + 1; k <= kTop; k++) blocks[b + k] = ID.water;
+    // The lip: a roof over the head and four shut sides at its own layer. This
+    // is the part that is written rather than tested. A source cell with one
+    // open side spreads six columns every tick it is woken, so "there was rock
+    // there anyway" is not good enough — a cave, an ore vein or a later change
+    // to the carve would all be silent ways to lose it.
+    blocks[b + kTop + 1] = rock;
+    for (let d = 0; d < 4; d++) {
+      const n = colNeighbor(col, d);
+      const nb = n * D;
+      blocks[nb + kTop] = rock;
+      // Second layer only where the column is open, so the lip reads as a shelf
+      // of rock rather than as one floating tile. Where the neighbour is
+      // already cliff this would be replacing its own stone with its own stone.
+      if (this.groundKOf(n) < kTop) blocks[nb + kTop + 1] = rock;
+    }
+    // Foam and speed at the fall itself, and at the patch of the pool it lands
+    // in — the style is per column, so the cell where it hits reads aerated,
+    // which is exactly right. See WATER_OCEAN.
+    this.colWaterStyle[col] = WATER_FALL;
+    this.fallCount++;
   }
 
   /**
@@ -4720,5 +5096,13 @@ export class WorldGen {
     // The deep floor, last. Disjoint from the cover pass by depth and beaten by
     // the reef where the two bands overlap — see `abyssAt`.
     for (let n = 0; n < cols.length; n++) this.abyssAt(blocks, cols[n]);
+    // The waterfalls, last of everything and over this region's own columns
+    // only. Last because the lip and the column of water are written
+    // unconditionally and must win: a fall stands in open air over water, which
+    // is ground no other pass claims, but the lip reaches one column sideways
+    // into the cliff beside it and that column is ordinary land. Own columns
+    // only because `_fallSite` refuses any site that would reach outside its
+    // region, so there is nothing in the margin that could write in here.
+    for (let n = 0; n < cols.length; n++) this.fallAt(blocks, cols[n], rid);
   }
 }

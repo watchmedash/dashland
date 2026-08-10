@@ -77,104 +77,147 @@ import * as MobModels from './MobModels.js';
  * The budgets below sum to more than this, and that is fine. Measured, because
  * the arithmetic says otherwise and the arithmetic is misleading.
  *
- * 46 land + 12 aquatic + 12 flying + 14 surface husks (a savage world) + 4 cave
- * husks + 3 monsters + 1 merchant is 92 against a ceiling of 90, which reads as an
- * over-subscription that would starve whatever spawns last — husks, monsters
- * and the merchant, in that order. It is not one, because the two halves cannot
- * be full at the same time: the surface husk budget only opens at night, and
- * night is exactly when `_bedDown` takes the land and flier budgets down to
- * NIGHT_WILDLIFE of themselves.
+ * 84 land + 18 aquatic + 18 flying + 18 surface husks (a savage world) + 4 cave
+ * husks + 3 monsters + 1 merchant is 146 against a ceiling of 134, which reads
+ * as an over-subscription that would starve whatever spawns last — husks,
+ * monsters and the merchant, in that order. It is not one, because the two
+ * halves cannot be full at the same time: the surface husk budget only opens at
+ * night, and night is exactly when `_bedDown` takes the land and flier budgets
+ * down to NIGHT_WILDLIFE of themselves.
  *
- * Driven from the sun direction the spawner actually reads, over a long run:
+ * Driven from the sun direction the spawner actually reads, five minutes of
+ * each clock with the first ninety seconds thrown away while the population
+ * walks from one budget to the other:
  *
- *   day    46 land, 12 water, 12 air,  4 husks, 3 monsters, 1 trader = 78
- *   night  18 land, 12 water,  5 air, 12 husks, 3 monsters          = 50
+ *   day    84 land, 18 water, 18 air,  0 husks, 3 monsters, 1 trader = 124
+ *   night  34 land, 18 water,  7 air,  8 husks, 3 monsters, 1 trader =  71
  *
- * So the true peak is 78, twelve under this ceiling, and the sum of 92 is a
- * number no clock can produce. Raising the cap for it was the fix I nearly
- * shipped. If a budget is ever raised, check the *day* line — that is the one
- * with the headroom left in it.
+ * So the true peak is the daytime 124, ten under this ceiling, and the sum of
+ * 146 is a number no clock can produce. If a budget is ever raised, check the
+ * *day* line — that is the one with the headroom left in it, and there is not
+ * much of it.
  *
  * --- and why these are the numbers they are, which is a report --------------
  *
- * "There are so many animals like omg they are so much." A headcount cannot
- * answer that, because what a player meets is not the roster, it is how many
- * bodies are inside the ground they can see. Measured on the real planet with
- * the real spawner, one census a second over five minutes with the player
- * standing still, at the previous budgets (84/18/18):
+ * "There are so many animals like omg they are so much", and then the
+ * correction that made sense of it: "the density of animals was never the
+ * problem it was just them not being spread around the whole planet, they are
+ * mostly near spawn area."
  *
- *              live    within 20u       within 40u       within 80u
- *   day        116.3   10.6 (peak 17)   38.3 (peak 48)   92.8
- *   night       88.2   14.7 (peak 18)   38.0 (peak 43)   74.9
+ * The first report was answered by cutting these budgets roughly in half. That
+ * was wrong, and the way it was wrong is worth keeping: a headcount cannot
+ * answer either report, because what a player meets is not the roster, it is
+ * how many bodies are inside the ground they can see — and THAT was not being
+ * set by the budget at all. It was being set by where the spawner put things.
+ * See spawnDist: the placement had a 32.7x density gradient falling away from
+ * the player, so every player stood in a small dense cloud with an empty world
+ * around it. Cutting the budget shrank the cloud and the empty world together
+ * and moved the gradient not at all.
  *
- * Thirty eight animals inside forty units — a circle you can cross in nine
- * seconds — is not a populated meadow, it is a herd standing on you, and the
- * peak of 48 is the number the report is about. At 46/12/12, same seed, same
- * spot, same five minutes:
+ * One census a second over four minutes, daylight, same planet and same seed,
+ * player standing still at the world spawn:
  *
- *              live    within 20u       within 40u       within 80u
- *   day         69.0    9.2 (peak 13)   27.0 (peak 36)   56.8
- *   night       53.5   11.6 (peak 14)   25.6 (peak 30)   43.5
+ *                                     live   within 20u        40u      80u
+ *   46/12/12, 1/r placement (the cut)  71.5   8.85     24.23 (peak 37)  54.78
+ *   84/18/18, even over area (now)    120.1   4.30     13.85 (peak 17)  54.22
  *
- * The roster is down 41% and the band a player actually looks at is down 30%,
- * its peak from 48 to 36. The shape of the world is unchanged: the same biome
- * mix in the same proportions, the same species in the same places, predators
- * and hostiles still on their own smaller caps, and nothing anywhere near empty
- * — nine bodies inside twenty units is still an animal every few steps.
+ * The roster is up 68% and the crowd inside forty units is down 43%, its peak
+ * from 37 to 17. That is the whole case for reverting the cut: the crowding
+ * and the emptiness were one bug, and fixing it pays for the animals twice
+ * over. And the same run walking rather than standing, which is the half the
+ * cut could never have helped:
  *
- * Note the two numbers that did *not* halve with the budget, because they are
- * the ones to aim at next. The near bands fall by less than the roster does,
- * and at night the twenty-unit count barely moves at all: a standing player
- * accumulates whatever wanders past, so the near field fills up from the ring
- * whatever the ceiling is. If this is still too busy, the next lever is
- * therefore NOT this ceiling and not the land budget again — it is
- * `SPAWN_PER_TICK` against `SPAWN_PERIOD` (six every two seconds, tuned to
- * outpace a sprint) and `SPAWN_MIN_DIST`. Slowing the refill makes a walk out
- * of a valley thin as you go, which is a different and better kind of quiet
- * than a smaller herd.
+ *                                     live   within 20u        40u      80u
+ *   46/12/12, 1/r placement, walking   73.8   2.35     10.20            32.80
+ *   84/18/18, even over area, walking 121.8   3.67     13.44            47.92
  *
- * --- what a body costs, measured, and why this is still 134 ------------------
+ * Standing used to find 2.4x as many animals inside forty units as walking
+ * did. It is 1.03x now. A base that felt busy and a road that felt dead were
+ * the same population seen from the inside and from the outside of it.
+ *
+ * The population is a disc that travels with the player, and that is correct
+ * and deliberate — "we are rendering the planet by chunks obviously not all
+ * animals will render". Nothing exists past DESPAWN_RADIUS and nothing should.
+ * The three things that could have made a travelling disc read as "crowded at
+ * spawn, empty everywhere else" were checked one at a time, because the
+ * obvious suspect was not the culprit:
+ *
+ *   - Does the despawn ring actually fire? Yes. Over eight minutes of standing
+ *     and walking, the furthest body from the player ever recorded was 145.0
+ *     units against a DESPAWN_RADIUS of 145. Nothing lingers behind.
+ *   - Do bodies the player has left behind hold the global cap open? No. A
+ *     sweep of all 5,046 regions of the planet finds every living body inside
+ *     the disc and none outside it, at every sample. There is no leak, so the
+ *     cap is never spent on animals nobody is near.
+ *   - Does travelling get refilled to the same population as standing? THIS
+ *     was the one that failed, and it failed at 42%: 10.20 bodies inside forty
+ *     units while walking against 24.23 while standing. Not because the refill
+ *     was too slow — the roster was full the whole time — but because of where
+ *     the refill was PUT. See spawnDist. It is 97% now.
+ *
+ * So the fix is not persistence and not a bigger cap; it is that the disc the
+ * player carries is now the same density everywhere in itself.
+ *
+ * The one place the disc is still not flat is the twenty units the spawner is
+ * forbidden to place in (SPAWN_MIN_DIST). Bodies wander in and nothing removes
+ * them there, so it fills from the ring: measured, its density climbs from
+ * 2.39 to 5.57 per 1000 square units over seven minutes of a player standing
+ * in one spot, against a served ring that holds 2.2-2.7 throughout. A 2.1x
+ * peak that takes seven minutes to build, where it used to be 125x and took
+ * ten seconds.
+ *
+ * --- what a body costs, measured, and why 134 is affordable ------------------
  *
  * Measured headless on the real planet, driving the real Mobs.update over real
- * generated terrain with the real GLB rigs and mixers. Differential rather than
- * instrumented: the whole tick is timed per frame and a part's cost is the
- * difference between a run with it and a run with it stubbed, because timing
- * _animate per call allocated two BigInts per body per frame and invented the
- * GC it was measuring. p05 is the clean-frame cost, p50 the clean-frame cost
- * plus its share of a scavenge.
+ * generated terrain with the real GLB rigs and mixers, three minutes a run with
+ * nothing else on the machine. Per-frame percentiles, never whole-block timing:
+ * process.cpuUsage() has 15ms granularity on Windows and would quantise a 1ms
+ * tick into noise. p05 is the clean-frame cost, p50 the clean-frame cost plus
+ * its share of a scavenge.
  *
- *   bodies        52    105    116    141    165    325
- *   tick p05    266us  648us  702us  975us 1076us 2548us
- *   tick p50    364us  956us  991us 1275us 1465us 5084us
- *   _animate    1.86   1.94   2.12   2.52   2.44   3.17   us per body
- *   of that,    1.28   1.58   1.66   1.84   1.86   2.61   us in the mixer
+ *                       bodies   p05     p50     p90     p95     p99     max
+ *   46/12/12/90  (cut)    72.3  0.473   0.699   2.345   4.269  27.107   84.3
+ *   84/18/18/134 (now)   122.5  0.823   1.329   5.651  18.894  93.218  349.8
  *
- * So tick:mobs is about 7.4us per body over the operating range, of which
- * _animate is roughly 2.2 and the AnimationMixer 69-82% of that — the cap's own
- * prediction, confirmed. The day peak of 128 is 0.82ms of clean frame; a day
- * peak of 170 would be 1.13ms, i.e. +0.31ms. In *simulation* terms this ceiling
- * has plenty of room, and the earlier estimate of "160-170 for +0.4ms" was
- * right about the delta while being nearly twice too pessimistic per body.
+ * The marginal cost of the fifty bodies restored is 7.0us each on a clean
+ * frame and 12.5us each at the median — so the day peak of 124 is 0.82ms of
+ * clean frame. The clean-frame figure confirms the 7.4us this comment has
+ * claimed for a long time; the median figure is higher because the garbage
+ * scales with the headcount too, and the p95 and p99 columns are that garbage
+ * and nothing else.
  *
- * It came *down* to 90 with the budgets below, and the direction is worth being
- * plain about, because every note above it argues about how far up it could go.
- * It could go up; the report was that it should not. See the census under the
- * day and night lines below. What the cut buys, on the same measured 7.4us a
- * body, is a day peak of 0.58ms of clean frame against 0.95ms — so the cost
- * argument that used to hold this number is no longer the binding one either
- * way, and what sets it is how crowded the world reads.
+ * Attributed properly, by trimming the list to a fixed size EVERY frame rather
+ * than emptying it once. Emptying it once measures nothing, because the
+ * spawner refills it inside a few seconds — the first attempt at this table did
+ * exactly that and reported that 91% of the tick was fixed overhead, which its
+ * control refused to accept:
  *
- * The headcount buys garbage as well as work: about 600 bytes per body per
- * frame, which was 70-86KB a frame at the old caps and is 42-56KB at these.
- * That is what puts the tick's p90 and p99 an order of magnitude above its p50,
- * and it scales with the headcount exactly as the linear cost does — so the cut
- * takes a bite out of the spikes as well as out of the mean.
+ *   bodies held    122     61      0
+ *   tick p50    1.5193 0.5275 0.0001 ms
+ *
+ * So the fixed overhead of a tick with no bodies in it is a tenth of a
+ * microsecond: this tick is the bodies, all of it, and a per-body number is
+ * the honest way to price it. The slope is mildly superlinear — the upper half
+ * of the population costs 1.9x what the lower half does per body — which is
+ * the separation grid and the prey searches finding more to look at, not a
+ * return of any O(n^2).
+ *
+ * Heap, after a forced collection so this is what the bodies HOLD rather than
+ * what they were making:
+ *
+ *   bodies held    122     61      0
+ *   heap        35.41  30.62  24.50 MB
+ *
+ * 87.4 KB a body, so a full ring is 10.9MB and restoring these caps costs
+ * about 4.4MB over the cut ones. That is the number the mobile target has to
+ * carry, and it is a rig clone per body rather than anything this file
+ * allocates per frame.
  *
  * If this is ever raised again, it is not the dial to raise: the day line is
  * made of MAX_WILDLIFE, MAX_AQUATIC and MAX_FLYING, and this is only the
  * ceiling they are checked against.
  */
-const MAX_MOBS = 90;
+const MAX_MOBS = 134;
 /**
  * Of that, how many may be ordinary land animals. Kept as its own budget rather
  * than a fraction of MAX_MOBS for the same reason the two husk caps are
@@ -183,36 +226,50 @@ const MAX_MOBS = 90;
  * the merchant — so a busy night quietly stopped the wildlife from backfilling
  * at all.
  *
- * Left alone through the "still concentrated near spawn" report, on purpose.
- * That was never a headcount problem: the 62 were real, they were simply all
- * inside a ring 20 to 41 units out, because the searches that place them
- * travel in random-walk steps while the rules that accept them are written in
- * world units and nothing converted between the two. 62 over that ring is one
- * animal per 65 square units — eight units apart, closer than a cow is long —
- * against the 600 this comment is written for. Fixing the conversion (see
- * stepsFor) spreads the same 62 over the ring the rules always intended,
- * 20 to 85, which is one per 345. Raising the budget before fixing that would
- * have made the crowd worse and called it content.
+ * This was cut to 46 on the report "damn there are so many animals like omg
+ * they are so much", and put back because that read the report wrong. The
+ * correction, verbatim: "the density of animals was never the problem it was
+ * just them not being spread around the whole planet, they are mostly near
+ * spawn area."
  *
- * It went to 84 with the despawn ring, on that same one-per-345 reasoning, and
- * it is 46 now because the reasoning was answered by a measurement it could not
- * see. One animal per 345 square units of *ring* is not what a player stands
- * in: the ring is 66,000 square units and almost none of it is in front of you.
- * Censused a body at a time (see the day and night table on MAX_MOBS), 84 land
- * animals put 38 bodies inside forty units of a standing player, peaking at 48,
- * and the report those numbers answer is "damn there are so many animals like
- * omg they are so much". 46 halves that to 20, and the spread the ring argument
- * was protecting is untouched — it is the same placement, over the same band,
- * with fewer bodies in it.
+ * They were. Not because the spawner is anchored to the world origin — it has
+ * always searched from the player's own column — but because the search put
+ * 37% of what it placed in the 20-40 unit band and 4.2% in the 100-120 one,
+ * which per unit of ground is a 32.7x gradient falling away from the player.
+ * See spawnDist. A player is therefore always standing in the dense middle of
+ * a small cloud, and everything else is the thin outside of it, and the two
+ * halves of that are the two halves of the report.
  *
- * The floor on this is not comfort, it is that a meadow has to have cows in it.
- * At 46 the twenty-unit circle still holds five, so an animal is a few steps
- * away and a herd is still a herd; the biome tables still decide which. Do not
- * take it under about 30 without re-running that census — below that the same
- * measurement shows single figures inside forty units, which is a walk through
- * an empty field.
+ * Both numbers below are one census a second over four minutes, on the real
+ * planet with the real spawner, in daylight, same world and same seed:
+ *
+ *                                  live   within 20u        40u          80u
+ *   46 land, old placement, standing 71.5  8.85       24.23 (peak 37)   54.78
+ *   84 land, even placement,standing 120.1 4.30       13.85 (peak 17)   54.22
+ *   46 land, old placement, walking  73.8  2.35       10.20            32.80
+ *   84 land, even placement,walking  121.8 3.67       13.44            47.92
+ *
+ * So this went UP by 83% and the crowd a standing player is inside went DOWN
+ * by 43%, its peak from 37 to 17. That is the whole argument for the number:
+ * spreading the same population over the ground it was always allowed to use
+ * buys back more than doubling it costs. The cut was solving the crowding by
+ * deleting animals; this solves it by putting them where the rules already
+ * said they could go, and can afford more of them for doing so.
+ *
+ * The other half of the correction is the walking line, which is what "spread
+ * around the whole planet" actually asks for. Standing used to find 2.4 times
+ * as many animals inside forty units as walking did — a base that feels busy
+ * and a road that feels dead, from one population. It is 1.03 times now:
+ * 13.85 standing against 13.44 walking, which is the same world wherever you
+ * are in it.
+ *
+ * The floor on this is not comfort, it is that a meadow has to have cows in
+ * it, and the ceiling is that a meadow is not a stockyard. Do not move it
+ * without re-running that census — the number to read is the forty-unit
+ * column, not this one, because this one is a headcount over 45,000 square
+ * units and what a player meets is the 5,000 in front of them.
  */
-const MAX_WILDLIFE = 46;
+const MAX_WILDLIFE = 84;
 /**
  * The two populations that were still inside the land budget, which is the very
  * failure the comment above describes, happening one level further down.
@@ -230,26 +287,30 @@ const MAX_WILDLIFE = 46;
  * own pass, and the biome tables go back to being the record of which biomes
  * have bees in them rather than the thing rationing them.
  *
- * 12 rather than 18 with the density cut, and cut by a third rather than by the
- * land budget's half on purpose: fish and bees arrive in groups (see SHOAL_MIN
- * and DRIFT_MIN), so what a player meets is a shoal or a drift rather than a
- * headcount, and thinning the budget thins how many *places* have one rather
- * than how full the one in front of you looks. Three shoals of four still reads
- * as a lake with fish in it.
+ * Cut to 12 with the density cut and restored with it, for the reason on
+ * MAX_WILDLIFE: the crowding was placement, not headcount. These two matter
+ * more to the spread than their size suggests, because fish and bees arrive in
+ * groups (see SHOAL_MIN and DRIFT_MIN) and what a player meets is whether the
+ * water in front of them has a shoal in it, not how many fish the planet holds.
+ * _findWaterColumn draws its distance evenly over AREA now as well, so a lake
+ * at the far edge of the ring is as likely to be stocked as one at the near
+ * edge; it was getting a fraction of the shoals for no reason but arithmetic.
  */
-const MAX_AQUATIC = 12;
+const MAX_AQUATIC = 18;
 /**
  * Raised from 14 when the parrot started flying rather than hopping. The two
  * fliers now share this budget, and leaving it alone would have bought parrots
  * by taking bees away — which is the exact trade the paragraph above is about,
  * one level further down again.
  *
- * 12 with the density cut, on the aquatic budget's terms rather than the land
- * one's: fliers arrive as drifts too, and a bee you can hear is worth more than
+ * Cut to 12 with the density cut and restored with it, on the aquatic budget's
+ * terms: fliers arrive as drifts too, and a bee you can hear is worth more than
  * a bee you can count. The parrot's share of it is protected by the biome
- * tables (see FOREST), not by this number.
+ * tables (see FOREST), not by this number. _spawnDrift places through
+ * _findSpawnColumn, so it picked up the even-over-area draw with the land
+ * animals and did not need its own change.
  */
-const MAX_FLYING = 12;
+const MAX_FLYING = 18;
 /** Wildlife spawned per top-up tick, and how often a tick comes round.
  *
  * A player walks 4.4 units a second and sprints at 6.8, so the ring of terrain
@@ -292,19 +353,22 @@ const MAX_HOSTILE_SURFACE = 8;
  * ...and what the dark is worth on a savage world.
  *
  * Only the *surface* budget moves, and that is the whole of the arithmetic.
- * Read the day and night lines on MAX_MOBS: the true peak is the daytime 78 of
- * 90, twelve under the ceiling, and the twelve are the only headroom there is.
- * The surface husk budget is the one population that cannot touch that line,
+ * Read the day and night lines on MAX_MOBS: the true peak is the daytime 124 of
+ * 134, ten under the ceiling, and the ten are the only headroom there is. The
+ * surface husk budget is the one population that cannot touch that line,
  * because it opens at sunset and sunset is exactly when `_bedDown` takes the
- * land and flier budgets down to NIGHT_WILDLIFE. The night line is 56, thirty
- * four under the ceiling, and this spends six of those thirty four:
+ * land and flier budgets down to NIGHT_WILDLIFE. Re-measured against the
+ * restored wildlife budgets, five minutes of each clock:
  *
- *   day    46 land, 12 water, 12 air,  4 husks, 3 monsters, 1 trader = 78
- *   night  18 land, 12 water,  5 air, 18 husks, 3 monsters          = 56
+ *   day    84 land, 18 water, 18 air,  0 husks, 3 monsters, 1 trader = 124
+ *   night  34 land, 18 water,  7 air,  8 husks, 3 monsters, 1 trader =  71
+ *   night, savage, this number       14 husks                        =  77
  *
- * So the peak roster is unchanged at 78, and no other population loses a slot:
- * the wildlife budgets are separate numbers and the husks have never been able
- * to spend them.
+ * So the peak roster is the day's 124 whatever this is set to, and no other
+ * population loses a slot: the wildlife budgets are separate numbers and the
+ * husks have never been able to spend them. Fifty seven under the ceiling at
+ * night is a lot of room, and it is room this may have — but it is not room
+ * the *day* line has, which is the line to check before raising anything.
  *
  * Rejected: raising MAX_HOSTILE_CAVE with it. Cave husks spawn at any hour, so
  * every one of them lands on the *day* line, which is the one with six left in
@@ -684,22 +748,52 @@ const NIGHT_BED_PER_TICK = 2;
 const CELL_SIZE = (R_SEA * Math.PI / 2) / F;
 const WALK_YIELD = 0.6;
 const stepsFor = (units) => Math.max(1, Math.round(units / (CELL_SIZE * WALK_YIELD)));
-/** The band a travelling spawn may land in, as walk steps: 20..85 units out. */
-const SPAWN_STEPS_MIN = stepsFor(SPAWN_MIN_DIST);
-const SPAWN_RADIUS = stepsFor(DESPAWN_RADIUS - 25) - SPAWN_STEPS_MIN;
+/** The band a travelling spawn may land in, in world units. */
+const SPAWN_FAR = DESPAWN_RADIUS - 25;
 /**
- * And the band a *world start* may land in. It reaches the same distance —
- * populate() used to scatter its forty animals over 10..44 walk steps, which
- * is 6 to 26 units of actual displacement: an annulus of 2,000 square units,
- * one animal per fifty. That is the founding herd arriving at twelve times the
- * intended density and never thinning out again, because nothing despawns
- * while the player is still inside DESPAWN_RADIUS of it and a player who has
- * built anywhere near where they woke up is inside it all session. The near edge is much closer than
- * the travelling ring's because at world start there is no view to avoid
- * materialising inside, only a body to avoid landing on.
+ * And the near edge of a *world start*'s band, which is much closer than the
+ * travelling ring's: at world start there is no view to avoid materialising
+ * inside, only a body to avoid landing on. populate() used to scatter its
+ * founding herd over 10..44 walk steps, which is 6 to 26 units of actual
+ * displacement — an annulus of 2,000 square units, one animal per fifty, and
+ * a herd that never thins out again because nothing despawns while the player
+ * is still inside DESPAWN_RADIUS of it, which someone who built where they
+ * woke up is all session.
  */
-const SEED_STEPS_MIN = stepsFor(8);
-const SEED_STEPS_SPAN = stepsFor(DESPAWN_RADIUS - 25) - SEED_STEPS_MIN;
+const SEED_NEAR = 8;
+/**
+ * How far out one spawn goes, in world units — and the whole of the "they are
+ * mostly near the spawn area" report.
+ *
+ * A distance drawn flat between the near and far edge does NOT fill a ring
+ * evenly. The band at 100-120 units holds eight times the ground the band at
+ * 20-40 does, so serving them the same number of animals leaves the far one
+ * eight times emptier. Drawing r as sqrt of a flat draw between r_near² and
+ * r_far² is the standard correction and puts equal numbers per unit AREA,
+ * which is the density every comment in this file is written in.
+ *
+ * The measured before is worse than that 8x, because the old search also
+ * *travelled* badly. Eight thousand real calls to _findSpawnColumn around the
+ * world spawn, histogrammed by where they actually landed:
+ *
+ *   band        20-40   40-60   60-80  80-100 100-120
+ *   share       37.1%   28.8%   18.7%   11.2%    4.2%
+ *   per 1000u²  0.099   0.046   0.021   0.010   0.003
+ *
+ * A 32.7x density gradient from the near edge of the ring to the far one. The
+ * distance was drawn flat in *walk steps* (an 8x error on its own) and then
+ * walked by _walkOut, which veers, so a step count aimed at 120 units mostly
+ * fell short — the far band was under-served twice over.
+ *
+ * What a player sees from inside a 1/r cloud centred on themselves is exactly
+ * the two things that were reported and that sound like opposites: standing
+ * anywhere puts you in the dense middle of it (24 bodies inside forty units,
+ * measured), and everything else — the road out, and 3,401 of the planet's
+ * 3,451 land regions — is the thin outside of it. Cutting the budget thinned
+ * both ends and left the gradient exactly where it was, which is why it was
+ * the wrong lever and is reverted.
+ */
+const spawnDist = (near, far) => Math.sqrt(near * near + Math.random() * (far * far - near * near));
 
 // --- the stalker -------------------------------------------------------------
 //
@@ -1062,6 +1156,8 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _p = [0, 0, 0];
 const _probe = { f: 0, ci: 0, cj: 0, ck: 0 };
+/** Two more of the same, for _walkTo's aim-measure-correct. */
+const _wa = [0, 0, 0], _wb = [0, 0, 0];
 /** The stalker's own scratch: view-projection, the point it puts on screen, and
  * the marching head of the line-of-sight walk. */
 const _vpm = new THREE.Matrix4();
@@ -3157,24 +3253,73 @@ export class Mobs {
     return col;
   }
 
+  /**
+   * Go `units` of world distance from `nearCol` on a random bearing.
+   *
+   * The difference from _walkOut is that this one ARRIVES. _walkOut holds a
+   * heading but veers, so the distance it covers for a given step count is a
+   * broad distribution that mostly falls short — which is fine for "somewhere
+   * over there" and useless for "fill this band". Here the bearing is drawn
+   * once and the whole offset is handed to stepColumn, which walks the seams
+   * itself; nothing in this function does arithmetic on a column index.
+   *
+   * Aimed, measured, then corrected once, rather than converted with
+   * CELL_SIZE and hoped for. CELL_SIZE is the planet's AVERAGE cell width, and
+   * a cubesphere is a gnomonic projection, so a real cell is that wide in only
+   * one place. Measured on the real planet, 200 draws per site, horizontal
+   * displacement (both ends read at the same layer — reading each at its own
+   * surface height instead measures the hill and not the walk, which is how
+   * the first version of this table came out backwards):
+   *
+   *   realised / asked        D=40   60    80   100   120
+   *   one pass, at a face centre    1.000 0.995 0.990 0.986 0.981
+   *   one pass, at the world spawn  0.948 0.942 0.943 0.935 0.906
+   *   one pass, near a face edge    0.772 0.780 0.815 0.809 0.852
+   *   corrected, worst of the three 1.002 1.005 1.006 1.008 1.012
+   *
+   * So a ring asked for at 120 units was a ring of 93 for a player standing
+   * near a face edge and 118 for one at a face centre: the size of the world's
+   * inhabited disc depended on where on the planet you happened to be. The
+   * second pass costs one more stepColumn walk — a few hundred array lookups,
+   * a handful of times per two-second spawn tick — and removes the whole of it
+   * without needing a model of the projection.
+   */
+  _walkTo(nearCol, units) {
+    const th = Math.random() * Math.PI * 2;
+    const ca = Math.cos(th), sa = Math.sin(th);
+    const a = colParts(nearCol);
+    // Both ends read at the same layer, so this is horizontal displacement and
+    // not a hill. The layer itself is arbitrary; only the difference is used.
+    cellToWorld(a.f, a.i + 0.5, a.j + 0.5, R_SEA - R_MIN, _wa);
+    let n = units / CELL_SIZE;
+    let col = stepColumn(nearCol, Math.round(ca * n), Math.round(sa * n));
+    const b = colParts(col);
+    cellToWorld(b.f, b.i + 0.5, b.j + 0.5, R_SEA - R_MIN, _wb);
+    const got = Math.hypot(_wb[0] - _wa[0], _wb[1] - _wa[1], _wb[2] - _wa[2]);
+    if (got > 1) {
+      n *= units / got;
+      col = stepColumn(nearCol, Math.round(ca * n), Math.round(sa * n));
+    }
+    return col;
+  }
+
   /** Grass column with headroom, or null. */
-  _findSpawnColumn(nearCol, radius, playerPos) {
+  _findSpawnColumn(nearCol, playerPos) {
     const p = this.planet;
     for (let tries = 0; tries < 40; tries++) {
       // Without a player to keep clear of, this is world start.
       //
-      // Both bands now cover the whole disc the *placement test below* allows,
-      // which they did not before and which is the "they all concentrate near
-      // spawn" complaint in one line. The test accepts 20..85 units out; the
-      // walk reached about 41 on the travelling ring and about 26 at world
-      // start, both of them step counts guessed in columns against rules
-      // written in world units. So every animal that could have been placed in
-      // the outer two thirds of the ring was simply never offered, and the
-      // outer two thirds is 87% of its area. See the note on stepsFor.
-      const steps = playerPos
-        ? SPAWN_STEPS_MIN + Math.floor(Math.random() * radius)
-        : SEED_STEPS_MIN + Math.floor(Math.random() * SEED_STEPS_SPAN);
-      const col = this._walkOut(nearCol, steps);
+      // Both bands cover the whole disc the placement test below allows, and
+      // both are drawn EVENLY OVER IT rather than evenly over the distance —
+      // see spawnDist for the 32.7x density gradient that not doing so
+      // produced, which is the whole of the "they are mostly near the spawn
+      // area" report. The world-start band gets the same treatment because
+      // the founding herd is the one population a player keeps for the rest
+      // of the session: 24% of it used to land inside twenty units of where
+      // they woke up, and that clearing is where they then build.
+      const col = this._walkTo(nearCol, playerPos
+        ? spawnDist(SPAWN_MIN_DIST, SPAWN_FAR)
+        : spawnDist(SEED_NEAR, SPAWN_FAR));
       const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
       const surf = p.at(col, k);
@@ -3393,6 +3538,19 @@ export class Mobs {
       contactT: 0,         // ...and the same for anything spiky it is leaning on
       swimming: false,     // in water, and at home in it
       wading: false,       // in water, and very much not
+      /**
+       * ...and the third one, which is neither: a land animal with water round
+       * its legs, at any depth it can still stand in.
+       *
+       * `wading` deliberately means "out of its depth" and so is false in the
+       * shallows, which is right for the swim override — an animal in an inch
+       * of water is walking, not drowning. But it left every *settled*
+       * behaviour with no test of the medium at all, and "I saw some land
+       * animals still going to water doing eating animations" is that hole:
+       * a cow standing in a fordable stream is not wading, so nothing stopped
+       * it grazing, and grazing is what puts the eat clip on the screen.
+       */
+      legsWet: false,
       swimT: 0,            // when to look for the bank again
       swimWant: null,      // and the bearing it found last time it looked
       /** Consecutive looks that found no bank it could climb — see SWIM_GIVE_UP. */
@@ -4424,8 +4582,10 @@ export class Mobs {
   /** Open water deep enough for the fish. */
   _findWaterColumn(nearCol, playerPos) {
     for (let tries = 0; tries < 44; tries++) {
-      const col = this._walkOut(nearCol,
-        SEED_STEPS_MIN + Math.floor(Math.random() * SEED_STEPS_SPAN));
+      // Evenly over the water's AREA, on the same reasoning as the land search
+      // — see spawnDist. A lake at the far edge of the ring is as much water as
+      // one at the near edge and was getting a fraction of the shoals.
+      const col = this._walkTo(nearCol, spawnDist(playerPos ? SPAWN_MIN_DIST : SEED_NEAR, SPAWN_FAR));
       const k = this._waterLayer(col);
       if (k < 0) continue;
       if (playerPos) {
@@ -4515,7 +4675,7 @@ export class Mobs {
     if (budget <= 0) return 0;
     let seed = null;
     for (let t = 0; t < 3 && !seed; t++) {
-      const spot = this._findSpawnColumn(nearCol, SPAWN_RADIUS, playerPos);
+      const spot = this._findSpawnColumn(nearCol, playerPos);
       if (!spot) break;
       if (t === 2 || this._flowery(spot.col, spot.k)) seed = spot;
     }
@@ -4588,7 +4748,7 @@ export class Mobs {
     // place the player stood.
     this.homePos = { x: player.position.x, y: player.position.y, z: player.position.z };
     for (let n = 0; n < count; n++) {
-      const spot = this._findSpawnColumn(startCol, SPAWN_RADIUS, null);
+      const spot = this._findSpawnColumn(startCol, null);
       if (spot) this._spawnWild(spot.col, spot.k);
     }
     // Water and air get seeded too, and to the same two thirds. Left to the
@@ -7523,7 +7683,7 @@ export class Mobs {
       const airCap = night ? Math.round(MAX_FLYING * NIGHT_WILDLIFE) : MAX_FLYING;
       let wild = have.land;
       for (let n = 0; n < SPAWN_PER_TICK && wild < wildCap; n++) {
-        const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
+        const spot = this._findSpawnColumn(playerCol, player.position);
         if (!spot) break;      // no ground going spare this tick; try the next
         if (this._spawnWild(spot.col, spot.k)) wild++;
       }
@@ -7583,7 +7743,7 @@ export class Mobs {
       // torches and walls matter, not a loading screen you die on.
       const surfaceCap = this.savage ? MAX_HOSTILE_SAVAGE : MAX_HOSTILE_SURFACE;
       if (night && !this.spawnGrace && this._countHostile(false) < surfaceCap) {
-        const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
+        const spot = this._findSpawnColumn(playerCol, player.position);
         if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = false; }
       }
       if (!this.spawnGrace && this._countHostile(true) < MAX_HOSTILE_CAVE) {
@@ -7601,7 +7761,7 @@ export class Mobs {
       // where this belongs.
       if (!this.spawnGrace && this._countMonsters() < MAX_MONSTERS
           && Math.random() < MONSTER_CHANCE) {
-        const spot = this._findSpawnColumn(playerCol, SPAWN_RADIUS, player.position);
+        const spot = this._findSpawnColumn(playerCol, player.position);
         if (spot) this._spawnMonster(spot.col, spot.k);
       }
       // The stalker. One at a time, on his own clock, and rolled against a
@@ -7787,7 +7947,20 @@ export class Mobs {
           mob.state = 'idle';
           mob.stateT = 1 + Math.random() * 2;
         } else if (mob.state === 'walk') {
-          mob.state = Math.random() < spec.grazeChance ? 'graze' : 'idle';
+          // Nothing grazes in water. There is no grass under it, and the eat
+          // clip on a body standing in a lake is the whole of "I saw some land
+          // animals still going to water doing eating animations" — measured at
+          // 18.4% of all grazing time before this line, because the fordable
+          // shallows are exactly where a wandering animal spends its time near
+          // a shore and `wading` is false in all of it.
+          //
+          // The draw is taken either way so that adding this test does not
+          // shift every later Math.random() in the frame, which would make the
+          // before and after of an unrelated measurement disagree for no
+          // reason. Falls through to 'idle', which is a believable thing to be
+          // doing ankle-deep in a stream.
+          const wantsGraze = Math.random() < spec.grazeChance;
+          mob.state = (wantsGraze && !mob.legsWet) ? 'graze' : 'idle';
           mob.stateT = spec.idleMin + Math.random() * (spec.idleMax - spec.idleMin);
         } else {
           mob.state = 'walk';
@@ -7825,6 +7998,15 @@ export class Mobs {
           mob.want = Math.atan2(rb, ra);
         }
       }
+
+      // Nothing re-tests a state once it is set — `stateT` simply runs out — so
+      // refusing to *enter* graze in water is only half of it. An animal that
+      // started grazing on a dry bank and then wandered, was chased or was
+      // flooded into the shallows would otherwise keep the eat clip running for
+      // the rest of its idle timer, which is up to spec.idleMax seconds of
+      // exactly the thing that was reported. Kept out of the block above
+      // because that one only runs when the timer has expired.
+      if (mob.state === 'graze' && mob.legsWet) mob.state = 'idle';
 
       // --- and a land animal in the water overrides all of it ---------------
       //
@@ -7985,6 +8167,10 @@ export class Mobs {
         && !this._fordable(bodyCol, this._groundK(bodyCol, feetK, !!spec.climbs),
           this._wadeDepth(mob));
       mob.wading = wading;
+      // Water round the legs at ANY depth, which `wading` on the line above
+      // deliberately is not. Read by the settled behaviours — see legsWet where
+      // it is declared, and the graze test in the behaviour block.
+      mob.legsWet = inWater && !swimming && !spec.flies;
       // A bee was a walker with a hop, which is a bee doing an impression of a
       // rabbit. Flight is the same shape as the fish's buoyancy below: hold a
       // height rather than fall, and never be grounded.

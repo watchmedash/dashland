@@ -367,7 +367,7 @@ html, body {
 
 /* The one label style in the game: small, spaced, upper. Used for every
    caption on both materials, which is most of what makes them look related. */
-.cap, .set-head, .ctl-head, .cmp-polar, .slot-cap, .smelt-label,
+.cap, .set-head, .ctl-head, .slot-cap, .smelt-label,
 .recipe-panel h3, .shop-col h3, .cg-cap, .status {
   font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase;
@@ -1248,20 +1248,11 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   border: 6px solid transparent; border-top: 8px solid #e2a052;
   filter: drop-shadow(0 1px 0 rgba(30, 16, 4, .9)) drop-shadow(0 0 2px rgba(255, 255, 255, .5));
 }
-/* Inside the polar cap there is no bearing to show. One word, and it carries
-   its own piece of sheet because the strip it would otherwise sit on is gone
-   by the time it is up. */
-.cmp-polar {
-  display: none; position: absolute; left: 50%; top: 0;
-  transform: translateX(-50%);
-  padding: 6px 14px; border-radius: var(--r-md);
-  background: var(--paper-hud); box-shadow: var(--emboss-hud);
-  color: var(--ink-soft);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .75);
-}
-#compass.polar { opacity: 1 !important; }
-#compass.polar .cmp-win, #compass.polar .cmp-notch { display: none; }
-#compass.polar .cmp-polar { display: block; }
+/* The compass no longer has a polar state. `compassFrame` uses one continuous
+   frame at every latitude, so the strip simply fades near the axis instead of
+   being swapped out for a plate. The rules that did the swapping were removed
+   with it - one of them forced `opacity: 1 !important`, which snapped a blank
+   plate in at full brightness exactly where the fade was meant to finish. */
 
 /* --- vitals (top left, under the map) -------------------------------------
    THE BAR IS THE OBJECT. Three faults were reported here and they are one

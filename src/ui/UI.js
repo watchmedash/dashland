@@ -15,7 +15,7 @@ import { CharacterPicker, CHARACTER_IDS, characterUrl } from '../player/Characte
 import { Save } from '../game/Save.js';
 import { BIOME_COLORS, R_SEA, F, cidx } from '../world/Constants.js';
 import { patchColumn } from '../world/Sphere.js';
-import { compassFrame, POLAR_REF_SWAP } from '../render/Sky.js';
+import { compassFrame } from '../render/Sky.js';
 
 const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands'];
 
@@ -281,25 +281,28 @@ const CMP_HALF = 160;
  * Where the compass gives up, as |Y × up| — see `compassFrame`, which is where
  * this number's meaning lives.
  *
- * Fully lit down to 31° from the pole and gone by 18°, which is exactly where
- * the sky's own frame swaps its reference axis. That swap is not a rounding
- * detail: standing over ±X and crossing it, east flips a full 180°, so a strip
- * that carried on through it would swing end to end for one step sideways. The
- * honest reading is that a bearing *relative to the pole* does not exist at the
- * pole, so inside the cap there is no strip — only the word.
+ * These used to be 19° and 31° of latitude, derived from the reference-axis
+ * swap the frame no longer has: 5% of the planet with no bearing and 14%
+ * dimmed, and because `WorldGen.climate` bands on |dy| that was exactly the
+ * snowfields, where a white horizon makes a bearing worth most. The frame is
+ * continuous now, so the only thing left to hide from is the *rate*: |Y × up|
+ * is the sine of the angle down from the pole, so walking a great circle past
+ * the pole turns the bearing at about 1/polar degrees per radian of travel.
+ * Measured on that traverse at sprint speed 6.8:
  *
- * Both ends are derived from POLAR_REF_SWAP rather than written down, so the
- * compass can never end up drawing on the far side of the discontinuity if the
- * sky ever moves it — with the dark end held a further half a percent short of
- * it. That margin is not decoration: `polar` comes back from a hypot of a
- * normalised vector and this constant from a square root of a product, so a
- * threshold sitting exactly on the flip resolved by floating-point luck and
- * measured as still 2.7e-16 lit *at* the discontinuity. Half a percent is a
- * degree of latitude, and it makes "dark before the flip" true by arithmetic
- * rather than by rounding.
+ *   polar 0.50  (148 blocks out)   0.35°/block     2°/s
+ *   polar 0.050 (14 blocks)        4.05°/block    28°/s
+ *   polar 0.010 (2.8 blocks)      19.89°/block   135°/s
+ *
+ * At CMP_PX 3.2 that is 90 px/s against a 320px window at fifteen blocks, and
+ * 432 px/s — a window and a third every second — at three. The first is a
+ * strip; the second is not. So: lit to 15 blocks of the pole, out by 3, both
+ * written as block distances against R_SEA because that is what they were
+ * chosen as. 3 blocks is a cap of 0.61° of latitude, 6e-5 of the planet's
+ * surface across both poles, against 5% before.
  */
-export const POLAR_HIDE = Math.sqrt(1 - (POLAR_REF_SWAP * 0.995) ** 2);
-export const POLAR_FULL = Math.sqrt(1 - (POLAR_REF_SWAP * 0.9) ** 2);
+export const POLAR_HIDE = 3 / R_SEA;
+export const POLAR_FULL = 15 / R_SEA;
 
 /** Scratch for the navigation HUD, which runs once a frame. */
 const _east = new THREE.Vector3();
@@ -545,17 +548,13 @@ export class UI {
     win.appendChild(track);
     const notch = document.createElement('u');
     notch.className = 'cmp-notch';
-    const polar = document.createElement('span');
-    polar.className = 'cmp-polar';
-    // Deliberately empty. This used to read "Pole" while the strip was hidden,
-    // and the word told a player standing in a snowfield nothing they did not
-    // already know while implying there was a thing here to understand. The
-    // strip still fades out near the axis for the reason above - a bearing
-    // relative to the pole does not exist at the pole - but it now simply goes
-    // quiet instead of announcing itself. The element stays so the fade has
-    // something to hold and so the layout does not move.
-    polar.textContent = '';
-    cmp.append(win, notch, polar);
+    // No cap element of any kind. It used to read "Pole" and was then emptied,
+    // but an empty one is worse than either: `#compass.polar` in style.css
+    // forces opacity to 1 and swaps the strip for it, so a blank parchment
+    // plate snapped in at full brightness exactly where the fade was supposed
+    // to be finishing. The cap is now three blocks wide (see POLAR_HIDE), so
+    // there is nothing left to announce - the strip just fades to nothing.
+    cmp.append(win, notch);
     hud.appendChild(cmp);
 
     this._cmpTrack = track;
@@ -564,7 +563,6 @@ export class UI {
     this.el.minimap = map;
     this.el.mmNorth = north;
     this.el.compass = cmp;
-    this.el.cmpPolar = polar;
 
     // The two settings rows and the Controls line these used to build in here
     // now live in `index.html` beside every other setting and binding, which is
@@ -592,11 +590,12 @@ export class UI {
 
     const { deg, polar } = bearingOf(player.up, player.forward);
     // Fade rather than cut, so walking into the cap is a compass quietly
-    // giving up over about ten seconds of travel instead of a HUD element
-    // blinking out from under you.
+    // giving up over the last twelve blocks of approach (about three seconds
+    // at a walk) instead of a HUD element blinking out from under you. It is
+    // also what keeps the strip from snapping: the bearing is still turning
+    // fast in there, and it dims as it speeds up.
     const lit = compassLit(polar);
     el.style.opacity = lit.toFixed(2);
-    el.classList.toggle('polar', lit <= 0);
     if (lit <= 0) return;
 
     // Quantised to a tenth of a degree before the compare. Written every frame

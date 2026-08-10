@@ -52,20 +52,23 @@ const _white = new THREE.Color(1, 1, 1);
  */
 export const MOON_FILL = new THREE.Color(0.22, 0.32, 0.80);
 
+// Only used at the axis itself, where any direction is as good as any other.
 const _refX = new THREE.Vector3(1, 0, 0);
-const _refY = new THREE.Vector3(0, 1, 0);
 const _east = new THREE.Vector3();
 const _north = new THREE.Vector3();
 const _zenith = new THREE.Vector3();
 
 /**
- * How near a pole the reference axis has to swap, as |up·Y|.
+ * How degenerate the frame has to be before an arbitrary one is substituted, as
+ * |Y × up|.
  *
- * Exported because it is not a detail of the sun: it is the exact latitude at
- * which the frame below stops being one frame and becomes two. See
- * `compassFrame`.
+ * This is not a latitude anyone stands at: 1e-9 of |Y × up| is 2.8e-7 blocks
+ * from the axis at R_SEA 282, i.e. the pole column itself and nothing else. It
+ * exists so `east` is never the zero vector — `solarDirection` multiplies it,
+ * and a zero sun direction is a NaN horizon, not a dark one. Everywhere a
+ * player can actually be, the frame below is the single continuous one.
  */
-export const POLAR_REF_SWAP = 0.95;
+export const POLAR_EPS = 1e-9;
 
 /**
  * The local compass frame standing at `up`: which way is east, which way is
@@ -85,20 +88,35 @@ export const POLAR_REF_SWAP = 0.95;
  * nothing else, so the snowfields genuinely are at ±Y and "north is where it
  * gets cold" is true on this planet.
  *
+ * The reference axis is Y and only Y, at every latitude. It used to swap to X
+ * inside the polar cap to keep the cross product away from zero, and that swap
+ * was the whole reason the compass had a dead zone: at the swap latitude,
+ * standing over ±X, east flipped a full 180° for one step sideways, measured
+ * here as a 180.000° jump between adjacent samples 0.02° of latitude apart, so
+ * the strip had to be dark for 19° of latitude either side of it and dimmed to
+ * 31° — about 5% of the planet blind and 14% murky, all of it snowfield. Y × up
+ * alone is smooth everywhere except *at* the axis, where the only defence
+ * needed is POLAR_EPS above. Walked over 1500 great circles at a block per
+ * sample, the worst step between neighbours is 3.4° anywhere the compass is
+ * fully lit and 6.8° anywhere it is drawn at all, against 180.000° before.
+ *
  * @returns {number} |Y × up| — the sine of the angle down from the pole. 1 at
  *   the equator, 0 at either pole. It is a measure of how much of an answer
- *   this is: at 0 there is no north to point at, and because of the `ref` swap
- *   above the frame is also *discontinuous* somewhere inside the polar cap —
- *   at |up.y| = POLAR_REF_SWAP with the player over ±X the east vector flips a
- *   full 180°. The sun barely shows it (the arc is anchored differently and
- *   moves slowly); a compass strip would jump end to end. So a caller drawing a
- *   bearing must read this and give up well before it reaches zero.
+ *   this is: at 0 there is no north to point at, and approaching zero the
+ *   bearing stays continuous but turns faster and faster for a fixed walking
+ *   speed (it goes as 1/this — meridians converging). So a caller drawing a
+ *   bearing still reads this, not to dodge a discontinuity that no longer
+ *   exists, but to stop drawing a strip that has begun to skate. See
+ *   POLAR_HIDE in UI.js for where that lands: 3 blocks from the pole.
  */
 export function compassFrame(up, east, north) {
-  const ref = Math.abs(up.y) > POLAR_REF_SWAP ? _refX : _refY;
-  east.crossVectors(ref, up).normalize();
+  const polar = Math.hypot(up.x, up.z);
+  // Y × up in closed form. Below POLAR_EPS there is no direction to give, so
+  // any orthonormal pair will do; the returned 0 tells the caller not to draw.
+  if (polar > POLAR_EPS) east.set(up.z, 0, -up.x).divideScalar(polar);
+  else east.crossVectors(_refX, up).normalize();
   north.crossVectors(up, east).normalize();
-  return Math.hypot(up.x, up.z);
+  return polar;
 }
 
 /**

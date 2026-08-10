@@ -2366,6 +2366,55 @@ export function bobberGeometry(rodItemId, onReady) {
   return mesh ? cut(mesh) : null;
 }
 
+/**
+ * The same geometry with the rod's own float removed, cached on the source.
+ *
+ * A cast puts a bobber on the water, and the rod in your fist carries a
+ * modelled one too - so during a cast there were two, and once they became
+ * literally the same object it read as a duplication bug rather than as art.
+ * The float stays on the model for the idle pose and the icon, where it is what
+ * stops a fishing rod reading as a plain stick.
+ *
+ * Built from whatever geometry it is handed rather than from the source file,
+ * because the held mesh is a posed clone in its own space - a complement built
+ * from the world template would drop in at the wrong place. Same vertex colour
+ * test `bobberGeometry` uses, inverted.
+ */
+export function withoutBobber(geo) {
+  if (!geo) return geo;
+  if (geo.userData.noFloat) return geo.userData.noFloat;
+  const pos = geo.getAttribute('position');
+  const col = geo.getAttribute('color');
+  if (!col) return geo;
+  const nrm = geo.getAttribute('normal');
+  const idx = geo.getIndex();
+  const n = idx ? idx.count : pos.count;
+  const at = (i) => (idx ? idx.getX(i) : i);
+  const isFloat = (v) => BOBBER_COLORS.some(([r, g, b]) =>
+    Math.abs(col.getX(v) - r) < BOBBER_TOL
+    && Math.abs(col.getY(v) - g) < BOBBER_TOL
+    && Math.abs(col.getZ(v) - b) < BOBBER_TOL);
+  const P = [], C = [], N = [];
+  for (let t = 0; t < n; t += 3) {
+    if (isFloat(at(t))) continue;
+    for (let k = 0; k < 3; k++) {
+      const v = at(t + k);
+      P.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+      C.push(col.getX(v), col.getY(v), col.getZ(v));
+      if (nrm) N.push(nrm.getX(v), nrm.getY(v), nrm.getZ(v));
+    }
+  }
+  if (!P.length || P.length === pos.count * 3) return geo;
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+  if (N.length) out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  out.computeBoundingSphere();
+  geo.userData.noFloat = out;
+  out.userData.withFloat = geo;
+  return out;
+}
+
 /** True when this item has (or is expected to have) a 3D model at all. */
 export function hasModel(itemId) {
   const spec = modelSpecFor(itemId);

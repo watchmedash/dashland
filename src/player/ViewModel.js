@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, RENDER_TYPE, R_CROSS } from '../world/Blocks.js';
 import { createItemBlockMaterial } from '../render/VoxelMaterial.js';
-import { heldModel, hasModel, worldModel, tipPoint } from '../render/ItemModels.js';
+import { heldModel, hasModel, worldModel, tipPoint, withoutBobber} from '../render/ItemModels.js';
 import * as MobModels from '../game/MobModels.js';
 import { characterUrl, DEFAULT_CHARACTER } from './Character.js';
 
@@ -1637,6 +1637,21 @@ export class ViewModel {
   setCast(on, hand) {
     this._cast = on ? 1 : 0;
     if (on && this.hands[hand]) this._castHand = hand;
+    // The rod's own float goes while its float is on the water. Two of the same
+    // object, one in your fist and one twenty cells away on the end of the line,
+    // reads as a duplication bug. Swapped on the mesh rather than rebuilt: the
+    // complement is cached on the geometry, so this is a pointer assignment.
+    for (const k of ['right', 'left']) {
+      const h = this.hands[k];
+      const g = h && h.mesh && h.mesh.geometry;
+      if (!g) continue;
+      if (on && k === this._castHand) {
+        const alt = withoutBobber(g);
+        if (alt !== g) h.mesh.geometry = alt;
+      } else if (g.userData.withFloat) {
+        h.mesh.geometry = g.userData.withFloat;
+      }
+    }
   }
 
   /**

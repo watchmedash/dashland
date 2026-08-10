@@ -1338,11 +1338,27 @@ export const TORCH_THICK = 0.14;
 
 /** Width of a fence post, centred in its cell. */
 export const FENCE_POST = 0.25;
-/** Thickness of a rail, and how tall the whole thing stands. See R_FENCE. */
+/** Thickness of a rail. See R_FENCE. */
 export const FENCE_RAIL = 0.16;
-export const FENCE_HEIGHT = 1.5;
+/**
+ * How tall a fence is *drawn*, and how tall it is to *walk into*, which are
+ * deliberately not the same number.
+ *
+ * They used to be one constant at 1.5, so the post was drawn a block and a half
+ * high and read as a palisade: "fences are way too tall". Minecraft draws one
+ * block and collides at one and a half, and the gap is the whole trick - the
+ * fence looks like something you could step over and then refuses to let you,
+ * which is what stops livestock walking out of a pen without building a wall.
+ *
+ * So the post is a block now and the bar you cannot cross is unchanged.
+ */
+export const FENCE_HEIGHT = 1.0;
+export const FENCE_BLOCK_H = 1.5;
 /** The two rail heights, as the bottom of each. */
-const RAIL_K = [0.42, 0.96];
+// Spaced for a one-block post: Minecraft's rails sit at 6/16 and 12/16, and
+// the pair used to be [0.42, 0.96], which on a 1.0 post would have put the
+// upper rail's top at 1.12, standing proud of the post it is nailed to.
+const RAIL_K = [0.36, 0.72];
 
 /**
  * Does a fence reach out towards this neighbour?
@@ -1835,7 +1851,7 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
  * is thick enough to be honest.
  */
 export function collisionBoxes(id, byte = 0) {
-  if (IS_FENCE[id]) return [[0, 0, 0, 1, 1, FENCE_HEIGHT]];
+  if (IS_FENCE[id]) return [[0, 0, 0, 1, 1, FENCE_BLOCK_H]];
   return blockBoxes(id, byte);
 }
 

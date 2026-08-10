@@ -107,11 +107,271 @@ const MOB_VOICE = {
   // out there worth walking towards — so it lands at about -30, above the herd
   // and under the sky.
   merchant: { kind: 'chime', base: 523, dur: 1.30, gain: 0.135, far: true },
+
+  // ---------------------------------------------------------------------------
+  // The other thirty.
+  //
+  // Ten species had a voice and thirty did not, including all thirteen
+  // monsters: a yeti closed on you and killed you in silence. That is not a
+  // polish gap, it is a fairness one — a hostile you cannot hear is a hostile
+  // you cannot turn around for.
+  //
+  // The trap when authoring thirty at once is that they all become the same
+  // filtered sawtooth at thirty different pitches, which tells a player no more
+  // than silence did. So the table below is spread across seven instruments,
+  // and inside the biggest one (`roar`) the strongest tell is deliberately NOT
+  // the fundamental but `rough[1]`, the rate the voice is chopped at: 5 Hz is a
+  // slow bellow, 24 Hz is a shredding growl and 61 Hz is past the ear's ability
+  // to hear separate pulses at all and reads as buzzing distortion. Two roars a
+  // fifth apart sound like one animal; two roars at 5 Hz and 61 Hz never do.
+  //
+  // Every gain below was set by rendering the sound through an
+  // OfflineAudioContext and measuring 400Hz-weighted RMS over a fixed 2.5s
+  // window, the same meter the retune above used, never by ear. The measured
+  // figure sits in the comment beside each group. On that meter the existing
+  // rows re-measure as: koala -31.3, cow -31.8, deer -34.2, husk -35.2,
+  // bunny -35.9, penguin -38.5, parrot -38.6, chick -40.1, fox -42.3, with
+  // break-metal at -35.3 and a footstep at -58.9.
+  //
+  // The whole roster as it now measures (idle, dry, mean of eight renders):
+  //
+  //   merchant -26.5 | dragon -27.8 | cyclops -29.6 | elephant -30.6
+  //   yeti -30.6 | koala -31.0 | lion -31.3 | cow -31.6 | cthulhu -32.0
+  //   polar -32.0 | demon -32.1 | alien_tall -32.9 | tiger -33.0
+  //   alien -33.1 | ghost -33.6 | cactus -34.2 | deer -34.4 | panda -34.5
+  //   husk -34.6 | skull -34.7 | imp -34.8 | cat -35.0 | dog -35.2
+  //   bunny -36.1 | sporeling -36.2 | monkey -36.2 | shark -36.0
+  //   beaver -37.0 | bat -37.8 | penguin -38.0 | giraffe -38.5
+  //   parrot -38.7 | fox -39.0 | bee -40.0 | chick -40.2 | crab -40.6
+  //   piranha -42.4 | deep_fish -42.8 | fish -43.7 | caterpillar -46.3
+  //
+  // and the stalker, which is silence and must stay silence. The dragon is
+  // 12.4dB over the chicken and second only to the merchant's bell, which is a
+  // landmark rather than a voice. Every monster is above every fish.
+  //
+  // Attack windups measure 1.5 to 3.7dB over the same species' idle, which is
+  // the point of the mode: the cue you must react to arrives louder than the
+  // ambient chatter it has to cut through.
+
+  // --- the thirteen that want you dead -------------------------------------
+  //
+  // Placed at the loud end on purpose: every one of these is louder than the
+  // chick (-40.1) and the loudest of them, the dragon, is inside 2dB of the
+  // merchant's bell, which is the loudest voice in the game.
+  //
+  // `urgent` lifts a species out of the shared 0.45s idle floor. That floor
+  // exists so a paddock of forty animals cannot stack, and a monster's approach
+  // tell being swallowed by a sheep standing between you is exactly the failure
+  // this whole table is here to fix.
+  yeti: {
+    // Ape-chested and mostly air. Lowest of the roars bar the cyclops, and by
+    // far the breathiest — you hear the lungs before the larynx.
+    kind: 'roar', base: 78, dur: 1.45, gain: 0.115, urgent: true,
+    rough: [0.45, 24], form: [380, 820], breath: 0.55, swell: 0.28, sub: 0.5,
+  },
+  cyclops: {
+    // A foghorn, not an animal. Slowest modulation in the game at 5Hz, almost
+    // no breath, a low vowel pair: one enormous sustained note that arrives
+    // before it does.
+    kind: 'roar', base: 58, dur: 2.05, gain: 0.128, urgent: true,
+    rough: [0.10, 5], form: [260, 540], breath: 0.08, swell: 0.45, sub: 0.7,
+  },
+  demon: {
+    // The opposite end of the same instrument. 61Hz modulation puts the
+    // sidebands into the audible band, and the 1.48 partial is deliberately
+    // inharmonic, so it reads as tearing rather than as a pitch.
+    kind: 'roar', base: 168, dur: 0.85, gain: 0.078, urgent: true,
+    rough: [0.55, 61], form: [900, 1900], breath: 0.25, swell: 0.05, harsh: true,
+  },
+  dragon: {
+    // The loudest voice on the planet bar the merchant, and the only one with a
+    // hiss laid over the tail: the roar ends and the flame keeps going.
+    kind: 'roar', base: 92, dur: 1.90, gain: 0.112, urgent: true,
+    rough: [0.30, 17], form: [500, 1100], breath: 0.75, swell: 0.20, sub: 0.8,
+    hiss: 0.5,
+  },
+  cthulhu: {
+    // Wet. A drowned groan with bubbles rising through it, heavily low-passed
+    // as though heard through water even in the air.
+    kind: 'gurgle', base: 74, dur: 1.55, gain: 0.6, urgent: true,
+  },
+  greendemon: {
+    // Rhythm carries this one, not pitch: six clipped grains in half a second,
+    // high and falling. The only monster that reads as fast rather than heavy.
+    kind: 'chitter', base: 470, dur: 0.62, gain: 0.338, urgent: true,
+    grains: 6, gap: 0.075, glide: 0.72, wave: 'square', band: 1600,
+  },
+  skull: {
+    // No pitch at all, anywhere in it. Six dry high-Q noise grains — bone on
+    // bone — which is why it can sit beside twelve tuned monsters and never be
+    // mistaken for one of them.
+    kind: 'noisevox', base: 1, dur: 0.55, gain: 2.45, urgent: true,
+    grains: 6, gap: 0.055, lo: 900, hi: 3400, q: 6, at: 0.002,
+  },
+  alien: {
+    // Electronic on purpose. A sine ring-modulated at 130Hz with a 17Hz warble
+    // over it: no throat could make this, and nothing else here is inharmonic
+    // in that particular way.
+    kind: 'tonal', base: 640, dur: 0.70, gain: 0.096, urgent: true,
+    wave: 'sine', vib: [17, 0.22], glide: [0.80, 1.35, 1.00], ring: 130,
+  },
+  alien_tall: {
+    // Its stillness is the tell. Two sines 3.5Hz apart beating against each
+    // other, almost no glide — where the small alien flutters, this hangs.
+    kind: 'tonal', base: 208, dur: 1.70, gain: 0.098, urgent: true,
+    wave: 'sine', vib: [0.8, 0.012], glide: [0.99, 1.01, 0.97], beat: 3.5,
+  },
+  ghost: {
+    // Pure tone, no noise layer whatsoever, and a slow 4.5Hz swell. The one
+    // monster that sounds like it is not touching the ground.
+    kind: 'tonal', base: 300, dur: 2.00, gain: 0.065, urgent: true,
+    wave: 'sine', vib: [4.5, 0.055], glide: [1.00, 1.28, 0.55], form: 900,
+  },
+  cactus_monster: {
+    // A bow drawn across dry wood: one sustained mid band with an 11Hz tremolo
+    // cut into it. Unpitched like the skull, but continuous where the skull
+    // clatters.
+    kind: 'noisevox', base: 1, dur: 0.80, gain: 0.635, urgent: true,
+    grains: 1, lo: 700, hi: 2100, q: 2.5, at: 0.06, trem: 11,
+  },
+  mushroom_monster: {
+    // Deliberately soft — two low breathy puffs and a dull pop. It is the
+    // weakest thing on the list (3 damage) and it should sound like it, so the
+    // roster has a bottom for the dragon to have a top of.
+    kind: 'noisevox', base: 190, dur: 0.75, gain: 0.752, urgent: true,
+    grains: 2, gap: 0.20, lo: 260, hi: 900, q: 0.9, at: 0.05, pop: 0.5,
+  },
+  bat: {
+    // The highest thing in the game by an octave and a half. Short, faint and
+    // above everything else in the mix, which is how you place one in the dark
+    // without ever seeing it.
+    kind: 'chitter', base: 3100, dur: 0.20, gain: 0.64, urgent: true,
+    grains: 2, gap: 0.055, glide: 0.45, wave: 'sine', band: 5200,
+  },
+
+  // --- the large animals ---------------------------------------------------
+  //
+  // Same roar instrument as the monsters, kept apart from them by modulation
+  // rate and by register, and about 2dB quieter as a group: none of these hunts
+  // you, and a lion you have not provoked should not read as a dragon.
+  lion: {
+    // A real swell — the longest attack of the cats — over a slow 9Hz rasp.
+    kind: 'roar', base: 108, dur: 1.40, gain: 0.078,
+    rough: [0.16, 9], form: [640, 1250], breath: 0.22, swell: 0.35, sub: 0.45,
+  },
+  tiger: {
+    // A chuff, not a roar: short, no swell at all, and a 33Hz rattle that is
+    // nearly four times the lion's. The two are never confusable even though
+    // they are a third apart.
+    kind: 'roar', base: 138, dur: 0.80, gain: 0.091,
+    rough: [0.60, 33], form: [560, 1150], breath: 0.30, swell: 0.06,
+  },
+  polar: {
+    kind: 'roar', base: 86, dur: 1.20, gain: 0.094,
+    rough: [0.28, 14], form: [340, 760], breath: 0.40, swell: 0.25, sub: 0.4,
+  },
+  elephant: {
+    // The only voice in the table that goes UP. `rise` sends it from a seventh
+    // below the fundamental to a fifth above in the first third, through a
+    // bright formant pair — which is the whole difference between a trumpet and
+    // a bellow.
+    kind: 'roar', base: 118, dur: 1.45, gain: 0.065,
+    rough: [0.12, 6.5], form: [1200, 2400], breath: 0.30, swell: 0.10, rise: 1.55,
+  },
+  giraffe: {
+    // Almost mute in life, and left almost mute here: one long low breath and
+    // no larynx at all. It is the quietest land animal on the planet.
+    kind: 'noisevox', base: 1, dur: 0.95, gain: 0.369,
+    grains: 1, lo: 180, hi: 700, q: 0.8, at: 0.14,
+  },
+  panda: {
+    // The ruminant instrument, a fourth under the deer so a mixed enclosure
+    // still separates.
+    kind: 'bleat', base: 158, dur: 0.62, gain: 0.352,
+  },
+
+  // --- the ones a player actually lives beside -----------------------------
+  dog: {
+    // Two hard grains 0.17s apart with a fast fall on each. The gap is the
+    // bark: three grains reads as a yap and one as a cough.
+    kind: 'chitter', base: 260, dur: 0.40, gain: 0.84,
+    grains: 2, gap: 0.17, glide: 0.55, wave: 'sawtooth', band: 900,
+  },
+  cat: {
+    // A vowel with a hinge in it — up a fourth, then down past where it
+    // started — under a 1100Hz formant. The glide shape is the meow; the same
+    // oscillator without it is just a tone.
+    kind: 'tonal', base: 480, dur: 0.65, gain: 0.079,
+    wave: 'triangle', vib: [6, 0.03], glide: [0.75, 1.25, 0.60], form: 1100,
+  },
+  monkey: {
+    // Three grains that each rise, against the dog's two that each fall. Same
+    // instrument, opposite gesture.
+    kind: 'chitter', base: 380, dur: 0.50, gain: 1.14,
+    grains: 3, gap: 0.13, glide: 1.90, wave: 'triangle', band: 1400,
+  },
+  beaver: {
+    kind: 'chitter', base: 520, dur: 0.42, gain: 0.49,
+    grains: 3, gap: 0.09, glide: 1.25, wave: 'sawtooth', band: 1200,
+  },
+  bee: {
+    // Sustained, which nothing else here is. A 42Hz amplitude chop on a
+    // band-limited saw, wandering slightly in pitch so a swarm does not phase
+    // into one tone.
+    kind: 'buzz', base: 205, dur: 0.85, gain: 0.14,
+  },
+  crab: {
+    // Chitin. Four ultra-short high-Q clicks and nothing else — the driest
+    // sound in the game.
+    kind: 'noisevox', base: 1, dur: 0.30, gain: 3.03,
+    grains: 4, gap: 0.045, lo: 2400, hi: 5200, q: 9, at: 0.001,
+  },
+  caterpillar: {
+    // Barely there, and it should be: a leaf-rustle at the very bottom of the
+    // ladder, quieter than a footstep.
+    kind: 'noisevox', base: 1, dur: 0.35, gain: 0.43,
+    grains: 3, gap: 0.08, lo: 2600, hi: 6200, q: 1.4, at: 0.01,
+  },
+
+  // --- underwater ----------------------------------------------------------
+  //
+  // Quiet by design and quieter still in play, because the muffle filter is
+  // closed to a few hundred Hz whenever the player is under with them. A fish
+  // is a texture you notice when you are already swimming, not a call across a
+  // bay.
+  fish: { kind: 'bubble', base: 420, dur: 0.45, gain: 0.119 },
+  deep_fish: { kind: 'bubble', base: 300, dur: 0.60, gain: 0.158 },
+  piranha: {
+    // Not a bubble: a dry snapping run, the one aquatic voice that is a warning.
+    kind: 'chitter', base: 1500, dur: 0.26, gain: 0.202,
+    grains: 4, gap: 0.042, glide: 0.90, wave: 'square', band: 3000,
+  },
+  shark: {
+    // No animal noise at all — a pressure wave. Low-passed noise swelling and
+    // closing over a falling sub, which is the sound of something large moving
+    // water, and the only honest thing a shark can be given.
+    kind: 'surge', base: 64, dur: 1.30, gain: 0.378,
+  },
+
+  // The stalker is not on this table and must never be. `_tryVocalise` returns
+  // early for phantoms and Audio.mob would refuse him anyway; a sighting that
+  // announces itself is a jump scare, and the whole effect is that nothing
+  // happens at all.
 };
 
-// idle / hurt / death are the same instrument played differently.
+// idle / attack / hurt / death are the same instrument played differently.
+//
+// `drop` is where the pitch ends up as a multiple of where it began, and it is
+// what separates the two aggressive modes from the two passive ones: under 1
+// the voice falls away, over 1 it climbs. A hurt climbs a little because it is
+// involuntary; an attack climbs harder, in the chest register rather than up a
+// third, because it is a decision.
 const VOX_MODE = {
   idle: { pitch: 1.0, dur: 1.0, gain: 1.0, drop: 0.86, thump: 0 },
+  // The windup. Louder and longer than a hurt and NOT pitched up: a monster
+  // squealing as it lunges reads as a monster taking damage, which is precisely
+  // backwards at the one moment the player has to read it right.
+  attack: { pitch: 0.98, dur: 0.72, gain: 1.5, drop: 1.30, thump: 0 },
   hurt: { pitch: 1.34, dur: 0.62, gain: 1.35, drop: 1.18, thump: 0 },
   death: { pitch: 0.92, dur: 1.75, gain: 1.15, drop: 0.42, thump: 0.9 },
 };
@@ -943,8 +1203,12 @@ export class Audio {
     const mode = VOX_MODE[kind] || VOX_MODE.idle;
     if (!v) return false;
     const t = this.ctx.currentTime;
-    if (kind === 'idle' && !v.far) {
-      // hard floor between any two idle calls from any animal
+    if (kind === 'idle' && !v.far && !v.urgent) {
+      // Hard floor between any two idle calls from any animal. `urgent` species
+      // are out of it: the floor is a herd limiter, and a yeti's approach tell
+      // being eaten by a rabbit that called 0.3s earlier is the exact failure
+      // this table was written to end. There are at most a handful of hostiles
+      // alive at once and Mobs' own per-world cooldown still applies to them.
       if (t - this._lastIdleVox < 0.45) { this.stats.throttled++; return false; }
       this._lastIdleVox = t;
     }
@@ -953,8 +1217,15 @@ export class Audio {
     const pitch = mode.pitch * jitter;
     const dur = v.dur * mode.dur * (0.88 + Math.random() * 0.28);
     // A death is the last thing an animal ever does; it outbids a herd of idles
-    // for the last slot in the budget rather than being dropped by them.
-    if (kind !== 'death' && !this._take('mob', dur * 2 + 0.4)) return false;
+    // for the last slot in the budget rather than being dropped by them. An
+    // attack windup outbids them for the same reason and a better one: at
+    // VOICE_COST.mob 7 against VOICE_CAP.mob 28 the category holds four
+    // concurrent voices, and a paddock idling nearby can hold all four, so
+    // without this the one cue a player has to react to is the cue a sheep can
+    // delete. Both still TAKE budget when there is any to take — outbidding is
+    // about not being refused, not about being unaccounted for.
+    const priority = kind === 'death' || kind === 'attack';
+    if (!this._take('mob', dur * 2 + 0.4) && !priority) return false;
     const gain = v.gain * mode.gain;
     const out = this._dest(pos, dur * 2 + 0.4, true, !!v.far);
     const f0 = v.base * pitch;
@@ -1054,6 +1325,343 @@ export class Audio {
         o.start(tn); o.stop(tn + gd + 0.03);
         this._noiseHit(out, tn, { gain: gain * 0.22, lo: 700, hi: 2800, q: 1.2, dur: gd * 0.7 });
       }
+    } else if (v.kind === 'roar') {
+      // Big voiced throat. Three detuned partials into ONE gain that an LFO
+      // chews at `rough[1]` Hz, then a pair of peaking filters standing in for
+      // a vowel, then the envelope.
+      //
+      // The chop is the species, not the pitch. Below about 20Hz the ear counts
+      // the pulses and hears a bellow; by 30-40Hz it stops counting and hears a
+      // rasp; past 50Hz the sidebands land inside the harmonic series and it
+      // stops being modulation at all and becomes distortion. Eight species
+      // share this branch and they run 5, 6.5, 9, 14, 17, 24, 33 and 61 Hz,
+      // which is a wider audible spread than their fundamentals give.
+      const rr = v.rough || [0.3, 16];
+      const fm = v.form || [500, 1100];
+      const atk = Math.max(0.012, dur * (v.swell ?? 0.2));
+
+      const am = this.ctx.createGain();
+      am.gain.value = 1 - rr[0] * 0.5;
+      const lfo = this.ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = rr[1] * (0.92 + Math.random() * 0.16);
+      const lg = this.ctx.createGain(); lg.gain.value = rr[0] * 0.5;
+      lfo.connect(lg).connect(am.gain);
+      lfo.start(t); lfo.stop(t + dur + 0.1);
+
+      // Peaking rather than bandpass: two bandpasses in series throw away most
+      // of the fundamental, which is the part of a roar you feel.
+      const p1 = this.ctx.createBiquadFilter();
+      p1.type = 'peaking'; p1.frequency.value = fm[0] * jitter;
+      p1.Q.value = 1.6; p1.gain.value = 9;
+      const p2 = this.ctx.createBiquadFilter();
+      p2.type = 'peaking'; p2.frequency.value = fm[1] * jitter;
+      p2.Q.value = 1.2; p2.gain.value = 6;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = fm[1] * 2.6; lp.Q.value = 0.7;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(gain, t + atk);
+      g.gain.linearRampToValueAtTime(gain * 0.78, t + dur * 0.78);
+      g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+      am.connect(p1).connect(p2).connect(lp).connect(g).connect(out);
+
+      // 1.48 is deliberately not a harmonic. On the harsh voices it beats
+      // against the fundamental instead of reinforcing it, which is what makes
+      // the demon read as tearing rather than as a low note.
+      const parts = v.harsh
+        ? [[1, 1, 'sawtooth'], [1.007, 0.8, 'sawtooth'], [1.48, 0.45, 'sawtooth']]
+        : [[1, 1, 'sawtooth'], [1.006, 0.7, 'sawtooth'], [0.5, 0.5, 'triangle']];
+      for (const [mul, amt, type] of parts) {
+        const o = this.ctx.createOscillator();
+        o.type = type;
+        const f = f0 * mul;
+        o.frequency.setValueAtTime(f * (v.rise ? 0.62 : 1.06), t);
+        if (v.rise) o.frequency.exponentialRampToValueAtTime(f * v.rise, t + dur * 0.32);
+        else o.frequency.linearRampToValueAtTime(f, t + dur * 0.25);
+        o.frequency.exponentialRampToValueAtTime(
+          Math.max(22, f * (v.rise ? v.rise * 0.85 : 1) * mode.drop), t + dur);
+        const og = this.ctx.createGain(); og.gain.value = amt;
+        o.connect(og).connect(am);
+        o.start(t); o.stop(t + dur + 0.08);
+      }
+
+      // The sub goes round the formants rather than through them. Filtered it
+      // would be shaped away, and it is the half of a cyclops you feel.
+      if (v.sub) {
+        const s = this.ctx.createOscillator();
+        s.type = 'sine';
+        s.frequency.setValueAtTime(f0 * 0.5, t);
+        s.frequency.exponentialRampToValueAtTime(Math.max(20, f0 * 0.5 * mode.drop), t + dur);
+        const sg = this.ctx.createGain();
+        sg.gain.setValueAtTime(0.0001, t);
+        sg.gain.linearRampToValueAtTime(gain * v.sub, t + atk);
+        sg.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+        s.connect(sg).connect(out);
+        s.start(t); s.stop(t + dur + 0.08);
+      }
+      if (v.breath) {
+        this._noiseHit(out, t, {
+          gain: gain * v.breath, lo: fm[0] * 0.5, hi: fm[1] * 2, q: 0.8,
+          dur: dur * 0.9, at: atk,
+        });
+      }
+      // Dragon only: the roar stops and the flame does not. Starts late on
+      // purpose, so it is heard as a consequence rather than as brightness.
+      if (v.hiss) {
+        this._noiseHit(out, t + dur * 0.55, {
+          gain: gain * v.hiss, lo: 2200, hi: 6400, q: 0.9, dur: dur * 0.8, at: dur * 0.25,
+        });
+      }
+    } else if (v.kind === 'chitter') {
+      // Rhythm-first voices: a run of short grains, and what identifies the
+      // species is the count, the spacing and whether each grain rises or
+      // falls. The dog is two falling, the monkey three rising, the imp six
+      // falling fast, the bat two very high and very short.
+      // A hurt and a death are cut short — a run of grains is a statement and
+      // an animal that has just been hit does not finish sentences. An ATTACK
+      // is not: measured, thinning the bat's two grains to one put its windup
+      // 3.9dB UNDER its own idle, which is the tell arriving quieter than the
+      // ambient chatter it has to be heard over.
+      const gn = kind === 'hurt' || kind === 'death'
+        ? Math.max(1, Math.round((v.grains || 3) * 0.6))
+        : Math.max(1, v.grains || 3);
+      const gap = v.gap || 0.1;
+      for (let n = 0; n < gn; n++) {
+        const tn = t + n * gap * (0.85 + Math.random() * 0.3);
+        const gd = Math.min(dur, gap * 1.5) * (0.8 + Math.random() * 0.4);
+        const o = this.ctx.createOscillator();
+        o.type = v.wave || 'square';
+        const f = f0 * (0.94 + Math.random() * 0.12);
+        o.frequency.setValueAtTime(f, tn);
+        o.frequency.exponentialRampToValueAtTime(
+          Math.max(50, f * (v.glide || 0.7) * mode.drop), tn + gd);
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = (v.band || 1200) * jitter; bp.Q.value = 1.3;
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = (v.band || 1200) * 3.2;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, tn);
+        g.gain.linearRampToValueAtTime(gain * (n === 0 ? 1 : 0.82), tn + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0004, tn + gd);
+        o.connect(bp).connect(lp).connect(g).connect(out);
+        o.start(tn); o.stop(tn + gd + 0.03);
+        // A bark with no air in it is a beep. This is the consonant.
+        this._noiseHit(out, tn, {
+          gain: gain * 0.28, lo: (v.band || 1200) * 0.5, hi: (v.band || 1200) * 2.4,
+          q: 1.2, dur: gd * 0.6,
+        });
+      }
+    } else if (v.kind === 'noisevox') {
+      // Unpitched, entirely. Six species share this and none of them can be
+      // confused with the tuned ones for the same reason a maraca is never
+      // confused with a trumpet, whatever else is playing.
+      //
+      // `grains` 1 is a sustained band (a breath, a scrape); more than one is a
+      // clatter. `trem` cuts the sustained case at an audible rate, which is
+      // the whole difference between the giraffe's huff and the prickler's rasp
+      // even though both are one band of noise.
+      const gn = Math.max(1, v.grains || 1);
+      const gd = gn === 1 ? dur : Math.min(dur, (v.gap || 0.06) * 1.1);
+      for (let n = 0; n < gn; n++) {
+        const tn = t + n * (v.gap || 0.06) * (0.85 + Math.random() * 0.3);
+        const src = this.ctx.createBufferSource();
+        src.buffer = this.noiseBuf;
+        src.playbackRate.value = 0.7 + Math.random() * 0.6;
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.setValueAtTime(v.hi * (0.9 + Math.random() * 0.2), tn);
+        bp.frequency.exponentialRampToValueAtTime(Math.max(40, v.lo), tn + gd);
+        bp.Q.value = v.q || 1;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, tn);
+        g.gain.linearRampToValueAtTime(gain * (n === 0 ? 1 : 0.85), tn + (v.at ?? 0.004));
+        g.gain.exponentialRampToValueAtTime(0.0004, tn + gd);
+        if (v.trem) {
+          const tl = this.ctx.createOscillator();
+          tl.type = 'sine'; tl.frequency.value = v.trem * (0.9 + Math.random() * 0.2);
+          const tg = this.ctx.createGain(); tg.gain.value = gain * 0.45;
+          tl.connect(tg).connect(g.gain);
+          tl.start(tn); tl.stop(tn + gd + 0.05);
+        }
+        src.connect(bp).connect(g).connect(out);
+        src.start(tn, Math.random() * 2); src.stop(tn + gd + 0.05);
+      }
+      // The sporeling's dull knock. Noise alone gave it no body at all and it
+      // vanished behind anything else in the mix.
+      if (v.pop) {
+        const o = this.ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.exponentialRampToValueAtTime(Math.max(30, f0 * 0.45 * mode.drop), t + dur * 0.6);
+        const pg = this.ctx.createGain();
+        pg.gain.setValueAtTime(0.0001, t);
+        pg.gain.linearRampToValueAtTime(gain * v.pop, t + 0.02);
+        pg.gain.exponentialRampToValueAtTime(0.0004, t + dur * 0.6);
+        o.connect(pg).connect(out);
+        o.start(t); o.stop(t + dur * 0.7);
+      }
+    } else if (v.kind === 'tonal') {
+      // Pure tone, no noise layer at all — which is itself the identity. Four
+      // species, separated by what the tone DOES: the cat hinges up then down,
+      // the ghost swells and falls, the small alien is ring-modulated into
+      // inharmonicity, the tall one barely moves and beats against itself.
+      const gl = v.glide || [1, 1.2, 0.8];
+      const vb = v.vib || [5, 0.04];
+      const voices = v.beat ? [0, v.beat] : [0];
+      for (const off of voices) {
+        const o = this.ctx.createOscillator();
+        o.type = v.wave || 'sine';
+        o.frequency.setValueAtTime(f0 * gl[0] + off, t);
+        o.frequency.exponentialRampToValueAtTime(f0 * gl[1] + off, t + dur * 0.38);
+        o.frequency.exponentialRampToValueAtTime(
+          Math.max(30, f0 * gl[2] * mode.drop + off), t + dur);
+        const lfo = this.ctx.createOscillator();
+        lfo.type = 'sine'; lfo.frequency.value = vb[0] * (0.9 + Math.random() * 0.2);
+        const lg = this.ctx.createGain(); lg.gain.value = f0 * vb[1];
+        lfo.connect(lg).connect(o.frequency);
+        lfo.start(t); lfo.stop(t + dur + 0.1);
+
+        let node = o;
+        // True ring modulation: a gain resting at zero, driven bipolar. Nothing
+        // with a throat can do this, and that is the point of the aliens.
+        if (v.ring) {
+          const rg = this.ctx.createGain(); rg.gain.value = 0;
+          const rm = this.ctx.createOscillator();
+          rm.type = 'sine'; rm.frequency.value = v.ring;
+          rm.connect(rg.gain);
+          rm.start(t); rm.stop(t + dur + 0.1);
+          o.connect(rg); node = rg;
+        }
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(gain * (off ? 0.8 : 1), t + dur * 0.18);
+        g.gain.linearRampToValueAtTime(gain * (off ? 0.6 : 0.75), t + dur * 0.7);
+        g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+        if (v.form) {
+          const pk = this.ctx.createBiquadFilter();
+          pk.type = 'peaking'; pk.frequency.value = v.form * jitter;
+          pk.Q.value = 2.0; pk.gain.value = 8;
+          node.connect(pk).connect(g).connect(out);
+        } else {
+          node.connect(g).connect(out);
+        }
+        o.start(t); o.stop(t + dur + 0.1);
+      }
+    } else if (v.kind === 'gurgle') {
+      // Drowned. A very dark sustained low note with bubbles rising through it,
+      // low-passed hard enough that it reads as heard through water even when
+      // the player is stood in the air beside it.
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f0 * 1.1, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(24, f0 * mode.drop), t + dur);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 260; lp.Q.value = 1.4;
+      const wob = this.ctx.createOscillator();
+      wob.type = 'sine'; wob.frequency.value = 3.2 + Math.random() * 1.6;
+      const wg = this.ctx.createGain(); wg.gain.value = 90;
+      wob.connect(wg).connect(lp.frequency);
+      wob.start(t); wob.stop(t + dur + 0.1);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(gain, t + dur * 0.2);
+      g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+      o.connect(lp).connect(g).connect(out);
+      o.start(t); o.stop(t + dur + 0.08);
+      // Rising resonances, the same trick that makes `splash` read as water.
+      const bubbles = 4 + ((Math.random() * 4) | 0);
+      for (let n = 0; n < bubbles; n++) {
+        const tn = t + 0.05 + Math.random() * dur * 0.8;
+        const bd = 0.05 + Math.random() * 0.09;
+        const bf = 140 + Math.random() * 260;
+        const b = this.ctx.createOscillator();
+        b.type = 'sine';
+        b.frequency.setValueAtTime(bf, tn);
+        b.frequency.exponentialRampToValueAtTime(bf * (2 + Math.random() * 1.4), tn + bd);
+        const bg = this.ctx.createGain();
+        bg.gain.setValueAtTime(0.0001, tn);
+        bg.gain.linearRampToValueAtTime(gain * 0.30, tn + 0.006);
+        bg.gain.exponentialRampToValueAtTime(0.0004, tn + bd);
+        b.connect(bg).connect(out);
+        b.start(tn); b.stop(tn + bd + 0.03);
+      }
+    } else if (v.kind === 'buzz') {
+      // The only sustained voice in the table. A band-limited saw chopped at
+      // 42Hz, with the fundamental wandering so a hive does not phase-lock into
+      // one flat tone.
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.linearRampToValueAtTime(f0 * (0.88 + Math.random() * 0.3), t + dur * 0.5);
+      o.frequency.linearRampToValueAtTime(f0 * mode.drop, t + dur);
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 620 * jitter; bp.Q.value = 1.1;
+      const am = this.ctx.createGain(); am.gain.value = 0.6;
+      const lfo = this.ctx.createOscillator();
+      lfo.type = 'sine'; lfo.frequency.value = 42 * (0.9 + Math.random() * 0.2);
+      const lg = this.ctx.createGain(); lg.gain.value = 0.4;
+      lfo.connect(lg).connect(am.gain);
+      lfo.start(t); lfo.stop(t + dur + 0.1);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(gain, t + 0.08);
+      g.gain.linearRampToValueAtTime(gain * 0.85, t + dur * 0.7);
+      g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+      o.connect(bp).connect(am).connect(g).connect(out);
+      o.start(t); o.stop(t + dur + 0.08);
+    } else if (v.kind === 'bubble') {
+      // A fish has no voice, so it is given the only noise it actually makes.
+      // Kept at the bottom of the ladder deliberately: the muffle is closed to
+      // a few hundred Hz whenever the player is down there to hear it.
+      const n = 3 + ((Math.random() * 3) | 0);
+      for (let i = 0; i < n; i++) {
+        const tn = t + i * (0.05 + Math.random() * 0.08);
+        const bd = 0.06 + Math.random() * 0.10;
+        const f = f0 * (0.6 + Math.random() * 0.7);
+        const o = this.ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f, tn);
+        o.frequency.exponentialRampToValueAtTime(f * (1.8 + Math.random() * 1.4) * mode.drop, tn + bd);
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = 2200;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, tn);
+        g.gain.linearRampToValueAtTime(gain * (i === 0 ? 1 : 0.8), tn + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0004, tn + bd);
+        o.connect(lp).connect(g).connect(out);
+        o.start(tn); o.stop(tn + bd + 0.03);
+      }
+    } else if (v.kind === 'surge') {
+      // Displaced water, not a voice. A low band opening and closing over a
+      // falling sub — the sound of a large body moving past you, which is the
+      // only honest thing to give a shark.
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.playbackRate.value = 0.3 + Math.random() * 0.2;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(140, t);
+      lp.frequency.exponentialRampToValueAtTime(560 + Math.random() * 220, t + dur * 0.45);
+      lp.frequency.exponentialRampToValueAtTime(120, t + dur);
+      lp.Q.value = 1.2;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(gain, t + dur * 0.4);
+      g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+      src.connect(lp).connect(g).connect(out);
+      src.start(t, Math.random() * 2); src.stop(t + dur + 0.05);
+      const s = this.ctx.createOscillator();
+      s.type = 'sine';
+      s.frequency.setValueAtTime(f0, t);
+      s.frequency.exponentialRampToValueAtTime(Math.max(20, f0 * 0.55 * mode.drop), t + dur);
+      const sg = this.ctx.createGain();
+      sg.gain.setValueAtTime(0.0001, t);
+      sg.gain.linearRampToValueAtTime(gain * 0.55, t + dur * 0.35);
+      sg.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+      s.connect(sg).connect(out);
+      s.start(t); s.stop(t + dur + 0.08);
     } else {
       // browser: long low hum, two detuned partials, slow vibrato, very dark
       for (const [mul, amt, type] of [[1, 1, 'triangle'], [2.01, 0.34, 'sine'], [0.5, 0.5, 'sine']]) {

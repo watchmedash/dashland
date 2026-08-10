@@ -503,6 +503,19 @@ const FLY_LAVA_CLEAR = 4;
  * The clearance is `tall` plus this, not a flat number, because a dragon and a
  * bee do not need the same room over a treetop.
  */
+/**
+ * How often a body re-asks what is over its head, in seconds, and how dark a
+ * fully roofed one gets.
+ *
+ * 0.6 s because walking under a tree is not a per-frame event and the probe
+ * walks a column; jittered at the call site so a herd does not all sample on
+ * the same frame. 0.55 because a mob indoors should read as indoors without
+ * becoming a silhouette - the terrain around it keeps its own baked light, and
+ * the two have to look like they are in the same room.
+ */
+const SKY_PROBE_PERIOD = 0.6;
+const SKY_SHADE_MIN = 0.55;
+
 const FLY_LOOK_NEAR = 1.4;
 const FLY_LOOK_FAR = 2.9;
 const FLY_CLEAR = 0.6;
@@ -9010,6 +9023,41 @@ export class Mobs {
     // animal reddens instead of glowing. `owned` is this mob's own material
     // clones; the map inside them is shared and never written to.
     let tr = 1, tg = 1, tb = 1;
+
+    // --- this body's own sky, not the player's -------------------------------
+    //
+    // "Why are light for blocks and models different? Sun and moon affect the
+    // environment properly but not mobs."
+    //
+    // Block light already is shared: `_entityLight` samples the same emitters
+    // the terrain does, through the same falloff. Sky light was not. The
+    // terrain carries a baked per-voxel sky value, so a cow in a cave is dark
+    // and one in a field is bright, cell by cell - but a mob cannot have baked
+    // vertex light because it moves, so it takes a single scene fill, and that
+    // fill is dimmed by the *player's* sky exposure. An animal under a canopy
+    // was lit by whatever you were standing under.
+    //
+    // So each body now answers for itself, with the same probe the weather uses
+    // on the player: walk up its own column and count what is over it, giving up
+    // at three. Sampled on a jittered timer rather than every frame - the sky
+    // over a cow changes when it walks under a tree, which is not a per-frame
+    // event - and quantised to sixteenths so the change guard below still holds
+    // and a wandering animal does not rewrite its materials every frame.
+    mob.skyT = (mob.skyT || 0) - dt;
+    if (mob.skyT <= 0) {
+      mob.skyT = SKY_PROBE_PERIOD * (0.75 + Math.random() * 0.5);
+      const c = mob.cell;
+      const col = this._colOf(c.f, c.ci, c.cj);
+      let blocked = 0;
+      for (let k = Math.floor(c.ck) + 2; k < D; k++) {
+        if (this.planet.solidAt(col, k) && ++blocked >= 3) break;
+      }
+      const open = 1 - Math.min(3, blocked) / 3;
+      mob.sky = Math.round((SKY_SHADE_MIN + (1 - SKY_SHADE_MIN) * open) * 16) / 16;
+    }
+    const sky = mob.sky ?? 1;
+    tr *= sky; tg *= sky; tb *= sky;
+
     if (mob.hurtT > 0) { tr = 1; tg = 0.34; tb = 0.30; }
     // `alight` is the lava afterburn, `burnT` the daylight one. Same tint for
     // both: what the player has to read is "that animal is on fire", not which

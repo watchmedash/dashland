@@ -234,6 +234,11 @@ const FREEZE_BATCH = 14;
 /** How far from the player winter is allowed to work, in columns. */
 const FREEZE_RADIUS = 24;
 /**
+ * How close a freezing or thawing cell has to be to be worth a sound. Five
+ * metres is about "the water at your feet" and nothing else; see `_iceHeard`.
+ */
+const ICE_EARSHOT = 5;
+/**
  * Falling sand: seconds between passes, and columns settled per pass.
  *
  * 0.1s is fast enough that a grain mined out from under a dune is gone before
@@ -990,7 +995,28 @@ class Game {
     // its box has to stay out of their bodies.
     this.player.mobs = this.mobs;
     this.weather = new Weather();
-    this.weather.onThunder = () => this.audio.thunder(0.85 + Math.random() * 0.35);
+    // Lightning and thunder are one strike, and until now they were two events
+    // that happened to share a frame: `Weather` set the flash and called this,
+    // this called `thunder()`, and `thunder()` rolled its OWN idea of how close
+    // the strike was. So a flash directly overhead could be answered, in the
+    // same millisecond, by a roll that had decided it was miles off — and every
+    // strike in the game arrived at zero delay regardless.
+    //
+    // One roll now decides both. `near` is 0 for a distant strike and 1 for one
+    // overhead, and it picks the gap between the flash you saw and the boom you
+    // hear as well as the sound itself, so counting the seconds tells you what
+    // it always tells you. 6.5s at the far end is about two kilometres at the
+    // real speed of sound, which is as long as a game can hold the count before
+    // the player has stopped connecting the two.
+    //
+    // The delay is a bare timer on purpose: a boom that outlives the storm that
+    // made it is correct, and one that arrives after the tab is hidden is
+    // dropped by `_live()` on its own account, because the context is suspended.
+    this.weather.onThunder = () => {
+      const near = Math.random();
+      const strength = 0.85 + Math.random() * 0.35;
+      setTimeout(() => this.audio.thunder(strength, near), (1 - near) * 6500);
+    };
     this.seasons = new Seasons();
     this.postfx = new PostFX(this.renderer, this.scene, this.camera);
     this.postfx.enabled = this.settings.post;
@@ -1471,6 +1497,12 @@ class Game {
     this.frozen.clear();
     this.hearths.clear();
     this.coreFound = false;
+    // Cleared with the rest of the world state so a new world cannot inherit
+    // the last one's sky and greet the player with a squall, or its clock and
+    // announce a dawn, on the first frame. Both edges are armed by the first
+    // frame that runs, which is what `undefined` means to their readers.
+    this._lastSky = undefined;
+    this._lastDayT = undefined;
     this.mobs.wards = null;
     this.seasons.fromJSON(0);
     this._pushSeason();
@@ -3434,7 +3466,11 @@ class Game {
       for (const kk of halves) if (this._intersectsPlayer(col, kk)) return;
     }
     this._applyEdits(halves.map((kk) => ({ col, k: kk, id, facing: next })));
-    this.audio.place('wood', this.planet.centerOf(col, halves[0], _v1));
+    // Bit 2 of the facing byte is the leaf's state, and it is the one the guard
+    // above already reads to decide whether this swing could trap you. Both
+    // halves of a door used to be `place('wood')`, so the one block in the game
+    // with two states was the one block whose state you could not hear.
+    this.audio.door(!!((next >> 2) & 1), this.planet.centerOf(col, halves[0], _v1));
     this.player.swing();
     this.viewModel.punch();
   }
@@ -3749,6 +3785,12 @@ class Game {
     }
     this.inventory.consumeHeld(1, held);
     this.audio.place(BLOCKS[id].sound, this.planet.centerOf(col, k, _v1));
+    // Over the top of the tap, not instead of it: the tap is the stick meeting
+    // stone and the flame is the reason you did it. Light is the resource the
+    // night in this game is actually about, which is what makes this the one
+    // placement out of two hundred worth confirming by ear. `_v1` is safe to
+    // hand over twice — `_dest` reads x/y/z straight into the panner.
+    if (IS_TORCH[id]) this.audio.torchLight(_v1);
     this.stats.placed++;
     this.player.swing();
     // The arm that put it down — the left one when the torch came out of the
@@ -3941,6 +3983,16 @@ class Game {
       const cur = this.planet.at(k.col, k.k);
       if ((cur === ID.kiln || cur === ID.kiln_lit) && cur !== want) {
         this._applyEdits([{ col: k.col, k: k.k, id: want }]);
+        // Here rather than beside `_mark('forge')` above, and the difference is
+        // the whole design of it: the branch up there fires once per *stick*, so
+        // a kiln burning through a stack of nine would light nine times. The
+        // block state changes exactly twice a run — it takes light, and it goes
+        // dark — which is the number of times a player wants to be told.
+        //
+        // Going dark is the half that fixes a real hole: loading a kiln,
+        // walking off to mine and never learning it ran out of coal two minutes
+        // in. Positional, at the kiln, for exactly that reason.
+        this.audio.kiln(want === ID.kiln_lit, this.planet.centerOf(k.col, k.k, _v1));
       }
     }
     if (this.ui.screen === 'kiln') this.ui.refresh();
@@ -4423,6 +4475,25 @@ class Game {
     const biomeId = this.planet.colBiome[cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)))] ?? 2;
     const altitude = this.player.position.length() - R_SEA;
     this.weather.update(dt, biomeId, altitude, this.seasons.cold);
+    // The leading edge of a rain band. `precip` eases toward its target at
+    // dt*0.14, so the bed already fades in over about seven seconds — what it
+    // has never had is a FRONT, and the first a player knew of a storm was
+    // being wet. A gust ahead of the rain is the whole of the warning weather
+    // gives in life and it is enough time to get under something.
+    //
+    // Rain and storm arriving only. Clear, fair and overcast are silent
+    // transitions on purpose: a sound for a state change the player can neither
+    // act on nor be harmed by is clutter, and so is a sound for rain stopping,
+    // which is a fade that is already audibly happening.
+    if (this.weather.state !== this._lastSky) {
+      const was = this._lastSky;
+      this._lastSky = this.weather.state;
+      // `was` is undefined on the first frame and after a load, which is what
+      // stops a world that was saved in a storm announcing one on the loading
+      // screen for weather that has been falling for an hour.
+      if (was !== undefined && this.weather.state === 'rain') this.audio.squall(0.6);
+      else if (was !== undefined && this.weather.state === 'storm') this.audio.squall(1);
+    }
     // Precipitation spawns in a box around the camera with no notion of the
     // world, so without this it rains just as hard inside a cave or under a
     // roof as it does in the open. Fade it out by how much sky is overhead,
@@ -4673,6 +4744,16 @@ class Game {
     this._scaldT = (this._scaldT || 0) + dt;
     if (this._scaldT < SCALD_PERIOD) return;
     this._scaldT = 0;
+    // Never fatal, the way starvation is not, and for a reason lava does not
+    // share: a hot spring *looks* like a rest spot. Lava is obviously lethal
+    // and nobody idles in it, but a pool is somewhere a player will genuinely
+    // step away from the keyboard, and on Extreme a death ends the run
+    // outright. So it takes you down and leaves you there.
+    //
+    // The floor is tested rather than clamped inside `_takeHit`, so the last
+    // point of health simply costs nothing: the flash and the sound still fire
+    // on every sting above it, which is what teaches you to get out.
+    if (this.player.health <= 1) return;
     this._takeHit(1, 'Scalded', false, 'scald');
   }
 
@@ -4790,6 +4871,41 @@ class Game {
     if (mins > 0) this.dayT = (this.dayT + days) % 1;
     this.seasons.advance(days);
     this._pushSeason();
+    this._tickSunTurn();
+  }
+
+  /**
+   * Say the day has turned.
+   *
+   * Day and night are not decoration here — the husks burn off at dawn, the
+   * spawner opens at dusk, the stalker walks, and `_tickNightOut` is counting
+   * the minutes you spend outside under it. All of that was announced by the
+   * colour of the sky and nothing else, which is no announcement at all to a
+   * player who is forty blocks down a shaft.
+   *
+   * **At 0.25 and 0.75, which is not sunrise.** `Ambience.nightness` ramps over
+   * 0.20-0.30 and 0.78-0.90, and the sky shader has its own idea again — but
+   * the husk burn, the spawn grace and the outdoors-at-night mark all test
+   * `t < 0.25 || t > 0.75`, so that is where the game's night actually begins
+   * and ends. A cue for a dusk the rules disagreed with would be worse than no
+   * cue, because a player would learn to trust it and then be caught out.
+   *
+   * The small-step guard is what keeps it honest across everything that moves
+   * this clock other than time passing: loading a save, starting a world, or
+   * sleeping through to morning all jump `dayT` by more than a frame's worth,
+   * and none of them is a sunset the player watched arrive. In clock-synced
+   * mode — the default, where a day is a real day — a frame moves the clock by
+   * about 2e-7, so the threshold has four orders of magnitude of room.
+   */
+  _tickSunTurn() {
+    const t = this.timeOfDay();
+    const was = this._lastDayT;
+    this._lastDayT = t;
+    if (was === undefined) return;
+    const step = t - was;
+    if (step <= 0 || step > 0.02) return;
+    if (was < 0.25 && t >= 0.25) this.audio.sunTurn(false);
+    else if (was < 0.75 && t >= 0.75) this.audio.sunTurn(true);
   }
 
   /**
@@ -4872,7 +4988,31 @@ class Game {
       this.frozen.add(key);
       edits.push({ col, k, id: ID.ice });
     }
-    if (edits.length) this._applyEdits(edits);
+    if (edits.length) { this._applyEdits(edits); this._iceHeard(edits, true); }
+  }
+
+  /**
+   * One crackle for a freeze or thaw pass, and only if it happened next to you.
+   *
+   * The sweep edits up to fourteen cells every 1.1 seconds across a 24-cell
+   * radius, nearly all of them out of sight — a voice per cell would be
+   * fourteen a second for the whole of winter, which is the single easiest way
+   * to make this feature hateful. What is worth hearing is not "the world is
+   * freezing", which is weather and which the season already says, but "the
+   * water beside YOU just became something you can stand on", which is a fact
+   * about the next step you take. So: nearest edit only, one per pass, and
+   * nothing at all beyond `ICE_EARSHOT`.
+   *
+   * Positional even though it is gated on being close, because within those few
+   * metres it still matters which side of you the lake is on.
+   */
+  _iceHeard(edits, freeze) {
+    let best = null, bestD = ICE_EARSHOT * ICE_EARSHOT;
+    for (const e of edits) {
+      const d = this.planet.centerOf(e.col, e.k, _v2).distanceToSquared(this.player.position);
+      if (d < bestD) { bestD = d; best = _v1.copy(_v2); }
+    }
+    if (best) this.audio.ice(freeze, best);
   }
 
   _thawSome() {
@@ -4900,7 +5040,7 @@ class Game {
       this.water.addSource(col, k);
       edits.push({ col, k, id: ID.water });
     }
-    if (edits.length) this._applyEdits(edits);
+    if (edits.length) { this._applyEdits(edits); this._iceHeard(edits, false); }
   }
 
   /** Hand the current season to the shader that colours the world. */
@@ -6375,6 +6515,23 @@ class Game {
         && this.inventory.countWithOffhand(itemIdOf(bowDef.ammo || '')) > 0);
     this.bow.hint = dry && input.buttons[2] && !busy && input.locked
       ? 'Out of arrows' : null;
+
+    // And say it out loud, once per press.
+    //
+    // Edge-triggered on the hint rather than on the button, because the hint is
+    // the state this is for and it is already the one thing here that knows
+    // which fist the bow is in. Firing on `buttons[2]` every frame would be
+    // sixty a second; firing on `clicked[2]` would miss the case a player
+    // actually hits, which is holding the button down waiting for a draw that
+    // never starts.
+    //
+    // Not `deny()`. A refusal shared with menu purchases and locked skills
+    // teaches the player one thing — that something was refused — when the
+    // useful thing to learn is that the quiver is empty. `dryFire` is the nock
+    // finding nothing, in the hands rather than in the interface.
+    const wasDry = this._bowDry;
+    this._bowDry = !!this.bow.hint;
+    if (this._bowDry && !wasDry) this.audio.dryFire();
   }
 
   /**
@@ -6950,6 +7107,10 @@ class Game {
     if (this.fishing.bite > 0) this._landCatch();
     else {
       this.ui.toast('Too soon.', itemIdOf('fishing_rod'), 1400);
+      // The same event as striking too late, and it gets the same sound: the
+      // line comes back with nothing on it. Which end of the window you missed
+      // is what the toast is for.
+      this.audio.lineLost(this.fishing.pos);
       this._stopFishing();
     }
   }
@@ -6977,11 +7138,17 @@ class Game {
       f.bite -= dt;
       if (f.bite <= 0) {
         this.ui.toast('It got away.', itemIdOf('fishing_rod'), 1600);
+        // The bite is `splash` — a slap and a run of rising bubbles. This is
+        // the same water going back the other way, and it has to be its own
+        // sound rather than a quieter splash: everything in it falls, which is
+        // the entire tell that the line came back empty.
+        this.audio.lineLost(f.pos);
         this._stopFishing();
       }
       return;
     }
     f.wait -= dt;
+    f.nibbleT = Math.max(0, (f.nibbleT ?? 0) - dt);
     if (f.wait <= 0) {
       f.bite = FISH_BITE_WINDOW;
       this.audio.splash(f.pos);
@@ -6989,6 +7156,15 @@ class Game {
     } else if (Math.random() < dt * 0.7) {
       // the odd nibble, so the wait is not a blank stare
       this.particles.bubbles(f.pos, this.player.up, 1);
+      // Throttled hard and separately from the particles. The bubbles are
+      // welcome at 0.7 a second because they are in the corner of your eye;
+      // a voice at that rate is a metronome, and the fishing wait is up to a
+      // minute long. One every two-and-a-half seconds at the most is a pond
+      // with something in it rather than a clock.
+      if (f.nibbleT === 0) {
+        f.nibbleT = 2.5 + Math.random() * 1.8;
+        this.audio.nibble(f.pos);
+      }
     }
     f.bob += dt;
     if (this.bobber) {

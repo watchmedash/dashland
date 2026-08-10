@@ -381,13 +381,23 @@ const VOX_MODE = {
 // graph holds on the order of 500 transient nodes, which measures as noise
 // beside the voxel meshes this game already keeps resident.
 const VOICE_BUDGET = 64;
+//
+// `sky` exists because of a measurement rather than a theory. The weather front
+// and the turn of the day were first put on `amb`, which is the right weight for
+// them — they build four to nine nodes, nothing like thunder's twenty — but
+// `amb` is also where every bird, owl, drip and gust one-shot lands, at the same
+// cost 3 against a cap of 12. Four of those in flight fills the category, and a
+// storm front arriving was measured being DROPPED by birdsong. A warning a
+// sparrow can mute is not a warning. Its own category at cost 4 and cap 8 costs
+// the global budget almost nothing (a squall and a sunset can coincide; nothing
+// else in here is a sky event) and cannot be starved by the ambience bed.
 const VOICE_COST = {
-  step: 2, block: 3, mob: 7, hit: 3, player: 3, ui: 1, amb: 3, weather: 10,
+  step: 2, block: 3, mob: 7, hit: 3, player: 3, ui: 1, amb: 3, weather: 10, sky: 4,
 };
 // Per-category ceilings on top of the global one, so no single source can eat
 // the whole budget. A cave-in must not be able to silence your own footsteps.
 const VOICE_CAP = {
-  step: 8, block: 24, mob: 28, hit: 12, player: 9, ui: 6, amb: 12, weather: 20,
+  step: 8, block: 24, mob: 28, hit: 12, player: 9, ui: 6, amb: 12, weather: 20, sky: 8,
 };
 
 export class Audio {
@@ -1057,6 +1067,502 @@ export class Audio {
     o.connect(og).connect(out);
     o.start(tn); o.stop(tn + 0.26);
     this._noiseHit(out, tn, { gain: 0.11, lo: 600, hi: 3200, q: 1.0, dur: 0.07 });
+  }
+
+  /**
+   * A kiln taking light, and a kiln going dark.
+   *
+   * Hooked to the block swapping between `kiln` and `kiln_lit` rather than to
+   * the moment fuel is consumed, because fuel is consumed once per stick: a
+   * furnace burning through a stack of nine would otherwise light nine times.
+   * The block state changes exactly twice per run, which is the number of times
+   * the player wants to be told.
+   *
+   * The two are one gesture played in opposite directions and nothing else, so
+   * they cannot be confused with each other or with anything else here: lighting
+   * OPENS a band upward over half a second, going out CLOSES one downward over
+   * three quarters. Lighting measures -44.9 and going dark -49.3, which puts the
+   * pair either side of `smelt` at -45.1 — the three things a kiln does sit on
+   * one shelf — and makes going out the quieter: a thing stopping is news, but
+   * it is not the same news as a thing starting, and only one of them is
+   * something you did. The first cut had them the wrong way round (-47.3 lit
+   * against -45.8 out), which read as the fire failing louder than it caught.
+   *
+   * Positional, and this is the whole point of the pair — the failure they fix
+   * is loading a kiln, walking off to mine, and never learning that it ran out
+   * of coal two minutes in.
+   */
+  kiln(lit = true, pos = null) {
+    if (!this._live() || !this._take('block', 1.2)) return;
+    const t = this.ctx.currentTime;
+    const d = lit ? 0.55 : 0.78;
+    const out = this._dest(pos, d + 0.6);
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    // Stretched hard. Fire has no top end to speak of and a fast-running noise
+    // buffer reads as a hiss of steam instead of a body of flame.
+    src.playbackRate.value = 0.30 + Math.random() * 0.14;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 0.9;
+    if (lit) {
+      bp.frequency.setValueAtTime(180, t);
+      bp.frequency.exponentialRampToValueAtTime(1250 + Math.random() * 350, t + d);
+    } else {
+      bp.frequency.setValueAtTime(900 + Math.random() * 250, t);
+      bp.frequency.exponentialRampToValueAtTime(120, t + d);
+    }
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    // A slow attack on the light — fuel catches, it does not strike. The dying
+    // one is slower still, because nothing about running out is sudden.
+    g.gain.linearRampToValueAtTime(lit ? 0.36 : 0.10, t + (lit ? 0.10 : 0.20));
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    // The low body under a lit kiln: the draught, held for a beat after the
+    // catch. Only on the way up; there is nothing to sustain on the way down.
+    if (lit) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(74, t);
+      o.frequency.linearRampToValueAtTime(58, t + 0.9);
+      const og = this.ctx.createGain();
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.linearRampToValueAtTime(0.20, t + 0.16);
+      og.gain.exponentialRampToValueAtTime(0.0004, t + 0.9);
+      o.connect(og).connect(out);
+      o.start(t); o.stop(t + 0.95);
+    } else {
+      // Two embers ticking as the heat leaves. Dry, unpitched, and the only
+      // thing in either half that is a transient rather than a sweep.
+      for (let i = 0; i < 2; i++) {
+        this._noiseHit(out, t + 0.34 + i * (0.16 + Math.random() * 0.1),
+          { gain: 0.04, lo: 900, hi: 2600, q: 5, dur: 0.05, at: 0.002 });
+      }
+    }
+  }
+
+  /**
+   * A torch catching. Laid over the block-place tap rather than replacing it:
+   * the tap is the stick meeting stone, and the flame is the reason you did it.
+   *
+   * Light is the resource this game's night is actually about, so the one
+   * placement in the game worth confirming by ear is this one. Kept small
+   * (-56.9, three and a half dB under the -53.5 tap it rides on) because a torch
+   * is a confirmation, not an event — you know you placed it, you are looking
+   * at it.
+   *
+   * No pitched layer anywhere in it. A flame has no fundamental, and every
+   * attempt at one here read as a gas ring.
+   */
+  torchLight(pos = null) {
+    if (!this._live() || !this._take('block', 0.8)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.40;
+    const out = this._dest(pos, 0.9);
+
+    // the catch: a puff of air taking, band opening upward
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.45 + Math.random() * 0.2;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(300, t);
+    bp.frequency.exponentialRampToValueAtTime(1600 + Math.random() * 500, t + d);
+    bp.Q.value = 0.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.10, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    // and the crackle settling in behind it, three grains at falling level
+    for (let i = 0; i < 3; i++) {
+      this._noiseHit(out, t + 0.10 + i * (0.07 + Math.random() * 0.08),
+        { gain: 0.035 * (1 - i * 0.25), lo: 1200, hi: 4200, q: 4, dur: 0.035, at: 0.002 });
+    }
+  }
+
+  /**
+   * A door. `open` is which way it just went, and it is the whole reason this
+   * exists: both halves used to be `place('wood')`, so the one block in the
+   * game with two states told you nothing about which state it had reached.
+   *
+   * The tell is not pitch, it is how each one ENDS. Opening ends open — a hinge
+   * band sweeping upward that simply stops being there. Closing ends closed —
+   * a fast swing down into a hard latch and a low body thump, which is a full
+   * stop. Played back to back the two are unmistakable with your eyes shut,
+   * which is the test that matters: a base you have sealed behind you sounds
+   * different from one you have not.
+   *
+   * -52.8 open and -53.0 shut, deliberately inside a fifth of a dB of each
+   * other and sitting on the -53.5 block-place tap they replaced. Two states of
+   * one object must differ in shape, not in loudness; the first cut had them
+   * 5.3dB apart and that reads as two different doors.
+   *
+   * Positional. A door is a place, and hearing one from the wrong side of the
+   * house is the point of it being a place.
+   */
+  door(open = true, pos = null) {
+    if (!this._live() || !this._take('block', 0.9)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 1.0);
+
+    // The hinge. High Q, because a hinge is one narrow resonance being dragged
+    // across a range rather than a band of noise: at Q 1 this is a whoosh, and
+    // at Q 9 it is a rusted pin.
+    const d = open ? 0.42 : 0.20;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = (open ? 0.30 : 0.55) + Math.random() * 0.15;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = open ? 9 : 5;
+    const f0 = 520 * (0.9 + Math.random() * 0.2);
+    bp.frequency.setValueAtTime(open ? f0 : f0 * 2.2, t);
+    bp.frequency.exponentialRampToValueAtTime(open ? f0 * 2.4 : f0 * 0.75, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    // Opening is a drag: slow on, and it fades rather than lands. Closing is a
+    // swing: it is already moving, so the noise is short and mostly a run-up.
+    g.gain.linearRampToValueAtTime(open ? 0.24 : 0.095, t + (open ? 0.13 : 0.04));
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    // The stop. Open gets a light knock as the leaf comes to rest against the
+    // frame; closed gets a hard latch and a low thump under it, and it is that
+    // thump — a body arriving — that reads as shut.
+    const tn = t + d * (open ? 0.95 : 0.80);
+    this._noiseHit(out, tn, open
+      ? { gain: 0.11, lo: 400, hi: 1700, q: 1.6, dur: 0.05 }
+      : { gain: 0.15, lo: 500, hi: 2600, q: 1.2, dur: 0.06, at: 0.002 });
+    if (!open) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      const bf = 105 * (0.92 + Math.random() * 0.16);
+      o.frequency.setValueAtTime(bf, tn);
+      o.frequency.exponentialRampToValueAtTime(bf * 0.62, tn + 0.20);
+      const og = this.ctx.createGain();
+      og.gain.setValueAtTime(0.0001, tn);
+      og.gain.linearRampToValueAtTime(0.17, tn + 0.005);
+      og.gain.exponentialRampToValueAtTime(0.0004, tn + 0.22);
+      o.connect(og).connect(out);
+      o.start(tn); o.stop(tn + 0.24);
+    }
+  }
+
+  /**
+   * Water taking a lid, or losing one. `freeze` picks which.
+   *
+   * The caller must gate this on proximity and on one per pass — see the note
+   * at `_tickFreeze`'s call site. The freeze sweep edits up to fourteen cells
+   * every 1.1s across a 24-cell radius, nearly all of them out of sight, and a
+   * voice per cell would be fourteen a second for the whole of winter. What is
+   * worth hearing is not "the world is freezing", which is weather, but "the
+   * water beside YOU just became something you can stand on", which is a fact
+   * about the next step you take.
+   *
+   * Freezing is the driest sound in this file bar the crab: high, brittle,
+   * unpitched grains with one thin rising tone under them. Thawing is the wet
+   * opposite — one soft break and two falling bubbles, because melting is water
+   * being given back and every rising bubble in this game means air.
+   *
+   * -48.3 and -47.6, level with each other and a shade under a waterfall at six
+   * metres. Loud enough to turn your head at the water's edge, and gated so it
+   * only ever happens there.
+   */
+  ice(freeze = true, pos = null) {
+    if (!this._live() || !this._take('block', 1.0)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 1.1);
+
+    if (freeze) {
+      const n = 4 + ((Math.random() * 3) | 0);
+      for (let i = 0; i < n; i++) {
+        this._noiseHit(out, t + i * (0.04 + Math.random() * 0.07),
+          { gain: 0.085, lo: 2200, hi: 5600, q: 8, dur: 0.03, at: 0.001 });
+      }
+      // Ice sings as it forms, and this thin rising line is the only part of the
+      // sound with a pitch at all — which is what stops six dry clicks reading
+      // as the crab.
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(1450, t);
+      o.frequency.exponentialRampToValueAtTime(2450 + Math.random() * 500, t + 0.45);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.022, t + 0.10);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + 0.45);
+      o.connect(g).connect(out);
+      o.start(t); o.stop(t + 0.48);
+      return;
+    }
+
+    // the lid giving: one wet break, low-passed rather than bright
+    this._noiseHit(out, t, { gain: 0.11, lo: 220, hi: 1500, q: 1.3, dur: 0.14, at: 0.003 });
+    for (let i = 0; i < 2; i++) {
+      const tn = t + 0.09 + i * (0.09 + Math.random() * 0.08);
+      const bd = 0.10 + Math.random() * 0.06;
+      const f = 520 + Math.random() * 260;
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, tn);
+      o.frequency.exponentialRampToValueAtTime(f * 0.42, tn + bd);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tn);
+      g.gain.linearRampToValueAtTime(0.055, tn + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + bd);
+      o.connect(g).connect(out);
+      o.start(tn); o.stop(tn + bd + 0.03);
+    }
+  }
+
+  /**
+   * Something is interested in the bait. The quietest world sound in the game
+   * at -60.0 — under the menu blip, over a footstep by two dB, and twenty-seven
+   * under a nearby thunderclap — and it has to be: the fishing wait is up to a
+   * minute of nothing, and the nibble is the one thing that makes staring at a
+   * float bearable. Anything louder turns a quiet minute into a metronome.
+   *
+   * It is not quieter still because it is PANNED and the float is thrown up to
+   * ten metres out, where the inverse law takes another eight dB off it. The
+   * first cut sat at -65 dry, which is -73 at the end of a real cast: gone.
+   *
+   * Positional, at the float rather than at the player — you cast it out there,
+   * and the whole gesture is that the sound comes from where the line is. The
+   * caller throttles it; see `_tickFishing`.
+   */
+  nibble(pos = null) {
+    if (!this._live() || !this._take('block', 0.4)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.5);
+    this._noiseHit(out, t, { gain: 0.10, lo: 500, hi: 1800, q: 2.2, dur: 0.055, at: 0.003 });
+    // one small bubble, rising — the same trick `splash` uses, at a fifth of it
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    const f = 380 + Math.random() * 240;
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 2.1, t + 0.07);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.07, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.08);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.1);
+  }
+
+  /**
+   * The one that got away. The bite is `splash` — a slap and a run of RISING
+   * bubbles — so this is the same water going the other way: a soft swallow and
+   * a bloop that falls. Nothing rises in it anywhere, which is the entire tell,
+   * and it is why this could not just be `splash` at a lower gain.
+   *
+   * Positional, at the float. Audible at -47.6 — over a breaking wooden block,
+   * under a splash — because it is news, but flat and downward, because it is
+   * bad news.
+   */
+  lineLost(pos = null) {
+    if (!this._live() || !this._take('block', 0.8)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.30;
+    const out = this._dest(pos, 0.9);
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.7 + Math.random() * 0.3;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1400 + Math.random() * 500, t);
+    bp.frequency.exponentialRampToValueAtTime(280, t + d);
+    bp.Q.value = 0.9;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.13, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    const tn = t + 0.05;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    const f = 460 * (0.9 + Math.random() * 0.2);
+    o.frequency.setValueAtTime(f, tn);
+    o.frequency.exponentialRampToValueAtTime(f * 0.30, tn + 0.26);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, tn);
+    og.gain.linearRampToValueAtTime(0.11, tn + 0.008);
+    og.gain.exponentialRampToValueAtTime(0.0004, tn + 0.28);
+    o.connect(og).connect(out);
+    o.start(tn); o.stop(tn + 0.30);
+  }
+
+  /**
+   * A bow with an empty quiver. Deliberately NOT `deny()`: a refusal that fires
+   * for a menu purchase, a locked skill and a dry bow teaches the player one
+   * thing, which is that something was refused, when the useful thing to learn
+   * is which of your two hands is empty of what.
+   *
+   * So it is the hands rather than the interface — two dull unpitched wooden
+   * ticks 45ms apart, the nock finding nothing and the string not moving. Dry,
+   * because it is your own bow. -61.5, four dB under the menu blip and one over
+   * a footstep: it answers a button you are holding down, and the hint line
+   * carries the words.
+   *
+   * 'ui' budget but the sfx bus, which is not a slip: the category weight is
+   * about how many nodes a call builds and this builds four, while the bus is
+   * about where the sound lives, and this one lives in the world's mix with the
+   * rest of the body rather than up with the menus.
+   */
+  dryFire() {
+    if (!this._live() || !this._take('ui', 0.3)) return;
+    const t = this.ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      this._noiseHit(this.sfxBus, t + i * 0.045,
+        { gain: 0.35 * (i ? 0.7 : 1), lo: 260, hi: 1100, q: 3, dur: 0.045, at: 0.002 });
+    }
+  }
+
+  // --- the sky ---------------------------------------------------------------
+
+  /**
+   * The turn of the day. `toNight` picks which end.
+   *
+   * Day and night are not decoration in this game — the husks burn, the spawner
+   * opens, the stalker walks, the outdoors-at-night mark counts — and until now
+   * the only notice of any of it was the colour of the sky, which you cannot
+   * see from inside a mine. This is the one cue that a player underground has
+   * any right to.
+   *
+   * Fired at the MECHANICAL boundary, not the visual one: the caller fires it as
+   * `timeOfDay` crosses 0.25 and 0.75, which is the same threshold the husk
+   * burn, the spawn grace and `_tickNightOut` all read. A cue for sunset that
+   * disagreed with the sunset the rules use would be worse than no cue.
+   *
+   * Built from the music pad's own palette — low sines, a fifth, a slow swell —
+   * so it reads as the world turning rather than as an achievement popping.
+   * Nightfall closes downward and hangs; daybreak opens upward and clears. Dry:
+   * the sky has no position, for the same reason thunder does not.
+   *
+   * -43.8 falling and -46.0 rising, either side of the -41 rain bed and well
+   * under a nearby animal. Twice a day at most, and in the default clock-synced
+   * mode twice a REAL day, so it can afford to be heard.
+   */
+  sunTurn(toNight = true) {
+    if (!this._live() || !this._take('sky', 4)) return;
+    const t = this.ctx.currentTime;
+    const d = toNight ? 3.4 : 2.7;
+    const out = this.sfxBus;
+    // 98Hz is G2, which is in the pad's own root set — the two never collide
+    // because the pad is a slow drone and this is a shape, but they do agree.
+    const root = toNight ? 98 : 110;
+
+    for (const [mul, amt] of [[1, 1], [1.5, 0.55], [3, 0.18]]) {
+      const o = this.ctx.createOscillator();
+      o.type = mul === 3 ? 'triangle' : 'sine';
+      // The gesture, and the only real difference between the two: nightfall
+      // sags a whole tone under itself and stays there, daybreak lifts a fourth
+      // and opens out. Same three partials, opposite direction.
+      o.frequency.setValueAtTime(root * mul * (toNight ? 1 : 0.75), t);
+      o.frequency.exponentialRampToValueAtTime(
+        root * mul * (toNight ? 0.89 : 1.0), t + d * 0.75,
+      );
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.Q.value = 0.7;
+      // The filter carries as much of it as the pitch does: dusk closes to 400Hz
+      // and dawn opens to 2.2k, which is the difference between a lid coming
+      // down and one coming off.
+      lp.frequency.setValueAtTime(toNight ? 1600 : 500, t);
+      lp.frequency.exponentialRampToValueAtTime(toNight ? 400 : 2200, t + d);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.113 * amt, t + d * (toNight ? 0.35 : 0.22));
+      g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+      o.connect(lp).connect(g).connect(out);
+      if (this.reverbGain) g.connect(this.reverbGain);
+      o.start(t); o.stop(t + d + 0.1);
+    }
+  }
+
+  /**
+   * The front of a rain band arriving: a gust that swells and passes.
+   *
+   * The gap this fills is not that rain has no sound — the bed has always faded
+   * in over about seven seconds — it is that the fade has no LEADING edge, so
+   * the first you know of a storm is that you are already wet. A gust ahead of
+   * the rain is the whole of the warning weather gives in life and it is enough
+   * time to get under something.
+   *
+   * Only for rain and storm arriving. Clear, fair and overcast are silent
+   * transitions on purpose: a sound the player can do nothing about, for a state
+   * that does nothing to them, is the exact clutter this pass is meant to avoid.
+   * Nothing is played when it stops either, for the same reason — a fade that is
+   * already happening does not need to be announced.
+   *
+   * `strength` is 0.6 for rain and 1 for a storm, measuring -48.6 and -43.8.
+   * Both sit under the -41 rain bed they precede rather than over it, because a
+   * warning that is louder than the weather is just the weather early. The rain
+   * front lands level with the wind bed, which is what a gust actually is.
+   *
+   * On the 'sky' budget at cost 4, not 'weather' at 10 and not 'amb' at 3.
+   * Thunder's price would have put a storm's arrival and its first strike at the
+   * category cap together, which is the one moment the player most needs their
+   * own footsteps to still fit in the budget — and `amb`, which was the first
+   * answer, was measured letting four birds drop the storm front. See the note
+   * above VOICE_COST.
+   *
+   * Dry, like thunder: a weather front is the whole sky and panning it would
+   * put the storm in one ear.
+   */
+  squall(strength = 1) {
+    if (!this._live() || !this._take('sky', 5)) return;
+    const t = this.ctx.currentTime;
+    const d = 3.2 + Math.random() * 1.4;
+    const out = this.sfxBus;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    src.playbackRate.value = 0.55 + Math.random() * 0.3;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 0.85;
+    // Rises through the middle and falls away past it: a front passing over,
+    // rather than a wind that arrives and stays. The peak is late (0.55 of the
+    // way in) so the approach is longer than the departure, which is what makes
+    // it read as coming towards you.
+    bp.frequency.setValueAtTime(260, t);
+    bp.frequency.linearRampToValueAtTime(900 + strength * 500, t + d * 0.55);
+    bp.frequency.linearRampToValueAtTime(300, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.080 * strength, t + d * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.1);
+
+    // A low body under a storm front only. Rain gets the hiss; a storm gets the
+    // pressure as well, and it is the layer that makes the two different sounds
+    // rather than one sound at two volumes — the same split the rain bed itself
+    // uses (see `rainHiss` / `rainBody` in Ambience).
+    if (strength > 0.8) {
+      const lo = this.ctx.createBufferSource();
+      lo.buffer = this.noiseBuf;
+      lo.loop = true;
+      lo.playbackRate.value = 0.22;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 150; lp.Q.value = 0.6;
+      const lg = this.ctx.createGain();
+      lg.gain.setValueAtTime(0.0001, t);
+      lg.gain.linearRampToValueAtTime(0.095, t + d * 0.6);
+      lg.gain.exponentialRampToValueAtTime(0.0004, t + d);
+      lo.connect(lp).connect(lg).connect(out);
+      lo.start(t, Math.random() * 2); lo.stop(t + d + 0.1);
+    }
   }
 
   /**
@@ -1741,11 +2247,19 @@ export class Audio {
    * low-passed rumble. Every roll is randomised — count and spacing of the
    * after-rumbles, cutoff sweep, crack brightness — so repeats never match.
    * Non-positional: it is the whole sky.
+   *
+   * `near` is 0 for a distant roll and 1 for an overhead crack, and it is now
+   * an argument rather than a fresh `Math.random()`. It had to become one: the
+   * caller delays the boom behind the flash by how far away the strike is, and
+   * a sound that rolls in eight seconds late and then cracks like it is
+   * overhead is worse than no delay at all. One roll now decides both the gap
+   * and the sound, which is the whole of the relationship. Left random when the
+   * caller does not care. An overhead strike measures -33.1 and a distant roll
+   * -46.3, so the argument is worth thirteen dB as well as six seconds.
    */
-  thunder(strength = 1) {
+  thunder(strength = 1, near = Math.random()) {
     if (!this._live() || !this._take('weather', 7)) return;
     const t = this.ctx.currentTime;
-    const near = Math.random();                 // 0 distant roll → 1 overhead crack
     const boom = 2.6 + Math.random() * 3.4;     // total decay in seconds
     // Clamped: the caller passes up to 1.2, and an overhead strike at that
     // strength used to schedule a gain of 1.26 on the bus. The compressor

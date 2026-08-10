@@ -5,21 +5,19 @@ credit is given anyway.
 
 ## Block materials — Stylized Texture Pack by **Lynocs**
 
-464 hand-painted textures with full PBR map sets. Free for private and
-commercial use, but **not CC0**: the author's terms are *"feel free to use any
-of these in your Private or Commercial Projects. Just don't sell these as it
-is."*
+464 hand-painted textures with full PBR map sets. **CC0** — the pack is marked
+with CC0 1.0. The author's accompanying note, *"feel free to use any of these
+in your Private or Commercial Projects. Just don't sell these as it is,"* asks
+that the pack not be resold as a texture product; it places no restriction on
+shipping a game built with it.
 
-**So please do not resell the pack — or the atlases in `public/tiles/` baked
-from it — as a texture asset.** That is the one restriction on this project's
-art, and it is the reason this section cannot be reduced to a line.
-
-102 of the game's 146 block tiles come from the pack. Which source image becomes
-which block, and the exposure each one is baked at, is recorded in
+101 of the game's 156 block tiles are mapped from the pack. Which source image
+becomes which block, and the exposure each one is baked at, is recorded in
 `scripts/bake-textures.mjs` — that table used to be copied out into this file
 and drifted, so the code is now the only copy. Everything the pack has no
 equivalent for is generated at bake time: every cross-shaped plant, torches,
-glass, ores, and the block-breaking overlay.
+glass, ores, the block-breaking overlay, and the pine needles, which were
+drawn because the pack has no conifer texture at all.
 
 ## Creatures — Cube Pets and Blocky Characters by **Kenney**
 
@@ -62,6 +60,13 @@ nine are procedural geometry over a named palette with no imported texture of
 any kind, which is also the reason they exist as models rather than as tiles:
 the block atlas is baked partly from a licensed pack, and nothing about this
 family needed to go near it.
+
+## Sound — no third-party audio
+
+Every sound in the game is synthesised at runtime from oscillators and one
+generated noise buffer. There is no audio file in the repository of any format,
+no `decodeAudioData`, no media fetch, and no `<audio>` element — audited, not
+assumed. So there is nothing here to licence and nothing to attribute.
 
 ## Engine
 

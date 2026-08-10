@@ -1217,14 +1217,27 @@ const FISH_CLIPS = {
   die: `${FISH_A}Death`,
 };
 /**
- * Which of them swim in ordinary water. The deep-water and predatory models in
- * the pack — anglerfish, blobfish, goblin shark, shark, piranha, puffer — are
- * converted and sitting beside these, waiting on species of their own rather
- * than being dropped into the shallows with the tangs.
+ * Which of them swim in ordinary water.
+ *
+ * `betta` and `goldfish` join the shoal here, and they are the last two bodies
+ * in the pack that were converted and never spawned. Every one of these is now a
+ * catchable item as well (see `FISH_SPECIES` in `Items.js`), and a species you
+ * can pull out of a lake but never see swim in one is the player's report
+ * inverted rather than answered — so the list a rod draws from and the list the
+ * water is stocked from are the same eleven names.
+ *
+ * What is deliberately still missing is a *salinity* split. The spawner picks a
+ * variant out of `urls` with the seeded stream and knows nothing about the
+ * column it is filling, so a koi can turn up in the ocean exactly as it always
+ * could. `_rollCatch` does know — it is handed the cast's own water — so the
+ * rod already keeps fresh and salt apart. Making the shoals do the same means
+ * threading the column's salinity through `spawn`, and that is worth doing on
+ * its own rather than inside this.
  */
 const FISH_KINDS = [
   'clownfish', 'bluetang', 'butterflyfish', 'moorishidol',
   'yellowtang', 'royalgramma', 'koi', 'tetra', 'puffer',
+  'betta', 'goldfish',
 ];
 /**
  * The ones that live where the light does not reach. Same rig and the same

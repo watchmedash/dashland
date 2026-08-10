@@ -84,7 +84,12 @@ for (const b of BLOCKS) {
  * the trader derives coin value from item properties — so the ladder is the one
  * place the whole food economy is decided:
  *
- *   2-4    raw and foraged. Edible in a pinch, never a plan.
+ *   2-5    raw and foraged. Edible in a pinch, never a plan. 4 is the ceiling
+ *          for anything you can *pick up* — an apple, a sea grape, a honeycomb
+ *          — and 5 is reserved for the five fish species a rod only turns up at
+ *          the top of its roll (see FISH_SPECIES at the foot of this file).
+ *          Cooking still beats every one of them: they all smelt to the grilled
+ *          fish at 8.
  *   6-9    simple cooked. One fire or one assembly. Cooking always beats raw:
  *          every smelt result is worth strictly more than what went in.
  *   10-14  proper meals. Several ingredients, usually a bench, and a full bar.
@@ -625,6 +630,234 @@ add({
   name: 'lava_bucket', label: 'Lava Bucket', art: 'bucket', stack: 1,
   color: '#a8adb8', shine: '#e8ecf4', fill: '#e2591b', carries: 'lava',
 });
+
+/**
+ * The fish, as species rather than as one word.
+ *
+ * The report was *"don't we have a bunch of fish models swimming around, why
+ * have I only been getting raw fish all the time?"* — and it is exactly right.
+ * Fifteen rigged bodies swim past a float and every cast produced the same
+ * `fish`, so the one part of the game whose whole appeal is *what is down there*
+ * was the one part that never said.
+ *
+ * **Appended here, at the very end, for the reason the bow, the honeycomb and
+ * the lava bucket all give at length: ids are save state.** `MATERIALS` is added
+ * before the tool and armour loops, so a line pushed in beside `fish` where it
+ * belongs thematically would renumber every tool and every piece of armour in
+ * every existing save. Fifteen ids go on the end, in this order, and this order
+ * is now frozen.
+ *
+ * `fish` itself is untouched and stays exactly what it was. A bear and a shark
+ * still drop one — a predator carrying "a fish" is the right amount of detail
+ * for something you took out of its mouth — and it is still what the merchant's
+ * larder carries. What changed is that the *rod* no longer produces it.
+ *
+ * ### RARITY IS THE ONLY NUMBER TYPED BY HAND
+ *
+ * The owner: *"remember the rarity of fish? that means each fish items should
+ * have scaled price"*. So there is exactly one authored number per species and
+ * everything else is a function of it:
+ *
+ *     rarity   0 = the commonest fish in the game, 1 = the rarest
+ *       |
+ *       +-- fishWeight()  how often the rod produces one   (main.js, _rollCatch)
+ *       +-- fishFood()    what eating it is worth          (below)
+ *       +-- fishPrice()   what a merchant pays             (Trade.js, OVERRIDE)
+ *       +-- fishHard()    how hard it fights on the line   (main.js, _beginFight)
+ *
+ * That is the whole point of writing it this way. A second hand-typed ladder is
+ * a ladder that drifts: this file already carries a long note about four of the
+ * seven meals having become strictly dominated because the data stopped obeying
+ * the rule the comment stated. With one source there is nothing to drift from —
+ * the fish that is hardest to catch is, by construction, the one that fights
+ * hardest, feeds best and fetches most.
+ *
+ * **The ladder, sorted by rarity** (the catch odds are in `fishTable`):
+ *
+ *     rarity  species          food  price  hard
+ *      0.00   tetra              3      3   0.04
+ *      0.05   clownfish          3      4   0.08
+ *      0.11   goldfish           3      5   0.12
+ *      0.17   yellowtang         3      6   0.17
+ *      0.23   butterflyfish      3      7   0.21
+ *      0.30   koi                4      8   0.27
+ *      0.36   bluetang           4      9   0.31
+ *      0.42   betta              4     10   0.36
+ *      0.48   royalgramma        4     11   0.41
+ *      0.54   puffer             4     12   0.45
+ *      0.66   moorishidol        5     14   0.54
+ *      0.72   piranha            5     16   0.59
+ *      0.82   anglerfish         5     18   0.66
+ *      0.91   blobfish           5     20   0.73
+ *      1.00   goblinshark        5     22   0.80
+ *
+ * Price is strictly increasing down that column and food is non-decreasing, so
+ * **no rarer fish is ever worth less or feeds less than a commoner one.** That
+ * is the invariant to hold, and it is the fish version of the meal rule above.
+ * The meal rule itself does not transfer, and it is worth saying why: a meal is
+ * chosen, so a meal that is worse than another meal is a recipe nobody cooks. A
+ * species is dealt, not chosen — the price of a rare fish is paid in casts — so
+ * the only thing that can be wrong on this ladder is an inversion.
+ *
+ * ### Why food has ties and price does not
+ *
+ * `food` is an integer on a ladder whose raw band is three rungs wide (see FOOD
+ * at the top of this file), and there is no fourth rung available: 2 is kelp, 6
+ * is the bottom of the *cooked* band, and a raw fish that fed 6 would beat a
+ * fried egg and make the fire pointless. Three rungs and fifteen species means
+ * ties, and they are shared out evenly — five species per rung, which is also
+ * the tidiest reading of "common, uncommon, rare".
+ *
+ * Coins have no such ceiling, so price is what tells those five apart, and every
+ * one of the fifteen has its own. Two species on the same food rung are never
+ * the same catch: the rarer one is worth more, every time.
+ *
+ * Cooking still beats raw at every rung — all fifteen smelt to `cooked_fish` at
+ * 8, which is strictly more than 5 — and that is why there are fifteen smelting
+ * recipes and no new cooked items. A fillet off a fire is a fillet; the species
+ * is a fact about the water you pulled it out of, not about the pan.
+ *
+ * ### `wild`
+ *
+ * The one new flag, and it keeps them out of the merchant's larder.
+ * `larderPool` admits anything with `food`, which is why it never needed editing
+ * when a recipe was added; fifteen raw fish walking into it would take a third
+ * of every pack he carries and turn the wandering merchant into a fishmonger
+ * selling the one thing the rod exists to produce. He will still *buy* them.
+ */
+
+/**
+ * Nourishment, as three rungs of the raw band chosen by rarity.
+ *
+ * 3 is level with `fish` itself and with a carrot. 4 is the foraging ceiling —
+ * an apple, a honeycomb, a sea grape — and 5 is above it, which nothing you can
+ * merely pick up is allowed to be. That top rung is the whole argument for
+ * fishing being an activity rather than a decoration: it is the best food on the
+ * planet that has never been near a fire, and it costs a long cast into the
+ * right water and the hardest fight the rod has.
+ */
+export const fishFood = (r) => (r < 0.25 ? 3 : r < 0.58 ? 4 : 5);
+
+/**
+ * Coins, and this is where rarity is actually legible.
+ *
+ * `3 + 16r + 3r³`, rounded — near-linear through the common half and bending up
+ * through the rare one, so the top of the ladder pulls away rather than merely
+ * finishing. The three constants are read off the anchors at either end rather
+ * than felt for:
+ *
+ *   - the floor is 3, which is what `fish` derives to from its own food value.
+ *     The commonest fish in the game is worth exactly the fish it replaced.
+ *   - the ceiling is 22, which is an amethyst, and deliberately under a pearl at
+ *     30. A goblin shark is a long cast into deep water; a pearl is a dive with
+ *     a breath meter running and a tool in your hand.
+ *   - and the curve has to separate all fifteen into distinct integers, which is
+ *     what fixes the linear term at 16: the closest pair of rarities is 0.05
+ *     apart, so anything shallower than that ties two species together and makes
+ *     one of them pointless.
+ */
+export const fishPrice = (r) => Math.round(3 + 16 * r + 3 * r ** 3);
+
+/**
+ * How hard it fights, as the `hard` the balance bar is driven by.
+ *
+ * 0.04 to 0.80 across the range. The floor is a drift a player can sit on top of
+ * without thinking; the ceiling is a shade under where a treasure roll used to
+ * sit, which makes the rarest fish the hardest thing in the game to land — and
+ * it has to be, because treasure does not fight at all any more (see
+ * `_beginFight`). Measured against the handicapped bot `FIGHT_HALF` is quoted
+ * against, that is a common fish landing every time in about two seconds and a
+ * goblin shark landing rather more than half of them, in seven.
+ */
+export const fishHard = (r) => 0.04 + 0.76 * r;
+
+/**
+ * How often the rod produces one, as a relative weight inside its own water.
+ *
+ * `2 ** (-4.2 * r)`, so the rarest fish in the game turns up about a nineteenth
+ * as often as the commonest one in the same water. Halving every 0.238 of rarity
+ * is what makes the ladder above read as a ladder in play rather than only on
+ * paper — see the measured shares in the note on `_rollCatch`.
+ */
+export const fishWeight = (r) => 2 ** (-4.2 * r);
+
+/**
+ * The species, sorted by rarity, which is the order everything else reads them
+ * in. `water` is which table a cast draws from:
+ *
+ *   fresh   ponds, lakes and rivers — any water whose surface is above sea level.
+ *   salt    the sea, at any depth.
+ *   deep    the sea, and only where the float has eight cells of water under it.
+ *           A deep *lake* is still fresh, so no anglerfish comes out of a tarn
+ *           however hard you throw.
+ */
+const FISH_SPECIES = [
+  { name: 'tetra', label: 'Raw Tetra', water: 'fresh', rarity: 0.00, color: '#3ea6c2', shine: '#9de2f0' },
+  { name: 'clownfish', label: 'Raw Clownfish', water: 'salt', rarity: 0.05, color: '#e2681f', shine: '#ffb06a' },
+  { name: 'goldfish', label: 'Raw Goldfish', water: 'fresh', rarity: 0.11, color: '#dd7a1e', shine: '#ffc072' },
+  { name: 'yellowtang', label: 'Raw Yellow Tang', water: 'salt', rarity: 0.17, color: '#e0ac16', shine: '#ffdd63' },
+  { name: 'butterflyfish', label: 'Raw Butterflyfish', water: 'salt', rarity: 0.23, color: '#e4c249', shine: '#fff0a2' },
+  { name: 'koi', label: 'Raw Koi', water: 'fresh', rarity: 0.30, color: '#d6522d', shine: '#f59e78' },
+  { name: 'bluetang', label: 'Raw Blue Tang', water: 'salt', rarity: 0.36, color: '#2050bd', shine: '#79a6ff' },
+  { name: 'betta', label: 'Raw Betta', water: 'fresh', rarity: 0.42, color: '#a6263d', shine: '#e26e88' },
+  { name: 'royalgramma', label: 'Raw Royal Gramma', water: 'salt', rarity: 0.48, color: '#8a3cbd', shine: '#d2a2f0' },
+  { name: 'puffer', label: 'Raw Pufferfish', water: 'salt', rarity: 0.54, color: '#b09a58', shine: '#e4d296' },
+  // The reef's prize. Shallow water is not a condition on it — it sits in the
+  // `salt` table, so a deep cast can turn one up as well. What the abyss adds is
+  // the three at the bottom of this list, which shallow water cannot produce at
+  // all.
+  { name: 'moorishidol', label: 'Raw Moorish Idol', water: 'salt', rarity: 0.66, color: '#d8c04a', shine: '#f7e79c' },
+  // The one hostile mob on this list, and it is here because it is the only one
+  // of the two that is a fish rather than a fight — a shoal body of the same
+  // size class as the koi, in exactly the fresh shallow water a rod reaches from
+  // a bank. A shark is not: see the note in `_rollCatch`.
+  { name: 'piranha', label: 'Raw Piranha', water: 'fresh', rarity: 0.72, color: '#6d7868', shine: '#aeb9a6' },
+  // Eight cells of water and no light. These three are the only things on the
+  // planet that live down there, and they are the whole reason to cast off a
+  // drop-off rather than off a beach.
+  { name: 'anglerfish', label: 'Raw Anglerfish', water: 'deep', rarity: 0.82, color: '#2b3440', shine: '#697b8e' },
+  { name: 'blobfish', label: 'Raw Blobfish', water: 'deep', rarity: 0.91, color: '#c78890', shine: '#efbac0' },
+  { name: 'goblinshark', label: 'Raw Goblin Shark', water: 'deep', rarity: 1.00, color: '#c78d88', shine: '#eebeb8' },
+];
+for (const f of FISH_SPECIES) {
+  add({
+    name: f.name, label: f.label, color: f.color, shine: f.shine,
+    food: fishFood(f.rarity), rarity: f.rarity, wild: true,
+  });
+}
+
+/** The species, sorted by rarity. Trade.js reads it for prices, main.js for the catch. */
+export const FISH = FISH_SPECIES;
+/** Every raw fish species the rod can produce, in registry order. */
+export const FISH_ITEMS = FISH_SPECIES.map((f) => f.name);
+
+/**
+ * The species a cast into this water can produce, commonest first, with the
+ * cumulative share of the fish band each one occupies on 0..1.
+ *
+ * Built per cast rather than cached, because it is fifteen multiplies against a
+ * bite that took up to thirteen seconds to arrive.
+ *
+ * `_rollCatch` walks this with the position its single roll landed at inside the
+ * fish band, so the same number that decides treasure-against-junk-against-fish
+ * also decides *which* fish — and the cast-distance and depth bias already baked
+ * into that roll carries straight through to the species, with no second table
+ * to keep in step and no second roll.
+ *
+ * @param {boolean} salt sea rather than lake
+ * @param {boolean} deep eight or more cells of water under the float
+ * @returns {Array<{name:string, rarity:number, upTo:number}>}
+ */
+export function fishTable(salt, deep) {
+  const want = salt ? (deep ? ['salt', 'deep'] : ['salt']) : ['fresh'];
+  const rows = FISH_SPECIES.filter((f) => want.includes(f.water));
+  const total = rows.reduce((a, f) => a + fishWeight(f.rarity), 0);
+  let run = 0;
+  return rows.map((f) => {
+    run += fishWeight(f.rarity) / total;
+    return { name: f.name, rarity: f.rarity, upTo: run };
+  });
+}
 
 /**
  * How much of a bow's power a given fraction of the draw is worth.

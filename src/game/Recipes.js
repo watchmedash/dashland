@@ -1,7 +1,7 @@
 // Crafting + smelting recipes. Shaped recipes use a character grid; shapeless
 // ones just need the right multiset of ingredients.
 
-import { itemIdOf } from './Items.js';
+import { itemIdOf, FISH_ITEMS } from './Items.js';
 
 /** @type {Array<{out:string,count:number,shape?:string[],key?:object,in?:string[],table?:boolean}>} */
 const RAW = [
@@ -454,6 +454,24 @@ export const SMELTING = [
   // 5 seconds puts it between an egg and a fish: a leaf dries faster than a
   // fillet cooks.
   { in: 'kelp', out: 'dried_kelp', count: 1, time: 5 },
+  /**
+   * Fifteen species, one grilled fish.
+   *
+   * The alternative was a cooked item per species, and it is thirty items and a
+   * thirty-line larder against one honest observation: **a fillet off a fire is
+   * a fillet.** The species is a fact about the water you pulled it out of, and
+   * the pan is where that stops mattering. Nothing downstream had to learn a new
+   * name either — the sandwich, the stew and the burger all ask for
+   * `cooked_fish` and all fifteen now feed them.
+   *
+   * It is also what keeps the ladder's one invariant intact for free. Cooking
+   * has to beat raw, and the raw band here runs 3 to 5 against a grilled fish at
+   * 8: strictly more from every rung, including the abyss species, which are the
+   * only raw food on the planet above the foraging ceiling of 4.
+   *
+   * Six seconds each, the same as `fish`, because they are the same fillet.
+   */
+  ...FISH_ITEMS.map((name) => ({ in: name, out: 'cooked_fish', count: 1, time: 6 })),
 ].map((s) => ({ in: itemIdOf(s.in), out: itemIdOf(s.out), count: s.count, time: s.time }))
   .filter((s) => s.in && s.out);
 

@@ -34,7 +34,7 @@
 // growing. Anything new that declares `food`, or is craftable from things that
 // already have a price, gets a sensible one without being listed here.
 
-import { ITEMS, N_ITEMS, itemIdOf } from './Items.js';
+import { ITEMS, N_ITEMS, itemIdOf, FISH, fishPrice } from './Items.js';
 import { BLOCKS } from '../world/Blocks.js';
 import { RECIPES, SMELTING, recipeCost } from './Recipes.js';
 
@@ -269,6 +269,37 @@ const OVERRIDE = {
   cheese: 16,
   chocolate: 22,
 };
+
+/**
+ * The fifteen fish species, priced off their rarity and nothing else.
+ *
+ * The owner: *"remember the rarity of fish? that means each fish items should
+ * have scaled price"*. **This loop is what makes that true rather than
+ * aspirational.** These could all have been typed into the object above and the
+ * numbers would look identical today; what they would not be is *coupled*. The
+ * same `rarity` decides how often the rod produces one, how hard it fights and
+ * what eating it is worth, so a species whose odds are retuned and whose price
+ * is not is a species that has quietly stopped meaning what the table says.
+ * `fishPrice` lives beside the rarities in `Items.js` for that reason, and this
+ * is the only line in this file that knows fish exist.
+ *
+ * They need an override at all for the reason a pearl does: `intrinsic` would
+ * reach `foodValue` and price all fifteen off a mouthful of nourishment, which
+ * is three rungs where the rarity ladder has fifteen. A goblin shark and a
+ * moorish idol would be the same six coins.
+ *
+ * Two consequences worth stating rather than discovering:
+ *
+ *   - **A rare fish is worth more raw than grilled.** `cooked_fish` is 5 coins;
+ *     a goblin shark is 22. That is intended, and it is not the "cooking beats
+ *     raw" invariant being broken — that rule is about *nourishment*, and it
+ *     holds at every rung, 5 into 8. What a trophy is for is the counter, and a
+ *     player who grills one has made a choice, not fallen into a trap.
+ *   - **It cannot be looped.** He will buy one and will never sell one (see
+ *     `wild` in `larderPool`), so there is no counter-to-counter trade here at
+ *     any price.
+ */
+for (const f of FISH) OVERRIDE[f.name] = fishPrice(f.rarity);
 
 // --- the formula ------------------------------------------------------------
 
@@ -577,7 +608,12 @@ function larderPool() {
   const pool = [];
   for (let id = 1; id < N_ITEMS; id++) {
     const def = ITEMS[id];
-    if (!def || WARE_IDS.has(id) || !def.food || def.tool) continue;
+    // `wild` is the fish species, and it is the one thing this pool refuses by
+    // flag rather than by property. Admitting by `food` is what lets the pantry
+    // grow without this file being edited, and it is right for anything a
+    // kitchen makes; it is wrong for fifteen raw fish, which would be half the
+    // pool and would put the one thing a rod exists to produce on a shelf.
+    if (!def || WARE_IDS.has(id) || !def.food || def.tool || def.wild) continue;
     // Rich food in smaller lots, so a merchant is never a canteen — and sweets
     // in smaller lots still, because the whole point of the treat band is that
     // it is dear. A line of five lollipops in every third pack would make the

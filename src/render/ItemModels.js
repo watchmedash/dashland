@@ -53,6 +53,24 @@ const PACKS = {
   // other half of the look — the source meshes ship no normals precisely so
   // that this side gets to derive hard-edged ones.
   wam:     { atlas: null, tint: false, flat: true },
+  // The fish pack — the same rigged bodies `game/Mobs.js` swims past you, reused
+  // as the fifteen catchable species. It is the first pack here with no atlas
+  // *and* no vertex colours: the models carry no UVs at all and every colour on
+  // them is a `baseColorFactor` on one of three to six materials, which is how a
+  // clownfish is orange with white bands and 1,530 triangles.
+  //
+  // `bakeColor` is the whole of the adaptation. This file's contract is one
+  // geometry and one material per item, so the per-primitive colours are written
+  // into a COLOR_0 attribute at load and the pack then rides the same
+  // vertex-colour material the WAM models do. Six materials become one draw call
+  // and nothing downstream — the icon painter, the view model, the ground drop —
+  // learns that this pack is different.
+  //
+  // `flat` is deliberately off, unlike WAM: these ship real normals and a fish
+  // is a smooth body. Faceting one would make it read as a carving.
+  // `ext` because the pack ships as GLB, like the food kit and unlike the
+  // .gltf + .bin packs above.
+  fish:    { atlas: null, tint: false, bakeColor: true, ext: 'glb' },
 };
 const BLANK =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII=';
@@ -188,6 +206,55 @@ function food(file, height, flat = false, extra = {}) {
     rot: flat ? [0.72, -0.50, 0.10] : [0.10, -0.50, 0.10],
     pos: [0.02, 0.13, -0.06],
     icon: flat ? [0.95, 0.55, 0] : undefined,
+    ...extra,
+  };
+}
+
+/**
+ * A pose for one of the fifteen species, off the same rigged body that swims
+ * past the float.
+ *
+ * They differ in one number — how big the fish is — so like `food()` above they
+ * are generated rather than written out fifteen times. Everything else is shared
+ * because it is a fact about the pack rather than about the animal: all sixteen
+ * models in it are authored nose along +Z, dorsal along +Y, and symmetric about
+ * X, which is what lets one `spin`, one `grip` and one `rot` hold for the lot.
+ *
+ *  - `spin` stands the fish on its tail so that `grip` indexes its *length*.
+ *    See the long note in `loadGeometry`; without it the fist is pinned to the
+ *    middle of the body, which is not how anyone has ever held a fish.
+ *  - `grip` at 0.16 is a sixth of the way up from the tail fin, in the meat of
+ *    the wrist of the tail. It carries to the third-person body, unlike `pos`.
+ *  - `rot` is **solved, not dialled**, on the three metrics `HAND_TILT` is
+ *    stated in — the same three the shipped `fish` pose above was re-solved on.
+ *    The target is that pose itself, measured through the same chain rather
+ *    than read off its comment: long axis 64.8 degrees on screen (its note says
+ *    25, which is the same line measured off the other axis), 0 out of the
+ *    screen plane, flank dead face-on. Solved: **64.8 / 0.0 / 0.0**, head up.
+ *
+ *    Both of the last two matter here more than they do for a pickaxe. A fish
+ *    seen along its length is a diamond with two eyes on it, and the whole point
+ *    of fifteen species is that a clownfish and a koi are different objects at
+ *    toolbar size — which they only are in profile. The first attempt was
+ *    dialled by hand and got exactly that wrong: it stood the fish up nose-on to
+ *    the camera and filled a fifth of the frame with an eyeball.
+ *
+ * `icon` is solved the same way against its own framing, which has no
+ * `HAND_TILT` in it: 40 degrees across the slot, face-on, no foreshortening. A
+ * fish is half again as long as it is deep, so a diagonal is what lets it be
+ * drawn largest in a square.
+ *
+ * No `fitMax`: after the spin the length *is* the height, so the shared
+ * normalisation already fits the axis that matters.
+ */
+function fish(file, height, extra = {}) {
+  return {
+    file: `fish/fish-${file}`, pack: 'fish', height,
+    spin: [-Math.PI / 2, 0, 0],
+    grip: 0.16,
+    rot: [-0.972, -2.135, -0.650],
+    pos: [0.007, 0.044, -0.020],
+    icon: [1.571, 0.698, -1.571],
     ...extra,
   };
 }
@@ -642,6 +709,40 @@ export const POSE = {
   // is where a hand goes and is what lifts the sweet back into frame.
   candy:       food('lollypop', 0.28, false, { grip: 0.02, pos: [0.002, 0.011, -0.005], rot: [-0.95, -2.13, -0.63] }),
   croissant:   food('croissant', 0.26, true, { pos: [0.013, 0.083, -0.038] }),
+
+  // --- the fish -------------------------------------------------------------
+  //
+  // Fifteen species, and `height` is the only thing that varies: it is what the
+  // player is being told apart from the colour, so a tetra is a minnow and a
+  // goblin shark is an armful. The numbers are in the models' own proportions,
+  // read off the pack (a tetra and a royal gramma are the two smallest bodies in
+  // it, a goblin shark and an anglerfish the two largest) rather than by feel.
+  //
+  // They sit around 0.22 where the food kit's `fish` sits at 0.30, and that is
+  // the tail grip paying for itself rather than an inconsistency. `height` is
+  // the whole model; what reaches out of the corner is the part *past the fist*,
+  // and that is 84% of one of these against 50% of a middle-gripped fillet. Held
+  // at 0.30 the head was a foot past the right edge of the screen; 0.22 x 0.84
+  // puts the same amount of fish on screen as 0.30 x 0.50 does.
+  //
+  // `fish` — the generic Raw Fish, from a bear's mouth or a shark's — keeps the
+  // food kit's fillet above and is deliberately not one of these. It is the fish
+  // you did not catch, and it should not look like a species you did.
+  clownfish:     fish('clownfish', 0.23),
+  yellowtang:    fish('yellowtang', 0.22),
+  butterflyfish: fish('butterflyfish', 0.22),
+  bluetang:      fish('bluetang', 0.22),
+  royalgramma:   fish('royalgramma', 0.20),
+  puffer:        fish('puffer', 0.21),
+  moorishidol:   fish('moorishidol', 0.22),
+  tetra:         fish('tetra', 0.20),
+  goldfish:      fish('goldfish', 0.23),
+  koi:           fish('koi', 0.24),
+  betta:         fish('betta', 0.22),
+  piranha:       fish('piranha', 0.22),
+  anglerfish:    fish('anglerfish', 0.25),
+  blobfish:      fish('blobfish', 0.22),
+  goblinshark:   fish('goblinshark', 0.24),
 
   // --- WAM materials --------------------------------------------------------
   //
@@ -1131,6 +1232,25 @@ export const BY_NAME = {
   muffin: 'muffin',
   candy: 'candy',
   croissant: 'croissant',
+  // The fifteen species. Identity again, and the map is what makes them models
+  // rather than sprites in all three places at once: the fist, the icon grid and
+  // the ground drop. `fish` above stays the food kit's fillet — see the note on
+  // their poses.
+  clownfish: 'clownfish',
+  yellowtang: 'yellowtang',
+  butterflyfish: 'butterflyfish',
+  bluetang: 'bluetang',
+  royalgramma: 'royalgramma',
+  puffer: 'puffer',
+  moorishidol: 'moorishidol',
+  tetra: 'tetra',
+  goldfish: 'goldfish',
+  koi: 'koi',
+  betta: 'betta',
+  piranha: 'piranha',
+  anglerfish: 'anglerfish',
+  blobfish: 'blobfish',
+  goblinshark: 'goblinshark',
 
   // --- armour ---------------------------------------------------------------
   //
@@ -1516,11 +1636,34 @@ function loadGeometry(key) {
   ]).then(([gltf, atlas]) => {
     gltf.scene.updateMatrixWorld(true);
     const parts = [];
+    const bake = PACKS[pose.pack].bakeColor;
     gltf.scene.traverse((o) => {
       if (!o.isMesh) return;
       const g = o.geometry.clone();
       g.applyMatrix4(o.matrixWorld);
       g.deleteAttribute('tangent');
+      if (bake) {
+        // A pack whose colour lives on its *materials* rather than on an atlas
+        // or on the mesh. One item is one material here, so the only place the
+        // per-primitive colour can survive the merge is the vertices — bake it
+        // now, while each primitive still knows which material it wore.
+        //
+        // `material.color` is already in the renderer's linear working space
+        // (GLTFLoader decodes `baseColorFactor`, which glTF defines as linear),
+        // which is the same space `vertexColors` multiplies in, so this is a
+        // move rather than a conversion and the model renders identically.
+        const src = Array.isArray(o.material) ? o.material[0] : o.material;
+        const n = g.getAttribute('position').count;
+        const col = new Float32Array(n * 3);
+        const r = src?.color?.r ?? 1, gg = src?.color?.g ?? 1, b = src?.color?.b ?? 1;
+        for (let i = 0; i < n; i++) { col[i * 3] = r; col[i * 3 + 1] = gg; col[i * 3 + 2] = b; }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        // Dead weight once the bind pose is baked into world space, and
+        // `mergeGeometries` refuses a set of parts whose attributes disagree.
+        g.deleteAttribute('skinIndex');
+        g.deleteAttribute('skinWeight');
+        g.deleteAttribute('uv');
+      }
       parts.push(g);
     });
     if (!parts.length) throw new Error(`${key}: no mesh`);
@@ -1534,6 +1677,29 @@ function loadGeometry(key) {
     if (PACKS[pose.pack].flat) {
       geo = geo.toNonIndexed();
       geo.computeVertexNormals();
+    }
+    /**
+     * `spin` — a rotation of the MODEL, applied before anything is measured.
+     *
+     * Everything else in a pose happens after the normalisation; this happens
+     * before it, and the difference is the whole reason it exists. **`grip` is a
+     * fraction of the model's height and only ever of its height** — X and Z are
+     * centred on the material by `gripAnchorXZ` and are not offered to the pose
+     * at all — so for a model whose long axis is not Y there is no value of
+     * `grip` that moves the fist along its length. The fist is stuck at the
+     * middle.
+     *
+     * The fish pack is authored nose along +Z, and a fish is held by the tail.
+     * Standing it on its tail here puts its length on Y, and then `grip: 0.16`
+     * means what it says: the fist closes a sixth of the way up from the tail,
+     * in both views, and `rot` is left free to be a carrying angle rather than
+     * an attempt to disguise a grip through the belly.
+     *
+     * Undefined for every other pose in the table, and those are untouched.
+     */
+    if (pose.spin) {
+      geo.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(
+        new THREE.Euler(pose.spin[0], pose.spin[1], pose.spin[2])));
     }
     geo.computeBoundingBox();
     const bb = geo.boundingBox;

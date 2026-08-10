@@ -44,7 +44,7 @@ import {
 } from './game/NewGame.js';
 import {
   ITEMS, computeDrops, miningTime, itemIdOf, armourPoints,
-  bowShot, bowDrawStep,
+  bowShot, bowDrawStep, fishTable, fishHard,
 } from './game/Items.js';
 import { Arrows } from './game/Arrows.js';
 import { Skills, MARKS, ON_DEATH } from './game/Skills.js';
@@ -452,6 +452,55 @@ const FISH_DIST_BIAS = 1.0;
  */
 const FISH_DEEP = 5;
 const FISH_DEEP_BIAS = 0.5;
+
+/**
+ * What a cast can produce, and where the species comes from.
+ *
+ * The report: *"don't we have a bunch of fish models swimming around, why have I
+ * only been getting raw fish all the time?"* Every cast used to return the one
+ * `fish` item, so the fifteen bodies in the pack were scenery and the rod had
+ * nothing to say about where you were standing.
+ *
+ * **There is no second roll.** `_rollCatch` rolls once, biases that roll on the
+ * cast distance and on the depth under the float, and reads it three times: it
+ * decides treasure against junk against fish, then, inside the fish band, it
+ * indexes the species table for the water the float went into. Rarity, catch
+ * odds, price, nourishment and fight difficulty all descend from the one
+ * `rarity` number per species in `Items.js` — see the ladder written out there.
+ *
+ * The tables come from `fishTable(salt, deep)`, and the shape is one prize per
+ * kind of water, which is what makes a rod a reason to go somewhere:
+ *
+ *   fresh        a pond, a lake, a river. Five species, and its rarity is the
+ *                piranha.
+ *   salt         the sea at any depth. Seven species, and its rarity is the
+ *                moorish idol.
+ *   salt + deep  eight cells of water under the float. Those seven plus the
+ *                abyss three, which no other water can produce at all.
+ *
+ * Fresh water has no deep table. A lake five cells down is deep enough to bias
+ * the *roll* — that is what `FISH_DEEP` is for, and it is a separate and lower
+ * threshold from the sea's — but it is not the bottom of the ocean, so no
+ * anglerfish comes out of a tarn however hard you throw.
+ *
+ * **Measured, over 200,000 casts per row** (short cast, no bias; a full 24-cell
+ * throw pushes every one of these up the ladder):
+ *
+ *     fresh                salt shallow            salt deep
+ *     tetra        30.5%   clownfish      23.0%    clownfish      21.4%
+ *     goldfish     22.1%   yellowtang     16.2%    yellowtang     15.1%
+ *     koi          12.7%   butterflyfish  13.6%    butterflyfish  12.7%
+ *     betta         9.0%   bluetang        9.3%    bluetang        8.7%
+ *     piranha       3.7%   royalgramma     6.6%    royalgramma     6.1%
+ *                          puffer          5.5%    puffer          5.1%
+ *                          moorishidol     3.9%    moorishidol     3.6%
+ *                                                  anglerfish      2.3%
+ *                                                  blobfish        1.8%
+ *                                                  goblinshark     1.4%
+ *
+ * The remaining 22% of every column is junk and treasure, unchanged, and none of
+ * it fights any more — see `_beginFight`.
+ */
 
 
 // --- winter ice -------------------------------------------------------------
@@ -7514,6 +7563,15 @@ class Game {
    * flick into the shallows can still turn up an emerald, it is simply about
    * half as likely to as a throw across the bay. See `FISH_DIST_BIAS`.
    *
+   * **Only a fish fights**, and that is decided here rather than anywhere else:
+   * the returned `fight` flag is what `_beginFight` gates the balance bar on.
+   * The owner: *"minigame triggered for kelp, minigame should only run on
+   * fishes, there's no reason for kelp and other things to fight back"*. A stick
+   * on the end of a line is a stick; a pearl struggling is nonsense. Both come
+   * up the moment they are hooked, and `hard` on those rolls is 0 because there
+   * is nothing left for it to describe. If a free pearl reads as too cheap, the
+   * lever is the 0.93 below — make it rarer, not stroppier.
+   *
    * @param {number} [dist] cells from the rod to where the float went in
    */
   _rollCatch(dist = 0, water = {}) {
@@ -7530,31 +7588,65 @@ class Game {
         : ['amethyst', 'coin', 'coin', 'emerald'])[(Math.random() * 4) | 0];
       return {
         id: itemIdOf(name), count: name === 'coin' ? 3 + ((Math.random() * 6) | 0) : 1,
-        hard: 0.78 + Math.random() * 0.22,
+        hard: 0, fight: false,
       };
     }
     if (roll > 0.78) {
       const name = (water.salt
         ? ['kelp', 'coral_branch', 'coral_fan', 'flint']
         : ['stick', 'seeds', 'clay'])[(Math.random() * (water.salt ? 4 : 3)) | 0];
-      return { id: itemIdOf(name), count: 1, hard: 0.3 + Math.random() * 0.2 };
+      return { id: itemIdOf(name), count: 1, hard: 0, fight: false };
     }
-    // The common fish, and even these are not all the same: the bottom of the
-    // roll is a lazy one and the top of it is nearly an odd-and-end.
-    return { id: itemIdOf('fish'), count: 1, hard: (roll / 0.78) * 0.32 };
+    // A fish, and now it is a species. `t` is where in the fish band the same
+    // roll landed, and the table is sorted commonest first — so a long throw
+    // into deep water reaches the rare end of it for exactly the reason it
+    // reaches the treasure band above. The bias is already in `roll`; nothing
+    // here rolls again.
+    const t = roll / 0.78;
+    const table = fishTable(!!water.salt, !!water.deep);
+    // `upTo` is cumulative and its last entry is 1, so the fallback is only
+    // there for a `t` that floating point has nudged past the end.
+    const pick = table.find((f) => t <= f.upTo) ?? table[table.length - 1];
+    return {
+      id: itemIdOf(pick.name),
+      count: 1,
+      // Off the species, not off the roll. How hard a fish fights is a fact
+      // about the fish, and this is the fourth thing its one `rarity` decides.
+      hard: fishHard(pick.rarity),
+      fight: true,
+    };
   }
 
   /**
-   * A fish is on. Set up the balance bar.
+   * Something is on. Set up the balance bar, if what is on it can pull.
+   *
+   * **The bar is fish-only.** Reported: *"minigame triggered for kelp, minigame
+   * should only run on fishes, there's no reason for kelp and other things to
+   * fight back"* — and there is not. A frond of kelp, a stick, a lump of clay, a
+   * branch of coral and a pearl all used to run the full balance minigame and
+   * could all be *lost*, which is a thing to lose to seaweed. They land the
+   * moment they are hooked now. There is no second roll behind that: `fight` is
+   * decided by the one roll in `_rollCatch`, at bite time, beside the item it
+   * describes.
+   *
+   * The splash still happens either way — something came out of the water — and
+   * it is smaller for the things that did not struggle.
    *
    * The shuttle starts under the fish and at rest, so the first quarter second
    * is contact rather than a scramble — the bar has to be readable before it is
    * hard. The fish starts mid-track and running.
    */
   _beginFight(f) {
+    const c = this._rollCatch(f.dist ?? 0, f);
+    f.catch = c;
+    this.audio.splash(f.pos);
+    this.particles.splash(f.pos, this.player.up, c.fight ? 0.7 : 0.45);
+    // Hooked something that cannot pull: it is simply yours. `_landCatch` reads
+    // `f.catch`, so the roll above is the roll that lands and nothing is rolled
+    // twice. This ends the cast, which is why the caller re-checks `this.fishing`.
+    if (!c.fight) { this._landCatch(); return; }
     const rod = ITEMS[this.inventory.actingSlot(
       (s) => ITEMS[s.item]?.tool?.kind === 'rod')?.item]?.tool ?? { tier: 0, speed: 1 };
-    const c = this._rollCatch(f.dist ?? 0, f);
     // The rod widens the window and the fish narrows it. Multiplied rather than
     // added so a better rod is still worth the same *proportion* against a
     // treasure fight as against a minnow — a flat subtraction would have taken
@@ -7562,7 +7654,6 @@ class Game {
     // meaningless exactly where it is wanted.
     const half = (FIGHT_HALF + FIGHT_HALF_PER_TIER * (rod.tier ?? 0))
       * (1 - FIGHT_HALF_RARITY * c.hard);
-    f.catch = c;
     f.fight = {
       hard: c.hard,
       half,
@@ -7579,8 +7670,6 @@ class Game {
       on: true,
       wasOn: true,
     };
-    this.audio.splash(f.pos);
-    this.particles.splash(f.pos, this.player.up, 0.7);
   }
 
   /**
@@ -7671,6 +7760,10 @@ class Game {
     f.nibbleT = Math.max(0, (f.nibbleT ?? 0) - dt);
     if (f.wait <= 0) {
       this._beginFight(f);
+      // A catch that does not fight lands inside that call and ends the cast, so
+      // `f` is a dead float from here on — bobbing it would put the marker back
+      // on the water after `_stopFishing` took it off.
+      if (!this.fishing) return;
     } else if (Math.random() < dt * 0.7) {
       // the odd nibble, so the wait is not a blank stare
       this.particles.bubbles(f.pos, this.player.up, 1);

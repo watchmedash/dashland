@@ -3160,7 +3160,21 @@ class Game {
       gen: GEN_VERSION,
       seed: this.seed,
       ...this._saveBlocks(),
-      colBiome: this.planet.colBiome.slice(),
+      // No `colBiome`. It is a megabyte and a quarter of pure seed-derived data
+      // - the same seed regenerates it exactly - and once the block payload
+      // stopped storing unedited regions it was 98 percent of the save: 1,261 KB
+      // against 25 KB of blocks.
+      //
+      // It was kept to guard one case: a save written by a version whose
+      // climate thresholds have since moved would come back with the terrain it
+      // stored and the tints of a different planet. That is exactly what the
+      // `gen` stamp at the top of this payload refuses outright, and moving a
+      // climate threshold is a worldgen change that has to bump it. A second,
+      // weaker defence against a case the first one rejects is not worth a
+      // megabyte on every autosave.
+      //
+      // The worker already regenerates it when a save does not carry one, and
+      // the loader's length check is written to tolerate its absence.
       facing: this.planet.facingPairs(),
       // Everything about the person rather than the planet, in one place.
       //

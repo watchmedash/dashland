@@ -151,8 +151,15 @@ G.ladder = (s) => {
     );
     // One rung per 1/RUNGS of the tile, centred in its band so a stack of
     // ladder blocks keeps the spacing even across the join.
+    // 0.13 is how far the rung is inset from the EDGE of the tile, so as a
+    // half-width about the centre it is 0.5 - 0.13. Written as 0.13 it made a
+    // rung spanning u 0.37 to 0.63 against rails whose inner edges are at
+    // 0.155 and 0.845 — a fifth of the tile of clear air at each end, so the
+    // rungs joined nothing and hung in the middle of the hole. Ending at 0.13
+    // puts the tip just inside the rail's inner edge: they meet, and the rail
+    // still reads as one unbroken length of timber over the joint.
     const rung = smoothstep(0.10, 0.075, Math.abs(((v * RUNGS) % 1) - 0.5))
-      * smoothstep(0.15, 0.13, Math.abs(u - 0.5));
+      * smoothstep(0.5 - 0.11, 0.5 - 0.13, Math.abs(u - 0.5));
     const m = Math.max(rail, rung);
     if (m <= 0.004) return;
     // Rungs a shade lighter than the rails, so the ribs read even head-on where

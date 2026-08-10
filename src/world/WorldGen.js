@@ -1782,6 +1782,11 @@ export class WorldGen {
     // calling it. A `this.structureCounts = {}` also stood here: an empty object
     // that was never filled and never read, left behind by the pass that used to
     // report what it had built.
+    //
+    // Keeping the builder costs nothing shipped, so do not delete it to save
+    // bundle size: an import that is never called is tree-shaken, and neither
+    // built chunk contains a single string from `Structures.js` - checked for
+    // `placeStructures`, `crypt` and `monolith`, all zero in both.
 
     onProgress(1, 'Ready');
     return { colBiome, colHeight, spawn: this.pickSpawn() };

@@ -1783,7 +1783,6 @@ class Game {
     this.ui.setQuitConfirm(false);
     this._streamPending = false;
     this._streamTimer = 0;
-    this._welcome = false;
     this.drops.clear();
     // Arrows are entities in the old world's air. They are not saved and they
     // must not survive the planet under them being replaced — a stuck arrow
@@ -2467,7 +2466,6 @@ class Game {
       // more now — a partial save is the seed plus the regions that exist, so
       // never writing one leaves the last planet on disk instead of this one.
       this._saveOnReady = true;
-      this._welcome = true;
     }
     this.ui.refresh();
   }
@@ -2500,23 +2498,10 @@ class Game {
     // sits after the assignment above rather than instead of it.
     if (this._deadOnLoad) { this._deadOnLoad = false; this._spectate(); }
 
-    if (this._welcome) {
-      this._welcome = false;
-      // Waking at midnight is now an ordinary way to start, so the opening
-      // advice has to know which one happened. "Punch a tree to begin" is fine
-      // at noon and useless in the dark to someone who has not been told they
-      // are holding six torches.
-      const t = this.timeOfDay();
-      const dark = t < 0.25 || t > 0.75;
-      setTimeout(() => {
-        if (dark) {
-          this.ui.toast('Plant a torch', itemIdOf('torch'), 5200);
-          setTimeout(() => this.ui.toast('Punch a tree', itemIdOf('log_oak'), 5000), 5600);
-        } else {
-          this.ui.toast('Punch a tree', itemIdOf('log_oak'), 5000);
-        }
-      }, 4600);
-    }
+    // No opening advice. A new planet used to greet the player with "Punch a
+    // tree" (and "Plant a torch" if they woke at night); both are gone with the
+    // rest of the teaching. The torches are in the bar and the trees are on the
+    // hill, and finding that out is the first thing the game is for.
   }
 
   /**
@@ -5241,9 +5226,10 @@ class Game {
     this.coreFound = true;
     this._mark('core');
     this.inventory.add(itemIdOf('hearth'), 1);
+    // The hearth's icon rides this toast and the item lands in the bar; a
+    // second line spelling out that it keeps the night away is the game
+    // playing itself. Let them plant it and find out.
     this.ui.toast('The core is warm to the touch.', itemIdOf('hearth'), 5000);
-    setTimeout(() => this.ui.toast('It gives you a hearth. Nothing that walks at night will come near it.',
-      itemIdOf('hearth'), 6000), 5200);
     this.audio.ui(880);
   }
 

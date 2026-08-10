@@ -104,9 +104,68 @@ function transfers(groups, crossLight) {
   return t;
 }
 
+/**
+ * A fingerprint of the last mesh posted for each resident chunk, so an
+ * unchanged rebuild can be dropped before it crosses the wire.
+ *
+ * The marking above is deliberately conservative — "this cell changed, so
+ * rebuild everything that could read it" — because the cheap alternative is the
+ * one that leaves seams. Most of what it catches genuinely changed; the rest is
+ * a chunk that samples a relit cell and has no face there to show it, which
+ * underground is most of them. Measured over a walk across seven region
+ * boundaries: 125 chunks rebuilt per step, 86 of them different.
+ *
+ * The mesh still gets built either way — this cannot save that, and it is not
+ * meant to. What it saves is the expensive half: a structured clone, eight
+ * BufferAttributes, a bounding sphere and a GPU upload on the main thread, for
+ * geometry identical to what is already in VRAM. Hashing a chunk is tens of
+ * microseconds against that.
+ */
+const meshHash = new Map();
+
+/** FNV-1a over the words of a buffer. Not a checksum against an adversary. */
+function hashInto(h, buf) {
+  // A word view needs a 4-aligned start and the mesher's arrays are all freshly
+  // allocated, so this is the path every time; the byte fallback is there so a
+  // future subarray cannot turn a fast path into a thrown RangeError.
+  if ((buf.byteOffset & 3) === 0) {
+    const w = new Uint32Array(buf.buffer, buf.byteOffset, buf.byteLength >> 2);
+    for (let i = 0; i < w.length; i++) h = Math.imul(h ^ w[i], 16777619) >>> 0;
+  } else {
+    const b = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 16777619) >>> 0;
+  }
+  // The trailing bytes a word view cannot reach, plus the length itself so two
+  // differently sized arrays can never collide on a shared prefix.
+  return Math.imul(h ^ buf.byteLength, 16777619) >>> 0;
+}
+
+function meshFingerprint(groups) {
+  let h = 2166136261;
+  for (let gi = 0; gi < 4; gi++) {
+    const g = groups[gi];
+    if (!g) { h = Math.imul(h ^ 0x9e37, 16777619) >>> 0; continue; }
+    h = hashInto(h, g.position);
+    h = hashInto(h, g.uv);
+    h = hashInto(h, g.aux);
+    h = hashInto(h, g.blockLight);
+    h = hashInto(h, g.tint);
+    h = hashInto(h, g.index);
+  }
+  return h;
+}
+
 function meshAndPost(f, ci, cj, ck) {
   const { groups, crossLight } = meshChunk(blocks, colBiome, gen.colWaterStyle,
     light, facing, f, ci, cj, ck);
+  // Normal, tangent and crossLight are left out of the fingerprint: the first
+  // two are a function of the face a quad sits on, so they cannot differ
+  // between two meshes whose positions and indices agree, and crossLight is
+  // derived from the same light bytes `blockLight` already covers.
+  const id = chunkIdx(f, ci, cj, ck);
+  const fp = meshFingerprint(groups);
+  if (meshHash.get(id) === fp) return;
+  meshHash.set(id, fp);
   // `crossLight` rides with the geometry rather than in a message of its own,
   // because it must land in the same tick as the mesh it belongs to: it is the
   // light of blocks this chunk deliberately did *not* mesh, and the main thread
@@ -241,6 +300,30 @@ function dilate(cols, steps) {
   return out;
 }
 
+/**
+ * The columns of `cols` that lie within `steps` of something outside it — its
+ * inward-facing rim, not the ring around it.
+ *
+ * Two dilations rather than a distance field: out to find what surrounds the
+ * set, then back in from that to find which of the set it can reach. Over the
+ * column graph for the usual reason, and it cannot use `_mark` to hold the
+ * membership test across a `dilate` call, because `dilate` uses `_mark` itself
+ * and would then skip its own seeds. Hence a second flag array.
+ */
+const _inSet = new Uint8Array(COLUMNS);
+
+function perimeter(cols, steps) {
+  for (let n = 0; n < cols.length; n++) _inSet[cols[n]] = 1;
+  const around = dilate(cols, steps);
+  const outer = [];
+  for (let n = 0; n < around.length; n++) if (!_inSet[around[n]]) outer.push(around[n]);
+  const back = dilate(outer, steps);
+  const out = [];
+  for (let n = 0; n < back.length; n++) if (_inSet[back[n]]) out.push(back[n]);
+  for (let n = 0; n < cols.length; n++) _inSet[cols[n]] = 0;
+  return out;
+}
+
 /** The columns of a list of regions, as one array. */
 function collectCols(rids) {
   const out = new Int32Array(rids.length * REGION_COLS);
@@ -323,10 +406,46 @@ function ensureRegions(rids, onProgress) {
   for (const r of rids) if (!hasDecor[r]) want.add(r);
   expandForVolcanoes(want);
   const fresh = [...want];
+  const dirty = new Set();
 
   if (fresh.length) {
     onProgress?.(0.05, 'Laying rock and soil');
     const cols = collectCols(fresh);
+
+    /**
+     * The two courses of this batch that a chunk outside it can see, and what
+     * they hold before anything is written to them.
+     *
+     * A chunk is culled and lit by the columns just *outside* itself, so a
+     * region that has had a mesh on screen since before this batch existed is
+     * reading into `cols` — and the blocks about to land there are decoration,
+     * which is exactly the part of worldgen that arrives late. A region gets
+     * terrain as somebody else's `DECOR_MARGIN` long before it is decorated in
+     * its own right, so the neighbour meshed against bare ground and kept that
+     * mesh; the trunk, the canopy and the boulder that turn up afterwards never
+     * reach it. That is a straight seam along a region boundary, sixteen
+     * columns long, in the shadow the missing tree should have cast — and it
+     * survives until something unrelated rebuilds the chunk, which is precisely
+     * what breaking a block near it does.
+     *
+     * Snapshotted here rather than diffed some other way because this is the
+     * last moment the old state exists, and taken before `ensureTerrain`
+     * because that is the state the neighbour was meshed against: DECOR_MARGIN
+     * is 6, so anything within two columns of a decorated region had its rock
+     * and soil laid in the batch that decorated it, never later.
+     *
+     * Two courses, and no more, because the reader can be no further away than
+     * that: the mesher's ambient-occlusion corners reach a diagonal, which is
+     * two steps, and a column three steps inside the batch has no chunk outside
+     * it that samples it. Everything deeper in is about to be meshed from
+     * scratch anyway.
+     */
+    const edge = perimeter(cols, 2);
+    const edgeWas = new Uint8Array(edge.length * D);
+    for (let n = 0; n < edge.length; n++) {
+      const base = edge[n] * D;
+      edgeWas.set(blocks.subarray(base, base + D), n * D);
+    }
 
     // Terrain for the region and for everything a canopy could reach in from.
     // See WorldGen.decorateRegion.
@@ -366,6 +485,15 @@ function ensureRegions(rids, onProgress) {
       regionColumns(rid, rcols);
       for (let n = 0; n < REGION_COLS; n++) colLive[rcols[n]] = 1;
     }
+
+    // What a chunk already on screen can now see of this batch. See `edge` and
+    // the snapshot above.
+    for (let n = 0; n < edge.length; n++) {
+      const base = edge[n] * D, o = n * D;
+      for (let k = 0; k < D; k++) {
+        if (edgeWas[o + k] !== blocks[base + k]) markChunkAround(dirty, edge[n], k);
+      }
+    }
   }
 
   const dark = [];
@@ -373,19 +501,53 @@ function ensureRegions(rids, onProgress) {
   for (const r of rids) if (!hasLight[r] && !seen.has(r)) { seen.add(r); dark.push(r); }
   for (const r of fresh) if (!hasLight[r] && !seen.has(r)) { seen.add(r); dark.push(r); }
 
-  const dirty = new Set();
   if (dark.length) {
     onProgress?.(0.86, 'Kindling sunlight');
     const cols = collectCols(dark);
-    for (let n = 0; n < cols.length; n++) _mark[cols[n]] = 1;
-    const ring = [];
+    // Dilate first, *then* flag what to exclude. The other order looks
+    // equivalent and is not: `dilate` seeds through `_mark` as well, so a set
+    // pre-flagged in it is a set whose every seed is skipped — the frontier
+    // starts empty, `reach` comes back empty, and the ring is empty every time.
+    // That is the whole reason a newly lit region never relit anything around
+    // it: `computeRegion` was handed no edge to snapshot, so it had nothing to
+    // diff and reported no change, and the neighbours already on screen kept
+    // the light they were built with. A dark seam along a region boundary until
+    // an edit rebuilt the chunk. Nothing crashes when a ring is empty, which is
+    // why it stayed.
     const reach = dilate(cols, LIGHT_REACH);
+    /**
+     * The new regions' own rim goes in the diffed list too, even though it is
+     * already in `cols`.
+     *
+     * `computeRegion` recomputes both lists and reports only the second, on the
+     * reasoning that the new region has no mesh yet and is about to get one.
+     * True of the region — not true of its neighbour. A chunk samples the light
+     * of the cells across its boundary for its side faces and its ambient
+     * occlusion, so the neighbour's mesh is holding this batch's light, and this
+     * batch's light is the one thing here that was zero five lines ago. Nothing
+     * inside the ring changes at all in that case: measured on a region lit
+     * alone and then surrounded, the ring diff reported zero changed cells and
+     * two of its nine chunks were still wrong, entirely in `blockLight`.
+     *
+     * Listing a column twice is safe by construction — the snapshot is taken
+     * before either list is cleared, seeding is idempotent, and the membership
+     * flags are set and cleared per list.
+     */
+    const rim = perimeter(cols, 2);
+    for (let n = 0; n < cols.length; n++) _inSet[cols[n]] = 1;
+    const ring = [];
     for (let n = 0; n < reach.length; n++) {
       const c = reach[n];
-      if (!_mark[c] && colLive[c]) ring.push(c);
+      if (!_inSet[c] && colLive[c]) ring.push(c);
     }
-    for (let n = 0; n < cols.length; n++) _mark[cols[n]] = 0;
-    light.computeRegion(blocks, cols, ring, (col, k) => markChunk(dirty, col, k));
+    for (let n = 0; n < cols.length; n++) _inSet[cols[n]] = 0;
+    for (let n = 0; n < rim.length; n++) ring.push(rim[n]);
+    // markChunkAround, not markChunk, for the reason its own comment gives: a
+    // cell's light is read by chunks that do not contain it. The relight ring
+    // is fifteen columns wide, so it reaches past the neighbours the block pass
+    // above already covered, and out there the reader is the only thing that
+    // changed.
+    light.computeRegion(blocks, cols, ring, (col, k) => markChunkAround(dirty, col, k));
     for (const r of dark) hasLight[r] = 1;
   }
 
@@ -439,6 +601,7 @@ self.onmessage = (e) => {
     blocks = new Uint8Array(NUM_VOXELS);
     hasTerrain.fill(0); hasDecor.fill(0); hasLight.fill(0); colLive.fill(0);
     resident.clear();
+    meshHash.clear();
 
     // The whole eager half of worldgen, and the only part a New Game waits on.
     const res = gen.generateGlobal((p, label) => self.postMessage({
@@ -496,7 +659,10 @@ self.onmessage = (e) => {
   }
 
   if (msg.type === 'chunks') {
-    for (const id of msg.drop || []) resident.delete(id);
+    // The fingerprint goes with the residency: the main thread has disposed
+    // this chunk's geometry, so the next mesh has to be posted whatever it
+    // hashes to.
+    for (const id of msg.drop || []) { resident.delete(id); meshHash.delete(id); }
     const add = msg.add || [];
 
     const rids = [];

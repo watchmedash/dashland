@@ -6561,6 +6561,12 @@ export class Mobs {
     if (dist > reach || !this._blowClearPlayer(mob, player)) {
       mob.state = 'chase';
     } else {
+      // 'idle' here means STANDING AND SWINGING, not doing nothing: a hostile
+      // in range stops closing, and this is the state it stops in. Reading a
+      // trace of a monster killing the player and seeing `state: 'idle'` on
+      // every blow looks like the mob is asleep and the damage is coming from
+      // somewhere else. The name is load-bearing elsewhere and not worth
+      // churning; this note is the cheaper fix.
       mob.state = 'idle';
       if (mob.swingT <= 0) {
         mob.swingT = spec.swing;

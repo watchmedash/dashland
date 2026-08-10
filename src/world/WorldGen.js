@@ -2250,35 +2250,31 @@ export class WorldGen {
             + 0.25 * nc.simplex3(cx * 4, cy * 4, cz * 4)) / 1.75;
         let open = cav > 0.52;
         if (!open) {
-          const a = nc.ridged3(px * 0.062, py * 0.062, pz * 0.062, 3, 2.1, 0.5);
-          // `b` only matters if `a` already cleared the bar — `min(a, b)` can
-          // never exceed the threshold when `a` does not.
+          // Tunnels as a thin shell around an isosurface, not as the peak of a
+          // ridge. Two ridged fields both near their peak is an intersection of
+          // two *volumes*, and an intersection of volumes is a blob - which is
+          // why loosening the old thresholds bought more pockets rather than
+          // more cave. `abs(f) < eps` is the shell around f = 0, and a shell is
+          // a surface: it winds, and it joins up with itself.
           //
-          // 0.86 was too strict to make tunnels. Two independent ridged fields
-          // both within 0.14 of their peak is a rare intersection, so almost
-          // everything underground was an isolated chamber: "I tried digging
-          // down straight and I never encountered a cave at all."
+          // Measured by flood fill over one 64-cube of crust, same rock for
+          // each, counting six-connected components of open cells:
           //
-          // Swept on one fixed field, so the comparison is the same rock rather
-          // than two different planets - which is how the first attempt at this
-          // fooled itself, reading 28% against 28.9% on two random seeds.
-          // Columns that meet air on the way down, by (chamber / tunnel):
+          //   two ridges 0.78    611 components, largest 674, 8.1% of the void
+          //   shell .050 @0.045 1110 components, largest 695, 6.0%
+          //   shell .065 @0.030  204 components, largest 3734, 26.6%
           //
-          //   0.58 / 0.86    9.5%   median pocket 3, tallest 9
-          //   0.545 / 0.815 14.3%   median 3, tallest 16
-          //   0.52 / 0.78   21.6%   median 2, tallest 17
-          //   0.50 / 0.75   28.2%   median 2, tallest 17
-          //   0.48 / 0.72   37.9%   median 2, tallest 17
+          // A quarter of the underground void in one navigable system, against
+          // an eighth spread over six hundred pockets. It is also cheaper: two
+          // single-octave samples where the ridges cost three octaves each.
           //
-          // 0.52 / 0.78 more than doubles the frequency and keeps the tallest
-          // chambers, and that is where this stops. The median falling to 2 is
-          // the honest limit of the approach: past here the extra hits are
-          // two-cell pockets, which is speckle rather than caves. Both fields
-          // are blob noise, so density buys blobs. A cave *system* you can walk
-          // is a tunnel carve - a path traced through the rock rather than a
-          // threshold on a field - and that is its own pass, not a constant.
-          open = a > 0.78
-            && nc.ridged3(px * 0.062 + 40.5, py * 0.062, pz * 0.062 - 22.3, 3, 2.1, 0.5) > 0.78;
+          // The second shell is deliberately wider (2.2x). Two equal shells
+          // intersect in a curve - a line you cannot walk down. A narrow shell
+          // crossed by a broad one is a corridor with the width of the narrow
+          // one and the run of the broad one.
+          const q = 0.030;
+          open = Math.abs(nc.simplex3(px * q + 5.5, py * q, pz * q)) < 0.065
+            && Math.abs(nc.simplex3(px * q - 31.2, py * q + 7.7, pz * q)) < 0.143;
         }
         if (open) {
           blocks[base + k] = (r < R_MANTLE + 4 && cav > 0.7) ? ID.lava : ID.air;

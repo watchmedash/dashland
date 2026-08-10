@@ -65,9 +65,12 @@ export class Slot {
   clear() { this.item = 0; this.count = 0; this.wear = 0; return this; }
   set(item, count, wear = 0) { this.item = item; this.count = count; this.wear = wear; return this; }
   copy() { return new Slot(this.item, this.count, this.wear); }
-  sameAs(o) {
-    return !o.empty && o.item === this.item && (ITEMS[this.item]?.stack ?? 64) > 1;
-  }
+  // A `sameAs(other)` merge test stood here — "same item, and it stacks" — and
+  // nothing ever called it. The three places that decide whether two stacks
+  // merge (`add` and `roomFor` below, `_slotClick` in ui/UI.js) each already
+  // hold the item id and the stack limit at that point and test them inline, so
+  // the method was a second statement of the rule that could drift from the
+  // three real ones without anything failing.
   toJSON() { return this.empty ? 0 : [this.item, this.count, this.wear]; }
   static fromJSON(v) { return Array.isArray(v) ? new Slot(v[0], v[1], v[2] || 0) : new Slot(); }
 }

@@ -378,8 +378,14 @@ const RAW = [
   // the one worth watching if ore starts to pile up.
 ];
 
+// `label: r.out` used to ride along on every one of these and was read by
+// nothing: the crafting sidebar and the tooltips both name a recipe by its
+// *output item's* label (`ITEMS[recipe.out].label`), which is the name the
+// player already sees on the thing in their hand, where this carried the
+// registry key. Two names for one recipe, one of them player-facing and one of
+// them not, is a thing to get wrong for no gain.
 export const RECIPES = RAW.map((r) => {
-  const rec = { out: itemIdOf(r.out), count: r.count, table: !!r.table, label: r.out, undo: !!r.undo };
+  const rec = { out: itemIdOf(r.out), count: r.count, table: !!r.table, undo: !!r.undo };
   if (r.shape) {
     rec.kind = 'shaped';
     rec.h = r.shape.length;

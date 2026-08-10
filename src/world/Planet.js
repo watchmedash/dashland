@@ -3,11 +3,10 @@
 
 import * as THREE from 'three';
 import {
-  F, D, R_MIN, R_MAX, COLUMNS, NUM_VOXELS, vidx, cidx, chunkIdx,
-  CHUNK_T, CHUNK_K, CT, CK,
+  F, D, R_MIN, COLUMNS, NUM_VOXELS, cidx, chunkIdx, CHUNK_T,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, regionOfCol, regionColumns,
 } from './Constants.js';
-import { worldToCell, cellToWorld, stepColumn, centerDir, tangentFrame, cellArc } from './Sphere.js';
+import { worldToCell, centerDir } from './Sphere.js';
 import {
   IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
 } from './Blocks.js';
@@ -160,20 +159,12 @@ export class Planet {
   /** Has this column been generated? */
   liveCol(col) { return this.live[regionOfCol(col)] === 1; }
 
-  /** Has the region containing this world point been generated? */
-  liveAt(x, y, z) {
-    const a = this.cellAt(x, y, z);
-    return a ? this.live[regionOfCol(a.col)] === 1 : false;
-  }
-
-  /** Legacy whole-planet handover. Nothing calls it now; see `applyRegions`. */
-  setWorld(blocks, colBiome, facingPairs) {
-    this.blocks = blocks;
-    this.colBiome = colBiome;
-    this.live.fill(1);
-    this.facing = new Map();
-    if (facingPairs) for (const [idx, v] of facingPairs) this.facing.set(idx, v);
-  }
+  // Two more were deleted from here rather than kept: `liveAt(x, y, z)`, the
+  // world-space spelling of `liveCol` that nothing ever asked in world space,
+  // and `setWorld`, the pre-streaming whole-planet handover. `setWorld` marked
+  // every region live and replaced the facing map wholesale, which is exactly
+  // the state a lazily built planet must never be put into, and it had carried a
+  // "nothing calls it now" note for long enough to prove nothing would.
 
   // --- directional facing ---------------------------------------------------
 
@@ -251,8 +242,11 @@ export class Planet {
     return a ? RENDER_TYPE[this.blocks[a.col * D + a.k]] === R_LIQUID : false;
   }
 
-  upAt(pos, out = new THREE.Vector3()) { return out.copy(pos).normalize(); }
-  radiusAt(pos) { return pos.length(); }
+  // `upAt(pos)` and `radiusAt(pos)` lived here and were deleted: on a planet
+  // centred at the origin they are `pos.clone().normalize()` and `pos.length()`,
+  // and every caller in the game writes those directly rather than reaching for
+  // the planet to do it. A method that only restates a vector operation reads
+  // like it knows something about the world, and this one did not.
 
   /**
    * Highest non-air, non-water layer in a column — the *ground*, not the top of
@@ -277,14 +271,13 @@ export class Planet {
     return -1;
   }
 
-  surfaceRadiusDir(dir) {
-    const c = worldToCell(dir.x * 40, dir.y * 40, dir.z * 40, _cell);
-    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-    const col = cidx(c.f, i, j);
-    const k = this.surfaceK(col);
-    return k < 0 ? 0 : R_MIN + k + 1;
-  }
+  // `surfaceRadiusDir(dir)` was deleted from here: a no-caller helper that took
+  // a direction and returned the radius of the ground under it. It leaned on
+  // `worldToCell` being scale-free in f/i/j by pushing the direction out to
+  // radius 40 — a point 210 units below layer 0, whose `ck` is meaningless and
+  // was duly ignored — which is a thing a reader has to work out before they can
+  // trust the two lines around it. `surfaceK` takes a column and everyone who
+  // wants ground already has one.
 
   /** Cell centre in world space. */
   centerOf(col, k, out = new THREE.Vector3()) {

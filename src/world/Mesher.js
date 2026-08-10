@@ -374,7 +374,11 @@ function cornerLerp(f, i, j, k, out) {
  *   chunk (null when there are none). See CROSS_LIGHT_ADDR_SHIFT.
  */
 export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, ck) {
-  const groups = [new Group(), new Group(), new Group(), new Group()];
+  // One Group per draw group, from GROUP_COUNT rather than from four literal
+  // constructors: the count was already declared next to the group ids and a
+  // fifth group added there would otherwise silently index past the end here.
+  const groups = [];
+  for (let g = 0; g < GROUP_COUNT; g++) groups.push(new Group());
   const crossLight = new CrossLightBuf();
   const i0 = ci * CHUNK_T, j0 = cj * CHUNK_T, k0 = ck * CHUNK_K;
   const i1 = Math.min(F, i0 + CHUNK_T), j1 = Math.min(F, j0 + CHUNK_T), k1 = Math.min(D, k0 + CHUNK_K);
@@ -944,7 +948,6 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
 
 // --- cross plants -----------------------------------------------------------
 
-const _cp = [0, 0, 0];
 function emitCross(g, f, i, j, k, col, id, biomeId, light) {
   const o = ((f * F + i) * F + j) * 3;
   const r = R_MIN + k + 0.5;
@@ -972,9 +975,13 @@ function emitCross(g, f, i, j, k, col, id, biomeId, light) {
     const ax = plane === 0 ? t1x : t2x;
     const ay = plane === 0 ? t1y : t2y;
     const az = plane === 0 ? t1z : t2z;
-    const nx = plane === 0 ? t2x : -t1x;
-    const ny = plane === 0 ? t2y : -t1y;
-    const nz = plane === 0 ? t2z : -t1z;
+    // The plane's own normal is deliberately not computed here. A cross plant
+    // is shaded with the COLUMN'S UP as its normal — `g.nrm.push3(upx, upy,
+    // upz)` below — so both quads and both sides of each quad take the same
+    // light and a tuft of grass never has a dark half depending on which way
+    // the sun is round. The true quad normal used to be worked out on every
+    // plane of every plant and then dropped on the floor, which read as if the
+    // shading were about to use it.
     const v0 = g.verts;
     const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const uvp = [[0, 1], [1, 1], [1, 0], [0, 0]];

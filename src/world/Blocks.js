@@ -1610,9 +1610,11 @@ export function growsOn(plant, floor) {
   return set === undefined || set[floor] === 1;
 }
 
-/** Every block that declares a soil set — the list the harness sweeps. */
-export const IS_FLORA = new Uint8Array(N_BLOCKS);
-for (let i = 0; i < N_BLOCKS; i++) if (FLORA_SOIL[i] !== undefined) IS_FLORA[i] = 1;
+// `IS_FLORA` used to sit here: an N_BLOCKS byte array marking every block that
+// declares a soil set, documented as "the list the harness sweeps". Nothing
+// swept it — not Harness.js, not the generator, not main — so it was a table
+// built at module load for no reader. `FLORA_SOIL` and `growsOn` above are what
+// the planting rules actually ask.
 
 for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
@@ -1844,7 +1846,9 @@ export function blockBottom(id, up = 0) {
   return up ? 0.5 : 0;
 }
 
-/** Does this block seal the cell's top face against the cell above? */
-export const sealsTop = (id, up = 0) => IS_OPAQUE[id] === 1 || (IS_SLAB[id] === 1 && up === 1);
-
-export function blockOf(name) { return BLOCKS[BLOCK_ID[name]]; }
+// Two helpers were deleted from here rather than wired up: `sealsTop`, a
+// "does this block seal the cell above" predicate over IS_OPAQUE and IS_SLAB,
+// and `blockOf(name)`, a `BLOCKS[BLOCK_ID[name]]` shorthand. Both were exported
+// and neither had a single caller anywhere in src/ or scripts/ — no rule in the
+// game asks the sealing question in those words, and every lookup by name goes
+// through `ID` or `BLOCK_ID` directly.

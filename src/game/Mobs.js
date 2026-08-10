@@ -774,7 +774,18 @@ const SIGHT_PERIOD = 0.25;
  * minute, and the first minute only.
  */
 const CALM_RADIUS = 40;
-const CALM_HEIGHT = 1.0;
+// 1.7, as the note above says twice over. It read 1.0 for a long time, which is
+// the value that note explicitly argues against — so the whole of the "a
+// clearing with no cow in it is not gentler, it is emptier" paragraph described
+// a bar the code never had. Measured against the table: at 1.0 the opening
+// clearing excluded the cow (1.62), the deer (1.50) and the panda (1.32), i.e.
+// the three animals the note lists by name as the ones it keeps. At 1.7 the
+// exclusions are the polar bear (1.90), the elephant (3.05) and the giraffe
+// (3.90) on height, and both big cats on `preyOn`/`predator` — which is exactly
+// the set the note describes. Nothing hostile can reach this test: monsters
+// spawn from _spawnMonster and husks from the night budget, both of which
+// refuse `_nearHome` outright, and SPAWN_BY_BIOME is wildlife only.
+const CALM_HEIGHT = 1.7;
 /**
  * Gentle enough for the opening clearing?
  *
@@ -1940,8 +1951,6 @@ const SPECIES = {
   },
 };
 
-export const SPECIES_TYPES = Object.keys(SPECIES);
-
 /**
  * How often a species is drawn from its biome's list, against the others on it.
  *
@@ -2636,7 +2645,14 @@ const tuckW = (spec, drawn) => (spec.aquatic ? drawn : drawn * FOOT_TUCK);
  * actually is. Margins absorb the walk cycle, which swings limbs past the
  * rest pose.
  */
-function modelExtents(root, scale) {
+// No `scale` argument, and do not add one back. This took a second parameter it
+// never read, which reads like a bug waiting to be "fixed" by multiplying the
+// numbers below by it -- and that would double-apply the scale. `setFromObject`
+// walks world matrices, and `model.root.scale.setScalar(scale)` has already run
+// by the time the one caller gets here, so every number returned is in scaled
+// cells. See also the notes at `_footprintCost` and `baseHeight`, which both say
+// this box is world-space.
+function modelExtents(root) {
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   if (box.isEmpty() || !Number.isFinite(box.min.x)) return { halfW: 0.3, halfL: 0.3, tall: 1 };
@@ -2828,8 +2844,11 @@ export class Mobs {
     this.merchantT = MERCHANT_FIRST;
     /** (mob) => void — a merchant has just arrived, for a nudge to the player. */
     this.onMerchant = null;
-    this.onHurtSound = null;
-    /** (kind, mob) => void — 'idle' | 'hurt' | 'death'. Wired to Audio.mob(). */
+    /**
+     * (kind, mob) => boolean — 'idle' | 'hurt' | 'death'. Wired to Audio.mob(),
+     * whose `false` means "no sound was made"; _tryVocalise reads it so silence
+     * does not spend the herd's call budget.
+     */
     this.onSound = null;
     /** (damage, mob) => void — a hostile landed a blow on the player. */
     this.onAttack = null;
@@ -3196,7 +3215,7 @@ export class Mobs {
     }
     this.group.add(model.root);
 
-    const ext = modelExtents(model.root, scale);
+    const ext = modelExtents(model.root);
     const mob = {
       id: this._nextId++, type, spec, model, seed: s, variant,
       scale, sizeJitter,
@@ -3399,7 +3418,7 @@ export class Mobs {
     this._sync(mob);
     mob.prevPos.copy(mob.pos);
     mob.progAt.copy(mob.pos);
-    this._animate(mob, 0, null);   // place the model now; never render at the origin
+    this._animate(mob, 0);   // place the model now; never render at the origin
     return mob;
   }
 
@@ -3408,7 +3427,7 @@ export class Mobs {
    * — a penguin on a savanna is the one mismatch obvious enough to matter, and
    * a full biome table would be a lot of bookkeeping for little gain.
    */
-  _pickWildlife(col, k) {
+  _pickWildlife(col) {
     return this._drawFrom(col, false);
   }
 
@@ -3590,7 +3609,7 @@ export class Mobs {
     const calm = this._nearHome(col, k);
     let type = null;
     for (let t = 0; t < (calm ? 3 : 1) && !type; t++) {
-      const pick = this._pickWildlife(col, k);
+      const pick = this._pickWildlife(col);
       // Null means this biome's whole list flies — nothing does today, but the
       // draw can return it and a silent SPECIES[null] would spawn nothing while
       // reporting success, which is the kind of thing that shows up later as a
@@ -5572,9 +5591,25 @@ export class Mobs {
     // from 16 to MAX_WILDLIFE. Forty animals on a 6-14s clock ask about four
     // times a second between them; without this the population raise alone
     // would have turned a paddock into a wall of noise.
+    //
+    // ...and the budget is spent only if a noise actually came out. `Audio.mob`
+    // returns false for a species with no MOB_VOICE row, and that table has 9
+    // animal entries against the 30 voiceless species this can be called for:
+    // 13 of the 21 in SPAWN_BY_BIOME (polar, bee, tiger, lion, caterpillar,
+    // giraffe, elephant, panda, monkey, beaver, dog, cat, crab), all four fish
+    // and all thirteen monsters. Spending the world's one-call-per-second slot
+    // on silence meant a mute animal throttled a cow standing beside it, and in
+    // the desert — lion, caterpillar, bee — every species on the list is mute,
+    // so the biome consumed the budget continuously and never made a sound.
+    //
+    // Strictly `=== false`, not falsy: an `onSound` that returns undefined is a
+    // handler that made a noise as far as this is concerned, and treating that
+    // as a refusal would disable the throttle entirely. Nothing runs away on
+    // the false path either — the retry is on the mob's own 6..14s `voxT`, not
+    // on the frame.
+    if (this.onSound('idle', mob) === false) return;
     this.voxCooldown = 0.8 + Math.random();
     this.voxCount++;
-    this.onSound('idle', mob);
   }
 
   /**
@@ -7333,7 +7368,7 @@ export class Mobs {
           );
           seen.want = seen.heading;
           seen.placed = false;      // adopt that heading outright, do not slerp
-          this._animate(seen, 0, sky);
+          this._animate(seen, 0);
           this.stalkerRest = STALKER_REST;
         }
       }
@@ -7398,7 +7433,7 @@ export class Mobs {
       if (mob.dying > 0) {
         mob.dying -= dt;
         mob.speedNow = 0;
-        this._animate(mob, dt, sky);
+        this._animate(mob, dt);
         if (mob.dying <= 0) { this._release(mob); this.list.splice(n, 1); }
         continue;
       }
@@ -7676,8 +7711,11 @@ export class Mobs {
       // walking rules — footprints, water as a wall — so a flier still keeps to
       // the ground it belongs over instead of drifting out to sea; it simply
       // does it at hover height.
+      // Local only. `mob.swimming` and `mob.wading` are published on the body
+      // because _footprintCost asks about them from outside this loop; nothing
+      // ever asked about flight, so a `mob.flying` written every frame for
+      // every body was a flag with no reader.
       const flying = !!spec.flies;
-      mob.flying = flying;
 
       // The layer the feet are standing on, hoisted above the steering because
       // the turn is checked against terrain now and wants the same reference
@@ -8261,7 +8299,7 @@ export class Mobs {
         this._sync(mob);
       }
 
-      this._animate(mob, dt, sky);
+      this._animate(mob, dt);
     }
 
     // Anything eaten this frame is removed here, outside the walk over the list
@@ -8293,7 +8331,7 @@ export class Mobs {
 
   // --- presentation ---------------------------------------------------------
 
-  _animate(mob, dt, sky) {
+  _animate(mob, dt) {
     const spec = mob.spec, fr = mob.frame, model = mob.model;
 
     mob.prevPos.copy(mob.pos);

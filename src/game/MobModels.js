@@ -16,7 +16,7 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 const loader = new GLTFLoader();
 
 /**
- * url -> { scene, clips, height, radius }. `scene` is a *prototype*: it is never
+ * url -> { scene, clips, height, footOffset }. `scene` is a *prototype*: it is never
  * added to the world, only cloned, so geometry and materials stay shared across
  * every instance of that species — one upload for a whole herd. The flip side is
  * that nothing may ever dispose them; releasing a mob only detaches it.
@@ -114,8 +114,10 @@ export async function prepare(urls) {
       scene: gltf.scene,
       skinned,
       clips: gltf.animations || [],
+      // No radius here. Mobs.js sizes its footprint from `modelExtents`, which
+      // measures the *oriented* half-width and half-length off the same rest
+      // pose; one number off the bounding box was never used by anything.
       height: size.y || 1,
-      radius: Math.max(size.x, size.z) * 0.5 || 0.5,
       // The exports put their origin at the feet; this is what would put a
       // model back on the ground if one ever did not.
       footOffset: -box.min.y,
@@ -123,12 +125,8 @@ export async function prepare(urls) {
   }));
 }
 
-/** Clip names a model actually ships, for choosing fallbacks. */
-export const clipNames = (url) => (protos.get(url)?.clips || []).map((c) => c.name);
-
 /** Rest-pose height in model units, before the per-species scale. */
 export const modelHeight = (url) => protos.get(url)?.height ?? 1;
-export const modelRadius = (url) => protos.get(url)?.radius ?? 0.5;
 export const footOffset = (url) => protos.get(url)?.footOffset ?? 0;
 
 /**

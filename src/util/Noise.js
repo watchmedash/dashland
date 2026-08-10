@@ -1,8 +1,9 @@
-// Deterministic noise toolkit — simplex 2D/3D, fbm, ridged, worley, value noise.
+// Deterministic noise toolkit — simplex 3D, fbm, ridged, worley, value noise.
 // Pure ES module, safe in workers.
+//
+// 3D and not 2D: see the note above `simplex3`. The skew constants below are
+// only the 3D pair now, because F2/G2 had no reader once the 2D path went.
 
-const F2 = 0.5 * (Math.sqrt(3) - 1);
-const G2 = (3 - Math.sqrt(3)) / 6;
 const F3 = 1 / 3;
 const G3 = 1 / 6;
 
@@ -23,14 +24,9 @@ export function makeRng(seed) {
   };
 }
 
-/** 32-bit integer hash → [0,1). */
-export function hash1(x) {
-  let h = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
-  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
-  h ^= h >>> 16;
-  return (h >>> 0) / 4294967296;
-}
-
+// A one-argument `hash1` stood here and had no caller anywhere in `src/` or
+// `scripts/`. Everything that hashes on this planet hashes a cell, and a cell is
+// three coordinates, so `hash3` below is the only shape that was ever wanted.
 export function hash3(x, y, z) {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(z | 0, 2147483647);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -55,30 +51,19 @@ export class Noise {
     }
   }
 
-  simplex2(xin, yin) {
-    const { perm, permMod12 } = this;
-    let n0 = 0, n1 = 0, n2 = 0;
-    const s = (xin + yin) * F2;
-    const i = Math.floor(xin + s), j = Math.floor(yin + s);
-    const t = (i + j) * G2;
-    const x0 = xin - (i - t), y0 = yin - (j - t);
-    let i1, j1;
-    if (x0 > y0) { i1 = 1; j1 = 0; } else { i1 = 0; j1 = 1; }
-    const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
-    const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
-    const ii = i & 255, jj = j & 255;
-    const gi0 = permMod12[ii + perm[jj]] * 3;
-    const gi1 = permMod12[ii + i1 + perm[jj + j1]] * 3;
-    const gi2 = permMod12[ii + 1 + perm[jj + 1]] * 3;
-    let t0 = 0.5 - x0 * x0 - y0 * y0;
-    if (t0 >= 0) { t0 *= t0; n0 = t0 * t0 * (GRAD3[gi0] * x0 + GRAD3[gi0 + 1] * y0); }
-    let t1 = 0.5 - x1 * x1 - y1 * y1;
-    if (t1 >= 0) { t1 *= t1; n1 = t1 * t1 * (GRAD3[gi1] * x1 + GRAD3[gi1 + 1] * y1); }
-    let t2 = 0.5 - x2 * x2 - y2 * y2;
-    if (t2 >= 0) { t2 *= t2; n2 = t2 * t2 * (GRAD3[gi2] * x2 + GRAD3[gi2 + 1] * y2); }
-    return 70 * (n0 + n1 + n2);
-  }
-
+  // --- there is no 2D noise here, and there never was a caller for one --------
+  //
+  // `simplex2` and the `fbm2` that wrapped it stood here, and between them they
+  // had exactly one reference in the whole repo: `fbm2` calling `simplex2`. The
+  // reason is structural rather than accidental. This is a sphere, sampled in
+  // world space, so every field on it is asked for at an (x, y, z) on the shell:
+  // all 21 worldgen calls go to `fbm3`, all 16 to `simplex3`, all 3 to
+  // `ridged3`. The flat 2D fields that do exist are the texture ones, and those
+  // have to tile, which simplex cannot do -- they go through
+  // `tileableValueNoise`/`tileableFbm`/`tileableWorley` below instead.
+  //
+  // So a 2D simplex on this planet is not a primitive waiting for a use. It is
+  // a shape the geometry does not ask for.
   simplex3(xin, yin, zin) {
     const { perm, permMod12 } = this;
     let n0 = 0, n1 = 0, n2 = 0, n3 = 0;
@@ -119,16 +104,6 @@ export class Noise {
     let amp = 1, freq = 1, sum = 0, norm = 0;
     for (let o = 0; o < octaves; o++) {
       sum += amp * this.simplex3(x * freq, y * freq, z * freq);
-      norm += amp;
-      amp *= gain; freq *= lacunarity;
-    }
-    return sum / norm;
-  }
-
-  fbm2(x, y, octaves = 4, lacunarity = 2, gain = 0.5) {
-    let amp = 1, freq = 1, sum = 0, norm = 0;
-    for (let o = 0; o < octaves; o++) {
-      sum += amp * this.simplex2(x * freq, y * freq);
       norm += amp;
       amp *= gain; freq *= lacunarity;
     }

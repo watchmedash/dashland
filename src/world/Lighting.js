@@ -89,14 +89,12 @@ for (let i = 0; i < N_BLOCKS; i++) {
 const ATTEN_V = new Uint8Array(N_BLOCKS);
 for (let i = 0; i < N_BLOCKS; i++) ATTEN_V[i] = SKY_ATTEN[i] === 255 ? 255 : ATTEN[i];
 
-/** Six neighbours of a voxel index; returns -1 when off the top/bottom. */
-export function neighborIndex(index, dir) {
-  const k = index % D;
-  if (dir === 4) return k + 1 < D ? index + 1 : -1;      // outward
-  if (dir === 5) return k > 0 ? index - 1 : -1;          // inward
-  const col = (index - k) / D;
-  return COL_NB[col * 4 + dir] * D + k;
-}
+// `neighborIndex(index, dir)` was deleted from here rather than wired up. It
+// was an exported six-neighbour walk over a voxel index, and nothing called it:
+// `_flood` is the only code that walks neighbours and it does the same six steps
+// inline, because it also needs each step's attenuation and cannot afford a call
+// per voxel per channel. A second, slower spelling of the flood's hot loop is
+// the one that goes stale when the graph changes.
 
 /**
  * Where the BFS queue starts, and how far it is ever allowed to go.
@@ -108,7 +106,8 @@ export function neighborIndex(index, dir) {
  * 6 319 911 entries (24.1 MiB, 4.94% of the array) with nothing dropped, so
  * about 465 MiB of a 1.9 GB footprint was scratch space that was allocated,
  * committed and never written to. The one entry point that could plausibly
- * want the whole world at once is `computeAll`, and nothing in `src/` calls it.
+ * want the whole world at once was `computeAll`, which nothing called and which
+ * has since been deleted; every remaining caller floods a region and a ring.
  *
  * 8M entries is the start: comfortably over the measured peak, so the ordinary
  * session never grows at all, and 32 MiB instead of 488. The ceiling is the old
@@ -204,35 +203,15 @@ export class LightField {
     return tail;
   }
 
-  computeAll(blocks, onProgress = () => {}) {
-    this.sun.fill(0); this.r.fill(0); this.g.fill(0); this.b.fill(0);
-    let tail = 0;
-
-    // seed: every cell above the highest opaque block in its column sees sky
-    for (let col = 0; col < COLUMNS; col++) {
-      tail = this._seedSky(blocks, col, tail);
-      if ((col & 8191) === 0) onProgress(0.5 * (col / COLUMNS));
-    }
-    this._flood(blocks, this.sun, 0, tail);
-    onProgress(0.7);
-
-    const chans = [this.r, this.g, this.b];
-    const scales = [LIGHT_R, LIGHT_G, LIGHT_B];
-    const seeds = [];
-    for (let i = 0; i < NUM_VOXELS; i++) if (LIGHT_EMIT[blocks[i]] > 0) seeds.push(i);
-    for (let c = 0; c < 3; c++) {
-      const chan = chans[c], scale = scales[c];
-      const q = this._ensureQueue(seeds.length);
-      tail = 0;
-      for (const i of seeds) {
-        const b = blocks[i];
-        const v = Math.round(LIGHT_EMIT[b] * (scale[b] / 255));
-        if (v > chan[i]) { chan[i] = v; q[tail++] = i; }
-      }
-      this._flood(blocks, chan, 0, tail);
-    }
-    onProgress(1);
-  }
+  // `computeAll(blocks, onProgress)` was deleted from here rather than left in
+  // place. It lit the whole planet in one pass — seed every one of the 259 584
+  // columns, flood, then sweep all 127 885 824 voxels four times looking for
+  // emitters — and nothing has called it since the world went lazy: the worker
+  // builds light per region (`computeRegion`) because a region is what it has
+  // blocks for, and a whole-planet pass on a planet that is mostly ungenerated
+  // would flood through columns `live` marks as absent. It was also the only
+  // caller that could plausibly want the queue at its NUM_VOXELS ceiling, which
+  // is what the note on QUEUE_MAX above measures against.
 
   _flood(blocks, field, head, tail) {
     let q = this._queue;
@@ -431,7 +410,6 @@ export class LightField {
     }
 
     const cols = [...region];
-    const fields = [this.sun, this.r, this.g, this.b];
     const before = new Map();
     for (const col of cols) {
       const base = col * D;

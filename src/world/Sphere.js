@@ -85,11 +85,10 @@ export const CENTER_DIR = new Float32Array(FACES * F * F * 3);
   }
 })();
 
-export function cornerDir(f, i, j, out = [0, 0, 0]) {
-  const o = ((f * (F + 1) + i) * (F + 1) + j) * 3;
-  out[0] = CORNER_DIR[o]; out[1] = CORNER_DIR[o + 1]; out[2] = CORNER_DIR[o + 2];
-  return out;
-}
+// `cornerDir` was deleted from here rather than wired up: an exported accessor
+// for the same CORNER_DIR row `cornerPos` reads, with no caller anywhere. The
+// table itself stays — `cornerPos` below and the mesher's cross-plant basis both
+// read it directly, which is why nothing ever wanted the direction on its own.
 
 export function centerDir(f, i, j, out = [0, 0, 0]) {
   const o = ((f * F + i) * F + j) * 3;

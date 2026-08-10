@@ -772,7 +772,6 @@ export class ViewModel {
     // --- arm ---
     const armTex = makeArmTexture();
     const armMat = new THREE.MeshStandardMaterial({ map: armTex, roughness: 0.88, metalness: 0 });
-    this.armMat = armMat;
     // Pivot sits at the shoulder; the limb extends forward, away from the
     // camera. Kept slim and short — anything nearer than ~0.4 units balloons
     // under perspective and swallows the corner of the screen.

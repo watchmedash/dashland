@@ -320,8 +320,12 @@ export class Sky {
   constructor(scene, renderer) {
     this.scene = scene;
     this.center = new THREE.Vector3(0, 0, 0);
-    this.time = 0.4;               // wall-clock day fraction, for the HUD dial
-    this.orbit = 0.4;              // sun's phase around the planet
+    // The day fraction `setSolarTime` was last given. `orbit`, a second copy of
+    // it labelled "sun's phase around the planet", used to sit beside it and was
+    // deleted: it was set once here and never written or read again, so it named
+    // a second notion of solar time that did not exist. There is one, and
+    // `solarDirection` takes it as an argument.
+    this.time = 0.4;
     this.sunDir = new THREE.Vector3(0, 1, 0);
     this.moonDir = new THREE.Vector3(0, -1, 0);
     this.palette = lerpKeys(1);

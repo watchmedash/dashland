@@ -310,23 +310,12 @@ export class Particles {
   }
 
 
-  hitSpark(point, normal, blockId) {
-    const col = BLOCKS[blockId]?.particle || [0.6, 0.6, 0.6];
-    for (let i = 0; i < 4; i++) {
-      const p = this._spawn();
-      if (!p) return;
-      p.alive = true;
-      p.pos.copy(point).addScaledVector(normal, 0.06);
-      p.pos.x += (Math.random() - 0.5) * 0.5; p.pos.y += (Math.random() - 0.5) * 0.5; p.pos.z += (Math.random() - 0.5) * 0.5;
-      p.vel.copy(normal).multiplyScalar(1.6 + Math.random() * 1.4);
-      p.vel.x += (Math.random() - 0.5) * 2; p.vel.y += (Math.random() - 0.5) * 2; p.vel.z += (Math.random() - 0.5) * 2;
-      p.rot.setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
-      p.spin.set((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);
-      p.life = 0; p.maxLife = 0.4 + Math.random() * 0.4;
-      p.size = 0.04 + Math.random() * 0.05;
-      p.color.setRGB(col[0], col[1], col[2]);
-    }
-  }
+  // `hitSpark` stood here and is gone rather than dormant. It threw four chips
+  // off the face being mined, out of the same instanced-cube pool as the break
+  // burst the player asked to be rid of — so mining still produced exactly the
+  // cubes that were removed. The dig call in main.js dropped it and kept the
+  // sound; the crack overlay draws the whole dig on the one face being worked,
+  // which is more information than a spray of boxes.
 
   footDust(pos, up, blockId) {
     const col = BLOCKS[blockId]?.particle || [0.6, 0.6, 0.6];

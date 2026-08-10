@@ -88,8 +88,8 @@ export class Ambience {
     this._armed = {};
     this._state = {
       wind: 0, water: 0, cave: 0, underwater: 0,
-      rain: 0, surf: 0, biome: 2, time: 0.35, openness: 1, depth: 0,
-      fall: false, spring: false,
+      rain: 0, surf: 0, biome: 2, time: 0.35, openness: 1,
+      spring: false,
     };
     this._build();
     this._tick = this._tick.bind(this);
@@ -282,7 +282,6 @@ export class Ambience {
     st.rain = s.rain ?? 0;
     st.biome = s.biome ?? st.biome;
     st.time = s.time ?? st.time;
-    st.depth = s.depth ?? 0;
     st.openness = s.openness ?? (1 - Math.min(1, st.cave));
     const air = BIOME_AIR[st.biome | 0] || DEFAULT_AIR;
     st.surf = s.surf ?? air.surf * Math.min(1, st.water * 1.6);
@@ -322,7 +321,9 @@ export class Ambience {
     // spring at about -48, clear of the wind but not competing with it.
     this._placeSet('fall', s.fall, ['fallRoar', 'fallHiss'], [0.180, 0.070]);
     this._placeSet('spring', s.spring, ['springBub', 'springHiss'], [0.150, 0.040]);
-    st.fall = !!s.fall;
+    // Only the spring is remembered: `_tick` throws bubble bursts off the pool
+    // and there is no equivalent one-shot over a waterfall, whose two beds are
+    // already continuous.
     st.spring = !!s.spring;
   }
 

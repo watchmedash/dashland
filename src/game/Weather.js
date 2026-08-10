@@ -4,12 +4,25 @@
 
 import { BIOME } from '../world/Constants.js';
 
+/**
+ * `fog` tops out at 1.9 because that is where it stops reaching anything.
+ *
+ * The consumer is `uFogDensity = 0.0013 * Math.min(1.9, w.fog)` in main.js, and
+ * the ceiling is not incidental — the aerial-perspective note in
+ * VoxelMaterial.js sizes the whole haze curve against "a storm's 1.9", which
+ * puts f at 0.83 on the horizon. The table did not agree with it: rain asked for
+ * 2.1 and storm for 2.8, both of which clamp to the same 1.9, so a storm was
+ * exactly as hazy as the rain it grew out of and the difference between the two
+ * numbers had never once been on screen. Every value now lands inside the range
+ * that arrives, with storm sitting on the ceiling the shader is tuned for and
+ * rain a clear step below it.
+ */
 const STATES = {
   clear: { weight: 34, coverage: 0.62, opacity: 0.72, precip: 0.00, sun: 1.00, wind: 0.55, fog: 1.0, dur: [240, 620] },
   fair: { weight: 30, coverage: 0.40, opacity: 0.86, precip: 0.00, sun: 0.94, wind: 0.8, fog: 1.1, dur: [200, 520] },
-  overcast: { weight: 18, coverage: 0.16, opacity: 0.95, precip: 0.00, sun: 0.55, wind: 1.0, fog: 1.5, dur: [160, 380] },
-  rain: { weight: 13, coverage: 0.08, opacity: 0.97, precip: 0.62, sun: 0.34, wind: 1.4, fog: 2.1, dur: [120, 300] },
-  storm: { weight: 5, coverage: 0.02, opacity: 1.00, precip: 1.00, sun: 0.20, wind: 2.1, fog: 2.8, dur: [80, 190] },
+  overcast: { weight: 18, coverage: 0.16, opacity: 0.95, precip: 0.00, sun: 0.55, wind: 1.0, fog: 1.4, dur: [160, 380] },
+  rain: { weight: 13, coverage: 0.08, opacity: 0.97, precip: 0.62, sun: 0.34, wind: 1.4, fog: 1.65, dur: [120, 300] },
+  storm: { weight: 5, coverage: 0.02, opacity: 1.00, precip: 1.00, sun: 0.20, wind: 2.1, fog: 1.9, dur: [80, 190] },
 };
 
 const COLD_BIOMES = new Set([BIOME.SNOW, BIOME.TUNDRA]);
@@ -82,8 +95,13 @@ export class Weather {
     }
   }
 
-  get raining() { return this.precip > 0.05 && !this.cold; }
-  get snowing() { return this.precip > 0.05 && this.cold; }
+  // `raining` and `snowing` used to sit here and were deleted rather than wired
+  // up. Both were exported-looking predicates over `precip` and `cold` that
+  // nothing read: everything that actually reacts to the weather reads the raw
+  // fields instead — the particle field takes `type` and `precip`, the ambience
+  // bed takes `precip`, the cloud shader takes `coverage`/`opacity`, and the
+  // status chip takes `label` below. Two more names for one threshold is how
+  // the threshold drifts apart from the thing it is supposed to describe.
   get label() {
     if (this.precip > 0.75) return this.cold ? 'Blizzard' : 'Storm';
     if (this.precip > 0.2) return this.cold ? 'Snow' : 'Rain';

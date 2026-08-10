@@ -133,6 +133,7 @@ const VOICE_CAP = {
 export class Audio {
   constructor() {
     this.ctx = null;
+    // Written only by `setVolumes`: a master volume of zero is off, not quiet.
     this.enabled = true;
     this.masterVolume = 0.7;
     this.musicVolume = 0.35;
@@ -223,9 +224,6 @@ export class Audio {
     }, Math.max(60, life * 1000 + 120));
     return true;
   }
-
-  /** Weighted units currently held. Zero when nothing is sounding. */
-  get voiceLoad() { return this._used; }
 
   resume() { if (this.ctx?.state === 'suspended') this.ctx.resume(); }
 
@@ -329,12 +327,6 @@ export class Audio {
   _reap(node, life) {
     setTimeout(() => { try { node.disconnect(); } catch (e) { /* already gone */ } },
       Math.max(50, life * 1000 + 400));
-  }
-
-  /** Rough attenuation a positional source will get — used for culling/tests. */
-  distanceGain(d) {
-    const dist = Math.max(REF_DISTANCE, Math.min(MAX_DISTANCE, d));
-    return REF_DISTANCE / (REF_DISTANCE + ROLLOFF * (dist - REF_DISTANCE));
   }
 
   _noise(seconds) {
@@ -1331,23 +1323,22 @@ export class Audio {
    * scaled by the current underwater duck rather than overwriting it — setting
    * the raw value here while submerged used to snap the mix back to dry until
    * the next time the player's head crossed the surface.
+   *
+   * Master at zero also switches the engine off rather than merely turning it
+   * down. `_live()` has always gated every voice on `enabled`, but nothing ever
+   * wrote that flag, so a player who dragged the slider to the left silently
+   * kept paying for the whole graph: at a muted master the game still built a
+   * PannerNode, three filters and an envelope per footstep, per block break and
+   * per animal call, several times a second, all of it multiplied by a gain of
+   * zero on the way out. This is the one control the player has that means
+   * "off", so it is the one that says so.
    */
   setVolumes(master, music) {
     this.masterVolume = master;
     this.musicVolume = music;
+    this.enabled = master > 0;
     const u = this._muffle || 0;
     if (this.master) this.master.gain.value = master * (1 - u * 0.45);
     if (this.musicBus) this.musicBus.gain.value = music * (1 - u * 0.6);
-  }
-
-  /** Everything off, immediately, without tearing down the graph. */
-  setEnabled(on) {
-    this.enabled = !!on;
-    if (this.master) {
-      this.master.gain.setTargetAtTime(
-        on ? this.masterVolume * (1 - (this._muffle || 0) * 0.45) : 0,
-        this.ctx.currentTime, 0.05,
-      );
-    }
   }
 }

@@ -448,8 +448,6 @@ export const ARMOUR_SLOTS = {
   boots: { label: 'Boots', weight: 0.8, art: 'boots', cost: 4 },
 };
 
-export const ARMOUR_SLOT_ORDER = ['helm', 'chest', 'legs', 'boots'];
-
 /**
  * What a point used to be worth: 4% off a blow, capped at 80% for a full set.
  *
@@ -476,6 +474,14 @@ for (const [tName, t] of Object.entries(ARMOUR_TIERS)) {
 }
 
 // --- ranged -----------------------------------------------------------------
+//
+// Everything from here down is a bare `add()`. The five items appended below
+// each used to bind their id to an exported constant (`BOW_ID`, `ARROW_ID`,
+// `DRIED_KELP_ID`, `HONEYCOMB_ID`, `LAVA_BUCKET_ID`) and not one of them was
+// ever imported: every consumer in the game reaches an item by *name*, through
+// `itemIdOf` or `ITEM_ID`, because that is what recipes, drop tables, smelts and
+// the trader's stock are all written in. An exported id constant reads as the
+// handle the rest of the game holds these things by, and it never was one.
 
 /**
  * The bow and its ammunition.
@@ -521,7 +527,7 @@ for (const [tName, t] of Object.entries(ARMOUR_TIERS)) {
  *            the tuning it is derived from stops being true. That coupling is
  *            the whole reason it is written down here rather than felt for.
  */
-export const BOW_ID = add({
+add({
   name: 'bow', label: 'Bow', stack: 1, art: 'rod',
   color: '#8a6a3a', shine: '#c9a86a',
   tool: { kind: 'bow', tier: 0, speed: 1, durability: 260 },
@@ -529,7 +535,7 @@ export const BOW_ID = add({
   ammo: 'arrow',
 });
 
-export const ARROW_ID = add({
+add({
   name: 'arrow', label: 'Arrow', art: 'stick',
   color: '#8a6a3a', shine: '#c9a86a',
 });
@@ -551,7 +557,7 @@ export const ARROW_ID = add({
  * *quite* a grilled fish is also the point: an ocean full of kelp that cooked
  * into an 8 would make fishing pointless, and the rod is the better toy.
  */
-export const DRIED_KELP_ID = add({
+add({
   name: 'dried_kelp', label: 'Dried Kelp', food: 6, cooked: true,
   color: '#4a5c2a', shine: '#8d9a70',
 });
@@ -578,7 +584,7 @@ export const DRIED_KELP_ID = add({
  * `OVERRIDE` in Trade.js) — 10 coins, twice a hide — and that price is what
  * makes every recipe downstream of it a luxury.
  */
-export const HONEYCOMB_ID = add({
+add({
   name: 'honeycomb', label: 'Honeycomb', food: 4,
   color: '#e0ad45', shine: '#f6dc94',
 });
@@ -615,7 +621,7 @@ export const HONEYCOMB_ID = add({
  * difference between the two full states — same model, same pose, different
  * waterline, which is what the water bucket already does.
  */
-export const LAVA_BUCKET_ID = add({
+add({
   name: 'lava_bucket', label: 'Lava Bucket', art: 'bucket', stack: 1,
   color: '#a8adb8', shine: '#e8ecf4', fill: '#e2591b', carries: 'lava',
 });
@@ -750,11 +756,13 @@ export const N_ITEMS = ITEMS.length;
 export const item = (nameOrId) => (typeof nameOrId === 'string' ? ITEMS[ITEM_ID[nameOrId]] : ITEMS[nameOrId]);
 export const itemIdOf = (name) => ITEM_ID[name] ?? 0;
 
-/** item id for a block id, or 0 if it can't be held. */
-export const ITEM_FOR_BLOCK = new Uint16Array(BLOCKS.length);
-for (const it of ITEMS) {
-  if (it && it.block !== undefined) ITEM_FOR_BLOCK[it.block] = it.id;
-}
+// A `ITEM_FOR_BLOCK` lookup (block id -> item id) stood here and was deleted
+// rather than wired up: it was built on import, exported, and read by nothing in
+// the game, the UI or the workers. Every path that needs the item for a block
+// already has the block's *name* in hand — `computeDrops` reads `b.drop`, the
+// place path reads the held item's own `block` — so the table answered a
+// question nobody was asking. Rebuild it only if a caller appears that has an id
+// and no name.
 
 /** Wild produce, in the order it is rolled. */
 const FORAGE = ['berries', 'carrot', 'corn', 'tomato'];

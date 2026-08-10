@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
-import { cellToWorld, worldToCell, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
+import { cellToWorld, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
 import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, ID, collisionBoxes, isPassable,
   CONTACT_HURT,
@@ -380,14 +380,6 @@ export class Player {
     const ref = Math.abs(this.up.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
     this.forward.copy(ref).sub(_a.copy(this.up).multiplyScalar(ref.dot(this.up))).normalize();
     this.pitch = -0.08;
-  }
-
-  setWorldPosition(v) {
-    worldToCell(v.x, v.y, v.z, this.cell);
-    this.vel.i = 0; this.vel.j = 0; this.vel.k = 0;
-    this.knockT = 0;
-    this.fallStart = null;      // same reason as `spawnAtColumn`
-    this._sync();
   }
 
   /**

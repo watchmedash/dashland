@@ -11,6 +11,10 @@ import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
 } from './Sphere.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
+// Imported and deliberately never called. The structure pass is switched off —
+// see the note beside `placeStructures` in `generateGlobal` for why, and for the
+// one line that switches it back on. The import stays so the builder keeps being
+// parsed and bundled with the rest of worldgen instead of quietly rotting.
 import { placeStructures } from './Structures.js';
 
 /**
@@ -115,7 +119,11 @@ const BEACH_REACH = 1;
  */
 const SHELF_COLS = 3;          // wadeable, 0.8 blocks per column
 const SLOPE_COLS = 11;         // continental slope, 0.95 blocks per column
-const OCEAN_MAX_DEPTH = R_SEA - R_SEABED_MIN;   // 15
+// An `OCEAN_MAX_DEPTH = R_SEA - R_SEABED_MIN` sat here with nothing reading it,
+// and its comment said 15 when the two constants have made it 17 for some time —
+// a stale number in a name that looks like the floor of the sea. The floor is
+// real and is applied where it can be: `Math.max(R_SEABED_MIN, ...)` clamps the
+// bathymetry as it is written into colHeight.
 
 function oceanDepthAt(d) {
   if (d <= SHELF_COLS) return d * 0.8;
@@ -1768,8 +1776,12 @@ export class WorldGen {
     // read as a level someone built, which is the opposite of the point. The
     // builder is kept — Structures.js still compiles and its patch mapping is
     // used elsewhere — so this is one line to put back if that judgement
-    // changes.
-    this.structureCounts = {};
+    // changes, and the line is
+    //   placeStructures(blocks, colHeight, colBiome, colSlope, seed)
+    // which is why the import at the top of this file is still here with nothing
+    // calling it. A `this.structureCounts = {}` also stood here: an empty object
+    // that was never filled and never read, left behind by the pass that used to
+    // report what it had built.
 
     onProgress(1, 'Ready');
     return { colBiome, colHeight, spawn: this.pickSpawn() };
@@ -2751,6 +2763,12 @@ export class WorldGen {
       }
     }
 
+    // Diagnostics, like `fallCount` and `volcanoCount`: written once at the end
+    // of the pass and read by nothing in the game. `this.lakes` is the same —
+    // the lake records the sim and the renderer actually use are `lakeSurf`,
+    // `lakeKind` and `colWaterStyle`, all of them per-column tables written
+    // above. Kept because a planet with no tarns on it is a thing you want to be
+    // able to ask about from a console, not because anything downstream reads it.
     const counts = [0, 0, 0, 0, 0, 0];
     for (let t = 0; t < this.lakes.length; t++) counts[this.lakes[t].kind]++;
     this.lakeCounts = {
@@ -3194,6 +3212,7 @@ export class WorldGen {
     }
 
     this.volcanoes = sites;
+    /** Diagnostics. Nothing in the game reads it; `volcanoes` is the real list. */
     this.volcanoCount = sites.length;
   }
 

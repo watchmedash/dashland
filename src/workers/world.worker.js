@@ -580,7 +580,12 @@ self.onmessage = (e) => {
       const f = (t2 - ci) / CT;
       meshAndPost(f, ci, cj, ck);
     }
-    self.postMessage({ type: 'editDone', id: msg.id });
+    // No reply. There used to be an `editDone` carrying `msg.id` back, and the
+    // main thread has no case for it in `_onWorldMessage` — the id it sends is
+    // its own local `editSeq`, used there as a cache stamp for the highlight and
+    // the tooltip and never compared against anything the worker says. So the
+    // ack was a message per placed block that fell through a switch. An edit is
+    // acknowledged by the chunk meshes it causes, which are posted above.
   }
 };
 

@@ -9,12 +9,10 @@ export class Input {
     this.wheel = 0;
     this.buttons = [false, false, false];
     this.justPressed = new Set();
-    this.justReleased = new Set();
     this.clicked = [false, false, false];
     this.locked = false;
     this.sensitivity = 0.0022;
     this.invertY = false;
-    this.enabled = true;
 
     this._onKeyDown = (e) => {
       if (e.repeat) return;
@@ -23,7 +21,7 @@ export class Input {
       this.keys.add(c);
       if (['Space', 'Tab', 'F3', 'F5'].includes(c) && this.locked) e.preventDefault();
     };
-    this._onKeyUp = (e) => { this.keys.delete(e.code); this.justReleased.add(e.code); };
+    this._onKeyUp = (e) => { this.keys.delete(e.code); };
     this._onMouseMove = (e) => {
       if (!this.locked) return;
       this.mouseDX += e.movementX || 0;
@@ -58,11 +56,10 @@ export class Input {
 
   down(code) { return this.keys.has(code); }
   pressed(code) { return this.justPressed.has(code); }
-  released(code) { return this.justReleased.has(code); }
 
   endFrame() {
     this.mouseDX = 0; this.mouseDY = 0; this.wheel = 0;
-    this.justPressed.clear(); this.justReleased.clear();
+    this.justPressed.clear();
     this.clicked = [false, false, false];
   }
 }

@@ -254,9 +254,8 @@ const XP_AT = (() => {
   for (let n = 1; n <= MAX_LEVEL; n++) out.push(out[n - 1] + xpForLevel(n));
   return out;
 })();
+/** Total xp at the ceiling is `xpToLevel(MAX_LEVEL)`, i.e. 34,760. */
 export function xpToLevel(n) { return XP_AT[clampInt(n, 0, MAX_LEVEL)]; }
-/** Total xp at the ceiling: 34,760. */
-export const XP_MAX = XP_AT[MAX_LEVEL];
 
 /** Level for a total xp, capped. Sixty-four steps, so a scan is the whole cost. */
 export function levelForXp(xp) {
@@ -377,22 +376,16 @@ export const XP_CRAFT = 3;
 export const XP_SURVIVE_PER_MIN = 3;
 export const XP_SURVIVE_LEVELS = 6;
 
-/**
- * The whole weight table again, in the order and the words the skills screen
- * should show it in. The screen's job is to answer "what earns xp and how
- * much", and it should not be answering it from six separate constants and its
- * own opinion about their ranking.
- */
-export const XP_SOURCES = [
-  { label: 'Monsters', detail: 'husks, and worse below', value: '15–56' },
-  { label: 'Deep ore', detail: 'the same seams, in slate', value: '12–51' },
-  { label: 'Ore', detail: 'coal 8 · iron 18 · gold 34', value: '8–70' },
-  { label: 'Animals', detail: 'hunting; a bred baby pays nothing', value: '4–28' },
-  { label: 'Fish', detail: 'landed on the bank', value: String(XP_FISH) },
-  { label: 'Crafting', detail: 'per trip to the bench', value: String(XP_CRAFT) },
-  { label: 'Staying alive', detail: `${XP_SURVIVE_PER_MIN}/min, first ${XP_SURVIVE_LEVELS} levels only`, value: String(XP_SURVIVE_PER_MIN) },
-  { label: 'Stone, dirt, wood', detail: 'the way to the ore, not the pay', value: '0' },
-];
+// An `XP_SOURCES` table stood here — the whole weight list again, phrased as
+// eight rows for the skills screen to print — and it is deleted rather than
+// wired up, because the screen it was written for was removed on purpose. See
+// `index.html` above `<div id="skills">` ("it used to carry an aside listing
+// where XP comes from ... which is a manual bolted to a menu"), the same note in
+// `ui/style.css`, and `openSkills` in `ui/UI.js`. The tree is the whole of what
+// K opens, and what pays XP is something the planet says by paying you.
+//
+// So this is not a table waiting for a renderer. Anything that wants the weights
+// reads the constants above, which are the rule rather than a description of it.
 
 // --- the history floor -------------------------------------------------------
 //
@@ -454,7 +447,12 @@ export const EARNED = {
  * still announced, and the tree still lists them. Only the unit changed.
  *
  * The values are the old points at 100 xp each, so the relative weights are
- * exactly preserved — 1:1:1:1:2:2:4, 1,200 xp in all. 100 is chosen because it
+ * exactly preserved — 1:1:1:1:2:2:4, 1,200 xp in all. They are written below as
+ * that multiplication rather than as seven literals, because the rate was
+ * previously a constant of its own that nothing multiplied by: it stated the
+ * rule and the table stated the answer, and only the table was ever read.
+ *
+ * 100 is chosen because it
  * is about what a level costs across the first five (80, 84, 88, 93, 97), which
  * is precisely when the four one-point marks are earned: a first night out is
  * still worth "about a level", which is what a point meant when it was one. The
@@ -462,15 +460,15 @@ export const EARNED = {
  * accepted cost of one currency: a player reaching the core at level 30 has
  * thirty points already, and 4 more was never the reason they went.
  */
-export const XP_PER_MARK_POINT = 100;
+const XP_PER_MARK_POINT = 100;
 export const MARKS = {
-  dawn: { xp: 100, label: 'First Light', hint: 'Survive a night outdoors.' },
-  forge: { xp: 100, label: 'Smelter', hint: 'Fire a kiln.' },
-  harvest: { xp: 100, label: 'Farmer', hint: 'Harvest a crop you planted.' },
-  trade: { xp: 100, label: 'Custom', hint: 'Trade with the merchant.' },
-  slayer: { xp: 200, label: 'Cinder', hint: 'Put down a husk.' },
-  abyss: { xp: 200, label: 'The Deep', hint: 'Find lava underground.' },
-  core: { xp: 400, label: 'The Core', hint: 'Reach the heart of the planet.' },
+  dawn: { xp: XP_PER_MARK_POINT, label: 'First Light', hint: 'Survive a night outdoors.' },
+  forge: { xp: XP_PER_MARK_POINT, label: 'Smelter', hint: 'Fire a kiln.' },
+  harvest: { xp: XP_PER_MARK_POINT, label: 'Farmer', hint: 'Harvest a crop you planted.' },
+  trade: { xp: XP_PER_MARK_POINT, label: 'Custom', hint: 'Trade with the merchant.' },
+  slayer: { xp: 2 * XP_PER_MARK_POINT, label: 'Cinder', hint: 'Put down a husk.' },
+  abyss: { xp: 2 * XP_PER_MARK_POINT, label: 'The Deep', hint: 'Find lava underground.' },
+  core: { xp: 4 * XP_PER_MARK_POINT, label: 'The Core', hint: 'Reach the heart of the planet.' },
 };
 
 // --- what death costs --------------------------------------------------------
@@ -1040,8 +1038,12 @@ export class Skills {
     return damage * (1 - this.absorb);
   }
 
-  /** Level in a branch, safe on an unknown key. */
-  levelOf(key) { return this.level[key] | 0; }
+  // A `levelOf(key)` accessor stood here and nothing ever called it. The two
+  // readers outside this file want a branch level for an effect curve — see
+  // `miningDrag` in Player.js, which reads `skills?.level?.lungs ?? 0` — and
+  // they reach `level` directly because they also have to survive there being no
+  // Skills instance at all. An accessor that cannot be called through an
+  // optional chain is not the safer route it looks like.
 
   /**
    * Everything a HUD or tooltip wants to say about the current build, computed

@@ -103,6 +103,7 @@ export const NUM_REGIONS = FACES * CT * CT;       // 5 046
 export const REGION_COLS = CHUNK_T * CHUNK_T;     // 256
 export const REGION_VOXELS = REGION_COLS * D;     // 16 896
 
+/** Face and region grid coordinates to a region id. `regionColumns` inverts it. */
 export const regionIdx = (f, ri, rj) => ((f * CT + ri) * CT + rj);
 
 /** Which region owns a column. */
@@ -110,7 +111,10 @@ export function regionOfCol(col) {
   const f = (col / (F * F)) | 0;
   const rem = col - f * F * F;
   const i = (rem / F) | 0;
-  return ((f * CT + ((i / CHUNK_T) | 0)) * CT + (((rem % F) / CHUNK_T) | 0));
+  // Through `regionIdx` rather than repeating its arithmetic: the packing had
+  // been written out twice, and two copies of an index formula are two things
+  // to keep in step for no gain.
+  return regionIdx(f, (i / CHUNK_T) | 0, ((rem % F) / CHUNK_T) | 0);
 }
 
 /** The 256 column indices a region owns, ascending. */

@@ -107,7 +107,15 @@ export class SignText {
       for (const l of lines) for (const ch of l) if (ch !== ' ') n++;
       if (n) { wrapped.push({ s, lines }); quads += n; }
     }
-    if (!quads) { this.mesh.visible = false; return; }
+    // Empty the draw range as well as hiding the mesh. `visible` alone left
+    // the last frame's letters in the buffer at the last frame's positions,
+    // so anything that turned the mesh back on — a scene traversal, a future
+    // caller — would draw the writing of a sign that has been broken.
+    if (!quads) {
+      this.mesh.visible = false;
+      this.geometry.setDrawRange(0, 0);
+      return;
+    }
 
     if (quads > this._cap) this._grow(quads);
     const pos = this.geometry.getAttribute('position');

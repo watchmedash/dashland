@@ -1517,81 +1517,177 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 #hint kbd { margin: 0 3px; }
 
 /* ── the fishing fight ─────────────────────────────────────
-   A tool, not a widget: a wooden case with a groove routed into it, a pale
-   shuttle riding the groove, a dark fish running along it, and one strip of
-   brass underneath that fills as the fish tires. Three materials, and the
-   brass is the only live thing on it — which is exactly what the player has to
-   read, because the brass reaching the end is the catch.
+   A TOOL BOLTED TO THE MIDDLE OF THE SCREEN.
+
+   The owner's word for the last version was "shit", and resizing it would not
+   have fixed what he was looking at, so this is a rebuild. What was wrong:
+
+     - it was 320px wide at the bottom edge of the screen, above the hotbar,
+       between the hint line and the held item name. The one thing the player
+       is doing during a fight was the smallest and lowest-priority thing on
+       the screen, in the corner of the eye, at hotbar scale.
+     - the wood was a 6px margin round the groove — a rounded rectangle with a
+       texture in it rather than a case with a hole routed into it. Nothing on
+       it had a made edge: the carcass had no lip, the groove was `--sunk-hud`
+       (which is the shallow one, for parchment) instead of `--pocket`, and the
+       whole object had no thickness at any point.
+     - the gauge — the thing that actually says whether you are winning — was a
+       6px strip under everything else, one seventh of the height of the track
+       above it, in the same brass as the shuttle. Two brass things, which is
+       the one rule the kit does not bend.
+
+   So: the case is centred, it is 620px of wood with a lip and four rivets, the
+   groove is a real pocket with a floor and a shadow thrown across it, and the
+   gauge is the same height as a hotbar cell's rail rather than a hairline. The
+   brass ration is spent on the GAUGE, because the gauge filling is the catch;
+   the shuttle is parchment and takes a lit rim while it is on the fish rather
+   than turning into metal.
+
+   READABLE IN A QUARTER SECOND, which is what all of the above is in service
+   of. Three reads, in this order: the pale block is you, the dark fish is what
+   you are chasing, the brass bar is how close it is to over.
+
+   NO TEXT. There is no caption, no label and no number, and there is nowhere
+   for one to go.
 
    Everything moves off four custom properties written once a frame by
    `UI.fishFight`, all of them 0..1 in track widths, so nothing here has a
    pixel in it that has to agree with a number in main.js. `left: calc(...)`
    rather than a transform because the shuttle's *width* changes with the rod
-   as well as its position, and one property doing both would be a matrix. */
+   and with the fish as well as its position, and one property doing both would
+   be a matrix. */
 #fish-bar {
-  width: min(320px, 44vw);
-  padding: 6px 7px 7px;
-  border-radius: var(--r-md);
-  background: var(--wood);
-  box-shadow: var(--hud-edge);
-  margin-bottom: 3px;
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(620px, 68vw);
+  padding: 13px 15px 15px;
+  border-radius: var(--r-lg);
+  /* Wood, with a rivet in each corner: the same construction the panels are
+     made of, at HUD weight. The rivets are the only reason this reads as a
+     fitting bolted over the view rather than a bar drawn on top of it. */
+  background:
+    var(--stud) left 5px top 5px / 7px 7px no-repeat,
+    var(--stud) right 5px top 5px / 7px 7px no-repeat,
+    var(--stud) left 5px bottom 5px / 7px 7px no-repeat,
+    var(--stud) right 5px bottom 5px / 7px 7px no-repeat,
+    var(--wood);
+  /* `--hud-edge` plus the lip from rule 2: the case stands on 3px of its own
+     dark timber, which is what gives it a thickness over a lit planet. */
+  box-shadow:
+    var(--hud-edge),
+    0 var(--lip) 0 var(--wood-dim),
+    0 calc(var(--lip) + 8px) 22px -8px rgba(12, 7, 2, .8);
+  pointer-events: none;
 }
 #fish-bar.hidden { display: none; }
 
+/* The groove. A hole cut clean through the carcass — `--pocket` and not
+   `--sunk-hud`, because this is timber and not parchment, and the hard shadow
+   thrown from the top lip is what makes the shuttle read as being *in* it. */
 .fb-track {
-  position: relative; height: 20px; border-radius: var(--r-sm);
+  position: relative; height: 46px; border-radius: var(--r-sm);
   background: var(--pocket-floor);
-  box-shadow: var(--sunk-hud);
+  box-shadow: var(--pocket);
   overflow: hidden;
 }
 
 /* The shuttle. A face of parchment on a lit edge, the one thing on the bar
-   that answers the button. It carries no colour of its own until it is on the
-   fish, and then it takes a warm rim — the same "this one" the brass ring
-   means everywhere else in the kit, at a weight that survives a bright sea. */
+   that answers the button. Deliberately NOT brass even when it is on the fish:
+   the gauge is the screen's one piece of live metal while this is up, and a
+   second would be the fourth material by another name. What it takes instead
+   is a lit rim and a warm bloom — brighter, not different — which is a stronger
+   read at this size than the old colour swap was at the old one. */
 .fb-shuttle {
-  position: absolute; top: 2px; bottom: 2px;
+  position: absolute; top: 3px; bottom: 3px;
   left: calc((var(--fb-x, .5) - var(--fb-half, .1)) * 100%);
   width: calc(var(--fb-half, .1) * 200%);
   border-radius: var(--r-sm);
   background: var(--paper-hud-cell);
   box-shadow:
     0 0 0 1px var(--hud-hard),
-    inset 0 1px 0 rgba(255, 255, 255, .9),
-    inset 0 -2px 0 rgba(122, 94, 54, .3);
+    inset 0 2px 0 rgba(255, 255, 255, .95),
+    inset 0 -3px 0 rgba(122, 94, 54, .32);
 }
+/* The catch is happening. The rim goes to brass line and the face throws light
+   into the groove around it, so "on the fish" is legible from the glow alone
+   with the shuttle itself off the centre of your eye. */
 #fish-bar.on .fb-shuttle {
-  background: var(--brass);
+  background:
+    linear-gradient(180deg, rgba(255, 252, 240, .95), rgba(255, 238, 206, .72));
   box-shadow:
     0 0 0 1px var(--brass-line),
-    inset 0 1px 0 rgba(255, 240, 205, .9),
-    0 0 12px -2px rgba(242, 168, 80, .9);
+    0 0 0 2px rgba(226, 160, 82, .85),
+    inset 0 2px 0 rgba(255, 255, 255, 1),
+    inset 0 -3px 0 rgba(158, 108, 40, .4),
+    0 0 26px -2px rgba(242, 168, 80, .95);
 }
 
-/* The fish. Ink, nose to the right, and small enough that the shuttle is
-   plainly a window it can sit inside rather than a second bar. */
+/* The fish. Ink, nose to the right, with a tail — at 46px of groove the old
+   14px lozenge was a smudge, and the silhouette is what the eye tracks. Small
+   enough against the shuttle that the shuttle is plainly a window it sits
+   inside rather than a second bar. */
 .fb-fish {
-  position: absolute; top: 4px; height: 12px; width: 14px;
+  position: absolute; top: 11px; height: 24px; width: 30px;
   left: calc(var(--fb-fish, .5) * 100%);
-  margin-left: -7px;
-  border-radius: 6px 3px 3px 6px;
-  background: linear-gradient(180deg, #4a381f, #171009);
-  box-shadow: 0 0 0 1px rgba(255, 245, 220, .45), 0 1px 2px rgba(0, 0, 0, .6);
+  margin-left: -15px;
+  border-radius: 13px 5px 5px 13px;
+  background: linear-gradient(180deg, #5a4526, #14100a);
+  box-shadow:
+    0 0 0 1px rgba(255, 245, 220, .5),
+    0 2px 4px rgba(0, 0, 0, .7);
+}
+/* The tail. A triangle and no `filter` on it, deliberately: this element is
+   moved by `left` every frame, and a drop-shadow on something that moves is a
+   re-filter on the compositor sixty times a second — rule (b) at the top of
+   this file. The pale rim the rest of the fish gets from a box-shadow is not
+   available on a border triangle, so it goes without one; at 30px against a
+   dark groove the silhouette carries itself. */
+.fb-fish::after {
+  content: ''; position: absolute; right: -9px; top: 5px;
+  width: 0; height: 0;
+  border: 7px solid transparent;
+  border-left: 10px solid #1b140c;
 }
 
-/* How tired it is. A groove in the same carcass with one strip of brass in
-   it — the only brass on the screen while this is up. */
+/* How tired it is, and the only brass on the screen while this is up. A second
+   groove in the same carcass, at a third of the track's height so it is a
+   different kind of thing from it, with the strip running left to right. When
+   this reaches the end the fish is landed, which is why it is the metal. */
 .fb-gauge {
-  margin-top: 5px; height: 6px; border-radius: 3px;
+  margin-top: 9px; height: 15px; border-radius: var(--r-sm);
   background: var(--pocket-floor);
-  box-shadow: var(--sunk-hud);
+  box-shadow: var(--pocket);
   overflow: hidden;
 }
 .fb-gauge b {
   display: block; height: 100%; width: calc(var(--fb-p, 0) * 100%);
   background: var(--brass);
-  box-shadow: inset 0 -1px 0 rgba(86, 41, 10, .5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 234, 190, .8),
+    inset 0 -2px 0 rgba(86, 41, 10, .55),
+    0 0 12px -2px rgba(242, 168, 80, .7);
 }
+
+/* ── the cast, waiting (under the compass) ─────────────────
+   One word on its own piece of sheet, at nearly twice the hint line's size.
+   It is up for as long as a line is in the water, which can be the better part
+   of a minute, so it is sized to be seen without being looked for and placed
+   where the other things you glance at while standing still already are. */
+#fish-wait {
+  position: absolute; left: 50%; top: 44px;
+  transform: translateX(-50%);
+  padding: 8px 20px; border-radius: var(--r-md);
+  font: var(--fw-disp) var(--fs-xl)/1 var(--font);
+  letter-spacing: .06em; color: var(--ink);
+  background: var(--paper-hud);
+  box-shadow: var(--emboss-hud);
+  text-shadow: var(--carved);
+  white-space: nowrap; pointer-events: none;
+}
+#fish-wait.hidden { display: none; }
+/* The toast stack starts at 46px, which is exactly where the plate above sits.
+   While a cast is out the stack steps down past it. See `UI.fishWait`. */
+body.casting #toasts { top: 94px; }
 
 #debug {
   position: absolute; top: 10px; left: 10px;

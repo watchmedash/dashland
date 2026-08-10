@@ -124,18 +124,31 @@
       <div class="vital hidden" id="v-breath"><i class="v-ico"></i><span class="v-track"><b></b></span><em class="v-num"></em></div>
     </div>
 
-    <div id="bottom">
-      <!-- The fishing fight. Up only while a fish is actually on, and it says
-           nothing: the shuttle is the only thing on screen that answers the
-           button, the fish is the only thing running away from it, and the
-           brass fills while the two are together. -->
-      <div id="fish-bar" class="hidden">
-        <div class="fb-track">
-          <i class="fb-shuttle"></i>
-          <i class="fb-fish"></i>
-        </div>
-        <div class="fb-gauge"><b></b></div>
+    <!-- The fishing fight. Up only while a fish is actually on, and it says
+         nothing: the shuttle is the only thing on screen that answers the
+         button, the fish is the only thing running away from it, and the brass
+         fills while the two are together.
+
+         Centre of the screen and out of the bottom cluster entirely. During a
+         fight it is the only thing the player is doing, and it was previously
+         a 320px strip above the hotbar, at the bottom edge, competing with the
+         hint line and the held item name for a glance it has about a quarter of
+         a second to win. -->
+    <div id="fish-bar" class="hidden">
+      <div class="fb-track">
+        <i class="fb-shuttle"></i>
+        <i class="fb-fish"></i>
       </div>
+      <div class="fb-gauge"><b></b></div>
+    </div>
+
+    <!-- A cast is out and nothing is on it yet. Under the compass, because a
+         line in the water is a state you are in for the best part of a minute
+         and belongs with the clock and the bearing rather than on the hint
+         line, which is for the answer to "what would this click do". -->
+    <div id="fish-wait" class="hidden">Waiting</div>
+
+    <div id="bottom">
       <!-- Offhand to the left of the hotbar, in its own frame: the same cell in
            the same glass, but it is not the tenth hotbar slot and a shared
            frame would claim it was. It hangs off the row rather than sitting in

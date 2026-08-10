@@ -424,7 +424,7 @@ export class UI {
       chipPack: $('chip-pack'), packDist: $('pack-dist'), chipSave: $('chip-save'),
       pzQuit: $('pz-quit'),
       toasts: $('toasts'), debug: $('debug'), hint: $('hint'),
-      fishBar: $('fish-bar'),
+      fishBar: $('fish-bar'), fishWait: $('fish-wait'),
       screenEl: $('screen'), screenTitle: $('screen-title'), screenTop: $('screen-top'),
       invMain: $('inv-main'), invHot: $('inv-hot'),
       cursor: $('cursor-stack'), tooltip: $('tooltip'),
@@ -2567,6 +2567,30 @@ export class UI {
     el.style.setProperty('--fb-fish', s.fx.toFixed(3));
     el.style.setProperty('--fb-p', s.p.toFixed(3));
     el.classList.toggle('on', !!s.on);
+  }
+
+  /**
+   * A line is in the water and nothing is on it yet.
+   *
+   * One word on its own plate under the compass. Guarded on the class it is
+   * about to write because this is called every frame of a cast that can last a
+   * minute, and `classList.toggle` on an unchanged value is still a style
+   * invalidation.
+   *
+   * @param {boolean} on
+   */
+  fishWait(on) {
+    const el = this.el.fishWait;
+    if (!el || this._fishWait === !!on) return;
+    this._fishWait = !!on;
+    el.classList.toggle('hidden', !on);
+    // The toast stack starts at the same 46px this plate occupies, so a cast
+    // and a toast landed on top of each other — and fishing is the one activity
+    // that produces both at once ("Too soon.", "Caught Raw Fish", "The water is
+    // gone."). The stack steps down for as long as the plate is up. On `body`
+    // rather than on `#hud` because `#toasts` deliberately lives outside the
+    // HUD, so that it reads over the pause overlay.
+    document.body.classList.toggle('casting', !!on);
   }
 
   /**

@@ -535,6 +535,37 @@ const turnEase = (t) => 1 - (1 - t) ** 8;
  */
 const DRAW_FALL = 12;
 
+/**
+ * The rod, while a line is out.
+ *
+ * The complaint this answers is that a cast changed nothing you were holding:
+ * the float was thirty cells away on the water, the line ran to it, and the rod
+ * sat in the idle carry as though it had never been swung. So it leans out —
+ * the hand drops and comes back a little towards the body, and the shoulder
+ * pitches forward, which takes the far end of the rod down and out over the
+ * water and puts the tip nearer the line it is holding.
+ *
+ * Deliberately a *lean and not a salute*, and the numbers are what keep it
+ * there: a quarter radian is fifteen degrees of pitch, against the bow's
+ * `DRAW.r[0]`, which is several times more and takes the whole arm out of
+ * frame. The test is that you notice the rod has changed without being able to
+ * say by how much. It was half this to begin with and did not survive a
+ * side-by-side against the idle pose, which is the only way to judge it.
+ *
+ * Same shape as `DRAW.p`/`DRAW.r` — an offset laid additively on the shoulder,
+ * not a track — so it composes with the walking bob, the equip dip and the
+ * cast's own swing rather than fighting any of them. It is mirrored onto the
+ * offhand by the same rule everything else is: the sideways offset and the two
+ * rotations that lean the limb inward change sign, and the rest does not.
+ */
+const CAST = {
+  p: [-0.02, -0.07, 0.06],
+  r: [-0.26, 0.06, 0.15],
+};
+
+/** How fast the rod leans out and comes back, in units per second. */
+const CAST_RATE = 6;
+
 // --- swing animations -------------------------------------------------------
 // Every tool used to play the same forward-and-down jab, so a pickaxe, a sword
 // and a bare fist all read as punching. Each kind now gets its own track.
@@ -921,6 +952,18 @@ export class ViewModel {
      * caller that has no opinion gets what this did before there was a choice.
      */
     this._drawHand = 'right';
+
+    /**
+     * Whether a fishing line is out, as a 0..1 the pose eases along. See `CAST`.
+     *
+     * Two numbers rather than one because a cast starts and ends on a single
+     * frame at either end and the arm must not teleport: `_cast` is the fact
+     * and `_castT` is what the shoulder is actually at.
+     */
+    this._cast = 0;
+    this._castT = 0;
+    /** Which fist is holding the cast rod, so the other arm is untouched. */
+    this._castHand = 'right';
 
     this.swing = 1;
     /** Which arm the current swing belongs to. See `punch`. */
@@ -1519,6 +1562,22 @@ export class ViewModel {
   }
 
   /**
+   * There is a line in the water, or there is not.
+   *
+   * Told by `main.js` at the two moments the cast begins and ends, rather than
+   * polled: the view model has no idea what a lake is, and "is something on the
+   * end of this" is not a question it could answer if it wanted to.
+   *
+   * @param {boolean} on
+   * @param {'right'|'left'} [hand] the fist the rod is in. Kept from the last
+   *   cast on the way down, so the arm that leaned is the arm that comes back.
+   */
+  setCast(on, hand) {
+    this._cast = on ? 1 : 0;
+    if (on && this.hands[hand]) this._castHand = hand;
+  }
+
+  /**
    * The hand that would act if nobody says otherwise.
    *
    * **A fallback, and no longer the rule.** It reads the one guess this view can
@@ -1651,9 +1710,17 @@ export class ViewModel {
     const drawY = DRAW.p[1] * rdw;
     const drawZ = DRAW.p[2] * rdw;
 
-    const px = rest.x + bx + _swingP.x * sw + drawX;
-    const py = rest.y + by + _swingP.y * sw + equipY + drawY;
-    const pz = rest.z + _swingP.z * sw + drawZ;
+    // The cast lean, split between the two arms exactly as the draw is: one
+    // share each, summing to `this._castT`, so only the fist holding the rod
+    // moves and there is no second piece of state to drift.
+    this._castT += (this._cast - this._castT) * Math.min(1, dt * CAST_RATE);
+    if (this._castT < 0.002) this._castT = 0;
+    const rcw = this._castHand === 'left' ? 0 : this._castT;
+    const lcw = this._castT - rcw;
+
+    const px = rest.x + bx + _swingP.x * sw + drawX + CAST.p[0] * rcw;
+    const py = rest.y + by + _swingP.y * sw + equipY + drawY + CAST.p[1] * rcw;
+    const pz = rest.z + _swingP.z * sw + drawZ + CAST.p[2] * rcw;
 
     // Shoulder anchor sits low-right, just behind the near plane. Everything —
     // bob, swing, equip dip, sprint — is applied here and nowhere else; the fist
@@ -1672,9 +1739,9 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * rdw,
-      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * rdw,
-      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * rdw,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * rdw + CAST.r[0] * rcw,
+      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * rdw + CAST.r[1] * rcw,
+      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * rdw + CAST.r[2] * rcw,
     );
 
     // The offhand arm, on the frames there is one. Everything above has already
@@ -1705,14 +1772,14 @@ export class ViewModel {
       if (this.offEquipT < 1) this.offEquipT = Math.min(1, this.offEquipT + dt * 5.0);
       const oeq = 1 - this.offEquipT;
       this.offArmPivot.position.set(
-        OFF_REST.x - bx - _swingP.x * osw - DRAW.p[0] * ldw,
-        OFF_REST.y + by + _swingP.y * osw - oeq * 0.42 + DRAW.p[1] * ldw,
-        OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05 + DRAW.p[2] * ldw,
+        OFF_REST.x - bx - _swingP.x * osw - DRAW.p[0] * ldw - CAST.p[0] * lcw,
+        OFF_REST.y + by + _swingP.y * osw - oeq * 0.42 + DRAW.p[1] * ldw + CAST.p[1] * lcw,
+        OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05 + DRAW.p[2] * ldw + CAST.p[2] * lcw,
       );
       this.offArmPivot.rotation.set(
-        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55 + DRAW.r[0] * ldw,
-        OFF_ARM_REST_ROT.y - _swingR.y * osw - DRAW.r[1] * ldw,
-        OFF_ARM_REST_ROT.z - _swingR.z * osw - DRAW.r[2] * ldw,
+        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55 + DRAW.r[0] * ldw + CAST.r[0] * lcw,
+        OFF_ARM_REST_ROT.y - _swingR.y * osw - DRAW.r[1] * ldw - CAST.r[1] * lcw,
+        OFF_ARM_REST_ROT.z - _swingR.z * osw - DRAW.r[2] * ldw - CAST.r[2] * lcw,
       );
     }
 

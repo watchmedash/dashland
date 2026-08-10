@@ -55,7 +55,7 @@ import {
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
 } from './world/Blocks.js';
 import {
-  F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
+  F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx, GRAVITY,
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns, regionOfCol,
@@ -96,6 +96,11 @@ const _v3 = new THREE.Vector3();
 // Owned by the drop-burn callback alone: it fires from inside Drops.update,
 // where the shared scratch vectors above may be mid-use by the caller.
 const _burnUp = new THREE.Vector3();
+// The cast's own three, kept off the shared scratch above because `_castArc`
+// runs a whole flight inside one call and its caller is holding `_v1`.
+const _castP = new THREE.Vector3();
+const _castV = new THREE.Vector3();
+const _castU = new THREE.Vector3();
 
 /** Three rows of nine, so a crate is worth the eight planks it costs. */
 const CRATE_SLOTS = 27;
@@ -241,6 +246,48 @@ const FISH_LEASH = 9;
  * weight goes when you throw it.
  */
 const FISH_CAST_RANGE = 28;
+/**
+ * The throw itself. A cast is a lead weight leaving a rod, not a laser.
+ *
+ * It used to be a straight `planet.raycast` down the look direction, and the
+ * owner found the whole of what is wrong with that in one sentence: you can
+ * only cast at water you are literally pointing at, and looking up refuses.
+ * A ray has no arc, so the sky is never over water, and the range is a *reach*
+ * rather than a distance you can put something at.
+ *
+ * So the float is thrown. `_castArc` launches it along the look direction and
+ * lets it fall, which gives the player the one control a cast has ever had:
+ * elevation. Flat and it drops in front of you; up and it carries.
+ *
+ * The numbers, once, all in cells and seconds:
+ *
+ *   SPEED 17 with G 0.55 puts a 45-degree cast at v^2/(GRAVITY*G) = 20 cells
+ *   and a flat one, thrown from an eye a cell and a half over the water, at
+ *   about 7. That spread is the feature: the difference between "at my feet"
+ *   and "out there" is where you point, and it is nearly three to one.
+ *
+ * Gravity is scaled by the same trick and for the same reason `Arrows.ARROW_G`
+ * is halved — full 26 against a throwable speed is an arc so steep that the
+ * only reachable water is directly below you.
+ *
+ * FISH_CAST_RANGE stays the cap, now measured straight-line from the rod tip
+ * to where the float lands, so a cast aimed at the zenith comes back down
+ * beside you rather than reaching the far side of the planet.
+ */
+const FISH_CAST_SPEED = 17;
+const FISH_CAST_G = 0.55;
+/**
+ * The longest piece of the arc tested as a single point, in cells.
+ *
+ * Lifted straight from `Arrows.SUBSTEP` along with the lesson written beside
+ * it: a fast projectile crosses several cells in one integration step, and a
+ * one-cell sheet of water sitting between two of them is water the cast flies
+ * through. Marching a fixed 0.3 of a cell — the step's *length*, not its
+ * duration — means the probe cannot skip a block whatever the speed is doing.
+ */
+const FISH_CAST_STEP = 0.3;
+/** How long the weight may stay in the air before the cast is simply a miss. */
+const FISH_CAST_TIME = 5;
 /** Height of the float above a water cell's centre — half a cell, plus a little. */
 const BOBBER_FLOAT = 0.56;
 
@@ -265,22 +312,146 @@ const BOBBER_FLOAT = 0.56;
 //   is a balance rather than a follow: over-hold and you are at the far wall
 //   with the fish behind you.
 //
-// Numbers, once: the shuttle is a fifth of the track at tier 0, the fill takes
-// 2.4s of solid contact from the start value, and the drain empties it in about
-// 2.3s against a common fish. So a decent fight is four to six seconds — long
-// enough to be a thing that happened, short enough that a lake is not an
-// evening.
-/** Half the shuttle's width, in track widths, before the rod's tier widens it. */
-const FIGHT_HALF = 0.10;
+// RARITY IS SAID TWICE, on purpose. It used to live entirely in how the fish
+// moved, which is only legible once the fight is under way; it now sets the
+// width of the shuttle as well, so the first frame of the bar already tells you
+// what is on the line. Fast-and-narrow against slow-and-wide is a much bigger
+// spread than fast-against-slow was, and it is what pays for a common fish
+// being easy without a treasure fight becoming easy with it.
+//
+// Numbers, once, for a tier-0 rod and a handicapped bot (see FIGHT_HALF): a
+// common fish is a 35%-wide shuttle against a drift, lands every time, and is
+// over in a second and a half; an odds-and-ends is 31% and also lands, in under
+// two; a treasure fight is a 22% shuttle against something twice as quick and
+// lands 46% of the time after five and a half seconds. The common one is a
+// formality on purpose. The fun is meant to be in the rare one, and that is
+// where all the difficulty now is.
+/**
+ * Half the shuttle's width, in track widths, before the rod and the fish have
+ * had their say.
+ *
+ * Raised from 0.10 after the owner played it and reported a *common* fish as
+ * hard, which it was: 0.10 is a shuttle a fifth of the track wide against a
+ * fish that could cross the whole of it, and it was that width for every fish
+ * in the game regardless of what was on the line. At 0.19 the starting shuttle
+ * is 38% of the track before rarity takes its share, which is the difference
+ * between a formality and a fight you can lose to a minnow.
+ *
+ * **The measurement that said 0.10 was fine was taken with a broken
+ * instrument.** "A naive good player lands 53 of 60" came from a bot that read
+ * the fish's position and answered it on the same frame — no reaction time, no
+ * input lag, perfect information. That is not a player, it is an oracle, and it
+ * will pass a difficulty nobody can. Re-measured with a 200ms reaction delay and
+ * a 100ms decision rate, the *same* fight landed 43% of common fish and 6% of
+ * treasure: the frame-perfect run had reported 97% and 24% for those two. Every
+ * number in this block is now quoted against the handicapped bot, and any future
+ * retune should be too.
+ *
+ * The width alone was never the whole of it, either — see `FIGHT_ACC`, where the
+ * shuttle turned out to be unable to follow a fish leftwards at all.
+ */
+const FIGHT_HALF = 0.19;
 const FIGHT_HALF_PER_TIER = 0.02;
-/** Shuttle pull while held, drift while released, and its drag. Track widths. */
-const FIGHT_ACC = 2.2;
-const FIGHT_GRAV = 1.55;
+/**
+ * How much of the shuttle a maximally rare fish takes away, as a fraction.
+ *
+ * The second channel the owner asked for. Difficulty used to live entirely in
+ * the fish's movement, so a rare fight and a common one were the same size of
+ * window and only differed in how fast the target moved — legible in motion,
+ * but not at the instant the bar appears. Rarity now narrows the shuttle as
+ * well, so the *first frame* of a fight already says what you have hooked.
+ *
+ * 0.48 against `hard` 0..1. In track widths that is a 35% shuttle for a typical
+ * common fish and a 22% one for a treasure roll — a difference you can see
+ * without comparing, which is the whole point of putting rarity in this channel
+ * as well as in the movement.
+ */
+const FIGHT_HALF_RARITY = 0.48;
+/**
+ * Shuttle pull while held, fall while released, and its drag. Track widths.
+ *
+ * **THE PULL AND THE FALL ARE THE SAME NUMBER, AND THAT IS A FAIRNESS RULE
+ * RATHER THAN A TUNING CHOICE.** They were 2.2 and 1.55, which against a drag
+ * of 2.7 is a shuttle that climbs at 0.815 track widths a second and sinks at
+ * 0.574 — and the fish, at the old speeds, ran at up to 0.687 as a *common*
+ * fish and 1.144 as a rare one. So a fish running left was simply faster than
+ * the only thing that could follow it left, and no amount of reading the bar
+ * could catch one. The owner reported exactly that ("letting go of rmb makes
+ * the bar move slowly to the left"), and it is most of why a minnow felt hard.
+ *
+ * The invariant, which anything retuning these has to preserve:
+ *
+ *     FIGHT_ACC / FIGHT_DRAG  >=  (FISH_RUN + FISH_RUN_RARITY) / 3.4
+ *
+ * — the shuttle's terminal speed, in *either* direction, beats the fastest a
+ * fish can ever run. At 3.4 against a drag of 2.7 that is 1.26 track widths a
+ * second, against a fish maximum of 0.91: a 38% margin, which is what makes
+ * "chase it" a thing the player can actually do rather than a thing they can
+ * only do rightward.
+ *
+ * Raising both rather than lowering the pull, because the fight is still a
+ * balance and not a follow: with equal forces the shuttle is a weight you are
+ * holding up, over-hold and you are at the far wall, and letting go is a real
+ * control instead of a slow slide.
+ */
+const FIGHT_ACC = 3.4;
+const FIGHT_GRAV = 3.4;
 const FIGHT_DRAG = 2.7;
+/**
+ * How hard the fish pulls towards its next destination, at `hard` 0 and at 1.
+ *
+ * Was `2.0 + 2.1 * hard`, which gave a common fish 2.0 — most of the speed of a
+ * rare one, for none of the reward, and it is part of why a minnow was a fight.
+ * 1.1 is a drift you can sit on top of; 3.1 at the top of the range is something
+ * that leaves the shuttle behind if you are not already moving. Both ends are
+ * bounded by the fairness rule on `FIGHT_ACC`: whatever goes here, the shuttle
+ * has to be able to outrun it in both directions.
+ */
+const FISH_RUN = 1.1;
+const FISH_RUN_RARITY = 2.0;
+/**
+ * How long a fish holds a destination before picking another, before the roll
+ * that scatters it. A common fish commits for about a second and a half; a rare
+ * one for a little over a second, which together with the speed above is what
+ * reads as darting rather than as merely fast.
+ */
+const FISH_TURN = 1.5;
+const FISH_TURN_RARITY = 0.30;
 /** Progress a second, on target and off it, and where the bar starts. */
 const FIGHT_GAIN = 0.42;
 const FIGHT_DRAIN = 0.30;
 const FIGHT_START = 0.35;
+
+/**
+ * How far the float has to go before distance starts paying, and where it stops
+ * paying, in cells — and how much it is worth at the far end.
+ *
+ * The owner: *"rarity should also be determined by how far we casted but not
+ * all the time like just because we casted near doesn't mean we can't catch
+ * rare fish"*. So this is a weight on the roll and emphatically not a gate.
+ * `_rollCatch` raises a uniform sample to `1 / (1 + bias)`, which pushes the
+ * whole distribution up without ever removing an outcome: at a cast of six
+ * cells or less the odds are exactly what they always were (7% treasure), and
+ * at a full 24 they are 13.5%. Roughly double at the top of the range, and
+ * never zero at the bottom. Deep water adds `FISH_DEEP_BIAS` on the same scale,
+ * so the best cast in the game — a long throw into open ocean — is 16.4%.
+ */
+const FISH_DIST_NEAR = 6;
+const FISH_DIST_FAR = 24;
+const FISH_DIST_BIAS = 1.0;
+/**
+ * How many cells of water under the float count as deep, and what deep water is
+ * worth on the same scale distance is measured on.
+ *
+ * `Mobs.DEEP_WATER` is 8 and is where the anglerfish, the blobfish and the
+ * goblin shark are allowed to spawn; this is 5, deliberately lower, because
+ * that one is about a body having room to swim and this one is about a hole
+ * being more than a puddle. A pond you can wade is shallow, a lake bed you
+ * cannot see is not, and the eight-cell line would have called almost every
+ * inland lake shallow.
+ */
+const FISH_DEEP = 5;
+const FISH_DEEP_BIAS = 0.5;
 
 
 // --- winter ice -------------------------------------------------------------
@@ -1032,7 +1203,7 @@ class Game {
     // The sight follows the restored camera, not just the keypress — a player
     // who left the game in third person should not be handed a crosshair back
     // for the one frame before they touch V.
-    this.ui.showCrosshair(this.viewMode === VIEW_FIRST);
+    this._syncCrosshair();
 
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
@@ -1510,7 +1681,7 @@ class Game {
     this.ui.setSpectator(false);
     // The sight comes back with the hands. `setSpectator` can only take it
     // away, because it is the view mode that decides whether there is one.
-    this.ui.showCrosshair(this.viewMode === VIEW_FIRST);
+    this._syncCrosshair();
     this.loadout = [];
     this._setDeathRule(DEFAULT_ON_DEATH);
     this.planet.clearMeshes();
@@ -4141,6 +4312,22 @@ class Game {
       && !this.spectating;
   }
 
+  /**
+   * Whether there is a sight at all, in one place.
+   *
+   * Three call sites used to write the same expression and a fourth condition
+   * has now joined it, so it is a method rather than a fourth copy. The rule
+   * reads as one sentence: the sight is honest in first person, never for a
+   * spectator, and not while a line is in the water — a cast is aimed by the
+   * throw and the float is out there being the thing you are looking at, so a
+   * dot pinned to the middle of the screen is pointing at nothing.
+   */
+  _syncCrosshair() {
+    this.ui.showCrosshair(
+      this.viewMode === VIEW_FIRST && !this.spectating && !this.fishing,
+    );
+  }
+
   _cycleView() {
     this.viewMode = (this.viewMode + 1) % VIEW_COUNT;
     this._syncViewModel();
@@ -4159,7 +4346,7 @@ class Game {
     // spectating: two presses put the crosshair straight back on a player who
     // cannot reach anything. Answered here rather than in `showCrosshair`
     // because this is where the view's own rule is decided.
-    this.ui.showCrosshair(this.viewMode === VIEW_FIRST && !this.spectating);
+    this._syncCrosshair();
     // Written on the keypress rather than at shutdown: a browser tab is closed,
     // not quit, and there is no reliable moment later to catch.
     this.settings.view = this.viewMode;
@@ -7051,7 +7238,14 @@ class Game {
       this._tickFishing(dt);
       if (this.fishing) {          // holding the line: nothing else to do
         // Nothing is said during the fight. The bar is the instruction.
-        this.ui.setHint(this.fishing.fight ? '' : 'Waiting');
+        //
+        // It is its own plate under the compass now rather than the hint line
+        // at the bottom of the screen. The hint line is where the game answers
+        // "what would this click do", which is a thing you read once and stop
+        // reading; a cast is up for the best part of a minute and belongs with
+        // the clock and the bearing, at a size you can see without looking for
+        // it. One word, and it stays one word.
+        this.ui.fishWait(!this.fishing.fight);
         return;
       }
     } else if (this.fishing) {
@@ -7150,24 +7344,126 @@ class Game {
    * One click of the rod: cast if the line is out of the water, strike if it
    * is in, and reel in empty-handed if you struck too early or too late.
    */
+  /**
+   * Throw the weight and answer where it went in.
+   *
+   * A ballistic march, deliberately shaped like `Arrows.step` rather than
+   * beside it: local up is the outward radial at the weight's *own* position
+   * and is recomputed every step, so a cast on the far side of the planet arcs
+   * the same way as one at the spawn. What it does not borrow is the scene
+   * graph — nothing here spawns, draws or persists anything, which is what
+   * lets a test call it with two vectors and read the answer.
+   *
+   * The march is by length and not by time (see `FISH_CAST_STEP`) and every
+   * probe asks three questions in the order they can end the throw: water ends
+   * it successfully, anything solid or molten ends it as a miss, and the range
+   * cap ends it as a miss. Water is tested first on purpose — the surface of a
+   * lake is the cell above its bed, and asking "solid?" first at a grazing
+   * entry angle would call a shallow shelf a bank.
+   *
+   * @param {THREE.Vector3} from where the weight leaves the rod
+   * @param {THREE.Vector3} dir unit aim direction
+   * @returns {{col:number, k:number}|null} the water cell it entered, or null
+   */
+  _castArc(from, dir) {
+    const p = _castP.copy(from);
+    const v = _castV.copy(dir).normalize().multiplyScalar(FISH_CAST_SPEED);
+    const g = GRAVITY * FISH_CAST_G;
+    for (let t = 0; t < FISH_CAST_TIME;) {
+      const speed = v.length();
+      if (speed < 1e-4) return null;
+      // One step is always FISH_CAST_STEP long, so `dt` is what that costs at
+      // the speed the weight happens to be doing. At the top of a lobbed arc
+      // that is a slow, fine step and near the ground a fast one, which is the
+      // right way round: the top is where the shape is and the bottom is where
+      // the cells are big compared to the error.
+      const dt = FISH_CAST_STEP / speed;
+      t += dt;
+      p.addScaledVector(v, dt);
+      _castU.copy(p).normalize();
+      v.addScaledVector(_castU, -g * dt);
+
+      if (p.distanceTo(from) > FISH_CAST_RANGE) return null;
+      const cell = this.planet.cellAt(p.x, p.y, p.z);
+      if (!cell) return null;
+      const id = this.planet.at(cell.col, cell.k);
+      if (id === ID.water) return cell;
+      if (id === ID.lava || IS_SOLID[id]) return null;
+    }
+    return null;
+  }
+
+  /**
+   * Is this water cell part of a hot spring?
+   *
+   * **The same three block reads `Player.inSpring` makes, and deliberately not
+   * a second predicate.** A spring pool is the only water on the planet with
+   * tuff under it — the lake beds are mud, peat, clay, sand, gravel, slate and
+   * basalt, and the seabed is sand and gravel — so this identifies a pool
+   * without the worker having to ship the per-column water style to the main
+   * thread. Two reads down because a pool is two deep in the middle and one on
+   * the shelf; one read up because the other water that rests on tuff is a deep
+   * aquifer lens inside the granite band, and a spring is built exactly two
+   * deep, so air within two of the surface excludes it.
+   *
+   * If that rule ever changes it changes in `Player.js` first and this has to
+   * follow, which is why the reasoning is restated here rather than referred to.
+   */
+  _isSpring(col, k) {
+    const p = this.planet;
+    return (p.at(col, k - 1) === ID.tuff || p.at(col, k - 2) === ID.tuff)
+      && p.at(col, k + 2) === 0;
+  }
+
   _rodClick() {
     if (!this.fishing) {
-      const wet = this.planet.raycast(
-        this.player.eye, this.player.lookDir, FISH_CAST_RANGE, { hitLiquid: true },
-      );
-      if (!wet || this.planet.at(wet.col, wet.k) !== ID.water) {
+      // Thrown from the rod's tip and not from the eye. Half a cell out along
+      // the aim is enough that the first probe is never inside the block the
+      // player is standing in or the wall they are leaning on, which a cast
+      // launched from the eye reads as a bank every time you fish over a lip.
+      // Its own vector and not the shared scratch: it is still needed after the
+      // arc has run, to measure how far the throw went.
+      const tip = this.player.eye.clone()
+        .addScaledVector(this.player.lookDir, 0.5);
+      const wet = this._castArc(tip, this.player.lookDir);
+      if (!wet) {
         this.ui.setHint('Cast at open water');
         return;
       }
-      // The ray can enter a body through a side face — off a low pier, or into
+      // The arc can enter a body through a side face — off a low pier, or into
       // the step at the edge of a shelf — and land a cell or two under the
       // surface, which put the float inside the water instead of on it. Climb
       // the column to the last water cell so a cast always floats.
       let k = wet.k;
       while (k + 1 < D && this.planet.at(wet.col, k + 1) === ID.water) k++;
+      // A hot spring is for soaking in, not for fishing out of.
+      if (this._isSpring(wet.col, k)) {
+        this.ui.setHint('Too hot to fish');
+        return;
+      }
       const c = this.planet.centerOf(wet.col, k, new THREE.Vector3());
+      // How deep the water under the float is, in cells. One of the two axes
+      // the catch is weighted on — see `_rollCatch`.
+      let depth = 1;
+      while (depth < FISH_DEEP && this.planet.at(wet.col, k - depth) === ID.water) depth++;
       this.fishing = {
         col: wet.col, k, pos: c,
+        // What kind of water this is, decided once at the cast rather than
+        // re-derived when something bites: the pond can freeze, drain or be
+        // built over in the minute a line is out, and the catch should be the
+        // one you threw into.
+        deep: depth >= FISH_DEEP,
+        // Salt if the surface sits at or below sea level, which on this planet
+        // is what an ocean is: lakes are carved into terrain that is by
+        // definition above R_SEA. One comparison, no biome lookup, and it is
+        // the same rule the world generator built the seas with.
+        salt: R_MIN + k < R_SEA,
+        // How far the throw actually went, straight-line from the rod tip to
+        // the float. Read off the arc rather than off the aim, because those
+        // are different numbers the moment the shore is not flat — and it is
+        // the throw the player is being rewarded for. Weights the loot roll
+        // when something finally bites; see `_rollCatch`.
+        dist: c.distanceTo(tip),
         // Where you were standing when you cast. The leash is measured from
         // here, not from the float — see FISH_LEASH.
         from: this.player.position.clone(),
@@ -7179,8 +7475,14 @@ class Game {
       this.player.swing();
       // The hand with the rod in it, found the same way `_landCatch` finds it
       // for the wear — cast left-handed and the left arm casts.
-      this.viewModel.punch(this._handOf(this.inventory.actingSlot(
-        (s) => ITEMS[s.item]?.tool?.kind === 'rod')));
+      const hand = this._handOf(this.inventory.actingSlot(
+        (s) => ITEMS[s.item]?.tool?.kind === 'rod'));
+      this.viewModel.punch(hand);
+      // The rod leans out over the water for as long as the line is in it, and
+      // the sight goes away for the same span. Both are "there is a cast out",
+      // said once here and undone once in `_stopFishing`.
+      this.viewModel.setCast(true, hand);
+      this._syncCrosshair();
       return;
     }
     // Line is out and nothing is on it yet, so this click is reeling in early.
@@ -7204,18 +7506,37 @@ class Game {
    * identically and the reward was a lottery played after the skill.
    *
    * `hard` is 0..1 and is the only thing `_tickFight` reads.
+   *
+   * **Distance weights the roll, it does not gate it.** `dist` is how far the
+   * float actually travelled — measured off the arc in `_rodClick`, not off the
+   * aim — and it becomes an exponent on a uniform sample rather than a
+   * threshold anywhere. Every outcome stays reachable from every cast: a lazy
+   * flick into the shallows can still turn up an emerald, it is simply about
+   * half as likely to as a throw across the bay. See `FISH_DIST_BIAS`.
+   *
+   * @param {number} [dist] cells from the rod to where the float went in
    */
-  _rollCatch() {
-    const roll = Math.random();
+  _rollCatch(dist = 0, water = {}) {
+    const reach = Math.min(1, Math.max(0,
+      (dist - FISH_DIST_NEAR) / (FISH_DIST_FAR - FISH_DIST_NEAR)));
+    const bias = FISH_DIST_BIAS * reach + (water.deep ? FISH_DEEP_BIAS : 0);
+    const roll = Math.random() ** (1 / (1 + bias));
     if (roll > 0.93) {
-      const name = ['amethyst', 'coin', 'coin', 'emerald'][(Math.random() * 4) | 0];
+      // What the *water* has in it, not one table for the whole planet. A pearl
+      // out of a mountain tarn was the kind of thing that reads as the loot
+      // table being a list rather than a place.
+      const name = (water.salt
+        ? ['pearl', 'pearl', 'amethyst', 'emerald']
+        : ['amethyst', 'coin', 'coin', 'emerald'])[(Math.random() * 4) | 0];
       return {
         id: itemIdOf(name), count: name === 'coin' ? 3 + ((Math.random() * 6) | 0) : 1,
         hard: 0.78 + Math.random() * 0.22,
       };
     }
     if (roll > 0.78) {
-      const name = ['stick', 'seeds', 'clay'][(Math.random() * 3) | 0];
+      const name = (water.salt
+        ? ['kelp', 'coral_branch', 'coral_fan', 'flint']
+        : ['stick', 'seeds', 'clay'])[(Math.random() * (water.salt ? 4 : 3)) | 0];
       return { id: itemIdOf(name), count: 1, hard: 0.3 + Math.random() * 0.2 };
     }
     // The common fish, and even these are not all the same: the bottom of the
@@ -7233,13 +7554,25 @@ class Game {
   _beginFight(f) {
     const rod = ITEMS[this.inventory.actingSlot(
       (s) => ITEMS[s.item]?.tool?.kind === 'rod')?.item]?.tool ?? { tier: 0, speed: 1 };
-    const c = this._rollCatch();
-    const half = FIGHT_HALF + FIGHT_HALF_PER_TIER * (rod.tier ?? 0);
+    const c = this._rollCatch(f.dist ?? 0, f);
+    // The rod widens the window and the fish narrows it. Multiplied rather than
+    // added so a better rod is still worth the same *proportion* against a
+    // treasure fight as against a minnow — a flat subtraction would have taken
+    // the whole of a tier-1 bonus off the hardest fish and left the upgrade
+    // meaningless exactly where it is wanted.
+    const half = (FIGHT_HALF + FIGHT_HALF_PER_TIER * (rod.tier ?? 0))
+      * (1 - FIGHT_HALF_RARITY * c.hard);
     f.catch = c;
     f.fight = {
       hard: c.hard,
       half,
+      // Both halves of the shuttle scale with the rod, so the pull-equals-fall
+      // invariant on `FIGHT_ACC` survives a rod that is quicker than a stick.
+      // Scaling only the pull would hand a better rod a *worse* fall relative
+      // to its climb, which is the exact asymmetry those constants exist to
+      // remove.
       pull: FIGHT_ACC * (rod.speed ?? 1),
+      fall: FIGHT_GRAV * (rod.speed ?? 1),
       x: 0.5, v: 0,               // the shuttle
       fx: 0.5, fv: 0, to: 0.5, t: 0, // the fish
       p: FIGHT_START,
@@ -7263,7 +7596,7 @@ class Game {
     const held = !!(this.input.buttons[2] && this.input.locked);
 
     // --- the shuttle ---
-    g.v += (held ? g.pull : -FIGHT_GRAV) * dt;
+    g.v += (held ? g.pull : -(g.fall ?? FIGHT_GRAV)) * dt;
     g.v -= g.v * FIGHT_DRAG * dt;
     g.x += g.v * dt;
     if (g.x < g.half) { g.x = g.half; g.v = Math.max(0, g.v); }
@@ -7275,10 +7608,10 @@ class Game {
     // which reads as darting rather than as merely faster.
     g.t -= dt;
     if (g.t <= 0) {
-      g.t = (1.25 - 0.62 * g.hard) * (0.55 + Math.random() * 0.9);
+      g.t = (FISH_TURN - FISH_TURN_RARITY * g.hard) * (0.55 + Math.random() * 0.9);
       g.to = Math.random();
     }
-    g.fv += Math.sign(g.to - g.fx) * (2.0 + 2.1 * g.hard) * dt;
+    g.fv += Math.sign(g.to - g.fx) * (FISH_RUN + FISH_RUN_RARITY * g.hard) * dt;
     g.fv -= g.fv * 3.4 * dt;
     g.fx += g.fv * dt;
     if (g.fx < 0.03) { g.fx = 0.03; g.fv = Math.abs(g.fv) * 0.4; g.to = Math.random(); }
@@ -7427,7 +7760,7 @@ class Game {
     // Rolled when it bit, because the fight you just won was that roll's own
     // difficulty. `_rollCatch` here is the fallback for a landing that somehow
     // never fought.
-    const { id, count } = f.catch ?? this._rollCatch();
+    const { id, count } = f.catch ?? this._rollCatch(f.dist ?? 0, f);
     const taken = this.inventory.add(id, count);
     if (taken < count) {
       _v1.copy(this.player.position).addScaledVector(this.player.up, 0.8);
@@ -7463,6 +7796,9 @@ class Game {
     if (this.bobber) this.bobber.visible = false;
     if (this.fishLine) this.fishLine.visible = false;
     this.ui.fishFight(null);
+    this.ui.fishWait(false);
+    this.viewModel.setCast(false);
+    this._syncCrosshair();
     this.ui.setHint('');
   }
 

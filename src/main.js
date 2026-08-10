@@ -52,7 +52,7 @@ import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, FACING_DEFAULT, NEEDS_ROOM, crowds,
-  NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY,
+  NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
 } from './world/Blocks.js';
 import {
   F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx,
@@ -1146,9 +1146,35 @@ class Game {
     // graph running in a tab the browser is trying to throttle, which on a
     // phone is battery.
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.audio.ctx?.suspend?.();
+      if (document.hidden) { this.audio.ctx?.suspend?.(); this._saveOnHide(); }
       else this.audio.resume();
     });
+  }
+
+  /**
+   * Write the world when the tab goes away.
+   *
+   * Three comments in this file already describe a "tab-hide write" as one of
+   * the paths through `saveGame`, and there was not one — the only thing that
+   * fired on the way out was the `beforeunload` handler, and that one is
+   * measured *not to land*: a save is about 6.6 seconds of IndexedDB work on a
+   * 10 MB payload, and killing the page 120 ms into one leaves the previous
+   * save intact and the new one gone. Which is the right failure, but it means
+   * closing the tab costs up to the full ninety seconds since the last
+   * autosave.
+   *
+   * `visibilitychange` is the event that still has a live page behind it, so it
+   * is the one that can actually finish. Rate-limited because alt-tabbing twice
+   * in a row should not queue two multi-second writes, and because the
+   * autosave is on its own ninety-second clock and this only has to cover the
+   * gap between them.
+   */
+  _saveOnHide() {
+    if (this.state !== 'playing' && this.state !== 'paused' && this.state !== 'spectating') return;
+    const now = performance.now();
+    if (this._lastHideSave && now - this._lastHideSave < 15000) return;
+    this._lastHideSave = now;
+    this.saveGame(false);
   }
 
   _resize() {
@@ -1206,6 +1232,19 @@ class Game {
     this.ui.loaded();
     this.state = 'menu';
     this.ui.showMenu();
+
+    // Then ask IndexedDB whether the menu is telling the truth. Not awaited and
+    // deliberately after the menu is up: it opens the database and may read a
+    // world, which is not something the first screen should wait on, and the
+    // only thing it can do is add rows that were missing. See
+    // `Save.repairIndex` for the failure this exists for.
+    Save.repairIndex().then((n) => {
+      if (n > 0) {
+        this.ui.showMenu();
+        this.ui.toast(n === 1 ? 'Recovered 1 planet the menu had lost'
+          : `Recovered ${n} planets the menu had lost`, 0, 5200);
+      }
+    }).catch((err) => console.error(err));
   }
 
   // --- world lifecycle ------------------------------------------------------
@@ -1213,7 +1252,47 @@ class Game {
   _startWorker() {
     if (this.worldWorker) this.worldWorker.terminate();
     this.worldWorker = new Worker(new URL('./workers/world.worker.js', import.meta.url), { type: 'module' });
-    this.worldWorker.onmessage = (e) => this._onWorldMessage(e.data);
+    this.worldWorker.onmessage = (e) => {
+      try {
+        this._onWorldMessage(e.data);
+      } catch (err) {
+        this._loadFailed(err);
+      }
+    };
+    // The worker's own uncaught exceptions come here rather than nowhere. The
+    // mesher throwing on a block id it does not know was silent from the main
+    // thread's side: no message ever arrived and the bar simply stopped.
+    this.worldWorker.onerror = (e) => { e.preventDefault?.(); this._loadFailed(e.message || e); };
+  }
+
+  /**
+   * The planet could not be built. Say so, and go back to the menu.
+   *
+   * This is the backstop for the failure the corruption pass found and the
+   * validation in `_saveRefusal` now catches by name: an exception thrown out
+   * of a worker message while the loading screen is up left the bar frozen for
+   * ever with nothing said, because nothing above this line was listening.
+   * Validation is the fix for the two cases we know about; this is the fix for
+   * every case we do not.
+   *
+   * Nothing is written on the way out — the save on disk is exactly what it
+   * was, which is the point.
+   */
+  _loadFailed(err) {
+    if (this.state === 'playing' || this.state === 'spectating') { console.error(err); return; }
+    if (this._loadAborted) return;
+    console.error(err);
+    if (this.worldWorker) { this.worldWorker.terminate(); this.worldWorker = null; }
+    this._pendingSave = null;
+    this._resetWorld();
+    // After the reset, which clears it: the flag has to survive until the next
+    // load starts, and the next load starts by resetting again.
+    this._loadAborted = true;
+    this.saveSlot = -1;
+    document.getElementById('loader')?.remove();
+    this.state = 'menu';
+    this.ui.showMenu();
+    this.ui.toast('That planet could not be opened. Nothing has been changed', 0, 5200);
   }
 
   /** What a mob's blow is multiplied by before it reaches the player. */
@@ -1285,6 +1364,10 @@ class Game {
     // the planet being torn down, and a spectator flag left set would open the
     // next one with no hotbar and nothing able to see the player.
     this._deadOnLoad = false;
+    // A failed load is over once the world it failed on is gone; the next
+    // attempt has to be able to report its own failure. See `_loadFailed`,
+    // which sets this after calling here for exactly that reason.
+    this._loadAborted = false;
     this._pausedFrom = 'playing';
     this.mobs.ghost = false;
     this.ui.setSpectator(false);
@@ -1522,9 +1605,10 @@ class Game {
       if (had) this.ui.toast('That planet is not in this browser any more', 0, 5200);
       return;
     }
-    if (!this._saveFitsWorld(data)) {
+    const refusal = this._saveRefusal(data);
+    if (refusal) {
       this.ui.showMenu();
-      this.ui.toast('That planet was made by an older version and cannot be opened', 0, 5200);
+      this.ui.toast(refusal, 0, 5200);
       return;
     }
     this.saveSlot = slot | 0;
@@ -1601,22 +1685,65 @@ class Game {
    * loads, indexes past the end of a short array, reads air, and hands back a
    * planet with holes in it that looks almost right — which is much harder to
    * understand than being told plainly that it cannot be opened.
+   *
+   * @returns {string|null} null if it fits, otherwise the sentence to show the
+   *   player. Two sentences and not one, because "made by an older version" is
+   *   a lie when the file is damaged, and a player told the wrong thing goes
+   *   looking for the wrong fix.
    */
-  _saveFitsWorld(data) {
-    if (!data?.blocks) return false;
+  _saveRefusal(data) {
+    const OLD = 'That planet was made by a different version and cannot be opened';
+    const BAD = 'That planet\'s file is damaged and cannot be opened';
+    if (!data?.blocks) return BAD;
     if (data.regions) {
       // A partial save. Its block payload is one region per id and everything
       // else comes back out of the generator, so the generator has to be the
       // one that made it — see GEN_VERSION.
-      if (data.regions.length * REGION_VOXELS !== data.blocks.length) return false;
-      if ((data.gen | 0) !== GEN_VERSION) return false;
-    } else if (data.blocks.length !== COLUMNS * D) return false;
-    if (data.colBiome && data.colBiome.length !== COLUMNS) return false;
+      if (data.regions.length * REGION_VOXELS !== data.blocks.length) return BAD;
+      if ((data.gen | 0) !== GEN_VERSION) return OLD;
+    } else if (data.blocks.length !== COLUMNS * D) return BAD;
+    if (data.colBiome && data.colBiome.length !== COLUMNS) return BAD;
     if (Array.isArray(data.geom)) {
       const [f, d, rmin] = data.geom;
-      if (f !== F || d !== D || rmin !== R_MIN) return false;
+      if (f !== F || d !== D || rmin !== R_MIN) return OLD;
     }
-    return true;
+    /*
+     * Where the player stood, because the loader dereferences it before there
+     * is anything to catch an exception with.
+     *
+     * `_seatPlayer` reads `save.player.cell[0]` while the loading screen is up
+     * and the worker is mid-flight. A save with no `player` — a truncated
+     * write, a hand-edited file — threw "Cannot read properties of undefined
+     * (reading 'cell')" out of a message handler, and the observed result was
+     * the loading bar sitting there for ever with no message at all. Measured:
+     * the load never completed and nothing was said.
+     */
+    const cell = data.player?.cell;
+    if (!Array.isArray(cell) || cell.length !== 4 || cell.some((n) => !Number.isFinite(n))) return BAD;
+    /*
+     * And a block id this build does not have.
+     *
+     * This is the downgrade case: a world written by a newer build, opened by
+     * an older one. The mesher looks up `GROUP[id]` and indexes `groups` with
+     * the `undefined` that comes back, so the very first chunk containing one
+     * throws inside the worker — and again the player gets a loading bar that
+     * never finishes and no explanation. The same thing happens to a save whose
+     * bytes have been damaged, which is how this was found.
+     *
+     * A full scan of the block array, which is the only honest test: an id
+     * three regions away is as fatal as one under the player's feet. Measured
+     * over a 10 061 568-byte save: 87 ms cold, then 5.5-8.9 ms warm — once, on
+     * a path that already spends thirty-nine seconds building the planet.
+     *
+     * Reported as the version message rather than the damage one, because a
+     * block this build has never heard of is overwhelmingly a newer build's
+     * world rather than a bit flip — the ids are append-only, so an unknown one
+     * is by construction one that was added after this build shipped.
+     */
+    for (let i = 0; i < data.blocks.length; i++) {
+      if (data.blocks[i] >= N_BLOCKS) return OLD;
+    }
+    return null;
   }
 
   _makeLoaderShell() {
@@ -1852,6 +1979,15 @@ class Game {
       // this line is the only thing that can fill it.
       this.inventory.loadOffhand(save.player?.offhand);
       this.drops.fromJSON(save.drops);
+      // Strictly after the drops, because `_update` clears this the moment
+      // there is no `keep` drop left to point at — restoring it before the
+      // pile exists would be a chip that survives exactly one frame. A save
+      // written before this field existed has no key and gets no chip, which
+      // is the behaviour those saves have had all along.
+      const ds = save.player?.deathSite;
+      this.deathSite = Array.isArray(ds) && ds.length === 4
+        ? { pos: new THREE.Vector3(ds[0], ds[1], ds[2]), at: ds[3] }
+        : null;
       this.mobs.fromJSON(save.mobs);
       if (save.crops) this.farming.fromJSON(save.crops); else this.farming.rescan();
       this.energy = save.player.energy ?? 1;
@@ -2627,6 +2763,19 @@ class Game {
          * never agreed to.
          */
         dead: this.spectating || (this.state === 'dead' && this.runEnds),
+        /**
+         * Where your pack is, while any of it is still out there.
+         *
+         * The pack itself was already saved — a death drop carries `keep`, so
+         * `Drops.toJSON` writes it and the pile is on the ground when you come
+         * back. The *chip pointing at it* was not, so quitting after a death
+         * and returning left an entire inventory lying somewhere on a planet
+         * with nothing to say where. Position is stored rather than the cell,
+         * because that is what `_paintPackChip` measures the walk from, and
+         * `at` because the chip shows how long ago it happened.
+         */
+        deathSite: this.deathSite
+          ? [...this.deathSite.pos.toArray(), this.deathSite.at] : null,
         // The other thing that block was written in anticipation of. Only what
         // cannot be recomputed goes in — levels, marks, the armour conversion —
         // because the rest is a function of `stats` and `playtime`, which are

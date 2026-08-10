@@ -140,6 +140,20 @@ const blankIndex = () => new Array(SLOT_COUNT).fill(null);
  * than removed; nothing reads it once the index exists, and an untouched key is
  * one less thing that can go wrong halfway.
  */
+/**
+ * All ten data keys, so a lost index can be rebuilt from what is actually in
+ * IndexedDB rather than from what localStorage remembers.
+ */
+async function keysPresent() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const r = tx.objectStore(STORE).getAllKeys();
+    r.onsuccess = () => { db.close(); resolve(r.result || []); };
+    r.onerror = () => { db.close(); reject(r.error); };
+  });
+}
+
 function readIndex() {
   let raw = null;
   try { raw = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null'); } catch { raw = null; }
@@ -250,6 +264,58 @@ export const Save = {
     const index = readIndex();
     index[i] = null;
     writeIndex(index);
+  },
+
+  /**
+   * Rebuild the menu from the worlds that are actually on disk.
+   *
+   * The index is a localStorage string and the planets are four megabytes each
+   * in IndexedDB, and the two can come apart. Measured: overwrite
+   * `dashcraft.slots.v1` with anything that is not JSON and every row goes
+   * blank — `readIndex` catches the parse error and hands back ten nulls, the
+   * menu offers nothing, and the next save writes an index with one entry in
+   * it. The nine other planets are still there, byte for byte, and there is no
+   * longer any way to reach them. One bad string, nine worlds gone.
+   *
+   * So when the index says a slot is empty, ask IndexedDB whether it agrees.
+   * Only *additive*: a slot the index describes is left exactly as it is, so
+   * this can never resurrect a planet the player deleted (`erase` removes the
+   * record as well as the entry) and can never overwrite a good summary with a
+   * thinner one. What it recovers has no `savedAt` and no `character`, because
+   * those live only in the summary — the row reads as an unnamed planet, which
+   * is a great deal better than no row.
+   *
+   * Async and called once at boot, off the critical path: the synchronous
+   * `readIndex` that draws the menu is untouched.
+   *
+   * @returns {Promise<number>} how many rows were put back.
+   */
+  async repairIndex() {
+    const index = readIndex();
+    if (index.every(Boolean)) return 0;
+    let keys;
+    try { keys = await keysPresent(); } catch { return 0; }
+    let found = 0;
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      if (index[i] || !keys.includes(dataKey(i))) continue;
+      let world = null;
+      try { world = await get(dataKey(i)); } catch { world = null; }
+      if (!world?.seed) continue;
+      index[i] = {
+        savedAt: 0,
+        seed: world.seed,
+        playtime: world.playtime | 0,
+        biome: world.biome ?? 2,
+        day: Math.floor(world.season || 0) + 1,
+        character: world.player?.character ?? null,
+        difficulty: world.difficulty ?? 'normal',
+        blocksPlaced: world.stats?.placed | 0,
+        blocksMined: world.stats?.mined | 0,
+      };
+      found++;
+    }
+    if (found) writeIndex(index);
+    return found;
   },
 
   settings() {

@@ -64,9 +64,14 @@ import * as MobModels from './MobModels.js';
  *
  * What decides this ceiling now is the per-body linear cost, and the mixer
  * update in _animate is the bulk of it. Raising the cap is an _animate
- * question, not a _separate one — and see the note on `pathT` in _pathBearing
- * for the one clock in this file that is not jittered, which is the other thing
- * to look at before trusting a frame-time sample taken with hostiles abroad.
+ * question, not a _separate one.
+ *
+ * A frame-time sample taken with hostiles abroad used to be worthless for a
+ * reason that had nothing to do with the headcount: `_pathBearing` re-ran a
+ * full-budget A* every frame for any husk that could not reach the player, and
+ * that was 61.6% of the whole mob tick on a measured savage night. It is fixed
+ * and bounded now (see PATH_PER_FRAME), so the numbers below can be trusted
+ * again with the lights out.
  */
 /*
  * The budgets below sum to more than this, and that is fine. Measured, because
@@ -89,6 +94,49 @@ import * as MobModels from './MobModels.js';
  * number no clock can produce. Raising the cap for it was the fix I nearly
  * shipped. If a budget is ever raised, check the *day* line — that is the one
  * with the headroom left in it.
+ *
+ * --- what a body costs, measured, and why this is still 134 ------------------
+ *
+ * Measured headless on the real planet, driving the real Mobs.update over real
+ * generated terrain with the real GLB rigs and mixers. Differential rather than
+ * instrumented: the whole tick is timed per frame and a part's cost is the
+ * difference between a run with it and a run with it stubbed, because timing
+ * _animate per call allocated two BigInts per body per frame and invented the
+ * GC it was measuring. p05 is the clean-frame cost, p50 the clean-frame cost
+ * plus its share of a scavenge.
+ *
+ *   bodies        52    105    116    141    165    325
+ *   tick p05    266us  648us  702us  975us 1076us 2548us
+ *   tick p50    364us  956us  991us 1275us 1465us 5084us
+ *   _animate    1.86   1.94   2.12   2.52   2.44   3.17   us per body
+ *   of that,    1.28   1.58   1.66   1.84   1.86   2.61   us in the mixer
+ *
+ * So tick:mobs is about 7.4us per body over the operating range, of which
+ * _animate is roughly 2.2 and the AnimationMixer 69-82% of that — the cap's own
+ * prediction, confirmed. The day peak of 128 is 0.82ms of clean frame; a day
+ * peak of 170 would be 1.13ms, i.e. +0.31ms. In *simulation* terms this ceiling
+ * has plenty of room, and the earlier estimate of "160-170 for +0.4ms" was
+ * right about the delta while being nearly twice too pessimistic per body.
+ *
+ * It is still 134, for two reasons this measurement can state and not answer.
+ *
+ * First, raising this number alone would change nothing a player can see. The
+ * day line is 128 and it is made of MAX_WILDLIFE and MAX_FLYING, not of this;
+ * this is only the ceiling they are checked against. More animals means raising
+ * *those*, and MAX_WILDLIFE's own headroom note cites a whole-frame worst case
+ * of 16.9ms at 94 bodies — a render-inclusive number. Against 0.82ms of
+ * simulation at 128, the other ~16ms is not this file. Every body is a skinned
+ * mesh with its own material clones casting a shadow, and nothing here prices
+ * that.
+ *
+ * Second, the headcount buys garbage as well as work: about 600 bytes per body
+ * per frame, 70-86KB a frame at these caps, ~5MB/s. That is what puts the tick's
+ * p90 and p99 an order of magnitude above its p50, and it scales with the
+ * headcount exactly as the linear cost does.
+ *
+ * So the thing to do before raising MAX_WILDLIFE is a whole-frame browser
+ * measurement with the renderer running, at 128 against 170 bodies. Until that
+ * exists, this ceiling is being held by the number nobody has taken.
  */
 const MAX_MOBS = 134;
 /**
@@ -380,6 +428,30 @@ const PATH_MAX_AGE = 2.2;
 /** Columns expanded before a search gives up, and the longest route it returns. */
 const PATH_BUDGET = 2600;
 const PATH_MAX_STEPS = 70;
+/**
+ * Route searches the whole planet may run in one frame.
+ *
+ * Measured on the real planet, headless, driving the real _findPath over real
+ * generated terrain (ns timing, per-frame percentiles): a search that spends
+ * its whole PATH_BUDGET costs 1.48ms at the median and 5.6ms at p95. That is
+ * one body. Nothing used to bound how many bodies asked for one in the same
+ * frame, and over a minute of a savage night with the spawner running and the
+ * player walking, _findPath was 61.6% of the entire mob tick — p90 4.3ms per
+ * frame, p95 5.8ms, p99 28.9ms, against a 16.7ms frame.
+ *
+ * Two, not one, because the cost of queueing is paid in how long a body that
+ * has just seen the player walks at it in a straight line instead of round the
+ * wall between them: a pack of fourteen acquiring on the same frame drains at
+ * two a frame, so the last one waits seven frames (0.12s) rather than thirteen
+ * (0.22s). Two is also what ESCAPE_PER_FRAME settled on, for the same reason.
+ *
+ * Deferring a search is cheap in a way that is worth being explicit about,
+ * because it is what makes this safe: `_hunt` has already set `mob.want` to the
+ * straight bearing at the player before `_pathBearing` is called, and a route
+ * only ever *overrides* it. A body waiting for a search slot is walking at the
+ * player, not standing still.
+ */
+const PATH_PER_FRAME = 2;
 /** How far a body will step down without thinking of it as a fall. */
 const PATH_MAX_DROP = MOB_STEP_DOWN;
 /** How many waypoints ahead a mob steers. See _pathBearing. */
@@ -2851,6 +2923,8 @@ export class Mobs {
      * this bounds is a frame's cost and not an animal's.
      */
     this._escapeBudget = 0;
+    /** Route searches left this frame — see PATH_PER_FRAME. */
+    this._pathBudget = 0;
     this.voxCount = 0;          // diagnostics: calls actually emitted
     this.voxSuppressed = 0;     // diagnostics: calls dropped by the rate limit
     this._nextId = 1;
@@ -5989,25 +6063,49 @@ export class Mobs {
    */
   _pathBearing(mob, dt, player, fr) {
     const goal = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
-    // NOT MEASURED, and left alone for that reason — written down because it is
-    // the only per-mob clock in this file that is not jittered at spawn. voxT,
-    // preyT, spookT and climbT are all seeded with a random fraction of their
-    // period so the work spreads over frames; pathT is not seeded at all, and
-    // `!mob.path` forces a search on the first frame a body starts hunting. So
-    // a husk pack that acquires the player together searches together, and then
-    // re-syncs on PATH_PERIOD forever after. Each search is bounded at
-    // PATH_BUDGET (2,600 expansions, four _stepTo probes and three Map writes
-    // each), which is the largest single lump of work any one body can ask for
-    // in a frame, and nothing limits how many bodies ask for it in the same
-    // one. If a frame-time sample taken at night ever comes back much worse
-    // than the headcount explains, look here before blaming the headcount:
-    // seeding pathT would spread it, at the cost of up to PATH_PERIOD before a
-    // newly-aggroed husk gets its first route, which is a gameplay change and
-    // wants a measurement behind it.
+    /*
+     * Measured now, on the real planet, and the note that used to stand here
+     * had the wrong suspect.
+     *
+     * It read: pathT is the one per-mob clock in this file that is not jittered
+     * at spawn, so a husk pack that acquires the player together searches
+     * together and re-syncs on PATH_PERIOD forever. True, and nearly harmless.
+     * The line that actually cost the frames was `!mob.path`, which bypassed
+     * the timer entirely — and `_findPath` returns null every time it cannot
+     * reach the player, which for a hostile on the far side of water, a wall or
+     * a cave roof is *every* search. So a husk that could not get to you ran a
+     * full PATH_BUDGET search sixty times a second, not once per PATH_PERIOD.
+     *
+     * Headless on the real planet, ns timing, per-frame percentiles, one minute
+     * of a savage night with the spawner running and the player walking at 4.4
+     * units/s: 3,628 searches in 3,600 frames, essentially all of them
+     * budget-exhausting, p50 1.13ms each. _findPath was 61.6% of the whole mob
+     * tick — 1,419 frames over 1ms of pathing, 454 over 4ms, 108 over 8ms,
+     * p99 28.9ms. Frames were being dropped by three husks that could not
+     * reach anybody.
+     *
+     * Three changes, in the order they matter:
+     *   1. `!mob.path` now waits for the timer like everything else, so a
+     *      failed search costs one per PATH_PERIOD instead of one per frame.
+     *      A body with no route is not stuck: `_hunt` set `mob.want` to the
+     *      straight bearing before calling this, and a route only overrides it.
+     *   2. PATH_PER_FRAME caps how many bodies may search in the same frame,
+     *      which bounds the worst case whatever the clocks do.
+     *   3. The period is jittered on each *reset* rather than at spawn, the way
+     *      spookT is. That desynchronises a pack after its first search without
+     *      the gameplay cost spawn-jitter would have had — seeding pathT would
+     *      have delayed a newly-aggroed husk's first route by up to
+     *      PATH_PERIOD, and this delays nothing.
+     */
     mob.pathT = (mob.pathT ?? 0) - dt;
-    const stale = mob.pathGoal !== goal && mob.pathT <= 0;
-    if (!mob.path || stale || mob.pathT <= -PATH_MAX_AGE) {
-      mob.pathT = PATH_PERIOD;
+    const due = mob.pathT <= 0;
+    const stale = mob.pathGoal !== goal && due;
+    // A body that has never searched has pathT undefined, so `due` is true on
+    // its first hunting frame and it still searches immediately.
+    if (((!mob.path && due) || stale || mob.pathT <= -PATH_MAX_AGE)
+        && this._pathBudget > 0) {
+      this._pathBudget--;
+      mob.pathT = PATH_PERIOD * (0.75 + Math.random() * 0.5);
       mob.pathGoal = goal;
       mob.path = this._findPath(mob, goal);
       mob.pathI = 0;
@@ -6015,6 +6113,8 @@ export class Mobs {
       // compare waypoint indices from two different paths.
       mob.stallPathI = -1;
     }
+    // Nothing is reset when the budget is out, so this body is still due and
+    // takes the next free slot rather than losing its turn.
     const path = mob.path;
     mob.onPath = false;
     if (!path || mob.pathI >= path.length) return null;
@@ -7065,6 +7165,9 @@ export class Mobs {
   update(dt, player, sky) {
     this.voxCooldown = Math.max(0, this.voxCooldown - dt);
     this._escapeBudget = ESCAPE_PER_FRAME;
+    // Route searches left this frame, on exactly the same terms and for the
+    // same reason as the escape budget above. See PATH_PER_FRAME.
+    this._pathBudget = PATH_PER_FRAME;
     this.bellT = Math.max(0, this.bellT - dt);
     this.merchantT = Math.max(0, this.merchantT - dt);
     this._resolveHits(dt, player);

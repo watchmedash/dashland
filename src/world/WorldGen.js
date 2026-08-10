@@ -2182,8 +2182,39 @@ export class WorldGen {
        */
       const ls = this.lakeSurf[col];
       const ceil = ls > 0 ? Math.min(h - skin, ls - LAKE_CAVE_CLEAR) : h - skin;
+      /**
+       * The sea's version of that guard, and it was missing.
+       *
+       * `skin` is measured against this column's OWN height and so says
+       * nothing about the sea standing beside it. Where the seabed next door
+       * is more than a skin lower — the wall of a drowned canyon, the flank of
+       * a seabed knoll — `h - skin` is above that neighbour's water, and the
+       * carve opens a passage straight into the ocean. Measured with the
+       * waterfall pass off, over 145k columns per seed: 18 such cells on seed
+       * 20260805 and none on 1234567 or 999331, the deepest twelve layers
+       * under the waterline. Rare, but it is the sea, and the sea is a
+       * permanent source: the largest of the two breaches filled a 144-cell
+       * void to sea level, and nothing in the geometry bounds the next one.
+       *
+       * The band that must stay solid is everything strictly above the lowest
+       * neighbouring seabed and at or below the waterline, which is exactly
+       * where a neighbour holds sea. Above the waterline there is no water to
+       * let in, so a cliff column keeps every cave it had up there rather than
+       * losing the lot to a single clamped ceiling. Height field and
+       * `submerged` only, both fixed before any voxel is written, so this is
+       * the same answer from either side of a region boundary.
+       */
+      let kWet0 = D;
+      for (let d = 0; d < 4; d++) {
+        const nb = colNeighbor(col, d);
+        if (!this.submerged[nb]) continue;
+        const kb = Math.floor(this.colHeight[nb] - R_MIN - 0.5) + 1;
+        if (kb < kWet0) kWet0 = kb;
+      }
+      const kWet1 = Math.floor(R_SEA - R_MIN - 0.5);
       for (let k = 0; k < D; k++) {
         if (!CARVEABLE[blocks[base + k]]) continue;
+        if (k >= kWet0 && k <= kWet1) continue;
         const r = R_MIN + k + 0.5;
         if (r < R_MANTLE + 1.5 || r > ceil) continue;
         const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
@@ -2326,7 +2357,49 @@ export class WorldGen {
     const dir = this._dirOf(col, _aqDir);
     for (let k = AQ_K0; k <= AQ_K1; k++) {
       const mine = this._aquiferAt(col, k);
-      if (mine) { blocks[base + k] = mine === 1 ? ID.water : ID.air; continue; }
+      if (mine === 2) { blocks[base + k] = ID.air; continue; }
+      if (mine === 1) {
+        /**
+         * Water goes in only where no neighbour's air pocket is at this layer,
+         * and the rest of the lens gets rock. Without this line the air gap is
+         * not a gap for long.
+         *
+         * `air` in `_aqRecord` is measured down from each column's OWN kTop,
+         * and kTop moves with the roof and with the `mid` field, so two
+         * adjacent columns routinely disagree about where the water stops: X
+         * still has water at layer 25 while Y's pocket has already started
+         * there. Both cells are the aquifer's own, so the seal below never
+         * looks at them, and the pair comes out of worldgen as a block of
+         * water standing against open air with nothing holding it — the "lake
+         * hanging in the air" the water sim's header is about. Measured over
+         * 145k columns on three seeds: 1559 / 1003 / 999 such cells, every one
+         * of them (100%) facing a neighbour's own pocket rather than a cave,
+         * and a faithful replay of the flow rules drowned 2215 of the 4582
+         * pocket cells in the sample. AQ_AIR is 2 layers, so half the air a
+         * big aquifer was given to surface into was going under.
+         *
+         * The rule is exact rather than approximate, and it has to be: X puts
+         * water at k only if no neighbour has air at k, so "X water beside Y
+         * air" is unsatisfiable by construction. It is also symmetric — Y
+         * refuses water under the same test against X's pocket — and it reads
+         * nothing but `_aqRecord`, which is a pure function of (seed, column),
+         * so both sides of a region boundary reach the same answer whichever
+         * was built first.
+         *
+         * A neighbourhood minimum over the water top would have been the
+         * obvious alternative and does not work: making X's surface agree with
+         * every neighbour's forces the surface to be constant over the whole
+         * connected aquifer, and connectivity is exactly what a column-local
+         * pass cannot see. Rock in the one column that disagrees costs 6.2%,
+         * 8.7% and 8.4% of the lens on the three seeds measured, leaves the air
+         * pocket exactly the size it was, and needs no such knowledge.
+         */
+        const dry = this._aquiferAt(nb0, k) === 2 || this._aquiferAt(nb1, k) === 2
+          || this._aquiferAt(nb2, k) === 2 || this._aquiferAt(nb3, k) === 2;
+        blocks[base + k] = dry
+          ? this.stratum(R_MIN + k + 0.5, dir[0], dir[1], dir[2]) : ID.water;
+        continue;
+      }
       const touching = this._aquiferAt(col, k - 1) || this._aquiferAt(col, k + 1)
         || this._aquiferAt(nb0, k) || this._aquiferAt(nb1, k)
         || this._aquiferAt(nb2, k) || this._aquiferAt(nb3, k);

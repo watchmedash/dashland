@@ -77,8 +77,8 @@ import * as MobModels from './MobModels.js';
  * The budgets below sum to more than this, and that is fine. Measured, because
  * the arithmetic says otherwise and the arithmetic is misleading.
  *
- * 84 land + 18 aquatic + 18 flying + 8 surface husks + 4 cave husks + 3
- * monsters + 1 merchant is 136 against a ceiling of 134, which reads as an
+ * 46 land + 12 aquatic + 12 flying + 14 surface husks (a savage world) + 4 cave
+ * husks + 3 monsters + 1 merchant is 92 against a ceiling of 90, which reads as an
  * over-subscription that would starve whatever spawns last — husks, monsters
  * and the merchant, in that order. It is not one, because the two halves cannot
  * be full at the same time: the surface husk budget only opens at night, and
@@ -87,13 +87,51 @@ import * as MobModels from './MobModels.js';
  *
  * Driven from the sun direction the spawner actually reads, over a long run:
  *
- *   day    84 land, 18 water, 18 air,  4 husks, 3 monsters, 1 trader = 128
- *   night  34 land, 18 water,  7 air, 12 husks, 3 monsters          =  74
+ *   day    46 land, 12 water, 12 air,  4 husks, 3 monsters, 1 trader = 78
+ *   night  18 land, 12 water,  5 air, 12 husks, 3 monsters          = 50
  *
- * So the true peak is 128, six under this ceiling, and the sum of 136 is a
+ * So the true peak is 78, twelve under this ceiling, and the sum of 92 is a
  * number no clock can produce. Raising the cap for it was the fix I nearly
  * shipped. If a budget is ever raised, check the *day* line — that is the one
  * with the headroom left in it.
+ *
+ * --- and why these are the numbers they are, which is a report --------------
+ *
+ * "There are so many animals like omg they are so much." A headcount cannot
+ * answer that, because what a player meets is not the roster, it is how many
+ * bodies are inside the ground they can see. Measured on the real planet with
+ * the real spawner, one census a second over five minutes with the player
+ * standing still, at the previous budgets (84/18/18):
+ *
+ *              live    within 20u       within 40u       within 80u
+ *   day        116.3   10.6 (peak 17)   38.3 (peak 48)   92.8
+ *   night       88.2   14.7 (peak 18)   38.0 (peak 43)   74.9
+ *
+ * Thirty eight animals inside forty units — a circle you can cross in nine
+ * seconds — is not a populated meadow, it is a herd standing on you, and the
+ * peak of 48 is the number the report is about. At 46/12/12, same seed, same
+ * spot, same five minutes:
+ *
+ *              live    within 20u       within 40u       within 80u
+ *   day         69.0    9.2 (peak 13)   27.0 (peak 36)   56.8
+ *   night       53.5   11.6 (peak 14)   25.6 (peak 30)   43.5
+ *
+ * The roster is down 41% and the band a player actually looks at is down 30%,
+ * its peak from 48 to 36. The shape of the world is unchanged: the same biome
+ * mix in the same proportions, the same species in the same places, predators
+ * and hostiles still on their own smaller caps, and nothing anywhere near empty
+ * — nine bodies inside twenty units is still an animal every few steps.
+ *
+ * Note the two numbers that did *not* halve with the budget, because they are
+ * the ones to aim at next. The near bands fall by less than the roster does,
+ * and at night the twenty-unit count barely moves at all: a standing player
+ * accumulates whatever wanders past, so the near field fills up from the ring
+ * whatever the ceiling is. If this is still too busy, the next lever is
+ * therefore NOT this ceiling and not the land budget again — it is
+ * `SPAWN_PER_TICK` against `SPAWN_PERIOD` (six every two seconds, tuned to
+ * outpace a sprint) and `SPAWN_MIN_DIST`. Slowing the refill makes a walk out
+ * of a valley thin as you go, which is a different and better kind of quiet
+ * than a smaller herd.
  *
  * --- what a body costs, measured, and why this is still 134 ------------------
  *
@@ -118,27 +156,25 @@ import * as MobModels from './MobModels.js';
  * has plenty of room, and the earlier estimate of "160-170 for +0.4ms" was
  * right about the delta while being nearly twice too pessimistic per body.
  *
- * It is still 134, for two reasons this measurement can state and not answer.
+ * It came *down* to 90 with the budgets below, and the direction is worth being
+ * plain about, because every note above it argues about how far up it could go.
+ * It could go up; the report was that it should not. See the census under the
+ * day and night lines below. What the cut buys, on the same measured 7.4us a
+ * body, is a day peak of 0.58ms of clean frame against 0.95ms — so the cost
+ * argument that used to hold this number is no longer the binding one either
+ * way, and what sets it is how crowded the world reads.
  *
- * First, raising this number alone would change nothing a player can see. The
- * day line is 128 and it is made of MAX_WILDLIFE and MAX_FLYING, not of this;
- * this is only the ceiling they are checked against. More animals means raising
- * *those*, and MAX_WILDLIFE's own headroom note cites a whole-frame worst case
- * of 16.9ms at 94 bodies — a render-inclusive number. Against 0.82ms of
- * simulation at 128, the other ~16ms is not this file. Every body is a skinned
- * mesh with its own material clones casting a shadow, and nothing here prices
- * that.
+ * The headcount buys garbage as well as work: about 600 bytes per body per
+ * frame, which was 70-86KB a frame at the old caps and is 42-56KB at these.
+ * That is what puts the tick's p90 and p99 an order of magnitude above its p50,
+ * and it scales with the headcount exactly as the linear cost does — so the cut
+ * takes a bite out of the spikes as well as out of the mean.
  *
- * Second, the headcount buys garbage as well as work: about 600 bytes per body
- * per frame, 70-86KB a frame at these caps, ~5MB/s. That is what puts the tick's
- * p90 and p99 an order of magnitude above its p50, and it scales with the
- * headcount exactly as the linear cost does.
- *
- * So the thing to do before raising MAX_WILDLIFE is a whole-frame browser
- * measurement with the renderer running, at 128 against 170 bodies. Until that
- * exists, this ceiling is being held by the number nobody has taken.
+ * If this is ever raised again, it is not the dial to raise: the day line is
+ * made of MAX_WILDLIFE, MAX_AQUATIC and MAX_FLYING, and this is only the
+ * ceiling they are checked against.
  */
-const MAX_MOBS = 134;
+const MAX_MOBS = 90;
 /**
  * Of that, how many may be ordinary land animals. Kept as its own budget rather
  * than a fraction of MAX_MOBS for the same reason the two husk caps are
@@ -158,15 +194,25 @@ const MAX_MOBS = 134;
  * 20 to 85, which is one per 345. Raising the budget before fixing that would
  * have made the crowd worse and called it content.
  *
- * Raised now, and only now, because the despawn ring had to grow: the horizon
- * moved out with the planet and 110 units no longer cleared it, so bodies were
- * winking out in plain sight. 145 costs 1.7x the ground, and 84 over the wider
- * ring holds the same one-per-345 spread the fix above bought. The headroom is
- * real but not large — 94 bodies measured at a 16.9ms worst frame, which is the
- * 60fps line — so this is deliberately a spread-preserving increase and not a
- * density increase.
+ * It went to 84 with the despawn ring, on that same one-per-345 reasoning, and
+ * it is 46 now because the reasoning was answered by a measurement it could not
+ * see. One animal per 345 square units of *ring* is not what a player stands
+ * in: the ring is 66,000 square units and almost none of it is in front of you.
+ * Censused a body at a time (see the day and night table on MAX_MOBS), 84 land
+ * animals put 38 bodies inside forty units of a standing player, peaking at 48,
+ * and the report those numbers answer is "damn there are so many animals like
+ * omg they are so much". 46 halves that to 20, and the spread the ring argument
+ * was protecting is untouched — it is the same placement, over the same band,
+ * with fewer bodies in it.
+ *
+ * The floor on this is not comfort, it is that a meadow has to have cows in it.
+ * At 46 the twenty-unit circle still holds five, so an animal is a few steps
+ * away and a herd is still a herd; the biome tables still decide which. Do not
+ * take it under about 30 without re-running that census — below that the same
+ * measurement shows single figures inside forty units, which is a walk through
+ * an empty field.
  */
-const MAX_WILDLIFE = 84;
+const MAX_WILDLIFE = 46;
 /**
  * The two populations that were still inside the land budget, which is the very
  * failure the comment above describes, happening one level further down.
@@ -183,15 +229,27 @@ const MAX_WILDLIFE = 84;
  * one-in-twelve draw for the slot. Both now come off their own budget in their
  * own pass, and the biome tables go back to being the record of which biomes
  * have bees in them rather than the thing rationing them.
+ *
+ * 12 rather than 18 with the density cut, and cut by a third rather than by the
+ * land budget's half on purpose: fish and bees arrive in groups (see SHOAL_MIN
+ * and DRIFT_MIN), so what a player meets is a shoal or a drift rather than a
+ * headcount, and thinning the budget thins how many *places* have one rather
+ * than how full the one in front of you looks. Three shoals of four still reads
+ * as a lake with fish in it.
  */
-const MAX_AQUATIC = 18;
+const MAX_AQUATIC = 12;
 /**
  * Raised from 14 when the parrot started flying rather than hopping. The two
  * fliers now share this budget, and leaving it alone would have bought parrots
  * by taking bees away — which is the exact trade the paragraph above is about,
  * one level further down again.
+ *
+ * 12 with the density cut, on the aquatic budget's terms rather than the land
+ * one's: fliers arrive as drifts too, and a bee you can hear is worth more than
+ * a bee you can count. The parrot's share of it is protected by the biome
+ * tables (see FOREST), not by this number.
  */
-const MAX_FLYING = 18;
+const MAX_FLYING = 12;
 /** Wildlife spawned per top-up tick, and how often a tick comes round.
  *
  * A player walks 4.4 units a second and sprints at 6.8, so the ring of terrain
@@ -234,17 +292,17 @@ const MAX_HOSTILE_SURFACE = 8;
  * ...and what the dark is worth on a savage world.
  *
  * Only the *surface* budget moves, and that is the whole of the arithmetic.
- * Read the day and night lines on MAX_MOBS: the true peak is the daytime 128 of
- * 134, six under the ceiling, and the six are the only headroom there is. The
- * surface husk budget is the one population that cannot touch that line,
+ * Read the day and night lines on MAX_MOBS: the true peak is the daytime 78 of
+ * 90, twelve under the ceiling, and the twelve are the only headroom there is.
+ * The surface husk budget is the one population that cannot touch that line,
  * because it opens at sunset and sunset is exactly when `_bedDown` takes the
- * land and flier budgets down to NIGHT_WILDLIFE. The night line is 74, sixty
- * under the ceiling, and this spends six of those sixty:
+ * land and flier budgets down to NIGHT_WILDLIFE. The night line is 56, thirty
+ * four under the ceiling, and this spends six of those thirty four:
  *
- *   day    84 land, 18 water, 18 air,  4 husks, 3 monsters, 1 trader = 128
- *   night  34 land, 18 water,  7 air, 14 husks, 3 monsters          =  80
+ *   day    46 land, 12 water, 12 air,  4 husks, 3 monsters, 1 trader = 78
+ *   night  18 land, 12 water,  5 air, 18 husks, 3 monsters          = 56
  *
- * So the peak roster is unchanged at 128, and no other population loses a slot:
+ * So the peak roster is unchanged at 78, and no other population loses a slot:
  * the wildlife budgets are separate numbers and the husks have never been able
  * to spend them.
  *
@@ -343,6 +401,47 @@ const MOB_STEP_DOWN = MOB_FALL_FREE;
  * set the height outright with no cap at all — see the note there.
  */
 const MOB_MAX_RISE = 1.05;
+
+// --- flight ------------------------------------------------------------------
+/**
+ * How far below a flying body lava still counts as a wall, in layers.
+ *
+ * A flier gets a body-occupancy collision now (see the flier branch in
+ * _footprintCost) rather than the walker's bed-relative rules, and the rule it
+ * loses along with the rest is the one that read `lava at gk + 1` — the only
+ * thing that had been keeping a bee out of a lava lake, since a lake is not
+ * solid and so is not an obstacle to a body that flies. Four layers keeps every
+ * low hoverer out of one (bat 1.2, parrot's bee-sized cousin 1.5, ghost 1.8,
+ * cthulhu 2.0, dragon 2.4) and lets a parrot at 6.0 cross a flow that cannot
+ * reach it, which is what a bird would do.
+ */
+const FLY_LAVA_CLEAR = 4;
+/**
+ * How far ahead a flier looks for something to climb over, in cells, and how
+ * much air it wants above whatever it finds.
+ *
+ * Real collision for fliers is only half a fix. The other half is that a bird
+ * which merely *stops* at the treeline is worse than one that flew through it:
+ * "a parrot that will not fly through a wood is not a parrot". A flier holds
+ * `hover` above the ground under its own footprint, and by the time a trunk or
+ * a canopy is under that footprint the body is already in it — the height seek
+ * has no warning at all. So it is given some: two probes along the heading,
+ * and the hover target is raised to clear the tallest thing they find.
+ *
+ * 1.4 and 2.9 cells against the fastest flier's 6.3 cells/s is a fifth to
+ * half a second of warning, and the climb rate is 2.2 cells/s — which is not
+ * enough to top a pine in one go and does not need to be. What it buys is that
+ * the bird is already rising when the horizontal move is refused, so the veer
+ * and the climb compose into a body going up and around rather than into a body
+ * pressed against bark. Measured over a forest: see the flier table in the
+ * commit note — cells/s covered is unchanged and time inside terrain is not.
+ *
+ * The clearance is `tall` plus this, not a flat number, because a dragon and a
+ * bee do not need the same room over a treetop.
+ */
+const FLY_LOOK_NEAR = 1.4;
+const FLY_LOOK_FAR = 2.9;
+const FLY_CLEAR = 0.6;
 
 // --- climbing (the monkey, and nothing else) ---------------------------------
 /** How far above itself a climber will look for a canopy worth going to. */
@@ -1638,14 +1737,28 @@ const SPECIES = {
   // only other bird on the planet with wings to do — the flight branch already
   // existed for the bee and this is one flag.
   //
-  // `hover` 2.0 is chosen against a hard ceiling rather than by eye: a flier's
-  // moves are still judged by the walking rules, so once its hover puts it more
-  // than MOB_FALL_FREE (3) layers over the ground every heading costs the
-  // refusal value and it stops moving horizontally altogether. Anything at or
-  // above 3 would silently hover in place. Two clears the tall grass and a
-  // fence and leaves margin under that limit; the bee sits at 1.5 for the same
-  // reason. See the note on _walkStep — that coupling is worth removing, and
-  // until it is, this number cannot be raised.
+  // `hover` was 2.0, chosen against a hard ceiling rather than by eye: a
+  // flier's moves were judged by the walking rules, so once its hover put it
+  // more than MOB_FALL_FREE (3) layers over the ground every heading cost the
+  // refusal value and it stopped moving horizontally altogether. Anything at or
+  // above 3 would silently hover in place. That note ended "this coupling is
+  // worth removing, and until it is, this number cannot be raised", and then the
+  // number was raised to 6.0 — for a good reason, see below — without the
+  // coupling being removed.
+  //
+  // What actually happened is worse than a bird that hovers in place, and is why
+  // both halves of this comment were true and the pair of them wrong. The
+  // refusal value is 9, i.e. every sample blocked, and `_walkStep`'s escape
+  // clause admits any move that costs no *more* than where the body already is
+  // — a clause added later, for a deer stuck on a shoreline. So a parrot at 6.0
+  // did not hover in place: it had no horizontal collision at all, and flew
+  // through cliffs and trunks. Measured before the fix: costHere > 0 on 93% of
+  // frames, its centre inside solid rock on 10.9% of them, worst stint 5.2s.
+  //
+  // The coupling is removed now — a flier is collided as a body in the air (see
+  // the flier branch in _colCost) rather than as a walker with a long drop
+  // beneath it — so this number is free, and the two comments no longer
+  // contradict each other. 6.0 is chosen on the reason below and nothing else.
   parrot: pet('parrot', {
     label: 'Parrot', h: 0.34, var: 0.06, hp: 4, spd: 2.60, shy: 1.0, turn: 6.5, accel: 12.0,
     graze: 0.4, idleMin: 0.8, idleMax: 2.6, drops: [['feather', 1, 3], ['poultry', 1, 1], ['egg', 1, 1]],
@@ -4563,14 +4676,13 @@ export class Mobs {
    * the footprint's extremes keeps the body out of the wall.
    */
   _footprintCost(f, ci, cj, hereK, mob, hdg) {
-    const p = this.planet;
     let cost = 0;
     // Nine samples over the animal's own oriented footprint: centre, the four
     // corners and the four edge midpoints. Sampling only the axis-aligned
     // extremes left the diagonals unguarded and the widest animal clipped
     // walls it met at an angle.
     const cw = Math.cos(hdg), sw = Math.sin(hdg);
-    const hw = mob.halfW, hl = mob.halfL, tall = mob.tall;
+    const hw = mob.halfW, hl = mob.halfL;
     // Is this body held up by water rather than standing on the bed? Three
     // different ways to be, and they want the same answer here: a fish, an
     // amphibian that has swum in, and a land animal that has ended up in the
@@ -4578,6 +4690,12 @@ export class Mobs {
     const afloat = !!mob.spec.aquatic || !!mob.swimming || !!mob.wading;
     /** ...and the narrower question: is this body *only* ever in the water? */
     const aquaticBody = !!mob.spec.aquatic;
+    /**
+     * ...and the same question for the air. A flier is never grounded (see the
+     * swimming/flying branch of the floor clamp), so this is a species reading
+     * and not a state one, exactly like `aquatic`.
+     */
+    const flier = !!mob.spec.flies;
     // How deep a wet column may be and still be ground to this body — see
     // WADE_STAND. Read once for all nine samples, and only for the bodies the
     // water rule below actually applies to.
@@ -4588,7 +4706,46 @@ export class Mobs {
       const ll = FOOT_OFF[n * 2 + 1] * hl;  // along the body
       const oi = cw * ll - sw * lw;
       const oj = sw * ll + cw * lw;
-      const col = this._colOf(f, ci + oi, cj + oj);
+      cost += this._colCost(this._colOf(f, ci + oi, cj + oj), hereK, mob,
+        afloat, aquaticBody, flier, wade);
+    }
+    return cost;
+  }
+
+  /**
+   * ...and the same question asked of the body's *middle* alone.
+   *
+   * One sample rather than nine, for the one caller that needs to tell a slide
+   * along an obstacle from a walk into it — see the equal-cost clause in
+   * _walkStep. It is the centre sample of _footprintCost and nothing else, so it
+   * goes through the same per-column rule rather than a second copy of it.
+   */
+  _centreCost(f, ci, cj, hereK, mob) {
+    const afloat = !!mob.spec.aquatic || !!mob.swimming || !!mob.wading;
+    const aquaticBody = !!mob.spec.aquatic;
+    const flier = !!mob.spec.flies;
+    const wade = (aquaticBody || flier || mob.spec.amphibious || afloat)
+      ? 0 : this._wadeDepth(mob);
+    return this._colCost(this._colOf(f, ci, cj), hereK, mob,
+      afloat, aquaticBody, flier, wade);
+  }
+
+  /**
+   * What one column of a body's footprint costs it: 1 if the body may not be
+   * there, 0 if it may.
+   *
+   * Lifted out of _footprintCost's loop unchanged when _centreCost was added,
+   * so that the nine-sample test and the one-sample test can never come to
+   * disagree about what an obstacle is. The flags are passed in rather than
+   * re-read because the caller asks this of up to nine columns in a row and not
+   * one of them varies between the samples.
+   *
+   * @returns {number} 1 or 0
+   */
+  _colCost(col, hereK, mob, afloat, aquaticBody, flier, wade) {
+    const p = this.planet;
+    const tall = mob.tall;
+    {
       // A fish is asked a different question from everything else here, and it
       // has to be, because every test below this is measured from the *bed*.
       //
@@ -4617,14 +4774,47 @@ export class Mobs {
       // step and climb out of the river; a fish never climbs out of anything.
       if (aquaticBody) {
         const kLo = hereK + 1, kHi = hereK + tall;
-        if (this._aquaticCost(col, kLo, kHi)) { cost++; continue; }
+        if (this._aquaticCost(col, kLo, kHi)) return 1;
         // ...and it stays in the water. Lava is named rather than left to the
         // liquid test for the same reason it is named below.
-        if (!p.liquidAt(col, kLo) || p.at(col, kLo) === ID.lava) cost++;
-        continue;
+        return (!p.liquidAt(col, kLo) || p.at(col, kLo) === ID.lava) ? 1 : 0;
+      }
+      // A flier is not walking either, and judging it by the walking rules is
+      // what quietly took its horizontal collision away.
+      //
+      // Every test below this line is measured from the *bed* — `_groundK` off
+      // the layer under the feet, then the step rules — and for a body holding
+      // station in open air the bed is `hover` cells down. The drop rule
+      // (`hereK - gk > MOB_STEP_DOWN`) therefore fires on every one of the nine
+      // samples the moment a flier is more than MOB_FALL_FREE (3) layers up, so
+      // `costHere` is 9, and _walkStep's equal-cost escape then admits *every*
+      // heading — including straight into a cliff or a trunk. Measured on the
+      // real planet before this branch existed: a parrot (hover 6.0) had
+      // costHere > 0 on 93% of frames and spent 25.8% of them with its centre
+      // inside solid rock, worst single stint 26.0s. The same fault scaled with
+      // hover height across the other fliers: bat 34.8% inside, dragon 22.4%,
+      // cthulhu 12.5%, ghost 2.5%, and the bee — hover 1.5, i.e. under the drop
+      // rule's threshold — only 1.4%, which is what made it look like a parrot
+      // bug rather than a flying bug.
+      //
+      // So a flier gets the one test that is true of it, which is the fish's:
+      // is there rock where its body is. No water rule (a lake is not a wall to
+      // something with wings — see the note below, and "birds should cross
+      // water"), no step rules, no bed. Lava is kept, and kept as a span rather
+      // than as a surface test, because the old `gk + 1` reading was the only
+      // thing stopping a bee from hovering into a lava lake: FLY_LAVA_CLEAR
+      // below the body covers the low hoverers and lets a parrot at six cross a
+      // flow it is in no danger from.
+      if (flier) {
+        const kLo = hereK + 1, kHi = hereK + tall;
+        if (this._aquaticCost(col, kLo, kHi)) return 1;
+        for (let k = Math.max(0, kLo - FLY_LAVA_CLEAR); k <= kHi; k++) {
+          if (p.at(col, k) === ID.lava) return 1;
+        }
+        return 0;
       }
       const gk = this._groundK(col, hereK + 1, !!mob.spec.climbs);
-      if (gk < 0) { cost++; continue; }
+      if (gk < 0) return 1;
       // Nothing walks into lava, whatever else it is willing to walk into.
       //
       // Written out rather than left to the water rule below, which did cover
@@ -4635,7 +4825,7 @@ export class Mobs {
       // two that would happily paddle into a lava lake. "Animals should be
       // smart enough not to jump on cliffs or lava" is one rule, so it is one
       // test, applied to everything.
-      if (p.at(col, gk + 1) === ID.lava) { cost++; continue; }
+      if (p.at(col, gk + 1) === ID.lava) return 1;
       // Land animals treat water as a wall. _groundK only reports solid ground,
       // so a lake bed read as ordinary walkable terrain and a chicken would
       // stroll in and keep walking along the bottom. A fish has the opposite
@@ -4647,6 +4837,11 @@ export class Mobs {
       // A flier is not walking, so water is not a wall to it. Without this a
       // bee or a parrot treated a lake exactly as a land animal does and turned
       // back at the shore — which is why nothing ever flew over open water.
+      // (Unreachable for a flier now, since the flier branch above returns
+      // first, and deliberately left in place: it is the same rule stated where
+      // the other bodies read it, and it is the thing to keep if that branch is
+      // ever narrowed. "Birds should be willing to cross water" is held by both
+      // of them saying the same thing.)
       //
       // ...and neither is a ford a wall. `!mob.wading` was the only way past
       // this line for a walker and it is unreachable from dry land, so nothing
@@ -4658,7 +4853,7 @@ export class Mobs {
       if (mob.spec.aquatic ? !wet
         : (wet && !mob.spec.flies && !mob.spec.amphibious && !mob.wading
            && !this._fordable(col, gk, wade))) {
-        cost++; continue;
+        return 1;
       }
       // The step rules, which are about *walking* and so do not apply to
       // anything afloat. Applying them to a swimmer is what walls a paddling
@@ -4688,15 +4883,13 @@ export class Mobs {
       // cannot disagree, which is the whole point: a body is allowed over
       // ground exactly when it is allowed onto it.
       if (afloat) {
-        if (gk + this._topOf(col, gk) > mob.cell.ck + this._haulReach(mob)) { cost++; continue; }
+        if (gk + this._topOf(col, gk) > mob.cell.ck + this._haulReach(mob)) return 1;
         // Headroom still applies — see the loop at the end.
-        let boxed = false;
-        for (let h = 1; h <= tall && !boxed; h++) {
+        for (let h = 1; h <= tall; h++) {
           const above = p.at(col, gk + h);
-          if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) boxed = true;
+          if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) return 1;
         }
-        if (boxed) cost++;
-        continue;
+        return 0;
       }
       //
       // Any rise at all blocks a walker. Letting a one-block step count as
@@ -4706,9 +4899,7 @@ export class Mobs {
       // The drop is MOB_STEP_DOWN rather than the 4 it was: an animal should
       // not walk off anything that would hurt it, and 4 was one more than the
       // fall it can take for free.
-      if (gk > hereK || hereK - gk > MOB_STEP_DOWN) {
-        cost++; continue;
-      }
+      if (gk > hereK || hereK - gk > MOB_STEP_DOWN) return 1;
       // Headroom. _groundK scans *downward* from just above the animal's feet,
       // so it reports the BOTTOM block of a wall and every wall — however tall
       // — came back as a harmless one-block step. That is what let animals
@@ -4721,13 +4912,10 @@ export class Mobs {
       // safe as a sealed one and there was never a reason to close it.
       for (let h = 1; h <= tall; h++) {
         const above = p.at(col, gk + h);
-        if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) {
-          cost++;
-          break;
-        }
+        if (IS_SOLID[above] && !isPassable(above, p.facingAt(col, gk + h))) return 1;
       }
+      return 0;
     }
-    return cost;
   }
 
   /**
@@ -4909,6 +5097,48 @@ export class Mobs {
   }
 
   /**
+   * The top of the tallest thing a flier is about to fly into, or -1.
+   *
+   * Two probes along the heading, in the same cell-space units the integrator
+   * moves in — `fr.arcA`/`fr.arcB` convert cells-per-second into cell indices,
+   * so a probe written in world cells stays the same distance ahead wherever on
+   * the cube face the body is. See FLY_LOOK_NEAR.
+   *
+   * Only obstacles that actually intrude on the body's own layers count. A hill
+   * a metre below it is not in its way, and treating it as one would have every
+   * flier climbing forever over rolling ground.
+   *
+   * @returns {number} the surface height to clear, or -1 for open air
+   */
+  _flyAhead(mob, fr) {
+    const p = this.planet;
+    const c = mob.cell;
+    const ch = Math.cos(mob.heading), sh = Math.sin(mob.heading);
+    const kLo = Math.floor(c.ck + 0.02);
+    const kHi = Math.floor(c.ck + mob.tall);
+    let best = -1;
+    for (let n = 0; n < 2; n++) {
+      // Off the *nose*, not off the origin. A dragon carries 1.9 of half-length,
+      // so a probe measured from its centre lands inside its own body and it
+      // learns about the mountain by hitting it: measured, the two big monsters
+      // covered half the ground they used to until this term was added.
+      const d = mob.halfL + (n === 0 ? FLY_LOOK_NEAR : FLY_LOOK_FAR);
+      const col = this._colOf(c.f, c.ci + ch * d / fr.arcA, c.cj + sh * d / fr.arcB);
+      // Downward from the head, so the *top* of the obstacle is what comes back
+      // — a wall reports its parapet, not the block the body happens to be
+      // level with, and one climb clears it instead of sixty.
+      for (let k = kHi; k >= kLo; k--) {
+        const id = p.at(col, k);
+        if (!IS_SOLID[id] || isPassable(id, p.facingAt(col, k))) continue;
+        const surf = k + this._topOf(col, k);
+        if (surf > best) best = surf;
+        break;
+      }
+    }
+    return best;
+  }
+
+  /**
    * Is the space this body would occupy solid rock?
    *
    * The only test a thrown body gets, and deliberately far weaker than
@@ -5015,12 +5245,38 @@ export class Mobs {
      * behaviour the wall slide exists to produce and which the shore had been
      * denying.
      */
-    const ok = (cost) => cost === 0 || cost < costHere
-      || (costHere > 0 && cost === costHere);
+    /**
+     * ...and the one thing the equal-cost clause may not do, which is bury the
+     * body's own middle.
+     *
+     * The clause above is right about slides and wrong about the direction of
+     * travel, because a count of nine samples cannot tell "along the obstacle"
+     * from "further into it": a body with one hind sample in the river can swap
+     * that sample for a different one and pay the same 1, over and over, and
+     * each swap moves it a step further in. That is how a cow ends up walking on
+     * a lake bed — measured before this test, 3.11% of cow-frames fully under
+     * water with the body grounded, worst single stint 28.0 seconds, which is
+     * the reported "cow walking underwater" exactly.
+     *
+     * The centre sample is the honest test of which of the two is happening.
+     * Sliding along a wall keeps a corner in the stone and the middle in the
+     * open; walking into it does not. So an equal-cost move may not newly put
+     * the centre column into something the body cannot be in — and a body whose
+     * centre is *already* buried keeps every equal move it had, because that is
+     * the case the clause exists for.
+     *
+     * One column of samples rather than nine, and only asked on the frames the
+     * equal-cost branch is actually reached, which is a body already overlapping
+     * something. An ordinary animal on open ground never pays for it.
+     */
+    const centreHere = costHere > 0 && this._centreCost(c.f, c.ci, c.cj, here, mob);
+    const ok = (cost, ci, cj) => cost === 0 || cost < costHere
+      || (costHere > 0 && cost === costHere
+        && (centreHere || !this._centreCost(c.f, ci, cj, here, mob)));
     const costI = this._footprintCost(c.f, ni, c.cj, here, mob, mob.heading);
     const costJ = this._footprintCost(c.f, c.ci, nj, here, mob, mob.heading);
-    let okI = ok(costI);
-    let okJ = ok(costJ);
+    let okI = ok(costI, ni, c.cj);
+    let okJ = ok(costJ, c.ci, nj);
     // The corner. Resolving the axes separately is what lets a body slide along
     // a wall instead of stopping dead, and the cost of it is that the diagonal
     // the two moves add up to is never tested: at an inside corner each axis
@@ -5034,8 +5290,12 @@ export class Mobs {
     // that has been tuned against half the animals on the planet, and the
     // elephant that has just been widened leans on the wall slide to get itself
     // out of dense forest; narrowing what it may do is not part of this fix.
-    if (okI && okJ && mob.spec.aquatic
-      && !ok(this._footprintCost(c.f, ni, nj, here, mob, mob.heading))) {
+    // ...and a flier is in the same position as a swimmer, for the same reason:
+    // it has no step rules to catch the corner block's top, because it is not
+    // standing on anything. Without this a bee rounds an inside corner through
+    // the stone.
+    if (okI && okJ && (mob.spec.aquatic || mob.spec.flies)
+      && !ok(this._footprintCost(c.f, ni, nj, here, mob, mob.heading), ni, nj)) {
       // Keep the axis that is cheaper on its own, so the body still slides
       // along the corner rather than stopping in front of it.
       if (costI <= costJ) okJ = false; else okI = false;
@@ -6074,7 +6334,14 @@ export class Mobs {
       if (mob.swingT <= 0) {
         mob.swingT = spec.swing;
         this._lunge(mob);
-        if (this.onSound) this.onSound('hurt', mob);
+        // 'attack', not 'hurt'. This call site is the windup — the 0.28s
+        // between deciding to swing and the blow landing is the only warning
+        // the player gets — and it used to borrow the pain voice, so a monster
+        // lunging at you and a monster taking a hit made the same noise at the
+        // one moment the difference decides whether you block or step back.
+        // Audio.mob has an 'attack' mode: same instrument, chest register
+        // rather than pitched up, louder, and rising instead of falling.
+        if (this.onSound) this.onSound('attack', mob);
         // The hit lands on the swing, not on the decision to swing, so there is
         // a moment to back out of range.
         this._pendingHits.push({ mob, at: 0.28, dmg: spec.damage });
@@ -6803,13 +7070,15 @@ export class Mobs {
     }
 
     mob.prowl -= dt;
-    // The audible half of the tell. 'hurt' is the aggressive call — the same
+    // The audible half of the tell. 'attack' is the aggressive call — the same
     // one a lunge uses — and it is deliberately not rate-limited through
     // _tryVocalise: this is the one noise in the game the player must not miss.
+    // It was 'hurt' until the voice table grew an aggression mode of its own; a
+    // stalking lion that sounds like a wounded one is the wrong warning.
     mob.growlT -= dt;
     if (mob.growlT <= 0) {
       mob.growlT = PROWL_GROWL;
-      if (this.onSound) this.onSound('hurt', mob);
+      if (this.onSound) this.onSound('attack', mob);
     }
 
     if (mob.prowl <= 0) {
@@ -7600,6 +7869,17 @@ export class Mobs {
         // nobody can see it and quietly eat the wildlife budget. It floats, it
         // keeps looking, and it either finds a shore or the despawn ring
         // collects it when the player walks away.
+        //
+        // Re-examined against "I saw a cow walking underwater" and still stands,
+        // because that was not a body in the sea, it was a body that had crept
+        // along the bed of a lake one equal-cost step at a time — 3.11% of
+        // cow-frames fully submerged with the body grounded, worst stint 28.0s,
+        // measured over five minutes on the real planet. Fixing the creep (see
+        // the centre-sample test in _walkStep) took every non-amphibious land
+        // species to 0.00% submerged over the same five minutes, so there is
+        // nothing left for a drowning clock to be the answer to. The only
+        // bodies the measurement still finds under the surface are the
+        // amphibians, swimming.
         if (mob.swimWant !== null) mob.want = mob.swimWant;
         else if (mob.swimAlong !== null) mob.want = mob.swimAlong;
         mob.state = 'walk';
@@ -7707,10 +7987,16 @@ export class Mobs {
       mob.wading = wading;
       // A bee was a walker with a hop, which is a bee doing an impression of a
       // rabbit. Flight is the same shape as the fish's buoyancy below: hold a
-      // height rather than fall, and never be grounded. It steers by the same
-      // walking rules — footprints, water as a wall — so a flier still keeps to
-      // the ground it belongs over instead of drifting out to sea; it simply
-      // does it at hover height.
+      // height rather than fall, and never be grounded.
+      //
+      // It used to steer by the walking rules too — this comment said so, and
+      // said that was what kept a flier over the ground it belongs to instead of
+      // out to sea. It was wrong on both counts by the time it was read: water
+      // had already been exempted for fliers a few lines into _colCost (nothing
+      // ever flew over a lake before that), and the rest of the walking rules
+      // were not keeping a flier anywhere, they were refusing every heading
+      // equally and so refusing nothing. A flier is collided as a body in the
+      // air now. See the flier branch in _colCost.
       // Local only. `mob.swimming` and `mob.wading` are published on the body
       // because _footprintCost asks about them from outside this loop; nothing
       // ever asked about flight, so a `mob.flying` written every frame for
@@ -7870,7 +8156,33 @@ export class Mobs {
         const under = this._groundUnder(mob, c.f, c.ci, c.cj, Math.floor(c.ck + 0.02));
         const bob = Math.sin(mob.idleT * 1.9 + mob.seed) * 0.22
           + Math.sin(mob.idleT * 0.7 + mob.seed * 1.7) * 0.30;
-        const want = (under >= 0 ? under + spec.hover : c.ck) + bob;
+        // ...and over whatever it is about to meet. The height seek reads the
+        // ground under the body's *own* footprint, which is a report on where it
+        // already is: a bird arrives inside the canopy and only then learns
+        // there was a tree. Now that a flier's horizontal move is genuinely
+        // refused by that canopy (see the flier branch in _footprintCost), a
+        // seek with no look-ahead is a bird parked at the treeline. See
+        // FLY_LOOK_NEAR.
+        const ahead = this._flyAhead(mob, fr);
+        const hold = under >= 0 ? under + spec.hover : c.ck;
+        let want = (ahead >= 0 ? Math.max(hold, ahead + mob.tall + FLY_CLEAR) : hold) + bob;
+        // ...but not into the roof. Under an overhang or in a cave mouth the
+        // wall ahead is also a wall the body cannot climb over, and a lift it
+        // can never satisfy is a body held against the ceiling for as long as it
+        // faces that way: measured, one ghost spent 109 consecutive seconds
+        // pinned in the rock before this clamp existed, against 1.2s for the
+        // same species with it. Where there is no room, there is no lift, and
+        // the veer in _walkStep is the way out — which is what it is for.
+        if (want > c.ck) {
+          const kTop = Math.ceil(want + mob.tall);
+          for (let k = Math.floor(c.ck + mob.tall); k <= kTop; k++) {
+            const id = this.planet.at(bodyCol, k);
+            if (IS_SOLID[id] && !isPassable(id, this.planet.facingAt(bodyCol, k))) {
+              want = Math.min(want, k - mob.tall);
+              break;
+            }
+          }
+        }
         const climb = Math.max(-2.2, Math.min(2.2, (want - c.ck) * 2.4));
         mob.vel.k += (climb - mob.vel.k) * Math.min(1, dt * 4);
       } else if (mob.climbTo !== null && spec.climbs

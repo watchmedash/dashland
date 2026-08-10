@@ -1329,7 +1329,7 @@ export function capTile(id, facing, isTop) {
 const TINTS = { grass: 1, foliage: 2, foliage_dark: 3, moss: 4 };
 
 /** How thick a door leaf is, as a fraction of its cell. */
-export const DOOR_THICK = 0.18;
+export const DOOR_THICK = 0.13;
 /** And a sign board, which is a plank rather than a slab. */
 export const SIGN_THICK = 0.12;
 
@@ -1376,17 +1376,23 @@ export function fenceLinks(idPi, idMi, idPj, idMj) {
 /**
  * Can a body walk through this cell despite it being `solid`?
  *
- * A ladder is climbed rather than bumped into, and an open door is not an
- * obstacle at all. Both still return real boxes to the mesher, because they are
- * things you can see; this is only about collision. Squeezing past an open leaf
- * on geometry alone does not work — swung aside it fills 0.18 of the cell and
- * the player is 0.7 wide, so the two overlap by a few centimetres in the middle
- * of the doorway and you stick on nothing.
+ * Only a ladder, which is climbed rather than bumped into. It still returns
+ * real boxes to the mesher, because it is a thing you can see; this is only
+ * about collision.
+ *
+ * **An open door and a sign used to be here and are not any more.** "I can pass
+ * through an open door, not the space they open but the door itself like they
+ * are not solid", and the same for signs. They were exempted because squeezing
+ * past an open leaf on geometry alone did not work: at DOOR_THICK 0.18 the
+ * swung leaf leaves 0.82 of the cell against a 0.68 wide player, so 0.14 of
+ * slack, and you snagged on nothing in the middle of your own doorway.
+ *
+ * That was a clearance problem being solved by deleting the obstacle. The leaf
+ * is 0.13 now, which leaves 0.19 of slack against Minecraft's 0.213 for the
+ * same manoeuvre, so you can walk through the opening and not through the door.
  */
 export function isPassable(id, byte = 0) {
   if (IS_LADDER[id]) return true;
-  if (IS_SIGN[id]) return true;      // you read a signpost, you do not walk into it
-  if (IS_DOOR[id]) return ((byte >> 2) & 1) === 1;
   return false;
 }
 

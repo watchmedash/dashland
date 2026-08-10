@@ -654,6 +654,17 @@ class Game {
     this._flameCells = [];
     /** Hot-spring surface cells near the player. See `_tickSteam`. */
     this._steamCells = [];
+    // Nearest waterfall and nearest hot spring, in world space, for the two
+    // placed ambient beds. Held as fields rather than returned because
+    // `_tickWaterSound` runs at 2Hz and `_updateAudio` reads them every frame.
+    this._fallAt = new THREE.Vector3();
+    this._springAt = new THREE.Vector3();
+    this._fallNear = false;
+    this._springNear = false;
+    this._fallSize = 1;
+    // Handed to `setAmbience` every frame; reused so the mix does not allocate.
+    this._fallSrc = { x: 0, y: 0, z: 0, size: 1 };
+    this._springSrc = { x: 0, y: 0, z: 0, size: 1 };
     /**
      * Every *light-emitting* cell near the player — torches, lanterns, lit
      * kilns, glowstone, crystal, lava — in world space, refilled by the same
@@ -802,7 +813,14 @@ class Game {
       if (mob.spec.hostile) this._mark('slayer');
       this.skills.xpKill(mob.spec, mob.baby > 0);
     };
-    this.arrows.onStick = (pos) => this.audio.dig('stone', pos);
+    // `dig('stone', pos)` stood here, which meant an arrow into a tree sounded
+    // like a pickaxe. `pos` is the last position OUTSIDE the block that stopped
+    // it, so the probe usually reads air and falls back to the wooden thud of
+    // the shaft itself, which is the right answer for a miss into the dirt too.
+    this.arrows.onStick = (pos) => {
+      const id = this.planet.blockAtWorld(pos.x, pos.y, pos.z);
+      this.audio.impact(id ? BLOCKS[id].sound : 'wood', pos);
+    };
     // An arrow burning up in lava, given the same embers a dropped item gets
     // there — it is the same event and should not read as two different ones.
     this.arrows.onBurn = (pos) => {
@@ -1105,6 +1123,31 @@ class Game {
     });
     this.canvas.addEventListener('click', () => {
       if (this.state === 'playing' && !this.input.locked && !this.ui.screenOpen) this.input.requestLock();
+    });
+
+    // Autoplay policy. The context is created in `_onWorldReady`, which is not
+    // a gesture handler: on desktop Chrome the click that started the world has
+    // already given the document sticky activation by then, so it comes up
+    // running — but that is the browser's rule rather than ours, and iOS has
+    // historically not promised it. This could not be measured here (a headless
+    // driver reports `userActivation.hasBeenActive` true before any input, so
+    // the test cannot tell a granted context from a lucky one), which is
+    // exactly why it is worth being defensive about. `resume()` returns
+    // immediately unless the context is actually suspended, so this is a
+    // property read per event.
+    const wake = () => this.audio.resume();
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', wake);
+    window.addEventListener('touchstart', wake, { passive: true });
+
+    // Nothing ever suspended the context, so a backgrounded tab went on playing
+    // wind, thunder and the generative pad at a player who had alt-tabbed away
+    // — over a game that is frozen, because rAF has stopped. It also leaves the
+    // graph running in a tab the browser is trying to throttle, which on a
+    // phone is battery.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.audio.ctx?.suspend?.();
+      else this.audio.resume();
     });
   }
 
@@ -2032,6 +2075,10 @@ class Game {
     if (this._skillTimer > 0) return;
     this._skillTimer = 1;
     if (!this.skills.observe(this.stats, this.playtime)) return;
+    // Earning a point is the only progression event in the game and it was
+    // announced by a toast and nothing else. `levelUp` is the only fanfare
+    // here; this is what it was written for.
+    this.audio.levelUp();
     const left = this.skills.available;
     // Announce the balance, not the delta. A player who has banked points and
     // not spent them wants to be reminded that they are sitting there; "+1" on
@@ -2083,7 +2130,9 @@ class Game {
 
   /** Buy one level. Called from the skills screen; returns whether it took. */
   buySkill(key) {
-    if (!this.skills.buy(key)) { this.audio.ui(220); return false; }
+    // `deny()` rather than a low blip: a refusal that is the click at a
+    // different pitch is a refusal the player has to already know to listen for.
+    if (!this.skills.buy(key)) { this.audio.deny(); return false; }
     this._applySkills();
     this.audio.ui(720);
     this.ui.refreshSkills();
@@ -2213,6 +2262,9 @@ class Game {
     // spectator would be the one way this state could be left by accident.
     if (this.state === 'dead' || this.spectating) return;
     this.state = 'dead';
+    // The one event in the game that had no sound at all. `hurt()` fires on the
+    // blow that kills, and then the world simply stopped.
+    this.audio.death();
     this.input.exitLock();
     this.closeScreen();
     this.closeSkills();
@@ -2673,6 +2725,10 @@ class Game {
       this.ui.setSaveWarning(true, `${n === 1 ? 'The last save failed' : `The last ${n} saves failed`}`
         + `${err?.name ? ` (${err.name})` : ''}. Your world is only in this tab.`);
       if (first || notify) this.ui.toast('Could not save your world');
+      // A save warning the player has to be looking at the chip to notice is a
+      // save warning they will miss. `saveFail` is three falling sawtooth
+      // barks, unmistakably not a confirmation.
+      this.audio.saveFail();
       return false;
     }
   }
@@ -3671,6 +3727,9 @@ class Game {
           if (k.input.count <= 0) k.input.clear();
           if (k.output.empty) k.output.set(recipe.out, recipe.count);
           else k.output.count += recipe.count;
+          // At the kiln, not at the player: this is the one event you are meant
+          // to be able to walk away from and still hear finish.
+          this.audio.smelt(this.planet.centerOf(k.col, k.k, _v1));
         }
       } else {
         k.progress = Math.max(0, k.progress - dt * 0.6);
@@ -3974,6 +4033,10 @@ class Game {
       this.player.vel.i = 0; this.player.vel.j = 0; this.player.vel.k = 0;
     }
     const wasInWater = this.player.inWater;
+    // Captured with it, for the gasp on the way back up. Both edges existed in
+    // the physics and neither had ever been listened for: only the entry
+    // splash was wired, so a dive in was loud and the way out was silent.
+    const wasHeadUnder = this.player.headInWater;
     // The fork, and the only one a spectator takes in this whole function.
     //
     // `Player.update` is where the collision, the step-up, the ladders, the
@@ -3988,6 +4051,23 @@ class Game {
     if (this.player.inWater && !wasInWater) {
       this.particles.splash(this.player.position, this.player.up, 1.2);
       this.audio.splash();
+    } else if (!this.player.inWater && wasInWater) {
+      // Climbing out. Smaller than going in, because a body leaving water
+      // displaces less of it than a body arriving at speed.
+      this.audio.splash(null, 0.55);
+    }
+    // Head breaking the surface. `surface()` is the splash plus the breath, and
+    // the breath is the half of it that only makes sense on this edge.
+    if (wasHeadUnder && !this.player.headInWater) this.audio.surface();
+    // Strokes. `onStep` is gated on `grounded`, so swimming had no sound of any
+    // kind — you crossed a lake in silence. On its own timer rather than the
+    // stride counter for the same reason: there is no ground to step on.
+    if (this.player.inWater && !ghost) {
+      this._swimT = (this._swimT ?? 0) - dt;
+      if (this._swimT <= 0 && this.player.moveAmount > 0.8) {
+        this._swimT = 0.72 + Math.random() * 0.35;
+        this.audio.swim();
+      }
     }
     if (this.player.headInWater && Math.random() < dt * 5) {
       this.particles.bubbles(this.player.eye, this.player.up, 2);
@@ -4195,7 +4275,7 @@ class Game {
     this.sky.update(dt, this.camera, this.player.up, this.player.position, this.shelter);
     this.particles.update(dt, this.camera, this.player.up, this.sky);
     this._updateSharedUniforms();
-    this._updateAudio();
+    this._updateAudio(biomeId);
     this._updateHud(biomeId);
 
     this.autosaveTimer += dt;
@@ -5219,6 +5299,60 @@ class Game {
         break;
       }
     }
+
+    this._tickWaterSound(dt);
+  }
+
+  /**
+   * Where the nearest waterfall and the nearest hot spring are, for the two
+   * placed ambient beds in `Ambience`.
+   *
+   * Both were completely silent until this pass, which on a planet where a fall
+   * is visible from most of a biome is the most obvious hole in the mix there
+   * is: you could stand under forty metres of falling water and hear wind.
+   *
+   * Twice a second, not every frame. The answer only changes as fast as a body
+   * can walk, and the pass is cheap: measured at 4us with the map empty, 12us
+   * at 500 flowing cells and 53us at 2000 -- so even a player who has flooded a
+   * valley pays 107us a SECOND for this, against the 36us a FRAME the whole
+   * audio system already cost.
+   */
+  _tickWaterSound(dt) {
+    this._wsT = (this._wsT ?? 0) - dt;
+    if (this._wsT > 0) return;
+    this._wsT = 0.5;
+    const P = this.player.position;
+
+    // Springs come free: `_steamCells` above is already the nearby pools.
+    let sd = Infinity;
+    for (let i = 0; i < this._steamCells.length; i++) {
+      const h = this._steamCells[i];
+      const pp = colParts(h.col);
+      _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, h.k, _steamAt));
+      const d = _v1.distanceToSquared(P);
+      if (d < sd) { sd = d; this._springAt.copy(_v1); }
+    }
+    // 26m and 56m are the placed panners' own maxDistance. Past those the
+    // linear distance law is already exactly zero, so holding a target beyond
+    // them buys nothing but a position ramp.
+    this._springNear = sd < 26 * 26;
+
+    // Falls off the flow map, which is exactly the set of cells that are
+    // falling. `n` is how much water is in earshot, and it is the difference
+    // between a cataract and a bucket someone tipped over a ledge -- every
+    // player spill lands in this same map.
+    let fd = Infinity, n = 0;
+    for (const key of this.water.level.keys()) {
+      const k = key % D;
+      const pp = colParts((key - k) / D);
+      _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, k, _steamAt));
+      const d = _v1.distanceToSquared(P);
+      if (d > 56 * 56) continue;
+      n++;
+      if (d < fd) { fd = d; this._fallAt.copy(_v1); }
+    }
+    this._fallNear = n > 0;
+    this._fallSize = Math.min(1, 0.28 + n / 8);
   }
 
   /**
@@ -5938,8 +6072,17 @@ class Game {
     const next = bowDrawStep(b.t, {
       armed, down: input.buttons[2], dt, drawTime: def?.bow?.draw ?? 1,
     });
+    const wasDrawn = b.t;
     b.t = next.t;
     if (next.fire) this._loose(def, arrowId, next.fire);
+    // The creak, which climbs with the draw so holding at full sounds like
+    // holding at full. Every quarter of the pull rather than every frame, and
+    // only while the charge is rising: a bow drawing in silence gave the player
+    // no way to hear how hard the shot was going to be, which is the one thing
+    // the whole charge mechanic is about.
+    if (b.t > wasDrawn && Math.floor(b.t / 0.25) > Math.floor(wasDrawn / 0.25)) {
+      this.audio.bowDraw(b.t);
+    }
 
     // Told every frame, including the frames it is zero: these are poses, not
     // events, and a listener that is only updated while drawing is a listener
@@ -6016,7 +6159,9 @@ class Game {
     // `active()`, which with an offhand bow and a pickaxe in the main hand
     // charged the shot to the pickaxe.
     if (def.tool) this.inventory.damageHeld(1, shooter);
-    this.audio.ui(240 + 140 * shot.power);
+    // Was `ui(240 + 140 * power)` — a menu blip on the game's loudest verb.
+    // `bowRelease` is the string and the shaft, both scaled by the same draw.
+    this.audio.bowRelease(shot.power);
   }
 
   /**
@@ -6174,7 +6319,12 @@ class Game {
           // third-person views, so there a crit is audible only. That is a fair
           // trade for never showing a cube again, and the thump is already
           // pitched differently from an ordinary hit.
-          this.audio.ui(1480);
+          // Was `ui(1480)` — the menu square, dry and centred on the head, for
+          // the best moment in the game. `impact('metal')` is the same idea
+          // done with the right instrument and, unlike the blip, it comes from
+          // the animal, so it lines up with the thump above instead of sitting
+          // beside it.
+          this.audio.impact('metal', mobHit.mob.pos);
           this.ui.critHit();
         }
         // Shove scales with the swing, rather than switching on at 85%.
@@ -6246,6 +6396,11 @@ class Game {
     } else {
       this.highlight.visible = false;
       this.ui.setCrosshairActive(false);
+      // Swung at nothing. Sound only, and no cooldown of its own: `clicked` is
+      // edge-triggered so this is one whoosh per press, and the voice budget's
+      // `step` cap holds the ceiling. A miss used to be indistinguishable from
+      // never having pressed the button, which is exactly what a whoosh is for.
+      if (input.clicked[0] && input.locked) this.audio.swing();
     }
 
     // An over-tier block still shatters and drops nothing. Silently losing six
@@ -6489,9 +6644,13 @@ class Game {
    * two copies that drift.
    */
   _tickEating(dt, heldSlot, heldItem) {
+    // One chew sequence per meal, fired on the first frame of it. The old
+    // `step('grass')` at nine a second was a footstep standing in for a bite,
+    // and it was the wrong instrument at the wrong rate; `eat()` is four
+    // irregular wet grains and a swallow, sized to the 1.3s the meal takes.
+    if (this.eating === 0) this.audio.eat();
     this.eating += dt;
     if (Math.random() < dt * 9) {
-      this.audio.step('grass');
       this.particles.footDust(this.player.eye, this.player.up, ID.dirt);
     }
     if (this.eating < 1.3) return;
@@ -6881,7 +7040,7 @@ class Game {
     if (w.lightning > 0.5) this.sky.sunLight.intensity += 2.4 * w.lightning;
   }
 
-  _updateAudio() {
+  _updateAudio(biomeId) {
     // Listener rides the camera. On a sphere the up vector is the player's own
     // local up — feeding world +Y here would swing the stereo image as you walk
     // round the planet.
@@ -6894,13 +7053,46 @@ class Game {
       _v2.x, _v2.y, _v2.z,
     );
 
-    const alt = Math.max(0, this.player.position.length() - R_SEA);
-    const openness = THREE.MathUtils.clamp(alt / 8, 0, 1);
+    const alt = this.player.position.length() - R_SEA;
+    // How high and exposed you are, which is what the wind answers to. This is
+    // NOT openness: it used to be both, and `cave: 1 - alt/8` meant that
+    // standing in open daylight two metres above sea level armed the
+    // underground rumble at 0.75 (measured) and choked the birds, the surf and
+    // every insect to a quarter through Ambience's shared `out` term. Every
+    // beach and every lakeside on the planet sounded like a cave.
+    const high = THREE.MathUtils.clamp(alt / 8, 0, 1);
+    // `shelter` is this frame's sky exposure, already computed for the rain
+    // particles: three solid blocks overhead and it is zero. That is what being
+    // underground actually is.
+    const roof = 1 - this.shelter;
+
+    if (this._fallNear) {
+      this._fallSrc.x = this._fallAt.x; this._fallSrc.y = this._fallAt.y;
+      this._fallSrc.z = this._fallAt.z; this._fallSrc.size = this._fallSize;
+    }
+    if (this._springNear) {
+      this._springSrc.x = this._springAt.x; this._springSrc.y = this._springAt.y;
+      this._springSrc.z = this._springAt.z;
+    }
+
     this.audio.setAmbience({
-      wind: (0.3 + openness * 0.7) * (0.6 + this.weather.wind * 0.5),
+      wind: (0.3 + high * 0.7) * (0.6 + this.weather.wind * 0.5),
       water: this._nearLiquid() * 0.6 + this.weather.precip * 0.8,
-      cave: 1 - openness,
+      cave: roof,
+      openness: this.shelter,
       underwater: this.player.headInWater ? 1 : 0,
+      // None of the rest was ever passed, so most of Ambience was dead code.
+      // Measured before this line existed: `_state.rain` stayed 0 through a
+      // downpour at precip 0.9, so BOTH rain beds had never once sounded;
+      // `_state.time` stayed pinned at 0.35, so crickets and owls had never
+      // played and birds sang at midnight; `_state.biome` stayed 2, so eleven
+      // of the twelve rows of BIOME_AIR were unreachable.
+      biome: biomeId,
+      time: this.timeOfDay(),
+      rain: this.weather.precip,
+      depth: Math.max(0, -alt),
+      fall: this._fallNear ? this._fallSrc : null,
+      spring: this._springNear ? this._springSrc : null,
     });
   }
 

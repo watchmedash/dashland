@@ -70,14 +70,30 @@ const MOB_VOICE = {
   // Gains are matched by ear/by meter, not by number: the bleat and cluck lose a
   // lot through their formant filters, the groan almost nothing. Pitches are
   // spread well apart so a mixed group never blurs into one texture.
+  //
+  // Retuned against a 400Hz-weighted RMS render of every sound in the game,
+  // because peak dBFS had been ranking a 62Hz groan level with a 4kHz cluck and
+  // the ear is thirty-odd dB less sensitive down there. What that measurement
+  // found was the clucks: the parrot at -24.7 and the chick at -25.5 were the
+  // two loudest things on the planet, TWELVE dB above an overhead thunderclap
+  // (-36.5) and thirty above the player's own footstep (-55.7). One parrot
+  // standing beside you was a thousand times the power of your own boots.
+  // The targets below put a nearby animal at about -34, which is where the cow,
+  // the deer and the fox already sat.
+  //
+  // The groans are deliberately NOT raised to match. The cow, the koala and the
+  // husk read quiet on a weighted meter because they are almost all sub-100Hz
+  // energy, but they are simultaneously the highest PEAKS in the game (husk
+  // -4.5 dBFS) and there is no headroom left to give them. That gap is the
+  // instrument, not a mistake: a husk is meant to be felt before it is heard.
   cow: { kind: 'groan', base: 96, dur: 1.10, gain: 0.38 },
   deer: { kind: 'bleat', base: 210, dur: 0.52, gain: 0.36 },
-  bunny: { kind: 'squeak', base: 940, dur: 0.11, gain: 0.30 },
-  chick: { kind: 'cluck', base: 620, dur: 0.26, gain: 0.34 },
-  parrot: { kind: 'cluck', base: 780, dur: 0.30, gain: 0.32 },
+  bunny: { kind: 'squeak', base: 940, dur: 0.11, gain: 0.45 },
+  chick: { kind: 'cluck', base: 620, dur: 0.26, gain: 0.13 },
+  parrot: { kind: 'cluck', base: 780, dur: 0.30, gain: 0.11 },
   fox: { kind: 'squeak', base: 430, dur: 0.28, gain: 0.32 },
   koala: { kind: 'groan', base: 132, dur: 0.80, gain: 0.30 },
-  penguin: { kind: 'cluck', base: 340, dur: 0.38, gain: 0.34 },
+  penguin: { kind: 'cluck', base: 340, dur: 0.38, gain: 0.26 },
   // Deliberately the lowest and longest thing on the planet — you should hear a
   // husk before the dark gives you any chance of seeing it.
   husk: { kind: 'groan', base: 62, dur: 1.70, gain: 0.42 },
@@ -86,7 +102,11 @@ const MOB_VOICE = {
   // is unambiguous even before you can see what made it.
   // `far` puts it on the landmark distance law and out of the shared idle
   // throttle — a beacon that a passing sheep can mute is not a beacon.
-  merchant: { kind: 'chime', base: 523, dur: 1.30, gain: 0.34, far: true },
+  // 0.34 measured as the single loudest sound in the game (-22.3 weighted, 14dB
+  // over thunder). It still wants to be the loudest VOICE — it is the one thing
+  // out there worth walking towards — so it lands at about -30, above the herd
+  // and under the sky.
+  merchant: { kind: 'chime', base: 523, dur: 1.30, gain: 0.135, far: true },
 };
 
 // idle / hurt / death are the same instrument played differently.
@@ -608,7 +628,9 @@ export class Audio {
     lp.type = 'lowpass'; lp.frequency.value = Math.min(9000, freq * 5.5); lp.Q.value = 0.7;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.05, t + 0.006);
+    // 0.05 measured at -51.5 weighted, the quietest thing in the game bar the
+    // bow creak, on the voice that answers every menu action there is.
+    g.gain.linearRampToValueAtTime(0.075, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0004, t + 0.09);
     o.connect(lp).connect(g).connect(this.uiBus);
     o.start(t); o.stop(t + 0.1);
@@ -736,6 +758,56 @@ export class Audio {
   }
 
   /**
+   * A kiln finishing a smelt. The one sound in the game that had to be new
+   * rather than rewired: a kiln ran for twenty seconds and produced its ingot
+   * in complete silence, so there was no way to know it was done without
+   * standing over the screen.
+   *
+   * Two layers, and the order matters. First the breath of heat escaping as the
+   * lid of the reaction gives — noise through a band that OPENS rather than
+   * closes, which is what separates a release from an impact. Then, a beat
+   * later, a dull struck tick: the thing itself, dropping into the tray.
+   * Positional, because a kiln is a place you walk away from.
+   */
+  smelt(pos = null) {
+    if (!this._live() || !this._take('block', 0.9)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.55;
+    const out = this._dest(pos, 1.2);
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.55 + Math.random() * 0.2;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(320, t);
+    bp.frequency.exponentialRampToValueAtTime(1900 + Math.random() * 600, t + d);
+    bp.Q.value = 1.1;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.11, t + 0.12);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    // the ingot landing: low, short, barely tuned — a kiln is fired clay, and
+    // anything that rang here sounded like a bell instead of a workshop
+    const tn = t + 0.30;
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    const f = 260 * (0.92 + Math.random() * 0.16);
+    o.frequency.setValueAtTime(f, tn);
+    o.frequency.exponentialRampToValueAtTime(f * 0.5, tn + 0.22);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, tn);
+    og.gain.linearRampToValueAtTime(0.17, tn + 0.004);
+    og.gain.exponentialRampToValueAtTime(0.0004, tn + 0.24);
+    o.connect(og).connect(out);
+    o.start(tn); o.stop(tn + 0.26);
+    this._noiseHit(out, tn, { gain: 0.11, lo: 600, hi: 3200, q: 1.0, dur: 0.07 });
+  }
+
+  /**
    * Drawing a bow. `power` is 0..1; the creak climbs with it, so holding at
    * full draw sounds like holding at full draw. Called repeatedly while held —
    * the step budget throttles it if the caller is generous with the rate.
@@ -754,7 +826,9 @@ export class Audio {
     bp.Q.value = 5;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.06 + power * 0.05, t + 0.06);
+    // -58 weighted at full draw: three dB under a footstep, for a sound whose
+    // whole job is to report how hard the shot will be.
+    g.gain.linearRampToValueAtTime(0.13 + power * 0.09, t + 0.06);
     g.gain.exponentialRampToValueAtTime(0.0004, t + d);
     src.connect(bp).connect(g).connect(this.sfxBus);
     src.start(t, Math.random() * 2); src.stop(t + d + 0.05);

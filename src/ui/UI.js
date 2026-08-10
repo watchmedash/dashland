@@ -1216,7 +1216,10 @@ export class UI {
     const at = this._loadout.indexOf(key);
     if (at >= 0) this._loadout.splice(at, 1);
     else if (this._loadout.length < LOADOUT_MAX) this._loadout.push(key);
-    else { this.game.audio.ui(240); return; }
+    // Every refusal in this file used to be the confirmation click at a lower
+    // pitch, which asks the player to hear an interval to know they were told
+    // no. `deny()` is a flat two-tone fall and is unmistakably not a yes.
+    else { this.game.audio.deny(); return; }
     this._syncKit();
     this.game.audio.ui(at >= 0 ? 380 : 620);
   }
@@ -1654,7 +1657,7 @@ export class UI {
     // XP is per trip to the bench, not per item — see `xpCraft` in Skills.js.
     // `made` can be 64 planks off one shift-click and paying by the item would
     // make plank-spam the best xp in the game.
-    if (made) { g.audio.pickup(); g.stats.crafted += made; g.skills.xpCraft(); }
+    if (made) { g.audio.craft(); g.stats.crafted += made; g.skills.xpCraft(); }
     this.refresh();
   }
 
@@ -1760,11 +1763,11 @@ export class UI {
         const times = e.shiftKey ? 64 : 1;
         const made = craftFromInventory(this.game.inventory, recipe, times);
         if (made) {
-          this.game.audio.pickup();
+          this.game.audio.craft();
           this.game.stats.crafted += made;
           this.game.skills.xpCraft();
         } else {
-          this.game.audio.ui(240);
+          this.game.audio.deny();
         }
         this.refresh();
       });
@@ -2149,7 +2152,7 @@ export class UI {
           g.audio.pickup();
           g._mark('trade');
           this.toast(`Bought ${ITEMS[line.item].label}`, line.item, 1400);
-        } else g.audio.ui(240);
+        } else g.audio.deny();
         this.refresh();
       }));
     }
@@ -2181,8 +2184,8 @@ export class UI {
           }
         } else if (mob?.purse && before < sellPriceOf(item)) {
           this.toast('Out of coin', COIN_ITEM, 2200);
-          g.audio.ui(240);
-        } else g.audio.ui(240);
+          g.audio.deny();
+        } else g.audio.deny();
         this.refresh();
       }));
     }

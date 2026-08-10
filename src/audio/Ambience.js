@@ -81,12 +81,15 @@ export class Ambience {
     this.noise = noise;
     this.budget = budget || (() => true);
     this.beds = {};
+    // world-anchored panners the placed beds hang off, keyed by feature
+    this.places = {};
     this.stats = { oneShots: 0, dropped: 0, rearms: 0 };
     // last target written per bed, so an unchanged frame writes nothing
     this._armed = {};
     this._state = {
       wind: 0, water: 0, cave: 0, underwater: 0,
       rain: 0, surf: 0, biome: 2, time: 0.35, openness: 1, depth: 0,
+      fall: false, spring: false,
     };
     this._build();
     this._tick = this._tick.bind(this);
@@ -95,8 +98,46 @@ export class Ambience {
 
   // --- construction ----------------------------------------------------------
 
+  /**
+   * A bed that lives at a point in the world rather than around the player.
+   *
+   * `linear` rather than the `inverse` law the rest of the game uses, because
+   * this is the one case where the falloff has to actually reach zero: the
+   * level map is planet-wide, and under an inverse law a waterfall on the far
+   * side of the world still leaks 3% into a silent desert. Linear is exactly 1
+   * at `ref` and exactly 0 at `max`, so out of range is genuinely out.
+   *
+   * `equalpower`, not HRTF: these run for the lifetime of the game rather than
+   * for a fifth of a second, and a 40m wall of falling water is a diffuse
+   * source that HRTF's pinpoint imaging gets wrong anyway.
+   */
+  _place(name, max) {
+    const p = this.ctx.createPanner();
+    p.panningModel = 'equalpower';
+    p.distanceModel = 'linear';
+    p.refDistance = 6;
+    p.maxDistance = max;
+    p.rolloffFactor = 1;
+    p.coneInnerAngle = 360; p.coneOuterAngle = 360; p.coneOuterGain = 1;
+    p.connect(this.out);
+    this.places[name] = p;
+    return p;
+  }
+
+  /** Point a placed bed at a world position, ramped so it never snaps. */
+  _moveTo(name, x, y, z) {
+    const p = this.places[name];
+    if (!p) return;
+    const t = this.ctx.currentTime + 0.25;
+    if (p.positionX) {
+      p.positionX.linearRampToValueAtTime(x, t);
+      p.positionY.linearRampToValueAtTime(y, t);
+      p.positionZ.linearRampToValueAtTime(z, t);
+    } else p.setPosition(x, y, z);
+  }
+
   /** One looping noise bed: source → filter → [modulated gain] → level → out. */
-  _bed(name, type, freq, q, { am = 0, amRate = 0, rate = 1 } = {}) {
+  _bed(name, type, freq, q, { am = 0, amRate = 0, rate = 1, into = null } = {}) {
     const ctx = this.ctx;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
@@ -122,7 +163,7 @@ export class Ambience {
       f.connect(amGain);
       head = amGain;
     }
-    head.connect(level).connect(this.out);
+    head.connect(level).connect(into || this.out);
     src.connect(f);
     src.start(0, Math.random() * 2);
     const bed = { src, f, level, am: amGain };
@@ -191,6 +232,37 @@ export class Ambience {
     tl.start();
 
     this._bed('cicada', 'bandpass', 3300, 7, { am: 0.35, amRate: 13, rate: 1.25 });
+
+    // --- placed sources ------------------------------------------------------
+    // A waterfall you cannot hear is not a landmark, and until this pass the
+    // falls and the springs were the only things in the world that made no
+    // sound at all. Both are beds rather than one-shots because both are
+    // genuinely continuous, which also means the node count is fixed: a planet
+    // with forty waterfalls on it costs exactly these nine nodes.
+
+    // Falls carry a long way and are worth walking towards, so 56m; a spring is
+    // a pool you find by looking, so 26m and quieter.
+    const fall = this._place('fall', 56);
+    // Two layers, because one band of noise is a hiss and falling water is a
+    // roar with a hiss on top. The roar is stretched noise (rate 0.45) so its
+    // energy sits under the wind bed rather than fighting it for the same
+    // 500Hz the wind already owns.
+    this._bed('fallRoar', 'bandpass', 300, 0.45, { rate: 0.45, into: fall });
+    this._bed('fallHiss', 'highpass', 2100, 0.5, { rate: 1.25, into: fall });
+    // A slow churn on the roar's cutoff. Falling water is never steady, and a
+    // flat filter is what makes a noise bed read as a broken audio device.
+    const churn = ctx.createOscillator();
+    churn.type = 'sine'; churn.frequency.value = 0.31;
+    const cd = ctx.createGain(); cd.gain.value = 90;
+    churn.connect(cd).connect(this.beds.fallRoar.f.frequency);
+    churn.start();
+
+    const spring = this._place('spring', 26);
+    // Narrow and chopped: a hot spring is intermittent bubbling, not a stream.
+    this._bed('springBub', 'bandpass', 340, 2.4, { am: 0.55, amRate: 2.9, rate: 0.65, into: spring });
+    // The steam leaving the surface. Almost nothing on its own; it is what
+    // stops the bubbles sounding like they are happening in a sealed jar.
+    this._bed('springHiss', 'highpass', 3400, 0.5, { rate: 1.5, into: spring });
   }
 
   // --- per-frame state -------------------------------------------------------
@@ -234,8 +306,35 @@ export class Ambience {
     this._arm('cave', st.cave * 0.080 * (1 - st.underwater));
     this._arm('sub', st.underwater * 0.10);
     // Insects need warmth, dark (or heat), dry air and open sky.
-    this._arm('cricket', air.cricket * night * dry * out * 0.030);
-    this._arm('cicada', air.cicada * (1 - night) * dry * out * 0.022);
+    // 0.030/0.022 measured at -66 and -62 weighted, which is eleven dB under a
+    // footstep and eighteen under the wind bed they play over: inaudible. They
+    // had also never been heard at all, because `time` was never passed and a
+    // meadow at midnight scored night = 0. Tripled now that they can actually
+    // happen, which puts them just under the wind rather than under the floor.
+    this._arm('cricket', air.cricket * night * dry * out * 0.090);
+    this._arm('cicada', air.cicada * (1 - night) * dry * out * 0.060);
+
+    // Placed sources. `size` is how much water is actually falling, so a bucket
+    // poured off a ledge trickles and a worldgen fall roars; without it every
+    // one-cell spill in the world would sound like a cataract.
+    // Levels set from a weighted render at the panner's reference distance: the
+    // fall lands at about -39, a shade over the rain-in-a-storm bed, and the
+    // spring at about -48, clear of the wind but not competing with it.
+    this._placeSet('fall', s.fall, ['fallRoar', 'fallHiss'], [0.180, 0.070]);
+    this._placeSet('spring', s.spring, ['springBub', 'springHiss'], [0.150, 0.040]);
+    st.fall = !!s.fall;
+    st.spring = !!s.spring;
+  }
+
+  /** Point one placed source and ride its layers, or fade it out if it is gone. */
+  _placeSet(name, src, layers, gains) {
+    if (src) {
+      this._moveTo(name, src.x, src.y, src.z);
+      const size = src.size ?? 1;
+      for (let i = 0; i < layers.length; i++) this._arm(layers[i], gains[i] * size);
+    } else {
+      for (const l of layers) this._arm(l, 0);
+    }
   }
 
   /** Ride a level gain, skipping the write when it has not meaningfully moved. */
@@ -281,6 +380,9 @@ export class Ambience {
       if (Math.random() < song * 0.85) this._bird(air);
       else if (Math.random() < owl * 0.10) this._owl();
       else if (Math.random() < st.wind * open * 0.16) this._howl(air);
+      // Standing over a spring, a burst of bubbles out of the pool itself. The
+      // bed alone is a steady simmer; the bursts are what give it a surface.
+      else if (st.spring && Math.random() < 0.5) this._bubbles(this.places.spring);
       gap = 1.4 + Math.random() * 3.2 * (1 - song * 0.5);
     }
 
@@ -407,9 +509,13 @@ export class Ambience {
     src.start(t, Math.random() * 2); src.stop(t + d + 0.1);
   }
 
-  /** A run of rising bubbles. Underwater's equivalent of a bird. */
-  _bubbles() {
+  /**
+   * A run of rising bubbles. Underwater's equivalent of a bird, and — routed
+   * through the spring panner instead — the surface of a hot pool.
+   */
+  _bubbles(out = null) {
     if (!this._ok()) return;
+    const dest = out || this.out;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const n = 2 + ((Math.random() * 5) | 0);
@@ -425,7 +531,7 @@ export class Ambience {
       g.gain.setValueAtTime(0.0001, tn);
       g.gain.linearRampToValueAtTime(0.030, tn + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0004, tn + d);
-      o.connect(g).connect(this.out);
+      o.connect(g).connect(dest);
       o.start(tn); o.stop(tn + d + 0.03);
     }
   }

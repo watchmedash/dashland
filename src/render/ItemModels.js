@@ -117,16 +117,47 @@ const BLANK =
  * a hand works and what puts the object back in frame. That is a grip change and
  * not a lift, so it costs no contact and it carries to the third-person body.
  *
- * **What `pos` may not be used for, and what it cannot fix.** `pos` is dropped
- * by `Character._wearPose`, so it is first person only; 100 of the 106 poses
- * here are bit-identical on the body after this pass. And `grip` is not free
- * either: `loadGeometry` centres X and Z on the *bounding box*, so the grip
- * point is (bbox XZ centre, grip x height), and for a model whose mass is not
- * stacked over that centre — a hollow pail, an L-shaped claw, a rosette whose
- * stems miss the middle, a bow whose stave curves away from it — there is no
- * value of `grip` that lands on the material. Those are corrected with an
- * off-axis `pos`, which is a first-person-only patch over a model-space fault;
- * see the notes on `bucket`, `crab_claw` and `bow`.
+ * **What `pos` may not be used for.** `pos` is dropped by
+ * `Character._wearPose`, so it is first person only. It is a framing nudge and
+ * never a grip: if an item needs moving to sit *in the hand*, that is `grip`
+ * and `root` below, both of which carry to the body.
+ *
+ * ### `grip`, `root`, and why there are two of them
+ *
+ * There are two origins on every model and they used to be one number, which is
+ * the fault this pass exists to fix.
+ *
+ * - **`grip`** is where the fist closes, as a fraction of the model's height.
+ *   It decides where the item hangs off the hand in *both* views.
+ * - **`root`** is the height that stands on the ground, same units. It decides
+ *   where a planted flower, coral or fungus sits, because `BlockModels.sync`
+ *   puts the geometry's origin on the floor of the cell. It defaults to `grip`,
+ *   and only because that is where the shipped world placement is — the two
+ *   were one translate in `loadGeometry`.
+ *
+ * While they were one number, `grip` was frozen for every plantable item:
+ * lowering a flower's grip buried the flower. It is not frozen now. **A pose
+ * that changes its `grip` states its old value as `root`** and the world does
+ * not move; the five entries carrying a `root` below are exactly that change,
+ * and the world templates were dumped before and after to prove it.
+ *
+ * The other half of the fault was lateral. `loadGeometry` centred X and Z on
+ * the *bounding box*, so the grip point was (bbox XZ centre, grip x height) —
+ * and for a model whose mass is not stacked over that centre there is no value
+ * of `grip` that lands on the material. Measured: a hollow pail was off the
+ * metal at every grip from 0.02 to 0.90, an L-shaped claw missed by 0.095, a
+ * pair of boots and a bunch of cherries put the fist in the gap between them,
+ * and a donut put it through the hole. On the body, where `pos` is dropped, that
+ * was **81 of 106 items in contact and a worst gap of 0.19 view units**. Those
+ * used to be patched with an off-axis `pos`, which is a first-person-only
+ * plaster over a model-space fault; the grip origin is measured off the
+ * material now (see `gripAnchorXZ`) and the plasters are gone.
+ *
+ * After: **106 of 106 in contact in both views** — first person mean 0.0034,
+ * worst 0.0050; on the body every item's grip point is inside its own material,
+ * mean 0.0000. Forty-four of the 106 anchors moved; the other sixty-two are
+ * bit-identical, because for them the bounding-box centre was already in the
+ * material and the measurement leaves it alone.
  */
 const ICON_ROT = [0.22, 0.62, 0];       // produce and anything unposed
 // Long-handled things, on the drawn diagonal. The yaw is deliberately shallow:
@@ -466,7 +497,7 @@ export const POSE = {
   // silhouette is actually recognisable in.
   bow: {
     file: 'bow_A_withString', pack: 'weapons', height: 0.78, grip: 0.5, fitMax: true,
-    rot: [0.12, 2.26, 1.40], pos: [-0.005, 0.008, 0.041], icon: [0.16, 0.40, 0.90],
+    rot: [0.12, 2.26, 1.40], pos: [-0.0008, 0.0012, 0.0062], icon: [0.16, 0.40, 0.90],
   },
   // **The arrow is the one model in this table whose long axis is Z**, and both
   // of its rotations were written as though it were Y, like the stick and the
@@ -488,11 +519,14 @@ export const POSE = {
   // bright blue there and steel grey at the tip), so it carries head-up, the way
   // you would hold one.
   //
-  // `grip` is inert here and is left at 0.5 to say so: it is a fraction of the
-  // model's *height*, and Y is this model's thinnest axis. What actually puts
-  // the fist at the middle of the shaft is `loadGeometry`'s unconditional
-  // centring of X and Z, which is correct for an arrow and is why nothing here
-  // needs to fight it.
+  // `grip` is nearly inert here and is left at 0.5 to say so: it is a fraction
+  // of the model's *height*, and Y is this model's thinnest axis. What puts the
+  // fist on the shaft is `loadGeometry`'s centring of X and Z — which used to be
+  // on the bounding box and is now on the material at that height. It moves the
+  // anchor 0.36 of the arrow's length along Z, because the bbox centre of an
+  // arrow whose height is its thinnest axis is not on the shaft at all: measured
+  // on the body, where there is no `pos` to hide behind, the old anchor was
+  // outside the material and the new one is inside it.
   arrow: {
     file: 'arrow_A', pack: 'weapons', height: 0.46, grip: 0.5, fitMax: true,
     rot: [-1.87, -0.28, -0.42], pos: [0.002, 0.009, -0.003], icon: [-1.52, 0.46, 0.11],
@@ -502,20 +536,21 @@ export const POSE = {
   // A torch you are holding is lit — it was only ever lit once planted, which
   // made carrying one through a cave look like carrying a stick.
   torch:  { file: 'torch',        pack: 'tools',   height: 0.50, grip: 0.24, rot: [-0.20, -0.35, 0.22], pos: [0.016, 0.047, -0.016],  icon: [0.08, 0.55, -0.26], glow: [0.78, 0.94] },
-  // **The one pose in this table a `grip` cannot rescue, and the clearest case
-  // of the model-space fault the note on `POSE` describes.** A pail is hollow,
-  // and `loadGeometry` puts the grip point at the bounding box's X/Z centre —
-  // which for this model is the empty air inside the bucket. Swept, the fist is
-  // off the metal at every grip from 0.02 to 0.90 and worst (0.166 view units)
-  // at the middle. 0.94 is the rim, the one height where the bbox centre and the
-  // material coincide, and it is also the true answer: a pail hangs from the
-  // hand by its rim. `pos` is then essentially zero, which is the point.
+  // **The pose that used to be pinned by a fault and is not any more.** A pail is
+  // hollow, and `loadGeometry` used to put the grip point at the bounding box's
+  // X/Z centre — which for this model is the empty air inside the bucket.
+  // Swept, the fist was off the metal at every grip from 0.02 to 0.90, worst
+  // 0.166 view units at the middle. 0.94 was the rim: the one height where the
+  // bbox centre and the material happened to coincide, so it was the only value
+  // that worked, and it cost the framing — gripped at the rim a pail hangs, and
+  // its top edge sat at NDC -0.83, most of it under the bottom of the screen.
   //
-  // The cost is framing and is not recoverable here: gripped at the rim the pail
-  // hangs, and its top edge sits at NDC -0.83 whatever `grip` is, so most of it
-  // is under the bottom of the screen. Fixing that wants `height` up or the
-  // model's own origin moved; neither was asked for.
-  bucket: { file: 'bucket_metal', pack: 'tools',   height: 0.36, grip: 0.94, rot: [0, -0.55, 0.14],     pos: [-0.002, 0, -0.002],  icon: [0.16, 0.60, 0] },
+  // The grip origin is measured off the material now (`gripAnchorXZ`), so any
+  // height lands on the wall of the pail and `grip` is free to be chosen for the
+  // picture instead. 0.55 is a hand round the middle of the pail, which puts the
+  // whole of it in frame. `root` holds the dropped and world copy exactly where
+  // the rim grip left it.
+  bucket: { file: 'bucket_metal', pack: 'tools',   height: 0.36, grip: 0.55, root: 0.94, rot: [0, -0.55, 0.14],     pos: [-0.002, 0, -0.002],  icon: [0.16, 0.60, 0] },
   // **The key is `rod` and not `fishing_rod`, and that is not a nickname.**
   // `poseKeyFor` sends anything carrying a `tool` block down `POSE[tool.kind]`
   // and never consults `BY_NAME` for it, so an entry under the item's name is
@@ -530,7 +565,7 @@ export const POSE = {
   // reel or it closes *on* it. Everything above that is pole, line and float,
   // which is the part that has to stay in frame; hence a `pos` lift in the
   // shovel's spirit rather than the bucket's.
-  rod:    { file: 'wam/fishing_rod', pack: 'wam',  height: 0.52, grip: 0.12, rot: [-0.18, -0.40, 0.26], pos: [0.003, 0.004, 0.039],  icon: [0.10, 0.36, -0.28] },
+  rod:    { file: 'wam/fishing_rod', pack: 'wam',  height: 0.52, grip: 0.12, rot: [-0.18, -0.40, 0.26], pos: [0.0022, 0.0029, 0.0283],  icon: [0.10, 0.36, -0.28] },
 
   // Food. Held small and close — an apple filling as much of the frame as a
   // pickaxe reads as a beach ball. `grip` sits at the middle of the fruit
@@ -577,14 +612,14 @@ export const POSE = {
   //
   // The icon is untouched: it is a different framing and has not been reported.
   fish:        food('fish', 0.30, false, { pos: [0.007, 0.044, -0.02], rot: [1.17, 0.33, -1.10], icon: [0.15, 1.34, 0.38] }),
-  cheese:      food('cheese', 0.24, false, { pos: [0.011, 0.073, -0.034] }),
+  cheese:      food('cheese', 0.24, false, { pos: [0.0104, 0.0693, -0.0323] }),
 
   cooked_fish: food('sushi-salmon', 0.26, true, { pos: [0.01, 0.065, -0.03] }),
-  cooked_egg:  food('egg-cooked', 0.26, true, { pos: [0.016, 0.105, -0.048] }),
+  cooked_egg:  food('egg-cooked', 0.26, true, { pos: [0.0088, 0.0578, -0.0264] }),
   salad:       food('salad', 0.26, true, { pos: [0.017, 0.11, -0.051] }),
   pancakes:    food('pancakes', 0.26, true, { pos: [0.013, 0.085, -0.039] }),
 
-  sandwich:    food('sandwich', 0.28, true, { pos: [0.02, 0.13, -0.06] }),
+  sandwich:    food('sandwich', 0.28, true, { pos: [0.013, 0.0845, -0.039] }),
   soup:        food('bowl-soup', 0.26, true, { pos: [0.016, 0.104, -0.048] }),
   pie:         food('pie', 0.30, true, { pos: [0.02, 0.129, -0.06] }),
   cake:        food('cake', 0.30, false, { pos: [0.018, 0.115, -0.053] }),
@@ -595,7 +630,7 @@ export const POSE = {
   burger:      food('burger-cheese', 0.26, false, { pos: [0.02, 0.13, -0.06] }),
 
   cookie:      food('cookie', 0.24, true, { pos: [0.015, 0.097, -0.045] }),
-  donut:       food('donut-sprinkles', 0.24, true, { pos: [0.016, 0.102, -0.047] }),
+  donut:       food('donut-sprinkles', 0.24, true, { pos: [0.0068, 0.0433, -0.02] }),
   ice_cream:   food('ice-cream', 0.28, false, { grip: 0.02, pos: [0.003, 0.016, -0.007] }),
   chocolate:   food('chocolate', 0.26, true, { pos: [0.014, 0.094, -0.043] }),
   muffin:      food('muffin', 0.24, false, { pos: [0.013, 0.083, -0.038] }),
@@ -626,8 +661,8 @@ export const POSE = {
   charcoal:   { file: 'wam/charcoal',   pack: 'wam', height: 0.22, grip: 0.08, rot: [0.10, -0.50, 0.55],   pos: [0.004, 0.022, -0.01], icon: [0.18, 0.62, -0.38] },
   raw_iron:   { file: 'wam/raw_iron',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.60, 0.12],   pos: [0.019, 0.104, -0.047], icon: [0.22, 0.66, 0] },
   raw_gold:   { file: 'wam/raw_gold',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.30, 0.12],   pos: [0.016, 0.089, -0.04], icon: [0.22, 0.30, 0] },
-  iron_ingot: { file: 'wam/iron_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30],   pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
-  gold_ingot: { file: 'wam/gold_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30],   pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
+  iron_ingot: { file: 'wam/iron_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30],   pos: [0.0009, 0.0052, -0.0023], icon: [0.50, 0.60, 1.30] },
+  gold_ingot: { file: 'wam/gold_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30],   pos: [0.0009, 0.0052, -0.0023], icon: [0.50, 0.60, 1.30] },
   crystal:    { file: 'wam/crystal',    pack: 'wam', height: 0.26, grip: 0.45, rot: [0.06, -0.60, 0.28],   pos: [0.009, 0.069, -0.022], icon: [0.10, 0.55, -0.20] },
   flint:      { file: 'wam/flint',      pack: 'wam', height: 0.19, grip: 0.18, rot: [0.10, -0.75, 0.34],   pos: [0.008, 0.044, -0.02], icon: [0.06, 0.60, -0.24] },
   wheat:      { file: 'wam/wheat',      pack: 'wam', height: 0.36, grip: 0.42, rot: [-0.14, -0.35, 0.34],  pos: [0.005, 0.071, -0.004], icon: [0.06, 0.20, -0.30] },
@@ -639,8 +674,8 @@ export const POSE = {
   // from it. At 0.92 the pelt was 54° out of the screen plane and drawn at about
   // three fifths of the length it has. Reduced until it reads as a laid-out
   // skin; the roll, which is the part that was chosen, is untouched.
-  hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.50, 1.30],   pos: [0.012, 0.067, -0.03], icon: [0.24, 0.40, 1.32] },
-  feather:    { file: 'wam/feather',    pack: 'wam', height: 0.32, grip: 0.38, rot: [-0.16, -0.40, 0.36],  pos: [0.005, 0.06, -0.009], icon: [0.06, 0.30, -0.38] },
+  hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.50, 1.30],   pos: [0.0114, 0.0636, -0.0285], icon: [0.24, 0.40, 1.32] },
+  feather:    { file: 'wam/feather',    pack: 'wam', height: 0.32, grip: 0.38, rot: [-0.16, -0.40, 0.36],  pos: [0.0031, 0.0375, -0.0056], icon: [0.06, 0.30, -0.38] },
 
   // The rest of the ladder, on the same three family poses. Ores and the
   // sulfur crust take the lump pose; the cast bars take the ingot pose, which
@@ -649,8 +684,8 @@ export const POSE = {
   raw_copper:   { file: 'wam/raw_copper',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.45, 0.12], pos: [0.017, 0.094, -0.043], icon: [0.22, 0.52, 0] },
   raw_silver:   { file: 'wam/raw_silver',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.60, 0.12], pos: [0.019, 0.104, -0.047], icon: [0.22, 0.66, 0] },
   sulfur:       { file: 'wam/sulfur',       pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.50, 0.12], pos: [0.016, 0.089, -0.041], icon: [0.22, 0.40, 0] },
-  copper_ingot: { file: 'wam/copper_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30], pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
-  silver_ingot: { file: 'wam/silver_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30], pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
+  copper_ingot: { file: 'wam/copper_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30], pos: [0.0009, 0.0052, -0.0023], icon: [0.50, 0.60, 1.30] },
+  silver_ingot: { file: 'wam/silver_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30], pos: [0.0009, 0.0052, -0.0023], icon: [0.50, 0.60, 1.30] },
 
   // Gems, on the crystal's pose: held a touch higher than a lump and turned
   // less far off the camera, because what a gem has that a lump does not is
@@ -688,7 +723,7 @@ export const POSE = {
   // the drawn diagonal is what the other tall, thin items use. `grip` is low
   // on purpose: you carry a seedling by its stem, so the fist closes under the
   // foliage rather than through it.
-  sapling:    { file: 'wam/sapling',    pack: 'wam', height: 0.34, grip: 0.3, rot: [-0.12, -0.35, 0.30],  pos: [0.005, 0.036, -0.005], icon: [0.08, 0.30, -0.18] },
+  sapling:    { file: 'wam/sapling',    pack: 'wam', height: 0.34, grip: 0.18, root: 0.3, rot: [-0.12, -0.35, 0.30],  pos: [0.0036, 0.0261, -0.0036], icon: [0.08, 0.30, -0.18] },
   // The crab claw is modelled as an L — arm up, pincer reaching along +Z — and
   // everything that makes it read as a claw lives in the plane of that reach.
   // Both poses are therefore near a quarter turn in yaw, which is what puts the
@@ -696,13 +731,13 @@ export const POSE = {
   // fish's problem and takes the fish's answer. `grip` is low because the fist
   // closes on the arm, not on the claw: at 0.5 it would have gripped the palm
   // and swung the whole thing around the pincer.
-  // `pos` is off-axis here and that is the model, not a taste. The claw is an L,
-  // so its bounding box's X/Z centre is in the crook between the arm and the
-  // pincer and no `grip` puts the fist on either: swept, the closest the fist
-  // gets is 0.095 view units at any grip below 0.30. The offset below is the
-  // shortest move that lands it on the arm, and it keeps `grip` at 0.24 for the
-  // reason written above — the fist closes on the arm, not on the palm.
-  crab_claw:  { file: 'wam/crab_claw',  pack: 'wam', height: 0.30, grip: 0.24, rot: [0.06, -1.30, 0.24],  pos: [-0.054, -0.029, 0.003], icon: [0.10, 1.45, 0.34] },
+  // The claw is an L, so its bounding box's X/Z centre is in the crook between
+  // the arm and the pincer and no `grip` used to put the fist on either: swept,
+  // the closest it got was 0.095 view units at any grip below 0.30. That is what
+  // the off-axis `pos` here used to be patching, first person only. The grip
+  // origin is measured off the material now and lands in the middle of the arm,
+  // so `pos` is a plain lift again and the body grips the claw too.
+  crab_claw:  { file: 'wam/crab_claw',  pack: 'wam', height: 0.30, grip: 0.24, rot: [0.06, -1.30, 0.24],  pos: [0.0061, 0.0481, -0.0131], icon: [0.10, 1.45, 0.34] },
 
   // The drumstick, and the last two foods that were still hand-drawn sprites
   // in a line-up of twenty-seven modelled ones. `meat` and `cooked_meat` moved
@@ -757,9 +792,9 @@ export const POSE = {
   //    of the way over — the `flat` treatment the food kit's plates and pizzas
   //    need — brings the face round. Not all the way: past about 0.6 the stalk
   //    disappears behind the head and it stops reading as a flower at all.
-  flower_red:  { file: 'wam/flower_red',  pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.10, -0.40, 0.26], pos: [0.011, 0.066, -0.011], icon: [0.12, 0.34, -0.18] },
-  flower_blue: { file: 'wam/flower_blue', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.02, -1.25, 0.26],  pos: [-0.01, -0.018, 0.021], icon: [0.14, 1.32, -0.12] },
-  flower_gold: { file: 'wam/flower_gold', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.24, -0.40, 0.22],  pos: [0.01, 0.063, -0.01], icon: [0.52, 0.32, -0.14] },
+  flower_red:  { file: 'wam/flower_red',  pack: 'wam', height: 0.30, grip: 0.16, root: 0.28, rot: [-0.10, -0.40, 0.26], pos: [0.003, 0.0182, -0.003], icon: [0.12, 0.34, -0.18] },
+  flower_blue: { file: 'wam/flower_blue', pack: 'wam', height: 0.30, grip: 0.16, root: 0.28, rot: [0.02, -1.25, 0.26],  pos: [0.0023, 0.0142, -0.0023], icon: [0.14, 1.32, -0.12] },
+  flower_gold: { file: 'wam/flower_gold', pack: 'wam', height: 0.30, grip: 0.16, root: 0.28, rot: [0.24, -0.40, 0.22],  pos: [0.002, 0.0126, -0.002], icon: [0.52, 0.32, -0.14] },
 
   // The glowcap, on the flowers' pose with two departures.
   //
@@ -778,7 +813,7 @@ export const POSE = {
   // is the block's own `lightColor` ([0.6, 0.85, 0.7] in `world/Blocks.js`)
   // scaled back to about seven tenths, which is bright enough to read as lit in
   // a dark cave without washing the mint out of the gills to white.
-  mushroom:    { file: 'wam/mushroom',    pack: 'wam', height: 0.26, grip: 0.38, rot: [0.02, -0.45, 0.22],  pos: [0.006, 0.03, -0.012], icon: [0.04, 0.42, -0.16],
+  mushroom:    { file: 'wam/mushroom',    pack: 'wam', height: 0.26, grip: 0.22, root: 0.38, rot: [0.02, -0.45, 0.22],  pos: [0.006, 0.03, -0.012], icon: [0.04, 0.42, -0.16],
                  glowMatch: { hex: '#b6efd0', color: [0.42, 0.60, 0.49] } },
 
   // --- the reef -------------------------------------------------------------
@@ -809,8 +844,8 @@ export const POSE = {
   coral_fan:    { file: 'wam/coral_fan',    pack: 'wam', height: 0.30, grip: 0.24, rot: [0.02, -1.35, 0.22],  pos: [0.007, 0.04, -0.007], icon: [0.12, 1.40, -0.10] },
   coral_brain:  { file: 'wam/coral_brain',  pack: 'wam', height: 0.24, grip: 0.42, rot: [0.10, -0.45, 0.16],  pos: [0.004, 0.019, -0.007], icon: [0.22, 0.40, -0.10] },
   coral_dead:   { file: 'wam/coral_dead',   pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.75, 0.24], pos: [0.015, 0.091, -0.015], icon: [0.10, 0.70, -0.18] },
-  kelp:         { file: 'wam/kelp',         pack: 'wam', height: 0.34, grip: 0.3, rot: [-0.12, -0.40, 0.28], pos: [0.002, 0.027, -0.006], icon: [0.08, 0.36, -0.20] },
-  sea_grass:    { file: 'wam/sea_grass',    pack: 'wam', height: 0.24, grip: 0.3, rot: [-0.06, -0.50, 0.26], pos: [0.046, 0.06, 0.009], icon: [0.10, 0.46, -0.16] },
+  kelp:         { file: 'wam/kelp',         pack: 'wam', height: 0.34, grip: 0.3, rot: [-0.12, -0.40, 0.28], pos: [0.0008, 0.0108, -0.0024], icon: [0.08, 0.36, -0.20] },
+  sea_grass:    { file: 'wam/sea_grass',    pack: 'wam', height: 0.24, grip: 0.3, rot: [-0.06, -0.50, 0.26], pos: [0.0006, 0.0081, -0.0018], icon: [0.10, 0.46, -0.16] },
   sea_sponge:   { file: 'wam/sea_sponge',   pack: 'wam', height: 0.26, grip: 0.4, rot: [0.06, -0.50, 0.18],  pos: [0.02, 0.11, -0.04], icon: [0.16, 0.46, -0.12] },
   // The clam is the one that has to show its inside. Its mantle — the bright
   // strip between the valves and the only saturated thing on the model — faces
@@ -834,7 +869,7 @@ export const POSE = {
   // specks past the rim. Both rotations pitch it forward hard, and the icon
   // nearly all the way, which is the food kit's `flat` treatment used for a
   // block — the crown, seen from above, is the thing worth putting in a slot.
-  sea_lettuce:   { file: 'wam/sea_lettuce',   pack: 'wam', height: 0.26, grip: 0.3, rot: [0.10, -1.10, 0.24], pos: [0.038, 0.053, 0.014], icon: [0.42, 1.15, -0.14] },
+  sea_lettuce:   { file: 'wam/sea_lettuce',   pack: 'wam', height: 0.26, grip: 0.3, rot: [0.10, -1.10, 0.24], pos: [0.0024, 0.014, -0.0024], icon: [0.42, 1.15, -0.14] },
   sea_grape:     { file: 'wam/sea_grape',     pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.06, -0.50, 0.26], pos: [0.007, 0.04, -0.007], icon: [0.10, 0.44, -0.18] },
   abyss_anemone: { file: 'wam/abyss_anemone', pack: 'wam', height: 0.24, grip: 0.36, rot: [0.44, -0.40, 0.16],  pos: [0.005, 0.025, -0.01], icon: [0.70, 0.34, -0.08] },
   // Dried kelp is item-only and is a stack of flat sheets, so it is held and
@@ -858,33 +893,33 @@ export const POSE = {
   // head. These take the branching coral's pose almost unchanged: a shallow
   // yaw, gripped low on the stem, because turning one of these far off square
   // only ever hides one stalk behind another.
-  thornbrush:   { file: 'wam/thornbrush',   pack: 'wam', height: 0.28, grip: 0.3, rot: [-0.08, -0.55, 0.24], pos: [0.015, 0.095, -0.007], icon: [0.12, 0.50, -0.18] },
-  golden_grass: { file: 'wam/golden_grass', pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.42, 0.28], pos: [-0.001, 0.018, -0.007], icon: [0.10, 0.38, -0.20] },
+  thornbrush:   { file: 'wam/thornbrush',   pack: 'wam', height: 0.28, grip: 0.3, rot: [-0.08, -0.55, 0.24], pos: [0.0146, 0.0926, -0.0068], icon: [0.12, 0.50, -0.18] },
+  golden_grass: { file: 'wam/golden_grass', pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.42, 0.28], pos: [-0.0004, 0.0067, -0.0026], icon: [0.10, 0.38, -0.20] },
   firebloom:    { file: 'wam/firebloom',    pack: 'wam', height: 0.34, grip: 0.26, rot: [-0.10, -0.40, 0.26], pos: [0, 0, 0], icon: [0.08, 0.34, -0.20] },
   marram:       { file: 'wam/marram',       pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.46, 0.28], pos: [0.01, 0.068, -0.01], icon: [0.10, 0.40, -0.20] },
-  lavender:     { file: 'wam/lavender',     pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [-0.002, 0.054, 0.007], icon: [0.10, 0.38, -0.18] },
-  cotton_grass: { file: 'wam/cotton_grass', pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [0.047, 0.072, 0.011], icon: [0.10, 0.38, -0.18] },
+  lavender:     { file: 'wam/lavender',     pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [-0.0003, 0.0067, 0.0009], icon: [0.10, 0.38, -0.18] },
+  cotton_grass: { file: 'wam/cotton_grass', pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [0.0085, 0.0578, -0.0085], icon: [0.10, 0.38, -0.18] },
 
   // Clumps read from a three-quarter view, the flowers' treatment: enough yaw
   // that the clump has depth, not so much that the leader hides the buds.
-  aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.26, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.008, 0.053, -0.038], icon: [0.18, 0.46, -0.14] },
-  snowbell:     { file: 'wam/snowbell',     pack: 'wam', height: 0.26, grip: 0.3, rot: [0.02, -0.45, 0.24],  pos: [0.004, 0.022, -0.004], icon: [0.10, 0.42, -0.16] },
+  aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.26, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.0022, 0.0146, -0.0105], icon: [0.18, 0.46, -0.14] },
+  snowbell:     { file: 'wam/snowbell',     pack: 'wam', height: 0.26, grip: 0.3, rot: [0.02, -0.45, 0.24],  pos: [0.002, 0.011, -0.002], icon: [0.10, 0.42, -0.16] },
   lingonberry:  { file: 'wam/lingonberry',  pack: 'wam', height: 0.26, grip: 0.36, rot: [1.04, 0.66, 0.18],   pos: [0.002, -0.01, 0.01], icon: [0.16, 0.44, -0.14] },
-  fern:         { file: 'wam/fern',         pack: 'wam', height: 0.28, grip: 0.3, rot: [-0.06, -0.52, 0.26], pos: [0.005, 0.027, -0.005], icon: [0.12, 0.48, -0.16] },
+  fern:         { file: 'wam/fern',         pack: 'wam', height: 0.28, grip: 0.3, rot: [-0.06, -0.52, 0.26], pos: [0.002, 0.0108, -0.002], icon: [0.12, 0.48, -0.16] },
 
   // The two that are read from *above*, the sea lettuce problem: a mat seen
   // square-on from the side is a line. Both rotations pitch them well forward
   // and the icons nearly onto their backs, because a trefoil and a star are
   // shapes that exist only in plan view.
-  clover:       { file: 'wam/clover',       pack: 'wam', height: 0.24, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.015, 0.018, -0.005], icon: [0.78, 0.46, -0.10] },
-  alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.047, 0.058, -0.006], icon: [0.80, 0.42, -0.10] },
+  clover:       { file: 'wam/clover',       pack: 'wam', height: 0.24, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.0064, 0.0076, -0.0021], icon: [0.78, 0.46, -0.10] },
+  alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.0026, 0.0031, -0.0009], icon: [0.80, 0.42, -0.10] },
 
   // Underground. The mushroom's own pose for the toadstools — a cap is read
   // from slightly below so the overhang shows — and the clam's steeper one for
   // the shelf fungus, whose plates only separate when you are not level with
   // them. The crystal cluster takes the gem kit's pose: gripped near the middle
   // of the matrix, turned so the points fan across the slot rather than at it.
-  cave_mushroom:   { file: 'wam/cave_mushroom',   pack: 'wam', height: 0.24, grip: 0.38, rot: [0.02, -0.45, 0.22], pos: [0.027, -0.084, -0.033], icon: [0.04, 0.42, -0.16] },
+  cave_mushroom:   { file: 'wam/cave_mushroom',   pack: 'wam', height: 0.24, grip: 0.38, rot: [0.02, -0.45, 0.22], pos: [0.006, 0.03, -0.012], icon: [0.04, 0.42, -0.16] },
   shelf_fungus:    { file: 'wam/shelf_fungus',    pack: 'wam', height: 0.24, grip: 0.38, rot: [0.34, -0.44, 0.18], pos: [0.022, 0.092, -0.037], icon: [0.52, 0.40, -0.12] },
   crystal_cluster: { file: 'wam/crystal_cluster', pack: 'wam', height: 0.26, grip: 0.4, rot: [0.10, -0.55, 0.20], pos: [0.02, 0.11, -0.04], icon: [0.18, 0.52, -0.14] },
 
@@ -1356,6 +1391,118 @@ function loadAtlas(pack) {
  * flat tier colour on the metal and the atlas on the wood, with no per-tier copy
  * of the vertex data.
  */
+/**
+ * Where the fist closes on a model, in the XZ plane, at one height.
+ *
+ * `loadGeometry` puts the geometry's origin on the **bounding box**'s X and Z
+ * centre, and for most models that is also a point inside the material — an
+ * apple, an ingot, a torch shaft. For a model whose mass is not stacked over
+ * that centre it is a point in mid-air, and then there is no value of `grip`
+ * that lands the fist on the object: measured, a hollow pail was off the metal
+ * at every grip from 0.02 to 0.90 (worst 0.166 at the middle), an L-shaped claw
+ * missed by 0.095 at any grip below 0.30, and the rosettes whose stems miss the
+ * middle missed by their own stem spacing. That is a fact about the model space,
+ * not about the pose, and it is why those entries used to carry an off-axis
+ * `pos` — a first-person-only patch, since `Character._wearPose` drops `pos`.
+ *
+ * So the anchor is measured off the geometry instead. Cross-section at the grip
+ * height; if the bbox centre is inside it, keep it — which is what leaves the
+ * ninety-odd models that were already right bit-identical — and if it is not,
+ * step out to the nearest wall and stop in the **middle** of it rather than on
+ * its surface, so that the first-person `pos` still has somewhere to move
+ * without leaving the material.
+ *
+ * Cheap enough to do at load: one pass over the triangles for the section, one
+ * pass over the section for the ray. A WAM model is ~200 triangles.
+ *
+ * @param {THREE.BufferGeometry} geo already recentred and normalised, so the
+ *   bounding box's X and Z centre is the origin
+ * @param {number} y the grip height in that same frame
+ * @returns {[number, number]|null} x and z, or null when nothing is there
+ */
+function gripAnchorXZ(geo, y) {
+  const pos = geo.getAttribute('position');
+  const idx = geo.getIndex();
+  const count = idx ? idx.count : pos.count;
+  const at = (i) => (idx ? idx.getX(i) : i);
+  // The section, as 2D segments in (x, z).
+  const seg = [];
+  const px = [0, 0, 0], py = [0, 0, 0], pz = [0, 0, 0];
+  for (let t = 0; t < count; t += 3) {
+    for (let c = 0; c < 3; c++) {
+      const v = at(t + c);
+      px[c] = pos.getX(v); py[c] = pos.getY(v); pz[c] = pos.getZ(v);
+    }
+    // Every edge that straddles the plane contributes one crossing point; a
+    // triangle cut by a plane gives exactly two of them.
+    const hit = [];
+    for (let e = 0; e < 3; e++) {
+      const a = e, b = (e + 1) % 3;
+      const ya = py[a], yb = py[b];
+      if ((ya < y && yb < y) || (ya > y && yb > y) || ya === yb) continue;
+      const f = (y - ya) / (yb - ya);
+      if (f < 0 || f > 1) continue;
+      hit.push(px[a] + (px[b] - px[a]) * f, pz[a] + (pz[b] - pz[a]) * f);
+    }
+    if (hit.length >= 4) seg.push(hit[0], hit[1], hit[2], hit[3]);
+  }
+  if (!seg.length) return null;
+
+  // Crossings of the ray from the origin along `d`, as ray parameters.
+  //
+  // Franklin's rule, and it has to be: the section comes out of the triangles as
+  // loose segments in whatever order each triangle wound, so the two segments
+  // that meet at a corner of the outline may both call that corner their start
+  // or both call it their end. A half-open test on the segment's own parameter
+  // then counts that corner twice or not at all, and the parity — which is the
+  // whole answer — flips. Testing the *sign* of each endpoint across the ray
+  // instead is orientation-free: a shared corner has one sign, so exactly one of
+  // the two segments straddles. Caught by an ingot reading "outside" its own
+  // middle, which is where a solid trapezoid's centre certainly is.
+  const crossings = (dx, dz) => {
+    const ts = [];
+    for (let i = 0; i < seg.length; i += 4) {
+      const ax = seg[i], az = seg[i + 1], bx = seg[i + 2], bz = seg[i + 3];
+      const pa = dx * az - dz * ax;              // signed distance across the ray
+      const pb = dx * bz - dz * bx;
+      if ((pa > 0) === (pb > 0)) continue;
+      const f = pa / (pa - pb);
+      const t = (ax + (bx - ax) * f) * dx + (az + (bz - az) * f) * dz;
+      if (t > 1e-9) ts.push(t);
+    }
+    return ts.sort((a, b) => a - b);
+  };
+
+  // Odd number of crossings ahead of it means the origin is already inside the
+  // material, and then nothing moves: this is the ninety-odd models the old
+  // bounding-box centre was always right for.
+  if (crossings(1, 0).length % 2 === 1) return [0, 0];
+
+  // Outside. Walk to the nearest wall...
+  let bestD = Infinity, bx = 0, bz = 0;
+  for (let i = 0; i < seg.length; i += 4) {
+    const ax = seg[i], az = seg[i + 1], cx = seg[i + 2], cz = seg[i + 3];
+    const ex = cx - ax, ez = cz - az;
+    const len2 = ex * ex + ez * ez;
+    const u = len2 < 1e-16 ? 0 : Math.max(0, Math.min(1, -(ax * ex + az * ez) / len2));
+    const qx = ax + ex * u, qz = az + ez * u;
+    const d = qx * qx + qz * qz;
+    if (d < bestD) { bestD = d; bx = qx; bz = qz; }
+  }
+  const len = Math.hypot(bx, bz);
+  if (!(len > 1e-9)) return [0, 0];
+  const dx = bx / len, dz = bz / len;
+  // ...and stop halfway through it. The first interval of the ray that is
+  // inside the material starts at the wall we just found and ends where the ray
+  // leaves it again, so its midpoint is the middle of the nearest limb: the
+  // middle of a pail's wall, the middle of a claw's arm, the middle of the stem
+  // nearest the centre of a rosette.
+  const ts = crossings(dx, dz);
+  if (ts.length < 2) return [bx, bz];
+  const mid = (ts[0] + ts[1]) / 2;
+  return [dx * mid, dz * mid];
+}
+
 function loadGeometry(key) {
   let p = modelCache.get(key);
   if (p) return p;
@@ -1405,11 +1552,27 @@ function loadGeometry(key) {
       ? Math.max(bb.max.x - bb.min.x, h, bb.max.z - bb.min.z)
       : h;
     const s = 1 / Math.max(1e-4, span);
-    geo.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + pose.grip * h), -(bb.min.z + bb.max.z) / 2);
+    // **The geometry's own origin is the WORLD origin, and only that.** It is
+    // the point `BlockModels.sync` stands on the floor of a cell, and it is
+    // therefore not free: move it and every planted flower, coral and fungus in
+    // the game moves with it. `root` is that height as a fraction, and it
+    // defaults to `grip` because that is where the shipped world placement is —
+    // the two used to be one number and this is the seam between them. A pose
+    // that changes its `grip` must state its `root` to hold the world still.
+    const root = pose.root ?? pose.grip;
+    geo.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + root * h), -(bb.min.z + bb.max.z) / 2);
     geo.scale(s, s, s);
 
     if (PACKS[pose.pack].tint) splitMetalGroup(geo, atlas);
-    return { geometry: geo, pack: pose.pack };
+
+    // ...and the grip origin is the other one: where the fist closes. Y is the
+    // authored `grip`, measured from the same place `root` is; X and Z are
+    // measured off the material at that height rather than taken from the
+    // bounding box. See `gripAnchorXZ`.
+    const gy = (pose.grip - root) * h * s;
+    const xz = gripAnchorXZ(geo, gy) ?? [0, 0];
+    const grip = [xz[0], gy, xz[1]];
+    return { geometry: geo, grip, pack: pose.pack, held: null };
   });
   modelCache.set(key, p);
   return p;
@@ -1559,8 +1722,8 @@ export function glowPalette(material, { hex, color, tol = 0.22, lift = [0.10, 0.
  * Per key and not per pack: the torch shares the `tools` atlas with the pickaxe
  * and the bucket, and neither of those has a burning end.
  */
-function glowMaterial(key, geo, src) {
-  const id = `glow|${key}`;
+function glowMaterial(id0, key, geo, src) {
+  const id = `glow|${id0}`;
   let m = matCache.get(id);
   if (m) return m;
   const pose = POSE[key];
@@ -1657,24 +1820,58 @@ function metalMaterial(tier, tintHex) {
 }
 
 /**
- * The posed mesh for one model at one tier. The geometry is shared across all
- * four tiers — only the material array differs — so a full set of tools costs
- * seven geometries and six materials in total.
+ * The same geometry with its origin moved from the world root to the grip.
+ *
+ * Built on demand and cached on the load record, so a model that is only ever
+ * planted (the thornbrush, the clam, the crystal cluster) never pays for it,
+ * and one that is only ever held never builds a second copy either — most
+ * models want exactly one of the two. Where the grip and the root coincide, and
+ * they do for everything whose material sits over its own bounding-box centre
+ * at the grip height, this hands back the one geometry rather than a copy of
+ * it: measured across the table, that is the large majority.
  */
-function buildMesh(spec, base, atlas) {
-  const id = meshKey(spec);
+function heldGeometry(base) {
+  if (base.held) return base.held;
+  const [x, y, z] = base.grip;
+  base.held = (Math.abs(x) + Math.abs(y) + Math.abs(z)) < 1e-6
+    ? base.geometry
+    : base.geometry.clone().translate(-x, -y, -z);
+  return base.held;
+}
+
+/**
+ * The posed mesh for one model at one tier, in one of the two origins.
+ *
+ * The geometry is shared across all four tiers — only the material array
+ * differs — so a full set of tools costs seven geometries and six materials in
+ * total.
+ *
+ * `held` picks the origin. **True is the fist's and false is the ground's**, and
+ * they are not the same point: see `loadGeometry`. The pose's rotation, scale
+ * and `pos` are the held presentation and go on either way, because
+ * `worldModel` and `iconModel` both reset them on the clone they hand out.
+ */
+function buildMesh(spec, base, atlas, held) {
+  const id = `${meshKey(spec)}|${held ? 'h' : 'w'}`;
   let mesh = meshCache.get(id);
   if (mesh) return mesh;
   const pose0 = POSE[spec.key];
+  const geo = held ? heldGeometry(base) : base.geometry;
   const pack = atlasMaterial(base.pack, atlas.texture);
   const skin = pose0.tintAll
     ? tintedMaterial(base.pack, spec.tint, spec.tier)
     : pose0.glow || pose0.glowMatch
-    ? glowMaterial(spec.key, base.geometry, pack)
+    // Keyed by the *geometry* and not by the variant: `glowTop` is a ramp on the
+    // geometry's own `position.y`, so a model whose grip and root differ needs
+    // one material per copy — and a model where they agree, which is the usual
+    // case and includes the torch, keeps the single shared material that lets
+    // the one in your fist, the one in the toolbar and the three hundred on the
+    // walls compile one program between them.
+    ? glowMaterial(geo === base.geometry ? spec.key : `${spec.key}|h`, spec.key, geo, pack)
     : pack;
   const split = PACKS[base.pack].tint && spec.tier > 0;
-  mesh = new THREE.Mesh(base.geometry, split ? [metalMaterial(spec.tier, spec.tint), skin] : skin);
-  if (spec.fill) mesh.add(fillDisc(base.geometry, spec.fill));
+  mesh = new THREE.Mesh(geo, split ? [metalMaterial(spec.tier, spec.tint), skin] : skin);
+  if (spec.fill) mesh.add(fillDisc(geo, spec.fill));
   const pose = POSE[spec.key];
   mesh.scale.setScalar(pose.height);
   mesh.rotation.set(pose.rot[0], pose.rot[1], pose.rot[2]);
@@ -1729,7 +1926,7 @@ function fillDisc(geo, hex) {
  */
 export function heldModel(itemId, onReady) {
   return requestMesh(itemId, onReady ? (mesh) => onReady(mesh.clone()) : null,
-    (m) => m.clone());
+    (m) => m.clone(), true);
 }
 
 /**
@@ -1758,7 +1955,13 @@ export function iconModel(itemId, onReady) {
     m.rotation.set(rot[0], rot[1], rot[2]);
     return m;
   };
-  return requestMesh(itemId, onReady ? (tmpl) => onReady(pose(tmpl)) : null, pose);
+  // The icon takes the *grip* origin, like the fist, and not because the icon
+  // cares where the grip is: `ModelIconPainter.paint` frames on the mesh's own
+  // bounding box, so the origin cannot move an icon at all. Sharing the held
+  // template is simply one fewer geometry, and it keeps the promise this file is
+  // built on — what you see in your fist and what you see in the grid are the
+  // same object.
+  return requestMesh(itemId, onReady ? (tmpl) => onReady(pose(tmpl)) : null, pose, true);
 }
 
 /**
@@ -1768,16 +1971,18 @@ export function iconModel(itemId, onReady) {
  * @param {((mesh: THREE.Mesh) => void)|null} onReady called once, late, with
  *   whatever `wrap` produced — the callers keep their fallback art until then.
  * @param {(mesh: THREE.Mesh) => THREE.Mesh} [wrap]
+ * @param {boolean} [held] which origin the template is built around — the fist's
+ *   or the ground's. See `buildMesh`.
  */
-function requestMesh(itemId, onReady, wrap = (m) => m) {
+function requestMesh(itemId, onReady, wrap = (m) => m, held = false) {
   const spec = modelSpecFor(itemId);
   if (!spec) return null;
-  const have = meshCache.get(meshKey(spec));
+  const have = meshCache.get(`${meshKey(spec)}|${held ? 'h' : 'w'}`);
   if (have) return wrap(have);
   if (failed.has(spec.key)) return null;
   Promise.all([loadGeometry(spec.key), loadAtlas(POSE[spec.key].pack)])
     .then(([base, atlas]) => {
-      const mesh = buildMesh(spec, base, atlas);
+      const mesh = buildMesh(spec, base, atlas, held);
       if (onReady) onReady(mesh);
     })
     .catch((err) => {
@@ -1798,6 +2003,12 @@ function requestMesh(itemId, onReady, wrap = (m) => m) {
  * that is a fixed distance away. A torch planted in the ground is seen from
  * every side and from above, so it wants none of that — just the model, the
  * right way up.
+ *
+ * It also wants the other origin. `BlockModels.sync` puts the geometry's origin
+ * on the floor of the cell, so what that origin is *is* where a planted flower
+ * stands, laterally and vertically; the fist's grip point is a different point
+ * and moving one used to move the other. This is the whole reason for the two
+ * templates. See `loadGeometry`.
  */
 export function worldModel(itemId, onReady) {
   const pose = (tmpl) => {
@@ -1808,6 +2019,57 @@ export function worldModel(itemId, onReady) {
     return m;
   };
   return requestMesh(itemId, onReady ? (tmpl) => onReady(pose(tmpl)) : null, pose);
+}
+
+const tipCache = new Map();   // pose key -> [x, y, z] in the held template's space
+
+/**
+ * The far end of a held model, in the held template's own space.
+ *
+ * There is one thing in the game that has to be drawn from a point *on* an item
+ * rather than from the item: the fishing line, which runs from the rod's tip to
+ * a float ten feet out in the world. It used to start from a constant —
+ * `(0.30, -0.24, -0.55)` in camera space — and measured against the real chain
+ * that constant is **0.69 view units** from the tip, against a rod that is only
+ * 0.81 units long in hand: the line left from the lower right of the screen
+ * while the rod tip was up in the top right corner. The number was never wrong
+ * so much as never checked, which is the same fault as the grips.
+ *
+ * "The far end" is the model's own +Y extreme, averaged over the ring of
+ * vertices within 3% of it so that a single stray corner cannot define it. For
+ * every model in this table +Y is the end away from the hand — that is what
+ * `grip` measures along — so this needs no per-pose authoring. Measured on
+ * `wam/fishing_rod`, it lands on the tip ring the `.wam` source calls
+ * `shaft2 at=1.00`, which is where the file hangs its own modelled cord (0.010
+ * model units lower, 0.013 view units once posed).
+ *
+ * Null until the model has loaded; the caller keeps its fallback.
+ *
+ * @param {number} itemId
+ * @param {THREE.Vector3} out
+ * @returns {THREE.Vector3|null}
+ */
+export function tipPoint(itemId, out) {
+  const spec = modelSpecFor(itemId);
+  if (!spec) return null;
+  const mesh = meshCache.get(`${meshKey(spec)}|h`);
+  if (!mesh) return null;
+  let p = tipCache.get(spec.key);
+  if (!p) {
+    const geo = mesh.geometry;
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const cut = bb.max.y - (bb.max.y - bb.min.y) * 0.03;
+    const pos = geo.getAttribute('position');
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) < cut) continue;
+      sx += pos.getX(i); sy += pos.getY(i); sz += pos.getZ(i); n++;
+    }
+    p = n ? [sx / n, sy / n, sz / n] : [0, bb.max.y, 0];
+    tipCache.set(spec.key, p);
+  }
+  return out.set(p[0], p[1], p[2]);
 }
 
 /** True when this item has (or is expected to have) a 3D model at all. */

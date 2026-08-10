@@ -1047,6 +1047,18 @@ export class PlayerCharacter {
    *   carrying it over would push the item off the fist here. With the origin
    *   already at the grip and the anchor already at the hand, zero is correct.
    *
+   *   That sentence used to be half true, and it is the half that made this the
+   *   worse of the two views. The grip origin was (bounding-box XZ centre, grip
+   *   x height), which for a hollow pail, an L-shaped claw, a pair of boots, a
+   *   bunch of cherries or a donut is a point in mid-air — and first person hid
+   *   it behind an off-axis `pos` that this line drops. Measured as the distance
+   *   from the fist to the nearest point of the item's surface, **81 of 106
+   *   items were in contact here against 105 of 106 in first person, and the
+   *   worst gap was 0.19 view units**: a claw held a fifth of its own length off
+   *   the hand. `ItemModels.gripAnchorXZ` measures the origin off the material
+   *   now, so zero really is correct, and it is 106 of 106 with every item's
+   *   grip point inside its own material.
+   *
    * Scale keeps the relative sizing the pose table encodes, rather than fitting
    * every item to one length the way the generic path does: an apple is meant
    * to be smaller in the hand than a pickaxe, and normalising both to the same

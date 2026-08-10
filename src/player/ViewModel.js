@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, RENDER_TYPE, R_CROSS } from '../world/Blocks.js';
 import { createItemBlockMaterial } from '../render/VoxelMaterial.js';
-import { heldModel, hasModel, worldModel } from '../render/ItemModels.js';
+import { heldModel, hasModel, worldModel, tipPoint } from '../render/ItemModels.js';
 import * as MobModels from '../game/MobModels.js';
 import { characterUrl, DEFAULT_CHARACTER } from './Character.js';
 
@@ -662,6 +662,8 @@ const _swingR = new THREE.Vector3();
 // Scratch for `_poseDraw`, which runs every frame of a draw and must not
 // allocate. `_mA`..`_mC` are matrices in view space, `_pA`/`_qA`/`_sA` the
 // pieces a transform decomposes into.
+const _tip = new THREE.Vector3();
+const _mT = new THREE.Matrix4();
 const _mA = new THREE.Matrix4();
 const _mB = new THREE.Matrix4();
 const _mC = new THREE.Matrix4();
@@ -1271,6 +1273,55 @@ export class ViewModel {
     h.rig.position.set(0, 0, 0);
     h.rig.quaternion.identity();
     h.rig.scale.setScalar(1);
+  }
+
+  /**
+   * Where the tip of a held model is in **world** space, or null.
+   *
+   * For the one thing the world scene has to draw *from* a held item: the
+   * fishing line, which runs from the rod's tip to a float out on the water.
+   * The rod is drawn in this file's own scene and has no world position at all,
+   * which is why the line used to start from a constant near the camera — and
+   * measured through the real chain that constant sits **0.69 view units** from
+   * the tip of a rod that is 0.81 units long in hand. It was pointing at the
+   * lower right of the screen while the tip was in the upper right corner.
+   *
+   * Two frames have to be crossed and both matter:
+   *
+   * - **Space.** The item hangs off `hand -> rig -> mesh`, so its own
+   *   `matrixWorld` is in this scene, and this scene's camera is the one at
+   *   `this.camera`. Going through that camera's inverse gives eye space, which
+   *   is the only frame the two scenes share.
+   * - **Field of view.** This camera is fixed at 70 degrees (see the
+   *   constructor) and the world's follows `settings.fov`, default 75 and
+   *   pushed further by sprint and pulled to 44 by the zoom. A point copied
+   *   across without correcting lands somewhere else on the screen: NDC is
+   *   `(x / -z) / tan(fov/2)`, so holding the screen position fixed means
+   *   scaling x and y by `tan(worldHalf) / tan(70/2)` — 1.096 at the default,
+   *   0.601 at full zoom. Both cameras render the full canvas, so the aspect
+   *   term is common and cancels.
+   *
+   * @param {number} itemId the item whose tip is wanted; whichever hand holds it
+   * @param {THREE.PerspectiveCamera} worldCamera
+   * @param {THREE.Vector3} out
+   * @returns {THREE.Vector3|null} null when that item is not in a fist, or its
+   *   model has not loaded yet, or first person is not what is being drawn
+   */
+  tipAnchorWorld(itemId, worldCamera, out) {
+    if (!this.enabled) return null;
+    const h = this.hands.right.item === itemId ? this.hands.right
+      : this.hands.left.item === itemId ? this.hands.left : null;
+    if (!h || !h.mesh || !h.modelled) return null;
+    if (!tipPoint(itemId, _tip)) return null;
+    this.scene.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld(true);
+    _tip.applyMatrix4(h.mesh.matrixWorld)
+      .applyMatrix4(_mT.copy(this.camera.matrixWorld).invert());
+    const k = Math.tan(THREE.MathUtils.degToRad(worldCamera.fov) / 2)
+      / Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
+    _tip.x *= k; _tip.y *= k;
+    worldCamera.updateMatrixWorld();
+    return out.copy(_tip).applyMatrix4(worldCamera.matrixWorld);
   }
 
   /**

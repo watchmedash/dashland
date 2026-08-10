@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
 import { tangentFrame } from '../world/Sphere.js';
-import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID } from '../world/Blocks.js';
+import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes } from '../world/Blocks.js';
 import { ITEMS } from './Items.js';
 import { hasModel, worldModel } from '../render/ItemModels.js';
 
@@ -469,39 +469,98 @@ function getPlaneGeo() {
 }
 
 /**
- * A unit cube carrying the same attributes the chunk mesher emits, so dropped
- * blocks shade identically to the world.
+ * The block, in its own shape, carrying the same attributes the chunk mesher
+ * emits so a dropped or held block shades identically to the world.
+ *
+ * **It used to be a cube for everything**, and that is the whole of the bug the
+ * owner reported as "while holding it it looks like a block, same goes for
+ * other models at hand looking like blocks like the door, sign, ladder etc".
+ * Forty items were affected: eighteen slabs, eighteen stairs, the ladder, the
+ * door, the sign and the fence. A ladder in the fist was a solid box with rungs
+ * painted on all six faces.
+ *
+ * The shape is not described again here. `blockBoxes` in `world/Blocks.js` is
+ * already the one description of it - its own note says "collision, the mesher
+ * and the ground scan all read this, so a new shape is described once here
+ * rather than three times in three files" - and it is a pure function of
+ * (id, byte, links) with no chunk in it. This is the fourth reader.
+ *
+ * What is *not* shared with the mesher is the box-to-quads step, and that is
+ * structural rather than an oversight: `emitBox` and `emit` are closures inside
+ * `meshChunk`, and every corner they place goes through `cornerLerp`, which
+ * indexes the planet's face and absolute grid position and scales by the
+ * radius. A held item has no face, no cell and no radius, and wants a flat unit
+ * cell. Hoisting them out would put a per-quad indirect call on the hottest
+ * loop in the game, in a worker, to save the forty lines below. See the note in
+ * the report for the exact extraction if that trade ever looks worth making.
+ *
+ * `byte` and `links` are the pose the item is drawn in rather than the pose it
+ * will be placed in: a slab low, a stair with its low side on +i, a door shut,
+ * a fence reaching both ways along i so it reads as a run of fence and not as a
+ * lone post.
  */
 function getBlockGeo(blockId) {
   let g = blockGeos.get(blockId);
   if (g) return g;
   const pos = [], nrm = [], tan = [], uv = [], aux = [], blk = [], tint = [], idxs = [];
-  const faces = [
-    { n: [0, 1, 0], layer: TILE_TOP[blockId], c: [[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]] },
-    { n: [0, -1, 0], layer: TILE_BOTTOM[blockId], c: [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]] },
-    // directional blocks wear their front on +z so a tumbling drop still reads
-    { n: [0, 0, 1], layer: TILE_FRONT[blockId], c: [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]] },
-    { n: [0, 0, -1], layer: TILE_SIDE[blockId], c: [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]] },
-    { n: [1, 0, 0], layer: TILE_SIDE[blockId], c: [[0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5]] },
-    { n: [-1, 0, 0], layer: TILE_SIDE[blockId], c: [[-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5]] },
-  ];
+  const tintv = dropTint(blockId);
+  const boxes = blockBoxes(blockId, 0, 0b0011);
   let v = 0;
-  for (const f of faces) {
-    const uvc = [[0, 0], [1, 0], [1, 1], [0, 1]];
-    const t = [f.c[1][0] - f.c[0][0], f.c[1][1] - f.c[0][1], f.c[1][2] - f.c[0][2]];
-    const tl = Math.hypot(t[0], t[1], t[2]) || 1;
-    for (let i = 0; i < 4; i++) {
-      pos.push(...f.c[i]);
-      nrm.push(...f.n);
-      tan.push(t[0] / tl, t[1] / tl, t[2] / tl);
-      uv.push(...uvc[i]);
-      aux.push(f.layer, 1, 1, 0);
-      blk.push(0.15, 0.15, 0.15);
-      tint.push(...dropTint(blockId));
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const b of boxes) {
+    // Cell coordinates are (i, j, k) with k the radial axis. Held and dropped,
+    // the radial axis is up, so k becomes local Y.
+    const x0 = b[0] - 0.5, x1 = b[3] - 0.5;
+    const z0 = b[1] - 0.5, z1 = b[4] - 0.5;
+    const y0 = b[2] - 0.5, y1 = b[5] - 0.5;
+    const faces = [
+      { n: [0, 1, 0], layer: TILE_TOP[blockId], u: x1 - x0, v: z1 - z0,
+        c: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]] },
+      { n: [0, -1, 0], layer: TILE_BOTTOM[blockId], u: x1 - x0, v: z1 - z0,
+        c: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]] },
+      // directional blocks wear their front on +z so a tumbling drop still reads
+      { n: [0, 0, 1], layer: TILE_FRONT[blockId], u: x1 - x0, v: y1 - y0,
+        c: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]] },
+      { n: [0, 0, -1], layer: TILE_SIDE[blockId], u: x1 - x0, v: y1 - y0,
+        c: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]] },
+      { n: [1, 0, 0], layer: TILE_SIDE[blockId], u: z1 - z0, v: y1 - y0,
+        c: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]] },
+      { n: [-1, 0, 0], layer: TILE_SIDE[blockId], u: z1 - z0, v: y1 - y0,
+        c: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]] },
+    ];
+    for (const f of faces) {
+      // The mesher runs the tile 0..extent across a partial box rather than
+      // 0..1, so a slab's side shows half a tile instead of a whole one
+      // squashed into half the height. Same rule here or a stack of slabs in
+      // the world and one in your fist are different bricks.
+      const uvc = [[0, 0], [f.u, 0], [f.u, f.v], [0, f.v]];
+      const t = [f.c[1][0] - f.c[0][0], f.c[1][1] - f.c[0][1], f.c[1][2] - f.c[0][2]];
+      const tl = Math.hypot(t[0], t[1], t[2]) || 1;
+      for (let i = 0; i < 4; i++) {
+        pos.push(...f.c[i]);
+        for (let a = 0; a < 3; a++) {
+          if (f.c[i][a] < lo[a]) lo[a] = f.c[i][a];
+          if (f.c[i][a] > hi[a]) hi[a] = f.c[i][a];
+        }
+        nrm.push(...f.n);
+        tan.push(t[0] / tl, t[1] / tl, t[2] / tl);
+        uv.push(...uvc[i]);
+        aux.push(f.layer, 1, 1, 0);
+        blk.push(0.15, 0.15, 0.15);
+        tint.push(...tintv);
+      }
+      idxs.push(v, v + 1, v + 2, v, v + 2, v + 3);
+      v += 4;
     }
-    idxs.push(v, v + 1, v + 2, v, v + 2, v + 3);
-    v += 4;
   }
+  // Centred on its own material and not on its cell. A full cube is unchanged
+  // by this - its box is the cell - and everything else is what the fist closes
+  // on: measured through the same fist-to-surface probe as the authored models,
+  // every shape in this table has its own bounding-box centre inside or on its
+  // material, so this is contact for all of them.
+  const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2, cz = (lo[2] + hi[2]) / 2;
+  for (let i = 0; i < pos.length; i += 3) { pos[i] -= cx; pos[i + 1] -= cy; pos[i + 2] -= cz; }
+
   g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));

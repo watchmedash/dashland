@@ -17,6 +17,30 @@ const _cell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
 const _p = [0, 0, 0];
 
 /**
+ * Drop a vertex buffer's CPU copy once the driver has taken it.
+ *
+ * Chunk geometry is written once by the mesher, uploaded once, and never read
+ * on this side again: nothing in `src/` touches a chunk's attributes after
+ * `applyChunk` builds them (the only `geometry.attributes` reads in the game
+ * are the highlight box and the fishing line, neither of which is chunk
+ * geometry, and the GTAO cutout proxy asks whether `aux` *exists*, not what is
+ * in it). The raycast marches `this.blocks`, not triangles, and a changed chunk
+ * is remeshed from scratch rather than patched in place — so the array sitting
+ * behind each attribute is a duplicate of what is already in VRAM. Measured on
+ * a settled 2 666-mesh view: 21 328 buffers, 90 bytes per vertex (84 of
+ * attributes plus 6 of index) over 2 839 896 vertices, 243.8 MiB of main heap
+ * that nothing would ever read.
+ *
+ * The price is a re-mesh if the WebGL context is ever lost, because the arrays
+ * needed to re-upload are gone. Worth being plain about it: this game has no
+ * context-loss handling at all today — there is no `webglcontextlost` or
+ * `webglcontextrestored` listener anywhere in the source — so a lost context
+ * already ends the session, with or without this. It is a cost to pay when
+ * somebody writes that handler, not one being incurred now.
+ */
+function discardArray() { this.array = null; }
+
+/**
  * Half-thickness, in cells, given to a cross plant's quads by the raycast.
  *
  * `emitCross` builds two flat quads through the middle of the cell: one
@@ -301,7 +325,12 @@ export class Planet {
       geo.setAttribute('blockLight', new THREE.BufferAttribute(payload.blockLight, 3));
       geo.setAttribute('tint', new THREE.BufferAttribute(payload.tint, 3));
       geo.setIndex(new THREE.BufferAttribute(payload.index, 1));
+      // Before the arrays are released: this is the one thing on the main thread
+      // that does read them, and the sphere it computes is what frustum culling
+      // and the shadow map use for the life of the mesh.
       geo.computeBoundingSphere();
+      for (const name in geo.attributes) geo.attributes[name].onUpload(discardArray);
+      geo.index.onUpload(discardArray);
 
       if (mesh) {
         mesh.geometry.dispose();

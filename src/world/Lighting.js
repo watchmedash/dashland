@@ -98,13 +98,39 @@ export function neighborIndex(index, dir) {
   return COL_NB[col * 4 + dir] * D + k;
 }
 
+/**
+ * Where the BFS queue starts, and how far it is ever allowed to go.
+ *
+ * It used to be `Int32Array(NUM_VOXELS)` outright — 127 885 824 entries, 487.8
+ * MiB — on the theory that a flood could in principle enqueue every voxel in
+ * the world. It never comes close. Measured over a session that generated the
+ * spawn area and then travelled ~190 cells across it, the high-water tail was
+ * 6 319 911 entries (24.1 MiB, 4.94% of the array) with nothing dropped, so
+ * about 465 MiB of a 1.9 GB footprint was scratch space that was allocated,
+ * committed and never written to. The one entry point that could plausibly
+ * want the whole world at once is `computeAll`, and nothing in `src/` calls it.
+ *
+ * 8M entries is the start: comfortably over the measured peak, so the ordinary
+ * session never grows at all, and 32 MiB instead of 488. The ceiling is the old
+ * size, so the pathological case is exactly as safe as it was before the change
+ * rather than merely likely to be fine.
+ *
+ * No compatibility question arises here, and it is worth being explicit about
+ * why: this is scratch. It holds nothing between calls, it is never posted
+ * anywhere, and the light field it fills is itself derived data — recomputed
+ * from blocks on load and never written to a save. Changing its size cannot
+ * change a save, a seed or a single voxel.
+ */
+const QUEUE_START = 8 * 1024 * 1024;
+const QUEUE_MAX = NUM_VOXELS;
+
 export class LightField {
   constructor() {
     this.sun = new Uint8Array(NUM_VOXELS);
     this.r = new Uint8Array(NUM_VOXELS);
     this.g = new Uint8Array(NUM_VOXELS);
     this.b = new Uint8Array(NUM_VOXELS);
-    this._queue = new Int32Array(NUM_VOXELS);
+    this._queue = new Int32Array(QUEUE_START);
     /**
      * Which columns have actually been generated, or null for "all of them".
      *
@@ -126,6 +152,27 @@ export class LightField {
   }
 
   /**
+   * Make room for `need` queue entries and return the queue.
+   *
+   * Doubling, and capped at QUEUE_MAX. Every caller has to use the array this
+   * returns rather than one it captured earlier: growing replaces `this._queue`,
+   * and writing into the old one afterwards would enqueue into a buffer the
+   * flood has already stopped reading. Returning the array instead of relying on
+   * the field is what makes that hard to get wrong.
+   */
+  _ensureQueue(need) {
+    const q = this._queue;
+    if (need <= q.length || q.length >= QUEUE_MAX) return q;
+    let cap = q.length;
+    while (cap < need && cap < QUEUE_MAX) cap *= 2;
+    if (cap > QUEUE_MAX) cap = QUEUE_MAX;
+    const next = new Int32Array(cap);
+    next.set(q);
+    this._queue = next;
+    return next;
+  }
+
+  /**
    * Seed one column from the sky: walk down from the top of the world writing
    * daylight into every cell until the column is roofed.
    *
@@ -136,7 +183,9 @@ export class LightField {
    *
    * @returns the new queue tail
    */
-  _seedSky(blocks, col, q, tail) {
+  _seedSky(blocks, col, tail) {
+    // At most D entries go in below, so one check per column covers the lot.
+    const q = this._ensureQueue(tail + D);
     const base = col * D;
     let v = MAX_LIGHT;
     for (let k = D - 1; k >= 0; k--) {
@@ -157,15 +206,14 @@ export class LightField {
 
   computeAll(blocks, onProgress = () => {}) {
     this.sun.fill(0); this.r.fill(0); this.g.fill(0); this.b.fill(0);
-    const q = this._queue;
     let tail = 0;
 
     // seed: every cell above the highest opaque block in its column sees sky
     for (let col = 0; col < COLUMNS; col++) {
-      tail = this._seedSky(blocks, col, q, tail);
+      tail = this._seedSky(blocks, col, tail);
       if ((col & 8191) === 0) onProgress(0.5 * (col / COLUMNS));
     }
-    this._flood(blocks, this.sun, q, 0, tail);
+    this._flood(blocks, this.sun, 0, tail);
     onProgress(0.7);
 
     const chans = [this.r, this.g, this.b];
@@ -174,19 +222,21 @@ export class LightField {
     for (let i = 0; i < NUM_VOXELS; i++) if (LIGHT_EMIT[blocks[i]] > 0) seeds.push(i);
     for (let c = 0; c < 3; c++) {
       const chan = chans[c], scale = scales[c];
+      const q = this._ensureQueue(seeds.length);
       tail = 0;
       for (const i of seeds) {
         const b = blocks[i];
         const v = Math.round(LIGHT_EMIT[b] * (scale[b] / 255));
         if (v > chan[i]) { chan[i] = v; q[tail++] = i; }
       }
-      this._flood(blocks, chan, q, 0, tail);
+      this._flood(blocks, chan, 0, tail);
     }
     onProgress(1);
   }
 
-  _flood(blocks, field, q, head, tail) {
-    const cap = q.length;
+  _flood(blocks, field, head, tail) {
+    let q = this._queue;
+    let cap = q.length;
     const live = this.live;
     while (head < tail) {
       const i = q[head++];
@@ -213,7 +263,18 @@ export class LightField {
         const nv = lv - at;
         if (nv > field[ni]) {
           field[ni] = nv;
+          // The common case is the same single compare it always was; growing is
+          // the cold branch. The guard stays after the grow as a backstop rather
+          // than as the plan: a cell can be enqueued more than once (every time
+          // its level improves), so even QUEUE_MAX is not a proof against
+          // overflow. Dropping an entry costs some light in a corner, which the
+          // next relight fixes; there is nothing to be gained by crashing.
           if (tail < cap) q[tail++] = ni;
+          else if (cap < QUEUE_MAX) {
+            q = this._ensureQueue(cap * 2);
+            cap = q.length;
+            if (tail < cap) q[tail++] = ni;
+          }
         }
       }
     }
@@ -272,15 +333,13 @@ export class LightField {
       }
     }
 
-    const q = this._queue;
-
     // --- sunlight ---
     let tail = 0;
     for (const list of all) {
       for (let n = 0; n < list.length; n++) {
         const col = list[n];
         const base = col * D;
-        tail = this._seedSky(blocks, col, q, tail);
+        tail = this._seedSky(blocks, col, tail);
         // Pull light in from the columns beyond the ring, which keep whatever
         // they already have. Without this the outermost course of the ring is
         // recomputed as if the rest of the planet were dark and the seam moves
@@ -289,6 +348,7 @@ export class LightField {
           const nb = COL_NB[col * 4 + d];
           if (inSet[nb]) continue;
           if (this.live !== null && this.live[nb] === 0) continue;
+          const q = this._ensureQueue(tail + D);
           for (let k = 0; k < D; k++) {
             const at = ATTEN[blocks[base + k]];
             if (at === 255) continue;
@@ -298,7 +358,7 @@ export class LightField {
         }
       }
     }
-    this._flood(blocks, this.sun, q, 0, tail);
+    this._flood(blocks, this.sun, 0, tail);
 
     // --- coloured block light ---
     const chans = [this.r, this.g, this.b];
@@ -310,6 +370,7 @@ export class LightField {
         for (let n = 0; n < list.length; n++) {
           const col = list[n];
           const base = col * D;
+          let q = this._ensureQueue(tail + D);
           for (let k = 0; k < D; k++) {
             const b = blocks[base + k];
             const v = LIGHT_EMIT[b] > 0 ? Math.round(LIGHT_EMIT[b] * (scale[b] / 255)) : 0;
@@ -319,6 +380,7 @@ export class LightField {
             const nb = COL_NB[col * 4 + d];
             if (inSet[nb]) continue;
             if (this.live !== null && this.live[nb] === 0) continue;
+            q = this._ensureQueue(tail + D);
             for (let k = 0; k < D; k++) {
               const at = ATTEN[blocks[base + k]];
               if (at === 255) continue;
@@ -328,7 +390,7 @@ export class LightField {
           }
         }
       }
-      this._flood(blocks, chan, q, 0, tail);
+      this._flood(blocks, chan, 0, tail);
     }
 
     for (let n = 0; n < edge.length; n++) {
@@ -384,18 +446,18 @@ export class LightField {
       before.set(col, snap);
     }
 
-    const q = this._queue;
     const inRegion = (col) => region.has(col);
 
     // --- sunlight ---
     let tail = 0;
     for (const col of cols) {
       const base = col * D;
-      tail = this._seedSky(blocks, col, q, tail);
+      tail = this._seedSky(blocks, col, tail);
       // pull light in from neighbouring columns outside the region
       for (let d = 0; d < 4; d++) {
         const n = COL_NB[col * 4 + d];
         if (inRegion(n)) continue;
+        const q = this._ensureQueue(tail + D);
         for (let k = 0; k < D; k++) {
           const at = ATTEN[blocks[base + k]];
           if (at === 255) continue;
@@ -404,7 +466,7 @@ export class LightField {
         }
       }
     }
-    this._flood(blocks, this.sun, q, 0, tail);
+    this._flood(blocks, this.sun, 0, tail);
 
     // --- coloured block light ---
     const chans = [this.r, this.g, this.b];
@@ -414,6 +476,7 @@ export class LightField {
       tail = 0;
       for (const col of cols) {
         const base = col * D;
+        let q = this._ensureQueue(tail + D);
         for (let k = 0; k < D; k++) {
           const b = blocks[base + k];
           let v = LIGHT_EMIT[b] > 0 ? Math.round(LIGHT_EMIT[b] * (scale[b] / 255)) : 0;
@@ -422,6 +485,7 @@ export class LightField {
         for (let d = 0; d < 4; d++) {
           const n = COL_NB[col * 4 + d];
           if (inRegion(n)) continue;
+          q = this._ensureQueue(tail + D);
           for (let k = 0; k < D; k++) {
             const at = ATTEN[blocks[base + k]];
             if (at === 255) continue;
@@ -430,7 +494,7 @@ export class LightField {
           }
         }
       }
-      this._flood(blocks, chan, q, 0, tail);
+      this._flood(blocks, chan, 0, tail);
     }
 
     for (const col of cols) {

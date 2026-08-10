@@ -48,7 +48,7 @@ export const R_MIN = 250;            // radius of layer 0
 export const R_MAX = R_MIN + D;      // 316
 
 export const COLUMNS = FACES * F * F;        // 1 291 776
-export const NUM_VOXELS = COLUMNS * D;       // 85 257 216
+export const NUM_VOXELS = COLUMNS * D;       // 127 885 824
 
 export const CHUNK_T = 16;           // cells per chunk along i and j
 export const CHUNK_K = 11;           // layers per chunk

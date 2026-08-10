@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
 import { tangentFrame } from '../world/Sphere.js';
-import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes } from '../world/Blocks.js';
+import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE} from '../world/Blocks.js';
 import { ITEMS } from './Items.js';
 import { hasModel, worldModel } from '../render/ItemModels.js';
 
@@ -118,7 +118,20 @@ export class Drops {
     // Cross-shaped blocks (flowers, grass, saplings) have no cube form — built
     // as a cube their transparent pixels render as a black box.
     if (def.block !== undefined && RENDER_TYPE[def.block] !== R_CROSS) {
-      const m = new THREE.Mesh(getBlockGeo(def.block), this.materials.opaque);
+      // Opaque unless the block's own tile has holes in it. A ladder is a
+      // frame: its tile is mostly alpha, and drawn with the opaque material
+      // those texels are not cut away, so the rungs fill in and the sides read
+      // as see-through depending on which face you catch - "ladder model still
+      // transparent angles both in hand, in toolbar and when placed". Glass and
+      // leaves are the same shape of problem, held and dropped opaque and hard
+      // clipped rather than blended.
+      //
+      // `cutout` is the material the world already draws these with: alphaTest
+      // 0.42 and double sided, so a one-cell-thick frame reads from both faces
+      // instead of vanishing when its front face is the one turned away.
+      const holes = !IS_OPAQUE[def.block];
+      const m = new THREE.Mesh(getBlockGeo(def.block),
+        holes ? this.materials.cutout : this.materials.opaque);
       m.castShadow = false;
       m.receiveShadow = false;
       return m;

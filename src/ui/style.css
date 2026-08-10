@@ -89,6 +89,17 @@
     repeating-linear-gradient(93deg, rgba(255, 222, 170, .09) 0 1px, rgba(0, 0, 0, 0) 1px 3px, rgba(0, 0, 0, .14) 3px 4px, rgba(0, 0, 0, 0) 4px 11px),
     repeating-linear-gradient(87deg, rgba(0, 0, 0, .13) 0 1px, rgba(0, 0, 0, 0) 1px 7px),
     linear-gradient(180deg, var(--wood-lit), var(--wood-mid) 38%, var(--wood-dim));
+  /* The same timber with the grain running the long way, for anything much
+     wider than it is tall. `--wood`'s grain is near-vertical on a 3 to 11px
+     period, which is right on a hotbar cell and turns into corduroy across a
+     620px case: you stop reading timber and start reading a barcode. A board
+     that wide would be cut with the grain along its length anyway, so this is
+     the more honest cut as well as the calmer one. Same three colours, so it
+     sits in the same set. */
+  --wood-long:
+    repeating-linear-gradient(2.5deg, rgba(255, 222, 170, .08) 0 1px, rgba(0, 0, 0, 0) 1px 5px, rgba(0, 0, 0, .12) 5px 6px, rgba(0, 0, 0, 0) 6px 17px),
+    repeating-linear-gradient(178deg, rgba(0, 0, 0, .10) 0 1px, rgba(0, 0, 0, 0) 1px 13px),
+    linear-gradient(180deg, var(--wood-lit), var(--wood-mid) 38%, var(--wood-dim));
   /* The same timber, turned end-on, for anything that reads as a cut edge. */
   --wood-end:
     repeating-linear-gradient(180deg, rgba(0, 0, 0, .1) 0 1px, rgba(0, 0, 0, 0) 1px 6px),
@@ -1556,9 +1567,14 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    rather than a transform because the shuttle's *width* changes with the rod
    and with the fish as well as its position, and one property doing both would
    be a matrix. */
+/* Under the compass, not at the centre of the screen. The fight is a thing you
+   watch while looking at the water, so it belongs at the top edge with the
+   other instruments; parking it over the middle of the view put it exactly
+   where the float is. Swapped with the Waiting plate, which is a single word
+   and can afford the centre. */
 #fish-bar {
-  position: absolute; left: 50%; top: 50%;
-  transform: translate(-50%, -50%);
+  position: absolute; left: 50%; top: 62px;
+  transform: translateX(-50%);
   width: min(620px, 68vw);
   padding: 13px 15px 15px;
   border-radius: var(--r-lg);
@@ -1570,7 +1586,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
     var(--stud) right 5px top 5px / 7px 7px no-repeat,
     var(--stud) left 5px bottom 5px / 7px 7px no-repeat,
     var(--stud) right 5px bottom 5px / 7px 7px no-repeat,
-    var(--wood);
+    var(--wood-long);
   /* `--hud-edge` plus the lip from rule 2: the case stands on 3px of its own
      dark timber, which is what gives it a thickness over a lit planet. */
   box-shadow:
@@ -1589,7 +1605,15 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   background: var(--pocket-floor);
   box-shadow: var(--pocket);
   overflow: hidden;
+  transition: background-color .09s linear;
 }
+/* Contact lights the whole groove, not just the shuttle. The shuttle alone got
+   brighter, which reads as "that block changed" rather than as "you have it" -
+   and it is the wrong place to put the signal anyway, because the shuttle is
+   what your eye is already tracking. Warming the timber it runs in puts the
+   answer in peripheral vision, where you can hold it while watching the fish.
+   Colour only, on the floor beneath the two moving parts, so nothing shifts. */
+#fish-bar.on .fb-track { background-color: rgba(196, 122, 44, .34); }
 
 /* The shuttle. A face of parchment on a lit edge, the one thing on the bar
    that answers the button. Deliberately NOT brass even when it is on the fish:
@@ -1673,9 +1697,11 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    It is up for as long as a line is in the water, which can be the better part
    of a minute, so it is sized to be seen without being looked for and placed
    where the other things you glance at while standing still already are. */
+/* The centre, now that the fight bar has taken the top edge. One word over the
+   middle of the view is the whole of what "your line is out" needs to say. */
 #fish-wait {
-  position: absolute; left: 50%; top: 44px;
-  transform: translateX(-50%);
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
   padding: 8px 20px; border-radius: var(--r-md);
   font: var(--fw-disp) var(--fs-xl)/1 var(--font);
   letter-spacing: .06em; color: var(--ink);
@@ -1685,9 +1711,10 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   white-space: nowrap; pointer-events: none;
 }
 #fish-wait.hidden { display: none; }
-/* The toast stack starts at 46px, which is exactly where the plate above sits.
-   While a cast is out the stack steps down past it. See `UI.fishWait`. */
-body.casting #toasts { top: 94px; }
+/* The toast stack starts at 46px and the fight bar now sits at 62. While a
+   cast is out the stack steps down clear of it. The Waiting plate no longer
+   collides with anything: it is in the middle of the screen. */
+body.casting #toasts { top: 150px; }
 
 #debug {
   position: absolute; top: 10px; left: 10px;

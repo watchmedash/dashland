@@ -5113,6 +5113,13 @@ class Game {
     const p = this.player;
     const working = p.sprinting ? 1.6 : (p.moveAmount > 0.6 ? 0.7 : 0.18);
     this.energy = Math.max(0, this.energy - dt * 0.0022 * working);
+    // Movement reads nourishment off the Player rather than the Game, so the
+    // gait scale can live beside the gait constants. Mirrored here and only
+    // here: eating and a hot spring soak both write `this.energy` from
+    // elsewhere, and this runs every frame, so one assignment covers all of
+    // them with at most a frame of lag. Without it `Player.energy` sits at its
+    // default of 1 for ever and the whole taper is dead code.
+    p.energy = this.energy;
 
     if (this.energy > 0.55 && p.health < p.maxHealth) {
       this._regen = (this._regen || 0) + dt;

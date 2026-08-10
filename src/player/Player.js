@@ -51,6 +51,40 @@ const TOUCH = 0.015;
 const SPRINT_RESUME = 0.15;
 
 /**
+ * Nourishment below which every gait starts to taper. Half the bar, which is
+ * the number that was asked for, and it is also where the meter has already
+ * been on screen for a while: the HUD reveals the row the moment energy leaves
+ * full, so by the time this bites the player has been looking at it.
+ *
+ * Above this, nothing here does anything at all. That matters more than the
+ * penalty does — energy sits above 0.5 for the first half of every stretch
+ * between meals, so most of play must be bit-for-bit what it was.
+ */
+const ENERGY_TIRED = 0.50;
+/**
+ * Nourishment below which sprinting is refused outright.
+ *
+ * No hysteresis pair like SPRINT_RESUME above, and it does not need one: energy
+ * only ever falls while you are moving (main's `_tickVitals` drains it), and the
+ * two things that put it back are eating, which is a jump of at least 0.06, and
+ * a hot-spring soak, which is gated on standing still. So there is no frame
+ * where refusing the sprint makes energy go back up, which is exactly the
+ * feedback loop the stamina gate had to be split in two to break.
+ */
+const ENERGY_NO_SPRINT = 0.15;
+/**
+ * What fraction of normal speed an empty bar leaves you with.
+ *
+ * 0.70 puts a starving walk at 4.4 * 0.70 = 3.08 cells/s. Chosen against the
+ * two gaits either side of it: it is a clear third off the 4.4 walk, so it
+ * reads as dragging, and it is still half again the 2.0 crouch, so being
+ * starving never feels like being permanently stuck in sneak. Lower than this
+ * and crossing a plain to reach food stops being a journey and becomes a
+ * punishment, on top of the -1 health per 8s starvation already costs.
+ */
+const ENERGY_FLOOR = 0.70;
+
+/**
  * The *base* free fall, in blocks. Agility adds to it — see `skills.fallFree`,
  * which starts from this same 3.0 — so this constant is now what a player with
  * no tree attached falls for free, and the floor everything else builds on.
@@ -313,6 +347,19 @@ export class Player {
     this.health = 20;
     this.maxHealth = 20;
     this.stamina = 1;
+    /**
+     * Nourishment, 0..1, mirrored here from the Game each frame.
+     *
+     * Not the same meter as `stamina` and not owned by this class. Stamina is
+     * the sprint budget and refills itself at 0.12/s; energy is food, it only
+     * goes up when you eat, and the Game is where it lives. This field is a
+     * copy so the movement code can read it without the Player having to know
+     * what a Game is — same reason `skills` and `water` are set from outside.
+     *
+     * Defaults to 1 so a Player built with nothing attached moves at exactly
+     * the speeds this file used before nourishment governed anything.
+     */
+    this.energy = 1;
     this.fallStart = null;
     this.onLadder = false;
     /**
@@ -829,6 +876,41 @@ export class Player {
     return lo;
   }
 
+  /**
+   * How much of your normal speed a half-empty stomach leaves you, 0.70..1.
+   *
+   * Exactly 1 above ENERGY_TIRED, so the first half of every stretch between
+   * meals is untouched, then a smoothstep down to ENERGY_FLOOR at empty.
+   *
+   * Smoothstep rather than a straight line because a line has a corner at the
+   * threshold: you would feel the exact frame you crossed 50%, which is a
+   * switch flipping, and the point is to feel yourself tiring. The curve is
+   * flat at both ends, so the first 0.02 of the bar past the threshold costs
+   * you 0.14% and the last of it costs almost nothing new either — the loss is
+   * spent in the middle, moving you from "something is off" to "I am slow".
+   *
+   * Measured, walking speed in cells/s beside the multiplier:
+   *   energy 0.50 -> 1.000  (4.40 walk)   nothing has happened yet
+   *   energy 0.45 -> 0.992  (4.36 walk)   below noticing
+   *   energy 0.35 -> 0.935  (4.12 walk)   about a step per second down
+   *   energy 0.25 -> 0.850  (3.74 walk)   unmistakable
+   *   energy 0.15 -> 0.765  (3.37 walk)   sprint cuts out here, 24% down already
+   *   energy 0.00 -> 0.700  (3.08 walk)
+   *
+   * Against main's drain (0.0022/s times 0.7 walking, 1.6 sprinting):
+   * Crossing 0.50 to losing the sprint is 0.35 of the bar: 227s of walking or
+   * 99s of sprinting. So the slowest way to find out is nearly four minutes of
+   * warning, and even a player sprinting the whole way gets a minute and a half
+   * of visibly degrading speed before the sprint is taken away.
+   */
+  _energyScale() {
+    const e = this.energy;
+    if (e >= ENERGY_TIRED) return 1;
+    const t = Math.min(1, (ENERGY_TIRED - e) / ENERGY_TIRED);  // 0 at threshold, 1 at empty
+    const s = t * t * (3 - 2 * t);
+    return 1 - (1 - ENERGY_FLOOR) * s;
+  }
+
   update(dt, input) {
     const p = this.planet;
     const c = this.cell;
@@ -861,9 +943,14 @@ export class Player {
     // Two different numbers break the loop, and they also read better: you jog
     // to a stop when you are spent, and you have to get some wind back before
     // you can go again rather than stuttering along at zero.
+    //
+    // Nourishment is a second, independent veto on top of that. Being spent and
+    // being starving are different states and they are allowed to stack: an
+    // empty stamina bar refills in 8s and an empty energy bar takes a meal.
     const wantsSprint = (input.down('ShiftLeft') || input.down('ShiftRight'))
       && iz > 0 && !this.crouching;
-    this.sprinting = wantsSprint && this.stamina > (this.sprinting ? 0 : SPRINT_RESUME);
+    this.sprinting = wantsSprint && this.stamina > (this.sprinting ? 0 : SPRINT_RESUME)
+      && this.energy > ENERGY_NO_SPRINT;
 
     // ---- environment ----
     const feet = p.cellAt(this.position.x, this.position.y, this.position.z);
@@ -898,8 +985,14 @@ export class Player {
     // would be a branch that punishes you for being in a cave, where there is
     // nowhere to sprint; and the crouch has to keep its ratio to the walk or
     // sneaking along a ledge stops feeling like the same action.
+    //
+    // Nourishment scales all three the same way and for the same reason. It is
+    // a multiplier rather than a subtraction so it composes with `speedScale`
+    // and the 0.62 wading factor instead of fighting them, and so that a fully
+    // fed Agility player and a fully fed one with no tree are slowed by the
+    // same *proportion* rather than the same absolute cells/s.
     let speed = (this.crouching ? 2.0 : this.sprinting ? 6.8 : 4.4)
-      * (this.skills?.speedScale ?? 1);
+      * (this.skills?.speedScale ?? 1) * this._energyScale();
     if (this.inWater) speed *= 0.62;
 
     const right = _c.copy(this.forward).cross(this.up).normalize();

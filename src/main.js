@@ -1272,6 +1272,18 @@ class Game {
     // for the one frame before they touch V.
     this._syncCrosshair();
 
+    /**
+     * Regions the player has changed, as region ids.
+     *
+     * A region nobody has touched is byte for byte what the generator makes of
+     * it from the seed, so it does not have to be stored - it can be made again
+     * on load. This set is what separates the two, and it is filled in
+     * `_applyEdits`, which every block change in the game passes through.
+     *
+     * Loaded saves seed it with whatever they carried, because those regions
+     * were edited by a past session and are still not what the seed would make.
+     */
+    this.editedRegions = new Set();
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
     /**
@@ -2032,6 +2044,12 @@ class Game {
 
     if (data.regions && data.blocks) {
       this.planet.applyRegions(data.regions, data.blocks, (rid) => this._seedWaterRegion(rid));
+      // Regions a past session changed are still changed. `_saveBlocks` only
+      // stores edited regions, so the set it filters on has to survive a
+      // reload - otherwise opening a world and saving it again would drop
+      // everything built before this session and hand the player back the
+      // generator's version of their own base.
+      for (const rid of data.regions) this.editedRegions.add(rid);
     } else if (data.blocks) {
       // A save from before the world went lazy: one flat array, all of it live.
       this.planet.blocks.set(data.blocks);
@@ -3090,8 +3108,27 @@ class Game {
    * the whole block array cost, every ninety seconds.
    */
   _saveBlocks() {
+    // Only what the player changed. A region nobody has touched is byte for
+    // byte what the generator makes of it from this seed, so storing it is
+    // storing a copy of something the loader can make again for free - and the
+    // seed and `gen` stamp at the top of the payload are exactly the promise
+    // that it can.
+    //
+    // Measured on a fresh world after digging six blocks: 399 regions were
+    // live and one had been edited, so the block payload goes from 9.64 MB to
+    // 0.024 MB. A fully explored planet was heading for 122 MB of blocks;
+    // now the ceiling is however much you actually built, not how far you
+    // walked. That is the autosave problem: it was taking three to five seconds
+    // at eight percent explored against a ninety second interval, and the cost
+    // was tracking exploration rather than construction.
+    //
+    // The regions a *previous* session edited are still edited, so `load`
+    // seeds this set from whatever the save carried. Without that, opening and
+    // re-saving a world would quietly drop everything built before it.
     const live = [];
-    for (let rid = 0; rid < NUM_REGIONS; rid++) if (this.planet.live[rid]) live.push(rid);
+    for (let rid = 0; rid < NUM_REGIONS; rid++) {
+      if (this.planet.live[rid] && this.editedRegions.has(rid)) live.push(rid);
+    }
     const regions = new Int32Array(live);
     const blocks = new Uint8Array(live.length * REGION_VOXELS);
     const tmp = new Int32Array(REGION_COLS);
@@ -3467,6 +3504,12 @@ class Game {
 
   _applyEdits(edits) {
     for (const e of edits) {
+      // The region this touched is no longer what the generator would make of
+      // it. Every block change in the game comes through here, so this is the
+      // one place that can know it - and it is the difference between a save
+      // that stores the whole world and one that stores the part of it you
+      // made. See `_saveBlocks`.
+      this.editedRegions.add(regionOfCol(e.col));
       // any change can open a path for water or cut one off
       this.water?.onEdit(e.col, e.k);
       this.planet.setAt(e.col, e.k, e.id);

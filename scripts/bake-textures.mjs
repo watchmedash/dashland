@@ -29,6 +29,7 @@ const OUT = 'public/tiles';
 //   contrast  gain around the tile's own mean luminance (raises std-dev)
 //   warm      per-channel trim, [r, g, b]; nudges a hue off dead neutral
 //   rough     roughness multiplier
+//   repeat    tile the source NxN inside one block face, shrinking its detail
 //   holes     punch alpha with noise (leaves)
 //   overlayOn composite this tile as a fringe on top of another tile
 const MAP = {
@@ -52,8 +53,19 @@ const MAP = {
   sandstone: ['Desert', 3],
   sandstone_top: ['Sand', 3],
   // Beach/6 is pale sand — it read as a second sand block, not as gravel.
-  // Small loose pebbles, darkened and desaturated so it sits below cobblestone.
-  gravel: ['Cobble Stone', 3, { bright: 1.62, tint: 0.72, warm: [1.02, 1.0, 0.97] }],
+  //
+  // The two Cobble Stone variants were then the wrong way round, and the
+  // playtest called it exactly ("cobblestone look more like gravel and gravel
+  // look more like cobblestone"). Variant 3 is a rubble WALL — big set stones,
+  // wide dark mortar lines between them — and variant 5 is a bed of small
+  // mixed stones with hairline gaps. Gravel had the wall and cobblestone had
+  // the bed. Swapped, and `repeat: 2` halves the stone size on gravel again so
+  // the two are separated by scale and not only by exposure: measured on the
+  // baked tiles, gravel's stones now average about a quarter the area of
+  // cobblestone's. Exposure is re-tuned per source to keep the value ladder the
+  // old pair had — cobblestone just under stone, gravel ~22 luminance below
+  // cobblestone.
+  gravel: ['Cobble Stone', 5, { bright: 1.05, tint: 0.82, warm: [1.02, 1.0, 0.97], repeat: 2 }],
   clay: ['Mud', 5],
   ice: ['Ice', 3],
   water: ['Water', 1],
@@ -93,7 +105,11 @@ const MAP = {
   // Raw cobble is a brown stone (luminance 97, saturation 0.35) against graded
   // stone's neutral 136 — side by side they looked like different materials.
   // Desaturated and lifted to just under stone, which is what rubble should be.
-  cobblestone: ['Cobble Stone', 5, { bright: 1.28, tint: 0.84, warm: [1.02, 1.0, 0.98] }],
+  // See `gravel` for why this is variant 3 and not 5. Raw variant 3 is the
+  // darkest tile in the folder (mean luminance 62), so it needs the same
+  // exposure lift stone needed; the numbers here land it at 125 against stone's
+  // 137, which is where the old cobblestone sat.
+  cobblestone: ['Cobble Stone', 3, { bright: 1.9, tint: 0.72, contrast: 1.05, warm: [1.02, 1.0, 1.0] }],
   stone_brick: ['Stone Wall', 4],
   brick: ['Stone Wall', 11],
   moss_stone: ['Wall_with_plants', 1, { tint: 0.7 }],
@@ -105,7 +121,21 @@ const MAP = {
   crystal_block: ['Ice', 1],
   iron_block: ['Metal Plates', 6],
   gold_block: ['Pile of Gold', 1],
-  snow: ['Snow Ground', 11],
+  // "Snow Ground" is a misleading folder name: all eleven variants are snow-
+  // dusted ROCK, and 11 is the whitest of them — hard-edged pale cells with dark
+  // outlines, which is why the playtest read the block as "white rocks clump
+  // together". Snow is a smooth soft-edged drift, so the tile comes from the
+  // "Snow" folder instead. Snow/1 is the only variant there that is neither
+  // cracked pack ice (2, 3, 9) nor a wave pattern (4, 5): soft wind-blown
+  // swirls, and measured, its luminance std-dev is 13 against Snow Ground/11's
+  // 33 — half the contrast and none of it in hard edges.
+  //
+  // `warm` pulls the blue back. The source sits at r-b = -45 counts, which is a
+  // sky-lit snowfield painted flat; snow reads as white with blue only in its
+  // hollows, and the hollows are already the dark end of the tile's own range.
+  // After the trim the mean is 241/245/251 and the blue survives where it
+  // belongs.
+  snow: ['Snow', 1, { bright: 1.12, warm: [1.14, 1.03, 0.95] }],
 
   farmland: ['Mud', 10],
   farmland_wet: ['Mud', 10, { bright: 0.55, rough: 0.45 }],
@@ -213,10 +243,17 @@ const MAP = {
   glowstone_azure: ['Cave Floor', 1],
 
   // --- storage --------------------------------------------------------------
-  copper_block: ['Pile of Gold', 4, { warm: [1.1, 0.82, 0.7] }],
+  // Pile of Gold/4 is a heap of dark red coins in shadow: mean 108/36/32, so
+  // the block was a maroon field with orange only on the few coin faces that
+  // catch the light. It is the tile the playtest meant by "copper only colour in
+  // a small part" — the ore's flecks are measured at the same 11.6% coverage as
+  // every other ore, this was the tile with the copper hidden. Variant 3 is the
+  // same coin pile lit, so the metal is the whole surface; `warm` takes it from
+  // gold to copper and leaves it a hue apart from gold_block's ingots.
+  copper_block: ['Pile of Gold', 3, { warm: [0.95, 0.70, 0.85] }],
   silver_block: ['Metal Plates', 7, { bright: 1.12 }],
-  // Nothing in the pack is a block of coal. Small loose lumps at a quarter of
-  // the exposure gravel gets from the same source: the shape is right and the
+  // Nothing in the pack is a block of coal. Cobble Stone 3 at a fifth of the
+  // exposure cobblestone takes from the same source: the shape is right and the
   // value is four stops away from anything it could be mistaken for.
   coal_block: ['Cobble Stone', 3, { bright: 0.42, tint: 0.95, contrast: 1.3, rough: 0.75 }],
   amethyst_block: ['Cave Floor', 6],
@@ -227,9 +264,19 @@ const MAP = {
 };
 
 // Side tiles built by blending a top material over a base material.
+//
+// `tintMask` writes the fringe into the arm map's ALPHA as well: 255 where the
+// top material won, 0 where the base did. The renderer multiplies a block's
+// biome tint by that mask (see VoxelMaterial's MAP_FRAG), so the grass on a
+// grass block's flank still turns with the biome and the season while the soil
+// under it stays the same soil as the dirt block beside it. Without it the tint
+// is per block and hits the whole face: measured in plains, [0.55, 0.78, 0.40]
+// on 140/102/70 soil gives 77/80/28, an olive earth next to a brown one, which
+// is what the playtest reported. Snow needs no mask — nothing tints a snow
+// block — but it costs nothing and keeps the two fringes the same object.
 const FRINGE = {
-  grass_side: { base: 'dirt', top: 'grass_top', height: 0.15, jitter: 0.07 },
-  snow_side: { base: 'dirt', top: 'snow', height: 0.26, jitter: 0.10 },
+  grass_side: { base: 'dirt', top: 'grass_top', height: 0.15, jitter: 0.07, tintMask: true },
+  snow_side: { base: 'dirt', top: 'snow', height: 0.26, jitter: 0.10, tintMask: true },
 };
 
 // Tiles drawn as procedural detail ON TOP of a pack material. The generator
@@ -297,14 +344,29 @@ const arm = Buffer.from(base.arm);
 
 // --- helpers ----------------------------------------------------------------
 
-async function rawOf(file, { normalMap = false } = {}) {
+async function rawOf(file, { repeat = 1 } = {}) {
   if (!file) return null;
+  // A repeat is a resize to SIZE/n followed by an n-by-n copy, not a crop: the
+  // pack's tiles are seamless, so a shrunk copy tiles seamlessly against itself
+  // and the block face stays seamless against the next block. This is how a
+  // material gets a *scale* of its own — gravel is the same stones as
+  // cobblestone at half the size, and no exposure trick says that.
+  const n = Math.max(1, repeat | 0);
+  const s = Math.round(SIZE / n);
   const { data } = await loadMap(file)
-    .resize(SIZE, SIZE, { fit: 'fill', kernel: 'lanczos3' })
+    .resize(s, s, { fit: 'fill', kernel: 'lanczos3' })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  return data;   // RGB, SIZE*SIZE*3
+  if (n === 1) return data;   // RGB, SIZE*SIZE*3
+  const out = Buffer.alloc(SIZE * SIZE * 3);
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const si = ((y % s) * s + (x % s)) * 3, d = (y * SIZE + x) * 3;
+      out[d] = data[si]; out[d + 1] = data[si + 1]; out[d + 2] = data[si + 2];
+    }
+  }
+  return out;
 }
 
 /**
@@ -367,9 +429,10 @@ async function bakeTile(tileName, category, variant, opts = {}) {
   const files = materialFiles(category, variant);
   if (!files?.diffuse) { console.warn(`  ! no diffuse for ${category}/${variant}`); return false; }
 
+  const ro = { repeat: opts.repeat ?? 1 };
   let [dif, nrm, ao, smooth, metal] = await Promise.all([
-    rawOf(files.diffuse), rawOf(files.normal), rawOf(files.ao),
-    rawOf(files.smoothness), rawOf(files.metallic),
+    rawOf(files.diffuse, ro), rawOf(files.normal, ro), rawOf(files.ao, ro),
+    rawOf(files.smoothness, ro), rawOf(files.metallic, ro),
   ]);
 
   if (opts.rot90) {
@@ -457,6 +520,7 @@ function bakeFringe(tileName, cfg) {
         arm[o + c] = t ? arm[to + c] : arm[bo + c];
       }
       albedo[o + 3] = 255;   // side faces are always opaque
+      if (cfg.tintMask) arm[o + 3] = t ? 255 : 0;
     }
   }
   return true;

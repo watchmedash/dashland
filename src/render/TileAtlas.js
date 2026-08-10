@@ -130,9 +130,12 @@ export async function loadTileAtlas(onProgress = () => {}) {
   const [albedo, normal, arm] = bitmaps.map((bmp) =>
     sliceGrid(imageToRGBA(bmp), bmp.width, size, cols, layers));
 
-  // Albedo only. Measured on this atlas: normal and arm carry no alpha==0
-  // texel at all (0 of 10.2M each), so a dilate there is a pure cost, and the
-  // crack strip is never far enough away for its mips to matter.
+  // Albedo only. The dilate exists so a cut-out tile's transparent texels carry
+  // their neighbours' colour into the mips instead of black. The normal map has
+  // no transparent texel at all, and the arm map's alpha is not transparency —
+  // it is the per-texel biome-tint mask on the two fringe tiles (see FRINGE in
+  // scripts/bake-textures.mjs), which wants its own soft mip edge and must not
+  // be dilated. The crack strip is never far enough away for its mips to matter.
   const t0 = performance.now();
   const dilated = dilateLayers(albedo, size, layers);
   if (import.meta.env?.DEV) {

@@ -709,6 +709,19 @@ varying vec3 vWorld;
 varying vec3 vTangent;
 varying float vWave;
 vec3 armSample;
+/**
+ * How much of the block's biome tint this texel takes, 1 by default.
+ *
+ * The tint is per BLOCK and a grass block's side face is two materials in one
+ * tile: living turf across the top sixth and the same soil as a dirt block under
+ * it. Multiplying the whole face by the biome grass colour turned that soil
+ * olive (plains: 140/102/70 becomes 77/80/28) while the dirt block against it
+ * stayed brown. The mask rides in the arm atlas's alpha, which is otherwise
+ * unused and 255 everywhere — so every other tile is unaffected, and unlike the
+ * albedo's alpha it is not also the cut-out mask that the held/inventory block
+ * renderer alpha-tests against. Written in scripts/bake-textures.mjs.
+ */
+float tintMask = 1.0;
 
 // --- aerial perspective ------------------------------------------------------
 //
@@ -858,8 +871,9 @@ vec3 cellOffset(vec3 p, vec3 cen) {
  * the one it replaced.
  */
 const SEASON_FRAG = /* glsl */`
-  vec3 seasonBase = diffuseColor.rgb * vTint;
-  float living = clamp(length(vec3(1.0) - vTint) * 4.0, 0.0, 1.0);
+  vec3 blockTint = mix(vec3(1.0), vTint, tintMask);
+  vec3 seasonBase = diffuseColor.rgb * blockTint;
+  float living = clamp(length(vec3(1.0) - blockTint) * 4.0, 0.0, 1.0);
   float seasonLum = dot(seasonBase, vec3(0.299, 0.587, 0.114));
   vec3 rehued = mix(seasonBase, seasonLum * uSeasonColor, uSeasonStrength);
   diffuseColor.rgb = mix(seasonBase, rehued, living);
@@ -868,6 +882,9 @@ const SEASON_FRAG = /* glsl */`
 const MAP_FRAG = /* glsl */`
   vec4 texel = texture(uMap, vec3(vTexUv, vLayer));
   diffuseColor *= texel;
+  // Solid faces only. A cut-out tile's arm alpha is its own business and the
+  // liquid path has no biome tint to mask, so both leave tintMask at 1.
+  tintMask = texture(uArm, vec3(vTexUv, vLayer)).a;
 ${SEASON_FRAG}
 
   // Per-voxel tone jitter: identical blocks stop reading as tiled wallpaper.
@@ -1997,6 +2014,7 @@ export function createItemBlockMaterial() {
         uniform float uSeasonStrength;
         vec3 armS;
         vec4 texelS;
+        float tintMask = 1.0;
       `)
       // A held or dropped block turns with the year too, or an autumn player
       // carries a piece of summer around in front of them.
@@ -2004,6 +2022,9 @@ export function createItemBlockMaterial() {
         texelS = texture(uMap, vec3(vTexUv, vLayer));
         vec4 texel = texelS;
         diffuseColor *= texel;
+        // Same per-texel tint mask the world uses, or the grass block in the
+        // hand keeps the olive sides the one in the ground has lost.
+        tintMask = texture(uArm, vec3(vTexUv, vLayer)).a;
 ${SEASON_FRAG}
       `)
       // Emissive that follows the texture instead of flooding the whole cube.

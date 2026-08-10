@@ -12,6 +12,7 @@ import {
   TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
   IS_SUBMERGED,
   FACING_DEFAULT, sideTile, capTile, axisOf, blockBoxes, IS_FENCE, fenceLinks,
+  TILES, TILE_INDEX,
 } from './Blocks.js';
 
 /**
@@ -267,6 +268,27 @@ function tintOf(id, biomeId) {
   if (t === 3) { const f = c.foliage; return [f[0] * 0.90, f[1] * 0.98, f[2] * 0.93]; }
   return [c.foliage[0] * 0.9, c.foliage[1] * 1.0, c.foliage[2] * 0.85];
 }
+
+/**
+ * Layers that must never take a block's biome tint, whatever block they land on.
+ *
+ * The tint is a property of the *block* and multiplies every fragment of it, so
+ * a grass block's bottom face — which is the plain `dirt` tile — came out
+ * multiplied by the biome grass colour. Measured on the baked atlas, the tile
+ * itself is exact: grass_side's lower 70% and `dirt` agree to a mean 0.03 counts
+ * per channel. Measured in a plains biome, the tint is [0.55, 0.78, 0.40], so
+ * the same soil rendered 140/102/70 on a dirt block and 77/80/28 on the grass
+ * block beside it — a different, olive earth, which is what the playtest called
+ * out ("grass block also uses different dirt color").
+ *
+ * The face's *layer* is what says "this texel is soil, not foliage", and it is
+ * already threaded into `emit`. Only whole faces can be settled here; the side
+ * face is soil and foliage in one tile and is masked per texel instead, see the
+ * arm-alpha tint mask in scripts/bake-textures.mjs and VoxelMaterial's MAP_FRAG.
+ */
+const WHITE = [1, 1, 1];
+const UNTINTED_LAYER = new Uint8Array(TILES.length);
+for (const t of ['dirt']) UNTINTED_LAYER[TILE_INDEX[t]] = 1;
 
 function faceVisible(a, b) {
   if (a === 0) return false;
@@ -596,7 +618,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
 
     const tint = GROUP[id] === GROUP_LIQUID
       ? [liquidDepth, liquidShore, liquidStyle]
-      : tintOf(id, biomeId);
+      : (UNTINTED_LAYER[layer] ? WHITE : tintOf(id, biomeId));
     const wave = WAVE[id];
     const uv = [[0, 0], [uMax, 0], [uMax, vMax], [0, vMax]];
     const pts = [p0, p1, p2, p3];

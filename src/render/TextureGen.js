@@ -398,7 +398,19 @@ G.crystal_ore = (s) => ore(s, [px([94, 178, 226]), px([190, 240, 255])], 0.1, 53
 // they are a variant of is the *rock*, not the ore, and the baker drops them on
 // slate instead of stone.
 const ORE_MINERALS = {
-  copper_ore: [[142, 78, 38], [206, 122, 62], 0.55, 541, 0.48],
+  // Copper is the iron problem one step milder, and it survived the pass that
+  // fixed iron because it has a hue where iron's old beige had none. Coverage is
+  // not the issue: every ore is the same blob field with a different seed, and
+  // measured on the baked atlas all of them mask 11.6% of the tile. What copper
+  // lacked was VALUE. Its light end sat at luminance 140 against the stone it
+  // bakes onto at 137, so the lit half of every fleck disappeared into the rock
+  // and only the dark half read as ore — flecks that shrink to nothing at a few
+  // blocks' distance or in a torch-lit shaft. Measured RMS luminance difference
+  // against the stone base: copper 14.2, with coal 29.4, crystal 23.9, silver
+  // 19.6, gold 19.5 and iron 19.3. Dropped a stop and a half and saturated,
+  // which lands copper at 20.2 — inside the family band — and reads as raw
+  // copper ore rather than as pale rust.
+  copper_ore: [[104, 48, 18], [188, 96, 34], 0.55, 541, 0.48],
   silver_ore: [[136, 142, 152], [222, 228, 238], 0.7, 551, 0.3],
   sulfur_ore: [[168, 148, 26], [236, 222, 96], 0.0, 561, 0.62],
   amethyst_ore: [[110, 58, 168], [198, 148, 252], 0.05, 571, 0.16],
@@ -410,6 +422,10 @@ const ORE_MINERALS = {
   // deep matrix it would sit in, so the vein disappeared. Lifted a stop and a
   // half, which is the only way a black mineral reads against black rock.
   deep_coal_ore: [[58, 58, 66], [124, 124, 136], 0, 621, 0.72],
+  // Deep copper keeps the OLD, lighter copper: it bakes onto slate at luminance
+  // 47, so the shallow ore's new dark end would be the same value as its matrix
+  // and the vein would vanish the way deep coal's did. Same mineral, one rock
+  // brighter, for the same reason coal has a deep colour of its own.
   deep_copper_ore: [[142, 78, 38], [206, 122, 62], 0.55, 631, 0.48],
   deep_iron_ore: [[92, 62, 42], [146, 108, 78], 0.45, 641, 0.5],
   deep_silver_ore: [[136, 142, 152], [222, 228, 238], 0.7, 651, 0.3],

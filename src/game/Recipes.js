@@ -384,6 +384,70 @@ const RAW = [
 // player already sees on the thing in their hand, where this carried the
 // registry key. Two names for one recipe, one of them player-facing and one of
 // them not, is a thing to get wrong for no gain.
+/**
+ * Ingredient families: one canonical id that a recipe names, and every id it
+ * will actually accept in that slot.
+ *
+ * "Why can't pine, birch etc planks just work like regular planks? Why do we
+ * have to convert them to planks before we can use them?" They could not,
+ * because a recipe compiles its ingredients to single ids and the match was
+ * `===`. Every plank species therefore needed a 1:1 conversion recipe before it
+ * could be a bench or a bed, which is a tax on having more than one tree.
+ *
+ * The canonical id stays what the recipe names, so the crafting panel still
+ * says "Planks" and `recipeCost` still reports one line rather than five. Only
+ * the *match* widens. `familyOf` is the inverse and is what lets counting and
+ * consumption look across the whole family.
+ */
+const FAMILY_NAMES = [
+  ['planks', 'planks_birch', 'planks_pine', 'planks_dark', 'planks_grey'],
+];
+
+const FAMILY = new Map();      // canonical id -> Set of accepted ids
+const MEMBER_OF = new Map();   // any id -> canonical id
+for (const names of FAMILY_NAMES) {
+  const ids = names.map(itemIdOf).filter(Boolean);
+  if (ids.length < 2) continue;
+  const set = new Set(ids);
+  for (const id of ids) { FAMILY.set(id, set); MEMBER_OF.set(id, ids[0]); }
+}
+
+/** Does `got` satisfy a slot that asked for `want`? */
+export function accepts(want, got) {
+  if (want === got) return true;
+  const set = FAMILY.get(want);
+  return !!set && set.has(got);
+}
+
+/** Every id that can stand in for this one, itself included. */
+export function familyOf(id) {
+  const set = FAMILY.get(id);
+  return set ? [...set] : [id];
+}
+
+/** How many of a family the inventory holds. */
+function countFamily(inventory, id) {
+  let n = 0;
+  for (const m of familyOf(id)) n += inventory.count(m);
+  return n;
+}
+
+/** Take `count` from a family, spending the odd species before the canonical
+ *  one so a player's mixed timber is used up rather than accumulating. */
+function removeFamily(inventory, id, count) {
+  let left = count;
+  const members = familyOf(id).sort((a, b) => (a === id ? 1 : 0) - (b === id ? 1 : 0));
+  for (const m of members) {
+    if (left <= 0) break;
+    const have = inventory.count(m);
+    if (!have) continue;
+    const take = Math.min(have, left);
+    inventory.remove(m, take);
+    left -= take;
+  }
+  return count - left;
+}
+
 export const RECIPES = RAW.map((r) => {
   const rec = { out: itemIdOf(r.out), count: r.count, table: !!r.table, undo: !!r.undo };
   if (r.shape) {
@@ -503,8 +567,17 @@ export function findRecipe(grid, w, h, hasTable) {
     if (r.table && !hasTable) continue;
     if (r.kind === 'shapeless') {
       if (present.length !== r.ingredients.length) continue;
-      const want = [...r.ingredients].sort((a, b) => a - b);
-      if (want.every((v, i) => v === present[i])) return r;
+      // Family aware, so a shapeless recipe naming planks takes any plank.
+      // Greedy is safe here because the families are disjoint: an id belongs to
+      // at most one, so no slot can steal another's only candidate.
+      const pool = [...present];
+      let all = true;
+      for (const wid of r.ingredients) {
+        const at = pool.findIndex((got) => accepts(wid, got));
+        if (at < 0) { all = false; break; }
+        pool.splice(at, 1);
+      }
+      if (all && pool.length === 0) return r;
       continue;
     }
     // shaped: slide the pattern over the grid
@@ -516,7 +589,7 @@ export function findRecipe(grid, w, h, hasTable) {
           for (let x = 0; x < w && ok; x++) {
             const gy = y - oy, gx = x - ox;
             const want = (gy >= 0 && gy < r.h && gx >= 0 && gx < r.w) ? r.grid[gy * r.w + gx] : 0;
-            if (ids[y * w + x] !== want) ok = false;
+            if (!accepts(want, ids[y * w + x])) ok = false;
           }
         }
         if (ok) return r;
@@ -544,7 +617,7 @@ export function availableRecipes(inventory, hasTable) {
   for (const r of RECIPES) {
     if (r.table && !hasTable) continue;
     const cost = recipeCost(r);
-    if (cost.every((c) => inventory.count(c.item) >= c.count)) out.push({ recipe: r, cost });
+    if (cost.every((c) => countFamily(inventory, c.item) >= c.count)) out.push({ recipe: r, cost });
   }
   // de-duplicate by output: several recipes make planks, show one entry
   const seen = new Set();
@@ -563,12 +636,12 @@ export function craftFromInventory(inventory, recipe, times = 1) {
   let made = 0;
   for (let n = 0; n < times; n++) {
     const cost = recipeCost(recipe);
-    if (!cost.every((c) => inventory.count(c.item) >= c.count)) break;
+    if (!cost.every((c) => countFamily(inventory, c.item) >= c.count)) break;
     // Room for the whole yield, not for one of it. `hasRoom` is true when a
     // single partial stack exists, so a four-plank recipe with one space left
     // consumed the log and threw three planks away.
     if (!inventory.roomFor(recipe.out, recipe.count)) break;
-    for (const c of cost) inventory.remove(c.item, c.count);
+    for (const c of cost) removeFamily(inventory, c.item, c.count);
     inventory.add(recipe.out, recipe.count);
     made++;
   }

@@ -123,15 +123,6 @@ const _right = new THREE.Vector3();
 const _here = new THREE.Vector3();
 const _there = new THREE.Vector3();
 
-/**
- * Read-out for the day length slider, where 0 is not a length.
- *
- * `_tickClock` treats any value at or below 0 as "follow the device clock", so
- * the leftmost notch has to say what it does rather than show "0 min", which
- * reads as a stopped clock.
- */
-const dayLabel = (m) => (m > 0 ? `${m} min` : 'Clock');
-
 // Colours go in as plain `#rrggbb` — pre-encoding them as %23 then running
 // encodeURIComponent double-escapes the %, which yields an invalid fill and
 // silently renders every pip black.
@@ -814,16 +805,11 @@ export class UI {
     bind('set-sens', 'input', (e) => { s.sensitivity = +e.target.value; $('sens-val').textContent = (+e.target.value).toFixed(2); g.persistSettings(); });
     bind('set-vol', 'input', (e) => { s.volume = +e.target.value / 100; $('vol-val').textContent = e.target.value; g.audio.setVolumes(s.volume, s.music); g.persistSettings(); });
     bind('set-mus', 'input', (e) => { s.music = +e.target.value / 100; $('mus-val').textContent = e.target.value; g.audio.setVolumes(s.volume, s.music); g.persistSettings(); });
-    // Field of view needs nothing pushed: `updateCamera` reads `settings.fov`
-    // every frame. Resolution does, because the pixel ratio is only set in
-    // `_resize`, and `setRenderScale` exists for exactly this call and had no
-    // caller until now.
-    bind('set-fov', 'input', (e) => { s.fov = +e.target.value; $('fov-val').textContent = e.target.value; g.persistSettings(); });
-    bind('set-scale', 'input', (e) => { s.renderScale = +e.target.value; $('scale-val').textContent = `${Math.round(+e.target.value * 100)}%`; g.setRenderScale(); g.persistSettings(); });
-    // 0 means follow the device clock. `_tickClock` only advances `dayT` while
-    // this is above 0, so moving off the leftmost notch hands the planet its own
-    // cycle from wherever `dayT` last stood.
-    bind('set-day', 'input', (e) => { s.dayMinutes = +e.target.value; $('day-val').textContent = dayLabel(+e.target.value); g.persistSettings(); });
+    // No rows for field of view, resolution or day length, and that is a
+    // decision rather than an omission. They were added once because the code
+    // reads all three, and the owner took them out again: the panel was trimmed
+    // on purpose and a slider nobody asked for is another line to scroll past.
+    // `setRenderScale` therefore has no caller, which is correct.
     bind('set-post', 'change', (e) => { s.post = e.target.checked; g.postfx.enabled = e.target.checked; g.persistSettings(); });
     bind('set-bob', 'change', (e) => { s.bob = e.target.checked; g.persistSettings(); });
     bind('set-invert', 'change', (e) => { s.invertY = e.target.checked; g.input.invertY = e.target.checked; g.persistSettings(); });
@@ -852,9 +838,6 @@ export class UI {
     $('set-sens').value = s.sensitivity; $('sens-val').textContent = s.sensitivity.toFixed(2);
     $('set-vol').value = Math.round(s.volume * 100); $('vol-val').textContent = Math.round(s.volume * 100);
     $('set-mus').value = Math.round(s.music * 100); $('mus-val').textContent = Math.round(s.music * 100);
-    $('set-fov').value = s.fov; $('fov-val').textContent = Math.round(s.fov);
-    $('set-scale').value = s.renderScale; $('scale-val').textContent = `${Math.round(s.renderScale * 100)}%`;
-    $('set-day').value = s.dayMinutes; $('day-val').textContent = dayLabel(s.dayMinutes);
     $('set-post').checked = s.post;
     $('set-bob').checked = s.bob;
     $('set-invert').checked = s.invertY;

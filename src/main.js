@@ -3811,6 +3811,10 @@ class Game {
       // part of what is being written. Ctrl+Enter carves, so the keyboard can
       // still finish without reaching for the button.
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(true); }
+      // ...and refuse a fifth line. The field shows four and does not scroll,
+      // and the board carves four, so a fifth would be typed where the player
+      // cannot see it and then not appear on the sign either.
+      else if (e.key === 'Enter' && input.value.split('\n').length >= 4) e.preventDefault();
       if (e.key === 'Escape') finish(false);
     };
   }

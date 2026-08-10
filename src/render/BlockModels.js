@@ -148,6 +148,12 @@ export class BlockModels {
       // one. Measure what we were given.
       const bb = new THREE.Box3().setFromObject(mesh);
       k.scale = k.height / Math.max(1e-3, bb.max.y - bb.min.y);
+      // How far the model's lowest point sits BELOW its own origin, in cells.
+      // The exporter centres a model about its origin, so this is negative for
+      // every model in the game and the placement below has to add it back or
+      // the thing is planted rather than stood on the ground. See the note
+      // there for what that cost.
+      k.foot = bb.min.y * k.scale;
       k.material = this._skin(k, bb);
     };
     const m = worldModel(itemId, take);
@@ -228,7 +234,17 @@ export class BlockModels {
         // the cell. Getting this wrong is what left one floating with its head
         // off-centre over the neighbouring block instead of leaning out of the
         // wall it is fixed to.
-        _pos.copy(t.pos).addScaledVector(_up, -0.5);
+        // `-k.foot` is what makes "stands on the floor" true. Dropping half a
+        // cell puts the model's ORIGIN on the floor, and the exporter centres a
+        // model about its origin, so every one of the 33 was buried by half its
+        // own height: sea sponge by 0.32 of a cell, the torch by 0.228, the
+        // smallest of them by 0.10. It went unnoticed for as long as it did
+        // because an upright plant loses only its roots to it and still reads
+        // as a plant. Driftwood is the one model whose mass is all at the
+        // bottom — a limb lying on sand with one fork rising — so burying its
+        // lowest 0.15 took the limb and left the tip of the fork standing in
+        // the grass. That is the whole of "why is the driftwood standing".
+        _pos.copy(t.pos).addScaledVector(_up, -0.5 - (k.foot || 0));
         if (k.lean && t.out) _pos.addScaledVector(_out, -0.42).addScaledVector(_up, 0.16);
 
         _m.compose(_pos, _q, _scale.setScalar(k.scale));

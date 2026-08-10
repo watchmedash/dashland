@@ -2887,6 +2887,18 @@ class Game {
     this.ui.hideDeath();
     this.player.health = this.player.maxHealth;
     this.breath = 1;
+    // Everything that was still hurting you when you died. "After dying I am
+    // still taking damage - when I died from lava, after respawning I am still
+    // taking damage": `burning` is a five second clock that relights while you
+    // stand in lava, and death did not clear it, so you woke up at your bed
+    // already on fire and lost health to a pool you were nowhere near. The
+    // scald and starvation clocks are the same shape and would have done the
+    // same thing.
+    this.player.burning = 0;
+    this._scaldT = 0;
+    this.soakT = 0;
+    this._starve = 0;
+    this.energy = Math.max(this.energy, 0.35);
     // Wake up at your bed if you have one and it is still there. Falling back to
     // a fresh random column is only right for a player who has never slept: on a
     // planet of 259,584 columns, being scattered at random after every death
@@ -5683,8 +5695,14 @@ class Game {
       // Same curve as the hand light's, in world units rather than cells — the
       // two differ by the cell's arc length, which on this planet is within a
       // few percent of one.
+      // Linear for the same reason `flameLight` is: the terrain's own block
+      // light loses one level per cell, so a squared curve here made a mob
+      // several times darker than the ground it stands on. "Why is a lion
+      // walking near a lava showing black model, I have to get very close
+      // before it shows color" - at half a lava pool's reach the ground under
+      // the lion was lit 0.50 and the lion 0.25.
       const fall = 1 - d / e.reach;
-      const w = fall * fall * gain;
+      const w = fall * gain;
       const k = Math.max(e.r, e.g, e.b) * w;
       if (!(k > 0)) continue;
       wt[i] = w; key[i] = k;

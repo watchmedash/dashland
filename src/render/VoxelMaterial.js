@@ -697,7 +697,14 @@ vec3 flameLight(vec3 lpos, vec3 lcol, float lrad, vec3 nrm, vec3 world, vec3 fce
     occFrame(lpos, vec3(0.0), lcell, unusedOffset);
     if (occMarch(fcell, lcell, lrad) <= 0.0) return vec3(0.0);
   }
-  return lcol * (wrap * fall * fall);
+  // Linear, not squared, because that is what the grid does. A placed torch's
+  // light is a flood fill that loses one level per cell, so its brightness at
+  // distance d is (reach - d) / reach - linear. This term was fall * fall, so a
+  // carried torch at half its reach delivered 0.25 where the identical torch in
+  // the wall delivered 0.50: "why is torch not as bright when handheld". The
+  // reach and the gain were already derived from the placed torch so the two
+  // could not drift; the curve between them was the one thing still disagreeing.
+  return lcol * (wrap * fall);
 }
 varying float vLayer;
 varying float vAO;

@@ -543,12 +543,22 @@ export class IconFactory {
           let o = P(0, y1, 0), a = P(1, y1, 0), v = P(0, y1, 1);
           face(topTile, [P(x0, y1, z0), P(x1, y1, z0), P(x1, y1, z1), P(x0, y1, z1)],
             o[0], o[1], a[0] - o[0], a[1] - o[1], v[0] - o[0], v[1] - o[1], 0.12);
+          // The two walls run their tile from the BOTTOM of the face upward,
+          // because that is the way round the world reads a side tile. The
+          // atlas stores a fringe tile with its fringe in the last rows -
+          // grass_side and snow_side both - and the renderer flips V, so in
+          // the world the grass is along the top of the flank. Starting at the
+          // top here did not flip, so every icon with an asymmetric side tile
+          // was upside down: the grass block wore a green stripe along the
+          // BOTTOM of both walls with bare soil above it, which is most of
+          // "grass block uses a different dirt colour". The soil was always
+          // the dirt tile; the green band under it was what read as different.
           // west wall (x = x0)
-          o = P(x0, 1, 0); a = P(x0, 1, 1); v = P(x0, 0, 0);
+          o = P(x0, 0, 0); a = P(x0, 0, 1); v = P(x0, 1, 0);
           face(sideTile, [P(x0, y1, z0), P(x0, y1, z1), P(x0, y0, z1), P(x0, y0, z0)],
             o[0], o[1], a[0] - o[0], a[1] - o[1], v[0] - o[0], v[1] - o[1], -0.28);
           // south wall (z = z1)
-          o = P(0, 1, z1); a = P(1, 1, z1); v = P(0, 0, z1);
+          o = P(0, 0, z1); a = P(1, 0, z1); v = P(0, 1, z1);
           face(frontTile ?? sideTile,
             [P(x0, y1, z1), P(x1, y1, z1), P(x1, y0, z1), P(x0, y0, z1)],
             o[0], o[1], a[0] - o[0], a[1] - o[1], v[0] - o[0], v[1] - o[1], -0.11);

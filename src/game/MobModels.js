@@ -156,6 +156,41 @@ export function instantiate(url) {
 }
 
 /**
+ * Free the one GPU resource a clone genuinely owns: its skeletons.
+ *
+ * `SkeletonUtils.clone` rebuilds the bone hierarchy per instance, so every
+ * skinned clone gets `Skeleton`s of its own, and three allocates each of those
+ * a bone `DataTexture` lazily on its first render (`Skeleton.computeBoneTexture`
+ * out of `setProgram`). Nothing ever freed them: a fish rig carries about five
+ * SkinnedMeshes with a skeleton each, so every fish that spawned and despawned
+ * left ~5 GL textures behind for the life of the context.
+ *
+ * Measured before this existed, four rounds of spawn-25-fish-then-release-all:
+ * `renderer.info.memory.textures` went 107 -> 215 -> 326 -> 427 -> 558 and never
+ * once fell, with 486 of those textures orphaned — no skeleton reachable from
+ * any scene still referenced them. That was the whole of the unbounded growth
+ * the audit measured while travelling (91 -> 973 over seven minutes); the
+ * earlier "mobs are clean" control had forced-spawned one of the fourteen
+ * *unskinned* species, which allocates no bone texture at all and so plateaus.
+ *
+ * Geometry and materials are deliberately NOT touched here — those belong to
+ * the prototype and are shared with the whole species. Disposing is safe even
+ * if the root is drawn again: three rebuilds a missing bone texture on the next
+ * render.
+ *
+ * @param {THREE.Object3D} root the clone's root, as handed out by `instantiate`
+ */
+export function releaseSkeletons(root) {
+  if (!root) return;
+  const seen = new Set();
+  root.traverse((n) => {
+    if (!n.isSkinnedMesh || !n.skeleton || seen.has(n.skeleton)) return;
+    seen.add(n.skeleton);
+    n.skeleton.dispose();
+  });
+}
+
+/**
  * Crossfade to one clip. Re-requesting the clip already playing is a no-op, so
  * this is safe to call every frame straight from the behaviour state machine.
  *

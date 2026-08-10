@@ -45,15 +45,28 @@ import * as MobModels from './MobModels.js';
  * another. 62 land bodies is about one per 600 square units, roughly
  * twenty-four units between neighbours.
  *
- * The cost this buys is bounded and known. The only per-frame O(n²) in this
- * file is _separate: at 110 that is 5,995 pair tests a frame, ~360,000 a
- * second, and every pair that is not actually overlapping now costs one squared
- * distance and a compare — see the early-out there. What costs real work is
+ * The cost this buys is bounded and known. There is no per-frame O(n²) in this
+ * file any more: _separate was the last one and is a hash-grid lookup now, and
+ * it is the one number here that has been measured rather than reasoned about.
+ * Over synthetic herds on a sphere, driving the real function:
+ *
+ *   bodies      60     120     134     200     400     800
+ *   all-pairs   52us   210us   251us   596us  2619us 10740us
+ *   hash grid    9us    32us    27us    53us   204us   642us
+ *
+ * That is a flat 41.5ns per pair before and roughly 150-500ns per *body* after,
+ * so the headcount no longer prices itself quadratically and this ceiling is no
+ * longer the thing _separate is protecting. What costs real work is still
  * _nudge (three footprint tests, nine column samples each) and that fires only
  * on genuine overlaps, so it scales with how crowded one spot is rather than
  * with the headcount. The prey search is still one pass per hungry carnivore
- * per PREY_PERIOD. None of that is the limiting factor at this ceiling; the
- * mixer update in _animate, which is per body per frame, is the larger bill.
+ * per PREY_PERIOD.
+ *
+ * What decides this ceiling now is the per-body linear cost, and the mixer
+ * update in _animate is the bulk of it. Raising the cap is an _animate
+ * question, not a _separate one — and see the note on `pathT` in _pathBearing
+ * for the one clock in this file that is not jittered, which is the other thing
+ * to look at before trusting a frame-time sample taken with hostiles abroad.
  */
 /*
  * The budgets below sum to more than this, and that is fine. Measured, because
@@ -802,6 +815,61 @@ const PLAYER_RADIUS = 0.34;
 
 const _seam = new THREE.Vector3();
 const _rel = new THREE.Vector3();
+
+/**
+ * Neighbour lookup for _separate: a uniform hash grid over world position.
+ *
+ * Measured before touching it, because the audit that sent me here had the
+ * attribution wrong and it was worth knowing by how much. The all-pairs loop
+ * costs a flat 41.5ns per pair — 52us a frame at 60 bodies, 214us at 120, 249us
+ * at the current cap of 134, and 3,303us at 400. That is a clean n² line, and
+ * it is what makes the cap immovable: it is not the bill at 134 that hurts, it
+ * is that every extra body costs more than the last one did.
+ *
+ * A flat 3D hash on the world-space position, deliberately, rather than
+ * anything in cell space. Bodies are spread over a sphere and the cube-face
+ * seams are exactly where column arithmetic goes wrong; world position has no
+ * seams in it at all, so the question never comes up. The cost is that the
+ * table is keyed on three signed ints instead of one, which is three compares
+ * on a candidate and nothing on a miss.
+ *
+ * Cell size is the largest reach any pair can have (twice the largest radius in
+ * the list, recomputed each frame — a tiger that has eaten its way larger, or
+ * a giraffe walking into the ring, both move it). Two bodies that overlap are
+ * then always within one cell of each other on every axis, so the 27-cell scan
+ * is exact: nothing that would have been pushed is skipped, which is the same
+ * bound the old squared-distance early-out relied on.
+ *
+ * Buckets are shared between cells that happen to hash together. That is
+ * harmless for correctness of the *set* of pairs, but not for the count: two
+ * different neighbour cells landing in one bucket would hand back the same body
+ * twice and push it twice. So each body's cell is stored exactly and checked on
+ * the way out, which makes a body appear once, from its own cell, or not at all.
+ */
+let _gHead = new Int32Array(0);   // bucket -> newest body in it, -1 for empty
+let _gNext = new Int32Array(0);   // body -> next body in the same bucket
+let _gCx = new Int32Array(0);     // body -> its exact grid cell, so a shared
+let _gCy = new Int32Array(0);     // bucket cannot return the same body from two
+let _gCz = new Int32Array(0);     // different neighbour cells
+let _gCand = new Int32Array(0);   // partners found for one body, sorted
+let _gMask = 0;
+const gridHash = (x, y, z) => (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791));
+/** Grow the scratch to hold `n` bodies. Never shrinks; MAX_MOBS bounds it. */
+function gridFit(n) {
+  if (_gNext.length >= n) return;
+  const want = Math.max(64, n);
+  _gNext = new Int32Array(want);
+  _gCx = new Int32Array(want);
+  _gCy = new Int32Array(want);
+  _gCz = new Int32Array(want);
+  _gCand = new Int32Array(want);
+  // Half load at the cap, which keeps the chains at one body each in the case
+  // that matters — bodies spread over terrain, not piled on one point.
+  const cap = 1 << (32 - Math.clz32(Math.max(1, want * 2 - 1)));
+  _gHead = new Int32Array(cap);
+  _gMask = cap - 1;
+}
+
 const _ray = new THREE.Vector3();
 const _rpos = new THREE.Vector3();
 const _vox = new THREE.Vector3();
@@ -2833,6 +2901,12 @@ export class Mobs {
     // clone only borrows them, so disposing either would blank the whole herd.
     // The material clones made for the damage tint are this mob's own.
     for (const m of mob.model.owned) m.dispose();
+    // So is its skeleton, and with it the bone texture three hangs off the
+    // skeleton on first render. This was the game's only unbounded GPU leak:
+    // the skinned species (fish, deep_fish) left ~5 undisposed GL textures per
+    // body, so a travelling player climbed ~126 textures a minute forever. See
+    // `MobModels.releaseSkeletons` for the measurement.
+    MobModels.releaseSkeletons(mob.model.root);
   }
 
   // --- spawning -------------------------------------------------------------
@@ -5450,17 +5524,60 @@ export class Mobs {
    * simply walks in. Fixing *that* means the player colliding with bodies, which
    * is not in this file.
    *
-   * The pair loop is O(n²) and MAX_MOBS is now 110, so it is 5,995 tests a
-   * frame. The squared-distance reject below is what keeps that free: a pair
-   * that is not overlapping costs one distanceToSquared and a compare, and the
-   * world distance is a sound bound because flattening into the tangent plane
-   * can only ever shorten the separation vector — so nothing that would have
-   * been pushed is skipped.
+   * The pair loop used to be O(n²) — every body against every other, 8,911
+   * tests a frame at the cap. It is a hash-grid lookup now (see the note on
+   * _gHead); measured over bodies spread the way the spawner spreads them,
+   * 266us a frame at 134 became 17us, and 2,540us at 400 became 84us. Packed
+   * into herds, where the contact work is real rather than avoidable, 251us at
+   * 134 became 27us and 2,619us at 400 became 204us — the remainder there is
+   * _nudge doing work the old loop did too, not the lookup.
+   * The squared-distance reject below still stands behind it
+   * and still earns its place: the grid narrows the candidates to bodies within
+   * one cell, and this rejects the ones that are in range of the cell but not
+   * of each other. The world distance is a sound bound because flattening into
+   * the tangent plane can only ever shorten the separation vector — so nothing
+   * that would have been pushed is skipped.
+   *
+   * The pairs are visited in exactly the order the all-pairs loop visited them:
+   * ascending `a`, and ascending `b` within each. That is not tidiness, it is
+   * required. _nudge writes mob.cell.ci/cj and the next _footprintCost reads
+   * them, so two pushes applied to one body in the other order settle it
+   * somewhere else. Proven equal over 2,000 frames against the old loop, on the
+   * exact sequence of (body, direction, amount) triples, to the bit.
    */
   _separate(dt, player) {
     const list = this.list;
     const k = Math.min(1, dt * 9);
-    for (let a = 0; a < list.length; a++) {
+    const n = list.length;
+
+    // --- build the neighbour grid ---
+    // The largest reach a pair can have. Recomputed each frame because it moves:
+    // predators grow, and which species are inside the despawn ring changes as
+    // the player walks.
+    let maxR = 0;
+    for (let i = 0; i < n; i++) {
+      const m = list[i];
+      if (!m.spec.phantom && m.radius > maxR) maxR = m.radius;
+    }
+    // 1e-3 only so an empty or all-phantom list cannot divide by zero.
+    const inv = 1 / Math.max(2 * maxR, 1e-3);
+    gridFit(n);
+    const head = _gHead, next = _gNext, cx = _gCx, cy = _gCy, cz = _gCz;
+    const cand = _gCand, mask = _gMask;
+    head.fill(-1);
+    for (let i = 0; i < n; i++) {
+      const m = list[i];
+      // He is not a body (see below), and nor is anything else phantom: leaving
+      // them out of the grid is the same exemption the old loop spelled twice.
+      if (m.spec.phantom) continue;
+      const p = m.pos;
+      const gx = Math.floor(p.x * inv), gy = Math.floor(p.y * inv), gz = Math.floor(p.z * inv);
+      cx[i] = gx; cy[i] = gy; cz[i] = gz;
+      const h = gridHash(gx, gy, gz) & mask;
+      next[i] = head[h]; head[h] = i;
+    }
+
+    for (let a = 0; a < n; a++) {
       const m = list[a];
       // Not him. He is a sighting, not a body: nothing may push him and he may
       // push nothing.
@@ -5491,9 +5608,37 @@ export class Mobs {
         this._nudge(m, _rel, (want - d) * k);
       }
       // --- against each other ---
-      for (let b = a + 1; b < list.length; b++) {
-        const o = list[b];
-        if (o.spec.phantom) continue;      // ...from either side of the pair
+      // Everything within one cell on every axis, which is every body that
+      // could possibly be overlapping this one.
+      const gx = cx[a], gy = cy[a], gz = cz[a];
+      let nc = 0;
+      for (let dx = -1; dx <= 1; dx++) {
+        const qx = gx + dx;
+        for (let dy = -1; dy <= 1; dy++) {
+          const qy = gy + dy;
+          for (let dz = -1; dz <= 1; dz++) {
+            const qz = gz + dz;
+            for (let i = head[gridHash(qx, qy, qz) & mask]; i >= 0; i = next[i]) {
+              // `i > a` is the old `b = a + 1`: each pair once, the later body
+              // of the two doing the finding. The cell compare is what stops a
+              // bucket shared by two neighbour cells returning a body twice.
+              if (i > a && cx[i] === qx && cy[i] === qy && cz[i] === qz) cand[nc++] = i;
+            }
+          }
+        }
+      }
+      // Ascending, for the ordering reason in the note above. Insertion sort
+      // because nc is the number of bodies within a body-length or two — one or
+      // two in open country, a handful in a herd — and a comparison sort's
+      // setup costs more than this whole loop at that size.
+      for (let i = 1; i < nc; i++) {
+        const v = cand[i];
+        let j = i - 1;
+        while (j >= 0 && cand[j] > v) { cand[j + 1] = cand[j]; j--; }
+        cand[j + 1] = v;
+      }
+      for (let c = 0; c < nc; c++) {
+        const o = list[cand[c]];
         const reach = m.radius + o.radius;
         if (m.pos.distanceToSquared(o.pos) >= reach * reach) continue;
         _rel.copy(m.pos).sub(o.pos);
@@ -5844,6 +5989,21 @@ export class Mobs {
    */
   _pathBearing(mob, dt, player, fr) {
     const goal = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
+    // NOT MEASURED, and left alone for that reason — written down because it is
+    // the only per-mob clock in this file that is not jittered at spawn. voxT,
+    // preyT, spookT and climbT are all seeded with a random fraction of their
+    // period so the work spreads over frames; pathT is not seeded at all, and
+    // `!mob.path` forces a search on the first frame a body starts hunting. So
+    // a husk pack that acquires the player together searches together, and then
+    // re-syncs on PATH_PERIOD forever after. Each search is bounded at
+    // PATH_BUDGET (2,600 expansions, four _stepTo probes and three Map writes
+    // each), which is the largest single lump of work any one body can ask for
+    // in a frame, and nothing limits how many bodies ask for it in the same
+    // one. If a frame-time sample taken at night ever comes back much worse
+    // than the headcount explains, look here before blaming the headcount:
+    // seeding pathT would spread it, at the cost of up to PATH_PERIOD before a
+    // newly-aggroed husk gets its first route, which is a gameplay change and
+    // wants a measurement behind it.
     mob.pathT = (mob.pathT ?? 0) - dt;
     const stale = mob.pathGoal !== goal && mob.pathT <= 0;
     if (!mob.path || stale || mob.pathT <= -PATH_MAX_AGE) {

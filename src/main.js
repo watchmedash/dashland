@@ -3699,11 +3699,15 @@ class Game {
    * you clicked.
    */
   _stairOrient(hit, col, k) {
-    // `_facingToward` gives the direction back toward the player; the step has
-    // to fall the other way, so the low side is the opposite of that.
-    const toward = this._facingToward(col, k);
-    const away = toward ^ 1;      // 0<->1 and 2<->3 are the opposing pairs
-    return away | (this._slabHalf(hit, col, k) ? 4 : 0);
+    // The low side faces the player. "Stairs isn't behaving like in minecraft,
+    // placing them is confusing": it used to face *away*, so the tall riser
+    // landed against you and the first thing you built was a wall you could not
+    // step onto - you had to walk round your own staircase to use it.
+    //
+    // Minecraft puts the low step on the side you placed from, which is what
+    // makes "stand still, place, walk forward" build a flight you ascend. The
+    // whole of the fix is dropping the flip that was here.
+    return this._facingToward(col, k) | (this._slabHalf(hit, col, k) ? 4 : 0);
   }
 
   /**

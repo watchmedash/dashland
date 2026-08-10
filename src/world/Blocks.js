@@ -44,10 +44,18 @@ export const R_DOOR = 8;
 /**
  * A board on a post. Its byte is a plain facing for the side the writing is on.
  *
- * The text is not rendered into the world: a canvas texture per sign costs a
- * draw call and a megabyte each, and a hundred signs round the back of a base
- * would be a hundred of both. You read one by looking at it, which reuses the
- * hint line and means the writing is legible at any distance you can aim from.
+ * The text IS rendered into the world, cut into the board — see
+ * `render/SignText.js`. This used to say it could not be afforded, on the
+ * grounds that "a canvas texture per sign costs a draw call and a megabyte
+ * each, and a hundred signs round the back of a base would be a hundred of
+ * both". That is true of a texture per sign and false of one shared glyph
+ * atlas: every sign near the player is quads in a single merged geometry with
+ * a single material, so it is one mesh whether that is one sign or a hundred.
+ * Sixty signs carrying the full 48 characters rebuild in 0.26 ms.
+ *
+ * Looking at one still puts the writing on the hint line, and that is not
+ * redundant: it is how you read a sign from across a valley, where the carved
+ * letters are a couple of pixels tall.
  */
 export const R_SIGN = 9;
 /**

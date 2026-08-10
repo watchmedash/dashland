@@ -14,6 +14,7 @@ import { Sky, MOON_FILL } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
 import { Particles } from './render/Particles.js';
 import { BlockModels, CAP as BLOCK_MODEL_CAP } from './render/BlockModels.js';
+import { SignText } from './render/SignText.js';
 import {
   createVoxelMaterials, buildTileTextures, buildCrackTexture, voxelUniforms,
   occupancyTexture, occupancyData, OCC_NI, OCC_NJ, OCC_NK, OCC_ANG,
@@ -990,6 +991,8 @@ class Game {
     this.bobberModelled = false;
     /** Sign text, keyed like the kilns and crates. */
     this.signs = new Map();
+    /** Bumped whenever the writing changes, so _syncSignText knows to rebuild. */
+    this.signSeq = 0;
     /**
      * Cells winter turned to ice, keyed like the rest.
      *
@@ -1150,6 +1153,7 @@ class Game {
     this.sky = new Sky(this.scene, this.renderer);
     this.particles = new Particles(this.scene, this.planet);
     this.blockModels = new BlockModels(this.scene);
+    this.signText = new SignText(this.scene);
     this.drops = new Drops(this.scene, this.planet, this.materials);
     // Arrows in flight. Built here, between the drops and the animals, because
     // it needs the planet for its collision and nothing else: the mob list is
@@ -1806,6 +1810,7 @@ class Game {
     this.homeSpawn = null;
     this.deathSite = null;
     this.signs.clear();
+    this.signSeq++;
     this.frozen.clear();
     this.hearths.clear();
     this.coreFound = false;
@@ -2429,6 +2434,7 @@ class Game {
         ? { col: save.home[0], k: save.home[1] }
         : null;
       this.signs = new Map(save.signs || []);
+      this.signSeq++;
       this.frozen = new Set(save.frozen || []);
       this.hearths = new Set(save.hearths || []);
       this.coreFound = !!save.coreFound;
@@ -3791,6 +3797,7 @@ class Game {
         const text = input.value.trim().slice(0, 48);
         if (text) this.signs.set(key, text);
         else this.signs.delete(key);
+        this.signSeq++;
         this.audio.ui(620);
       }
       this.state = 'playing';
@@ -3942,7 +3949,7 @@ class Game {
 
     // `_crateAt`, not `.get` — a worldgen cache you break without opening still
     // has to hand over its contents.
-    if (IS_SIGN[hit.id]) this.signs.delete(key);
+    if (IS_SIGN[hit.id]) { this.signs.delete(key); this.signSeq++; }
 
     const crate = hit.id === ID.crate ? this._crateAt(hit.col, hit.k) : null;
     if (crate) {
@@ -4943,6 +4950,7 @@ class Game {
     this._safeTick('flames', () => this._tickFlames(dt));
     this._safeTick('steam', () => this._tickSteam(dt));
     this._safeTick('blockModels', () => this._syncBlockModels());
+    this._safeTick('signText', () => this._syncSignText());
     this.sky.setSolarTime(this.player.up, this.timeOfDay());
     // `shelter` doubles as the entity fill's occlusion — animals cannot read
     // the voxel light, so a roof over the player is the best signal the sky has
@@ -6232,6 +6240,47 @@ class Game {
       if (a < addr) lo = mid + 1; else hi = mid - 1;
     }
     return -1;
+  }
+
+  /**
+   * The writing on every sign near enough to read, as one mesh.
+   *
+   * Driven off the `signs` map rather than off a scan of the world, which is
+   * what makes it affordable: the map holds only signs that have been written
+   * on, so this is a walk of a handful of entries and not 71 000 array reads.
+   * A base with two hundred signs in it is two hundred `centerOf` calls behind
+   * the same cache the block models use.
+   */
+  _syncSignText() {
+    if (!this.signText) return;
+    const c = this.player.cell;
+    const ck = Math.floor(c.ck);
+    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, Math.floor(c.ci))),
+      Math.min(F - 1, Math.max(0, Math.floor(c.cj))));
+    if (this._stCol === baseCol && this._stK === ck
+      && this._stSeq === this.editSeq && this._stSigns === this.signSeq) return;
+    this._stCol = baseCol; this._stK = ck;
+    this._stSeq = this.editSeq; this._stSigns = this.signSeq;
+
+    // Past this the letters are a smudge a pixel high, and the hint line is
+    // how you read a sign at range — that has not changed and is still the
+    // reason you can read one across a valley.
+    const RANGE = 26;
+    const list = [];
+    for (const [key, text] of this.signs) {
+      if (!text) continue;
+      const col = Math.floor(key / D), k = key - col * D;
+      if (!IS_SIGN[this.planet.at(col, k)]) continue;
+      const pos = this.planet.centerOf(col, k, new THREE.Vector3());
+      if (pos.distanceToSquared(this.player.position) > RANGE * RANGE) continue;
+      const p = colParts(col);
+      const fr = tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5);
+      list.push({
+        pos, ea: fr.ea, eb: fr.eb, up: fr.up, arcA: fr.arcA, arcB: fr.arcB,
+        dir: this.planet.facingAt(col, k) & 3, text,
+      });
+    }
+    this.signText.sync(list);
   }
 
   _syncBlockModels() {

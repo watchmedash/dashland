@@ -3896,7 +3896,15 @@ class Game {
     return ((this._ladderFacing(hit, col, k) & 3) ^ 1) | SIGN_WALL;
   }
 
-  /** Is there anything for a sign in this cell, with this byte, to hold on to? */
+  /**
+   * Is there anything for a sign in this cell, with this byte, to hold on to?
+   *
+   * Seam-safe, and checked rather than assumed: a sign in the last column of
+   * face 0 nailed to a wall on face 5, 4, 2 or 3 derives the right writing
+   * direction and reports supported in all four. It holds because the only two
+   * things here that cross a face are `stepColumn` and, in `_ladderFacing`, a
+   * difference of two world positions - never arithmetic on a column index.
+   */
   _signSupported(col, k, byte) {
     if (!(byte & SIGN_WALL)) return this.planet.solidAt(col, k - 1);
     // The wall is behind the writing, so step the opposite way to the facing.

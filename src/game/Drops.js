@@ -4,7 +4,19 @@
 import * as THREE from 'three';
 import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
 import { tangentFrame } from '../world/Sphere.js';
-import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE} from '../world/Blocks.js';
+import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX } from '../world/Blocks.js';
+
+/**
+ * Layers that must never take a biome tint, and the white that stands in.
+ *
+ * The same one-entry table the mesher keeps (`UNTINTED_LAYER` there): the dirt
+ * tile is soil wherever it appears, including on the underside of a grass
+ * block, and tinting it green is what made a grass block's soil disagree with
+ * the dirt block beside it.
+ */
+const UNTINTED_LAYER = new Uint8Array(TILES.length);
+for (const t of ['dirt']) UNTINTED_LAYER[TILE_INDEX[t]] = 1;
+const WHITE_TINT = [1, 1, 1];
 import { ITEMS } from './Items.js';
 import { hasModel, worldModel } from '../render/ItemModels.js';
 
@@ -560,7 +572,12 @@ function getBlockGeo(blockId) {
         uv.push(...uvc[i]);
         aux.push(f.layer, 1, 1, 0);
         blk.push(0.15, 0.15, 0.15);
-        tint.push(...tintv);
+        // Per face, not per block. A grass block's bottom is the dirt tile, and
+        // painting it with the grass tint made a dropped or held grass block's
+        // underside olive while the dirt block beside it stayed brown - the same
+        // fault that was fixed for the world faces and left here, because this
+        // pushed one tint for every face of the cube.
+        tint.push(...(UNTINTED_LAYER[f.layer] ? WHITE_TINT : tintv));
       }
       idxs.push(v, v + 1, v + 2, v, v + 2, v + 3);
       v += 4;

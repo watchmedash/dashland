@@ -117,6 +117,13 @@
   /* The one width the top-left corner is built on. The map is square, the
      vitals column is the same number across, and the two are one stack. */
   --map-size: 152px;
+  /* How much of each edge of the top of the screen is already spoken for: the
+     map, its 10px inset, and a gap nothing may cross. The compass is centred
+     on the window and the chip rail is flush right, so the only thing that
+     stops the two of them landing on top of each other in a narrow window is
+     that both are measured against this. Derived from `--map-size` so the
+     corner stays one object. */
+  --hud-side: calc(var(--map-size) + 26px);
   /* Room for the widest numeral a bar ever shows, which is health at three
      digits either side of the slash. Every row reserves it, so four bars have
      four tracks that start and end on the same two pixels. */
@@ -177,6 +184,15 @@
      `--gutter` is the band of dimmed world that is always visible around a
      card, on all four sides. It is what makes "the card's edge left the
      viewport" a thing the stylesheet cannot do.
+
+     Widths are a percentage of the overlay's *content box*, never of `vw`.
+     Every card used to cap itself at some fraction of the viewport - 93vw,
+     94vw, 96vw - and every one of those is a lie once the overlay's own
+     `--gutter` padding is added back: 96vw plus two 16px gutters is wider
+     than the window below 800px, so the overlay scrolled sideways and the
+     panel's right edge sat outside it. `100%` is measured against the box
+     the card actually sits in, which is the window minus both gutters, and
+     minus the overlay's scrollbar when there is one. It cannot be wrong.
 
      `--screen-h` is therefore the tallest anything is ever allowed to be,
      and every card and panel caps itself at it. A screen with more rows
@@ -288,7 +304,7 @@ html, body {
    `.panel-body` takes whatever height is left and scrolls inside it, and the
    sheet itself never exceeds the window. */
 .panel {
-  width: min(660px, 93vw);
+  width: min(660px, 100%);
   max-height: var(--screen-h);
   display: flex; flex-direction: column; overflow: hidden;
   padding: 20px 22px;
@@ -357,14 +373,14 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
    being a workspace in it — the title screen, pause, death, the confirm — are
    the same sheet as every screen, in a narrower box. */
 .menu-card {
-  width: min(340px, 90vw); padding: 26px 22px 20px; text-align: center;
+  width: min(340px, 100%); padding: 26px 22px 20px; text-align: center;
   /* These have no header to keep, so the sheet is allowed to be the scroll
      container. The cap is what matters: a card is never taller than the
      window, so its bottom button is always somewhere the player can reach. */
   max-height: var(--screen-h); overflow-y: auto;
   animation: rise .28s var(--ease);
 }
-.menu-card.small { width: min(320px, 90vw); padding: 22px 20px 18px; }
+.menu-card.small { width: min(320px, 100%); padding: 22px 20px 18px; }
 .menu-card h2 {
   color: var(--ink); font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: var(--ls-disp); text-align: center;
@@ -501,7 +517,7 @@ button.ghost {
 
 /* ── save slots ────────────────────────────────────────── */
 
-.slots-panel { width: min(520px, 93vw); }
+.slots-panel { width: min(520px, 100%); }
 /* The ten rows sit in one tray cut into the sheet, so the list is an object
    with a shape rather than ten cards floating on a background. Same well as
    the inventory grid, and for the same reason. */
@@ -515,10 +531,17 @@ button.ghost {
    words in it. Delete is a second, deliberately smaller one beside it. */
 /* `minmax(0, 1fr)` and not `1fr`: a grid track's floor is its content, so a
    long character name held the row open and pushed the delete button off the
-   card in a narrow window instead of being cut short. */
+   card in a narrow window instead of being cut short.
+   The saved-when column is `3fr` and not `auto` for the other half of the same
+   fault. An `auto` track is sized to max-content before any `fr` track is fed,
+   so "Saved 2 days ago" took its full width first and the name and the day
+   line divided what was left - which at 390px of window was 22px, and every
+   row read "R... / D...". Two flexible tracks share the shortfall instead, so
+   the name is the last thing to go rather than the first. `text-align: right`
+   is what the old `auto` track was doing for free by hugging its text. */
 .panel .slot-open {
   flex: 1; display: grid; gap: 0 12px; text-align: left;
-  grid-template-columns: 62px minmax(0, 1fr) auto;
+  grid-template-columns: 68px minmax(0, 5fr) minmax(0, 3fr);
   align-items: center; padding: 10px 13px; border-radius: var(--r-md);
   background: var(--paper-cell); border: none; box-shadow: var(--emboss);
   transition: box-shadow var(--t-fast) ease, background var(--t-fast) ease, transform var(--t-fast) var(--ease);
@@ -533,6 +556,9 @@ button.ghost {
   grid-row: 1 / span 2; align-self: center; justify-self: start;
   padding: 4px 7px; border-radius: var(--r-sm);
   font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: var(--ls-cap);
+  /* "Slot 10" is the widest of the ten and it broke onto a second line inside
+     the chip on a phone-width window. The track above holds it. */
+  white-space: nowrap;
   text-transform: uppercase; color: var(--ink-soft);
   background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
 }
@@ -544,6 +570,8 @@ button.ghost {
 .slot-open .slot-when { grid-column: 2; font-size: var(--fs-sm); font-weight: 500; color: var(--ink-soft); }
 .slot-open .slot-ago {
   grid-column: 3; grid-row: 1 / span 2; align-self: center;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  text-align: right;
   font: 600 var(--fs-xs) var(--mono); color: var(--ink-soft); opacity: .75; white-space: nowrap;
 }
 /* An empty slot is a hole in the tray, not a card in it. */
@@ -579,7 +607,7 @@ button.ghost {
 /* The same sheet as `.menu-card`, one size wider, because it is the same
    material doing the same job. */
 .chargen-card {
-  width: min(440px, 94vw); padding: 22px 22px 16px;
+  width: min(440px, 100%); padding: 22px 22px 16px;
   animation: rise .28s var(--ease);
 }
 .chargen-card h2 {
@@ -768,9 +796,18 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    out of it, so the corner reads as one instrument instead of a row of tags.
    The 1px gap is the sheet showing between the cells, which is the same trick
    the inventory tray uses one size up. */
+/* Capped and allowed to wrap.
+   Six chips come to about 460px, and at 960x600 that put the rail's left edge
+   on the middle of the window - which is where the compass is centred, so the
+   two overlapped and the weather chip was unreadable under the letter E. The
+   cap is half the window less whatever the map's side of the screen owns, so
+   the rail meets the compass and stops. Wrapping is what it does with the rest
+   rather than growing into the strip: a second row of the same sheet. */
 #status-bar {
   position: absolute; top: 10px; right: 10px;
   display: flex; align-items: stretch; gap: 1px;
+  flex-wrap: wrap; justify-content: flex-end;
+  max-width: calc(50vw - var(--hud-side));
   padding: 1px; border-radius: var(--r-md);
   background: var(--paper-hud); box-shadow: var(--emboss-hud);
 }
@@ -897,9 +934,14 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    A strip of headings that slides under a fixed notch. Everything on it is
    built once and positioned absolutely; turning costs one transform on the
    track, which the compositor can do without touching layout. */
+/* 320px where there is room for 320px, and the gap between the map and the
+   chip rail where there is not. Centred on the window, so its half-width is
+   what either side has to clear; the mask on `.cmp-win` means a narrower strip
+   simply shows fewer degrees rather than being cut off. */
 #compass {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-  width: 320px; pointer-events: none;
+  width: min(320px, calc(100vw - var(--hud-side) * 2));
+  pointer-events: none;
   transition: opacity .25s linear;
 }
 /* The strip is a piece of the same sheet, and the mask is what makes it one:
@@ -1160,7 +1202,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 
 /* ── inventory screen ──────────────────────────────────── */
 
-.inv-panel { width: min(830px, 96vw); }
+.inv-panel { width: min(830px, 100%); }
 #screen-top { margin-bottom: 16px; }
 
 .inv-body { display: flex; gap: 18px; align-items: flex-start; }
@@ -1218,8 +1260,13 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 }
 .recipe-row:hover::before { transform: scaleY(1); }
 .recipe-row img { width: 30px; height: 30px; flex: none; }
-.recipe-row .rname { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recipe-row .rcost { display: flex; gap: 4px; align-items: center; flex: none; }
+/* A floor under the name, and a cost list that wraps rather than taking the
+   room from it. The sidebar is 236px wide at every window size, so a recipe
+   with three ingredients was pushing its own name down to 36px - "Blue Mosaic"
+   read as "Bl..." on a 3440px monitor as readily as on a laptop. The chips are
+   the part with a second line available to it. */
+.recipe-row .rname { flex: 1 1 auto; min-width: 5.5em; font-size: var(--fs-md); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-row .rcost { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: flex-end; flex: 0 1 auto; min-width: 0; }
 .recipe-row .rcost i {
   display: flex; align-items: center; gap: 2px; font-style: normal;
   font: 700 var(--fs-xs) var(--mono); color: var(--ink-soft);
@@ -1298,8 +1345,17 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 }
 .shop-purse .shop-float.low { color: #b4451f; opacity: 1; }
 
-.shop-cols { display: flex; gap: 18px; align-items: flex-start; }
-.shop-col { flex: 1; min-width: 0; }
+/* Two counters side by side while there is room for two, and one above the
+   other when there is not. A shop row is an icon, a name, a quantity and a
+   price, and none of those shrink, so a pair of them held the panel wider than
+   a phone-width window and the screen ran off the right of it. */
+.shop-cols { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+/* The basis is the width a column has when the window is at the 790px step
+   below, so the pair parts company at the same size the craftable sidebar
+   already does and the rule below can turn the divider with it. Without the
+   wrap the two counters simply pushed the panel wider than the window: a shop
+   row is an icon, a name, a count and a price, and none of those shrink. */
+.shop-col { flex: 1 1 348px; min-width: 0; }
 .shop-col + .shop-col {
   padding-left: 18px;
   border-left: 1px solid rgba(122, 94, 54, .3);
@@ -1326,7 +1382,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   box-shadow: var(--emboss), 0 0 0 1px rgba(150, 108, 34, .3);
 }
 .shop-errand img { width: 26px; height: 26px; }
-.errand-text { flex: 1; font-size: var(--fs-md); color: var(--ink); }
+.errand-text { flex: 1; min-width: 0; font-size: var(--fs-md); color: var(--ink); }
 .errand-text em { opacity: .6; font-style: normal; }
 .shop-errand.ready { background: rgba(96, 168, 74, .18); border-color: rgba(60, 122, 44, .34); }
 .shop-errand.done { opacity: .6; }
@@ -1347,7 +1403,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    under a menu: the planet pays you, and noticing that is the game. Its
    removal is also what let this panel come back to one column. */
 
-.skills-panel { width: min(560px, 94vw); }
+.skills-panel { width: min(560px, 100%); }
 
 /* The balance, and the one destructive button on the screen, on one line. The
    number is the largest thing on the panel because every row below it is a
@@ -1798,6 +1854,14 @@ button kbd { background: rgba(0, 0, 0, .07); box-shadow: none; color: var(--ink-
     padding-top: 10px; border-top: 1px solid rgba(0, 0, 0, .1);
   }
   #recipe-list { max-height: 190px; }
+  /* The merchant's two counters stack at the same step, so the rule between
+     them turns with them rather than being left down the side of a block that
+     has nothing beside it. */
+  .shop-col + .shop-col {
+    padding-left: 0; border-left: none;
+    padding-top: 10px; border-top: 1px solid rgba(122, 94, 54, .3);
+    box-shadow: 0 -1px 0 rgba(255, 255, 255, .7);
+  }
 }
 
 @media (max-width: 560px) {
@@ -1829,6 +1893,11 @@ button kbd { background: rgba(0, 0, 0, .07); box-shadow: none; color: var(--ink-
 @media (max-width: 430px) {
   .islot { width: 30px; height: 30px; }
   .islot img { width: 26px; height: 26px; }
+  /* Nine 30px cells, eight gaps and the tray's own padding came to two pixels
+     more than a 390px window leaves, and the two pixels came off the right
+     hand column. The air between the cells is where they come from. */
+  .inv-grid { gap: 3px; }
+  .inv-section { padding: 5px; }
   .craft-out .islot { width: 40px; height: 40px; }
   .craft-out .islot img { width: 34px; height: 34px; }
 }

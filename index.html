@@ -243,10 +243,32 @@
         </label>
 
         <h3 class="set-head">Picture</h3>
+        <!-- Field of view, resolution and day length were read by the game from
+             the first build (`settings.fov` by `updateCamera`, `renderScale` by
+             `_resize`, `dayMinutes` by `timeOfDay`/`_tickClock`) but had no row
+             here, so every player was pinned to 75 degrees, full resolution and
+             the device clock. 60..110 covers the usual comfort range without
+             letting the near plane show through the player's own model. -->
+        <label>Field of view <span class="val" id="fov-val">75</span>
+          <input id="set-fov" type="range" min="60" max="110" step="1" value="75" />
+        </label>
+        <!-- 50%..100% of the display's pixel ratio. Below 0.5 the crosshair and
+             the block edges stop resolving, which reads as a broken game rather
+             than as a fast one. -->
+        <label>Resolution <span class="val" id="scale-val">100%</span>
+          <input id="set-scale" type="range" min="0.5" max="1" step="0.05" value="1" />
+        </label>
         <label class="row"><input id="set-post" type="checkbox" checked /> Softer light and shadow</label>
         <label class="row"><input id="set-bob" type="checkbox" checked /> Head movement while walking</label>
         <label class="row"><input id="set-minimap" type="checkbox" checked /> Minimap</label>
         <label class="row"><input id="set-compass" type="checkbox" checked /> Compass</label>
+
+        <h3 class="set-head">World</h3>
+        <!-- 0 is the leftmost notch and means the device clock, which is the
+             default the planet ships with. -->
+        <label>Day length <span class="val" id="day-val">Clock</span>
+          <input id="set-day" type="range" min="0" max="60" step="1" value="0" />
+        </label>
 
         <h3 class="set-head">Movement</h3>
         <label class="row"><input id="set-autojump" type="checkbox" /> Step up onto ledges automatically</label>

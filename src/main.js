@@ -2216,6 +2216,13 @@ class Game {
     this.input.exitLock();
     this.closeScreen();
     this.closeSkills();
+    // `_interact` owns the hint line and clears it every frame it runs, but it
+    // only runs while nothing is `busy` — and a death screen is busy forever.
+    // So whatever was on the line at the instant you died ("Needs a Pickaxe",
+    // "A bite, click") stayed there under the death screen and through the
+    // whole of a spectator run. Cleared here because this is the one place that
+    // knows the owner is never going to run again.
+    this.ui.setHint(null);
     // Everything you carried stays where you fell, and stays there — `keep`
     // exempts it from the despawn clock. What you were *wearing* stays on you:
     // you respawn at a bed that may be a long way from your body, and sending

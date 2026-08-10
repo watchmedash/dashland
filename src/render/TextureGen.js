@@ -126,23 +126,45 @@ G.bed_side = (s) => {
 };
 
 G.ladder = (s) => {
-  // Two rails and seven rungs, cut out of the plank base. Everything between
+  // Two rails and four rungs, cut out of the plank base. Everything between
   // them is transparent, so you can see the shaft wall through it and a ladder
   // in a dark mine still reads as a ladder rather than a plank.
+  //
+  // The proportions were the whole of "the ladder is made poorly". The rails
+  // were 0.26 of the tile wide each — over half the block was solid timber —
+  // and the rungs were 0.02 tall in the 0.48 left between them, so at arm's
+  // length it read as a plank with a zip down the middle. A real ladder is
+  // mostly the hole: rails a tenth of the width, rungs thick enough to be the
+  // thing you look at, and four to a block rather than seven, because seven
+  // rungs to a 1.8-cell body is a grating, not something you climb.
+  //
+  // The rungs are stepped in from the rails on purpose (0.13 against 0.10):
+  // set flush they merge into one silhouette and the ladder loses its ribs.
   clearAlpha(s);
+  const RAIL_C = 0.10;          // rail centre in from each edge
+  const RAIL_W = 0.055;         // half-width of a rail
+  const RUNGS = 4;
   s.each((i, x, y, u, v) => {
     const rail = Math.max(
-      smoothstep(0.20, 0.13, Math.abs(u - 0.17)),
-      smoothstep(0.20, 0.13, Math.abs(u - 0.83)),
+      smoothstep(RAIL_W + 0.02, RAIL_W, Math.abs(u - RAIL_C)),
+      smoothstep(RAIL_W + 0.02, RAIL_W, Math.abs(u - (1 - RAIL_C))),
     );
-    const rung = smoothstep(0.055, 0.035, Math.abs(((v * 7) % 1) - 0.5) * 0.5)
-      * smoothstep(0.90, 0.80, Math.abs(u - 0.5) * 2);
+    // One rung per 1/RUNGS of the tile, centred in its band so a stack of
+    // ladder blocks keeps the spacing even across the join.
+    const rung = smoothstep(0.10, 0.075, Math.abs(((v * RUNGS) % 1) - 0.5))
+      * smoothstep(0.15, 0.13, Math.abs(u - 0.5));
     const m = Math.max(rail, rung);
     if (m <= 0.004) return;
-    setRGB(s, i, mixc(px([124, 86, 46]), px([158, 114, 64]), (x * 5 + y * 3) % 13 / 13));
+    // Rungs a shade lighter than the rails, so the ribs read even head-on where
+    // there is no grazing light to pick out the relief.
+    const grain = (x * 5 + y * 3) % 13 / 13;
+    const base = rung > rail
+      ? mixc(px([146, 104, 58]), px([178, 132, 78]), grain)
+      : mixc(px([112, 76, 40]), px([142, 100, 56]), grain);
+    setRGB(s, i, base);
     s.a[i] = m;
-    s.h[i] = 0.9;
-    s.ao[i] = 0.85;
+    s.h[i] = rung > rail ? 1.0 : 0.82;
+    s.ao[i] = rung > rail ? 0.95 : 0.8;
     s.rough[i] = 0.92;
   });
   s.normalStrength = 1.6;

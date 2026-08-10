@@ -1347,11 +1347,21 @@ const RAIL_K = [0.42, 0.96];
 /**
  * Does a fence reach out towards this neighbour?
  *
- * Another fence, obviously — but also any full solid block, so a run of fence
- * meets a wall or a gatepost flush instead of stopping a rail short of it and
- * leaving a gap you can see daylight through.
+ * Another fence, obviously — but also anything a body would walk into, so a run
+ * of fence meets a wall or a gatepost flush instead of stopping a rail short of
+ * it and leaving a gap you can see daylight through.
+ *
+ * The test used to be IS_OPAQUE, and `opaque` defaults to "is a plain cube" —
+ * so a fence ran up to a stone block and joined it, ran up to the stone *slab*
+ * or *stair* beside it and did not, and a run terminating on a step left a
+ * quarter-cell gap for no reason a player could see. `crowds` is the same
+ * predicate collision and the cactus rule already use: solid, and not one of
+ * the fittings you walk through. It also excludes a closed door, which is
+ * `crowds` only until somebody opens it — a rail into a swinging leaf would
+ * appear and vanish with the door.
  */
-export const fenceJoins = (id) => IS_FENCE[id] === 1 || IS_OPAQUE[id] === 1;
+export const fenceJoins = (id) => IS_FENCE[id] === 1
+  || (crowds(id) && !IS_DOOR[id]);
 
 /**
  * Pack the four tangential neighbours of a fence into the `links` mask

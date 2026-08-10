@@ -1,47 +1,72 @@
 /* Mojazer.
 
-   One material, in two weights.
+   THREE MATERIALS, AND NOTHING ELSE IS ALLOWED TO BE A FOURTH.
 
-   PARCHMENT is the whole game: menus, inventory, the tree, and the HUD. Warm,
-   light, a fibre tooth, a bright top edge. The HUD used to be its opposite, a
-   dark plate, on the argument that a bright world needs a dark instrument over
-   it. That argument lost: a player who has seen both wants the corner of the
-   screen to be made of the same thing the inventory is made of, and a HUD that
-   is a different material to every screen behind it is two products.
+   The interface is a field kit: a wooden case with parchment in it and brass on
+   the parts you touch. Every surface in the game is one of those three, and
+   every surface says which one it is by its edge rather than by its fill.
 
-   The title, pause, death, confirm and character screens held out one round
-   longer, on the argument that a card over a dimmed world should read as the
-   world going away and so ought to be dark. Same answer, from the same player:
-   they are parchment too. The dimming is what says the world went away, and it
-   says it better under a light card than under a dark one, which only merges
-   with it. There is no plate left in the game and no plate tokens either, so
-   the dark theme cannot come back one element at a time.
+     WOOD is the frame and the carcass. Oiled, grained, a lit chamfer along the
+     top and a dark one along the bottom, an ink line all the way round. Cards,
+     trays, racks and the hotbar are made of it. It is what a screen is *built
+     out of*, and it is the reason a panel now reads as an object with a
+     thickness instead of a rounded rectangle with a shadow under it.
 
-   So the HUD is parchment now, in the over-the-world weight, and the legibility
-   the plate was buying is bought three other ways instead:
-     - the sheet is near-opaque, so grass, water and a night sky are behind it
-       rather than mixed into it;
-     - the outer keyline is *dark*, not warm. A warm hairline is invisible on
-       sand and on snow, and those two are the whole failure case. A dark line
-       plus a tight black drop shadow is what holds the edge on a white field;
-     - mass stays low. Nothing grew: the vitals got narrower, and the map, the
-       chips and the hotbar occupy exactly the boxes they did before.
+     PARCHMENT is the writing surface, held inside the wood. Warm, mottled, a
+     fibre tooth, darker where it meets the frame because that is where a real
+     sheet catches the edge. Everything the player reads sits on it.
 
-   Two rules the HUD side obeys without exception, because it runs at 60fps
-   over a 1.6GB heap:
-     1. No `backdrop-filter` anywhere inside #hud. It was on the chips, the
-        vitals, the hotbar, the toasts and the hint, all of which are written
-        every frame, and every one of them forced a backdrop re-blur on the
-        compositor. The sheet gets its depth from layered gradients and
-        shadows, which are free once painted. This is also why the HUD sheet is
-        near-opaque rather than a frosted one: frosted is a blur, and a blur
-        over a moving world is a recomposite every frame.
-     2. No `filter` on anything that changes per frame. Drop-shadows are baked
-        into `text-shadow`/`box-shadow` instead, and the only filters left are
-        on one-shot animations (the crit flash) and static glyphs. */
+     BRASS is the live metal, and it is rationed on purpose. The accepted
+     button, the selected cell, the earned pip, the compass notch. If two things
+     on a screen are brass, one of them is wrong.
+
+   What this replaced was one material in two weights, all of it laid out in
+   even rounded rectangles with hairline bevels, which the player looked at and
+   correctly called a website. The palette did not change and was never the
+   problem: the same parchment, the same warm accent, the same ink. What changed
+   is that surfaces now have edges that were *made* — a chamfer, a groove, a
+   stud, a lip — and radii dropped from 13px to 3-6px, because a big even radius
+   is the single loudest web tell there is.
+
+   Four rules the whole file obeys:
+
+     1. FRAMES ARE BORDERS, NOT MARKUP. A card paints parchment into its padding
+        box and wood into its border box, so any element becomes a framed case
+        with one declaration and no extra wrapper. `::before` draws the carved
+        seam where the two meet, at `inset: -1px`, which lands exactly on it.
+
+     2. RAISED THINGS HAVE A LIP. A button is a face sitting on a 3px edge of
+        wood, and pressing it moves the face down onto the wood and takes the
+        lip to nothing. That, not a colour change, is what makes a control feel
+        like it clicked.
+
+     3. RECESSED THINGS ARE POCKETS. A slot, a groove, a track and a tray are
+        holes cut into wood: dark inside, a hard shadow under the top edge, a
+        lit line along the bottom inner edge where light that fell in has to
+        come back out, and a bright hairline on the surface around the mouth.
+        Nothing is a box with a border.
+
+     4. THE HUD CARRIES NO PLATE. Over the world, the map is its picture and a
+        keyline, and a vital is its bar and its number, and neither sits on a
+        sheet. A widget-shaped panel in the corner of a game is the same mistake
+        as a card-shaped dialog in the middle of one. Legibility over snow, sand
+        and a night cave is bought by each element's own edge: a dark ink line
+        with a light line inside it reads on white and on black both, which is
+        why every HUD edge in this file is that pair.
+
+   Two performance rules the HUD side obeys without exception, because it runs
+   at 60fps over a 1.6GB heap:
+     a. No `backdrop-filter` anywhere inside #hud. Every element there is
+        written every frame, and each one would force a backdrop re-blur on the
+        compositor. Depth comes from layered gradients and shadows, which are
+        free once painted.
+     b. No `filter` on anything that changes per frame. Drop shadows are baked
+        into `text-shadow`/`box-shadow`, and the only filters left are on
+        one-shot animations and on static glyphs that are written once and
+        cached. */
 
 :root {
-  /* --- parchment ------------------------------------------------------- */
+  /* --- ink ------------------------------------------------------------- */
   --ink: #26201a;
   --ink-soft: #6a5e52;
   --ink-faint: rgba(38, 32, 26, .42);
@@ -49,70 +74,138 @@
   --parchment-2: #e9dcc4;
   --edge: #d8c7aa;
 
-  /* The parchment's bevel set, which is the only one left: a hard warm keyline
-     on the outside so a card never dissolves into the dimmed world behind it,
-     a bright line inside so it reads as a lifted face, and a matching sunk
-     shadow for anything the material is supposed to be cut *into* rather than
-     laid on top of. Every
-     card, row, cell and well on every screen is one of these three and
-     nothing else. */
-  --paper:
-    linear-gradient(180deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, 0) 34%),
-    linear-gradient(168deg, var(--parchment), var(--parchment-2));
-  --paper-cell:
-    linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, .22));
-  --paper-hard: rgba(122, 94, 54, .38);
-  --emboss:
-    0 0 0 1px var(--paper-hard),
-    inset 0 1px 0 rgba(255, 255, 255, .8),
-    inset 0 -1px 0 rgba(122, 94, 54, .14);
-  --emboss-lift:
-    0 0 0 1px var(--paper-hard),
-    inset 0 1px 0 rgba(255, 255, 255, .95),
-    inset 0 -1px 0 rgba(122, 94, 54, .16),
-    0 8px 18px -10px rgba(56, 40, 20, .55);
-  /* Cut into the sheet: the inventory tray, a slider groove, a segment track. */
-  --sunk:
-    inset 0 0 0 1px rgba(122, 94, 54, .26),
-    inset 0 2px 5px rgba(74, 54, 28, .2);
-  /* The warm ring that means "this one". Same accent as the hotbar's live cell,
-     so a selected inventory slot and a selected hotbar slot are one idea. */
-  --ring: 0 0 0 2px var(--accent), 0 0 14px -3px rgba(221, 124, 56, .7);
+  /* --- material one: wood ----------------------------------------------
+     Three tones and one line. The line is the important one: `--wood-line` is
+     a near-black brown and it goes round the outside of every wooden thing in
+     the game, which is what stops a warm object dissolving into a warm
+     background. The grain is three repeating gradients at slightly different
+     angles and periods so it does not tile visibly at any size, and it is
+     painted once. */
+  --wood-lit: #7c5227;
+  --wood-mid: #4f3315;
+  --wood-dim: #2b1a08;
+  --wood-line: #170d04;
+  --wood:
+    repeating-linear-gradient(93deg, rgba(255, 222, 170, .09) 0 1px, rgba(0, 0, 0, 0) 1px 3px, rgba(0, 0, 0, .14) 3px 4px, rgba(0, 0, 0, 0) 4px 11px),
+    repeating-linear-gradient(87deg, rgba(0, 0, 0, .13) 0 1px, rgba(0, 0, 0, 0) 1px 7px),
+    linear-gradient(180deg, var(--wood-lit), var(--wood-mid) 38%, var(--wood-dim));
+  /* The same timber, turned end-on, for anything that reads as a cut edge. */
+  --wood-end:
+    repeating-linear-gradient(180deg, rgba(0, 0, 0, .1) 0 1px, rgba(0, 0, 0, 0) 1px 6px),
+    linear-gradient(90deg, var(--wood-mid), var(--wood-lit) 45%, var(--wood-dim));
+  /* A brass rivet. Four of them hold every case together. */
+  --stud: radial-gradient(circle at 42% 34%,
+    #ffe9bd 0 16%, #e0a755 38%, #9a6320 66%, #4a2a0c 84%, rgba(0, 0, 0, 0) 86%);
 
-  /* --- parchment, over the world ---------------------------------------
-     The same sheet as every screen, in the weight that has to survive being
-     laid over a lit planet. Three differences from `--paper` and only three,
-     because any more and it stops being the same material:
-       1. a couple of points of translucency, so the world is still behind it;
-       2. a dark outer keyline instead of the warm one. This is the whole
-          reason a light HUD works over a bright world: `--paper-hard` is a
-          warm brown line that disappears completely against sand and snow,
-          which is exactly where the HUD has to hold its edge;
-       3. a tighter, blacker drop shadow, so the sheet sits above the world
-          rather than in it.
-     Everything below is gradients and shadows. Nothing is a filter, because
-     everything wearing these is repainted every frame. */
+  /* --- material two: parchment -----------------------------------------
+     A lit top, a mottle that is four soft radials rather than a noise image,
+     and an edge burn so the sheet is darker where the frame holds it. */
+  --paper:
+    radial-gradient(120% 80% at 18% 8%, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 55%),
+    radial-gradient(90% 70% at 82% 96%, rgba(150, 116, 62, .16), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(60% 50% at 68% 22%, rgba(203, 170, 112, .13), rgba(255, 255, 255, 0) 70%),
+    repeating-linear-gradient(91deg, rgba(122, 94, 54, .045) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
+    repeating-linear-gradient(3deg, rgba(122, 94, 54, .035) 0 1px, rgba(0, 0, 0, 0) 1px 5px),
+    linear-gradient(168deg, var(--parchment), var(--parchment-2));
+  /* A ticket: a smaller piece of the same sheet, for rows and faces. */
+  --paper-cell:
+    linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(255, 252, 244, .3) 52%, rgba(214, 194, 158, .34));
+  --paper-hard: rgba(122, 94, 54, .38);
+
+  /* --- material three: brass ------------------------------------------- */
+  --brass:
+    linear-gradient(180deg, #ffe3ae 0%, #f6b862 26%, #dd8b34 55%, #b8631d 78%, #8e4a13 100%);
+  --brass-line: #56290a;
+
+  /* --- edges -----------------------------------------------------------
+     `--lip` is rule 2: the 3px of wood a raised face stands on. `--pocket` is
+     rule 3. `--emboss` and friends are kept under their old names because half
+     the file already asks for them, but they are the new edge now. */
+  --lip: 3px;
+  --emboss:
+    0 0 0 1px var(--wood-line),
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    inset 0 -1px 0 rgba(122, 94, 54, .22),
+    0 var(--lip) 0 var(--wood-dim),
+    0 calc(var(--lip) + 3px) 7px -3px rgba(20, 12, 4, .5);
+  --emboss-lift:
+    0 0 0 1px var(--wood-line),
+    inset 0 1px 0 rgba(255, 255, 255, .98),
+    inset 0 -1px 0 rgba(122, 94, 54, .24),
+    0 calc(var(--lip) + 1px) 0 var(--wood-dim),
+    0 calc(var(--lip) + 7px) 12px -5px rgba(20, 12, 4, .6);
+  /* Pressed: the face is on the wood and there is no lip left. */
+  --emboss-press:
+    0 0 0 1px var(--wood-line),
+    inset 0 2px 4px rgba(40, 24, 8, .4),
+    inset 0 -1px 0 rgba(255, 255, 255, .35);
+  /* A hole cut into the carcass, and the floor that shows at the bottom of it.
+     The floor is deliberately not black: what goes in these is a stone axe and
+     a lump of coal, and a black hole eats both. It is a lit timber floor with a
+     hard shadow thrown across it from the top lip, which is what actually reads
+     as depth — the shadow, not the darkness. */
+  --pocket-floor:
+    linear-gradient(180deg, rgba(24, 14, 5, .62) 0 14%, rgba(96, 67, 33, .34) 42%, rgba(130, 96, 52, .3));
+  --pocket:
+    0 1px 0 rgba(255, 249, 236, .4),
+    inset 0 0 0 1px rgba(14, 8, 2, .9),
+    inset 0 5px 7px -2px rgba(16, 9, 2, .8),
+    inset 0 -3px 0 rgba(255, 224, 168, .22);
+  /* The shallow version, for a groove in parchment rather than in wood: a
+     slider track, a segment rail, a pip socket. */
+  --sunk:
+    inset 0 0 0 1px rgba(58, 38, 16, .5),
+    inset 0 2px 5px rgba(52, 34, 12, .34),
+    inset 0 -1px 0 rgba(255, 255, 255, .5);
+  /* The brass rim that means "this one", on a cell or on a row. */
+  --ring:
+    0 0 0 1px var(--brass-line),
+    0 0 0 3px #e2a052,
+    0 0 16px -2px rgba(242, 168, 80, .85);
+
+  /* --- the same three materials, over the world -------------------------
+     Anything laid over a lit planet has one extra job, and `--hud-hard` is how
+     it is done everywhere in this file: a near-black ink line on the outside
+     with a light line immediately inside it. That pair is the only edge that
+     survives both bright snow and a night cave, because one of the two lines is
+     always the opposite of whatever is behind it. A single warm hairline, which
+     is what the menus can afford, vanishes on sand.
+
+     `--paper-hud` is still parchment and still near-opaque: frosted would be a
+     blur, and a blur over a moving world is a recomposite every frame. */
   --paper-hud:
     linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 42%),
-    linear-gradient(168deg, rgba(247, 238, 222, .94), rgba(228, 214, 188, .95));
+    linear-gradient(168deg, rgba(247, 238, 222, .95), rgba(228, 214, 188, .96));
   --paper-hud-cell:
     linear-gradient(180deg, rgba(255, 255, 255, .78), rgba(255, 247, 234, .4));
-  --hud-hard: rgba(26, 18, 8, .62);
+  --hud-hard: rgba(16, 10, 3, .8);
+  /* The HUD's whole edge vocabulary, in one token. */
+  --hud-edge:
+    0 0 0 1px var(--hud-hard),
+    inset 0 0 0 1px rgba(255, 250, 238, .42),
+    0 2px 7px -2px rgba(0, 0, 0, .7);
   --emboss-hud:
     0 0 0 1px var(--hud-hard),
-    inset 0 1px 0 rgba(255, 255, 255, .85),
+    inset 0 1px 0 rgba(255, 255, 255, .88),
     inset 0 -1px 0 rgba(122, 94, 54, .2),
-    0 3px 10px -4px rgba(0, 0, 0, .6);
+    0 2px 0 rgba(46, 28, 10, .55),
+    0 5px 10px -4px rgba(0, 0, 0, .62);
   --emboss-hud-lift:
     0 0 0 1px var(--hud-hard),
-    inset 0 1px 0 rgba(255, 255, 255, .95),
+    inset 0 1px 0 rgba(255, 255, 255, .96),
     inset 0 -1px 0 rgba(122, 94, 54, .22),
-    0 9px 22px -9px rgba(0, 0, 0, .8);
-  /* A groove cut into a sheet that is over the world. Deeper than `--sunk`,
-     because what shows through a shallow one here is a planet. */
+    0 3px 0 rgba(46, 28, 10, .6),
+    0 10px 20px -8px rgba(0, 0, 0, .8);
+  /* A pocket over the world: same idea as `--pocket`, one notch harder, because
+     what shows through a shallow one here is a planet. */
   --sunk-hud:
-    inset 0 0 0 1px rgba(74, 54, 28, .45),
-    inset 0 2px 4px rgba(52, 36, 16, .34);
+    inset 0 0 0 1px rgba(16, 10, 3, .78),
+    inset 0 3px 5px rgba(20, 11, 3, .55),
+    inset 0 -2px 0 rgba(255, 222, 168, .2);
+  /* Type over the world. Dark ink on a tight pale halo, never the reverse:
+     parchment is the colour of sand and snow, black is the colour of a cave,
+     and only a dark letter with a light rim is legible on all three. */
+  --hud-text: 0 1px 0 rgba(255, 255, 255, .9), 0 0 3px rgba(255, 250, 238, .95);
 
   /* The one width the top-left corner is built on. The map is square, the
      vitals column is the same number across, and the two are one stack. */
@@ -124,10 +217,13 @@
      that both are measured against this. Derived from `--map-size` so the
      corner stays one object. */
   --hud-side: calc(var(--map-size) + 26px);
-  /* Room for the widest numeral a bar ever shows, which is health at three
-     digits either side of the slash. Every row reserves it, so four bars have
-     four tracks that start and end on the same two pixels. */
-  --vital-num: 44px;
+  /* There is deliberately no `--vital-num` any more. It was 44px of reserved
+     column beside every bar, which is where two of the three reported faults
+     came from: it was most of why the bar was short, and all of why the number
+     sat twenty pixels away from the end of it. The numeral is out of flow and
+     inside the groove now, so nothing has to be reserved for it and every track
+     still starts and ends on the same two pixels because they all share one
+     `--map-size` box. */
 
   /* --- accent ---------------------------------------------------------- */
   --accent: #dd7c38;
@@ -140,11 +236,19 @@
   --danger: #cf4630;
   --good: #63b04b;
 
-  /* --- radii ----------------------------------------------------------- */
-  --r-sm: 3px;
-  --r-md: 5px;
-  --r-lg: 9px;
-  --r-xl: 13px;
+  /* --- radii -----------------------------------------------------------
+     These came down hard, and it is the cheapest single thing on this page.
+     A 13px radius on a 340px card is the shape of every web dialog ever
+     shipped; the same card at 5px is a made object. Nothing in the game is
+     rounder than 6px now except a pip, a knob and a purse, which are round
+     because they are actually round things. */
+  --r-sm: 2px;
+  --r-md: 3px;
+  --r-lg: 4px;
+  --r-xl: 6px;
+  /* How thick the wooden carcass is on a card, and on a tray inside one. */
+  --frame: 9px;
+  --frame-sm: 6px;
 
   /* One easing curve for everything that opens, lifts or settles, and one
      duration scale. A screen that comes up on a different curve to the row
@@ -165,14 +269,27 @@
   --fs-2xl: 24px;
   --fs-3xl: 34px;
   /* Two letter-spacings, and they mean two different things: `--ls-cap` is for
-     anything set in small caps (a label), `--ls-disp` for display type. */
-  --ls-cap: .13em;
-  --ls-disp: .06em;
+     anything set in small caps (a label), `--ls-disp` for display type. Display
+     tightened from .06 to .02: wide-tracked light type is editorial, and this
+     is a game. Weight went the other way, which is the other half of the same
+     change — a title is now heavy and close-set rather than thin and airy. */
+  --ls-cap: .12em;
+  --ls-disp: .02em;
+  --fw-disp: 800;
 
   --font: "Segoe UI Variable Display", "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
   --mono: "Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace;
 
-  --shadow: 0 20px 48px -20px rgba(6, 8, 16, .78), 0 1px 0 rgba(255, 255, 255, .5) inset;
+  /* Type cut into the sheet rather than printed on it: a hard light line under
+     every letter and a soft dark one over. One token, used by every heading and
+     every readout in the game, and it is most of why the type stopped looking
+     like body copy. */
+  --carved: 0 1px 0 rgba(255, 255, 255, .9), 0 -1px 0 rgba(96, 68, 30, .22);
+
+  --shadow:
+    0 0 0 1px var(--wood-line),
+    0 26px 54px -22px rgba(6, 8, 16, .85),
+    0 8px 0 -2px rgba(24, 14, 5, .5);
 
   /* --- how a screen meets the edge of the window -----------------------
      This game ships to a desktop store, where the window is whatever size
@@ -273,28 +390,43 @@ html, body {
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.985) } to { opacity: 1; transform: none } }
 
-/* PARCHMENT, the material. A sheet with a warm keyline, light falling on the
-   top edge, and a fibre tooth fine enough that you read it as paper rather
-   than as a pattern. The tooth is two repeating gradients, painted once, and
-   it is the single thing that stops a light card looking like a browser
-   dialog. */
-/* The sheet itself, written once for all three sizes of it: the workspace
-   screens (`.panel`), the cards the game stops for (`.menu-card`), and the
-   character picker (`.chargen-card`). They were two materials until the player
-   pointed out, twice, that they should not be. Only the box each one occupies
-   differs now. */
+/* THE CASE. Rule 1 of the four at the top of this file, and the one that does
+   the most work: the element paints parchment into its *padding* box and wood
+   into its *border* box, so a plain div becomes a framed wooden case holding a
+   sheet, with no extra wrapper and no change to any markup or to UI.js. The
+   border is the frame. Four brass studs are background layers on the border
+   box, one per corner, so the case reads as held together rather than drawn.
+
+   This is written once for all three sizes of it: the workspace screens
+   (`.panel`), the cards the game stops for (`.menu-card`), and the character
+   picker (`.chargen-card`). Only the box each one occupies differs. */
 .panel, .menu-card, .chargen-card {
   position: relative;
+  border: var(--frame) solid transparent;
   border-radius: var(--r-xl);
   background:
-    repeating-linear-gradient(92deg, rgba(122, 94, 54, .035) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
-    repeating-linear-gradient(2deg, rgba(122, 94, 54, .03) 0 1px, rgba(0, 0, 0, 0) 1px 5px),
-    var(--paper);
+    var(--paper) padding-box,
+    var(--stud) left 1px top 1px / 8px 8px no-repeat border-box,
+    var(--stud) right 1px top 1px / 8px 8px no-repeat border-box,
+    var(--stud) left 1px bottom 1px / 8px 8px no-repeat border-box,
+    var(--stud) right 1px bottom 1px / 8px 8px no-repeat border-box,
+    var(--wood) border-box;
   box-shadow:
-    0 0 0 1px rgba(122, 94, 54, .5),
-    inset 0 1px 0 rgba(255, 255, 255, .9),
-    inset 0 -20px 40px -30px rgba(74, 54, 28, .5),
+    inset 0 1px 0 rgba(255, 226, 178, .22),
+    inset 0 -1px 0 rgba(0, 0, 0, .3),
     var(--shadow);
+}
+/* The carved seam where the frame holds the sheet. `inset: -1px` on a child of
+   a bordered box lands exactly on the join, which is the whole reason this is
+   one pseudo-element and not a second wrapper. Dark line into the wood, lit
+   line onto the paper, and the paper's own edge burn under both. */
+.panel::before, .menu-card::before, .chargen-card::before {
+  content: ''; position: absolute; inset: -1px; pointer-events: none;
+  border-radius: var(--r-sm);
+  box-shadow:
+    0 0 0 1px rgba(20, 12, 5, .8),
+    inset 0 1px 0 rgba(255, 255, 255, .75),
+    inset 0 0 22px -8px rgba(96, 66, 28, .45);
 }
 /* A workspace screen is a header that stays and a body that scrolls, not one
    sheet with a scrollbar down it. The panel used to be the scroll container
@@ -307,7 +439,9 @@ html, body {
   width: min(660px, 100%);
   max-height: var(--screen-h);
   display: flex; flex-direction: column; overflow: hidden;
-  padding: 20px 22px;
+  /* Nine of the old padding is the frame now, so this came down by that much
+     and the screen occupies the box it always did. */
+  padding: 13px 14px;
   animation: rise .26s var(--ease);
 }
 .panel > header { flex: none; }
@@ -321,28 +455,28 @@ html, body {
   overflow-y: auto; overflow-x: hidden;
   margin-right: -12px; padding-right: 12px;
 }
-/* The screens the game stops for get one warm hairline along the top edge of
-   the sheet. It is what makes a menu and the hotbar look struck from the same
-   set of rules. */
-.panel::before, .menu-card::before, .chargen-card::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
-  border-radius: var(--r-xl) var(--r-xl) 0 0;
-  background: linear-gradient(90deg, rgba(221, 124, 56, 0), var(--accent-2), rgba(221, 124, 56, 0));
-  opacity: .55; pointer-events: none;
-}
+/* The head of a workspace screen. The rule under it is a groove cut in the
+   sheet, not a border: a dark line with a lit one under it, which is the same
+   two-line trick every edge in the game is made of. */
 .panel header {
   display: flex; align-items: center; gap: 10px;
-  margin: -2px 0 16px; padding-bottom: 11px;
-  /* Two lines, one dark one light, so the rule is cut into the sheet rather
-     than drawn on it. Same trick as every bevel in the game. */
-  border-bottom: 1px solid rgba(122, 94, 54, .3);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .8);
+  margin: 0 0 14px; padding-bottom: 10px;
+  border-bottom: 1px solid rgba(58, 38, 16, .42);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .85);
 }
 .panel header h2 { flex: 1; }
 .panel h2 {
-  font-size: var(--fs-lg); font-weight: 700;
+  font-size: var(--fs-lg); font-weight: var(--fw-disp);
   letter-spacing: var(--ls-cap); text-transform: uppercase;
-  color: var(--ink);
+  color: var(--ink); text-shadow: var(--carved);
+}
+/* A brass tack ahead of the title. One shape, on every screen, so a heading is
+   a fixture on the case rather than a line of bold text. */
+.panel header h2::before {
+  content: ''; display: inline-block; vertical-align: 1px;
+  width: 8px; height: 8px; margin-right: 9px; border-radius: 50%;
+  background: var(--stud);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .7);
 }
 .note { margin-top: 14px; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
 
@@ -350,22 +484,38 @@ html, body {
   .overlay, .panel, .menu-card, .chargen-card { animation: none; }
 }
 
+/* The wordmark. It was 200-weight at .26em of tracking, which is a fashion
+   masthead: airy, thin, and the first thing that told the player he was looking
+   at a website. It is heavy and close-set now, and stamped rather than printed
+   — a hard dark line under every letter, a light one over it. */
 h1 {
-  font-size: var(--fs-3xl); font-weight: 200; letter-spacing: .26em;
+  font-size: var(--fs-3xl); font-weight: var(--fw-disp); letter-spacing: .06em;
   color: var(--parchment); text-align: center;
-  text-shadow: 0 2px 24px rgba(0, 0, 0, .6);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, .55), 0 3px 26px rgba(0, 0, 0, .7);
 }
-h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
+h1 em { font-style: normal; font-weight: var(--fw-disp); color: var(--accent-2); }
 .tagline {
   text-align: center; margin: 7px 0 0;
-  font-size: var(--fs-md); letter-spacing: .05em; color: rgba(247, 238, 222, .5);
+  font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: rgba(247, 238, 222, .52);
 }
 /* The two above are the loader's, which is still light type on a dark void and
-   is the one screen in the game that is not made of paper. The same two on a
+   is the one screen in the game that is not made of wood. The same two on a
    card are cut into the sheet instead. */
-.menu-card h1 { color: var(--ink); text-shadow: 0 1px 0 rgba(255, 255, 255, .8); }
+.menu-card h1 { color: var(--ink); text-shadow: var(--carved); }
 .menu-card h1 em { color: var(--accent-deep); }
-.menu-card .tagline { color: var(--ink-soft); }
+.menu-card .tagline { color: var(--ink-faint); }
+/* A ruled line under the wordmark, with a brass lozenge sitting on it. The
+   title card's one ornament, and it is what a chapter head looks like on paper
+   rather than what a subtitle looks like on a landing page. */
+.menu-card .tagline::after {
+  content: ''; display: block; width: 62%; height: 3px; margin: 11px auto 0;
+  border-radius: 2px;
+  background:
+    var(--stud) center / 7px 7px no-repeat,
+    linear-gradient(90deg, rgba(96, 66, 28, 0), rgba(96, 66, 28, .45) 22%, rgba(96, 66, 28, .45) 78%, rgba(96, 66, 28, 0));
+}
 
 /* ── menu cards ────────────────────────────────────────── */
 
@@ -373,51 +523,68 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
    being a workspace in it — the title screen, pause, death, the confirm — are
    the same sheet as every screen, in a narrower box. */
 .menu-card {
-  width: min(340px, 100%); padding: 26px 22px 20px; text-align: center;
+  width: min(340px, 100%); padding: 18px 14px 14px; text-align: center;
   /* These have no header to keep, so the sheet is allowed to be the scroll
      container. The cap is what matters: a card is never taller than the
      window, so its bottom button is always somewhere the player can reach. */
   max-height: var(--screen-h); overflow-y: auto;
   animation: rise .28s var(--ease);
 }
-.menu-card.small { width: min(320px, 100%); padding: 22px 20px 18px; }
+.menu-card.small { width: min(320px, 100%); padding: 15px 13px 12px; }
 .menu-card h2 {
-  color: var(--ink); font-size: var(--fs-xl); font-weight: 600;
+  color: var(--ink); font-size: var(--fs-xl); font-weight: var(--fw-disp);
   letter-spacing: var(--ls-disp); text-align: center;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
+  text-shadow: var(--carved);
 }
-.menu-card .tagline { margin-bottom: 16px; }
+.menu-card .tagline { margin-bottom: 15px; }
 /* Every card action is the full width of the card. A row of differently sized
-   buttons has to be read; a stack of identical ones is a list you point at. */
-.menu-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
-.menu-actions button { width: 100%; padding: 10px 15px; }
+   buttons has to be read; a stack of identical ones is a list you point at.
+   The gap is the lip plus air: keys that overlap their own edges read as a
+   segmented control rather than as separate keys. */
+.menu-actions { display: flex; flex-direction: column; gap: 9px; margin-top: 15px; }
+/* Set like a plate on a case rather than like a link on a page: uppercase,
+   tracked, heavy. It is four words on four keys, and words on keys are not set
+   in sentence case anywhere outside a browser. */
+.menu-actions button {
+  width: 100%; padding: 11px 15px;
+  font-size: var(--fs-sm); font-weight: var(--fw-disp);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+}
 /* Death. A red keyline round the sheet, the word "Died" as the smallest thing
    on it, and the cause as the biggest. The red is the only thing that changes:
    it is the same paper as the pause card, scorched at the edge. */
+/* The same case, in scorched timber. Only the wood changes colour: a death
+   screen that switched material as well would be a fourth one. */
 .death-card {
+  background:
+    var(--paper) padding-box,
+    var(--stud) left 1px top 1px / 8px 8px no-repeat border-box,
+    var(--stud) right 1px top 1px / 8px 8px no-repeat border-box,
+    var(--stud) left 1px bottom 1px / 8px 8px no-repeat border-box,
+    var(--stud) right 1px bottom 1px / 8px 8px no-repeat border-box,
+    repeating-linear-gradient(93deg, rgba(255, 200, 178, .07) 0 1px, rgba(0, 0, 0, 0) 1px 3px, rgba(0, 0, 0, .1) 3px 4px, rgba(0, 0, 0, 0) 4px 11px)
+      border-box,
+    linear-gradient(180deg, #7b3122, #4e1b12 44%, #2c0d08) border-box;
   box-shadow:
-    0 0 0 1px rgba(158, 44, 28, .6),
-    inset 0 1px 0 rgba(255, 255, 255, .9),
-    inset 0 -20px 40px -30px rgba(140, 34, 20, .4),
-    0 0 40px -12px rgba(190, 50, 34, .45),
-    var(--shadow);
+    inset 0 1px 0 rgba(255, 190, 170, .22),
+    0 0 0 1px #200604,
+    0 0 44px -10px rgba(190, 50, 34, .5),
+    0 26px 54px -22px rgba(6, 8, 16, .85);
 }
-.death-card::before {
-  background: linear-gradient(90deg, rgba(207, 70, 48, 0), var(--danger), rgba(207, 70, 48, 0));
-  opacity: .8;
-}
+.death-card::before { box-shadow: 0 0 0 1px rgba(90, 20, 12, .85), inset 0 1px 0 rgba(255, 255, 255, .7); }
 .death-kicker {
   font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase;
-  color: rgba(140, 44, 28, .72);
+  color: rgba(140, 44, 28, .8);
 }
 .menu-card h2.death-title {
-  margin-top: 5px;
-  font-size: var(--fs-2xl); font-weight: 200;
-  letter-spacing: var(--ls-disp);
+  margin-top: 4px;
+  font-size: var(--fs-2xl); font-weight: var(--fw-disp);
+  letter-spacing: var(--ls-disp); text-transform: uppercase;
   color: #8e2417;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .75), 0 -1px 0 rgba(120, 30, 18, .3);
 }
+.death-card .tagline::after { display: none; }
 /* On screen only when something really was taken, and only ever one line. */
 .death-lost {
   margin-top: 10px; font-size: var(--fs-sm); font-weight: 600;
@@ -440,46 +607,90 @@ h1 em { font-style: normal; font-weight: 700; color: var(--accent-2); }
    because the next list somebody adds will have the same default. */
 .slot-row, .recipe-row, .shop-row, .skill-row, .toast { flex: none; }
 
-/* Every button in the game is cut from parchment: the same emboss as every
-   other raised thing on a sheet, so a control and a row are visibly the same
-   material. This used to be the `.panel` exception to a dark default, and the
-   dark default is what has gone. */
+/* THE KEY. Rule 2: a parchment face standing on `--lip` of wood, with an ink
+   line all the way round. Hover raises the face and the lip grows with it;
+   pressing puts the face down onto the wood and takes the lip to nothing, so
+   the travel is real and the button ends up where your finger pushed it. A
+   colour change alone was what this used to be, and a control that only
+   changes colour is a control on a web page. */
 button {
-  font: inherit; cursor: pointer;
+  font: inherit; cursor: pointer; position: relative;
   padding: 9px 15px; border-radius: var(--r-md);
-  font-size: var(--fs-md); font-weight: 600; letter-spacing: .015em;
-  color: var(--ink-soft); text-shadow: none; border: none;
+  font-size: var(--fs-md); font-weight: 700; letter-spacing: .03em;
+  color: var(--ink); text-shadow: var(--carved); border: none;
   background: var(--paper-cell);
   box-shadow: var(--emboss);
-  transition: transform var(--t-fast) ease, box-shadow var(--t-mid) ease, background var(--t-mid) ease, filter var(--t-mid);
+  transition: transform var(--t-fast) var(--ease), box-shadow var(--t-fast) ease, background var(--t-fast) ease, filter var(--t-mid);
 }
 button:hover:not(:disabled) {
-  background: #fff; color: var(--ink);
+  background: linear-gradient(180deg, #fff, rgba(255, 246, 230, .6) 55%, rgba(226, 206, 170, .4));
+  color: var(--ink);
   box-shadow: var(--emboss-lift); transform: translateY(-1px);
 }
-/* Pressed is the face going into the sheet, not a brightness change: on paper
-   there is nothing to darken. */
-button:active:not(:disabled) { filter: none; box-shadow: var(--sunk); transform: translateY(1px); }
-button:disabled {
-  cursor: default; opacity: 1; color: var(--ink-faint);
-  background: rgba(122, 94, 54, .06); box-shadow: var(--sunk);
+button:active:not(:disabled) {
+  filter: none; transform: translateY(var(--lip));
+  background: linear-gradient(180deg, rgba(226, 206, 170, .6), rgba(247, 240, 226, .5));
+  box-shadow: var(--emboss-press);
 }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A refusal is part of the carcass: the face is gone and there is a hole where
+   it was, so there is visibly nothing to press. */
+button:disabled {
+  cursor: default; opacity: 1; color: rgba(255, 240, 214, .32);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .35);
+  background: linear-gradient(180deg, rgba(48, 30, 12, .5), rgba(74, 50, 22, .38));
+  box-shadow: var(--pocket);
+}
+button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
+/* THE BRASS KEY. One per screen. */
 button.primary {
-  color: #2a1607; border: none;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
-  box-shadow: 0 10px 22px -12px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .55), 0 0 0 1px rgba(140, 74, 26, .35);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .28);
+  color: #3a1c06; border: none;
+  background: var(--brass);
+  text-shadow: 0 1px 0 rgba(255, 232, 190, .55);
+  box-shadow:
+    0 0 0 1px var(--brass-line),
+    inset 0 1px 0 rgba(255, 250, 232, .75),
+    inset 0 -3px 6px -2px rgba(120, 54, 8, .55),
+    0 var(--lip) 0 #703a10,
+    0 calc(var(--lip) + 4px) 10px -3px rgba(90, 44, 8, .65);
 }
 button.primary:hover:not(:disabled) {
-  filter: brightness(1.05); color: #2a1607;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
-  box-shadow: 0 12px 24px -12px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .6), 0 0 0 1px rgba(140, 74, 26, .4);
+  filter: brightness(1.06); color: #3a1c06; background: var(--brass);
+  box-shadow:
+    0 0 0 1px var(--brass-line),
+    inset 0 1px 0 rgba(255, 252, 240, .85),
+    inset 0 -3px 6px -2px rgba(120, 54, 8, .5),
+    0 calc(var(--lip) + 1px) 0 #703a10,
+    0 calc(var(--lip) + 8px) 15px -4px rgba(90, 44, 8, .7);
 }
+button.primary:active:not(:disabled) {
+  transform: translateY(var(--lip)); background: var(--brass);
+  box-shadow:
+    0 0 0 1px var(--brass-line),
+    inset 0 2px 5px rgba(96, 42, 6, .55),
+    inset 0 -1px 0 rgba(255, 232, 190, .3);
+}
+/* A tab on the case rather than a key on it: no lip, no face, just a cut
+   outline. Used for Back and for the small corner actions, which should not
+   compete with the one brass key on the screen. */
 button.ghost {
   padding: 6px 10px; font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase;
   display: flex; gap: 6px; align-items: center;
+  color: var(--ink-soft); background: rgba(122, 94, 54, .1);
+  box-shadow:
+    inset 0 0 0 1px rgba(58, 38, 16, .4),
+    inset 0 1px 0 rgba(255, 255, 255, .5),
+    0 1px 0 rgba(255, 255, 255, .6);
+}
+button.ghost:hover:not(:disabled) {
+  transform: none; color: var(--ink); background: rgba(255, 252, 244, .85);
+  box-shadow:
+    inset 0 0 0 1px rgba(58, 38, 16, .55),
+    inset 0 1px 0 rgba(255, 255, 255, .9),
+    0 1px 0 rgba(255, 255, 255, .7);
+}
+button.ghost:active:not(:disabled) {
+  transform: none; box-shadow: var(--sunk); background: rgba(122, 94, 54, .14);
 }
 
 /* ── loader ────────────────────────────────────────────── */
@@ -521,10 +732,12 @@ button.ghost {
 /* The ten rows sit in one tray cut into the sheet, so the list is an object
    with a shape rather than ten cards floating on a background. Same well as
    the inventory grid, and for the same reason. */
+/* A WELL, not a pocket tray: what is in it is writing, so it stays parchment.
+   See the rule at `.inv-section`. */
 .slot-list {
-  display: flex; flex-direction: column; gap: 5px;
-  padding: 6px; border-radius: var(--r-lg);
-  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 7px; border-radius: var(--r-lg);
+  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
 }
 .slot-row { display: flex; gap: 5px; align-items: stretch; }
 /* The row is a button, so the whole card is the hit target rather than the
@@ -547,9 +760,10 @@ button.ghost {
   transition: box-shadow var(--t-fast) ease, background var(--t-fast) ease, transform var(--t-fast) var(--ease);
 }
 .panel .slot-open:hover:not(:disabled) {
-  transform: none; background: #fff; color: var(--ink);
+  transform: translateY(-1px); background: #fffdf7; color: var(--ink);
   box-shadow: var(--emboss-lift), var(--ring);
 }
+.panel .slot-open:active:not(:disabled) { transform: translateY(var(--lip)); box-shadow: var(--emboss-press); }
 /* The index, in a well of its own: it is a fixed label on the furniture, not
    part of what is saved in the slot. */
 .slot-open b {
@@ -635,10 +849,14 @@ button.ghost {
   position: relative; margin-top: 14px; border-radius: var(--r-lg); overflow: hidden;
   width: min(100%, var(--cg-stage)); margin-left: auto; margin-right: auto;
   background:
-    radial-gradient(115% 95% at 50% 0%, rgba(255, 255, 255, .18), rgba(255, 255, 255, 0) 62%),
-    linear-gradient(180deg, #8b95ad, #626c88);
+    radial-gradient(115% 95% at 50% 0%, rgba(255, 255, 255, .2), rgba(255, 255, 255, 0) 62%),
+    linear-gradient(180deg, #8b95ad, #56607a);
   background-color: #737d97;
-  box-shadow: inset 0 -16px 30px -18px rgba(0, 0, 0, .55), var(--sunk);
+  box-shadow:
+    inset 0 -16px 30px -18px rgba(0, 0, 0, .6),
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 3px 6px rgba(0, 0, 0, .45),
+    0 1px 0 rgba(255, 255, 255, .6);
 }
 /* Square, set inline by UI.js, matching the picker's square frustum. */
 #cg-canvas { display: block; width: 100%; }
@@ -647,13 +865,13 @@ button.ghost {
    translate here would drop the -50% that centres them. */
 .cg-arrow {
   position: absolute; top: 50%; transform: translateY(-50%);
-  width: 38px; height: 54px; padding: 0; border-radius: var(--r-md);
-  background: var(--paper-cell); box-shadow: var(--emboss-lift);
+  width: 36px; height: 52px; padding: 0; border-radius: var(--r-md);
+  background: var(--paper-cell); box-shadow: var(--emboss);
 }
 .cg-arrow.prev { left: 8px; }
 .cg-arrow.next { right: 8px; }
-.cg-arrow:hover:not(:disabled) { background: #fff; transform: translateY(-50%); }
-.cg-arrow:active:not(:disabled) { transform: translateY(-50%); box-shadow: var(--sunk); }
+.cg-arrow:hover:not(:disabled) { background: #fffdf7; transform: translateY(-50%); box-shadow: var(--emboss-lift); }
+.cg-arrow:active:not(:disabled) { transform: translateY(calc(-50% + var(--lip))); box-shadow: var(--emboss-press); }
 /* The chevron itself: two borders of an empty box, turned 45 degrees. Drawn
    rather than typed, so it is the same shape in every font. */
 .cg-arrow i {
@@ -667,9 +885,9 @@ button.ghost {
 .cg-arrow.next i { transform: rotate(-135deg) translate(1px, -1px); }
 .cg-name { text-align: center; margin-top: 12px; }
 .cg-name b {
-  color: var(--ink); font-size: var(--fs-xl); font-weight: 600;
-  letter-spacing: var(--ls-disp);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
+  color: var(--ink); font-size: var(--fs-xl); font-weight: var(--fw-disp);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  text-shadow: var(--carved);
 }
 
 /* How hard it hits back, and what a death costs. Two rows, one caption each.
@@ -702,7 +920,8 @@ select.pick {
   background: var(--paper-cell); box-shadow: var(--emboss);
   transition: box-shadow var(--t-fast) ease, background var(--t-fast) ease;
 }
-select.pick:hover { background: #fff; box-shadow: var(--emboss-lift); }
+select.pick:hover { background: #fffdf7; box-shadow: var(--emboss-lift); }
+select.pick:active { box-shadow: var(--emboss-press); }
 select.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* The list itself is drawn by the platform, so the two colours it will honour
    are set and nothing else is attempted. */
@@ -725,22 +944,34 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    the left two thirds of one built for difficulty. */
 .seg {
   display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px;
-  padding: 2px; border-radius: 7px;
-  background: rgba(122, 94, 54, .1);
-  box-shadow: var(--sunk);
+  padding: 3px; border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(28, 17, 6, .8), rgba(66, 44, 20, .68));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .85),
+    inset 0 2px 4px rgba(0, 0, 0, .5),
+    0 1px 0 rgba(255, 255, 255, .6);
 }
 .seg button {
-  padding: 7px 4px; border-radius: var(--r-md);
+  padding: 8px 4px; border-radius: var(--r-sm);
   background: transparent; box-shadow: none;
-  font-size: var(--fs-sm); font-weight: 700; letter-spacing: .04em;
-  color: var(--ink-soft); text-align: center;
+  font-size: var(--fs-xs); font-weight: var(--fw-disp);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: rgba(255, 232, 194, .55); text-align: center; text-shadow: 0 1px 1px rgba(0, 0, 0, .6);
 }
-.seg button:hover:not(.on) { transform: none; background: rgba(255, 255, 255, .7); color: var(--ink); }
-.seg button:active:not(:disabled) { transform: none; }
+.seg button:hover:not(.on) {
+  transform: none; color: #fff2da;
+  background: rgba(255, 214, 150, .14); box-shadow: none;
+}
+.seg button:active:not(:disabled) { transform: none; box-shadow: none; }
+/* The chosen one is a brass plate seated in the rail. */
 .seg button.on {
-  color: #2a1607;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 60%, var(--accent));
-  box-shadow: 0 6px 14px -9px rgba(221, 124, 56, .95), inset 0 1px 0 rgba(255, 255, 255, .5);
+  color: #3a1c06; text-shadow: 0 1px 0 rgba(255, 232, 190, .5);
+  background: var(--brass);
+  box-shadow:
+    0 0 0 1px var(--brass-line),
+    inset 0 1px 0 rgba(255, 250, 232, .7),
+    inset 0 -2px 4px rgba(120, 54, 8, .4),
+    0 0 12px -2px rgba(242, 168, 80, .7);
 }
 
 .chargen-foot {
@@ -803,22 +1034,30 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    cap is half the window less whatever the map's side of the screen owns, so
    the rail meets the compass and stops. Wrapping is what it does with the rest
    rather than growing into the strip: a second row of the same sheet. */
+/* One brass strip with the cells cut out of it, rather than a parchment plate
+   with tags on it. The strip is the material and the 1px gaps between cells are
+   it showing through, which is the same trick the rack uses one size up. */
 #status-bar {
   position: absolute; top: 10px; right: 10px;
   display: flex; align-items: stretch; gap: 1px;
   flex-wrap: wrap; justify-content: flex-end;
   max-width: calc(50vw - var(--hud-side));
-  padding: 1px; border-radius: var(--r-md);
-  background: var(--paper-hud); box-shadow: var(--emboss-hud);
+  padding: 2px; border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--wood-lit), var(--wood-mid) 45%, var(--wood-dim));
+  box-shadow:
+    0 0 0 1px var(--hud-hard),
+    inset 0 1px 0 rgba(255, 226, 178, .3),
+    0 2px 7px -2px rgba(0, 0, 0, .7);
 }
 .chip {
   display: flex; align-items: center; gap: 6px;
-  height: 22px; padding: 0 9px; border-radius: 2px;
+  height: 21px; padding: 0 9px; border-radius: 1px;
   font: 700 var(--fs-xs)/1 var(--font);
   letter-spacing: var(--ls-cap); text-transform: uppercase;
   color: var(--ink);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .75);
   background: var(--paper-hud-cell);
+  box-shadow: inset 0 -1px 0 rgba(122, 94, 54, .22);
 }
 .chip .dial {
   width: 12px; height: 12px; border-radius: 50%; display: block; flex: none;
@@ -848,11 +1087,20 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 
    Corner ticks rather than a full second border: four short arms read as an
    instrument bezel and cost one static background-image. */
+/* No mount, no padding, no sheet. The player's words were that the plate made
+   it look cheap, and he was right: a parchment surround four pixels wide around
+   a picture is a widget frame, and a widget in the corner of a game reads as
+   something bolted on afterwards. The picture goes edge to edge and the only
+   thing holding it is the HUD's standard edge — an ink line outside, a light
+   line inside — plus four brass corner brackets sitting *on* the map, which is
+   where an instrument's brackets go. */
 #minimap {
   position: absolute; top: 10px; left: 10px;
   width: var(--map-size); height: var(--map-size); border-radius: var(--r-md);
-  background: var(--paper-hud);
-  box-shadow: var(--emboss-hud);
+  background: none;
+  box-shadow:
+    0 0 0 1px var(--hud-hard),
+    0 2px 9px -2px rgba(0, 0, 0, .75);
   overflow: hidden;
 }
 /* 148% of the frame, centred. That number is the whole fix and it is not a
@@ -869,37 +1117,43 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   width: 148%; height: 148%; margin: -74% 0 0 -74%;
   transform-origin: 50% 50%;
 }
-/* The mount, the corner ticks and the vignette, in one static layer over the
-   turning canvas. This is also where the map joins the rest of the HUD: the
-   canvas fills the whole frame and always will, so the parchment surround is
-   drawn *on top of* it as an inset ring rather than as padding, which would
-   have changed the box the 148% is a percentage of. Three inset rings, in
-   paint order: the sheet, a dark hairline cut into its inside edge, and a lit
-   line under that. The dark one is the important one. A map is a picture of
-   terrain, so parts of it are always going to be the colour of whatever it is
-   sitting on, and that hairline is what keeps a snowfield on the map from
-   running into the parchment around it. */
+/* The brackets and the vignette, in one static layer over the turning canvas.
+   The mount that used to be the first inset ring here is gone; what is left is
+   the light line that has to be there, because a map is a picture of terrain
+   and parts of it are always the colour of whatever is behind the HUD. Ink line
+   outside (on `#minimap` itself), light line inside (here), and the pair holds
+   on snow and in a cave both.
+
+   The brackets are drawn twice, dark under bright, so an arm crossing a
+   snowfield still has an edge. That is the whole reason they can sit on the
+   picture now instead of on a plate. */
 #minimap::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   border-radius: var(--r-md);
   box-shadow:
-    inset 0 0 0 4px rgba(243, 233, 214, .96),
-    inset 0 0 0 5px rgba(38, 26, 12, .68),
-    inset 0 0 0 6px rgba(255, 255, 255, .3);
+    inset 0 0 0 1px rgba(255, 246, 226, .5),
+    inset 0 0 0 2px rgba(20, 12, 4, .35);
   background:
-    /* four corner brackets, two arms each, inside the mount */
-    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px top 7px / 9px 2px no-repeat,
-    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px top 7px / 2px 9px no-repeat,
-    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px top 7px / 9px 2px no-repeat,
-    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px top 7px / 2px 9px no-repeat,
-    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px bottom 7px / 9px 2px no-repeat,
-    linear-gradient(var(--accent-deep), var(--accent-deep)) left 7px bottom 7px / 2px 9px no-repeat,
-    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px bottom 7px / 9px 2px no-repeat,
-    linear-gradient(var(--accent-deep), var(--accent-deep)) right 7px bottom 7px / 2px 9px no-repeat,
-    /* and the vignette under them, warm rather than black now, so the edge of
-       the picture settles into the mount instead of being burnt away from it */
-    linear-gradient(180deg, rgba(58, 40, 18, .34), rgba(0, 0, 0, 0) 20%, rgba(0, 0, 0, 0) 80%, rgba(58, 40, 18, .36)),
-    linear-gradient(90deg, rgba(58, 40, 18, .34), rgba(0, 0, 0, 0) 20%, rgba(0, 0, 0, 0) 80%, rgba(58, 40, 18, .36));
+    /* four corner brackets, two arms each: the bright arm, then its shadow one
+       pixel down and right, then the vignette under both */
+    linear-gradient(#ffd79a, #ffd79a) left 5px top 5px / 11px 2px no-repeat,
+    linear-gradient(#ffd79a, #ffd79a) left 5px top 5px / 2px 11px no-repeat,
+    linear-gradient(#ffd79a, #ffd79a) right 5px top 5px / 11px 2px no-repeat,
+    linear-gradient(#ffd79a, #ffd79a) right 5px top 5px / 2px 11px no-repeat,
+    linear-gradient(#ffd79a, #ffd79a) left 5px bottom 5px / 11px 2px no-repeat,
+    linear-gradient(#ffd79a, #ffd79a) left 5px bottom 5px / 2px 11px no-repeat,
+    linear-gradient(#ffd79a, #ffd79a) right 5px bottom 5px / 11px 2px no-repeat,
+    linear-gradient(#ffd79a, #ffd79a) right 5px bottom 5px / 2px 11px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) left 4px top 4px / 13px 4px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) left 4px top 4px / 4px 13px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) right 4px top 4px / 13px 4px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) right 4px top 4px / 4px 13px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) left 4px bottom 4px / 13px 4px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) left 4px bottom 4px / 4px 13px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) right 4px bottom 4px / 13px 4px no-repeat,
+    linear-gradient(#3a1f06, #3a1f06) right 4px bottom 4px / 4px 13px no-repeat,
+    linear-gradient(180deg, rgba(30, 18, 4, .5), rgba(0, 0, 0, 0) 18%, rgba(0, 0, 0, 0) 82%, rgba(30, 18, 4, .52)),
+    linear-gradient(90deg, rgba(30, 18, 4, .5), rgba(0, 0, 0, 0) 18%, rgba(0, 0, 0, 0) 82%, rgba(30, 18, 4, .52));
 }
 /* Where north is. It rides the inside of the frame rather than sitting at the
    top, because on a sphere the top of a heading-up map is not north and never
@@ -951,12 +1205,13 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    not an outer ring: a mask clips to the border box and would cut an outer
    shadow off entirely. */
 .cmp-win {
-  position: relative; height: 26px; overflow: hidden;
-  border-radius: var(--r-md);
+  position: relative; height: 24px; overflow: hidden;
+  border-radius: var(--r-sm);
   background: var(--paper-hud);
   box-shadow:
-    inset 0 0 0 1px rgba(38, 26, 12, .5),
-    inset 0 1px 0 rgba(255, 255, 255, .8);
+    inset 0 0 0 1px rgba(16, 10, 3, .7),
+    inset 0 1px 0 rgba(255, 255, 255, .85),
+    inset 0 -2px 5px rgba(60, 42, 18, .25);
   /* Feather both ends, so a letter arrives and leaves rather than popping in
      at the edge of a box. */
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
@@ -967,17 +1222,20 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   position: absolute; transform: translateX(-50%);
   text-shadow: 0 1px 0 rgba(255, 255, 255, .75);
 }
-.cmp-track i { top: 10px; width: 1px; height: 6px; background: rgba(74, 54, 28, .45); }
+.cmp-track i { top: 9px; width: 1px; height: 6px; background: rgba(58, 38, 16, .5); }
 .cmp-track b {
-  top: 6px; font: 700 var(--fs-md)/1 var(--font); letter-spacing: .1em;
+  top: 5px; font: var(--fw-disp) var(--fs-md)/1 var(--font); letter-spacing: .08em;
   color: var(--ink);
 }
-.cmp-track b.inter { font-size: var(--fs-xs); font-weight: 700; top: 9px; color: var(--ink-soft); }
+.cmp-track b.inter { font-size: var(--fs-xs); font-weight: 700; top: 8px; color: var(--ink-soft); }
+/* Brass, and it hangs into the strip from above rather than sitting on top of
+   it: the notch is the thing that reads the compass, so it is the one part of
+   the top of the screen allowed to be metal. */
 .cmp-notch {
-  position: absolute; left: 50%; top: 0;
-  width: 0; height: 0; margin-left: -5px;
-  border: 5px solid transparent; border-top: 7px solid var(--accent-deep);
-  filter: drop-shadow(0 1px 1px rgba(255, 255, 255, .8));
+  position: absolute; left: 50%; top: 0; z-index: 2;
+  width: 0; height: 0; margin-left: -6px;
+  border: 6px solid transparent; border-top: 8px solid #e2a052;
+  filter: drop-shadow(0 1px 0 rgba(30, 16, 4, .9)) drop-shadow(0 0 2px rgba(255, 255, 255, .5));
 }
 /* Inside the polar cap there is no bearing to show. One word, and it carries
    its own piece of sheet because the strip it would otherwise sit on is gone
@@ -995,48 +1253,67 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 #compass.polar .cmp-polar { display: block; }
 
 /* --- vitals (top left, under the map) -------------------------------------
-   Every bar is one sheet: icon, groove, number, inside a single keyline, so
-   four of them stack into a column rather than into twelve floating pieces.
-   The groove carries a static tick pattern; only the fill's width is written
-   per frame.
+   THE BAR IS THE OBJECT. Three faults were reported here and they are one
+   fault: the bar was a 69px sliver inside a 152px plate, its number sat 20px
+   away from the end of it behind a fixed 44px column, and the whole row was a
+   piece of parchment with padding round it. So the plate is gone, and with it
+   the padding, the fixed numeral column and the six pixels of air on either
+   side of the track.
 
-   The column is exactly the width of the map above it, and that is the whole
-   point of the fixed pieces below. A 152px-wide map over a 257px-wide bar was
-   two objects in one corner: the eye reads the left edge they share and then
-   the right edge they do not, and the stack falls apart at the second one. So
-   the row is built out of three fixed widths and one that takes what is left:
-   the icon and the numeral never change size between rows, which is what puts
-   all four tracks on the same two pixels, and the track is `flex: 1` so the
-   arithmetic lives in one place and the media query below can change the
-   width without touching any of it. */
+   What is left is a groove the full width of the map, the fill in it, and the
+   number *inside the groove's own right-hand end*. `--vital-num` is not a
+   reserved column any more; the numeral is out of flow, so the track is not
+   paying for it and a three-digit health reading cannot push a bar shorter than
+   a two-digit one. That is the whole fix: the bar went from 69px to 132px and
+   the gap between a bar and its number went from twenty pixels to five.
+
+   Everything the player reads sits on the bar. That is also what makes it
+   legible with no sheet under it: the groove is near-opaque parchment, so ink
+   on it is ink on paper whatever the world is doing, and the groove's own edge
+   is the HUD's ink-line-plus-light-line pair, which holds on snow and in a
+   cave. The icon is the one thing outside, and it carries a baked pale halo of
+   its own for the same reason.
+
+   The column is exactly the width of the map above it and that has not moved:
+   the track is `flex: 1` inside a `--map-size` box, so the arithmetic still
+   lives in one place. */
 #vitals {
-  position: absolute; top: 172px; left: 10px;
+  position: absolute; top: 170px; left: 10px;
   width: var(--map-size);
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 5px;
 }
 /* ...and back in the corner when there is no map above them. Driven off a
    class on #hud because the map is `display: none` and cannot push anything. */
 #hud.no-map #vitals { top: 10px; }
 .vital {
-  display: flex; align-items: center; gap: 6px;
-  padding: 3px 6px 3px 3px; border-radius: var(--r-md);
-  background: var(--paper-hud); box-shadow: var(--emboss-hud);
+  position: relative;
+  display: flex; align-items: center; gap: 5px;
+  padding: 0; border-radius: 0;
+  background: none; box-shadow: none;
 }
 .vital.hidden { display: none; }
 .vital .v-ico {
-  width: 18px; height: 18px; flex: none;
-  background: no-repeat center/16px 16px;
-  border-radius: var(--r-sm);
+  width: 15px; height: 15px; flex: none;
+  background: no-repeat center/15px 15px;
+  border-radius: 0;
+  /* Written once and cached by `_vital`, never per frame, which is what makes
+     a filter allowed here. Same inversion as the map's north pip: a dark glyph
+     on a pale rim survives snow, sand and a cave; a pale one does not. */
+  filter: drop-shadow(0 0 1.6px rgba(255, 252, 242, .98)) drop-shadow(0 1px 1px rgba(0, 0, 0, .55));
 }
 .vital .v-track {
   position: relative; display: block;
-  flex: 1; min-width: 0; height: 11px; border-radius: 2px;
-  /* Ticks in percent rather than pixels, because the track no longer has a
-     width of its own to divide up. Four marks either way. */
+  flex: 1; min-width: 0; height: 14px; border-radius: var(--r-sm);
+  /* Ticks in percent rather than pixels, because the track has no width of its
+     own to divide up. Four marks either way. */
   background:
-    repeating-linear-gradient(90deg, rgba(74, 54, 28, .2) 0 1px, rgba(0, 0, 0, 0) 1px 25%),
-    rgba(122, 94, 54, .16);
-  box-shadow: var(--sunk-hud);
+    repeating-linear-gradient(90deg, rgba(74, 54, 28, .18) 0 1px, rgba(0, 0, 0, 0) 1px 25%),
+    linear-gradient(180deg, rgba(233, 220, 196, .96), rgba(210, 192, 160, .96));
+  box-shadow:
+    0 0 0 1px var(--hud-hard),
+    inset 0 1px 2px rgba(60, 42, 18, .38),
+    inset 0 -1px 0 rgba(255, 255, 255, .5),
+    0 2px 6px -2px rgba(0, 0, 0, .65);
   overflow: hidden;
 }
 .vital .v-track b {
@@ -1044,37 +1321,56 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   /* The width transition is what makes a hit read as a hit: an instant jump at
      60fps is easy to miss entirely. */
   transition: width .16s cubic-bezier(.3, .8, .4, 1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), inset 0 -3px 6px -3px rgba(74, 40, 16, .5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .5),
+    inset -1px 0 0 rgba(255, 255, 255, .35),
+    inset 0 -4px 7px -3px rgba(74, 40, 16, .55);
 }
+/* Out of flow, so it costs the track nothing, and tucked five pixels inside the
+   end of the groove it belongs to. Ink with a tight pale halo: over the fill it
+   is dark type on a lit colour, over the empty groove it is dark type on paper,
+   and both of those are readable without knowing which one it will be. */
 .vital .v-num {
+  position: absolute; right: 5px; top: 50%; z-index: 2;
+  transform: translateY(-50%);
   font: 700 var(--fs-xs)/1 var(--mono); font-style: normal;
-  color: var(--ink);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
-  width: var(--vital-num); flex: none; text-align: right;
+  color: #241a0e;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, .85),
+    0 0 3px rgba(255, 250, 240, .9),
+    0 0 2px rgba(255, 250, 240, .7);
+  width: auto; flex: none; text-align: right;
 }
-#v-health   .v-track b { background: linear-gradient(180deg, #ff7a6f, #e2453f 45%, #a81e1a); }
+#v-health   .v-track b { background: linear-gradient(180deg, #ff8074, #dd3f39 45%, #9c1a17); }
 #v-food     .v-track b { background: linear-gradient(180deg, #ffd07a, #e8a83f 45%, #a55f0e); }
 #v-stamina  .v-track b { background: linear-gradient(180deg, #ffe6b0, var(--accent-2) 45%, #b5811a); }
 #v-breath   .v-track b { background: linear-gradient(180deg, #c8ecff, #79c8f0 45%, #2372a3); }
 
-/* Low health is a different-looking HUD, not a shorter bar. The sheet itself
-   goes to a scorched red, the keyline glows, and the row breathes. Cheap: one
-   box-shadow swap on a 152px element, and no filter anywhere in it. */
-#v-health.critical {
-  background: linear-gradient(180deg, rgba(250, 214, 202, .95), rgba(232, 172, 158, .95));
-  box-shadow:
-    0 0 0 1px rgba(120, 26, 14, .8),
-    inset 0 1px 0 rgba(255, 240, 234, .9),
-    0 0 18px -4px rgba(190, 44, 30, .8);
+/* Low health is a different-looking HUD, not a shorter bar. With the plate gone
+   there is nothing left to scorch, so the alarm is on the groove itself: the
+   keyline goes red-hot and throws a glow, and the empty part of the track warms
+   with it. One box-shadow swap on a 152px element, and no filter in it. */
+#v-health.critical .v-track {
+  background:
+    repeating-linear-gradient(90deg, rgba(120, 30, 16, .22) 0 1px, rgba(0, 0, 0, 0) 1px 25%),
+    linear-gradient(180deg, rgba(246, 208, 196, .96), rgba(226, 172, 158, .96));
   animation: vital-alarm 1.15s ease-in-out infinite;
 }
-#v-health.critical .v-num { color: #6d1408; text-shadow: 0 1px 0 rgba(255, 240, 234, .8); }
+#v-health.critical .v-num { color: #5e0f05; }
 @keyframes vital-alarm {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(120, 26, 14, .7), inset 0 1px 0 rgba(255, 240, 234, .85), 0 0 14px -6px rgba(190, 44, 30, .6); }
-  50%      { box-shadow: 0 0 0 1px rgba(170, 34, 18, .95), inset 0 1px 0 rgba(255, 246, 242, .95), 0 0 26px -4px rgba(226, 60, 40, .95); }
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(120, 26, 14, .85), inset 0 1px 2px rgba(90, 20, 10, .4),
+      inset 0 -1px 0 rgba(255, 240, 234, .5), 0 0 14px -5px rgba(190, 44, 30, .7);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(190, 40, 22, .95), inset 0 1px 2px rgba(90, 20, 10, .4),
+      inset 0 -1px 0 rgba(255, 246, 242, .6), 0 0 26px -3px rgba(226, 60, 40, .95);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  #v-health.critical { animation: none; }
+  #v-health.critical .v-track { animation: none; }
 }
 
 /* --- hotbar --------------------------------------------------------------
@@ -1083,50 +1379,76 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    lifts clear of the row with a warm rim and a notch above it. It is the same
    tray of cells the inventory screen opens onto, which is now legible without
    opening the inventory. */
+/* THE RACK. The one piece of the HUD that keeps a surface, and it earns it:
+   nine tools have to hang on something. It is the carcass, in the same timber
+   the menus are framed in, with the nine pockets cut into it. This is also the
+   HUD's answer to the "no plate" rule, which is about the map and the vitals:
+   those are readouts and a readout floats, but a rack is furniture. */
 #hotbar, #offhand-bar {
-  display: flex; gap: 3px; padding: 4px; border-radius: var(--r-md);
-  background: var(--paper-hud); box-shadow: var(--emboss-hud-lift);
+  display: flex; gap: 4px; padding: 5px; border-radius: var(--r-lg);
+  background:
+    var(--stud) left 2px top 2px / 5px 5px no-repeat,
+    var(--stud) right 2px top 2px / 5px 5px no-repeat,
+    var(--stud) left 2px bottom 2px / 5px 5px no-repeat,
+    var(--stud) right 2px bottom 2px / 5px 5px no-repeat,
+    var(--wood);
+  box-shadow:
+    0 0 0 1px var(--wood-line),
+    inset 0 1px 0 rgba(255, 226, 178, .28),
+    inset 0 -1px 0 rgba(0, 0, 0, .4),
+    0 3px 0 rgba(24, 14, 5, .6),
+    0 10px 20px -8px rgba(0, 0, 0, .8);
   pointer-events: auto;
 }
 /* The offhand hangs off the row rather than sitting inside it, so the hotbar
    stays centred on the crosshair. */
 #bar-row { position: relative; display: flex; }
 #offhand-bar { position: absolute; right: 100%; bottom: 0; margin-right: 7px; }
+/* Nine pockets in the rack, and they are the same pocket as the bag's so a tool
+   is in the same kind of hole wherever you are looking at it. */
 .slot {
   position: relative; width: 42px; height: 42px; border-radius: var(--r-sm);
-  background: var(--paper-hud-cell);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 0 0 1px rgba(122, 94, 54, .4);
+  background: var(--pocket-floor);
+  box-shadow: var(--pocket);
   display: grid; place-items: center; cursor: pointer;
   transition: transform .13s cubic-bezier(.2, .9, .3, 1.35), box-shadow .16s, background .16s;
 }
 .slot img { width: 34px; height: 34px; pointer-events: none; }
 .slot .num {
   position: absolute; top: 2px; left: 4px;
-  font: 700 var(--fs-2xs) var(--mono); color: var(--ink-faint);
+  font: 700 var(--fs-2xs) var(--mono); color: rgba(255, 232, 194, .45);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .8);
 }
 .slot .count {
   position: absolute; right: 3px; bottom: 1px;
-  font: 700 var(--fs-sm) var(--mono); color: var(--ink);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .95), 0 0 3px rgba(255, 255, 255, .9);
+  font: 700 var(--fs-sm) var(--mono); color: #fff4de;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .95), 0 0 3px rgba(0, 0, 0, .9);
   pointer-events: none;
 }
-.slot .wear { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 3px; border-radius: 2px; background: rgba(74, 54, 28, .3); overflow: hidden; }
-.slot .wear i { display: block; height: 100%; background: linear-gradient(180deg, #82d06b, #3f8232); }
+.slot .wear { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 3px; border-radius: 2px; background: rgba(8, 5, 2, .65); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .5); overflow: hidden; }
+.slot .wear i { display: block; height: 100%; background: linear-gradient(180deg, #9ae182, #3f8232); }
+/* The live cell. It does not rise out of the rack: a brass collar drops into
+   the pocket and the inside of it lights up, which is a thing a rack can
+   actually do and a floating cell is not. */
 .slot.active {
-  background: linear-gradient(180deg, #fff6e6, rgba(255, 219, 168, .6));
+  background: linear-gradient(180deg, rgba(122, 70, 14, .8), rgba(196, 132, 48, .62) 60%, rgba(226, 168, 82, .52));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .9),
-    0 0 0 2px var(--accent),
-    0 0 16px -2px rgba(221, 124, 56, .7);
-  transform: translateY(-3px);
+    inset 0 0 0 1px rgba(16, 10, 3, .8),
+    inset 0 3px 5px rgba(20, 11, 3, .4),
+    inset 0 0 16px rgba(255, 206, 120, .55),
+    0 0 0 2px #e2a052,
+    0 0 0 3px var(--brass-line),
+    0 0 18px -2px rgba(242, 168, 80, .85);
+  transform: none;
 }
-.slot.active .num { color: var(--accent-deep); }
-/* The notch above the selected cell: a small warm wedge that points at it, so
+.slot.active .num { color: #ffe4b0; }
+/* The notch above the selected cell: a small brass wedge that points at it, so
    which slot is live is legible from the corner of the eye. */
 .slot.active::before {
-  content: ''; position: absolute; left: 50%; bottom: 100%; margin: 0 0 5px -4px;
+  content: ''; position: absolute; left: 50%; bottom: 100%; margin: 0 0 6px -5px;
   width: 0; height: 0;
-  border: 4px solid transparent; border-top: 5px solid var(--accent);
+  border: 5px solid transparent; border-top: 6px solid #e2a052;
+  filter: drop-shadow(0 1px 0 rgba(30, 16, 4, .9));
 }
 
 /* Sits on top of the bottom cluster and grows upward, so the hint and the item
@@ -1165,19 +1487,20 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   pointer-events: none;
 }
 .toast {
-  padding: 6px 12px 6px 8px; border-radius: var(--r-md);
-  font-size: var(--fs-md); font-weight: 600; letter-spacing: .01em;
+  padding: 6px 12px 6px 7px; border-radius: var(--r-sm);
+  font-size: var(--fs-md); font-weight: 700; letter-spacing: .01em;
   background: var(--paper-hud); color: var(--ink);
   box-shadow: var(--emboss-hud-lift);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+  text-shadow: var(--carved);
   animation: toastIn .25s cubic-bezier(.2, .9, .3, 1.2);
   display: flex; align-items: center; gap: 9px;
 }
-/* A hairline of accent down the leading edge: enough to say "the game is
-   telling you something" without a colour field behind the words. */
+/* A brass strip down the leading edge: enough to say "the game is telling you
+   something" without a colour field behind the words. */
 .toast::before {
-  content: ''; width: 2px; align-self: stretch; border-radius: 2px;
-  background: var(--accent); flex: none;
+  content: ''; width: 3px; align-self: stretch; border-radius: 1px;
+  background: var(--brass); flex: none;
+  box-shadow: 0 0 0 1px rgba(86, 41, 10, .6);
 }
 .toast img { width: 20px; height: 20px; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-8px) } to { opacity: 1; transform: none } }
@@ -1185,10 +1508,11 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-8px) } }
 
 #hint {
-  font-size: var(--fs-md); font-weight: 600; color: var(--ink);
+  font-size: var(--fs-sm); font-weight: 700; color: var(--ink);
+  letter-spacing: .02em;
   background: var(--paper-hud); box-shadow: var(--emboss-hud);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
-  padding: 5px 11px; border-radius: var(--r-md); white-space: nowrap;
+  text-shadow: var(--carved);
+  padding: 5px 11px; border-radius: var(--r-sm); white-space: nowrap;
 }
 #hint kbd { margin: 0 3px; }
 
@@ -1234,6 +1558,9 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 /* Two caps, and the smaller wins. The pixel one is a taste limit on a big
    monitor; the viewport one is what stops a list of recipes from being taller
    than the window it is in. */
+/* Nothing to make is nothing to look at, rather than an empty groove with a
+   line of text stranded under it. */
+#recipe-list:empty { display: none; }
 #recipe-list {
   display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
   max-height: min(330px, 34vh);
@@ -1255,9 +1582,10 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   transition: transform var(--t-fast) var(--ease);
 }
 .recipe-row:hover {
-  background: #fff; transform: translateX(2px);
-  box-shadow: var(--emboss-lift), 0 0 0 1px var(--accent);
+  background: #fffdf7; transform: translateY(-1px);
+  box-shadow: var(--emboss-lift);
 }
+.recipe-row:active { transform: translateY(var(--lip)); box-shadow: var(--emboss-press); }
 .recipe-row:hover::before { transform: scaleY(1); }
 .recipe-row img { width: 30px; height: 30px; flex: none; }
 /* A floor under the name, and a cost list that wraps rather than taking the
@@ -1282,7 +1610,11 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 .craft-grid {
   display: grid; gap: 4px;
   padding: 6px; border-radius: var(--r-lg);
-  background: rgba(122, 94, 54, .09); box-shadow: var(--sunk);
+  background: var(--wood-end);
+  box-shadow:
+    inset 0 0 0 1px rgba(18, 11, 4, .8),
+    inset 0 2px 6px rgba(14, 8, 2, .5),
+    0 1px 0 rgba(255, 249, 236, .5);
 }
 .craft-grid.g2 { grid-template-columns: repeat(2, 1fr); }
 .craft-grid.g3 { grid-template-columns: repeat(3, 1fr); }
@@ -1292,22 +1624,36 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 .craft-arrow {
   width: 0; height: 0; flex: none;
   border: 7px solid transparent;
-  border-left: 11px solid var(--ink-faint);
+  border-left: 11px solid #c48a3c;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, .85));
 }
-/* The result. Bigger, and warm, because it is the one cell on the bench that
-   is an outcome rather than an ingredient. */
+/* The result. The one cell on the bench that is an outcome rather than an
+   ingredient, so it is the one that gets brass: a deeper pocket in a rim of it,
+   lit from inside. */
 .craft-out .islot {
-  width: 60px; height: 60px; border-radius: var(--r-lg);
-  background: linear-gradient(180deg, #fff8ec, rgba(255, 224, 178, .5));
-  box-shadow: var(--emboss-lift), 0 0 0 1px rgba(200, 132, 54, .5);
+  width: 60px; height: 60px; border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(74, 40, 8, .8), rgba(140, 92, 30, .6) 60%, rgba(180, 128, 54, .5));
+  box-shadow:
+    var(--pocket),
+    inset 0 0 18px rgba(255, 200, 110, .4),
+    0 0 0 2px #c98a3c,
+    0 0 0 3px var(--brass-line);
 }
 .craft-out .islot img { width: 50px; height: 50px; }
-.craft-out .islot:hover { box-shadow: var(--emboss-lift), var(--ring); }
+.craft-out .islot:hover {
+  background: linear-gradient(180deg, rgba(110, 62, 12, .8), rgba(180, 122, 44, .6) 60%, rgba(214, 158, 74, .5));
+  box-shadow:
+    var(--pocket),
+    inset 0 0 22px rgba(255, 214, 130, .55),
+    0 0 0 2px #f0b45e,
+    0 0 0 3px var(--brass-line),
+    0 0 18px -2px rgba(242, 168, 80, .8);
+}
 
 .smelt-area {
   display: flex; align-items: center; justify-content: center; gap: 16px;
-  padding: 12px 16px; border-radius: var(--r-lg); align-self: center;
-  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+  padding: 12px 16px; border-radius: var(--r-md); align-self: center;
+  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
 }
 .smelt-col { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .smelt-label { color: var(--ink-faint); font-family: var(--mono); }
@@ -1319,13 +1665,17 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 }
 .flame::after { content: ''; position: absolute; inset: 0; border-radius: 50% 50% 45% 45%; border: 1.5px solid rgba(0, 0, 0, .18); }
 .progress-arrow {
-  width: 52px; height: 9px; border-radius: 99px; overflow: hidden;
-  background: rgba(122, 94, 54, .12); box-shadow: var(--sunk);
+  width: 52px; height: 10px; border-radius: var(--r-sm); overflow: hidden;
+  background: linear-gradient(180deg, rgba(26, 16, 5, .85), rgba(62, 42, 18, .74));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .88),
+    inset 0 2px 4px rgba(0, 0, 0, .5),
+    0 1px 0 rgba(255, 255, 255, .6);
 }
 .progress-arrow i {
-  display: block; height: 100%; width: 0%; border-radius: 99px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45);
+  display: block; height: 100%; width: 0%;
+  background: var(--brass);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 0 10px rgba(242, 180, 92, .8);
 }
 
 /* ── merchant ──────────────────────────────────────────── */
@@ -1333,11 +1683,20 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 .shop-area { display: flex; flex-direction: column; gap: 12px; }
 .shop-purse {
   display: flex; align-items: center; gap: 8px; align-self: stretch;
-  padding: 6px 13px 6px 8px; border-radius: 999px;
+  padding: 6px 13px 6px 8px; border-radius: var(--r-md);
   background: var(--paper-cell); box-shadow: var(--emboss);
 }
 .shop-purse img { width: 22px; height: 22px; }
-.shop-purse b { font: 700 var(--fs-lg) var(--font); color: var(--ink); }
+.shop-purse b {
+  font: var(--fw-disp) var(--fs-md) var(--mono); letter-spacing: .04em;
+  color: #ffd79a; text-shadow: 0 0 8px rgba(255, 178, 74, .6);
+  padding: 3px 9px; border-radius: var(--r-sm);
+  background: linear-gradient(180deg, rgba(24, 15, 5, .92), rgba(56, 37, 15, .84));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 2px 4px rgba(0, 0, 0, .6),
+    0 1px 0 rgba(255, 255, 255, .6);
+}
 .shop-purse span { color: var(--ink-faint); font-size: var(--fs-xs); font-weight: 700; letter-spacing: var(--ls-cap); text-transform: uppercase; }
 .shop-purse .shop-float {
   margin-left: auto; font: 600 var(--fs-sm) var(--mono); font-style: normal;
@@ -1389,13 +1748,18 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 /* `.panel button` greys every button inside a screen, which made the one
    actionable control on this panel look disabled. */
 .panel .errand-go, .panel .errand-go:hover {
-  border: 1px solid rgba(40, 96, 30, .4); border-radius: 7px; cursor: pointer;
-  padding: 8px 14px; font: 700 var(--fs-sm)/1 var(--font);
-  color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
-  background: linear-gradient(180deg, #7ac45f, var(--good) 50%, #3f8232);
-  box-shadow: 0 8px 16px -9px rgba(40, 96, 30, .9), inset 0 1px 0 rgba(255, 255, 255, .35);
+  border: none; border-radius: var(--r-md); cursor: pointer;
+  padding: 8px 14px; font: var(--fw-disp) var(--fs-xs)/1 var(--font);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: #3a1c06; text-shadow: 0 1px 0 rgba(255, 232, 190, .5);
+  background: var(--brass);
+  box-shadow:
+    0 0 0 1px var(--brass-line),
+    inset 0 1px 0 rgba(255, 250, 232, .7),
+    0 var(--lip) 0 #703a10;
 }
-.panel .errand-go:hover { filter: brightness(1.07); }
+.panel .errand-go:hover { filter: brightness(1.06); }
+.panel .errand-go:active { transform: translateY(var(--lip)); box-shadow: 0 0 0 1px var(--brass-line), inset 0 2px 5px rgba(96, 42, 6, .55); }
 
 /* ── growth ────────────────────────────────────────────── */
 /* The tree, and nothing else. The aside that used to sit beside it listed
@@ -1410,17 +1774,22 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    question about whether this number is big enough. */
 .skills-bar {
   flex: none;
-  display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px;
-  padding: 8px 14px; border-radius: var(--r-lg);
-  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  padding: 8px 12px; border-radius: var(--r-md);
+  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
 }
 .skill-points {
-  font: 200 var(--fs-3xl)/1 var(--font); color: var(--ink);
-  letter-spacing: -.02em;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
+  font: var(--fw-disp) var(--fs-2xl)/1 var(--mono); color: #ffd79a;
+  letter-spacing: .02em; padding: 5px 12px; border-radius: var(--r-sm);
+  text-shadow: 0 0 10px rgba(255, 178, 74, .7);
+  background: linear-gradient(180deg, rgba(24, 15, 5, .92), rgba(56, 37, 15, .84));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 2px 5px rgba(0, 0, 0, .6),
+    0 1px 0 rgba(255, 255, 255, .6);
 }
 /* Nothing to spend is not an error, so it goes quiet rather than red. */
-.skill-points.none { opacity: .3; text-shadow: none; }
+.skill-points.none { color: rgba(255, 215, 154, .3); text-shadow: none; }
 .skill-sub {
   flex: 1; color: var(--ink-faint);
   font-size: var(--fs-xs); font-weight: 700;
@@ -1433,11 +1802,19 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   position: relative;
   display: grid; grid-template-columns: 1fr auto; gap: 3px 14px;
   align-items: center;
-  padding: 11px 14px; border-radius: var(--r-lg);
+  padding: 10px 13px 10px 16px; border-radius: var(--r-md);
   background: var(--paper-cell); box-shadow: var(--emboss);
-  transition: box-shadow var(--t-fast) ease;
+  transition: box-shadow var(--t-fast) ease, transform var(--t-fast) var(--ease);
 }
-.skill-row:hover { box-shadow: var(--emboss-lift); }
+/* The spine. Every row in the game that can be acted on carries one, and it
+   lights when the row is live: the settings list, the skills, the recipes. */
+.skill-row::after {
+  content: ''; position: absolute; left: 4px; top: 8px; bottom: 8px; width: 3px;
+  border-radius: 2px; background: rgba(96, 66, 28, .25);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .25);
+}
+.skill-row:hover { box-shadow: var(--emboss-lift); transform: translateY(-1px); }
+.skill-row:hover::after { background: var(--brass); }
 /* A leaf is indented under its root and joined to it by a drawn elbow, so the
    shape of the tree is visible without reading a single prerequisite. The
    elbow is two borders of an empty box, which is the same way every other
@@ -1454,10 +1831,13 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 }
 /* Bought out. Green, and quieter than an unbought row rather than louder:
    there is nothing left to do here. */
+/* Bought out. Nothing left to do here, so the row goes quiet and its spine
+   goes solid brass: earned, not available. */
 .skill-row.maxed {
-  background: linear-gradient(180deg, rgba(190, 226, 176, .8), rgba(150, 200, 136, .45));
-  box-shadow: var(--emboss), 0 0 0 1px rgba(80, 130, 70, .3);
+  background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7));
+  box-shadow: var(--emboss);
 }
+.skill-row.maxed::after { background: var(--brass); box-shadow: 0 0 0 1px rgba(70, 32, 6, .5); }
 .skill-head-row { display: flex; align-items: center; gap: 10px; }
 .skill-name {
   font: 700 var(--fs-md) var(--font); color: var(--ink);
@@ -1467,17 +1847,22 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    rather than a grey dot. */
 .skill-pips {
   display: flex; gap: 4px; align-items: center;
-  padding: 3px 5px; border-radius: 99px;
-  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+  padding: 3px 6px; border-radius: var(--r-sm);
+  background: linear-gradient(180deg, rgba(26, 16, 5, .85), rgba(62, 42, 18, .74));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .88),
+    inset 0 2px 4px rgba(0, 0, 0, .5),
+    0 1px 0 rgba(255, 255, 255, .6);
 }
 .skill-pips i {
   width: 8px; height: 8px; border-radius: 50%;
-  background: rgba(74, 54, 28, .16);
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .28);
+  background: rgba(0, 0, 0, .5);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7), 0 1px 0 rgba(255, 220, 170, .12);
 }
+/* A rivet driven home, and lit. */
 .skill-pips i.on {
-  background: linear-gradient(170deg, var(--accent-hi), var(--accent) 70%);
-  box-shadow: 0 0 0 1px rgba(160, 88, 32, .45), 0 0 6px rgba(242, 180, 92, .8);
+  background: radial-gradient(circle at 40% 32%, #fff0cd 0 20%, #f3b661 48%, #c47a2a 78%, #8c4d13 100%);
+  box-shadow: 0 0 0 1px rgba(70, 32, 6, .8), 0 0 7px rgba(242, 180, 92, .95);
 }
 /* Not prose: one line of what the level does, set as a spec rather than as a
    sentence about the game. */
@@ -1488,27 +1873,34 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 /* Spans both rows of the row's grid so the button is centred against the name
    and the blurb together. */
 .skill-buy { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+/* Brass, like every other accepted action in the game. It used to be green,
+   which was a fourth material on a screen that already had three. */
 .panel .skill-buy {
   border: none; border-radius: var(--r-md); cursor: pointer; min-width: 108px;
-  padding: 9px 13px; font: 700 var(--fs-sm)/1 var(--font); color: #fff;
-  letter-spacing: var(--ls-disp);
-  text-shadow: 0 1px 1px rgba(0, 0, 0, .3);
-  background: linear-gradient(180deg, #7ac45f, var(--good) 50%, #3f8232);
+  padding: 9px 13px; font: var(--fw-disp) var(--fs-xs)/1 var(--font);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: #3a1c06; text-shadow: 0 1px 0 rgba(255, 232, 190, .5);
+  background: var(--brass);
   box-shadow:
-    0 0 0 1px rgba(40, 96, 30, .5),
-    inset 0 1px 0 rgba(255, 255, 255, .4),
-    0 8px 16px -9px rgba(40, 96, 30, .9);
+    0 0 0 1px var(--brass-line),
+    inset 0 1px 0 rgba(255, 250, 232, .7),
+    inset 0 -3px 6px -2px rgba(120, 54, 8, .5),
+    0 var(--lip) 0 #703a10,
+    0 calc(var(--lip) + 4px) 9px -4px rgba(90, 44, 8, .6);
 }
-.panel .skill-buy:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
-.panel .skill-buy:active:not(:disabled) { transform: translateY(0); }
-/* A refusal is a sunk plate, not a faded button: it is part of the sheet now
-   and there is nothing to press. */
+.panel .skill-buy:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
+.panel .skill-buy:active:not(:disabled) {
+  transform: translateY(var(--lip));
+  box-shadow: 0 0 0 1px var(--brass-line), inset 0 2px 5px rgba(96, 42, 6, .55);
+}
+/* A refusal is a hole in the sheet, not a faded button: there is visibly
+   nothing to press. */
 .panel .skill-buy:disabled {
   cursor: default; opacity: 1; transform: none;
-  background: rgba(122, 94, 54, .08); box-shadow: var(--sunk);
-  color: var(--ink-faint); font-weight: 700; text-shadow: none;
+  background: var(--pocket-floor); box-shadow: var(--pocket);
+  color: rgba(255, 236, 200, .38); text-shadow: 0 1px 0 rgba(0, 0, 0, .4);
 }
-.panel .skill-buy.short { color: var(--ink-soft); }
+.panel .skill-buy.short { color: rgba(255, 214, 150, .55); }
 
 /* The level bar, at the head of the tree because it is the thing the whole
    column is downstream of. */
@@ -1517,7 +1909,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    in the HUD — a ticked groove, a lit fill, a mono number on the right — cut
    into paper instead of laid on a plate. */
 .xp-block {
-  padding: 12px 14px 11px; border-radius: var(--r-lg); margin-bottom: 10px;
+  padding: 11px 13px 10px; border-radius: var(--r-md); margin-bottom: 10px;
   background: var(--paper-cell); box-shadow: var(--emboss);
 }
 .xp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
@@ -1525,17 +1917,22 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   font: 700 var(--fs-lg) var(--font); color: var(--ink);
   letter-spacing: var(--ls-disp);
 }
+/* The same anatomy as a vital, cut into paper instead of laid over a planet:
+   a ticked slot, a lit fill, and the numbers under it in mono. */
 .xp-bar {
-  height: 11px; border-radius: 99px; overflow: hidden;
+  height: 12px; border-radius: var(--r-sm); overflow: hidden;
   background:
-    repeating-linear-gradient(90deg, rgba(74, 54, 28, .12) 0 1px, rgba(0, 0, 0, 0) 1px 10%),
-    rgba(122, 94, 54, .14);
-  box-shadow: var(--sunk);
+    repeating-linear-gradient(90deg, rgba(255, 220, 170, .12) 0 1px, rgba(0, 0, 0, 0) 1px 10%),
+    linear-gradient(180deg, rgba(26, 16, 5, .85), rgba(62, 42, 18, .74));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .88),
+    inset 0 2px 4px rgba(0, 0, 0, .55),
+    0 1px 0 rgba(255, 255, 255, .6);
 }
 .xp-bar i {
-  display: block; height: 100%; border-radius: 99px; min-width: 3px;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 0 10px -2px rgba(242, 180, 92, .9);
+  display: block; height: 100%; border-radius: 0; min-width: 3px;
+  background: var(--brass);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 0 12px 0 rgba(242, 180, 92, .85);
   transition: width .4s var(--ease);
 }
 .xp-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; }
@@ -1544,11 +1941,8 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   flex: 1; text-align: right; font-style: normal;
   font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint);
 }
-.xp-block.maxed {
-  background: linear-gradient(180deg, rgba(190, 226, 176, .8), rgba(150, 200, 136, .45));
-  box-shadow: var(--emboss), 0 0 0 1px rgba(80, 130, 70, .3);
-}
-.xp-block.maxed .xp-bar i { background: linear-gradient(180deg, #b6e6a4, var(--good) 55%, #3f8232); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5); }
+.xp-block.maxed { background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7)); }
+.xp-block.maxed .xp-bar i { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55); }
 
 /* The tray.
    The grid is the screen the player spends the most time looking at, and the
@@ -1557,22 +1951,44 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    into the parchment now, with the nine hotbar cells inside the same well
    below a ruled line, because they are the same thirty-six-slot object the
    hotbar is the bottom row of. */
+/* THE CARCASS, and the one rule that decides which of the two kinds of well a
+   thing gets. A POCKET TRAY is wood and holds objects: the bag, the crate, the
+   bench, the hotbar. A WELL is parchment and holds writing: the recipe list,
+   the shop counters, the save slots. Objects go in wood; words stay on paper.
+   Getting that backwards is how you end up with a dark box of grey text. */
 .inv-section {
   display: flex; flex-direction: column; gap: 5px; align-items: center;
-  padding: 7px; border-radius: var(--r-lg);
-  background: rgba(122, 94, 54, .09); box-shadow: var(--sunk);
+  padding: 6px; border-radius: var(--r-lg);
+  background: var(--wood-end);
+  box-shadow:
+    inset 0 0 0 1px rgba(18, 11, 4, .8),
+    inset 0 2px 6px rgba(14, 8, 2, .5),
+    0 1px 0 rgba(255, 249, 236, .5);
 }
 .inv-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
 
 /* The sign writing field. Sized to the card rather than the text so a short
    note and a long one look like the same kind of thing. */
+/* A slip of paper pinned into the sheet, so writing on a sign looks like
+   writing rather than like filling in a field. */
 #sign-line {
   width: 100%; margin: 14px 0 0; padding: 11px 13px;
-  border-radius: 8px; font: 600 var(--fs-lg)/1.2 var(--font);
-  color: var(--ink); background: rgba(255, 255, 255, .9);
-  border: 1px solid rgba(0, 0, 0, .2);
+  border-radius: var(--r-md); font: 700 var(--fs-lg)/1.2 var(--font);
+  letter-spacing: .01em; text-align: center;
+  color: var(--ink); background: linear-gradient(180deg, #fffdf6, #f0e5cf);
+  border: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(58, 38, 16, .5),
+    inset 0 2px 5px rgba(74, 52, 22, .28),
+    0 1px 0 rgba(255, 255, 255, .8);
 }
-#sign-line:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(242, 180, 92, .35); }
+#sign-line:focus {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--brass-line),
+    inset 0 2px 5px rgba(74, 52, 22, .22),
+    0 0 0 2px #e2a052;
+}
 
 /* The pack marker. Warm against the other chips so it reads as a thing to act
    on rather than another readout, and the arrow turns with you. The chips are
@@ -1616,7 +2032,15 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
   display: flex; flex-direction: column; align-items: center; gap: 5px;
   margin-right: 14px;
 }
-.offhand-slot { background: rgba(120, 132, 158, .16); border-color: rgba(60, 74, 104, .2); }
+/* The off hand. Same pocket, cut a shade cooler, so the one cell that is not
+   part of the bag is legible as a different place without being a different
+   material. */
+.offhand-slot {
+  background: linear-gradient(180deg, rgba(14, 18, 28, .62) 0 14%, rgba(66, 78, 100, .34) 42%, rgba(96, 112, 140, .3));
+}
+.offhand-slot:hover {
+  background: linear-gradient(180deg, rgba(30, 38, 54, .6) 0 14%, rgba(104, 122, 152, .4) 42%, rgba(140, 160, 190, .34));
+}
 .slot-cap {
   color: var(--ink-faint); font-family: var(--mono);
   display: flex; align-items: center; gap: 4px;
@@ -1625,9 +2049,12 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 
 .crate-area { display: flex; justify-content: center; }
 .crate-grid {
-  padding: 7px; border-radius: var(--r-lg);
-  background: rgba(150, 106, 58, .16);
-  box-shadow: var(--sunk);
+  padding: 6px; border-radius: var(--r-lg);
+  background: var(--wood-end);
+  box-shadow:
+    inset 0 0 0 1px rgba(18, 11, 4, .8),
+    inset 0 2px 6px rgba(14, 8, 2, .5),
+    0 1px 0 rgba(255, 249, 236, .5);
 }
 /* The nine cells your hands are on, inside the same tray as the rest, under a
    cut line. Not a separate box: it is the bottom row of one bag. */
@@ -1637,35 +2064,44 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
   box-shadow: 0 -1px 0 rgba(255, 255, 255, .55);
 }
 
-/* The cell. Raised out of the tray, so an item sits on something and an empty
-   slot is a place where something could sit. Hover lifts it and warms the
-   keyline; selection fills it and rings it in the same accent the live hotbar
-   cell uses, because they are the same statement. */
+/* THE POCKET. Rule 3, and the cell the player looks at more than anything else
+   in the game. It was a pale raised square on a pale sheet, which is a CSS box
+   with a border and reads as one; it is a hole cut into the case now. Dark
+   inside so a stone axe and a torch both come off it, a hard shadow under the
+   top lip, a lit line along the bottom inner edge where the light that fell in
+   has to leave, and a bright hairline on the wood around the mouth.
+
+   An empty pocket is a hole. A full one has a thing in it. Nothing about the
+   cell says "empty" except that you can see the bottom of it, which is how a
+   real tray works and is why there is no empty-state styling here at all. */
 .islot {
-  position: relative; width: 46px; height: 46px; border-radius: var(--r-md);
-  background: var(--paper-cell);
-  box-shadow: var(--emboss);
+  position: relative; width: 46px; height: 46px; border-radius: var(--r-sm);
+  background: var(--pocket-floor);
+  box-shadow: var(--pocket);
   display: grid; place-items: center; cursor: pointer;
-  transition: background var(--t-fast) ease, transform var(--t-fast) var(--ease), box-shadow var(--t-fast) ease;
+  transition: background var(--t-fast) ease, box-shadow var(--t-fast) ease;
 }
+/* Hover lights the inside of the pocket rather than lifting it. A hole does not
+   come out of the wood; a lamp goes over it. */
 .islot:hover {
-  background: #fff; transform: translateY(-2px);
-  box-shadow: var(--emboss-lift), 0 0 0 1px var(--accent);
+  background: linear-gradient(180deg, rgba(96, 66, 30, .7), rgba(146, 108, 56, .55) 60%, rgba(170, 130, 70, .5));
+  box-shadow: var(--pocket), inset 0 0 12px rgba(255, 206, 130, .35);
 }
 .islot.sel {
-  background: linear-gradient(180deg, #fff6e6, rgba(255, 219, 168, .55));
-  box-shadow: var(--emboss), var(--ring);
+  background: linear-gradient(180deg, rgba(120, 74, 20, .78), rgba(180, 118, 44, .6));
+  box-shadow: var(--pocket), var(--ring), inset 0 0 14px rgba(255, 200, 110, .45);
 }
-.islot.sel:hover { box-shadow: var(--emboss-lift), var(--ring); }
 .islot img { width: 40px; height: 40px; pointer-events: none; }
+/* Light type now, because what it sits on went dark. Same numeral everywhere a
+   count appears, so a stack in the bag and a stack on the bar match. */
 .islot .count {
   position: absolute; right: 3px; bottom: 0;
-  font: 700 var(--fs-md) var(--mono); color: var(--ink);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .95), 0 0 3px rgba(255, 255, 255, .9);
+  font: 700 var(--fs-md) var(--mono); color: #fff4de;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .95), 0 0 3px rgba(0, 0, 0, .9);
   pointer-events: none;
 }
-.islot .wear { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(48, 34, 18, .3); overflow: hidden; }
-.islot .wear i { display: block; height: 100%; background: linear-gradient(180deg, #82d06b, #3f8232); }
+.islot .wear { position: absolute; left: 5px; right: 5px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(10, 6, 2, .6); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .5); overflow: hidden; }
+.islot .wear i { display: block; height: 100%; background: linear-gradient(180deg, #9ae182, #3f8232); }
 
 /* Carried on the pointer. Tilted a couple of degrees and dropped a real
    shadow, so a held stack visibly is not in the grid. */
@@ -1676,9 +2112,10 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 #cursor-stack img { width: 100%; height: 100%; filter: drop-shadow(0 5px 7px rgba(0, 0, 0, .6)); }
 #cursor-stack span {
   position: absolute; right: -4px; bottom: -5px;
-  padding: 1px 4px; border-radius: var(--r-sm);
-  font: 700 var(--fs-sm) var(--mono); color: var(--ink);
-  background: var(--paper-hud); box-shadow: var(--emboss-hud);
+  padding: 1px 5px; border-radius: var(--r-sm);
+  font: 700 var(--fs-sm) var(--mono); color: #ffd79a;
+  background: linear-gradient(180deg, rgba(24, 15, 5, .95), rgba(56, 37, 15, .9));
+  box-shadow: 0 0 0 1px rgba(12, 7, 2, .9), inset 0 1px 2px rgba(0, 0, 0, .5);
 }
 
 /* A tooltip is over the world and over a screen both, so it is the same sheet
@@ -1687,8 +2124,8 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
    for: they are what separates paper from paper. */
 #tooltip {
   position: fixed; z-index: 132; pointer-events: none;
-  padding: 7px 11px; border-radius: var(--r-md);
-  font-size: var(--fs-md); font-weight: 600; letter-spacing: .01em;
+  padding: 7px 11px; border-radius: var(--r-sm);
+  font-size: var(--fs-md); font-weight: 700; letter-spacing: .01em;
   background: var(--paper-hud); color: var(--ink);
   box-shadow: var(--emboss-hud-lift);
   text-shadow: 0 1px 0 rgba(255, 255, 255, .7);
@@ -1708,84 +2145,133 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 
 /* ── settings + controls ───────────────────────────────── */
 
-.settings { display: flex; flex-direction: column; gap: 5px; }
-/* Every setting is a card in the same material as an inventory cell or a skill
-   row. The screen used to be a column of bare labels on the sheet, which is
-   why it read as a form and not as part of the game. */
+/* This screen was the clearest evidence for the verdict: sentence-case labels
+   in a column of white cards, each with a phone's switch on the right. Every
+   one of those three is a web form and none of them was doing anything a game
+   needs. What replaced them:
+
+     - the rows are ruled into one sheet rather than being nine sheets. A list
+       of separate cards is a settings page; a ruled column is an index;
+     - the readouts are instruments. Every value sits in a dark pocket in warm
+       mono, so a number on this screen looks like a number on a machine;
+     - the switch is a brass plug in a slot. It is still a real `<input
+       type=checkbox>`, so nothing in `syncSettings` or in any change handler
+       changed for it — only what it is made of. */
+.settings { display: flex; flex-direction: column; gap: 0; }
 .settings label {
-  display: block; padding: 10px 13px; border-radius: var(--r-md);
-  font-size: var(--fs-md); font-weight: 600; color: var(--ink);
-  background: var(--paper-cell); box-shadow: var(--emboss);
-  transition: box-shadow var(--t-fast) ease;
+  display: block; position: relative;
+  padding: 11px 12px 11px 15px; border-radius: 0;
+  font-size: var(--fs-md); font-weight: 700; letter-spacing: .01em;
+  color: var(--ink); text-shadow: var(--carved);
+  background: none;
+  border-bottom: 1px solid rgba(58, 38, 16, .17);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+  transition: background var(--t-fast) ease;
 }
-.settings label:hover { box-shadow: var(--emboss-lift); }
-/* Reversed, so the switch lands on the right edge of every card and the eye
+/* A carved notch down the leading edge of every row, so the column has a spine
+   and the eye has one line to run down. It lights when the row is live. */
+.settings label::before {
+  content: ''; position: absolute; left: 4px; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 2px; background: rgba(96, 66, 28, .22);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .25), 0 1px 0 rgba(255, 255, 255, .6);
+  transition: background var(--t-fast) ease;
+}
+.settings label:hover { background: rgba(255, 252, 244, .55); }
+.settings label:hover::before { background: var(--brass); }
+/* Reversed, so the switch lands on the right edge of every row and the eye
    runs down one column of them. The label is still the whole hit target. */
 .settings label.row {
   display: flex; align-items: center; gap: 11px; cursor: pointer;
   flex-direction: row-reverse; justify-content: space-between;
 }
-/* The value, in a well, in mono, on the right. It is a readout, so it is
-   built like every other readout in the game. */
+/* THE READOUT. A window cut into the sheet with a lit number behind it. Every
+   value in the game that is a measurement rather than a name is one of these. */
 .settings .val {
-  float: right; font: 700 var(--fs-sm) var(--mono); color: var(--ink);
-  padding: 2px 7px; border-radius: var(--r-sm);
-  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+  float: right; font: 700 var(--fs-sm) var(--mono); letter-spacing: .04em;
+  color: #ffd79a; text-shadow: 0 0 7px rgba(255, 178, 74, .6);
+  padding: 3px 8px; border-radius: var(--r-sm); min-width: 46px; text-align: center;
+  background: linear-gradient(180deg, rgba(28, 17, 6, .9), rgba(58, 38, 16, .8));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 2px 4px rgba(0, 0, 0, .6),
+    0 1px 0 rgba(255, 255, 255, .65);
 }
 
-/* A groove cut into the card, with a knob sitting in it. */
+/* A slot cut into the sheet with a brass knob riding in it. */
 .settings input[type=range] {
   -webkit-appearance: none; appearance: none;
   display: block; width: 100%; height: 10px; margin-top: 11px;
-  border-radius: 99px; outline: none; cursor: pointer;
+  border-radius: var(--r-sm); outline: none; cursor: pointer;
   background:
-    repeating-linear-gradient(90deg, rgba(74, 54, 28, .12) 0 1px, rgba(0, 0, 0, 0) 1px 10%),
-    rgba(122, 94, 54, .14);
-  box-shadow: var(--sunk);
+    repeating-linear-gradient(90deg, rgba(255, 220, 170, .13) 0 1px, rgba(0, 0, 0, 0) 1px 10%),
+    linear-gradient(180deg, rgba(28, 17, 6, .82), rgba(66, 44, 20, .7));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .85),
+    inset 0 2px 4px rgba(0, 0, 0, .55),
+    0 1px 0 rgba(255, 255, 255, .6);
 }
 .settings input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 20px; height: 20px; margin-top: 0;
   border-radius: 50%; cursor: pointer;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  background: radial-gradient(circle at 40% 30%, #ffeec6 0 14%, #f3b661 42%, #c47a2a 72%, #8c4d13 100%);
   box-shadow:
-    0 0 0 1px rgba(140, 74, 26, .55),
-    inset 0 1px 0 rgba(255, 255, 255, .65),
-    0 3px 7px -2px rgba(56, 40, 20, .7);
+    0 0 0 1px var(--brass-line),
+    inset 0 -2px 3px rgba(110, 52, 8, .5),
+    0 3px 6px -1px rgba(0, 0, 0, .65);
 }
 .settings input[type=range]::-moz-range-thumb {
   width: 20px; height: 20px; border: none; border-radius: 50%; cursor: pointer;
-  background: linear-gradient(180deg, var(--accent-hi), var(--accent-2) 45%, var(--accent));
+  background: radial-gradient(circle at 40% 30%, #ffeec6 0 14%, #f3b661 42%, #c47a2a 72%, #8c4d13 100%);
   box-shadow:
-    0 0 0 1px rgba(140, 74, 26, .55),
-    inset 0 1px 0 rgba(255, 255, 255, .65),
-    0 3px 7px -2px rgba(56, 40, 20, .7);
+    0 0 0 1px var(--brass-line),
+    inset 0 -2px 3px rgba(110, 52, 8, .5),
+    0 3px 6px -1px rgba(0, 0, 0, .65);
 }
-.settings input[type=range]:focus-visible { box-shadow: var(--sunk), 0 0 0 2px var(--accent-2); }
+.settings input[type=range]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
 
-/* A switch, drawn: a two-position segmented control with the same track and
-   the same warm live face as `.seg` on the character screen. It is still a
-   real checkbox, so nothing in `syncSettings` or the change handlers changed
-   for it. */
+/* THE PLUG. A brass slug that seats in one end of a slot cut into the wood.
+   Off is a hole with the slug at the near end and nothing lit; on is the slug
+   driven home with the slot glowing behind it. Still a real checkbox. */
 .settings input[type=checkbox] {
   -webkit-appearance: none; appearance: none;
   position: relative; flex: none; margin: 0;
-  width: 38px; height: 21px; border-radius: 99px; cursor: pointer;
-  background: rgba(122, 94, 54, .16); box-shadow: var(--sunk);
-  transition: background var(--t-fast) ease;
+  width: 42px; height: 22px; border-radius: var(--r-sm); cursor: pointer;
+  background: linear-gradient(180deg, rgba(24, 15, 5, .88), rgba(60, 40, 18, .78));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 2px 4px rgba(0, 0, 0, .6),
+    0 1px 0 rgba(255, 255, 255, .65);
+  transition: background var(--t-fast) ease, box-shadow var(--t-fast) ease;
 }
 .settings input[type=checkbox]::after {
   content: ''; position: absolute; left: 2px; top: 2px;
-  width: 17px; height: 17px; border-radius: 50%;
-  background: linear-gradient(180deg, #fff, #e3d6bf);
-  box-shadow: 0 0 0 1px rgba(122, 94, 54, .35), 0 2px 4px -1px rgba(56, 40, 20, .6);
+  width: 18px; height: 18px; border-radius: var(--r-sm);
+  background: linear-gradient(180deg, #efe0c2, #a89373);
+  box-shadow:
+    0 0 0 1px rgba(20, 12, 4, .8),
+    inset 0 1px 0 rgba(255, 255, 255, .85),
+    inset 0 -2px 3px rgba(90, 66, 30, .35),
+    0 2px 3px rgba(0, 0, 0, .5);
   transition: transform var(--t-fast) var(--ease), background var(--t-fast) ease;
 }
 .settings input[type=checkbox]:checked {
-  background: linear-gradient(180deg, var(--accent-2), var(--accent));
-  box-shadow: inset 0 1px 3px rgba(120, 56, 12, .45), 0 0 0 1px rgba(140, 74, 26, .45);
+  background: linear-gradient(180deg, rgba(96, 44, 6, .92), rgba(168, 92, 22, .85));
+  box-shadow:
+    inset 0 0 0 1px rgba(70, 32, 6, .95),
+    inset 0 2px 4px rgba(60, 24, 2, .6),
+    inset 0 0 10px rgba(255, 176, 74, .55),
+    0 1px 0 rgba(255, 255, 255, .65);
 }
-.settings input[type=checkbox]:checked::after { transform: translateX(17px); }
-.settings input[type=checkbox]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.settings input[type=checkbox]:checked::after {
+  transform: translateX(20px);
+  background: var(--brass);
+  box-shadow:
+    0 0 0 1px var(--brass-line),
+    inset 0 1px 0 rgba(255, 250, 232, .8),
+    inset 0 -2px 3px rgba(120, 54, 8, .45),
+    0 2px 4px rgba(0, 0, 0, .55);
+}
+.settings input[type=checkbox]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .settings input[type=checkbox]::after { transition: none; }
 }
@@ -1795,13 +2281,26 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
    each row. */
 /* Cut into the sheet, like the panel header, so a group heading and the screen
    title are the same kind of mark at two sizes. */
+/* A brass tack, the word, and a rule that runs out to the edge of the sheet.
+   Same mark as the panel title one size down, so a screen and its sections are
+   the same kind of object. */
 .set-head, .ctl-head {
-  color: var(--ink-faint);
-  margin-top: 14px; padding-bottom: 6px;
-  border-bottom: 1px solid rgba(122, 94, 54, .3);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .8);
+  display: flex; align-items: center; gap: 8px;
+  color: var(--accent-deep); text-shadow: var(--carved);
+  margin-top: 16px; padding-bottom: 5px;
+  border-bottom: 1px solid rgba(58, 38, 16, .35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .85);
 }
-.set-head { margin-bottom: 3px; }
+.set-head::before, .ctl-head::before {
+  content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--stud);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+}
+.set-head::after, .ctl-head::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, rgba(96, 66, 28, .3), rgba(96, 66, 28, 0));
+}
+.set-head { margin-bottom: 4px; }
 .ctl-head { margin-top: 18px; margin-bottom: 9px; }
 .ctl-head:first-of-type, .set-head:first-of-type { margin-top: 0; }
 .settings details.credits {
@@ -1818,27 +2317,33 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 
 /* Key, then what it does. The key caps carry the meaning, so they get the
    contrast and the label sits back. */
-.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; }
+/* Key, then what it does, ruled into the sheet rather than sitting on nine
+   cards. The caps carry the meaning, so they get the mass and the label sits
+   back behind them. */
+.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
 .controls-grid > div {
   display: flex; align-items: center; gap: 4px;
-  padding: 7px 11px; border-radius: var(--r-md);
+  padding: 7px 4px; border-radius: 0;
   font-size: var(--fs-md); color: var(--ink-soft);
-  background: var(--paper-cell); box-shadow: var(--emboss);
+  background: none;
+  border-bottom: 1px dotted rgba(96, 66, 28, .35);
 }
-.controls-grid span { margin-left: auto; padding-left: 10px; text-align: right; color: var(--ink); font-weight: 600; }
+.controls-grid span { margin-left: auto; padding-left: 10px; text-align: right; color: var(--ink); font-weight: 700; text-shadow: var(--carved); }
+/* A real key cap: a face on a 2px edge, with an ink line round it. Same
+   anatomy as a button, three sizes down. */
 kbd {
-  font: 700 var(--fs-xs)/1 var(--mono); padding: 4px 6px; border-radius: var(--r-sm);
-  background: linear-gradient(180deg, #fff, #ece0cb);
+  font: 700 var(--fs-xs)/1 var(--mono); padding: 4px 7px; border-radius: var(--r-sm);
+  background: linear-gradient(180deg, #fffdf7, #e5d5b8);
   color: var(--ink);
   box-shadow:
-    0 0 0 1px rgba(122, 94, 54, .4),
-    inset 0 1px 0 rgba(255, 255, 255, .9),
-    0 2px 0 rgba(122, 94, 54, .35);
+    0 0 0 1px var(--wood-line),
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    inset 0 -2px 3px rgba(122, 94, 54, .2),
+    0 2px 0 var(--wood-dim);
 }
 /* A cap on a button is already sitting on a raised face, so it drops its own
-   lift and reads as printed on the key instead. There is no dark cap any more:
-   there is nothing dark left for one to sit on. */
-button kbd { background: rgba(0, 0, 0, .07); box-shadow: none; color: var(--ink-soft); }
+   edge and reads as printed on the key instead. */
+button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba(70, 46, 18, .25); color: var(--ink-soft); }
 
 /* ── narrow windows ────────────────────────────────────── */
 /* The nine-column grid and the 236px sidebar together need ~760px of viewport.

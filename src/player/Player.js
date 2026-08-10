@@ -315,6 +315,12 @@ export class Player {
     this.stamina = 1;
     this.fallStart = null;
     this.onLadder = false;
+    /**
+     * Cell-space direction you must push to be leaning on the ladder you are
+     * touching, written by `_touchingLadder` and read by the climb. Zero when
+     * there is no ladder.
+     */
+    this._climbI = 0; this._climbJ = 0;
     this.eyeHeight = EYE;
     this.stepOffset = 0;         // smooths the camera over 1-block step-ups
     this.autoJump = false;       // walk up a one-block ledge without jumping
@@ -390,33 +396,54 @@ export class Player {
    * Deliberately generous on the tangential axes — the plate is a seventh of a
    * cell thick, and requiring the box to actually touch it would mean losing
    * your grip every time you nudged the stick.
+   *
+   * It also records, in `_climbI`/`_climbJ`, the cell-space direction you have
+   * to push to be leaning ON the ladder rather than away from it. That is what
+   * lets forward climb: without a direction, "am I holding W into it" cannot be
+   * asked at all, and Space was the only way up. The directions of every ladder
+   * in contact are summed, so a body in the inside corner of two ladders climbs
+   * on either of the two ways of pressing into the corner.
    */
   _touchingLadder(height) {
     const c = this.cell;
     const p = this.planet;
+    this._climbI = 0; this._climbJ = 0;
     const baseI = Math.floor(c.ci), baseJ = Math.floor(c.cj);
     if (baseI < 0 || baseI >= F || baseJ < 0 || baseJ >= F) return false;
     const baseCol = cidx(c.f, baseI, baseJ);
     const k0 = Math.floor(c.ck + FOOT);
     const k1 = Math.floor(c.ck + height - FOOT);
+    let found = false;
+    const fi = c.ci - baseI, fj = c.cj - baseJ;
     for (let di = -1; di <= 1; di++) {
       for (let dj = -1; dj <= 1; dj++) {
         if (Math.abs(di) + Math.abs(dj) > 1) continue;      // no diagonals
         const col = stepColumn(baseCol, di, dj);
         for (let k = k0; k <= k1; k++) {
           if (!IS_LADDER[p.at(col, k)]) continue;
-          if (di === 0 && dj === 0) return true;
+          if (di === 0 && dj === 0) {
+            // Standing inside the ladder's own cell: the way to push is at the
+            // wall it is nailed to, which is what its facing byte names.
+            // 0:+i 1:-i 2:+j 3:-j, the order blockBoxes reads it in.
+            const dir = p.facingAt(col, k) & 3;
+            this._climbI += dir === 0 ? 1 : dir === 1 ? -1 : 0;
+            this._climbJ += dir === 2 ? 1 : dir === 3 ? -1 : 0;
+            found = true;
+            break;
+          }
           // A ladder in the next cell only holds you if you are pressed up
-          // against that side of your own cell.
-          const fi = c.ci - baseI, fj = c.cj - baseJ;
-          if (di === 1 && fi > 1 - LADDER_GRIP) return true;
-          if (di === -1 && fi < LADDER_GRIP) return true;
-          if (dj === 1 && fj > 1 - LADDER_GRIP) return true;
-          if (dj === -1 && fj < LADDER_GRIP) return true;
+          // against that side of your own cell — and the way to push is simply
+          // towards it.
+          if ((di === 1 && fi > 1 - LADDER_GRIP) || (di === -1 && fi < LADDER_GRIP)
+            || (dj === 1 && fj > 1 - LADDER_GRIP) || (dj === -1 && fj < LADDER_GRIP)) {
+            this._climbI += di; this._climbJ += dj;
+            found = true;
+          }
+          break;
         }
       }
     }
-    return false;
+    return found;
   }
 
   /**
@@ -938,15 +965,31 @@ export class Player {
     const height = this.crouching ? HEIGHT - 0.35 : HEIGHT;
     this.onLadder = !this.inWater && this._touchingLadder(height);
     if (this.onLadder) {
-      // Hold Space to go up, Ctrl to go down, and neither to stay put — a
-      // ladder you slide off the moment you stop pressing something is a rope,
-      // not a ladder. Walking into the wall is what keeps you attached, so
-      // stepping backwards drops you off it, which is how you get off at the
-      // bottom without a special case.
-      const climb = input.down('Space') ? CLIMB_SPEED
-        : this.crouching ? -CLIMB_SPEED * 0.8 : 0;
+      // Holding forward *into* the ladder climbs it, which is the whole of how
+      // anyone expects a ladder to work and was the one way it did not: Space
+      // was the only lift, so going up a shaft meant tapping jump all the way.
+      // The test is on the steering you asked for (wi, wj) rather than on the
+      // velocity you got, because pressing into a wall is exactly the case
+      // where collision has already zeroed the velocity you would be reading.
+      //
+      // Space still lifts, and still lifts on its own: you climb a ladder in a
+      // one-block shaft by facing any of the four walls, and there is no reason
+      // to make the player face the right one. Ctrl goes down, and holding
+      // nothing holds you where you are — a ladder you slide off the moment you
+      // stop pressing something is a rope, not a ladder.
+      //
+      // Stepping *away* is still how you let go, and it needs no case of its
+      // own: the grip already requires the body to be against that side of the
+      // cell, so backing off drops you at the bottom and walks you off at the
+      // top. Nothing is added to carry you over the lip either — the climb is
+      // still running at 3.2 cells/s when the last rung leaves the box, and 26
+      // of gravity turns that into a fifth of a cell of coast, which is enough
+      // to clear a floor level with the top rung and not enough to launch you.
+      const into = wi * this._climbI + wj * this._climbJ;
+      const up = input.down('Space') || into > 0.01;
+      const climb = up ? CLIMB_SPEED : this.crouching ? -CLIMB_SPEED * 0.8 : 0;
       this.vel.k += (climb - this.vel.k) * Math.min(1, 14 * dt);
-      if (this.grounded && input.down('Space')) this.grounded = false;
+      if (this.grounded && up) this.grounded = false;
     } else if (this.inWater) {
       this.vel.k -= GRAVITY * 0.22 * dt;
       if (input.down('Space')) this.vel.k += 15 * dt;

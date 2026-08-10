@@ -731,19 +731,34 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           for (let b = 0; b < boxes.length; b++) {
             const [bi0, bj0, bk0, bi1, bj1, bk1] = boxes[b];
             const skip = {};
-            // Drop any face that coincides with another box of the same block.
+            // Drop a face only where another box of the same block covers the
+            // WHOLE of it. Touching used to be enough, and touching is not the
+            // same question: a fence post is 0.25 x 0.25 x 1.5 and a rail is
+            // 0.16 x 0.16, so a rail laid against the post covered 13.7% of
+            // that face and took away 100% of it. A post in the middle of a run
+            // lost both its +i and -i faces and you looked straight through the
+            // timber — which is the "sides go transparent at some angles" fault,
+            // and it is angle-dependent precisely because only the faces the
+            // rails link to are lost. A stair had the same hole at 50%: the
+            // riser touches half the tread's top and the whole top went.
+            //
+            // Coverage is tested per box rather than against the union, so a
+            // face buried by two boxes that neither covers alone is drawn and
+            // hidden rather than dropped. That is the safe way round — the cost
+            // is a quad, the alternative is a hole — and it costs nothing in
+            // practice: no shape in the table is built that way.
             for (let o = 0; o < boxes.length; o++) {
               if (o === b) continue;
               const [oi0, oj0, ok0, oi1, oj1, ok1] = boxes[o];
-              const iOv = Math.min(bi1, oi1) > Math.max(bi0, oi0);
-              const jOv = Math.min(bj1, oj1) > Math.max(bj0, oj0);
-              const kOv = Math.min(bk1, ok1) > Math.max(bk0, ok0);
-              if (jOv && kOv && bi1 === oi0) skip.pi = 1;
-              if (jOv && kOv && bi0 === oi1) skip.mi = 1;
-              if (iOv && kOv && bj1 === oj0) skip.pj = 1;
-              if (iOv && kOv && bj0 === oj1) skip.mj = 1;
-              if (iOv && jOv && bk1 === ok0) skip.up = 1;
-              if (iOv && jOv && bk0 === ok1) skip.dn = 1;
+              const iIn = oi0 <= bi0 && oi1 >= bi1;
+              const jIn = oj0 <= bj0 && oj1 >= bj1;
+              const kIn = ok0 <= bk0 && ok1 >= bk1;
+              if (jIn && kIn && bi1 === oi0) skip.pi = 1;
+              if (jIn && kIn && bi0 === oi1) skip.mi = 1;
+              if (iIn && kIn && bj1 === oj0) skip.pj = 1;
+              if (iIn && kIn && bj0 === oj1) skip.mj = 1;
+              if (iIn && jIn && bk1 === ok0) skip.up = 1;
+              if (iIn && jIn && bk0 === ok1) skip.dn = 1;
             }
             // A face flush with the cell wall can still be hidden by a solid
             // neighbour, exactly as a full cube's would be.

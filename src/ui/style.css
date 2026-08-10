@@ -1714,7 +1714,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 /* The toast stack starts at 46px and the fight bar now sits at 62. While a
    cast is out the stack steps down clear of it. The Waiting plate no longer
    collides with anything: it is in the middle of the screen. */
-body.casting #toasts { top: 150px; }
+body.casting #toasts { top: 172px; }
 
 #debug {
   position: absolute; top: 10px; left: 10px;

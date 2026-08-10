@@ -3807,7 +3807,10 @@ class Game {
     document.getElementById('sign-cancel').onclick = () => finish(false);
     input.onkeydown = (e) => {
       e.stopPropagation();
-      if (e.key === 'Enter') finish(true);
+      // Enter breaks a line, because the field is four lines and the break is
+      // part of what is being written. Ctrl+Enter carves, so the keyboard can
+      // still finish without reaching for the button.
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(true); }
       if (e.key === 'Escape') finish(false);
     };
   }
@@ -7331,7 +7334,10 @@ class Game {
       // Reading is looking: no key to press and nothing to open, so a row of
       // signs can be read by sweeping across them.
       const text = this.signs.get(hit.col * D + hit.k);
-      this.ui.setHint(text ? `"${text}"` : 'A blank sign');
+      // The hint is one line, so the board's own line breaks become spaces
+      // rather than vanishing into a run-on: "WEST GATE\nkeep out" reads as
+      // "WEST GATE keep out" and not as "WEST GATEkeep out".
+      this.ui.setHint(text ? `"${text.replace(/\s*\n\s*/g, ' ')}"` : 'A blank sign');
     } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
       this.ui.setHint(null);
     } else if (needTool || dragHint || tillHint) {

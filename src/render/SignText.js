@@ -54,21 +54,36 @@ const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _o = new THREE.Vector3();
 
-/** Wrap to at most LINES lines of at most LINE_CHARS, breaking on spaces. */
+/**
+ * Wrap to at most LINES lines of at most LINE_CHARS.
+ *
+ * A newline the player typed is obeyed, and word wrap fills in around it. Both
+ * are needed: someone writing an address wants their own breaks, and someone
+ * typing a sentence does not want to count characters. Splitting on `\s+`
+ * alone treated a deliberate break as an ordinary space and silently reflowed
+ * four short lines into two long ones.
+ */
 function wrap(text) {
   const out = [];
-  let line = '';
-  for (const word of String(text).split(/\s+/)) {
-    if (!word) continue;
-    if (!line) line = word.slice(0, LINE_CHARS);
-    else if (line.length + 1 + word.length <= LINE_CHARS) line += ` ${word}`;
-    else { out.push(line); line = word.slice(0, LINE_CHARS); }
-    // A single word longer than a line is cut rather than hyphenated: the
-    // limit is 48 characters, so this is someone typing one long token, and
-    // half of it on the next line reads as a bug rather than as a wrap.
+  for (const para of String(text).split(/\r?\n/)) {
     if (out.length >= LINES) break;
+    // An empty line the player typed is a blank line on the board, not nothing.
+    if (!para.trim()) { if (out.length && out.length < LINES) out.push(''); continue; }
+    let line = '';
+    for (const word of para.trim().split(/\s+/)) {
+      if (out.length >= LINES) break;
+      if (!line) line = word.slice(0, LINE_CHARS);
+      else if (line.length + 1 + word.length <= LINE_CHARS) line += ` ${word}`;
+      else { out.push(line); line = word.slice(0, LINE_CHARS); }
+      // A single word longer than a line is cut rather than hyphenated: the
+      // limit is 48 characters, so this is someone typing one long token, and
+      // half of it on the next line reads as a bug rather than as a wrap.
+    }
+    if (line && out.length < LINES) out.push(line);
   }
-  if (line && out.length < LINES) out.push(line);
+  // A trailing blank line is a line the board would carve as nothing; drop it
+  // so the block of text still centres on what was actually written.
+  while (out.length && out[out.length - 1] === '') out.pop();
   return out;
 }
 
@@ -152,7 +167,12 @@ export class SignText {
       let longest = 0;
       for (const l of lines) longest = Math.max(longest, l.length);
       const perW = boardW / Math.max(longest, 1);
-      const perH = BOARD_H / lines.length;
+      // Divided by the LINE PITCH, not by the glyph height: lines are set
+      // 1.16 apart, so `BOARD_H / lines.length` is the space each line gets
+      // for its letters and leaves no room for the leading between them. A
+      // three-line sign overran the plank by 4% and its top line was cut off
+      // against the board's edge.
+      const perH = BOARD_H / (lines.length * 1.16);
       // A drawn glyph is about 0.62 as wide as it is tall, so width is the
       // binding constraint on a long line and height on a short one. Take
       // whichever runs out first.

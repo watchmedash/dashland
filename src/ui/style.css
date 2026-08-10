@@ -2186,8 +2186,13 @@ body.casting #toasts { top: 172px; }
    writing rather than like filling in a field. */
 #sign-line {
   width: 100%; margin: 14px 0 0; padding: 11px 13px;
-  border-radius: var(--r-md); font: 700 var(--fs-lg)/1.2 var(--font);
+  border-radius: var(--r-md); font: 700 var(--fs-lg)/1.35 var(--font);
   letter-spacing: .01em; text-align: center;
+  /* A textarea, so the four lines the board carves are the four lines you
+     type into. No drag handle and no scrollbar: the field is exactly as tall
+     as the sign and the 48-character limit cannot overflow it. */
+  display: block; resize: none; overflow: hidden;
+  box-sizing: border-box; min-height: calc(4 * 1.35em + 22px);
   color: var(--ink); background: linear-gradient(180deg, #fffdf6, #f0e5cf);
   border: none;
   box-shadow:

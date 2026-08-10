@@ -362,7 +362,10 @@
   <div id="sign-write" class="overlay hidden">
     <div class="menu-card small">
       <h2>Sign</h2>
-      <input id="sign-line" maxlength="48" autocomplete="off" spellcheck="false" />
+      <!-- Four rows because the board carves four. Enter breaks a line rather
+           than confirming: a sign is the one field in the game where the line
+           you are on is part of what you are writing. -->
+      <textarea id="sign-line" rows="4" maxlength="48" autocomplete="off" spellcheck="false"></textarea>
       <div class="menu-actions">
         <button id="sign-ok" class="primary">Carve</button>
         <button id="sign-cancel">Cancel</button>

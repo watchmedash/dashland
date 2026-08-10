@@ -1725,6 +1725,8 @@ body.casting #toasts { top: 172px; }
 /* ── inventory screen ──────────────────────────────────── */
 
 .inv-panel { width: min(830px, 100%); }
+/* Set for the crate, which has no sidebar and no craft grid. See openScreen. */
+#screen.snug .inv-panel { width: fit-content; max-width: min(830px, 100%); }
 #screen-top { margin-bottom: 16px; }
 
 .inv-body { display: flex; gap: 18px; align-items: flex-start; }
@@ -1923,6 +1925,13 @@ body.casting #toasts { top: 172px; }
   max-height: min(250px, 28vh);
   padding: 5px; border-radius: var(--r-md);
   background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
+}
+/* Set by _refreshShop on the columns that overflow. The partial row at the
+   bottom edge is deliberate; the fade is what keeps it from reading as a
+   rendering fault. */
+.shop-list.scrolls {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
 }
 .shop-row .shop-price {
   display: flex; align-items: center; gap: 4px; flex: none;
@@ -2154,8 +2163,14 @@ body.casting #toasts { top: 172px; }
    bench, the hotbar. A WELL is parchment and holds writing: the recipe list,
    the shop counters, the save slots. Objects go in wood; words stay on paper.
    Getting that backwards is how you end up with a dark box of grey text. */
+/* `align-self` so the wood box hugs the two grids instead of stretching to the
+   column. Stretched, it ran the full width of the sheet with the slots centred
+   inside it, leaving a hand of bare wood at each end that read as missing
+   columns. Worst on the crate, which hides the sidebar and so has the most
+   width to spare. */
 .inv-section {
   display: flex; flex-direction: column; gap: 5px; align-items: center;
+  align-self: center;
   padding: 6px; border-radius: var(--r-lg);
   background: var(--wood-end);
   box-shadow:

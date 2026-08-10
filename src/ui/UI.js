@@ -1877,8 +1877,15 @@ export class UI {
     else this._buildCraftUI(kind === 'bench' ? 3 : 2);
 
     // The craftable sidebar is dead weight while trading — the merchant's two
-    // lists want the width more than a recipe book does.
-    this.el.recipePanel.classList.toggle('hidden', kind === 'shop');
+    // lists want the width more than a recipe book does. A crate has no craft
+    // grid either, so the sidebar sat there answering a question the screen
+    // cannot ask, with "Nothing yet, without a bench" against a quarter of the
+    // panel's width and nothing to spend it on.
+    this.el.recipePanel.classList.toggle('hidden', kind === 'shop' || kind === 'crate');
+    // With the sidebar gone the crate is the one screen whose content does not
+    // fill an 830px sheet, and it sat in the middle of it with the title a hand
+    // away to the left. The shop keeps the full width; its two columns want it.
+    this.el.screenEl.classList.toggle('snug', kind === 'crate');
 
     this.el.screenEl.classList.remove('hidden');
     this.refresh();
@@ -2235,6 +2242,16 @@ export class UI {
         } else g.audio.deny();
         this.refresh();
       }));
+    }
+
+    // Both columns cap at 28vh, which lands mid-row on most screens and slices
+    // the fifth line of stock in half against a hard edge. A half row is the
+    // right affordance — it says there is more — but only once it reads as
+    // continuing rather than as clipped, so fade the lists that actually
+    // overflow. `.scrolls` cannot be a static rule: a short list would have its
+    // last row dimmed for nothing.
+    for (const l of [wares.list, goods.list]) {
+      l.classList.toggle('scrolls', l.scrollHeight > l.clientHeight + 1);
     }
   }
 

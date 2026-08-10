@@ -74,6 +74,59 @@ const BLANK =
  * modelled and the way it is held, and rolling it a half turn to match the
  * others would put the icon and the fist at odds, which is the thing this
  * whole path exists to stop.
+ *
+ * ### `pos`, and why every one of them was rewritten
+ *
+ * Reported: "some tools at hand look floating and not attached to the hand, like
+ * the shovel, bow, arrow, fishing rod, items that are small enough like flowers,
+ * and some items like fish are also floating and wrong angle in hand."
+ *
+ * **`pos` is not a lift. It is the offset between the fist and the item, and the
+ * fist is a point on the fingertips.** `ViewModel._tryArms` scales the
+ * character's arm so its bounding box's far end lands exactly on `HAND_LOCAL`,
+ * which is the parent of the item rig — so there is no hand flesh beyond that
+ * point to hide a gap behind, and whatever `pos` is, is daylight. Then
+ * `_setMesh` multiplies it by `HELD_SCALE`, which is 1.56, so every nudge in
+ * this table was being drawn 56% longer than it was written.
+ *
+ * Measured through the real glTF and the real chain, as the distance from the
+ * fist point to the nearest point of the item's *surface* in view units (not to
+ * its nearest vertex, which flatters a coarse mesh, and not by silhouette area,
+ * which cannot see it at all): **16 of 106 items were in contact with the fist.
+ * The mean gap was 0.0657 view units and the worst was 0.176 — a lollypop
+ * floating four tenths of its own length off the hand.** The two poses the owner
+ * had approved were the two smallest gaps in the table, 0.015 for the pickaxe
+ * and 0.025 for the sword, and every item named in the report was in the top
+ * fifteen. That is the whole bug: the approved items were approved because their
+ * `pos` happened to be near zero.
+ *
+ * Every `pos` here is now solved rather than written: **the fist is moved the
+ * shortest distance that puts it on the item, and then slid back up the authored
+ * lift's own direction as far as it can go while staying on.** Two quantities per
+ * pose, both measured. Afterwards: **106 of 106 in contact, mean gap 0.0070,
+ * worst 0.009.**
+ *
+ * The cost, stated rather than buried: an item that hangs off the fist sits
+ * where the fist is, and the fist is at NDC y -1.03 — below the bottom edge, by
+ * design, because that is Minecraft's composition (see `REST` in
+ * `ViewModel.js`). So attaching everything dropped the family, mean top edge
+ * -0.16 -> -0.32 in NDC. A long tool does not care: it reaches up out of the
+ * corner the way a pickaxe always did. A *small* item gripped through its middle
+ * ended up half under the screen, so for ten of those `grip` came down as well —
+ * the fist closes UNDER a small object rather than through it, which is both how
+ * a hand works and what puts the object back in frame. That is a grip change and
+ * not a lift, so it costs no contact and it carries to the third-person body.
+ *
+ * **What `pos` may not be used for, and what it cannot fix.** `pos` is dropped
+ * by `Character._wearPose`, so it is first person only; 100 of the 106 poses
+ * here are bit-identical on the body after this pass. And `grip` is not free
+ * either: `loadGeometry` centres X and Z on the *bounding box*, so the grip
+ * point is (bbox XZ centre, grip x height), and for a model whose mass is not
+ * stacked over that centre — a hollow pail, an L-shaped claw, a rosette whose
+ * stems miss the middle, a bow whose stave curves away from it — there is no
+ * value of `grip` that lands on the material. Those are corrected with an
+ * off-axis `pos`, which is a first-person-only patch over a model-space fault;
+ * see the notes on `bucket`, `crab_claw` and `bow`.
  */
 const ICON_ROT = [0.22, 0.62, 0];       // produce and anything unposed
 // Long-handled things, on the drawn diagonal. The yaw is deliberately shallow:
@@ -92,6 +145,11 @@ const TOOL_ICON = [0.12, 0.42, -0.42];
  * Pitching it forward about X brings the top face round to face the viewer; the
  * icon takes more of it than the hand does, because the hand is also holding the
  * thing at an angle already.
+ *
+ * The `pos` default here is the one the whole kit used to share, and most of the
+ * kit no longer takes it: it is 0.226 view units of daylight once `HELD_SCALE`
+ * is on it, which was the largest gap in the table. Anything that needed less
+ * passes its own solved `pos` through `extra`. See the note on `POSE`.
  */
 function food(file, height, flat = false, extra = {}) {
   return {
@@ -146,8 +204,8 @@ export const POSE = {
   // once more the largest of the tools without being what it was; the rest of
   // the loss is inherent to holding the head edge-on and is not recoverable by
   // scaling. Revert this one number if it reads too big.
-  pick:   { file: 'pickaxe',      pack: 'tools',   height: 0.54, grip: 0.18, rot: [0.955, -1.296, 1.577], pos: [0.02, -0.04, 0],     icon: TOOL_ICON },
-  axe:    { file: 'axe',          pack: 'tools',   height: 0.40, grip: 0.20, rot: [-0.35, -0.95, 0.40], pos: [0.03, 0.04, -0.02],  icon: TOOL_ICON },
+  pick:   { file: 'pickaxe',      pack: 'tools',   height: 0.54, grip: 0.18, rot: [0.955, -1.296, 1.577], pos: [0.018, -0.035, 0],     icon: TOOL_ICON },
+  axe:    { file: 'axe',          pack: 'tools',   height: 0.40, grip: 0.2, rot: [-0.35, -0.95, 0.40], pos: [-0.008, 0.004, -0.005],  icon: TOOL_ICON },
   // The shovel is the one tool the pick's pose does not transfer to, and it had
   // the pick's rotation copied verbatim. It is modelled the other way up —
   // T-grip at the top, blade hanging below — so the pick's *backward* pitch,
@@ -335,7 +393,7 @@ export const POSE = {
   // described above and neither is a dialled number; if this needs retuning,
   // change the pitch in that construction and re-evaluate rather than nudging
   // the composed triple, whose first component is no longer the pitch.
-  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.70, rot: [-0.381, -0.550, -2.942],  pos: [-0.02, 0.12, -0.14], icon: [0.18, 0.52, -0.26] },
+  shovel: { file: 'shovel',       pack: 'tools',   height: 0.46, grip: 0.7, rot: [-0.381, -0.550, -2.942],  pos: [-0.003, 0.018, -0.021], icon: [0.18, 0.52, -0.26] },
   // The roll is the whole of this entry's history. At `rot.z` 1.00 it was two
   // and a half times the next largest in the table — the axe's 0.40 — and the
   // number to read it by is where that leaves the blade: the tip sat **66° off
@@ -355,7 +413,7 @@ export const POSE = {
   // pose. There is no shared frame error. Every pose in this table lands on the
   // third-person body at exactly its first-person orientation — measured across
   // all of them, worst case 0.0° — so nothing here is inherited.
-  sword:  { file: 'sword_B',      pack: 'weapons', height: 0.50, grip: 0.16, rot: [-0.25, -0.60, 0.45], pos: [0.04, 0.04, -0.03],  icon: [0.05, 0.30, -0.42] },
+  sword:  { file: 'sword_B',      pack: 'weapons', height: 0.50, grip: 0.16, rot: [-0.25, -0.60, 0.45], pos: [0.025, 0.025, -0.019],  icon: [0.05, 0.30, -0.42] },
 
   // --- archery --------------------------------------------------------------
   //
@@ -407,8 +465,8 @@ export const POSE = {
   // turned toward the viewer, doubles the covered area and is the pose the
   // silhouette is actually recognisable in.
   bow: {
-    file: 'bow_A_withString', pack: 'weapons', height: 0.78, grip: 0.50, fitMax: true,
-    rot: [0.12, 2.26, 1.40], pos: [0.02, 0.06, -0.10], icon: [0.16, 0.40, 0.90],
+    file: 'bow_A_withString', pack: 'weapons', height: 0.78, grip: 0.5, fitMax: true,
+    rot: [0.12, 2.26, 1.40], pos: [-0.005, 0.008, 0.041], icon: [0.16, 0.40, 0.90],
   },
   // **The arrow is the one model in this table whose long axis is Z**, and both
   // of its rotations were written as though it were Y, like the stick and the
@@ -436,15 +494,28 @@ export const POSE = {
   // centring of X and Z, which is correct for an arrow and is why nothing here
   // needs to fight it.
   arrow: {
-    file: 'arrow_A', pack: 'weapons', height: 0.46, grip: 0.50, fitMax: true,
-    rot: [-1.87, -0.28, -0.42], pos: [0.02, 0.10, -0.04], icon: [-1.52, 0.46, 0.11],
+    file: 'arrow_A', pack: 'weapons', height: 0.46, grip: 0.5, fitMax: true,
+    rot: [-1.87, -0.28, -0.42], pos: [0.002, 0.009, -0.003], icon: [-1.52, 0.46, 0.11],
   },
   // `glow`: the fraction of the model's own height over which the head lights
   // up. On this art the last fifth is the wrapped, burning end and nothing else.
   // A torch you are holding is lit — it was only ever lit once planted, which
   // made carrying one through a cave look like carrying a stick.
-  torch:  { file: 'torch',        pack: 'tools',   height: 0.50, grip: 0.24, rot: [-0.20, -0.35, 0.22], pos: [0.02, 0.06, -0.02],  icon: [0.08, 0.55, -0.26], glow: [0.78, 0.94] },
-  bucket: { file: 'bucket_metal', pack: 'tools',   height: 0.36, grip: 0.55, rot: [0, -0.55, 0.14],     pos: [0.03, 0.05, -0.03],  icon: [0.16, 0.60, 0] },
+  torch:  { file: 'torch',        pack: 'tools',   height: 0.50, grip: 0.24, rot: [-0.20, -0.35, 0.22], pos: [0.016, 0.047, -0.016],  icon: [0.08, 0.55, -0.26], glow: [0.78, 0.94] },
+  // **The one pose in this table a `grip` cannot rescue, and the clearest case
+  // of the model-space fault the note on `POSE` describes.** A pail is hollow,
+  // and `loadGeometry` puts the grip point at the bounding box's X/Z centre —
+  // which for this model is the empty air inside the bucket. Swept, the fist is
+  // off the metal at every grip from 0.02 to 0.90 and worst (0.166 view units)
+  // at the middle. 0.94 is the rim, the one height where the bbox centre and the
+  // material coincide, and it is also the true answer: a pail hangs from the
+  // hand by its rim. `pos` is then essentially zero, which is the point.
+  //
+  // The cost is framing and is not recoverable here: gripped at the rim the pail
+  // hangs, and its top edge sits at NDC -0.83 whatever `grip` is, so most of it
+  // is under the bottom of the screen. Fixing that wants `height` up or the
+  // model's own origin moved; neither was asked for.
+  bucket: { file: 'bucket_metal', pack: 'tools',   height: 0.36, grip: 0.94, rot: [0, -0.55, 0.14],     pos: [-0.002, 0, -0.002],  icon: [0.16, 0.60, 0] },
   // **The key is `rod` and not `fishing_rod`, and that is not a nickname.**
   // `poseKeyFor` sends anything carrying a `tool` block down `POSE[tool.kind]`
   // and never consults `BY_NAME` for it, so an entry under the item's name is
@@ -459,13 +530,13 @@ export const POSE = {
   // reel or it closes *on* it. Everything above that is pole, line and float,
   // which is the part that has to stay in frame; hence a `pos` lift in the
   // shovel's spirit rather than the bucket's.
-  rod:    { file: 'wam/fishing_rod', pack: 'wam',  height: 0.52, grip: 0.12, rot: [-0.18, -0.40, 0.26], pos: [0.02, 0.10, -0.03],  icon: [0.10, 0.36, -0.28] },
+  rod:    { file: 'wam/fishing_rod', pack: 'wam',  height: 0.52, grip: 0.12, rot: [-0.18, -0.40, 0.26], pos: [0.003, 0.004, 0.039],  icon: [0.10, 0.36, -0.28] },
 
   // Food. Held small and close — an apple filling as much of the frame as a
   // pickaxe reads as a beach ball. `grip` sits at the middle of the fruit
   // rather than at a handle, so it turns in the fist instead of orbiting it.
-  apple:  { file: 'applered01', pack: 'produce', height: 0.24, grip: 0.50, rot: [0.10, -0.50, 0.10], pos: [0.02, 0.12, -0.06] },
-  roast:  { file: 'pumpkin01',  pack: 'produce', height: 0.28, grip: 0.50, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
+  apple:  { file: 'applered01', pack: 'produce', height: 0.24, grip: 0.5, rot: [0.10, -0.50, 0.10], pos: [0.017, 0.104, -0.052] },
+  roast:  { file: 'pumpkin01',  pack: 'produce', height: 0.28, grip: 0.5, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
 
   // --- Kenney food kit ------------------------------------------------------
   //
@@ -478,45 +549,64 @@ export const POSE = {
   // 46px in the inventory neither read as what it was.
   // `loaf-round` and not `loaf`: the tin loaf is a brown box with no scoring on
   // it, and in a 46px slot it was indistinguishable from a crate.
-  bread:       food('loaf-round', 0.30),
-  meat:        food('meat-raw', 0.30, true),
-  cooked_meat: food('meat-cooked', 0.30, true),
+  bread:       food('loaf-round', 0.30, false, { pos: [0.016, 0.103, -0.047] }),
+  meat:        food('meat-raw', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
+  cooked_meat: food('meat-cooked', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
 
-  berries:     food('cherries', 0.22),
-  carrot:      food('carrot', 0.28),
-  corn:        food('corn', 0.30),
-  tomato:      food('tomato', 0.22),
-  egg:         food('egg', 0.20),
+  berries:     food('cherries', 0.22, false, { grip: 0.22, pos: [0.002, 0.015, -0.007] }),
+  carrot:      food('carrot', 0.28, false, { grip: 0.02, pos: [0.002, 0.013, -0.006] }),
+  corn:        food('corn', 0.30, false, { pos: [0.011, 0.073, -0.034] }),
+  tomato:      food('tomato', 0.22, false, { pos: [0.016, 0.104, -0.048] }),
+  egg:         food('egg', 0.20, false, { grip: 0.18, pos: [0.009, 0.062, -0.028] }),
   // The fish is modelled nose-down-Z and is only a third as wide as it is long,
   // so at the shared yaw it was a dark sliver pointing at the camera. The yaw is
   // nearly a quarter turn instead, which puts the flank across the view, and the
   // roll runs that length along the icon's diagonal so it can be drawn bigger
   // without leaving the slot.
-  fish:        food('fish', 0.30, false, { rot: [0.10, -1.30, 0.30], icon: [0.15, 1.34, 0.38] }),
-  cheese:      food('cheese', 0.24),
+  // **Re-solved on "items like fish are floating and wrong angle in hand".** The
+  // yaw the note above describes did turn the flank across the view, but it left
+  // the fish's long axis 40 degrees out of the screen plane and leaning at -51
+  // degrees on screen: a fish drawn foreshortened, pointing away and down the
+  // wrong diagonal. `rot` is now solved rather than dialled — minimised over the
+  // three metrics `HAND_TILT` is stated in (`ViewModel.js`), scoring the long
+  // axis as a *line* mod 180 so the two diagonals cannot be confused:
+  //
+  //     long axis on screen   -51 deg  ->  25 deg   (the family's, from HAND_TILT)
+  //     out of the screen      40 deg  ->   0
+  //     flank to the camera    40 deg  ->   1       (0 is dead face-on)
+  //
+  // The icon is untouched: it is a different framing and has not been reported.
+  fish:        food('fish', 0.30, false, { pos: [0.007, 0.044, -0.02], rot: [1.17, 0.33, -1.10], icon: [0.15, 1.34, 0.38] }),
+  cheese:      food('cheese', 0.24, false, { pos: [0.011, 0.073, -0.034] }),
 
-  cooked_fish: food('sushi-salmon', 0.26, true),
-  cooked_egg:  food('egg-cooked', 0.26, true),
-  salad:       food('salad', 0.26, true),
-  pancakes:    food('pancakes', 0.26, true),
+  cooked_fish: food('sushi-salmon', 0.26, true, { pos: [0.01, 0.065, -0.03] }),
+  cooked_egg:  food('egg-cooked', 0.26, true, { pos: [0.016, 0.105, -0.048] }),
+  salad:       food('salad', 0.26, true, { pos: [0.017, 0.11, -0.051] }),
+  pancakes:    food('pancakes', 0.26, true, { pos: [0.013, 0.085, -0.039] }),
 
-  sandwich:    food('sandwich', 0.28, true),
-  soup:        food('bowl-soup', 0.26, true),
-  pie:         food('pie', 0.30, true),
-  cake:        food('cake', 0.30),
+  sandwich:    food('sandwich', 0.28, true, { pos: [0.02, 0.13, -0.06] }),
+  soup:        food('bowl-soup', 0.26, true, { pos: [0.016, 0.104, -0.048] }),
+  pie:         food('pie', 0.30, true, { pos: [0.02, 0.129, -0.06] }),
+  cake:        food('cake', 0.30, false, { pos: [0.018, 0.115, -0.053] }),
   // The stew pot takes the flat pose for the same reason the bowls do: side-on
   // it is a grey cylinder, and everything that says "stew" is inside it.
-  stew:        food('pot-stew', 0.30, true),
-  pizza:       food('pizza', 0.30, true),
-  burger:      food('burger-cheese', 0.26),
+  stew:        food('pot-stew', 0.30, true, { pos: [0.017, 0.11, -0.051] }),
+  pizza:       food('pizza', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
+  burger:      food('burger-cheese', 0.26, false, { pos: [0.02, 0.13, -0.06] }),
 
-  cookie:      food('cookie', 0.24, true),
-  donut:       food('donut-sprinkles', 0.24, true),
-  ice_cream:   food('ice-cream', 0.28),
-  chocolate:   food('chocolate', 0.26, true),
-  muffin:      food('muffin', 0.24),
-  candy:       food('lollypop', 0.28),
-  croissant:   food('croissant', 0.26, true),
+  cookie:      food('cookie', 0.24, true, { pos: [0.015, 0.097, -0.045] }),
+  donut:       food('donut-sprinkles', 0.24, true, { pos: [0.016, 0.102, -0.047] }),
+  ice_cream:   food('ice-cream', 0.28, false, { grip: 0.02, pos: [0.003, 0.016, -0.007] }),
+  chocolate:   food('chocolate', 0.26, true, { pos: [0.014, 0.094, -0.043] }),
+  muffin:      food('muffin', 0.24, false, { pos: [0.013, 0.083, -0.038] }),
+  // The lollypop is a disc on a stick and the kit's shared pose held it edge-on:
+  // its plate sat 86 degrees to the view axis, six degrees off invisible, which
+  // is the same failure the note above `bow` records. Solved on the fish's three
+  // metrics: 86 -> 0 degrees, and the axis onto the family's 25-degree diagonal.
+  // `grip` at the very bottom of the model puts the fist under the stick, which
+  // is where a hand goes and is what lifts the sweet back into frame.
+  candy:       food('lollypop', 0.28, false, { grip: 0.02, pos: [0.002, 0.011, -0.005], rot: [-0.95, -2.13, -0.63] }),
+  croissant:   food('croissant', 0.26, true, { pos: [0.013, 0.083, -0.038] }),
 
   // --- WAM materials --------------------------------------------------------
   //
@@ -531,17 +621,17 @@ export const POSE = {
   // `height` is the long axis. These are materials, not tools: none of them
   // gets more than about half the frame a pickaxe takes, or the hand stops
   // reading as a hand.
-  stick:      { file: 'wam/stick',      pack: 'wam', height: 0.38, grip: 0.40, rot: [-0.18, -0.40, 0.30],  pos: [0.02, 0.04, -0.02], icon: [0.10, 0.10, -0.46] },
-  coal:       { file: 'wam/coal',       pack: 'wam', height: 0.17, grip: 0.50, rot: [0.16, -0.55, 0.12],   pos: [0.02, 0.11, -0.05], icon: [0.22, 1.75, 0] },
-  charcoal:   { file: 'wam/charcoal',   pack: 'wam', height: 0.22, grip: 0.50, rot: [0.10, -0.50, 0.55],   pos: [0.02, 0.11, -0.05], icon: [0.18, 0.62, -0.38] },
-  raw_iron:   { file: 'wam/raw_iron',   pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.60, 0.12],   pos: [0.02, 0.11, -0.05], icon: [0.22, 0.66, 0] },
-  raw_gold:   { file: 'wam/raw_gold',   pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.30, 0.12],   pos: [0.02, 0.11, -0.05], icon: [0.22, 0.30, 0] },
-  iron_ingot: { file: 'wam/iron_ingot', pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.55, 1.30],   pos: [0.02, 0.11, -0.05], icon: [0.50, 0.60, 1.30] },
-  gold_ingot: { file: 'wam/gold_ingot', pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.55, 1.30],   pos: [0.02, 0.11, -0.05], icon: [0.50, 0.60, 1.30] },
-  crystal:    { file: 'wam/crystal',    pack: 'wam', height: 0.26, grip: 0.45, rot: [0.06, -0.60, 0.28],   pos: [0.02, 0.16, -0.05], icon: [0.10, 0.55, -0.20] },
-  flint:      { file: 'wam/flint',      pack: 'wam', height: 0.19, grip: 0.50, rot: [0.10, -0.75, 0.34],   pos: [0.02, 0.11, -0.05], icon: [0.06, 0.60, -0.24] },
-  wheat:      { file: 'wam/wheat',      pack: 'wam', height: 0.36, grip: 0.42, rot: [-0.14, -0.35, 0.34],  pos: [0.02, 0.20, -0.02], icon: [0.06, 0.20, -0.30] },
-  seeds:      { file: 'wam/seeds',      pack: 'wam', height: 0.17, grip: 0.50, rot: [0.30, -0.55, 0.10],   pos: [0.02, 0.05, -0.05], icon: [0.42, 0.60, 0] },
+  stick:      { file: 'wam/stick',      pack: 'wam', height: 0.38, grip: 0.4, rot: [-0.18, -0.40, 0.30],  pos: [0.007, 0.014, -0.007], icon: [0.10, 0.10, -0.46] },
+  coal:       { file: 'wam/coal',       pack: 'wam', height: 0.17, grip: 0.5, rot: [0.16, -0.55, 0.12],   pos: [0.011, 0.062, -0.028], icon: [0.22, 1.75, 0] },
+  charcoal:   { file: 'wam/charcoal',   pack: 'wam', height: 0.22, grip: 0.08, rot: [0.10, -0.50, 0.55],   pos: [0.004, 0.022, -0.01], icon: [0.18, 0.62, -0.38] },
+  raw_iron:   { file: 'wam/raw_iron',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.60, 0.12],   pos: [0.019, 0.104, -0.047], icon: [0.22, 0.66, 0] },
+  raw_gold:   { file: 'wam/raw_gold',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.30, 0.12],   pos: [0.016, 0.089, -0.04], icon: [0.22, 0.30, 0] },
+  iron_ingot: { file: 'wam/iron_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30],   pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
+  gold_ingot: { file: 'wam/gold_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30],   pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
+  crystal:    { file: 'wam/crystal',    pack: 'wam', height: 0.26, grip: 0.45, rot: [0.06, -0.60, 0.28],   pos: [0.009, 0.069, -0.022], icon: [0.10, 0.55, -0.20] },
+  flint:      { file: 'wam/flint',      pack: 'wam', height: 0.19, grip: 0.18, rot: [0.10, -0.75, 0.34],   pos: [0.008, 0.044, -0.02], icon: [0.06, 0.60, -0.24] },
+  wheat:      { file: 'wam/wheat',      pack: 'wam', height: 0.36, grip: 0.42, rot: [-0.14, -0.35, 0.34],  pos: [0.005, 0.071, -0.004], icon: [0.06, 0.20, -0.30] },
+  seeds:      { file: 'wam/seeds',      pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10],   pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
   // The hide's roll is what lays it across the fist, and it is also what makes
   // its *icon* yaw a different question from every other one in this table: once
   // the roll has turned the model's long axis across the frame, a yaw does not
@@ -549,18 +639,18 @@ export const POSE = {
   // from it. At 0.92 the pelt was 54° out of the screen plane and drawn at about
   // three fifths of the length it has. Reduced until it reads as a laid-out
   // skin; the roll, which is the part that was chosen, is untouched.
-  hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.50, 1.30],   pos: [0.02, 0.11, -0.05], icon: [0.24, 0.40, 1.32] },
-  feather:    { file: 'wam/feather',    pack: 'wam', height: 0.32, grip: 0.38, rot: [-0.16, -0.40, 0.36],  pos: [0.02, 0.18, -0.02], icon: [0.06, 0.30, -0.38] },
+  hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.50, 1.30],   pos: [0.012, 0.067, -0.03], icon: [0.24, 0.40, 1.32] },
+  feather:    { file: 'wam/feather',    pack: 'wam', height: 0.32, grip: 0.38, rot: [-0.16, -0.40, 0.36],  pos: [0.005, 0.06, -0.009], icon: [0.06, 0.30, -0.38] },
 
   // The rest of the ladder, on the same three family poses. Ores and the
   // sulfur crust take the lump pose; the cast bars take the ingot pose, which
   // is the one with the quarter turn in `rot.z` because those models are
   // authored along their long axis and stood up on export.
-  raw_copper:   { file: 'wam/raw_copper',   pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.45, 0.12], pos: [0.02, 0.11, -0.05], icon: [0.22, 0.52, 0] },
-  raw_silver:   { file: 'wam/raw_silver',   pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.60, 0.12], pos: [0.02, 0.11, -0.05], icon: [0.22, 0.66, 0] },
-  sulfur:       { file: 'wam/sulfur',       pack: 'wam', height: 0.18, grip: 0.50, rot: [0.16, -0.50, 0.12], pos: [0.02, 0.11, -0.05], icon: [0.22, 0.40, 0] },
-  copper_ingot: { file: 'wam/copper_ingot', pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.55, 1.30], pos: [0.02, 0.11, -0.05], icon: [0.50, 0.60, 1.30] },
-  silver_ingot: { file: 'wam/silver_ingot', pack: 'wam', height: 0.26, grip: 0.50, rot: [0.10, -0.55, 1.30], pos: [0.02, 0.11, -0.05], icon: [0.50, 0.60, 1.30] },
+  raw_copper:   { file: 'wam/raw_copper',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.45, 0.12], pos: [0.017, 0.094, -0.043], icon: [0.22, 0.52, 0] },
+  raw_silver:   { file: 'wam/raw_silver',   pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.60, 0.12], pos: [0.019, 0.104, -0.047], icon: [0.22, 0.66, 0] },
+  sulfur:       { file: 'wam/sulfur',       pack: 'wam', height: 0.18, grip: 0.5, rot: [0.16, -0.50, 0.12], pos: [0.016, 0.089, -0.041], icon: [0.22, 0.40, 0] },
+  copper_ingot: { file: 'wam/copper_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30], pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
+  silver_ingot: { file: 'wam/silver_ingot', pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.55, 1.30], pos: [0.009, 0.052, -0.023], icon: [0.50, 0.60, 1.30] },
 
   // Gems, on the crystal's pose: held a touch higher than a lump and turned
   // less far off the camera, because what a gem has that a lump does not is
@@ -570,30 +660,35 @@ export const POSE = {
   // The cut stones (ruby, sapphire, emerald) are shorter in the frame than the
   // grown crystals: they are one compact object rather than a cluster, so at
   // the cluster's height they filled the slot edge to edge.
-  amethyst:   { file: 'wam/amethyst',   pack: 'wam', height: 0.24, grip: 0.45, rot: [0.06, -0.55, 0.24],   pos: [0.02, 0.16, -0.05], icon: [0.10, 0.50, -0.18] },
-  ruby:       { file: 'wam/ruby',       pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.02, 0.14, -0.05], icon: [0.14, 0.40, -0.12] },
-  sapphire:   { file: 'wam/sapphire',   pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.02, 0.14, -0.05], icon: [0.14, 0.40, -0.12] },
-  emerald:    { file: 'wam/emerald',    pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.02, 0.14, -0.05], icon: [0.14, 0.40, -0.12] },
+  amethyst:   { file: 'wam/amethyst',   pack: 'wam', height: 0.24, grip: 0.26, rot: [0.06, -0.55, 0.24],   pos: [0.007, 0.054, -0.017], icon: [0.10, 0.50, -0.18] },
+  ruby:       { file: 'wam/ruby',       pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.01, 0.067, -0.024], icon: [0.14, 0.40, -0.12] },
+  sapphire:   { file: 'wam/sapphire',   pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.01, 0.067, -0.024], icon: [0.14, 0.40, -0.12] },
+  emerald:    { file: 'wam/emerald',    pack: 'wam', height: 0.20, grip: 0.48, rot: [0.10, -0.45, 0.18],   pos: [0.01, 0.067, -0.024], icon: [0.14, 0.40, -0.12] },
   // The shard is a wafer with its broken face on +Z, so it takes the flint
   // treatment: turned to show the flat of the blade, not its edge, where it
   // would be a two-pixel line.
-  void_shard: { file: 'wam/void_shard', pack: 'wam', height: 0.23, grip: 0.45, rot: [0.06, -0.34, 0.30],   pos: [0.02, 0.15, -0.05], icon: [0.08, 0.24, -0.20] },
+  void_shard: { file: 'wam/void_shard', pack: 'wam', height: 0.23, grip: 0.1, rot: [0.06, -0.34, 0.30],   pos: [0.005, 0.033, -0.011], icon: [0.08, 0.24, -0.20] },
   // Cinder is a lump, but its whole read is the hot seam, and the seam is a 22°
   // stripe on the model's +Z face. Both poses are therefore nearly square to
   // the camera: at the lump family's usual three-quarter turn the crack went
   // round the side and the icon was a plain black pebble.
-  cinder:     { file: 'wam/cinder',     pack: 'wam', height: 0.19, grip: 0.50, rot: [0.16, -0.22, 0.12],   pos: [0.02, 0.11, -0.05], icon: [0.22, 0.14, 0] },
+  cinder:     { file: 'wam/cinder',     pack: 'wam', height: 0.19, grip: 0.5, rot: [0.16, -0.22, 0.12],   pos: [0.014, 0.079, -0.036], icon: [0.22, 0.14, 0] },
 
   // The coin is modelled standing on its rim with the struck device on both
   // faces, so both poses are shallow yaws: the whole object is that face, and
   // anything approaching three-quarters turns it into a sliver. Held small —
   // it is a coin, and at lump size it read as a dinner plate.
-  coin:       { file: 'wam/coin',       pack: 'wam', height: 0.15, grip: 0.50, rot: [0.10, -0.30, 0.10],   pos: [0.02, 0.12, -0.05], icon: [0.12, 0.26, 0] },
+  // `height` 0.15 -> 0.22 and the fist under the coin rather than through it.
+  // Once it is attached, a 0.15-tall coin is drawn 0.23 view units long and the
+  // fist is at NDC y -1.03, so more than half of it was below the bottom edge.
+  // 0.22 with `grip` 0.16 brings the top back to -0.54 with the fist still on
+  // the metal. It is still the smallest thing in the game and is meant to be.
+  coin:       { file: 'wam/coin',       pack: 'wam', height: 0.22, grip: 0.16, rot: [0.10, -0.30, 0.10],   pos: [0.003, 0.022, -0.009], icon: [0.12, 0.26, 0] },
   // The sapling takes the shaft pose — it is a stem with a crown on top, and
   // the drawn diagonal is what the other tall, thin items use. `grip` is low
   // on purpose: you carry a seedling by its stem, so the fist closes under the
   // foliage rather than through it.
-  sapling:    { file: 'wam/sapling',    pack: 'wam', height: 0.34, grip: 0.30, rot: [-0.12, -0.35, 0.30],  pos: [0.02, 0.14, -0.02], icon: [0.08, 0.30, -0.18] },
+  sapling:    { file: 'wam/sapling',    pack: 'wam', height: 0.34, grip: 0.3, rot: [-0.12, -0.35, 0.30],  pos: [0.005, 0.036, -0.005], icon: [0.08, 0.30, -0.18] },
   // The crab claw is modelled as an L — arm up, pincer reaching along +Z — and
   // everything that makes it read as a claw lives in the plane of that reach.
   // Both poses are therefore near a quarter turn in yaw, which is what puts the
@@ -601,7 +696,13 @@ export const POSE = {
   // fish's problem and takes the fish's answer. `grip` is low because the fist
   // closes on the arm, not on the claw: at 0.5 it would have gripped the palm
   // and swung the whole thing around the pincer.
-  crab_claw:  { file: 'wam/crab_claw',  pack: 'wam', height: 0.30, grip: 0.24, rot: [0.06, -1.30, 0.24],  pos: [0.02, 0.07, -0.03], icon: [0.10, 1.45, 0.34] },
+  // `pos` is off-axis here and that is the model, not a taste. The claw is an L,
+  // so its bounding box's X/Z centre is in the crook between the arm and the
+  // pincer and no `grip` puts the fist on either: swept, the closest the fist
+  // gets is 0.095 view units at any grip below 0.30. The offset below is the
+  // shortest move that lands it on the arm, and it keeps `grip` at 0.24 for the
+  // reason written above — the fist closes on the arm, not on the palm.
+  crab_claw:  { file: 'wam/crab_claw',  pack: 'wam', height: 0.30, grip: 0.24, rot: [0.06, -1.30, 0.24],  pos: [-0.054, -0.029, 0.003], icon: [0.10, 1.45, 0.34] },
 
   // The drumstick, and the last two foods that were still hand-drawn sprites
   // in a line-up of twenty-seven modelled ones. `meat` and `cooked_meat` moved
@@ -629,8 +730,8 @@ export const POSE = {
   //
   // `grip` follows the meat line in each: the fist closes on the bone just
   // above it, so the drum hangs under the hand.
-  poultry:        { file: 'wam/poultry',        pack: 'wam', height: 0.28, grip: 0.62, rot: [0.06, -0.45, 0.22], pos: [0.02, 0.15, -0.04], icon: [0.12, 0.42, -0.18] },
-  cooked_poultry: { file: 'wam/cooked_poultry', pack: 'wam', height: 0.28, grip: 0.56, rot: [0.06, -0.45, 0.22], pos: [0.02, 0.14, -0.04], icon: [0.12, 0.42, -0.18] },
+  poultry:        { file: 'wam/poultry',        pack: 'wam', height: 0.28, grip: 0.62, rot: [0.06, -0.45, 0.22], pos: [0.007, 0.055, -0.015], icon: [0.12, 0.42, -0.18] },
+  cooked_poultry: { file: 'wam/cooked_poultry', pack: 'wam', height: 0.28, grip: 0.56, rot: [0.06, -0.45, 0.22], pos: [0.003, 0.021, -0.006], icon: [0.12, 0.42, -0.18] },
 
   // The three flowers, on the sapling's pose — they are the same object, a stem
   // with something on top, and `grip` is low for the same reason: you carry a
@@ -656,9 +757,9 @@ export const POSE = {
   //    of the way over — the `flat` treatment the food kit's plates and pizzas
   //    need — brings the face round. Not all the way: past about 0.6 the stalk
   //    disappears behind the head and it stops reading as a flower at all.
-  flower_red:  { file: 'wam/flower_red',  pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.10, -0.40, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.12, 0.34, -0.18] },
-  flower_blue: { file: 'wam/flower_blue', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.02, -1.25, 0.26],  pos: [0.02, 0.12, -0.02], icon: [0.14, 1.32, -0.12] },
-  flower_gold: { file: 'wam/flower_gold', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.24, -0.40, 0.22],  pos: [0.02, 0.12, -0.02], icon: [0.52, 0.32, -0.14] },
+  flower_red:  { file: 'wam/flower_red',  pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.10, -0.40, 0.26], pos: [0.011, 0.066, -0.011], icon: [0.12, 0.34, -0.18] },
+  flower_blue: { file: 'wam/flower_blue', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.02, -1.25, 0.26],  pos: [-0.01, -0.018, 0.021], icon: [0.14, 1.32, -0.12] },
+  flower_gold: { file: 'wam/flower_gold', pack: 'wam', height: 0.30, grip: 0.28, rot: [0.24, -0.40, 0.22],  pos: [0.01, 0.063, -0.01], icon: [0.52, 0.32, -0.14] },
 
   // The glowcap, on the flowers' pose with two departures.
   //
@@ -677,7 +778,7 @@ export const POSE = {
   // is the block's own `lightColor` ([0.6, 0.85, 0.7] in `world/Blocks.js`)
   // scaled back to about seven tenths, which is bright enough to read as lit in
   // a dark cave without washing the mint out of the gills to white.
-  mushroom:    { file: 'wam/mushroom',    pack: 'wam', height: 0.26, grip: 0.38, rot: [0.02, -0.45, 0.22],  pos: [0.02, 0.10, -0.04], icon: [0.04, 0.42, -0.16],
+  mushroom:    { file: 'wam/mushroom',    pack: 'wam', height: 0.26, grip: 0.38, rot: [0.02, -0.45, 0.22],  pos: [0.006, 0.03, -0.012], icon: [0.04, 0.42, -0.16],
                  glowMatch: { hex: '#b6efd0', color: [0.42, 0.60, 0.49] } },
 
   // --- the reef -------------------------------------------------------------
@@ -704,19 +805,19 @@ export const POSE = {
   // `grip` runs low on all of them: these are held by the stem or the base,
   // which is where a hand would take a piece of coral, and a fist closing
   // halfway up a branching colony hides the forks that identify it.
-  coral_branch: { file: 'wam/coral_branch', pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.55, 0.24], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.50, -0.18] },
-  coral_fan:    { file: 'wam/coral_fan',    pack: 'wam', height: 0.30, grip: 0.24, rot: [0.02, -1.35, 0.22],  pos: [0.02, 0.12, -0.02], icon: [0.12, 1.40, -0.10] },
-  coral_brain:  { file: 'wam/coral_brain',  pack: 'wam', height: 0.24, grip: 0.42, rot: [0.10, -0.45, 0.16],  pos: [0.02, 0.10, -0.04], icon: [0.22, 0.40, -0.10] },
-  coral_dead:   { file: 'wam/coral_dead',   pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.75, 0.24], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.70, -0.18] },
-  kelp:         { file: 'wam/kelp',         pack: 'wam', height: 0.34, grip: 0.30, rot: [-0.12, -0.40, 0.28], pos: [0.02, 0.14, -0.02], icon: [0.08, 0.36, -0.20] },
-  sea_grass:    { file: 'wam/sea_grass',    pack: 'wam', height: 0.24, grip: 0.30, rot: [-0.06, -0.50, 0.26], pos: [0.02, 0.10, -0.02], icon: [0.10, 0.46, -0.16] },
-  sea_sponge:   { file: 'wam/sea_sponge',   pack: 'wam', height: 0.26, grip: 0.40, rot: [0.06, -0.50, 0.18],  pos: [0.02, 0.11, -0.04], icon: [0.16, 0.46, -0.12] },
+  coral_branch: { file: 'wam/coral_branch', pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.55, 0.24], pos: [0.015, 0.092, -0.015], icon: [0.10, 0.50, -0.18] },
+  coral_fan:    { file: 'wam/coral_fan',    pack: 'wam', height: 0.30, grip: 0.24, rot: [0.02, -1.35, 0.22],  pos: [0.007, 0.04, -0.007], icon: [0.12, 1.40, -0.10] },
+  coral_brain:  { file: 'wam/coral_brain',  pack: 'wam', height: 0.24, grip: 0.42, rot: [0.10, -0.45, 0.16],  pos: [0.004, 0.019, -0.007], icon: [0.22, 0.40, -0.10] },
+  coral_dead:   { file: 'wam/coral_dead',   pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.75, 0.24], pos: [0.015, 0.091, -0.015], icon: [0.10, 0.70, -0.18] },
+  kelp:         { file: 'wam/kelp',         pack: 'wam', height: 0.34, grip: 0.3, rot: [-0.12, -0.40, 0.28], pos: [0.002, 0.027, -0.006], icon: [0.08, 0.36, -0.20] },
+  sea_grass:    { file: 'wam/sea_grass',    pack: 'wam', height: 0.24, grip: 0.3, rot: [-0.06, -0.50, 0.26], pos: [0.046, 0.06, 0.009], icon: [0.10, 0.46, -0.16] },
+  sea_sponge:   { file: 'wam/sea_sponge',   pack: 'wam', height: 0.26, grip: 0.4, rot: [0.06, -0.50, 0.18],  pos: [0.02, 0.11, -0.04], icon: [0.16, 0.46, -0.12] },
   // The clam is the one that has to show its inside. Its mantle — the bright
   // strip between the valves and the only saturated thing on the model — faces
   // straight up, so both rotations pitch it well forward, the food kit's `flat`
   // treatment. Square-on it is two grey shells and nothing else.
-  sea_shell:    { file: 'wam/sea_shell',    pack: 'wam', height: 0.24, grip: 0.36, rot: [0.46, -0.40, 0.16],  pos: [0.02, 0.10, -0.04], icon: [0.72, 0.34, -0.08] },
-  pearl:        { file: 'wam/pearl',        pack: 'wam', height: 0.15, grip: 0.50, rot: [0.10, -0.30, 0.10],  pos: [0.02, 0.12, -0.05], icon: [0.12, 0.26, 0] },
+  sea_shell:    { file: 'wam/sea_shell',    pack: 'wam', height: 0.24, grip: 0.36, rot: [0.46, -0.40, 0.16],  pos: [0.016, 0.081, -0.032], icon: [0.72, 0.34, -0.08] },
+  pearl:        { file: 'wam/pearl',        pack: 'wam', height: 0.22, grip: 0.5, rot: [0.10, -0.30, 0.10],  pos: [0.011, 0.064, -0.027], icon: [0.12, 0.26, 0] },
 
   // The larder and the lamp, on the same three rules as the reef above.
   //
@@ -733,21 +834,21 @@ export const POSE = {
   // specks past the rim. Both rotations pitch it forward hard, and the icon
   // nearly all the way, which is the food kit's `flat` treatment used for a
   // block — the crown, seen from above, is the thing worth putting in a slot.
-  sea_lettuce:   { file: 'wam/sea_lettuce',   pack: 'wam', height: 0.26, grip: 0.30, rot: [0.10, -1.10, 0.24], pos: [0.02, 0.11, -0.02], icon: [0.42, 1.15, -0.14] },
-  sea_grape:     { file: 'wam/sea_grape',     pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.06, -0.50, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.44, -0.18] },
-  abyss_anemone: { file: 'wam/abyss_anemone', pack: 'wam', height: 0.24, grip: 0.36, rot: [0.44, -0.40, 0.16],  pos: [0.02, 0.10, -0.04], icon: [0.70, 0.34, -0.08] },
+  sea_lettuce:   { file: 'wam/sea_lettuce',   pack: 'wam', height: 0.26, grip: 0.3, rot: [0.10, -1.10, 0.24], pos: [0.038, 0.053, 0.014], icon: [0.42, 1.15, -0.14] },
+  sea_grape:     { file: 'wam/sea_grape',     pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.06, -0.50, 0.26], pos: [0.007, 0.04, -0.007], icon: [0.10, 0.44, -0.18] },
+  abyss_anemone: { file: 'wam/abyss_anemone', pack: 'wam', height: 0.24, grip: 0.36, rot: [0.44, -0.40, 0.16],  pos: [0.005, 0.025, -0.01], icon: [0.70, 0.34, -0.08] },
   // Dried kelp is item-only and is a stack of flat sheets, so it is held and
   // shown the way the food kit holds anything flat: gripped low at the fold,
   // turned enough that the stepped margins read rather than the back sheet's
   // blank face.
-  dried_kelp:    { file: 'wam/dried_kelp',    pack: 'wam', height: 0.22, grip: 0.34, rot: [0.14, -0.44, 0.20],  pos: [0.02, 0.11, -0.03], icon: [0.24, 0.38, -0.10] },
+  dried_kelp:    { file: 'wam/dried_kelp',    pack: 'wam', height: 0.22, grip: 0.34, rot: [0.14, -0.44, 0.20],  pos: [0.014, 0.078, -0.021], icon: [0.24, 0.38, -0.10] },
   // The comb has the sea fan's problem and takes the sea fan's answer in a
   // milder form: everything that identifies it — seven hexagonal cell mouths —
   // is on one face, and at the lump family's three-quarter turn that face goes
   // round the side and leaves a gold brick. Both rotations are shallow in yaw
   // so the cells stay square to the viewer, and the icon is shallower still.
   // Held at the middle: it is a chunk, not a handle.
-  honeycomb:     { file: 'wam/honeycomb',     pack: 'wam', height: 0.22, grip: 0.48, rot: [0.10, -0.26, 0.14],  pos: [0.02, 0.12, -0.04], icon: [0.14, 0.20, -0.08] },
+  honeycomb:     { file: 'wam/honeycomb',     pack: 'wam', height: 0.22, grip: 0.48, rot: [0.10, -0.26, 0.14],  pos: [0.011, 0.066, -0.022], icon: [0.14, 0.20, -0.08] },
 
   // The land flora. Sixteen entries, and they are grouped by *what the model
   // needs the camera to do* rather than by biome, because that is the only
@@ -757,35 +858,35 @@ export const POSE = {
   // head. These take the branching coral's pose almost unchanged: a shallow
   // yaw, gripped low on the stem, because turning one of these far off square
   // only ever hides one stalk behind another.
-  thornbrush:   { file: 'wam/thornbrush',   pack: 'wam', height: 0.28, grip: 0.30, rot: [-0.08, -0.55, 0.24], pos: [0.02, 0.12, -0.02], icon: [0.12, 0.50, -0.18] },
-  golden_grass: { file: 'wam/golden_grass', pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.42, 0.28], pos: [0.02, 0.13, -0.02], icon: [0.10, 0.38, -0.20] },
-  firebloom:    { file: 'wam/firebloom',    pack: 'wam', height: 0.34, grip: 0.26, rot: [-0.10, -0.40, 0.26], pos: [0.02, 0.14, -0.02], icon: [0.08, 0.34, -0.20] },
-  marram:       { file: 'wam/marram',       pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.46, 0.28], pos: [0.02, 0.13, -0.02], icon: [0.10, 0.40, -0.20] },
-  lavender:     { file: 'wam/lavender',     pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [0.02, 0.13, -0.02], icon: [0.10, 0.38, -0.18] },
-  cotton_grass: { file: 'wam/cotton_grass', pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.10, 0.38, -0.18] },
+  thornbrush:   { file: 'wam/thornbrush',   pack: 'wam', height: 0.28, grip: 0.3, rot: [-0.08, -0.55, 0.24], pos: [0.015, 0.095, -0.007], icon: [0.12, 0.50, -0.18] },
+  golden_grass: { file: 'wam/golden_grass', pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.42, 0.28], pos: [-0.001, 0.018, -0.007], icon: [0.10, 0.38, -0.20] },
+  firebloom:    { file: 'wam/firebloom',    pack: 'wam', height: 0.34, grip: 0.26, rot: [-0.10, -0.40, 0.26], pos: [0, 0, 0], icon: [0.08, 0.34, -0.20] },
+  marram:       { file: 'wam/marram',       pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.10, -0.46, 0.28], pos: [0.01, 0.068, -0.01], icon: [0.10, 0.40, -0.20] },
+  lavender:     { file: 'wam/lavender',     pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [-0.002, 0.054, 0.007], icon: [0.10, 0.38, -0.18] },
+  cotton_grass: { file: 'wam/cotton_grass', pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.08, -0.44, 0.26], pos: [0.047, 0.072, 0.011], icon: [0.10, 0.38, -0.18] },
 
   // Clumps read from a three-quarter view, the flowers' treatment: enough yaw
   // that the clump has depth, not so much that the leader hides the buds.
-  aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.26, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.02, 0.11, -0.03], icon: [0.18, 0.46, -0.14] },
-  snowbell:     { file: 'wam/snowbell',     pack: 'wam', height: 0.26, grip: 0.30, rot: [0.02, -0.45, 0.24],  pos: [0.02, 0.11, -0.02], icon: [0.10, 0.42, -0.16] },
-  lingonberry:  { file: 'wam/lingonberry',  pack: 'wam', height: 0.26, grip: 0.36, rot: [0.06, -0.48, 0.20],  pos: [0.02, 0.11, -0.03], icon: [0.16, 0.44, -0.14] },
-  fern:         { file: 'wam/fern',         pack: 'wam', height: 0.28, grip: 0.30, rot: [-0.06, -0.52, 0.26], pos: [0.02, 0.12, -0.02], icon: [0.12, 0.48, -0.16] },
+  aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.26, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.008, 0.053, -0.038], icon: [0.18, 0.46, -0.14] },
+  snowbell:     { file: 'wam/snowbell',     pack: 'wam', height: 0.26, grip: 0.3, rot: [0.02, -0.45, 0.24],  pos: [0.004, 0.022, -0.004], icon: [0.10, 0.42, -0.16] },
+  lingonberry:  { file: 'wam/lingonberry',  pack: 'wam', height: 0.26, grip: 0.36, rot: [1.04, 0.66, 0.18],   pos: [0.002, -0.01, 0.01], icon: [0.16, 0.44, -0.14] },
+  fern:         { file: 'wam/fern',         pack: 'wam', height: 0.28, grip: 0.3, rot: [-0.06, -0.52, 0.26], pos: [0.005, 0.027, -0.005], icon: [0.12, 0.48, -0.16] },
 
   // The two that are read from *above*, the sea lettuce problem: a mat seen
   // square-on from the side is a line. Both rotations pitch them well forward
   // and the icons nearly onto their backs, because a trefoil and a star are
   // shapes that exist only in plan view.
-  clover:       { file: 'wam/clover',       pack: 'wam', height: 0.24, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.02, 0.10, -0.04], icon: [0.78, 0.46, -0.10] },
-  alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.02, 0.10, -0.04], icon: [0.80, 0.42, -0.10] },
+  clover:       { file: 'wam/clover',       pack: 'wam', height: 0.24, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.015, 0.018, -0.005], icon: [0.78, 0.46, -0.10] },
+  alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.047, 0.058, -0.006], icon: [0.80, 0.42, -0.10] },
 
   // Underground. The mushroom's own pose for the toadstools — a cap is read
   // from slightly below so the overhang shows — and the clam's steeper one for
   // the shelf fungus, whose plates only separate when you are not level with
   // them. The crystal cluster takes the gem kit's pose: gripped near the middle
   // of the matrix, turned so the points fan across the slot rather than at it.
-  cave_mushroom:   { file: 'wam/cave_mushroom',   pack: 'wam', height: 0.24, grip: 0.38, rot: [0.02, -0.45, 0.22], pos: [0.02, 0.10, -0.04], icon: [0.04, 0.42, -0.16] },
-  shelf_fungus:    { file: 'wam/shelf_fungus',    pack: 'wam', height: 0.24, grip: 0.38, rot: [0.34, -0.44, 0.18], pos: [0.02, 0.10, -0.04], icon: [0.52, 0.40, -0.12] },
-  crystal_cluster: { file: 'wam/crystal_cluster', pack: 'wam', height: 0.26, grip: 0.40, rot: [0.10, -0.55, 0.20], pos: [0.02, 0.11, -0.04], icon: [0.18, 0.52, -0.14] },
+  cave_mushroom:   { file: 'wam/cave_mushroom',   pack: 'wam', height: 0.24, grip: 0.38, rot: [0.02, -0.45, 0.22], pos: [0.027, -0.084, -0.033], icon: [0.04, 0.42, -0.16] },
+  shelf_fungus:    { file: 'wam/shelf_fungus',    pack: 'wam', height: 0.24, grip: 0.38, rot: [0.34, -0.44, 0.18], pos: [0.022, 0.092, -0.037], icon: [0.52, 0.40, -0.12] },
+  crystal_cluster: { file: 'wam/crystal_cluster', pack: 'wam', height: 0.26, grip: 0.4, rot: [0.10, -0.55, 0.20], pos: [0.02, 0.11, -0.04], icon: [0.18, 0.52, -0.14] },
 
   // --- armour ---------------------------------------------------------------
   //
@@ -810,10 +911,10 @@ export const POSE = {
   // than they are tall, and normalising those by *height* is what turned a low
   // wide thing into a giant — the same fault the food kit and the bow carry the
   // flag for.
-  armour_helm:  { file: 'wam/armour_helm',  pack: 'wam', height: 0.30, grip: 0.62, tintAll: true, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.10, -0.04], icon: [0.14, 0.50, -0.10] },
-  armour_chest: { file: 'wam/armour_chest', pack: 'wam', height: 0.36, grip: 0.72, tintAll: true, fitMax: true, rot: [0.10, -0.50, 0.10], pos: [0.02, 0.12, -0.04], icon: [0.14, 0.44, -0.10] },
-  armour_legs:  { file: 'wam/armour_legs',  pack: 'wam', height: 0.34, grip: 0.78, tintAll: true, rot: [0.08, -0.50, 0.12], pos: [0.02, 0.14, -0.04], icon: [0.12, 0.44, -0.12] },
-  armour_boots: { file: 'wam/armour_boots', pack: 'wam', height: 0.30, grip: 0.55, tintAll: true, fitMax: true, rot: [0.14, -0.55, 0.10], pos: [0.02, 0.10, -0.04], icon: [0.20, 0.48, -0.08] },
+  armour_helm:  { file: 'wam/armour_helm',  pack: 'wam', height: 0.30, grip: 0.62, tintAll: true, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.1, -0.04], icon: [0.14, 0.50, -0.10] },
+  armour_chest: { file: 'wam/armour_chest', pack: 'wam', height: 0.36, grip: 0.72, tintAll: true, fitMax: true, rot: [0.10, -0.50, 0.10], pos: [0, 0.084, -0.037], icon: [0.14, 0.44, -0.10] },
+  armour_legs:  { file: 'wam/armour_legs',  pack: 'wam', height: 0.34, grip: 0.78, tintAll: true, rot: [0.08, -0.50, 0.12], pos: [0.014, 0.096, -0.027], icon: [0.12, 0.44, -0.12] },
+  armour_boots: { file: 'wam/armour_boots', pack: 'wam', height: 0.30, grip: 0.55, tintAll: true, fitMax: true, rot: [0.14, -0.55, 0.10], pos: [0.02, 0.1, -0.04], icon: [0.20, 0.48, -0.08] },
 
   // Driftwood is the one authored wider than it is tall on purpose, so it
   // normalises on its longest axis instead of its height — without `fitMax` a
@@ -827,7 +928,7 @@ export const POSE = {
   // was 72° out of the screen plane in both poses — a wide tangle drawn end-on,
   // which is the very thing `fitMax` is here to stop it looking like. A shallow
   // yaw keeps the span across the view, where the forks read.
-  driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.34, grip: 0.44, fitMax: true, rot: [0.16, -0.40, 0.22], pos: [0.02, 0.10, -0.04], icon: [0.24, 0.40, -0.10] },
+  driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.34, grip: 0.44, fitMax: true, rot: [0.16, -0.40, 0.22], pos: [0.01, 0.062, -0.016], icon: [0.24, 0.40, -0.10] },
 };
 
 /**

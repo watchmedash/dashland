@@ -45,10 +45,27 @@ export class Particles {
     this.debrisColors = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DEBRIS * 3), 3);
     this.debris.instanceColor = this.debrisColors;
 
-    // --- bubbles ---
+    // --- bubbles and splash droplets ---
     // Bubbles shared the debris cube mesh, so underwater you were watching a
     // stream of tiny boxes rise past your face. They get their own rounded,
     // translucent mesh; block shatter still wants cubes, a bubble never does.
+    //
+    // Splash droplets are drawn from this same mesh, and that is on purpose --
+    // read the steam note below for what a FOURTH mesh has to earn. Steam got
+    // one because it needs a per-instance alpha, which three cannot give from a
+    // shared material. A droplet needs nothing of the sort: it is one fixed
+    // water blue, no fade, the same rounded silhouette as a bubble, at the same
+    // 0.03-0.09 size. Every reason bubbles are not cubes is a reason splashes
+    // are not either, and the only difference between the two is the physics --
+    // a droplet falls and bounces, a bubble rises -- which lives on the pool
+    // entry, not on the mesh. So `droplet` picks the mesh and `buoyant` picks
+    // the motion, and they are deliberately separate flags.
+    //
+    // Budget: this cap is now shared. The largest splash is the player entering
+    // water at strength 1.2, i.e. 21 droplets, and the steady state of breath
+    // bubbles underwater is ~22 (2 every 200ms against a ~2.2s life). 43 of 64
+    // in the one case where both are up at once, so 64 still holds and nothing
+    // is silently truncated.
     const bubGeo = new THREE.IcosahedronGeometry(0.5, 1);
     const bubMat = new THREE.MeshStandardMaterial({
       color: 0xbfe8ff, roughness: 0.12, metalness: 0.0,
@@ -79,7 +96,7 @@ export class Particles {
       this.pool.push({
         alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(),
         rot: new THREE.Quaternion(), spin: new THREE.Vector3(), life: 0, maxLife: 1, size: 0.1,
-        color: new THREE.Color(), buoyant: false, steam: 0,
+        color: new THREE.Color(), buoyant: false, steam: 0, droplet: false,
       });
     }
 
@@ -303,6 +320,7 @@ export class Particles {
       if (!this.pool[i].alive) {
         this.pool[i].buoyant = false;   // only bubbles opt back in
         this.pool[i].steam = 0;         // and only steam opts back into this
+        this.pool[i].droplet = false;   // and only splashes into this
         return this.pool[i];
       }
     }
@@ -340,6 +358,9 @@ export class Particles {
       const p = this._spawn();
       if (!p) return;
       p.alive = true;
+      // Rounded, off the bubble mesh. Not buoyant: a thrown droplet still falls
+      // and still bounces off the bank, which is the debris branch in `update`.
+      p.droplet = true;
       p.pos.copy(pos);
       p.pos.x += (Math.random() - 0.5) * 0.9; p.pos.y += (Math.random() - 0.5) * 0.9; p.pos.z += (Math.random() - 0.5) * 0.9;
       p.vel.copy(up).multiplyScalar(2.5 + Math.random() * 3 * strength);
@@ -347,7 +368,9 @@ export class Particles {
       p.rot.identity(); p.spin.set(0, 0, 0);
       p.life = 0; p.maxLife = 0.5 + Math.random() * 0.5;
       p.size = 0.035 + Math.random() * 0.05;
-      p.color.setRGB(0.42, 0.68, 0.9);
+      // No `p.color`. That was the per-instance tint the debris mesh reads, and
+      // the bubble material carries its own single colour -- writing one here
+      // would just be a value nothing looks at.
     }
   }
 
@@ -522,7 +545,8 @@ export class Particles {
           this.steamAlpha.setX(stm, p.color.r * Math.sin(Math.PI * Math.min(1, t)) );
           stm++;
         }
-      } else if (p.buoyant) {
+      } else if (p.buoyant || p.droplet) {
+        // Two different motions, one mesh. See the note on the mesh itself.
         if (bub < MAX_BUBBLES) { this.bubbleMesh.setMatrixAt(bub, _m); bub++; }
       } else {
         this.debris.setMatrixAt(count, _m);

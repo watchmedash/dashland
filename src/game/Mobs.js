@@ -1710,7 +1710,13 @@ const SPECIES = {
   polar: pet('polar', {
     // Taller than the player, and the only thing on the ice that is.
     label: 'Polar Bear', h: 1.90, hp: 16, spd: 1.60, shy: 0.3, turn: 2.4, accel: 5.0,
-    diet: 'carnivore', drops: [['hide', 2, 3], ['meat', 1, 2]], cold: true,
+    // Fish on a quarter of kills, from the same `eats` list two lines down: it
+    // lives on fish, so some of the time it is carrying one. Deliberately a
+    // garnish and not a source. A base bear already pays 11-18 coins (hide 3-4
+    // at 3, meat 1-3 at 2) and one raw fish sells for 2, so this is +0.5 coins
+    // expected, ~3%; a rod pulls a fish per cast, and nothing here should make
+    // hunting bears a way around fishing.
+    diet: 'carnivore', drops: [['hide', 2, 3], ['meat', 1, 2], ['fish', 1, 1, 0.25]], cold: true,
     // It fishes, so it swims — and it has to, or half its prey list is on the
     // wrong side of a wall and it spends every hunt padding along the ice
     // looking stupid. Amphibious is exactly the flag for that.
@@ -1971,7 +1977,12 @@ const SPECIES = {
   shark: {
     ...pet('fish', {
       label: 'Shark', h: 1.5, var: 0.12, hp: 20, spd: 1.85, shy: 0.2, turn: 3.4, accel: 8.0,
-      graze: 0, idleMin: 1, idleMax: 3, drops: [['meat', 1, 2], ['hide', 1, 1]],
+      // A third rather than the bear's quarter, because both entries in `eats`
+      // below are fish: a bear splits its diet with penguin, a shark does not
+      // eat anything else at all. Still under a half so a shark reads as meat
+      // and hide with a fish in it, and at 0.89 bulk it is one fish, not a
+      // haul.
+      graze: 0, idleMin: 1, idleMax: 3, drops: [['meat', 1, 2], ['hide', 1, 1], ['fish', 1, 1, 0.35]],
       aquatic: true, diet: 'carnivore', eats: ['fish', 'deep_fish'],
     }),
     urls: [FISH('shark')],
@@ -7598,9 +7609,17 @@ export class Mobs {
     // `boon` above and multiplying by it twice would pay a grown tiger four
     // times over. A calf is covered by the caller passing an empty list.
     const bulk = lootBulk(mob.baseHeight ?? mob.spec.height);
-    for (const [name, min, max] of drops) {
+    for (const [name, min, max, chance] of drops) {
       const id = itemIdOf(name);
       if (!id) continue;
+      // Optional fourth element: the odds this line appears at all. Every other
+      // entry in the table is a guarantee with a range, which is right for the
+      // things an animal is MADE of — a bear always has a hide. It is wrong for
+      // the things an animal is CARRYING, i.e. what it had just eaten, which is
+      // either there or it is not. A 0-min range is not the same thing: it
+      // rolls against boon and bulk, so `['fish', 0, 1]` on a grown bear rounds
+      // 0.5 x 2.0 x 1.27 up and pays out nearly every time.
+      if (chance !== undefined && Math.random() >= chance) continue;
       const count = Math.round((min + Math.floor(Math.random() * (max - min + 1))) * boon * bulk);
       // Lift the drop along the mob's own up, not world +Y. On a sphere those
       // only agree at the north pole; everywhere else `+0.3` in Y was a sideways

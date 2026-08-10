@@ -424,6 +424,7 @@ export class UI {
       chipPack: $('chip-pack'), packDist: $('pack-dist'), chipSave: $('chip-save'),
       pzQuit: $('pz-quit'),
       toasts: $('toasts'), debug: $('debug'), hint: $('hint'),
+      fishBar: $('fish-bar'), fishGauge: $('fish-bar')?.querySelector('.fb-gauge b'),
       screenEl: $('screen'), screenTitle: $('screen-title'), screenTop: $('screen-top'),
       invMain: $('inv-main'), invHot: $('inv-hot'),
       cursor: $('cursor-stack'), tooltip: $('tooltip'),
@@ -546,9 +547,14 @@ export class UI {
     notch.className = 'cmp-notch';
     const polar = document.createElement('span');
     polar.className = 'cmp-polar';
-    // One word. The strip is gone and the reason it is gone is a fact about
-    // spheres, not something a HUD owes the player a sentence about.
-    polar.textContent = 'Pole';
+    // Deliberately empty. This used to read "Pole" while the strip was hidden,
+    // and the word told a player standing in a snowfield nothing they did not
+    // already know while implying there was a thing here to understand. The
+    // strip still fades out near the axis for the reason above - a bearing
+    // relative to the pole does not exist at the pole - but it now simply goes
+    // quiet instead of announcing itself. The element stays so the fade has
+    // something to hold and so the layout does not move.
+    polar.textContent = '';
     cmp.append(win, notch, polar);
     hud.appendChild(cmp);
 
@@ -2528,6 +2534,40 @@ export class UI {
   }
 
   setCrosshairActive(on) { this.el.crosshair.classList.toggle('active', on); }
+
+  /**
+   * The fishing fight, once a frame while one is running.
+   *
+   * Three numbers and a flag, and all four go out as custom properties on one
+   * element: the shuttle and the fish are positioned by `calc()` off them, so
+   * the whole bar is one style write per frame rather than four element writes.
+   * Rounded to three places first and skipped when nothing moved enough to see,
+   * for the same reason `setCrosshairDraw` does it — this runs at 60fps over a
+   * lit planet.
+   *
+   * @param {{x:number, half:number, fx:number, p:number, on:boolean}|null} s
+   *   shuttle centre, shuttle half-width, fish, progress, all 0..1 in track
+   *   widths; null to take the bar down.
+   */
+  fishFight(s) {
+    const el = this.el.fishBar;
+    if (!el) return;
+    if (!s) {
+      if (this._fbKey === null) return;
+      this._fbKey = null;
+      el.classList.add('hidden');
+      return;
+    }
+    const key = `${s.x.toFixed(3)} ${s.fx.toFixed(3)} ${s.p.toFixed(3)} ${s.half.toFixed(3)} ${s.on ? 1 : 0}`;
+    if (key === this._fbKey) return;
+    if (this._fbKey === null || this._fbKey === undefined) el.classList.remove('hidden');
+    this._fbKey = key;
+    el.style.setProperty('--fb-x', s.x.toFixed(3));
+    el.style.setProperty('--fb-half', s.half.toFixed(3));
+    el.style.setProperty('--fb-fish', s.fx.toFixed(3));
+    el.style.setProperty('--fb-p', s.p.toFixed(3));
+    el.classList.toggle('on', !!s.on);
+  }
 
   /**
    * The bow's charge, as the sight closing in on the shot.

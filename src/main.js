@@ -43,7 +43,7 @@ import {
   huntsOnSight, endsOnDeath,
 } from './game/NewGame.js';
 import {
-  ITEMS, computeDrops, miningTime, itemIdOf, harvestHint, armourPoints,
+  ITEMS, computeDrops, miningTime, itemIdOf, armourPoints,
   bowShot, bowDrawStep,
 } from './game/Items.js';
 import { Arrows } from './game/Arrows.js';
@@ -212,12 +212,75 @@ const FOOD_TO_ENERGY = 0.06;
 // down and look at the water, short enough that it is not a punishment.
 const FISH_WAIT_MIN = 4;
 const FISH_WAIT_MAX = 13;
-/** How long the fish is on before it shakes the hook. Generous but not free. */
-const FISH_BITE_WINDOW = 1.1;
-/** Walk this far from your own float and the line comes in. */
+/**
+ * Walk this far *from where you cast* and the line comes in.
+ *
+ * It used to be measured from the player to the float, which quietly made the
+ * leash a cast-length limit as well as a wandering-off limit — and one that a
+ * cliff broke instantly. Stand six blocks up a headland, cast eight out, and
+ * the diagonal is ten: the very first tick of `_tickFishing` cancelled the cast
+ * on the frame it was made, which is the "it goes straight back to the rest
+ * position" fault. Measured from the casting spot, height costs nothing and the
+ * rule says what it always meant: stay near where you cast.
+ */
 const FISH_LEASH = 9;
+/**
+ * How far a cast reaches, in cells.
+ *
+ * This was `player.reach + 3`, and `reach` is 3, so a cast travelled six cells
+ * from the eye. Six cells is a shore and nothing else: face an ocean from a
+ * pier or a headland and the surface is simply further away than that, the ray
+ * ends in open air, and you are told to cast at open water while looking at an
+ * ocean. It is also why fishing from height was impossible — the water is down
+ * as well as out, and the diagonal ran out first.
+ *
+ * 28 is a thrown line rather than a poke: it clears a beach shelf, reaches the
+ * water from the top of a normal cliff, and is still short enough that you
+ * cannot fish a lake from the far side of a valley. It is deliberately not tied
+ * to `reach` — reach is how far your arm goes, and this is how far a lead
+ * weight goes when you throw it.
+ */
+const FISH_CAST_RANGE = 28;
 /** Height of the float above a water cell's centre — half a cell, plus a little. */
 const BOBBER_FLOAT = 0.56;
+
+// --- the fight ---------------------------------------------------------------
+//
+// What used to happen when a fish took the bait was that you clicked inside a
+// 1.1s window, which is a reaction test you pass every time after the second
+// fish. This is the balance bar instead: a shuttle you drive along a horizontal
+// track by holding the button, a fish that runs up and down it, and a catch
+// that fills while the two overlap and empties while they do not.
+//
+// Everything below is one of three levers, and nothing here invents a stat that
+// the game did not already have:
+//
+//   THE ROD widens the shuttle and pulls harder — `tool.tier` and `tool.speed`
+//   off the item, so a better rod is a bigger window and a livelier hand rather
+//   than a separate difficulty number.
+//   THE FISH sets `hard` (0..1), rolled off the *same* number that decides what
+//   you caught. A common fish drifts; a treasure roll darts. That the rare
+//   thing fights hardest is the only reason it is worth more.
+//   THE PLAYER is the hold. The shuttle is under gravity and has weight, so it
+//   is a balance rather than a follow: over-hold and you are at the far wall
+//   with the fish behind you.
+//
+// Numbers, once: the shuttle is a fifth of the track at tier 0, the fill takes
+// 2.4s of solid contact from the start value, and the drain empties it in about
+// 2.3s against a common fish. So a decent fight is four to six seconds — long
+// enough to be a thing that happened, short enough that a lake is not an
+// evening.
+/** Half the shuttle's width, in track widths, before the rod's tier widens it. */
+const FIGHT_HALF = 0.10;
+const FIGHT_HALF_PER_TIER = 0.02;
+/** Shuttle pull while held, drift while released, and its drag. Track widths. */
+const FIGHT_ACC = 2.2;
+const FIGHT_GRAV = 1.55;
+const FIGHT_DRAG = 2.7;
+/** Progress a second, on target and off it, and where the bar starts. */
+const FIGHT_GAIN = 0.42;
+const FIGHT_DRAIN = 0.30;
+const FIGHT_START = 0.35;
 
 
 // --- winter ice -------------------------------------------------------------
@@ -2492,6 +2555,9 @@ class Game {
     // whole of a spectator run. Cleared here because this is the one place that
     // knows the owner is never going to run again.
     this.ui.setHint(null);
+    // Same reasoning for the cast: a float, a line and a balance bar left over
+    // a death screen, none of which anything is going to tick again.
+    if (this.fishing) this._stopFishing();
     // Everything you carried stays where you fell, and stays there — `keep`
     // exempts it from the despawn clock. What you were *wearing* stays on you:
     // you respawn at a bed that may be a long way from your body, and sending
@@ -3658,7 +3724,6 @@ class Game {
     // A liquid cell counts as free space above — which is right for a wall, and
     // is how you dam a river — but not for a flame or a stem. See `DROWNS`.
     if (DROWNS[id] && RENDER_TYPE[existing] === R_LIQUID) {
-      this.ui.setHint(IS_TORCH[id] ? 'It would go out' : 'It would wash away');
       return false;
     }
     // ...and the reef, which is the same rule pointing the other way: coral,
@@ -3673,11 +3738,9 @@ class Game {
     // asked for the same discipline; see the note above IS_SUBMERGED.
     if (IS_SUBMERGED[id]) {
       if (RENDER_TYPE[existing] !== R_LIQUID) {
-        this.ui.setHint('It only grows under water');
         return false;
       }
       if (RENDER_TYPE[this.planet.at(col, k + 1)] !== R_LIQUID) {
-        this.ui.setHint('It needs deeper water');
         return false;
       }
     }
@@ -3693,7 +3756,6 @@ class Game {
         // rather than silently eating the click.
         torchByte = 0;
         if (!this._torchSupported(col, k, 0)) {
-          this.ui.setHint('Nothing to fix a torch to');
           return false;
         }
       }
@@ -3705,7 +3767,6 @@ class Game {
     // is the funnel every block change goes through and a rule enforced in only
     // one of the two places is a rule with a trivial workaround.
     if (NEEDS_ROOM[id] && this._crowdedAt(col, k)) {
-      this.ui.setHint('No room for a ' + BLOCKS[id].label.toLowerCase());
       return false;
     }
 
@@ -3718,7 +3779,6 @@ class Game {
     // and immediately fall: a placement that undoes itself reads as a dropped
     // input rather than as a rule.
     if (NEEDS_FLOOR[id] && !supports(this.planet.at(col, k - 1), this.planet.facingAt(col, k - 1))) {
-      this.ui.setHint('Nothing for a ' + BLOCKS[id].label.toLowerCase() + ' to grow on');
       return false;
     }
 
@@ -3733,14 +3793,12 @@ class Game {
     // `growsOn` returns true for anything with no soil set, so this line is
     // inert for every block that is not a plant.
     if (!growsOn(id, this.planet.at(col, k - 1))) {
-      this.ui.setHint('Nothing for a ' + BLOCKS[id].label.toLowerCase() + ' to grow on');
       return false;
     }
 
     // A door is two cells tall, so it needs the headroom before anything else.
     if (IS_DOOR[id]) {
       if (k + 1 >= D || this.planet.at(col, k + 1) !== 0) {
-        this.ui.setHint('No room for a door');
         return false;
       }
       if (this._intersectsPlayer(col, k + 1)) return false;
@@ -6791,7 +6849,7 @@ class Game {
       // The bow's own refusal outranks the feed prompt: a player holding the
       // button on an empty quiver is asking why nothing happened, and "Feed" is
       // not the answer. Everywhere else this message is joined in below.
-      this.ui.setHint(this.bow.hint || this._feedHint(mobHit.mob));
+      this.ui.setHint(null);
       this.placeCooldown = Math.max(0, this.placeCooldown - dt);
       this.useCooldown = Math.max(0, this.useCooldown - dt);
       voxelUniforms.uBreakStage.value = -1;
@@ -6816,14 +6874,17 @@ class Game {
     }
 
     // An over-tier block still shatters and drops nothing. Silently losing six
-    // seconds to an iron vein reads as a broken game, so name the tool needed.
+    // No "Needs a Pickaxe". It was here to stop a slow dig reading as a broken
+    // game, and it bought that at the price of teaching the tool rules out
+    // loud, which is the one thing this game is not supposed to do: a stone
+    // that only a pickaxe pays out for is something to work out by swinging an
+    // axe at one, not something to be told at the crosshair. The dig being slow
+    // and the block yielding nothing already say it, in the language the game
+    // is played in. `harvestHint` is left in `Items.js` and simply not called.
+    //
     // One chain, one winner. Setting a hint anywhere above this ran into the
     // unconditional clear at the end of it and lasted exactly zero frames.
-    // `held()`: this line describes the *dig*, and the dig is the main hand's.
-    // With a pickaxe in the left hand and an empty right one, "Needs a pickaxe"
-    // is the true and useful answer, and `active()` used to suppress it and then
-    // fail to drop the ore anyway.
-    const needTool = hit ? harvestHint(hit.id, ITEMS[this.inventory.held().item]) : null;
+    const needTool = null;
     // (`heldSlot`/`heldItem` — the hand the right button is speaking to — are
     // resolved once at the top of this method, above the creature branch.)
     // Soil with something built over it, said while you are *aiming*.
@@ -6832,9 +6893,7 @@ class Game {
     // branch would live for one frame and be seen by nobody. Up here it is
     // re-set every frame the crosshair is on covered soil, which is also when
     // the player is deciding what to do about it.
-    const tillHint = hit && heldItem?.tool?.kind === 'shovel'
-      && this.farming.canTill(hit.id) && !this.farming.openAbove(hit.col, hit.k)
-      ? 'No room to till' : null;
+    const tillHint = null;
     // Same argument as the line above it, for the other invisible tax. A player
     // who dives onto a lake bed and finds sand taking two thirds of a second a
     // block has no way to tell a rule from a broken timer, so the rule says so
@@ -6843,15 +6902,15 @@ class Game {
     //
     // Gated on a breakable block so it is not a permanent caption on swimming;
     // water's own hardness is -1, so looking at the lake says nothing.
-    const dragHint = hit && BLOCKS[hit.id]?.hardness >= 0 ? this._dragHint() : null;
+    const dragHint = null;
     if (hit && IS_SIGN[hit.id]) {
       // Reading is looking: no key to press and nothing to open, so a row of
       // signs can be read by sweeping across them.
       const text = this.signs.get(hit.col * D + hit.k);
       this.ui.setHint(text ? `"${text}"` : 'A blank sign');
     } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
-      this.ui.setHint(`<kbd>RMB</kbd> ${hit.id === ID.bench ? 'Craft' : 'Smelt'}`);
-    } else if (needTool || dragHint || tillHint || this.bow.hint) {
+      this.ui.setHint(null);
+    } else if (needTool || dragHint || tillHint) {
       // Both can be true — a wrong tool on a wet seam is the worst case in the
       // game and the one most likely to be read as broken — so neither hides
       // the other.
@@ -6861,7 +6920,7 @@ class Game {
       // offhand, and "Out of arrows" is exactly the message that must survive
       // that — it is the reason the player is about to be placing a torch with
       // a bow in their hand.
-      this.ui.setHint([needTool, dragHint, tillHint, this.bow.hint].filter(Boolean).join(', '));
+      this.ui.setHint([needTool, dragHint, tillHint].filter(Boolean).join(', '));
     } else this.ui.setHint(null);
 
     const m = this.mining;
@@ -6931,7 +6990,7 @@ class Game {
     // line that lets a bow be drawn *from the offhand*: a pickaxe claims
     // nothing, so `heldItem` is the left hand's bow, and `_tickBow` — which
     // resolves the hand exactly the same way — is charging it.
-    if (heldItem?.bow) { this.eating = 0; this.ui.setHint(this.bow.hint || null); return; }
+    if (heldItem?.bow) { this.eating = 0; this.ui.setHint(null); return; }
 
     // --- eating: hold RMB on any food ---
     //
@@ -6972,15 +7031,20 @@ class Game {
       if (this._useBucket(heldSlot)) return;
     }
 
-    // --- fishing: cast, wait, strike ------------------------------------
+    // --- fishing: cast, wait, fight -------------------------------------
     if (heldItem?.tool?.kind === 'rod') {
-      if (input.clicked[2] && input.locked && this.useCooldown === 0) {
+      // Once the fight is on, the button is the control and not a click any
+      // more: a press that reeled in mid-fight would throw the fish away on the
+      // first thing the player instinctively does, which is grab the button.
+      if (!this.fishing?.fight
+          && input.clicked[2] && input.locked && this.useCooldown === 0) {
         this.useCooldown = 0.3;
         this._rodClick();
       }
       this._tickFishing(dt);
       if (this.fishing) {          // holding the line: nothing else to do
-        this.ui.setHint(this.fishing.bite > 0 ? 'A bite, click' : 'Waiting');
+        // Nothing is said during the fight. The bar is the instruction.
+        this.ui.setHint(this.fishing.fight ? '' : 'Waiting');
         return;
       }
     } else if (this.fishing) {
@@ -7082,17 +7146,26 @@ class Game {
   _rodClick() {
     if (!this.fishing) {
       const wet = this.planet.raycast(
-        this.player.eye, this.player.lookDir, this.player.reach + 3, { hitLiquid: true },
+        this.player.eye, this.player.lookDir, FISH_CAST_RANGE, { hitLiquid: true },
       );
       if (!wet || this.planet.at(wet.col, wet.k) !== ID.water) {
         this.ui.setHint('Cast at open water');
         return;
       }
-      const c = this.planet.centerOf(wet.col, wet.k, new THREE.Vector3());
+      // The ray can enter a body through a side face — off a low pier, or into
+      // the step at the edge of a shelf — and land a cell or two under the
+      // surface, which put the float inside the water instead of on it. Climb
+      // the column to the last water cell so a cast always floats.
+      let k = wet.k;
+      while (k + 1 < D && this.planet.at(wet.col, k + 1) === ID.water) k++;
+      const c = this.planet.centerOf(wet.col, k, new THREE.Vector3());
       this.fishing = {
-        col: wet.col, k: wet.k, pos: c,
+        col: wet.col, k, pos: c,
+        // Where you were standing when you cast. The leash is measured from
+        // here, not from the float — see FISH_LEASH.
+        from: this.player.position.clone(),
         wait: FISH_WAIT_MIN + Math.random() * (FISH_WAIT_MAX - FISH_WAIT_MIN),
-        bite: 0, bob: 0,
+        bob: 0,
       };
       this._showBobber(c);
       this.audio.splash(c);
@@ -7103,16 +7176,126 @@ class Game {
         (s) => ITEMS[s.item]?.tool?.kind === 'rod')));
       return;
     }
-    // Line is out. Striking during the bite window lands it.
-    if (this.fishing.bite > 0) this._landCatch();
-    else {
-      this.ui.toast('Too soon.', itemIdOf('fishing_rod'), 1400);
-      // The same event as striking too late, and it gets the same sound: the
-      // line comes back with nothing on it. Which end of the window you missed
-      // is what the toast is for.
-      this.audio.lineLost(this.fishing.pos);
-      this._stopFishing();
+    // Line is out and nothing is on it yet, so this click is reeling in early.
+    // A click during the fight never arrives here: the caller hands the button
+    // to the bar the moment a fish is on, because grabbing the button is the
+    // first thing anyone does when the bar appears.
+    this.ui.toast('Too soon.', itemIdOf('fishing_rod'), 1400);
+    // The line comes back with nothing on it, and that is the same event as
+    // losing one, so it is the same sound.
+    this.audio.lineLost(this.fishing.pos);
+    this._stopFishing();
+  }
+
+  /**
+   * What is on the end of the line, decided the moment it bites rather than the
+   * moment it lands.
+   *
+   * It has to be decided early now, because the fight's difficulty *is* the
+   * rarity: the roll that says "treasure" is the same roll that says "this one
+   * runs". Rolling at landing time, as it used to, would mean every fish fought
+   * identically and the reward was a lottery played after the skill.
+   *
+   * `hard` is 0..1 and is the only thing `_tickFight` reads.
+   */
+  _rollCatch() {
+    const roll = Math.random();
+    if (roll > 0.93) {
+      const name = ['amethyst', 'coin', 'coin', 'emerald'][(Math.random() * 4) | 0];
+      return {
+        id: itemIdOf(name), count: name === 'coin' ? 3 + ((Math.random() * 6) | 0) : 1,
+        hard: 0.78 + Math.random() * 0.22,
+      };
     }
+    if (roll > 0.78) {
+      const name = ['stick', 'seeds', 'clay'][(Math.random() * 3) | 0];
+      return { id: itemIdOf(name), count: 1, hard: 0.3 + Math.random() * 0.2 };
+    }
+    // The common fish, and even these are not all the same: the bottom of the
+    // roll is a lazy one and the top of it is nearly an odd-and-end.
+    return { id: itemIdOf('fish'), count: 1, hard: (roll / 0.78) * 0.32 };
+  }
+
+  /**
+   * A fish is on. Set up the balance bar.
+   *
+   * The shuttle starts under the fish and at rest, so the first quarter second
+   * is contact rather than a scramble — the bar has to be readable before it is
+   * hard. The fish starts mid-track and running.
+   */
+  _beginFight(f) {
+    const rod = ITEMS[this.inventory.actingSlot(
+      (s) => ITEMS[s.item]?.tool?.kind === 'rod')?.item]?.tool ?? { tier: 0, speed: 1 };
+    const c = this._rollCatch();
+    const half = FIGHT_HALF + FIGHT_HALF_PER_TIER * (rod.tier ?? 0);
+    f.catch = c;
+    f.fight = {
+      hard: c.hard,
+      half,
+      pull: FIGHT_ACC * (rod.speed ?? 1),
+      x: 0.5, v: 0,               // the shuttle
+      fx: 0.5, fv: 0, to: 0.5, t: 0, // the fish
+      p: FIGHT_START,
+      on: true,
+      wasOn: true,
+    };
+    this.audio.splash(f.pos);
+    this.particles.splash(f.pos, this.player.up, 0.7);
+  }
+
+  /**
+   * One frame of the fight.
+   *
+   * The shuttle is a weight on a spring you do not have: holding the button is
+   * the only upward force, and letting go is the only downward one, so keeping
+   * it anywhere but the two ends is a continuous act. That is the whole game,
+   * and it is why the bar needs no caption.
+   */
+  _tickFight(dt, f) {
+    const g = f.fight;
+    const held = !!(this.input.buttons[2] && this.input.locked);
+
+    // --- the shuttle ---
+    g.v += (held ? g.pull : -FIGHT_GRAV) * dt;
+    g.v -= g.v * FIGHT_DRAG * dt;
+    g.x += g.v * dt;
+    if (g.x < g.half) { g.x = g.half; g.v = Math.max(0, g.v); }
+    if (g.x > 1 - g.half) { g.x = 1 - g.half; g.v = Math.min(0, g.v); }
+
+    // --- the fish ---
+    // A run is picked, not steered: a new destination every so often and an
+    // acceleration towards it. A rare fish picks more often and pulls harder,
+    // which reads as darting rather than as merely faster.
+    g.t -= dt;
+    if (g.t <= 0) {
+      g.t = (1.25 - 0.62 * g.hard) * (0.55 + Math.random() * 0.9);
+      g.to = Math.random();
+    }
+    g.fv += Math.sign(g.to - g.fx) * (2.0 + 2.1 * g.hard) * dt;
+    g.fv -= g.fv * 3.4 * dt;
+    g.fx += g.fv * dt;
+    if (g.fx < 0.03) { g.fx = 0.03; g.fv = Math.abs(g.fv) * 0.4; g.to = Math.random(); }
+    if (g.fx > 0.97) { g.fx = 0.97; g.fv = -Math.abs(g.fv) * 0.4; g.to = Math.random(); }
+
+    // --- contact ---
+    g.on = Math.abs(g.fx - g.x) <= g.half;
+    g.p += (g.on ? FIGHT_GAIN : -FIGHT_DRAIN * (1 + 0.35 * g.hard)) * dt;
+    if (g.on && !g.wasOn) this.audio.nibble(f.pos);   // regained it
+    g.wasOn = g.on;
+
+    if (g.p >= 1) { this._landCatch(); return; }
+    if (g.p <= 0) {
+      this.ui.toast('It got away.', itemIdOf('fishing_rod'), 1600);
+      this.audio.lineLost(f.pos);
+      // Losing costs the attempt and one point off the rod, the same as landing
+      // one. Nothing else: the punishment for a bad fight is the minute you
+      // spent on it.
+      this.inventory.damageHeld(1, this.inventory.actingSlot(
+        (s) => ITEMS[s.item]?.tool?.kind === 'rod'));
+      this._stopFishing();
+      return;
+    }
+    this.ui.fishFight(g);
   }
 
   _tickFishing(dt) {
@@ -7120,7 +7303,9 @@ class Game {
     if (!f) return;
     // Wander off and the line comes in on its own, rather than fishing a lake
     // you are no longer standing beside.
-    if (this.player.position.distanceTo(f.pos) > FISH_LEASH) { this._stopFishing(); return; }
+    if (this.player.position.distanceTo(f.from ?? f.pos) > FISH_LEASH) {
+      this._stopFishing(); return;
+    }
 
     // The water can leave while the line is out. Only the cast was ever checked
     // for water, which was survivable when water could not move; a starved flow
@@ -7134,25 +7319,18 @@ class Game {
       return;
     }
 
-    if (f.bite > 0) {
-      f.bite -= dt;
-      if (f.bite <= 0) {
-        this.ui.toast('It got away.', itemIdOf('fishing_rod'), 1600);
-        // The bite is `splash` — a slap and a run of rising bubbles. This is
-        // the same water going back the other way, and it has to be its own
-        // sound rather than a quieter splash: everything in it falls, which is
-        // the entire tell that the line came back empty.
-        this.audio.lineLost(f.pos);
-        this._stopFishing();
-      }
+    if (f.fight) {
+      this._tickFight(dt, f);
+      // The fight can end the cast from inside — landed, lost, or the line came
+      // in — and everything below this point wants a float that still exists.
+      if (!this.fishing) return;
+      this._bobFloat(f, dt);
       return;
     }
     f.wait -= dt;
     f.nibbleT = Math.max(0, (f.nibbleT ?? 0) - dt);
     if (f.wait <= 0) {
-      f.bite = FISH_BITE_WINDOW;
-      this.audio.splash(f.pos);
-      this.particles.splash(f.pos, this.player.up, 0.7);
+      this._beginFight(f);
     } else if (Math.random() < dt * 0.7) {
       // the odd nibble, so the wait is not a blank stare
       this.particles.bubbles(f.pos, this.player.up, 1);
@@ -7166,17 +7344,28 @@ class Game {
         this.audio.nibble(f.pos);
       }
     }
+    this._bobFloat(f, dt);
+  }
+
+  /**
+   * The float on the water, and the line that goes to it.
+   *
+   * Pulled under while a fish is on: the dip is the world's half of the balance
+   * bar, so a player watching the water rather than the HUD still sees the
+   * fight happening.
+   */
+  _bobFloat(f, dt) {
     f.bob += dt;
-    if (this.bobber) {
-      // `centerOf` is the middle of the cell, and the water's surface is half a
-      // cell above that — offsetting from the centre left the float sunk inside
-      // the block, where it rendered as nothing at all.
-      _v1.copy(f.pos).addScaledVector(this.player.up,
-        BOBBER_FLOAT + Math.sin(f.bob * 2.2) * 0.05 - (f.bite > 0 ? 0.22 : 0));
-      this.bobber.position.copy(_v1);
-      this.bobber.visible = true;
-      this._updateFishLine(_v1);
-    }
+    if (!this.bobber) return;
+    // `centerOf` is the middle of the cell, and the water's surface is half a
+    // cell above that — offsetting from the centre left the float sunk inside
+    // the block, where it rendered as nothing at all.
+    _v1.copy(f.pos).addScaledVector(this.player.up,
+      BOBBER_FLOAT + Math.sin(f.bob * (f.fight ? 9 : 2.2)) * (f.fight ? 0.09 : 0.05)
+      - (f.fight ? 0.2 : 0));
+    this.bobber.position.copy(_v1);
+    this.bobber.visible = true;
+    this._updateFishLine(_v1);
   }
 
   /**
@@ -7184,10 +7373,20 @@ class Game {
    *
    * Without it the cast reads as a red ball someone left on the water: the rod
    * is in your hand, the float is ten feet out, and nothing says the two are
-   * connected. The catch is that the rod lives in the view model's own scene
-   * and has no position in the world at all, so there is nothing to anchor to.
-   * Hanging the near end off the camera by the same offsets the rod is drawn at
-   * puts it where the tip *looks*, which is all the eye is asking for.
+   * connected.
+   *
+   * The near end is the rod's actual tip. That was not askable when this was
+   * written — the rod lives in the view model's own scene, on its own camera —
+   * so it used to be a hand-measured offset off the world camera, and the owner
+   * saw exactly what that is: a string starting three quarters of a unit away
+   * from the end of the rod, in mid air, and starting from the wrong side of
+   * the screen whenever the rod was in the left hand.
+   *
+   * `ViewModel.tipAnchorWorld` answers it properly now, fov correction and all
+   * — the view model draws at a fixed 70 degrees and the world does not, so the
+   * two only agree once that ratio is applied. It returns null when there is
+   * genuinely nothing to ask (third person, or the frame or two before the
+   * model lands), and only then does the old constant stand in.
    */
   _updateFishLine(bobberPos) {
     if (!this.fishLine) {
@@ -7201,7 +7400,13 @@ class Game {
       this.scene.add(this.fishLine);
     }
     const cam = this.camera;
-    _v2.set(0.30, -0.24, -0.55).applyQuaternion(cam.quaternion).add(cam.position);
+    // The same hand resolution the cast used, so a left-handed cast hangs its
+    // line off the left hand.
+    const rodItem = this.inventory.actingSlot(
+      (s) => ITEMS[s.item]?.tool?.kind === 'rod')?.item;
+    if (!(rodItem && this.viewModel.tipAnchorWorld(rodItem, cam, _v2))) {
+      _v2.set(0.30, -0.24, -0.55).applyQuaternion(cam.quaternion).add(cam.position);
+    }
     const arr = this.fishLine.geometry.attributes.position.array;
     arr[0] = _v2.x; arr[1] = _v2.y; arr[2] = _v2.z;
     arr[3] = bobberPos.x; arr[4] = bobberPos.y; arr[5] = bobberPos.z;
@@ -7212,12 +7417,10 @@ class Game {
   _landCatch() {
     const f = this.fishing;
     if (!f) return;
-    const roll = Math.random();
-    let name = 'fish';
-    if (roll > 0.93) name = ['amethyst', 'coin', 'coin', 'emerald'][(Math.random() * 4) | 0];
-    else if (roll > 0.78) name = ['stick', 'seeds', 'clay'][(Math.random() * 3) | 0];
-    const id = itemIdOf(name);
-    const count = name === 'coin' ? 3 + ((Math.random() * 6) | 0) : 1;
+    // Rolled when it bit, because the fight you just won was that roll's own
+    // difficulty. `_rollCatch` here is the fallback for a landing that somehow
+    // never fought.
+    const { id, count } = f.catch ?? this._rollCatch();
     const taken = this.inventory.add(id, count);
     if (taken < count) {
       _v1.copy(this.player.position).addScaledVector(this.player.up, 0.8);
@@ -7252,6 +7455,7 @@ class Game {
     this.fishing = null;
     if (this.bobber) this.bobber.visible = false;
     if (this.fishLine) this.fishLine.visible = false;
+    this.ui.fishFight(null);
     this.ui.setHint('');
   }
 
@@ -7304,7 +7508,6 @@ class Game {
       // nobody poured is a fire with no end, and it can be minted next to
       // anything you would rather not set alight. One test, both liquids.
       if (!this.water.sources.has(key)) {
-        this.ui.setHint(kind === 'lava' ? 'Too thin to scoop' : 'Too shallow to scoop');
         return false;
       }
       this._applyEdits([{ col: wet.col, k: wet.k, id: 0 }]);

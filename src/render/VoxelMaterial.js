@@ -975,13 +975,19 @@ const LIQUID_MAP_FRAG = /* glsl */`
    * Four things per kind, and they are ordered so that the one you notice first
    * is not the hue:
    *
-   *   dScale  is CLARITY and does most of the work. It is how many blocks of
-   *           depth the colour ramp saturates over, so a small number is water
-   *           you cannot see into and a large one is water you can read a bed
-   *           through. Peat at 0.10 closes up inside one block; a mountain tarn
-   *           at 0.62 shows you six blocks of slate.
+   *   dScale  is CLARITY, and it is in units of the ENCODED depth, not blocks.
+   *           The mesher sends min(1, d / 7) (Mesher.js, liquidDepth), so the
+   *           whole scale runs out at seven blocks and dScale 0.10 closes up
+   *           inside one. What that means, and it cost this a verification
+   *           pass to find: on water deeper than seven blocks wDepth is pinned
+   *           at 1.0 and EVERY dScale up to 1.0 gives the same saturated ramp.
+   *           A measured seven-block tarn came out identical at 0.62 and at
+   *           1.00 (patch mean 90,138,201 against 90,138,200). Past seven
+   *           blocks dScale cannot make water clear. Only alpha can.
    *   aLo/aHi is the same axis in the blend, and has to move with dScale or the
-   *           colour arrives and the bed shows straight through it anyway.
+   *           colour arrives and the bed shows straight through it anyway. It
+   *           is also the ONLY lever left on water at the bottom of the depth
+   *           scale, which is why the tarn's clarity is spent here.
    *   wGloss  scales the sky reflection and the sun glint.
    *   the two colours come last on purpose.
    *
@@ -999,21 +1005,55 @@ const LIQUID_MAP_FRAG = /* glsl */`
   if (ws == 1) {
     // Pond. Standing lowland water over mud: green rather than blue, and it
     // closes up faster than the sea because there is silt in it.
-    shallow = vec3(0.17, 0.47, 0.36); deep = vec3(0.04, 0.18, 0.15);
-    dScale = 0.30; aLo = 0.56; aHi = 0.93; foamK = 0.7; wGloss = 0.85;
+    //
+    // "Green rather than blue" was true of the constants and false of the
+    // frame. Shot at noon on a pinned seed, the pond came out at hue 193 --
+    // cyan, four degrees off the ocean -- because the body colour is only part
+    // of what lands: the surface texture is blue-green, the skylight is blue,
+    // and the reflection term adds more of the same. So the blue in the
+    // constants had to come down further than "green rather than blue" reads,
+    // and the gloss with it, since a pond is not a mirror. Measured hue 193 ->
+    // 171 from above and 198 -> 171 from the bank.
+    shallow = vec3(0.22, 0.46, 0.24); deep = vec3(0.07, 0.20, 0.08);
+    dScale = 0.30; aLo = 0.56; aHi = 0.93; foamK = 0.7; wGloss = 0.55;
   } else if (ws == 2) {
     // Tarn. Snowmelt on bare rock: the clearest water on the planet and the
-    // coldest colour. The long ramp is the point of it. You can see the floor
-    // of a five-block tarn, and past that it goes black rather than blue.
+    // coldest colour. You can see the floor of a five-block tarn, and past
+    // that it goes black rather than blue.
+    //
+    // That was the intent and the frame did not have it. A real tarn on a
+    // pinned seed is seven blocks deep, so wDepth sits at 1.0 across almost
+    // its whole surface and dScale had nothing left to shape -- the water was
+    // a flat opaque sheet at alpha 0.95 with no slate visible anywhere, and
+    // was indistinguishable from the plunge basin, whose entire identity is
+    // being the tarn WITHOUT the clarity. Raising dScale changed the frame by
+    // one RGB unit. Dropping the alpha ceiling is what actually opened it: at
+    // aHi 0.68 the submerged ledges and floor read through the water while the
+    // deep centre still darkens, and the two kinds separate on sight.
+    // aLo 0.20 keeps the shallow rim reading as clear water rather than
+    // jumping to deep blue within a block of the shore.
     shallow = vec3(0.11, 0.44, 0.55); deep = vec3(0.01, 0.06, 0.19);
-    dScale = 0.62; aLo = 0.32; aHi = 0.95; foamK = 1.0; wGloss = 1.15;
+    dScale = 1.00; aLo = 0.20; aHi = 0.68; foamK = 1.0; wGloss = 1.15;
   } else if (ws == 3) {
     // Marsh. Peat-stained, and the one body of water on the planet you cannot
     // see into at all: brown-green, opaque within a block and nearly matte, so
     // it reads as a surface rather than as a volume. No foam, because a marsh
     // has no wave to break and a white rim round it read as a lagoon.
-    shallow = vec3(0.21, 0.25, 0.13); deep = vec3(0.09, 0.11, 0.05);
-    dScale = 0.10; aLo = 0.78; aHi = 0.94; foamK = 0.0; wGloss = 0.45;
+    //
+    // The clarity was already right -- measured, this is the most opaque water
+    // on the planet, patch contrast 4.9 against 36 for a tarn -- and the hue
+    // was not. It came out at hue 168, a green-teal, and swung to 195 seen
+    // from the bank rather than from above, which is a body of water with no
+    // fixed identity at all. Two causes, both fixed here. The surface texture
+    // and the skylight are blue-green, so a constant that merely leans brown
+    // arrives green; red has to be run up hard, and the ratios below are what
+    // land on olive rather than what look like olive in the source. And a
+    // marsh at wGloss 0.45 was still mixing in enough sky to account for the
+    // whole swing between the two views. Measured hue 168 -> 77 from above,
+    // 195 -> 156 from the bank, and the saturation drop (0.94 -> 0.36) is the
+    // "nearly matte" that was being claimed and not delivered.
+    shallow = vec3(0.80, 0.20, 0.06); deep = vec3(0.62, 0.12, 0.03);
+    dScale = 0.10; aLo = 0.78; aHi = 0.94; foamK = 0.0; wGloss = 0.22;
     bodyGain = 1.30;
   } else if (ws == 4) {
     // Oasis. Clean water over pale sand under a desert sun. The turquoise is

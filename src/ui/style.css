@@ -1049,6 +1049,12 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    with tags on it. The strip is the material and the 1px gaps between cells are
    it showing through, which is the same trick the rack uses one size up. */
 #status-bar {
+  /* Chrome, not information you are reading. The clock, the weather, the
+     season and the biome all change on their own and none of them is ever
+     urgent, so they sit back off the world instead of competing with it.
+     Minecraft shows none of these at all; this is the middle position. */
+  opacity: .62;
+  transition: opacity .3s linear;
   position: absolute; top: 10px; right: 10px;
   display: flex; align-items: stretch; gap: 1px;
   flex-wrap: wrap; justify-content: flex-end;
@@ -1332,7 +1338,14 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    end of the groove it belongs to. Ink with a tight pale halo: over the fill it
    is dark type on a lit colour, over the empty groove it is dark type on paper,
    and both of those are readable without knowing which one it will be. */
+/* Hidden, not deleted. Minecraft never prints a number on a bar - it shows ten
+   hearts and lets you count them - and "14/20" beside a bar that is already
+   70% full is the same fact twice, in the more clerical of the two languages.
+   The element stays so the readout can come back behind a setting if anyone
+   wants it; `visibility` rather than `display` so it keeps its box and the
+   bar's right edge does not move. */
 .vital .v-num {
+  visibility: hidden;
   position: absolute; right: 5px; top: 50%; z-index: 2;
   transform: translateY(-50%);
   font: 700 var(--fs-xs)/1 var(--mono); font-style: normal;

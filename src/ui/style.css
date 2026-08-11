@@ -85,9 +85,12 @@
   --wood-mid: #4f3315;
   --wood-dim: #2b1a08;
   --wood-line: #170d04;
+  /* Flat timber. The two repeating grain layers came off: at a 3-11px period
+     they read as hatching rather than wood once a case is more than a few
+     hundred pixels across, and hatching under every window is most of what
+     made the menus busy. The three-stop gradient carries the material on its
+     own. Same colours, so nothing else in the set has to move. */
   --wood:
-    repeating-linear-gradient(93deg, rgba(255, 222, 170, .09) 0 1px, rgba(0, 0, 0, 0) 1px 3px, rgba(0, 0, 0, .14) 3px 4px, rgba(0, 0, 0, 0) 4px 11px),
-    repeating-linear-gradient(87deg, rgba(0, 0, 0, .13) 0 1px, rgba(0, 0, 0, 0) 1px 7px),
     linear-gradient(180deg, var(--wood-lit), var(--wood-mid) 38%, var(--wood-dim));
   /* The same timber with the grain running the long way, for anything much
      wider than it is tall. `--wood`'s grain is near-vertical on a 3 to 11px
@@ -111,12 +114,9 @@
   /* --- material two: parchment -----------------------------------------
      A lit top, a mottle that is four soft radials rather than a noise image,
      and an edge burn so the sheet is darker where the frame holds it. */
+  /* Flat parchment: three radial mottles and two hatch layers came off the
+     same way the wood grain did. A sheet you put slots on wants to be quiet. */
   --paper:
-    radial-gradient(120% 80% at 18% 8%, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 55%),
-    radial-gradient(90% 70% at 82% 96%, rgba(150, 116, 62, .16), rgba(255, 255, 255, 0) 60%),
-    radial-gradient(60% 50% at 68% 22%, rgba(203, 170, 112, .13), rgba(255, 255, 255, 0) 70%),
-    repeating-linear-gradient(91deg, rgba(122, 94, 54, .045) 0 1px, rgba(0, 0, 0, 0) 1px 4px),
-    repeating-linear-gradient(3deg, rgba(122, 94, 54, .035) 0 1px, rgba(0, 0, 0, 0) 1px 5px),
     linear-gradient(168deg, var(--parchment), var(--parchment-2));
   /* A ticket: a smaller piece of the same sheet, for rows and faces. */
   --paper-cell:
@@ -258,7 +258,8 @@
   --r-lg: 4px;
   --r-xl: 6px;
   /* How thick the wooden carcass is on a card, and on a tray inside one. */
-  --frame: 9px;
+  /* 9px was a chunky case. 6 still reads as a frame around a sheet. */
+  --frame: 6px;
   --frame-sm: 6px;
 
   /* One easing curve for everything that opens, lifts or settles, and one

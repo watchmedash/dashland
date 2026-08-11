@@ -643,6 +643,8 @@ const HAND_LIGHT_RADIUS = 8;
  * always the real difference.
  */
 const HAND_LIGHT_REACH = 13.0;
+/** Turns the shader strength into a PointLight intensity for scene-lit bodies. */
+const HAND_LIGHT_SCENE = 9.0;
 /**
  * How far from the player a dropped flame is looked for, in world units.
  *
@@ -1154,6 +1156,16 @@ class Game {
     this.particles = new Particles(this.scene, this.planet);
     this.blockModels = new BlockModels(this.scene);
     this.signText = new SignText(this.scene);
+    // The carried flame, for everything the voxel shader does not draw.
+    //
+    // The hand light is a set of uniforms on the terrain material, so a torch
+    // in your fist lit the ground and nothing standing on it: at midnight a cow
+    // five cells away was a flat blue cutout on lit stone. Mobs, drops and
+    // block models are scene-lit, so they need a real light. Terrain ignores it
+    // - the voxel material is a ShaderMaterial with lights off - so nothing is
+    // lit twice.
+    this.handLight = new THREE.PointLight(0xffffff, 0, HAND_LIGHT_REACH, 1.6);
+    this.scene.add(this.handLight);
     this.drops = new Drops(this.scene, this.planet, this.materials);
     // Arrows in flight. Built here, between the drops and the animals, because
     // it needs the planet for its collision and nothing else: the mob list is
@@ -6531,6 +6543,11 @@ class Game {
     u.uHandLightPos.value.copy(this.player.eye)
       .addScaledVector(this.player.lookDir, 0.45)
       .addScaledVector(this.player.up, -0.35);
+    // Same flame, same place, for the scene-lit half of the world.
+    this.handLight.color.setRGB(lc[0], lc[1], lc[2]);
+    this.handLight.intensity = strength * HAND_LIGHT_SCENE;
+    this.handLight.distance = u.uHandLightRadius.value;
+    this.handLight.position.copy(u.uHandLightPos.value);
     // ...unless the hand is inside a wall, which happens the moment you put
     // your face against one. That was harmless while the flame lit through
     // rock; now that it is occluded, a light stuck in a block is shadowed by

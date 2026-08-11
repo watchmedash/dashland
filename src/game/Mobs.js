@@ -22,6 +22,7 @@ import {
   ID, IS_SHAPED, IS_LEAF, IS_TREE, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
   isPassable, CONTACT_HURT,
 } from '../world/Blocks.js';
+import { SKY_ATTEN } from '../world/Lighting.js';
 import { itemIdOf } from './Items.js';
 import { rollStock, rollRequest } from './Trade.js';
 import { makeRng, clamp, lerp } from '../util/Noise.js';
@@ -9107,9 +9108,31 @@ export class Mobs {
       mob.skyT = SKY_PROBE_PERIOD * (0.75 + Math.random() * 0.5);
       const c = mob.cell;
       const col = this._colOf(c.f, c.ci, c.cj);
+      // What counts as being over this body is what the *terrain* counts, which
+      // is `SKY_ATTEN`, not "anything solid".
+      //
+      // Leaves are deliberately zero in that table, and Lighting.js spends a
+      // paragraph on why: a canopy is a sieve, not a lid, a forest floor is not
+      // a cave, and the canopy's shadow is already drawn per leaf by the sun's
+      // shadow map. So the ground under a wood keeps full sky - and this probe,
+      // reading `solidAt`, charged the body standing on that ground three
+      // blockers for the same leaves and cut it to SKY_SHADE_MIN. A cow in a
+      // field was fine and anything under a tree was a silhouette on lit grass.
+      //
+      // Every body under a tree paid it; it is the monsters you notice, because
+      // their pack is by far the darkest art in the game - whole-texture luma 35
+      // to 110 against the animals' shared colormap at 103 - so the same cut
+      // takes them from dim to unreadable. Measured at 07:00 with the sun up,
+      // one frame either side of this line: a cyclops under three layers of
+      // canopy went from 7.8/255 to 20.9. The owner's words for it are the same
+      // words Lighting.js uses about the wood - having to put a torch down in
+      // daylight.
+      //
+      // A plank roof, a slab, a stair or a stone overhang is still 255 here, so
+      // a body indoors or in a cave darkens exactly as it did.
       let blocked = 0;
       for (let k = Math.floor(c.ck) + 2; k < D; k++) {
-        if (this.planet.solidAt(col, k) && ++blocked >= 3) break;
+        if (SKY_ATTEN[this.planet.at(col, k)] === 255 && ++blocked >= 3) break;
       }
       const open = 1 - Math.min(3, blocked) / 3;
       mob.sky = Math.round((SKY_SHADE_MIN + (1 - SKY_SHADE_MIN) * open) * 16) / 16;

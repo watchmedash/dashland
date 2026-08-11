@@ -145,7 +145,6 @@ export class Drops {
       const m = new THREE.Mesh(getBlockGeo(def.block),
         holes ? this.materials.cutout : this.materials.opaque);
       m.castShadow = false;
-      m.layers.enable(2);   // lit by the carried flame - see HAND_LAYER
       m.receiveShadow = false;
       return m;
     }

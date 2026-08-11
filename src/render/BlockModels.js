@@ -361,7 +361,6 @@ export class BlockModels {
     // story is in `Sky.js`, above `entityFill`.)
     mesh.receiveShadow = true;
     mesh.castShadow = false;
-    mesh.layers.enable(2);   // lit by the carried flame - see HAND_LAYER
     // One bounding sphere for instances spread over forty cells is a sphere
     // containing the player, so culling it can only ever be wrong — and three.js
     // computes that sphere from the matrices as they were when it last looked.

@@ -644,19 +644,6 @@ const HAND_LIGHT_RADIUS = 8;
  */
 const HAND_LIGHT_REACH = 13.0;
 /**
- * The layer the carried flame lives on.
- *
- * The first attempt at this was a plain PointLight on the default layer, and it
- * lit the TERRAIN as well - the voxel materials are MeshStandardMaterial, so
- * they take scene lights, and they already apply this same flame from their own
- * uniforms. Two lots of light plus a specular lobe is why the ground sparkled
- * in the morning. A light only reaches objects sharing a layer with it, so this
- * one sits on its own and bodies opt in.
- */
-export const HAND_LAYER = 2;
-/** Turns the shader strength into a PointLight intensity for scene-lit bodies. */
-const HAND_LIGHT_SCENE = 6.0;
-/**
  * How far from the player a dropped flame is looked for, in world units.
  *
  * A little past the reach of the light itself, so one walks into view already
@@ -1167,11 +1154,6 @@ class Game {
     this.particles = new Particles(this.scene, this.planet);
     this.blockModels = new BlockModels(this.scene);
     this.signText = new SignText(this.scene);
-    // The carried flame for everything the voxel shader does not draw: mobs,
-    // drops, block models. On HAND_LAYER so it cannot reach terrain.
-    this.handLight = new THREE.PointLight(0xffffff, 0, HAND_LIGHT_REACH, 1.6);
-    this.handLight.layers.set(HAND_LAYER);
-    this.scene.add(this.handLight);
     this.drops = new Drops(this.scene, this.planet, this.materials);
     // Arrows in flight. Built here, between the drops and the animals, because
     // it needs the planet for its collision and nothing else: the mob list is
@@ -6549,11 +6531,6 @@ class Game {
     u.uHandLightPos.value.copy(this.player.eye)
       .addScaledVector(this.player.lookDir, 0.45)
       .addScaledVector(this.player.up, -0.35);
-    // Same flame, same place, for the scene-lit half of the world.
-    this.handLight.color.setRGB(lc[0], lc[1], lc[2]);
-    this.handLight.intensity = strength * HAND_LIGHT_SCENE;
-    this.handLight.distance = u.uHandLightRadius.value;
-    this.handLight.position.copy(u.uHandLightPos.value);
     // ...unless the hand is inside a wall, which happens the moment you put
     // your face against one. That was harmless while the flame lit through
     // rock; now that it is occluded, a light stuck in a block is shadowed by

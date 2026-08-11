@@ -29,6 +29,35 @@ export const isReady = (url) => protos.has(url);
 const unlitFixed = new WeakMap();
 
 /**
+ * How much brighter the monster pack has to be drawn to sit where the animals
+ * do.
+ *
+ * Measured on the texels the models actually use — a palette sheet is mostly
+ * empty, so a whole-image average is not the albedo of anything — by sampling
+ * each pack's own UVs:
+ *
+ *   pets      mean luma 141  (p50 140, p95 227)
+ *   monsters  mean luma  59  (p50  50, p95 126)
+ *
+ * That gap is not lighting, it is paint. The monster pack is authored *unlit*,
+ * i.e. meant to be shown at face value with no diffuse term at all, so
+ * rebuilding it as a lit material (see `lit`) multiplies an already dark albedo
+ * by an irradiance below one and the thing reads as a silhouette in broad
+ * daylight. 141/59 is what closes it, and it is applied as one number for the
+ * whole pack rather than per species so that the artist's own spread survives:
+ * the skull stays the brightest of them and the alien the darkest.
+ *
+ * The husk and the merchant are deliberately NOT lifted. They are the same
+ * unlit case and about the same darkness, and nobody has complained about them
+ * — a husk that reads as a shape at the edge of the firelight is the animal
+ * doing its job, and it is also the one that burns at dawn.
+ */
+const MONSTER_GAIN = 141 / 59;
+
+/** The packs that need it, by url. */
+const gainFor = (url) => (url.includes('/monsters/') ? MONSTER_GAIN : 1);
+
+/**
  * Give a model back its shadows.
  *
  * The Blocky Characters exports — the husk and the wandering merchant, every
@@ -46,13 +75,21 @@ const unlitFixed = new WeakMap();
  * any property that forces a re-upload renders the mob flat white. Reading one
  * across to a new material does not.
  */
-function lit(mat) {
+function lit(mat, gain = 1) {
   if (!mat || !mat.isMeshBasicMaterial) return mat;
+  // Keyed on the source material alone, which stays correct while `gainFor`
+  // answers by url: one GLB's materials are its own, so a material is never
+  // asked for at two different gains.
   const done = unlitFixed.get(mat);
   if (done) return done;
   const m = new THREE.MeshStandardMaterial({
     map: mat.map,
-    color: mat.color,
+    // Above 1 for the monsters, and that is the whole of MONSTER_GAIN: a
+    // multiply into the material colour, which is the same safe operation the
+    // damage tint and `spec.shade` already perform on these clones. The map
+    // itself is untouched and nothing is re-uploaded — see the warning in
+    // `prepare` about what happens when it is.
+    color: mat.color.clone().multiplyScalar(gain),
     // Matches the Cube Pets materials, so a husk and a cow sit in the same
     // light rather than one looking waxier than the other.
     roughness: 0.92,
@@ -96,7 +133,10 @@ export async function prepare(urls) {
       if (!n.isMesh) return;
       n.castShadow = true;
       n.receiveShadow = true;
-      n.material = Array.isArray(n.material) ? n.material.map(lit) : lit(n.material);
+      const gain = gainFor(url);
+      n.material = Array.isArray(n.material)
+        ? n.material.map((m) => lit(m, gain))
+        : lit(n.material, gain);
     });
 
     // Measure the rest pose. Clips move the parts around, but the rest pose is

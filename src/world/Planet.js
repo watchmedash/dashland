@@ -331,6 +331,12 @@ export class Planet {
       } else {
         mesh = new THREE.Mesh(geo, mats[gi]);
         mesh.castShadow = gi === GROUP_OPAQUE || gi === GROUP_CUTOUT;
+        // A cutout casts the shape of its art, not the shape of its quad. Without
+        // this the shadow pass uses a plain MeshDepthMaterial, which cannot read
+        // the tile atlas, and a grass tuft lays down two solid slabs.
+        if (gi === GROUP_CUTOUT && this.materials.cutoutDepth) {
+          mesh.customDepthMaterial = this.materials.cutoutDepth;
+        }
         mesh.receiveShadow = gi !== GROUP_LIQUID;
         mesh.matrixAutoUpdate = false;
         mesh.updateMatrix();

@@ -1707,7 +1707,9 @@ export function createVoxelMaterials() {
   liquid.roughness = 0.08;
   liquid.metalness = 0.0;
 
-  return { opaque, cutout, transparent, liquid, uniforms: voxelUniforms };
+  // The shadow pass needs its own cutout discard - see createCutoutDepthMaterial.
+  const cutoutDepth = createCutoutDepthMaterial(cutout.alphaTest);
+  return { opaque, cutout, transparent, liquid, cutoutDepth, uniforms: voxelUniforms };
 }
 
 /**
@@ -1724,6 +1726,53 @@ export function createVoxelMaterials() {
  * This repeats the cutout discard (including the sharpened alpha lookup) and
  * the wind displacement, so the AO geometry matches what is actually drawn.
  */
+/**
+ * The same discard, for the SHADOW map.
+ *
+ * A cutout chunk is a ShaderMaterial, and three.js renders the shadow pass with
+ * its own MeshDepthMaterial, which knows nothing about the tile atlas. So every
+ * hole-punched quad wrote its WHOLE rectangle into the shadow map: a tuft of
+ * grass is two crossed cards and cast two solid black slabs, and a tree canopy
+ * cast a box rather than dapple. The owner's report was "remove shadows of tall
+ * grass, it having shadows makes everything darker" - the shadows were not the
+ * problem, their shape was.
+ *
+ * Same alpha lookup as the AO prepass above, so the two passes agree about what
+ * is solid. RGBADepthPacking because that is what WebGLShadowMap asks a custom
+ * depth material for.
+ */
+export function createCutoutDepthMaterial(alphaTest = 0.42) {
+  const mat = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.RGBADepthPacking,
+    side: THREE.DoubleSide,
+  });
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, voxelUniforms);
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\n' + COMMON_VERT_HEAD)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + COMMON_VERT_BODY);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <packing>', /* glsl */`
+        #include <packing>
+        precision highp sampler2DArray;
+        uniform sampler2DArray uMap;
+        varying float vLayer;
+        varying vec2 vTexUv;
+      `)
+      .replace('#include <clipping_planes_fragment>', /* glsl */`
+        #include <clipping_planes_fragment>
+        {
+          float aFlat = texture(uMap, vec3(vTexUv, vLayer)).a;
+          if (aFlat < ${alphaTest.toFixed(3)}) discard;
+        }
+      `);
+  };
+  mat.customProgramCacheKey = () => 'voxelCutoutDepth';
+  return mat;
+}
+
 export function createCutoutNormalMaterial(alphaTest = 0.42) {
   const mat = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
   mat.blending = THREE.NoBlending;

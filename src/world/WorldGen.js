@@ -2278,12 +2278,19 @@ export class WorldGen {
           // crossed by a broad one is a corridor with the width of the narrow
           // one and the run of the broad one.
           const q = 0.030;
-          // 0.100, not 0.065. The shell threshold is the cave's THICKNESS, and
+          // 0.085, not 0.065. The shell threshold is the cave's THICKNESS, and
           // at 0.065 a shaft that met one met a seam: measured over 225
           // straight-down digs, 37.3% hit a cave and the mean opening was 2.1
           // cells - just tall enough to stand in and nothing more, which is not
-          // the "found a cave" moment the rewrite was for.
-          open = Math.abs(nc.simplex3(px * q + 5.5, py * q, pz * q)) < 0.100
+          // the "found a cave" moment the rewrite was for. At 0.085 the same sweep
+          // gives a 4.3 cell mean opening: somewhere to walk.
+          //
+          // It stops at 0.085 rather than going further because the opening is
+          // exposed surface and surface is frame time. Measured minutes apart
+          // on the same machine: 0.065 medians 19.5 ms, 0.085 medians 22, 0.100
+          // medians 22-26 with p95 up to 38. Cave quality between 0.085 and
+          // 0.100 is inside seed noise; the frame cost is not.
+          open = Math.abs(nc.simplex3(px * q + 5.5, py * q, pz * q)) < 0.085
             && Math.abs(nc.simplex3(px * q - 31.2, py * q + 7.7, pz * q)) < 0.143;
         }
         if (open) {

@@ -95,6 +95,10 @@ export async function prepare(urls) {
     gltf.scene.traverse((n) => {
       if (!n.isMesh) return;
       n.castShadow = true;
+      // Opt in to the carried flame. See HAND_LAYER in main.js: the light sits
+      // on its own layer so it cannot also light the terrain, which already
+      // applies the same torch from the voxel shader.
+      n.layers.enable(2);
       n.receiveShadow = true;
       n.material = Array.isArray(n.material) ? n.material.map(lit) : lit(n.material);
     });

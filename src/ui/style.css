@@ -133,12 +133,12 @@
      rule 3. `--emboss` and friends are kept under their old names because half
      the file already asks for them, but they are the new edge now. */
   --lip: 3px;
+  /* Border and a lip. The two inset lines and the drop shadow came off with
+     the rest of the ornament; the lip stays because it is what says the thing
+     can be pressed, which is function rather than decoration. */
   --emboss:
     0 0 0 1px var(--wood-line),
-    inset 0 1px 0 rgba(255, 255, 255, .9),
-    inset 0 -1px 0 rgba(122, 94, 54, .22),
-    0 var(--lip) 0 var(--wood-dim),
-    0 calc(var(--lip) + 3px) 7px -3px rgba(20, 12, 4, .5);
+    0 var(--lip) 0 var(--wood-dim);
   --emboss-lift:
     0 0 0 1px var(--wood-line),
     inset 0 1px 0 rgba(255, 255, 255, .98),
@@ -657,12 +657,11 @@ button.primary {
   color: #3a1c06; border: none;
   background: var(--brass);
   text-shadow: 0 1px 0 rgba(255, 232, 190, .55);
+  /* Same treatment as the plain button: border, lip, nothing else. The brass
+     colour is what makes it the key on the screen, not the shine on it. */
   box-shadow:
     0 0 0 1px var(--brass-line),
-    inset 0 1px 0 rgba(255, 250, 232, .75),
-    inset 0 -3px 6px -2px rgba(120, 54, 8, .55),
-    0 var(--lip) 0 #703a10,
-    0 calc(var(--lip) + 4px) 10px -3px rgba(90, 44, 8, .65);
+    0 var(--lip) 0 #703a10;
 }
 button.primary:hover:not(:disabled) {
   filter: brightness(1.06); color: #3a1c06; background: var(--brass);

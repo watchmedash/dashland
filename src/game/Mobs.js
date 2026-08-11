@@ -5360,6 +5360,18 @@ export class Mobs {
       // level with, and one climb clears it instead of sixty.
       for (let k = kHi; k >= kLo; k--) {
         const id = p.at(col, k);
+        // Water is the floor, for anything that flies.
+        //
+        // This scan asked `IS_SOLID` and nothing else, and water is not solid,
+        // so a flier looked straight THROUGH a lake to the seabed and read that
+        // as the ground to hold height over - which is a bee flying calmly down
+        // into the water. The surface is where the air stops, so it is what a
+        // wing has to clear. Checked before the solid test because the seabed
+        // below would otherwise win the loop.
+        if (p.liquidAt(col, k)) {
+          if (k + 1 > best) best = k + 1;
+          break;
+        }
         if (!IS_SOLID[id] || isPassable(id, p.facingAt(col, k))) continue;
         const surf = k + this._topOf(col, k);
         if (surf > best) best = surf;

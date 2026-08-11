@@ -155,13 +155,17 @@
      a lump of coal, and a black hole eats both. It is a lit timber floor with a
      hard shadow thrown across it from the top lip, which is what actually reads
      as depth — the shadow, not the darkness. */
+  /* A recess, in two layers rather than six. The floor was a three-stop
+     gradient under a four-layer shadow - an outer lift, an inner border, a
+     deep top shading and a lit bottom lip - and a window is mostly slots, so
+     that stack is multiplied by forty and is where the remaining busyness
+     lived. Minecraft draws a flat darker square with one bevel. Border and a
+     little shading is enough to read as a hole. */
   --pocket-floor:
-    linear-gradient(180deg, rgba(24, 14, 5, .62) 0 14%, rgba(96, 67, 33, .34) 42%, rgba(130, 96, 52, .3));
+    linear-gradient(180deg, rgba(24, 14, 5, .46), rgba(122, 90, 48, .26));
   --pocket:
-    0 1px 0 rgba(255, 249, 236, .4),
-    inset 0 0 0 1px rgba(14, 8, 2, .9),
-    inset 0 5px 7px -2px rgba(16, 9, 2, .8),
-    inset 0 -3px 0 rgba(255, 224, 168, .22);
+    inset 0 0 0 1px rgba(14, 8, 2, .82),
+    inset 0 3px 5px -3px rgba(16, 9, 2, .6);
   /* The shallow version, for a groove in parchment rather than in wood: a
      slider track, a segment rail, a pip socket. */
   --sunk:
@@ -2306,7 +2310,7 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
    cell says "empty" except that you can see the bottom of it, which is how a
    real tray works and is why there is no empty-state styling here at all. */
 .islot {
-  position: relative; width: 46px; height: 46px; border-radius: var(--r-sm);
+  position: relative; width: 46px; height: 46px; border-radius: 3px;
   background: var(--pocket-floor);
   box-shadow: var(--pocket);
   display: grid; place-items: center; cursor: pointer;

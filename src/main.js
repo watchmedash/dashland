@@ -1904,7 +1904,18 @@ class Game {
     document.body.appendChild(this._makeLoaderShell());
     this.ui.progress(0, 'Igniting the core');
     this._resetWorld();
-    this.seed = (Math.random() * 0x7fffffff) | 0;
+    // A world you can ask for by name. `opts.seed` is honoured when it is a
+    // number and a fresh draw otherwise, so nothing about starting a game from
+    // the menu changes.
+    //
+    // It was unconditionally random, which meant no two runs of anything ever
+    // met the same planet. That is fine for a player and ruinous for measuring:
+    // a before/after on movement, lighting or crowding cannot be read when the
+    // terrain underneath it was redrawn between the two runs, and it silently
+    // cost three separate investigations a verdict.
+    this.seed = Number.isFinite(opts.seed)
+      ? (opts.seed | 0)
+      : (Math.random() * 0x7fffffff) | 0;
     this._pendingSave = null;
     this._startWorker();
     this.worldWorker.postMessage({ type: 'init', seed: this.seed });

@@ -2684,3 +2684,17 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 100, 70, .32); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(120, 100, 70, .5); }
+
+/* No Close buttons on the sheets. The key that opened a screen closes it, and
+   so does clicking the dark outside - both of which a player already tries
+   before hunting for a button. The elements stay in the markup and stay wired,
+   so the shortcut hint and the click target are still there for anyone
+   navigating by keyboard; they are simply not drawn.
+
+   The death card keeps its buttons: it is the one sheet you cannot dismiss by
+   changing your mind, and Wake Up is a decision rather than an exit. */
+[data-close-screen][data-close-screen],
+[data-close-skills][data-close-skills],
+[data-close-settings][data-close-settings],
+[data-close-controls][data-close-controls],
+[data-close-slots][data-close-slots] { display: none; }

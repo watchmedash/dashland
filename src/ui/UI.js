@@ -832,6 +832,21 @@ export class UI {
     document.querySelector('[data-close-settings]').onclick = () => this.closeSettings();
     document.querySelector('[data-close-controls]').onclick = () => this.closeControls();
 
+    // Clicking the dark outside a sheet closes it, the way the key that opened
+    // it does. The overlay IS the backdrop - the sheet is its child - so the
+    // test is that the click landed on the overlay itself and not inside the
+    // panel, which is what `e.target === e.currentTarget` says. Each screen
+    // has its own closer because they are not one state machine: a screen, the
+    // skill tree, settings and controls all close differently.
+    const backdrop = (sel, close) => {
+      const el = document.querySelector(sel);
+      if (el) el.addEventListener('mousedown', (e) => { if (e.target === e.currentTarget) close(); });
+    };
+    backdrop('#screen', () => g.closeScreen());
+    backdrop('#skills', () => g.closeSkills());
+    backdrop('#settings', () => this.closeSettings());
+    backdrop('#controls', () => this.closeControls());
+
     const s = g.settings;
     const bind = (id, ev, fn) => { $(id).addEventListener(ev, fn); };
     bind('set-sens', 'input', (e) => { s.sensitivity = +e.target.value; $('sens-val').textContent = (+e.target.value).toFixed(2); g.persistSettings(); });

@@ -118,8 +118,19 @@ export async function prepare(urls) {
       // measures the *oriented* half-width and half-length off the same rest
       // pose; one number off the bounding box was never used by anything.
       height: size.y || 1,
-      // The exports put their origin at the feet; this is what would put a
-      // model back on the ground if one ever did not.
+      // How far the body hangs below its own origin. Measured 2026-08-11
+      // across every model in play: the eleven `animal-*.glb` are all exactly
+      // 0, so the land rig really is origin-at-the-feet, but all fifteen
+      // `fish-*.glb` are 0.90 to 1.73 - their origin sits near mid-body, which
+      // is the natural pivot for something that swims rather than stands.
+      //
+      // Nothing applies this. That is fine for the animals, where it is zero,
+      // and it is deliberate-by-accident for the fish: a swimmer centred on
+      // its position is what you want. It is recorded rather than used so the
+      // next reader does not take "the exports put their origin at the feet"
+      // on trust - it was written here, and it is only true of the land rig.
+      // See `footOffset` in `render/BlockModels.js` for the same assumption
+      // made about block models, where it was false and was costing us.
       footOffset: -box.min.y,
     });
   }));

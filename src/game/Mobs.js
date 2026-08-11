@@ -5313,6 +5313,21 @@ export class Mobs {
   }
 
   /**
+   * The surface height in one column, with none of the footprint spread.
+   *
+   * `_groundUnder` above is a max over nine samples because a walker really is
+   * held up by whatever its feet reach. A swimmer is held up by nothing, and
+   * that max is what lifted a shark out of the shallows and onto the bank — see
+   * the swimmer's floor clamp in update().
+   *
+   * @returns {number} surface height, or -1 if there is no ground below `fromK`
+   */
+  _groundOwn(mob, col, fromK) {
+    const gk = this._groundK(col, fromK, !!mob.spec.climbs);
+    return gk < 0 ? -1 : gk + this._topOf(col, gk);
+  }
+
+  /**
    * The top of the tallest thing a flier is about to fly into, or -1.
    *
    * Two probes along the heading, in the same cell-space units the integrator
@@ -8691,8 +8706,34 @@ export class Mobs {
         // in the bed. Zero for everything the pack authors from the feet, i.e.
         // for every land animal and every flier, so this branch is unchanged
         // for them — see `belly` in modelExtents.
-        const rest = floor + mob.belly;
-        if (floor >= 0 && c.ck < rest) {
+        //
+        // ...and the bed that holds a swimmer up is the one under its own
+        // column, not the highest ground anywhere under its footprint.
+        //
+        // `floor` is a max over nine samples, which is right for a body that is
+        // standing: a deer with two feet on a step is held up by the step. A
+        // fish is standing on nothing, and in the shallows those nine samples
+        // reach the bank. That is the shark-on-land report, entire. Measured on
+        // a sloping pool: a shark swimming in one-deep water with its nose over
+        // the shore read the *shore's* height, and this clamp put it at bank +
+        // belly — out of the lake and onto the beach, in one frame, from a
+        // position and a move that were both legal.
+        //
+        // What turned a moment of daylight into a walk inland is what happens
+        // next. `_colCost`'s aquatic branch asks whether the layer holding the
+        // body is liquid, and above the surface the answer is no *everywhere*,
+        // including where it stands — so a body whose own column already costs
+        // the maximum has no worse neighbour to be refused by, _walkStep's
+        // equal-cost escape admits every heading, and the fish swims off across
+        // the sand. Over a five-minute run, 12 of 18 swimmers ended on dry
+        // ground, every one of them lifted out of one-deep shallows first.
+        //
+        // A fish's tail overhanging a rock is not something to be lifted onto;
+        // that overlap is the horizontal collision's business, and `_swimBlocked`
+        // and `_aquaticCost` already hold it.
+        const bed = spec.aquatic ? this._groundOwn(mob, col, here + 1) : floor;
+        const rest = bed + mob.belly;
+        if (bed >= 0 && c.ck < rest) {
           c.ck = crossed ? rest : Math.min(rest, c.ck + MOB_MAX_RISE);
           mob.vel.k = Math.max(0, mob.vel.k);
         }

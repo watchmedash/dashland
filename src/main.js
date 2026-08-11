@@ -3739,8 +3739,20 @@ class Game {
    * which half of that face was clicked — the same rule Minecraft uses, and the
    * only one that lets you build a run of steps without turning around.
    */
-  _slabHalf(hit, col, k) {
-    if (hit.col === col) return hit.k > k ? 1 : 0;   // stacked: fill the near half
+  /**
+   * Which half of `col,k` a slab placement should fill: 1 upper, 0 lower.
+   *
+   * `aim` forces the aim-point test below. The stacked shortcut answers "was
+   * the block I hit above the cell I am filling?", which is right when those
+   * are two different cells and meaningless when they are the same one - and
+   * the merge asks about the hit's OWN cell, so it read `hit.k > hit.k`, false
+   * every time. That pinned `adding` to 0, so a second slab could never differ
+   * from a lower slab already there and the merge never fired: the slab went
+   * into the cell above and left the half-block gap the owner reported. It
+   * fired only on an upper slab, which is the rarer half of the case.
+   */
+  _slabHalf(hit, col, k, aim = false) {
+    if (!aim && hit.col === col) return hit.k > k ? 1 : 0;   // stacked: fill the near half
     // Side placement: compare the aim point with the cell's mid-height.
     const p = colParts(col);
     tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
@@ -4074,7 +4086,9 @@ class Game {
       if (IS_SLAB[there] && there === id) {
         const full = ID[BLOCKS[id].name.slice(5)];
         const filled = this.planet.facingAt(hit.col, hit.k) & 1;   // 1 upper, 0 lower
-        const adding = this._slabHalf(hit, hit.col, hit.k);
+        // : ask which half was AIMED at, not the stacked shortcut, which
+        // is degenerate when the hit cell and the target cell are the same.
+        const adding = this._slabHalf(hit, hit.col, hit.k, true);
         if (full && adding !== filled) {
           this._applyEdits([{ col: hit.col, k: hit.k, id: full }]);
           this.audio.place(BLOCKS[full].sound,

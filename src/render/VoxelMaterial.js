@@ -430,6 +430,9 @@ const float NIGHT_OPEN_GAIN = 3.0;
  * sentence and the file stops parsing as JavaScript.
  */
 const float DAY_SHADE_GAIN = 1.2;
+/** Floor under sky-lit surfaces at night. Gated by voxel skylight, so a
+    sealed room is unaffected - see where it is applied. */
+const float NIGHT_FLOOR = 0.14;
 
 // --- moving-light occlusion --------------------------------------------------
 
@@ -1344,6 +1347,22 @@ const LIGHTS_END = /* glsl */`
   // does not.
   float skyFacing = clamp(dot(normal, upDir) * 0.5 + 0.5, 0.0, 1.0);
   skyFill *= mix(mix(0.62, 0.30, uNight), 1.0, skyFacing);
+
+  // A floor under anything the sky can see.
+  //
+  // "Even in minecraft there is no absolute black even at night without
+  // torches - you can still see something outside or in a forest. The only
+  // time it's pitch black is if you are in a box without a light source."
+  // That is exactly right, and the shaping above does not give it: an
+  // underside outdoors keeps 30% of a term that is already near nothing at
+  // midnight, so open ground medianed 35 of 255 and the tenth percentile sat
+  // at 11 - shapes you cannot read.
+  //
+  // Multiplied by sunAmt, which is the VOXEL skylight, so it reaches only what
+  // the sky reaches. A sealed room has sunAmt 0 and stays black, which is the
+  // one place the note above is protecting and the one place Minecraft is
+  // pitch dark too. Nothing here can light a cave.
+  skyFill += uSkyColor * (NIGHT_FLOOR * uNight * sunAmt);
 
   reflectedLight.indirectDiffuse += diffuseColor.rgb * (skyFill + bounce) * aoTotal * RECIPROCAL_PI;
 

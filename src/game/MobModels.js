@@ -47,15 +47,22 @@ const unlitFixed = new WeakMap();
  * whole pack rather than per species so that the artist's own spread survives:
  * the skull stays the brightest of them and the alien the darkest.
  *
- * The husk and the merchant are deliberately NOT lifted. They are the same
- * unlit case and about the same darkness, and nobody has complained about them
- * — a husk that reads as a shape at the edge of the firelight is the animal
- * doing its job, and it is also the one that burns at dawn.
+ * The Blocky Characters pack — the husk, the stalker, the merchant — is the
+ * same unlit case and gets the same treatment against its own number. It starts
+ * a good deal brighter than the monsters, so it needs much less:
+ *
+ *   characters  mean luma  99  (the four that ship: a, d, l and o)
+ *
+ * Measured over the shipped four rather than all eighteen, because the other
+ * fourteen are never loaded and averaging them in would price the lift against
+ * models nobody sees.
  */
 const MONSTER_GAIN = 141 / 59;
+const CHARACTER_GAIN = 141 / 99;
 
-/** The packs that need it, by url. */
-const gainFor = (url) => (url.includes('/monsters/') ? MONSTER_GAIN : 1);
+/** The packs that need it, by url. The animals and the fish are already lit. */
+const gainFor = (url) => (url.includes('/monsters/') ? MONSTER_GAIN
+  : url.includes('/characters/') ? CHARACTER_GAIN : 1);
 
 /**
  * Give a model back its shadows.

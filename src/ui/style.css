@@ -570,23 +570,19 @@ h1 em { font-style: normal; font-weight: var(--fw-disp); color: var(--accent-2);
    it is the same paper as the pause card, scorched at the edge. */
 /* The same case, in scorched timber. Only the wood changes colour: a death
    screen that switched material as well would be a fourth one. */
+/* The death card is the same window in a darker timber, so it flattens with
+   the rest: studs and grain off, one border and the red glow that makes it
+   read as an alarm rather than a menu. */
 .death-card {
   background:
     var(--paper) padding-box,
-    var(--stud) left 1px top 1px / 8px 8px no-repeat border-box,
-    var(--stud) right 1px top 1px / 8px 8px no-repeat border-box,
-    var(--stud) left 1px bottom 1px / 8px 8px no-repeat border-box,
-    var(--stud) right 1px bottom 1px / 8px 8px no-repeat border-box,
-    repeating-linear-gradient(93deg, rgba(255, 200, 178, .07) 0 1px, rgba(0, 0, 0, 0) 1px 3px, rgba(0, 0, 0, .1) 3px 4px, rgba(0, 0, 0, 0) 4px 11px)
-      border-box,
     linear-gradient(180deg, #7b3122, #4e1b12 44%, #2c0d08) border-box;
   box-shadow:
-    inset 0 1px 0 rgba(255, 190, 170, .22),
     0 0 0 1px #200604,
     0 0 44px -10px rgba(190, 50, 34, .5),
     0 26px 54px -22px rgba(6, 8, 16, .85);
 }
-.death-card::before { box-shadow: 0 0 0 1px rgba(90, 20, 12, .85), inset 0 1px 0 rgba(255, 255, 255, .7); }
+.death-card::before { box-shadow: 0 0 0 1px rgba(90, 20, 12, .8); }
 .death-kicker {
   font-size: var(--fs-xs); font-weight: 700;
   letter-spacing: var(--ls-cap); text-transform: uppercase;

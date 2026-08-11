@@ -411,21 +411,20 @@ html, body {
    This is written once for all three sizes of it: the workspace screens
    (`.panel`), the cards the game stops for (`.menu-card`), and the character
    picker (`.chargen-card`). Only the box each one occupies differs. */
+/* A frame, not furniture. This carried four corner studs and a lit/dark inset
+   pair on top of the wood, which is ornament answering nothing: the owner's
+   note was that the windows are "so over the top compared to minecraft's
+   minimalistic", and Minecraft's panel is a flat box with one border. The wood
+   and the paper stay, because "not a website frontpage" was the other note and
+   those two are what carry it; the jewellery goes. */
 .panel, .menu-card, .chargen-card {
   position: relative;
   border: var(--frame) solid transparent;
-  border-radius: var(--r-xl);
+  border-radius: var(--r-lg);
   background:
     var(--paper) padding-box,
-    var(--stud) left 1px top 1px / 8px 8px no-repeat border-box,
-    var(--stud) right 1px top 1px / 8px 8px no-repeat border-box,
-    var(--stud) left 1px bottom 1px / 8px 8px no-repeat border-box,
-    var(--stud) right 1px bottom 1px / 8px 8px no-repeat border-box,
     var(--wood) border-box;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 226, 178, .22),
-    inset 0 -1px 0 rgba(0, 0, 0, .3),
-    var(--shadow);
+  box-shadow: var(--shadow);
 }
 /* The carved seam where the frame holds the sheet. `inset: -1px` on a child of
    a bordered box lands exactly on the join, which is the whole reason this is
@@ -434,10 +433,10 @@ html, body {
 .panel::before, .menu-card::before, .chargen-card::before {
   content: ''; position: absolute; inset: -1px; pointer-events: none;
   border-radius: var(--r-sm);
-  box-shadow:
-    0 0 0 1px rgba(20, 12, 5, .8),
-    inset 0 1px 0 rgba(255, 255, 255, .75),
-    inset 0 0 22px -8px rgba(96, 66, 28, .45);
+  /* One dark hairline where the frame meets the sheet. It used to be three
+     layers - the line, a lit edge on the paper and a 22px burn inside it -
+     which is a lot of rendering to say "these are two materials". */
+  box-shadow: 0 0 0 1px rgba(20, 12, 5, .7);
 }
 /* A workspace screen is a header that stays and a body that scrolls, not one
    sheet with a scrollbar down it. The panel used to be the scroll container

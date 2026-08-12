@@ -9,6 +9,37 @@ import { D } from '../world/Constants.js';
 import { colNeighbor } from '../world/Sphere.js';
 import { ID, IS_REPLACEABLE, RENDER_TYPE, R_LIQUID } from '../world/Blocks.js';
 
+/**
+ * The crop families, each a run of four consecutive block ids.
+ *
+ * Growth is still "increment the id", which is what makes a crop an ordinary
+ * block with no per-stage code. What changed is that there is now more than one
+ * run: a single `CROP_MIN`..`CROP_MAX` pair could only ever describe one crop,
+ * and with a second family inside the same range wheat's ripe stage would grow
+ * into the next crop's seedling.
+ *
+ * Derived from the names rather than written out, so adding a crop means adding
+ * its four blocks and this list, and nothing else here.
+ */
+export const CROP_FAMILIES = ['wheat', 'strawberry', 'squash', 'greenbean',
+  'snowpea', 'hops', 'grape']
+  .map((n) => ({ name: n, first: ID[`${n}_0`], last: ID[`${n}_3`] }))
+  .filter((f) => f.first !== undefined && f.last !== undefined);
+
+/** The family this block id belongs to, or null. */
+export function cropFamily(id) {
+  for (let n = 0; n < CROP_FAMILIES.length; n++) {
+    const f = CROP_FAMILIES[n];
+    if (id >= f.first && id <= f.last) return f;
+  }
+  return null;
+}
+
+/** The seedling a given seed item sows, by crop name. */
+export const cropFirstId = (name) => ID[`${name}_0`];
+
+// Kept so nothing outside has to know the shape changed; wheat is still the
+// crop the bare `seeds` item sows.
 export const CROP_MIN = ID.wheat_0;
 export const CROP_MAX = ID.wheat_3;
 
@@ -107,9 +138,10 @@ export class Farming {
   }
 
   /** Plant seeds on farmland. */
-  plant(col, k) {
+  plant(col, k, firstId = CROP_MIN) {
     if (!this.canPlant(col, k)) return false;
-    this.applyEdits([{ col, k: k + 1, id: CROP_MIN }]);
+    if (!cropFamily(firstId)) return false;
+    this.applyEdits([{ col, k: k + 1, id: firstId }]);
     this.crops.set(this.key(col, k + 1), { col, k: k + 1, t: 0 });
     return true;
   }
@@ -151,8 +183,10 @@ export class Farming {
 
     for (const [key, c] of this.crops) {
       const cur = p.at(c.col, c.k);
-      if (cur < CROP_MIN || cur > CROP_MAX) { this.crops.delete(key); continue; }
-      if (cur === CROP_MAX) continue;
+      const fam = cropFamily(cur);
+      if (!fam) { this.crops.delete(key); continue; }
+      // Ripe is the last rung of THIS family, not of the whole crop range.
+      if (cur === fam.last) continue;
 
       const below = p.at(c.col, c.k - 1);
       const wet = below === ID.farmland_wet;
@@ -206,7 +240,8 @@ export class Farming {
     for (let col = 0; col < p.colBiome.length; col++) {
       for (let k = 1; k < D; k++) {
         const b = p.at(col, k);
-        if (b >= CROP_MIN && b < CROP_MAX) this.crops.set(this.key(col, k), { col, k, t: 0 });
+        const fb = cropFamily(b);
+        if (fb && b < fb.last) this.crops.set(this.key(col, k), { col, k, t: 0 });
       }
     }
   }

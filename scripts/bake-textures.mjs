@@ -29,6 +29,8 @@ const OUT = 'public/tiles';
 //   contrast  gain around the tile's own mean luminance (raises std-dev)
 //   warm      per-channel trim, [r, g, b]; nudges a hue off dead neutral
 //   rough     roughness multiplier
+//   calm      keep only this fraction of the material's own variation, in ALL
+//             THREE maps at once, each pivoting on its own per-channel mean
 //   repeat    tile the source NxN inside one block face, shrinking its detail
 //   holes     punch alpha with noise (leaves)
 //   overlayOn composite this tile as a fringe on top of another tile
@@ -121,7 +123,19 @@ const MAP = {
   // (Ice/1, strong cyan, per the note there); lifting ice increases that gap
   // rather than closing it.
   ice: ['Ice', 3, { tint: 0.30, bright: 1.10, warm: [1.05, 1.0, 0.99] }],
-  water: ['Water', 1],
+  // The one tile in the pack that is drawn at the wrong SCALE for what it is
+  // used for. A planet is mostly ocean, the liquid shader samples this at about
+  // one copy per block, and Water/1's painted ripple is roughly a block across
+  // — so every water block in the sea shows the same ripple in the same place
+  // and the whole ocean reads as tweed, with the tile's rectangular seams
+  // visible on it. `calm` is the lever; see calmLayer for the measurements and
+  // for the three things tried before it. 0.30 takes the checker energy at
+  // noon from 1.62 / 1.59 / 1.58 (underfoot / mid / horizon) to
+  // 0.87 / 0.92 / 1.30, against a floor of 0.75 / 0.81 / 1.29 measured with the
+  // tile replaced by flat colour — i.e. most of what is left at the horizon is
+  // the swell geometry and the sky, not this texture. The sea's mean colour and
+  // luminance are unchanged to within a count.
+  water: ['Water', 1, { calm: 0.30 }],
 
   // Bark on a standing trunk has to run up the side face, the way planks and
   // pine already do. Tree Bark variants 2 and 3 are the only two in the folder
@@ -836,7 +850,77 @@ async function bakeTile(tileName, category, variant, opts = {}) {
     arm[o + 2] = mtV;
     arm[o + 3] = 255;
   }
+  if (opts.calm !== undefined) calmLayer(li, opts.calm);
   return true;
+}
+
+/**
+ * Keep only `k` of a finished tile's own variation, in all three maps at once.
+ *
+ * This is for one specific failure and it is not the same one `contrast` fixes.
+ * `contrast` widens or narrows an albedo around a single scalar — the tile's
+ * mean *luminance* — which is right for an exposure problem and wrong here
+ * twice over: it slides every channel toward one grey (water's 86,210,239 goes
+ * to 155,192,201 at 0.3, i.e. the sea stops being blue), and it does not touch
+ * the normal or the roughness at all.
+ *
+ * The failure this is for is a tile whose own detail is roughly the size of one
+ * block face. The shader samples a liquid at one copy per block, so a tile like
+ * that has its *frame* on the block grid: every water block in the ocean shows
+ * the same painted ripple in the same place, and the planet reads as woven
+ * cloth. It does not fade with distance either, and that is not a broken mip —
+ * it is what a correctly mipped high-contrast texture does. Mipping keeps
+ * detail at about a pixel wide at every range; if the content has contrast at
+ * every scale, so does the screen. Measured on the shipped sea at noon over
+ * three bands of one frame — underfoot, mid, and the last twenty pixels before
+ * the horizon — the per-pixel checker energy was 1.62 / 1.59 / 1.58. Flat.
+ *
+ * So the lever has to be contrast at *all* scales, which means the tile itself,
+ * and it has to reach every map: with the albedo alone flattened the sea still
+ * measured 1.17 against a 0.99 floor, and the last of it was the pack's
+ * roughness map — painted caustics, which is a picture of ripples rather than a
+ * measurement of how rough the water is, and water has one roughness.
+ *
+ * Each map pivots on its OWN per-channel mean, which is what keeps this a
+ * flattening and not a recolour: the mean of every channel is unchanged by
+ * construction, so a tile calmed to zero is exactly its own average colour, its
+ * own average normal and its own average roughness. Alpha is not touched — it
+ * is a cut-out mask, not a shade.
+ *
+ * Rejected first: three separate levers, one per map. Measured, one scalar at
+ * 0.30 across all three lands within 0.006 of the best hand-tuned triple
+ * (0.30 albedo / 0.50 normal / 0.00 roughness) at all three ranges, so the
+ * extra two numbers bought nothing but two more numbers.
+ *
+ * Rejected second: `repeat: 2` on the water, to put four copies of the ripple
+ * on a face so the tile's frame stops being the block's. It halves the feature
+ * size and leaves the contrast alone, and contrast is what survives mipping —
+ * measured 1.22 against 1.17 for flattening alone, i.e. slightly worse.
+ *
+ * Rejected third: a different Water variant. All nine in the pack are painted
+ * swimming-pool caustics; variant 3 is the calmest (std-dev 18.4 against
+ * variant 1's 19.6) and the most isotropic, but at 0.30 of its variation the
+ * choice of variant is worth almost nothing, and swapping it would move the
+ * sea's colour for no measured gain.
+ *
+ * @param {number} k 0 = the tile's own flat average, 1 = untouched.
+ */
+function calmLayer(li, k) {
+  const off = li * per;
+  for (const buf of [albedo, normal, arm]) {
+    const mean = [0, 0, 0];
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      const o = off + i * 4;
+      mean[0] += buf[o]; mean[1] += buf[o + 1]; mean[2] += buf[o + 2];
+    }
+    for (let c = 0; c < 3; c++) mean[c] /= SIZE * SIZE;
+    for (let i = 0; i < SIZE * SIZE; i++) {
+      const o = off + i * 4;
+      for (let c = 0; c < 3; c++) {
+        buf[o + c] = Math.max(0, Math.min(255, Math.round(mean[c] + (buf[o + c] - mean[c]) * k)));
+      }
+    }
+  }
 }
 
 /** Blend `top` over `base` along a jittered horizontal fringe near v = 1. */

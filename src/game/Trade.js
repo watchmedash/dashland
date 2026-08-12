@@ -527,6 +527,27 @@ export function buyPriceOf(itemId) {
  */
 const WARES = [
   ['seeds', 6, 16],
+  // The six farm crops, and the merchant is their ONLY source.
+  //
+  // Wheat seeds fall out of tall grass, so wheat has always been something you
+  // could stumble into. These six do not: nothing on the planet generates them,
+  // no block drops them and no recipe makes them, so a crop whose seed is not
+  // on this list is twenty-four blocks, twenty-four models and a food item that
+  // no player can ever reach. That is the whole reason these lines exist and it
+  // is worth stating, because they look like flavour and are not.
+  //
+  // Stocked thinner than wheat's — the bands below run 2-6 against its 6-16 —
+  // so a full farm is several visits rather than one, and the crop you happen
+  // to be offered is a reason to come back. That is also exactly the rule this
+  // list already lives by: a merchant sells a shortcut past a chore, and buying
+  // the *start* of a crop is a shortcut, while buying enough to skip growing it
+  // is the shop replacing the farm.
+  ['strawberry_seeds', 2, 6],
+  ['squash_seeds', 2, 6],
+  ['greenbean_seeds', 2, 6],
+  ['snowpea_seeds', 2, 6],
+  ['hops_seeds', 2, 6],
+  ['grape_seeds', 2, 6],
   ['sapling', 2, 6],
   ['wheat', 4, 10],
   ['stick', 8, 20],

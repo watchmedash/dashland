@@ -123,7 +123,20 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom', 'saplin
   'swampreed', 'mireroot', 'lotus', 'truffle',
   // The orchard. Same rule as the rest and it matters more here, because a
   // missing name would draw a 1x1 billboard where a four-cell tree should be.
-  'apple_tree', 'cherry_tree', 'plum_tree', 'olive_tree', 'cocoa_tree']) {
+  'apple_tree', 'cherry_tree', 'plum_tree', 'olive_tree', 'cocoa_tree',
+  // The farm. Wheat stays out of this set and keeps its billboard because it
+  // has four authored tiles in the atlas and they read fine; these six have no
+  // tile at all, so a name missing from here draws an untextured card and a
+  // name missing from `MODELLED_PLANTS` draws nothing whatsoever. All four
+  // stages of each, because a crop's stages are four separate block ids and
+  // this array is indexed by id - listing only the ripe rung would leave a
+  // field invisible for the whole time it is worth watching.
+  'strawberry_0', 'strawberry_1', 'strawberry_2', 'strawberry_3',
+  'squash_0', 'squash_1', 'squash_2', 'squash_3',
+  'greenbean_0', 'greenbean_1', 'greenbean_2', 'greenbean_3',
+  'snowpea_0', 'snowpea_1', 'snowpea_2', 'snowpea_3',
+  'hops_0', 'hops_1', 'hops_2', 'hops_3',
+  'grape_0', 'grape_1', 'grape_2', 'grape_3']) {
   const i = BLOCKS.findIndex((b) => b.name === n);
   if (i > 0) MODELLED_CROSS[i] = 1;
 }

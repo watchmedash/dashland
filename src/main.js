@@ -36,7 +36,7 @@ import { Weather } from './game/Weather.js';
 import { Seasons } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import * as MobModels from './game/MobModels.js';
-import { Farming, roofsSoil } from './game/Farming.js';
+import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
 import { Water, LEVEL_MAX } from './game/Water.js';
 import { Save } from './game/Save.js';
 import {
@@ -947,6 +947,23 @@ const MODELLED_PLANTS = {
   // rather than by eye.
   apple_tree: 4.2, cherry_tree: 3.8, plum_tree: 3.9,
   olive_tree: 3.5, cocoa_tree: 3.4,
+  // The farm, and the only entries here where the number carries information
+  // rather than just scale: a crop's four stages are four models and the
+  // heights are what makes the field *read* as growing. A row that arrives at
+  // full size on the first tick has no story, and the player has no way to see
+  // from a distance which beds are worth walking to.
+  //
+  // The four rungs climb from a seedling you have to look down at to a plant at
+  // about two thirds of a cell, which is where the wheat billboard already
+  // sits, so a mixed field stays one field. The two climbers get their own
+  // taller ladder: hops and grapes are vines, and the whole point of a vine is
+  // that it stands up past everything around it.
+  strawberry_0: 0.22, strawberry_1: 0.38, strawberry_2: 0.52, strawberry_3: 0.62,
+  squash_0: 0.22, squash_1: 0.38, squash_2: 0.52, squash_3: 0.62,
+  greenbean_0: 0.22, greenbean_1: 0.38, greenbean_2: 0.52, greenbean_3: 0.62,
+  snowpea_0: 0.22, snowpea_1: 0.38, snowpea_2: 0.52, snowpea_3: 0.62,
+  hops_0: 0.26, hops_1: 0.46, hops_2: 0.68, hops_3: 0.90,
+  grape_0: 0.26, grape_1: 0.46, grape_2: 0.66, grape_3: 0.86,
 };
 const FLOWER_NAMES = Object.keys(MODELLED_PLANTS);
 const FLOWER_KIND = [];
@@ -6978,6 +6995,28 @@ class Game {
     return slot === this.inventory.offhand ? 'left' : 'right';
   }
 
+  /**
+   * The seedling block a held item sows, or 0 if the item is not a seed.
+   *
+   * Derived from the item's *name* rather than from a table, because a table
+   * would be a third list of the same seven crops — after `CROP_FAMILIES` and
+   * the blocks themselves — and the one that nobody would remember to add to.
+   * The naming rule is the contract: `<crop>_seeds` sows `<crop>_0`, and bare
+   * `seeds` is wheat's, which is the only irregular entry and is the one the
+   * game shipped with.
+   *
+   * `cropFirstId` returns undefined for a name with no such block, so a seed
+   * item added without its four blocks resolves to 0 and refuses to plant
+   * rather than writing a garbage id into the world.
+   */
+  _seedlingOf(itemId) {
+    if (!itemId) return 0;
+    const name = ITEMS[itemId]?.name;
+    if (name === 'seeds') return cropFirstId('wheat') ?? 0;
+    if (!name?.endsWith('_seeds')) return 0;
+    return cropFirstId(name.slice(0, -'_seeds'.length)) ?? 0;
+  }
+
   _dropHeld() {
     const s = this.inventory.held();
     if (s.empty) return;
@@ -7643,7 +7682,12 @@ class Game {
         return;
       }
       // --- sow seeds on farmland ---
-      if (heldSlot.item === itemIdOf('seeds') && this.farming.plant(hit.col, hit.k)) {
+      //
+      // Every seed in the game plants through this one line. `_seedlingOf` maps
+      // the held item to the block that goes in the ground, so a seventh crop
+      // is a seed item and four blocks and nothing here.
+      const seedling = this._seedlingOf(heldSlot.item);
+      if (seedling !== 0 && this.farming.plant(hit.col, hit.k, seedling)) {
         this.inventory.consumeHeld(1, heldSlot);
         this.audio.place('grass');
         this.player.swing();

@@ -1062,6 +1062,43 @@ export const POSE = {
   olive_tree:   { file: 'wam/olive_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
   cocoa_tree:   { file: 'wam/cocoa_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
 
+  // The farm. Twenty-four entries for six crops, one per growth stage, and they
+  // are here for `file` rather than for the pose: `worldModel` resolves a
+  // planted block's art through this table, so a crop stage with no line here
+  // sows, grows, ticks and drops correctly and draws absolutely nothing. That
+  // is the failure this comment exists to prevent — it has no error, no warning
+  // and no missing-texture chequerboard, just an empty furrow.
+  //
+  // None of these is ever actually held: a crop is broken into produce and
+  // seeds, and neither of those is the block. The rot/pos/icon numbers are
+  // therefore the flowers' family defaults rather than turntable-measured, and
+  // the only ones worth measuring later are the two climbers, whose models are
+  // tall enough that a default grip catches them well below the middle.
+  strawberry_0: { file: 'wam/strawberry_0', pack: 'wam', height: 0.22, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  strawberry_1: { file: 'wam/strawberry_1', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  strawberry_2: { file: 'wam/strawberry_2', pack: 'wam', height: 0.26, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  strawberry_3: { file: 'wam/strawberry_3', pack: 'wam', height: 0.28, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  squash_0:     { file: 'wam/squash_0',     pack: 'wam', height: 0.22, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  squash_1:     { file: 'wam/squash_1',     pack: 'wam', height: 0.24, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  squash_2:     { file: 'wam/squash_2',     pack: 'wam', height: 0.26, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  squash_3:     { file: 'wam/squash_3',     pack: 'wam', height: 0.28, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  greenbean_0:  { file: 'wam/greenbean_0',  pack: 'wam', height: 0.22, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  greenbean_1:  { file: 'wam/greenbean_1',  pack: 'wam', height: 0.25, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  greenbean_2:  { file: 'wam/greenbean_2',  pack: 'wam', height: 0.28, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  greenbean_3:  { file: 'wam/greenbean_3',  pack: 'wam', height: 0.30, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  snowpea_0:    { file: 'wam/snowpea_0',    pack: 'wam', height: 0.22, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  snowpea_1:    { file: 'wam/snowpea_1',    pack: 'wam', height: 0.25, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  snowpea_2:    { file: 'wam/snowpea_2',    pack: 'wam', height: 0.28, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  snowpea_3:    { file: 'wam/snowpea_3',    pack: 'wam', height: 0.30, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  hops_0:       { file: 'wam/hops_0',       pack: 'wam', height: 0.22, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  hops_1:       { file: 'wam/hops_1',       pack: 'wam', height: 0.26, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  hops_2:       { file: 'wam/hops_2',       pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  hops_3:       { file: 'wam/hops_3',       pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  grape_0:      { file: 'wam/grape_0',      pack: 'wam', height: 0.22, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  grape_1:      { file: 'wam/grape_1',      pack: 'wam', height: 0.26, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  grape_2:      { file: 'wam/grape_2',      pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  grape_3:      { file: 'wam/grape_3',      pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+
   // Underground. The mushroom's own pose for the toadstools — a cap is read
   // from slightly below so the overhang shows — and the clam's steeper one for
   // the shelf fungus, whose plates only separate when you are not level with
@@ -1250,6 +1287,36 @@ export const BY_NAME = {
   clover: 'clover',
   fern: 'fern',
   lingonberry: 'lingonberry',
+  // The farm. Not one of these twenty-four is ever an item in an inventory —
+  // the crop breaks into produce and seed — and they are listed anyway for the
+  // reason given above the thornbrush, which is the whole trap this table sets:
+  // `BlockModels.prime` reaches a *planted* block's art through the matching
+  // name here, so dropping a line because "nothing picks it up" empties the
+  // furrow rather than a toolbar slot.
+  strawberry_0: 'strawberry_0',
+  strawberry_1: 'strawberry_1',
+  strawberry_2: 'strawberry_2',
+  strawberry_3: 'strawberry_3',
+  squash_0: 'squash_0',
+  squash_1: 'squash_1',
+  squash_2: 'squash_2',
+  squash_3: 'squash_3',
+  greenbean_0: 'greenbean_0',
+  greenbean_1: 'greenbean_1',
+  greenbean_2: 'greenbean_2',
+  greenbean_3: 'greenbean_3',
+  snowpea_0: 'snowpea_0',
+  snowpea_1: 'snowpea_1',
+  snowpea_2: 'snowpea_2',
+  snowpea_3: 'snowpea_3',
+  hops_0: 'hops_0',
+  hops_1: 'hops_1',
+  hops_2: 'hops_2',
+  hops_3: 'hops_3',
+  grape_0: 'grape_0',
+  grape_1: 'grape_1',
+  grape_2: 'grape_2',
+  grape_3: 'grape_3',
   cave_mushroom: 'cave_mushroom',
   shelf_fungus: 'shelf_fungus',
   crystal_cluster: 'crystal_cluster',

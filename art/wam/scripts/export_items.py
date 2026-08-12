@@ -134,6 +134,18 @@ ITEMS = [
     # therefore reskins ten inventory slots, not two.
     "armour_legs", "armour_boots",
     "armour_helm", "armour_chest",
+    # The six farm crops are NOT listed here, and the omission is deliberate
+    # rather than an oversight. Every other name in this list is a file: the
+    # loop below reads `wam/out/<name>.gltf`. The crops are the one family
+    # whose authored name and whose game name differ — they are modelled as
+    # four growth rungs `<crop>_1` through `<crop>_4`, while the blocks are
+    # stages `<crop>_0` through `<crop>_3`, so rung N is stage N-1 — and a name
+    # like "strawberry_0" would resolve to a source file that does not exist.
+    #
+    # Renaming in `wam/out` is not the fix: copying `_1` onto `_0` and then `_2`
+    # onto `_1` walks over each rung with the next one. To rebuild them, copy
+    # the four rungs of each crop into a scratch directory under their stage
+    # names first, then run `convert` with `SRC` pointed at that directory.
 ]
 
 # Models authored lying along +Z — bars, loaves, bundles — are stood up on

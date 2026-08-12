@@ -52,7 +52,12 @@ export function useKind(item) {
   if (def.carries || def.name === 'bucket') return 'any';
   if (def.tool?.kind === 'rod') return 'any';
   if (def.tool?.kind === 'shovel') return 'soil';
-  if (def.name === 'seeds') return 'seed';
+  // Wheat's bare `seeds` and every `<crop>_seeds` beside it. Spelled as the
+  // suffix rather than as a list, for the reason the whole seed path is spelled
+  // that way: an item that claims no kind here silently does nothing on right
+  // click, and it does it without an error, so a crop wired everywhere else
+  // would still refuse to plant and give no hint why.
+  if (def.name === 'seeds' || def.name.endsWith('_seeds')) return 'seed';
   return 'none';
 }
 

@@ -1153,6 +1153,63 @@ export const BLOCKS = [
     solid: false, opaque: false, hardness: 0.2, needsFloor: true,
     particle: [0.42, 0.32, 0.24], sound: 'grass',
   }),
+
+  // --- the farm ------------------------------------------------------------
+  //
+  // Six crops beside the wheat, and the ONE rule that governs how they are
+  // written down: each crop's four stages must be four *consecutive* ids.
+  // `game/Farming.js` grows a plant by incrementing its block id and stops at
+  // the last rung of its own family, so a stray block slipped between
+  // `squash_1` and `squash_2` would not be a cosmetic mistake — the squash
+  // would grow into it, and the family after it would start one short and let
+  // its ripe stage grow on into the next crop's seedling. Never insert here.
+  //
+  // Appended at the end of the table rather than filed next to the wheat for
+  // the reason every block after an insertion point cares about: an id is what
+  // a saved chunk stores, so putting these in the middle would silently
+  // renumber everything below them and turn every existing world's stone into
+  // something else. New blocks go on the end.
+  //
+  // Like the flora above these carry no tile and no billboard — the atlas is
+  // baked from a texture pack that is not in this tree — so the model in
+  // `MODELLED_CROSS` + `MODELLED_PLANTS` + `POSE` is the only picture there is.
+  //
+  // `drop`/`dropCount` below are read only by `harvestHint`, exactly as they
+  // are on the wheat rows: `computeDrops` special-cases every crop family and
+  // returns before the generic `b.drop` path, so what a ripe row actually pays
+  // is produce AND a seed. See the note above the wheat blocks.
+  block({ name: 'strawberry_0', label: 'Strawberry', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'strawberry_seeds', particle: [0.32, 0.52, 0.26], sound: 'grass' }),
+  block({ name: 'strawberry_1', label: 'Strawberry', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'strawberry_seeds', particle: [0.34, 0.56, 0.28], sound: 'grass' }),
+  block({ name: 'strawberry_2', label: 'Strawberry', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'strawberry_seeds', particle: [0.48, 0.54, 0.28], sound: 'grass' }),
+  block({ name: 'strawberry_3', label: 'Ripe Strawberry', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'berries', dropCount: 2, particle: [0.80, 0.22, 0.28], sound: 'grass' }),
+
+  block({ name: 'squash_0', label: 'Squash', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'squash_seeds', particle: [0.30, 0.50, 0.24], sound: 'grass' }),
+  block({ name: 'squash_1', label: 'Squash', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'squash_seeds', particle: [0.33, 0.54, 0.26], sound: 'grass' }),
+  block({ name: 'squash_2', label: 'Squash', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'squash_seeds', particle: [0.55, 0.56, 0.24], sound: 'grass' }),
+  block({ name: 'squash_3', label: 'Ripe Squash', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'squash', dropCount: 2, particle: [0.88, 0.60, 0.18], sound: 'grass' }),
+
+  block({ name: 'greenbean_0', label: 'Green Beans', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'greenbean_seeds', particle: [0.30, 0.50, 0.26], sound: 'grass' }),
+  block({ name: 'greenbean_1', label: 'Green Beans', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'greenbean_seeds', particle: [0.32, 0.54, 0.28], sound: 'grass' }),
+  block({ name: 'greenbean_2', label: 'Green Beans', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'greenbean_seeds', particle: [0.34, 0.58, 0.30], sound: 'grass' }),
+  block({ name: 'greenbean_3', label: 'Ripe Green Beans', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'greenbean', dropCount: 2, particle: [0.40, 0.68, 0.30], sound: 'grass' }),
+
+  block({ name: 'snowpea_0', label: 'Snow Peas', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'snowpea_seeds', particle: [0.32, 0.52, 0.30], sound: 'grass' }),
+  block({ name: 'snowpea_1', label: 'Snow Peas', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'snowpea_seeds', particle: [0.36, 0.56, 0.34], sound: 'grass' }),
+  block({ name: 'snowpea_2', label: 'Snow Peas', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'snowpea_seeds', particle: [0.42, 0.62, 0.38], sound: 'grass' }),
+  block({ name: 'snowpea_3', label: 'Ripe Snow Peas', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'snowpea', dropCount: 2, particle: [0.58, 0.76, 0.46], sound: 'grass' }),
+
+  // The two climbers. They are taller than the rest by a good margin — see
+  // their `MODELLED_PLANTS` heights — because a vine that does not clear the
+  // row beside it is not reading as a vine.
+  block({ name: 'hops_0', label: 'Hops', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'hops_seeds', particle: [0.34, 0.50, 0.24], sound: 'grass' }),
+  block({ name: 'hops_1', label: 'Hops', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'hops_seeds', particle: [0.38, 0.54, 0.26], sound: 'grass' }),
+  block({ name: 'hops_2', label: 'Hops', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'hops_seeds', particle: [0.46, 0.58, 0.28], sound: 'grass' }),
+  block({ name: 'hops_3', label: 'Ripe Hops', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'hops', dropCount: 2, particle: [0.62, 0.70, 0.32], sound: 'grass' }),
+
+  block({ name: 'grape_0', label: 'Grape Vine', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'grape_seeds', particle: [0.30, 0.48, 0.26], sound: 'grass' }),
+  block({ name: 'grape_1', label: 'Grape Vine', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'grape_seeds', particle: [0.34, 0.52, 0.28], sound: 'grass' }),
+  block({ name: 'grape_2', label: 'Grape Vine', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'grape_seeds', particle: [0.40, 0.46, 0.36], sound: 'grass' }),
+  block({ name: 'grape_3', label: 'Ripe Grapes', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'grape', dropCount: 2, particle: [0.44, 0.24, 0.52], sound: 'grass' }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -1709,8 +1766,18 @@ grows(['mushroom'], soil(['dirt', 'coarse_dirt', 'gravel', 'clay', 'mud', 'peat'
   'moss_block', 'sandstone', 'red_sandstone'], 'rock', 'ore'));
 // A cactus stands on sand and on its own lower segments.
 grows(['cactus'], soil(['cactus'], 'desert'));
-// Crops belong in a field and nowhere else.
-grows(['wheat_0', 'wheat_1', 'wheat_2', 'wheat_3'], soil(['farmland', 'farmland_wet']));
+// Crops belong in a field and nowhere else. All seven families on the same
+// footing: a crop is the one plant on the planet that only exists because a
+// player tilled for it, so tilled soil is the whole of its habitat and there is
+// no wild version of any of them to place anywhere else.
+grows(['wheat_0', 'wheat_1', 'wheat_2', 'wheat_3',
+  'strawberry_0', 'strawberry_1', 'strawberry_2', 'strawberry_3',
+  'squash_0', 'squash_1', 'squash_2', 'squash_3',
+  'greenbean_0', 'greenbean_1', 'greenbean_2', 'greenbean_3',
+  'snowpea_0', 'snowpea_1', 'snowpea_2', 'snowpea_3',
+  'hops_0', 'hops_1', 'hops_2', 'hops_3',
+  'grape_0', 'grape_1', 'grape_2', 'grape_3'],
+soil(['farmland', 'farmland_wet']));
 // The reef, the carpet and the deep light: the seabed, all of it. Kelp adds
 // itself, because a stalk is a run of one block (see STACKS).
 grows(['coral_branch', 'coral_fan', 'coral_brain', 'coral_dead', 'sea_sponge',

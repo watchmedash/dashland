@@ -133,6 +133,28 @@ const FOOD = [
   { name: 'cocoa', label: 'Cocoa Pod', food: 3, color: '#7a4423', shine: '#a86c42' },
   { name: 'corn', label: 'Corn', food: 3, color: '#d9b02c', shine: '#f5dc78' },
   { name: 'tomato', label: 'Tomato', food: 3, color: '#c33227', shine: '#ee6a55' },
+  // The farm's produce. Colour-defined like the orchard fruit above, so five
+  // new crops cost no atlas layer and no model — which is the only reason it
+  // was worth giving each crop its own harvest rather than making them all pay
+  // out in an existing vegetable.
+  //
+  // All of them sit in the raw band at 2-4 and none of them beats the berries
+  // that grow wild. That is deliberate and it is the whole balance of the farm:
+  // a crop takes tilling, a seed, water and four growth stages, and if the
+  // reward for that were a big number on the food bar then foraging would stop
+  // being worth doing the moment you owned a hoe. What farming buys is not
+  // better food, it is *reliable* food in a place you chose, plus the kitchen
+  // above it — the produce is worth most as an ingredient.
+  //
+  // Hops is the odd one and is deliberately still edible at 2. It is a bitter
+  // flower nobody would eat by choice, but an ingredient that cannot be eaten
+  // at all is an item that reads as broken the first time a hungry player right
+  // clicks it, and 2 is low enough to say "do something else with this".
+  { name: 'squash', label: 'Squash', food: 4, color: '#d98b21', shine: '#f4b962' },
+  { name: 'greenbean', label: 'Green Beans', food: 2, color: '#4f8f34', shine: '#83c063' },
+  { name: 'snowpea', label: 'Snow Peas', food: 2, color: '#7ab355', shine: '#aede8b' },
+  { name: 'hops', label: 'Hops', food: 2, color: '#8fa444', shine: '#c3d47c' },
+  { name: 'grape', label: 'Grapes', food: 3, color: '#5b2d78', shine: '#9563b8' },
   // A chick, a penguin and a parrot each leave one. It used to be the merchant's
   // cheapest line and nothing else at all, which made the whole baking half of
   // the kitchen a thing you bought rather than a thing you kept birds for.
@@ -255,6 +277,27 @@ const MATERIALS = [
   { name: 'cinder', label: 'Husk Cinder', art: 'crystal', color: '#d1451f', shine: '#ffb06a' },
   { name: 'wheat', label: 'Wheat', art: 'wheat' },
   { name: 'seeds', label: 'Seeds', art: 'seeds' },
+  // One seed per crop, and the bare `seeds` above stays wheat's.
+  //
+  // Separate items rather than one seed with a chosen crop, because the choice
+  // would have to live somewhere: on the stack (so two half-stacks of different
+  // seed never merge, which is worse than two item ids) or on a UI the player
+  // has to open before they can plant. A named seed is legible in a toolbar
+  // slot, sorts next to its own crop and sows on a single click, which is what
+  // planting a row should cost.
+  //
+  // Colour-defined and art-free like the fruit — the icon painter builds these
+  // from two colours — and each is tinted toward the crop it grows so a belt of
+  // six is told apart at a glance rather than read one label at a time. See
+  // `_plantSeed` in main.js for the naming rule that turns one of these back
+  // into a seedling block: it is the item name minus `_seeds`, so renaming one
+  // of these silently stops it planting.
+  { name: 'strawberry_seeds', label: 'Strawberry Seeds', color: '#8c3a44', shine: '#c76a75' },
+  { name: 'squash_seeds', label: 'Squash Seeds', color: '#a97a2c', shine: '#dcae61' },
+  { name: 'greenbean_seeds', label: 'Green Bean Seeds', color: '#5d7a3c', shine: '#93af6d' },
+  { name: 'snowpea_seeds', label: 'Snow Pea Seeds', color: '#7d9a68', shine: '#b6cda3' },
+  { name: 'hops_seeds', label: 'Hops Seeds', color: '#7d8a45', shine: '#b3bd7c' },
+  { name: 'grape_seeds', label: 'Grape Seeds', color: '#553f6b', shine: '#8a72a1' },
   { name: 'apple', label: 'Apple', art: 'apple', food: 4 },
   { name: 'bread', label: 'Bread', art: 'bread', food: 8 },
   { name: 'roast', label: 'Roast Pumpkin', art: 'roast', food: 6 },
@@ -1013,6 +1056,28 @@ export const itemIdOf = (name) => ITEM_ID[name] ?? 0;
 const FORAGE = ['berries', 'carrot', 'corn', 'tomato'];
 
 /**
+ * What each farmed crop pays out when its ripe rung is broken.
+ *
+ * Wheat is not in here: it has its own branch in `computeDrops` because it
+ * drops 1-3 seeds where these drop exactly one, and folding the two together
+ * would mean either changing wheat's economy or carrying a per-crop seed count
+ * to describe a single exception.
+ *
+ * Strawberry pays the `berries` the planet already had rather than a
+ * strawberry of its own. A cultivated berry and a wild one are the same thing
+ * on a plate, and every recipe that wanted berries now has a second source
+ * instead of a second near-identical ingredient to be kept in step with it.
+ */
+const CROP_PRODUCE = {
+  strawberry: 'berries',
+  squash: 'squash',
+  greenbean: 'greenbean',
+  snowpea: 'snowpea',
+  hops: 'hops',
+  grape: 'grape',
+};
+
+/**
  * What a block yields when mined with a given tool.
  * @returns {Array<{item:number, count:number}>}
  */
@@ -1067,6 +1132,30 @@ export function computeDrops(blockId, toolItem, rng = Math.random) {
     const ripe = b.name === 'wheat_3';
     const out = [{ item: itemIdOf('seeds'), count: ripe ? 1 + Math.floor(rng() * 3) : 1 }];
     if (ripe) out.push({ item: itemIdOf('wheat'), count: 1 + Math.floor(rng() * 2) });
+    return out;
+  }
+  // The other six crops, on wheat's terms but written once.
+  //
+  // Matched on the name rather than on an id range so this cannot drift out of
+  // step with `CROP_FAMILIES` in Farming.js: both are derived from the same
+  // `<crop>_<stage>` naming, so a seventh crop is a line in `CROP_PRODUCE` and
+  // nothing here. The regexp anchors the stage digit, which is what keeps
+  // `sea_grape` out of the grape family — a `startsWith` would have taken it.
+  //
+  // Seed back and produce out, which is the rule that makes a field pay for
+  // itself: exactly one seed whatever the stage, so digging up a seedling
+  // returns what you sowed and costs only the growing time, and 1-2 produce on
+  // the ripe rung only. Wheat above pays 1-3 seeds because a wheat field is
+  // meant to *spread*; these pay one, because six crops all multiplying their
+  // own seed turns the first harvest of each into an unlimited supply and there
+  // would be nothing left for the merchant to sell.
+  const crop = /^([a-z]+)_[0-3]$/.exec(b.name);
+  if (crop && CROP_PRODUCE[crop[1]]) {
+    const family = crop[1];
+    const out = [{ item: itemIdOf(`${family}_seeds`), count: 1 }];
+    if (b.name === `${family}_3`) {
+      out.push({ item: itemIdOf(CROP_PRODUCE[family]), count: 1 + Math.floor(rng() * 2) });
+    }
     return out;
   }
 

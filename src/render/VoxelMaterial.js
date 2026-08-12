@@ -411,6 +411,29 @@ const float BLOCK_CEIL = 0.58;
  * floor to bounce off.
  */
 const float NIGHT_OPEN_GAIN = 3.0;
+/*
+ * The promise above does not hold on grass, and that is left standing on
+ * purpose. Re-measured at midnight on seed 4242 in a field cleared of every
+ * block above the terrain, so there is provably nothing overhead:
+ *
+ *   grass         0/0/1     luma 0.1
+ *   sand         12/13/21   luma 13.4
+ *   stone, side   5/7/17    luma 7.2
+ *
+ * The numbers this constant's note quotes (grass 4/9/14, stone 25/30/45) are
+ * from a different frame and a different grade and no longer describe the game.
+ * A dark tile at midnight lands at the very bottom of the ACES toe, where a
+ * factor of three in radiance is worth about one code value, so grass in the
+ * open really is black and the gain is not what is stopping it.
+ *
+ * Not touched, because the only lever that reaches it is *how dark night is*,
+ * and that is a decision about the game rather than a defect in it. Anything
+ * that lifts open ground far enough to read has to come from uSkyIntensity's
+ * night floor or from this gain, and both are large multiplies on a value the
+ * toe has already crushed — a lift big enough to matter on grass is a lift big
+ * enough to change what night is for. That is the owner's call, not this
+ * pass's, and it is worth deciding once rather than being crept toward.
+ */
 
 /**
  * The same idea by day, for ground the canopy shadows.
@@ -825,6 +848,32 @@ float tintMask = 1.0;
  * already run a full standard-material BRDF.
  */
 const float AERIAL_GAIN = 3.6;
+/*
+ * Left at 3.6, and here is the measurement that says someone should look at it
+ * with an art eye rather than a bug-fixing one.
+ *
+ * At the range this term is *meant* to work — the rim of the planet — it does
+ * exactly what it says. But 3.6 also puts f at 19% by 75 units and 30% by 110,
+ * which is the middle distance of an ordinary vista rather than the horizon.
+ * Photographed from a mountain top at noon, seed 4242, with uFogDensity forced
+ * to zero in the same run and at the same yaw:
+ *
+ *   far snow cliff    152/166/182  ->   94/ 94/106
+ *   mid slope         65/104/104   ->   28/ 70/ 44
+ *   mid terrace       55/ 81/ 67   ->   40/ 64/ 34
+ *
+ * Everything past the near ground is carrying more haze than terrain. That is
+ * why the sky-fill fix in SKY_FILL_TRIM, which is what actually makes NEAR
+ * stone lavender, moves those same three patches by under one luma: at that
+ * range the colour on screen is mostly this veil, and no amount of work on the
+ * lighting reaches it.
+ *
+ * Not changed, because unlike the trim this is not a tuning that some later
+ * edit invalidated — it is a deliberate, argued art direction with its own
+ * before-and-after above, and it is doing precisely what it was written to do.
+ * Whether a planet with a 150-unit load distance wants a third of its terrain
+ * sitting in sky colour is a look decision.
+ */
 /**
  * How far the haze leans off the palette's fog colour toward the sky's own
  * horizon colour.

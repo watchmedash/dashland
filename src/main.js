@@ -9224,6 +9224,39 @@ class Game {
     const n2 = night * night;
     voxelUniforms.uSkyColor.value.copy(p.zenith).lerp(p.horizon, 0.55).lerp(WHITE, 0.34)
       .lerp(MOON_FILL, n2);
+    // The trailing weather term has been challenged and it stands. **Do not
+    // invert it**, and this is written down here because the argument for
+    // inverting it is a good one and will be made again.
+    //
+    // The argument: a cloud deck is a large diffuse source, so as the direct
+    // beam dies the *skylight* should rise, not fall; scaling it down means a
+    // cloudy day is dimmed twice rather than dimmed and flattened.
+    //
+    // The first half is true and is already what happens. This term scales
+    // *absolute* skylight, not skylight's share of the total, and the share
+    // rises on its own because the sun falls faster: sky fill against direct is
+    // 0.82 / 1.51 clear, 0.58 / 0.58 overcast, 0.49 / 0.24 in a storm — 35%,
+    // 50%, 67%. The thing the report asked for is in the numbers already.
+    //
+    // The second half does not survive being rendered. Emulated in one run at
+    // one site by multiplying this by (1 - 0.5·sun) / (0.5 + 0.5·sun):
+    //
+    //   grass, clear noon    81.2  ->  70.7   (a 13% regression on a clear day,
+    //                                          because 0.5+0.5·0.94 is 0.97 and
+    //                                          1-0.5·0.94 is 0.53)
+    //   grass, storm noon    40.1  ->  57.0   (storm ground goes from -51% of a
+    //                                          clear day to -30%, undoing most
+    //                                          of the shipped weather ladder)
+    //   shaded stone, storm  77.9  -> 102.8   (against 104.8 for the same face
+    //                                          on a CLEAR day: a storm and a
+    //                                          clear noon light a rock face
+    //                                          identically)
+    //
+    // A renormalised variant (1.5 - 0.5·sun, so clear stays exactly 1) fixes
+    // the first line and makes the other two worse, because the whole of the
+    // change then lands on bad weather. Overcast at 0.36 and storm at 0.15 in
+    // Weather.js were solved against this expression; they are freshly measured
+    // and they are correct as they stand.
     voxelUniforms.uSkyIntensity.value =
       (0.34 - SKY_NIGHT_DROP * n2 + p.sunIntensity * 0.72) * (0.5 + w.sun * 0.5);
     // How deep the night is, raw. The scotopic drain and the hemisphere shaping

@@ -59,6 +59,17 @@ const STICK_R = 52;
 const DEAD = 0.24;
 const SPRINT = 0.86;
 
+/** Hold a hotbar cell this long and it starts dropping, then keeps dropping at
+ *  this rate. 420ms is long enough that nobody selecting a slot ever reaches it
+ *  — a tap is under 150ms — and short enough that it does not feel stuck.
+ *  The repeat is what makes it usable at all: `_dropHeld` throws one item, and
+ *  sixty-four separate long-presses to put down a stack of cobble is not a
+ *  control, it is a punishment. */
+const DROP_DELAY = 420;
+const DROP_REPEAT = 190;
+/** How far the thumb may wander and still be holding the cell, in CSS px. */
+const DROP_SLOP = 16;
+
 export class TouchControls {
   /**
    * Returns true only for a device whose *primary* pointer is a finger.
@@ -98,6 +109,8 @@ export class TouchControls {
      *  surface for the whole of any moment you would want to sneak through. */
     this.sneak = false;
     this._shown = null;
+    /** The hotbar cell being held down, if any. See `_wireHotbar`. */
+    this._drop = null;
 
     this._build();
     this._wire();
@@ -279,6 +292,90 @@ export class TouchControls {
     this._tapBtn(this.buttons.bag, 'KeyE');
     this._tapBtn(this.buttons.pause, 'Escape');
     this._toggleBtn(this.buttons.sneak);
+
+    this._wireHotbar();
+  }
+
+  /**
+   * Hold a hotbar cell to drop what is in it. Q, for a thumb.
+   *
+   * There was no way to put anything down at all on a phone: `Q` is the only
+   * drop there is, `KeyQ` is read once a frame in `_interact`, and a thumb has
+   * no keyboard. That is not an edge case — you pick up forty cobble clearing a
+   * doorway and you are carrying them for the rest of the session.
+   *
+   * A sixth thumb button was the obvious answer and it is the wrong one. The
+   * right hand already has four buttons and two of them are pressed constantly;
+   * a fifth in reach would be pressed by accident, and one out of reach is one
+   * you never use. The hotbar cell is already on screen, already the size of a
+   * thumb, and already takes a tap — and it is the thing the drop is *about*,
+   * so the gesture points at its own target. The count in the corner going down
+   * is the confirmation, which is why nothing else is drawn to say it happened.
+   *
+   * The cell is selected first, exactly as the tap would have, so holding a
+   * cell that is not the live one drops that cell rather than the live one.
+   * `_dropHeld` only knows how to drop what is in your hand.
+   *
+   * Nothing here is preventDefault'd, and that is deliberate: the browser's
+   * synthesised click is what selects the slot on an ordinary tap, and killing
+   * the default would kill that with it. The long-press callout, the selection
+   * and the context menu — the three things a hold would otherwise raise — are
+   * already off, in `body.touch` and in the contextmenu handler above.
+   */
+  _wireHotbar() {
+    const slots = this.game.ui?.hudSlots;
+    if (!slots) return;
+    slots.forEach((el, i) => {
+      el.addEventListener('pointerdown', (e) => this._armDrop(el, i, e));
+      // A thumb that wanders is a thumb that meant something else, so past a
+      // finger's width of slop the hold is off. This is a `pointermove` test
+      // and not `pointerleave` on purpose: a touch pointer is implicitly
+      // captured by whatever it went down on, so the boundary events do not
+      // fire until the finger lifts, by which time the drop has already run.
+      el.addEventListener('pointermove', (e) => {
+        const d = this._drop;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) > DROP_SLOP) this._cancelDrop();
+      });
+      const off = () => this._cancelDrop();
+      el.addEventListener('pointerup', off);
+      el.addEventListener('pointercancel', off);
+    });
+  }
+
+  _armDrop(el, i, e) {
+    this._cancelDrop();
+    const fire = () => {
+      // Through the same two fields the keyboard uses: the selection the digit
+      // keys write, and a `justPressed` Q. Every guard main.js puts on dropping
+      // — no screen open, not a spectator, not dead — is therefore still in
+      // force, because this is not a second path to it.
+      this.game.inventory.selected = i;
+      this.game.ui.refresh();
+      this.input.tap('KeyQ');
+    };
+    this._drop = {
+      el, x: e.clientX, y: e.clientY,
+      timer: setTimeout(() => {
+        el.classList.add('tc-drop');
+        // One short pulse, on the first drop only. It is the only signal that
+        // the hold has been *taken*; after that the falling count says it. A
+        // buzz per repeat would be a phone vibrating continuously while a stack
+        // empties. Ignored on iOS, which has no Vibration API.
+        navigator.vibrate?.(12);
+        fire();
+        this._drop.timer = setInterval(fire, DROP_REPEAT);
+      }, DROP_DELAY),
+    };
+  }
+
+  /** Stop a drop, armed or already running. `clearTimeout` and `clearInterval`
+   *  are the same id space, so one call clears whichever this is. */
+  _cancelDrop() {
+    if (!this._drop) return;
+    clearTimeout(this._drop.timer);
+    clearInterval(this._drop.timer);
+    this._drop.el.classList.remove('tc-drop');
+    this._drop = null;
   }
 
   /**
@@ -408,6 +505,11 @@ export class TouchControls {
   }
 
   _release() {
+    // A repeating drop is a timer rather than a claim, and it is the one thing
+    // here that would go on running with the layer gone: the hotbar is behind
+    // the inventory screen, and a stack quietly emptying itself while the
+    // player crafts is exactly the class of bug the claims below exist to stop.
+    this._cancelDrop();
     // Through each claim's own release, not by clearing the map: the claim is
     // what knows the button it lit and the field it set.
     for (const c of [...this.claims.values()]) c.release?.();

@@ -1785,8 +1785,10 @@ export class UI {
       el.classList.toggle('active', i === inv.selected);
     }
     // `F` where a hotbar slot has its number — same corner, same type, and it
-    // is the same kind of fact: the key that puts this slot in your hand.
-    this.el.offhand.dataset.num = 'F';
+    // is the same kind of fact: the key that puts this slot in your hand. On a
+    // phone there is no F and the corner has to name the gesture instead; the
+    // cell's own click handler is what swaps, so a tap is the truth there.
+    this.el.offhand.dataset.num = this.game.input?.touch ? 'TAP' : 'F';
     this._paint(this.el.offhand, inv.offhand);
     for (let i = 0; i < TOTAL; i++) {
       const el = this.invSlots[i];
@@ -2012,7 +2014,13 @@ export class UI {
     this._wireSlot(d, () => this.game.inventory.offhand);
     const cap = document.createElement('span');
     cap.className = 'slot-cap';
-    cap.innerHTML = 'Off <kbd>F</kbd>';
+    // The key, and nothing at all in its place on a phone. `F` advertised there
+    // was a straight lie — there is no key to press — and there is no touch
+    // gesture to name in its stead either: swapping is the HUD cell's tap, and
+    // the HUD is behind this screen. In here the slot is worked the way every
+    // other slot in the bag is worked, by picking things up and putting them
+    // down, so the caption has nothing left to say but which slot it is.
+    cap.innerHTML = this.game.input.touch ? 'Off' : 'Off <kbd>F</kbd>';
     col.append(d, cap);
     this.offhandEl = d;
     return col;

@@ -2992,6 +2992,21 @@ body.touch #bottom {
 /* The crosshair does not shrink. It is already 11px, it is what you aim with,
    and on a phone it is the only thing saying where the Mine button will act. */
 
+/* ── holding a cell to drop it ─────────────────────────── */
+/* The cell held down long enough to be throwing its contents out. Red rather
+   than the rack's brass, because brass on a cell already means "this is the one
+   in your hand" and the two states can be on at once - the live cell is usually
+   the one you are emptying. The count in the corner falling is the real
+   feedback; this only has to say that the hold was taken, since there is a
+   moment between the press and the first item where nothing else has. */
+body.touch .slot.tc-drop {
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 10, 3, .8),
+    inset 0 0 14px rgba(207, 70, 48, .55),
+    0 0 0 2px #cf4630,
+    0 0 12px -2px rgba(207, 70, 48, .8);
+}
+
 /* ── the Controls screen swaps sides ───────────────────── */
 /* The keyboard rows are hidden rather than removed, and the touch block is
    revealed, so one screen serves both and neither is a fork of the other. The

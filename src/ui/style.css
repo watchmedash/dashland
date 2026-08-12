@@ -2753,6 +2753,12 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 body.touch {
   /* One number, and everything in the touch layer is a multiple of it. */
   --tc-btn: 72px;
+  /* The left corner is spoken for by a map that is now `--hud-scale` smaller,
+     so the reserve shrinks with it. Left at its desktop 178px, this reserved
+     90% of a 393px screen for a 112px map and squeezed the compass — which is
+     `100vw - 2 * this` — down to a 37px sliver, masked at 18% from each end,
+     showing a clipped letter and a half. */
+  --hud-side: calc(var(--map-size) * var(--hud-scale) + 26px);
   --tc-sm: 62px;
   --tc-chip: 46px;
   /* How much of the bottom of the screen the thumbs own. The hotbar is lifted
@@ -2934,20 +2940,44 @@ body.touch, body.touch #view, body.touch #touch {
 body.touch #vitals { transform: scale(var(--hud-scale)); transform-origin: top left; }
 body.touch #minimap { transform: scale(var(--hud-scale)); transform-origin: top left; }
 /* The compass carries its own centring transform, so the scale composes onto it
-   the way `#bottom`'s does. It is capped against `--hud-side`, which is the map
-   frame plus a margin, and on a 393px screen that cap leaves a strip wide enough
-   to run into the chips beside it. Scaling from the top centre pulls both ends
-   back off their neighbours at once. */
+   the way `#bottom`'s does, and scaling from the top centre pulls both ends back
+   off their neighbours at once. Its width is `100vw - 2 * --hud-side` and the
+   touch `--hud-side` above is the one that matters: with the desktop reserve it
+   was 37px on a phone. The chip rail is what yields to it now - see the cap in
+   the next rule. */
 body.touch #compass {
   transform: translateX(-50%) scale(var(--hud-scale));
   transform-origin: top center;
 }
+/* The rail meets the compass and stops, which is the desktop rule from the top
+   of this file measured properly rather than by proxy.
+
+   The reported fault was the compass chip drawn ON TOP of the clock/weather/
+   season row, and it was this cap. `66vw` was picked to stop the chips hanging
+   off the right edge when `50vw - var(--hud-side)` went negative on a phone,
+   and it does that, but two thirds of the window reaches a long way past the
+   middle of it - and the middle of the window is exactly where the compass is
+   centred. At 393px the rail ran from x=191 and the compass from x=183, so
+   they shared nineteen pixels of the same row. Not a transform artefact: the
+   two boxes overlap before either is scaled. Nothing was ever clipped by the
+   right edge either; the biome chip wrapping to a second row *under* the
+   overlapping compass is what read as clipping.
+
+   So the cap is derived, not chosen. `--cmp-w` is the compass's own width rule
+   (keep the two in step; there is no way to share one custom property, because
+   a var() inside a custom property resolves on the element that DECLARES it, so
+   one defined at `:root` would bake in the desktop `--hud-side` and ignore the
+   touch one above). Half of that, scaled, is what the compass owns to the right
+   of centre; the rail gets the rest of the half-window less its own 10px inset
+   and an 8px gap. Divided by the scale because `max-width` is measured before
+   the transform. The chips wrap inside whatever that comes to, so the rail
+   cannot reach the compass at any width or in either orientation, and its right
+   edge is pinned by `right: 10px` and a top-right origin so it cannot leave the
+   screen either. */
 body.touch #status-bar {
   transform: scale(var(--hud-scale)); transform-origin: top right;
-  /* The chips wrap to three rows on a phone and hung off the right edge doing
-     it, because the cap was half the viewport. Two thirds, and they wrap
-     inside it. */
-  max-width: 66vw;
+  --cmp-w: min(320px, calc(100vw - var(--hud-side) * 2));
+  max-width: calc((50vw - 18px - var(--cmp-w) * var(--hud-scale) / 2) / var(--hud-scale));
 }
 body.touch #bottom {
   /* `#bottom` already carries a transform for its own centring, so the scale

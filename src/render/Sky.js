@@ -275,6 +275,11 @@ uniform vec3 uCenter;
 uniform vec3 uCamPos;
 uniform float uCoverage;
 uniform float uOpacity;
+// The light falling on the deck, as radiance rather than as a swatch. See
+// CLOUD_ALBEDO below for why these three exist at all.
+uniform vec3 uSunLight;   // sun colour * sun intensity, unattenuated by weather
+uniform vec3 uSkyLight;   // the sky's own fill on a cloud
+uniform vec3 uMoonLight;  // what is left of it after dark
 
 vec3 hash3(vec3 p) {
   p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
@@ -321,13 +326,81 @@ void main() {
   float shade = clamp((d - lit) * 2.2 + 0.62, 0.25, 1.0);
   float rim = pow(clamp(dot(normalize(uSunDir), dir), 0.0, 1.0), 6.0);
 
-  // Weather darkens the cloud itself, not just its extent. Fair-weather cumulus
-  // are nearly white and a storm deck is slate; without this every sky was made
-  // of the same bright cloud and a storm read as fog with the lights on.
-  float bright = mix(1.0, 0.46, smoothstep(0.35, 0.95, cloudy));
-  vec3 col = mix(uZenith * 0.85, vec3(1.0), 0.72) * shade * bright;
-  col += uSunColor * rim * 0.55;
-  col = mix(col, uSunColor, 0.18);
+  // --- how thick the deck is ------------------------------------------------
+  //
+  // Fair-weather cumulus are a thin scatter you can see daylight past; an
+  // overcast deck is a kilometre of water and its *underside* — the only side a
+  // player ever sees — is dark because almost nothing gets through it. That is
+  // the one physical fact this whole block is built on, and it is why bad
+  // weather can make the sky darker than a clear one instead of brighter.
+  //
+  // Read off uCoverage because that is the only weather signal this shader is
+  // given (main publishes uCoverage/uOpacity and nothing else). The window is
+  // 0.52..0.99 of cloudy rather than the 0.35..0.95 it replaces, because the
+  // old one landed overcast at 0.91 and storm at 1.00: a 9% difference at the
+  // very top of the ACES shoulder, i.e. none. The two weathers used to come out
+  // pixel-identical in the sky and the recon measured them so, 212.8 against
+  // 212.1 luma.
+  //
+  // The new window is placed against the five states' coverages (0.62 clear,
+  // 0.40 fair, 0.16 overcast, 0.08 rain, 0.02 storm — see STATES in Weather.js)
+  // so that: clear and fair land at 0.00 and 0.08, i.e. the fair-weather cumulus
+  // that were already right are left alone; and overcast/rain/storm land at
+  // 0.83/0.94/1.00, which through the gates below come out at 148/108/70 luma
+  // against a clear noon sky's 158. That is a readable ladder where there was
+  // one flat beige value, and every rung of it is at or below the clear sky
+  // instead of above it.
+  float thick = smoothstep(0.52, 0.99, cloudy);
+
+  // --- albedo x illumination ------------------------------------------------
+  //
+  // This used to be mix(uZenith * 0.85, vec3(1.0), 0.72) * shade * bright,
+  // then washed 18% toward uSunColor, and every one of those terms was a colour
+  // rather than a light:
+  //
+  //  - the hard-coded vec3(1.0) at 72% weight is a daylight white that no hour
+  //    of the day could turn off, so the deck sat near 0.7 linear at MIDNIGHT
+  //    and measured luma 126 against a night sky at 0.5. Clouds lit from above
+  //    by a sun that is not there.
+  //  - nothing in it was multiplied by the sun's intensity, so an overcast noon
+  //    tone-mapped to luma 213 against a clear blue sky's 156. Switching cloud
+  //    cover ON made the sky brighter.
+  //  - the flat 18% lerp toward uSunColor was the sepia. It is a constant warm
+  //    wash added irrespective of density, so it lifted the shaded parts hardest
+  //    and turned the whole thing beige — and at altitude, where the deck fills
+  //    the frame, into a brown-grey smear with no contrast left in it.
+  //
+  // A cloud is a near-white diffuser. So: pick one albedo and multiply it by
+  // what is actually shining on it. Then every hour, every weather and the
+  // dawn ramp come out of the palette for free, and there is no term left that
+  // can glow on its own.
+  // 0.46 rather than the ~0.9 a real cloud reflects, because uSunLight carries
+  // the palette's sunIntensity (1.62 at noon) which is a *terrain* light level,
+  // tuned against terrain albedos around 0.3. Solved for rather than picked: it
+  // is the value at which a fair-weather noon cumulus lands back on the 165 luma
+  // it measured before this rewrite, which is the look the recon checked and
+  // passed. Everything else in this block is then free to be physical.
+  const float CLOUD_ALBEDO = 0.46;
+  // Direct sun goes first as the deck thickens — a beam is extinguished long
+  // before the diffuse sky is.
+  vec3 illum = uSunLight * shade * mix(1.0, 0.03, thick);
+  // ...and the sky fill is what is left, plus the moon so a night deck is a dim
+  // silhouette rather than a hole. Both are trimmed under a thick deck for the
+  // same reason.
+  illum += (uSkyLight * 0.55 + uMoonLight) * mix(1.0, 0.26, thick);
+  // A consequence worth stating rather than papering over: an OVERCAST midnight
+  // now measures luma 0.1 in the sky — the deck is thick, the moon is above it
+  // and the stars are behind it, so there is nothing left. That is the right
+  // answer and it is in keeping with this game's clear night sky, which the
+  // recon measured at 0.5. It was tried as a bug and the fix rejected: giving
+  // the moon a gentler gate than the sky fill (0.45 against 0.26) moved the deck
+  // from 1.5 to 2.4 of 255, which is more code for a difference no one can see,
+  // and lifting the moon term enough to matter (x6.4) would have taken the CLEAR
+  // night clouds with it — the exact defect this block was written to fix.
+  vec3 col = illum * CLOUD_ALBEDO;
+  // Silver lining. Sun-driven, so unlike the old flat wash it is gone at night
+  // and gone under a storm.
+  col += uSunLight * rim * 0.30 * (1.0 - thick);
 
   float distFade = smoothstep(2.0, 40.0, length(vWorld - uCamPos));
   gl_FragColor = vec4(col, a * uOpacity * distFade);
@@ -396,6 +469,9 @@ export class Sky {
       uCamPos: { value: new THREE.Vector3() },
       uCoverage: { value: 0.30 },
       uOpacity: { value: 0.88 },
+      uSunLight: { value: new THREE.Color(1, 1, 1) },
+      uSkyLight: { value: new THREE.Color(0, 0, 0) },
+      uMoonLight: { value: new THREE.Color(0, 0, 0) },
     };
     const cloudMat = new THREE.ShaderMaterial({
       uniforms: this.cloudUniforms,
@@ -719,6 +795,35 @@ export class Sky {
     this.cloudUniforms.uSunColor.value.copy(p.sun);
     this.cloudUniforms.uZenith.value.copy(p.zenith);
     this.cloudUniforms.uCamPos.value.copy(camera.position);
+
+    // The light on the deck, published as radiance so CLOUD_FRAG can do albedo
+    // x illumination instead of art-directing a colour. See the long note there.
+    //
+    // Deliberately NOT attenuated by the weather's `sun` the way main attenuates
+    // the terrain's: that factor is "how much sun gets through the cloud", and
+    // the cloud is the thing doing the blocking. It stands in full sunlight on
+    // top and the shader darkens its underside itself, from uCoverage.
+    this.cloudUniforms.uSunLight.value.copy(p.sun).multiplyScalar(p.sunIntensity);
+    // Not p.ambient alone. That key is the *ground's* fill — a dull grey-purple
+    // 0x6a6270 at sunrise — while the thing actually shining on the underside of
+    // a dawn cloud is the horizon itself, 0xf2a468, which is three times the
+    // luminance and the whole reason a sunrise cloud goes salmon instead of
+    // brown. With ambient alone the first dawn shot after this rewrite had a
+    // brown smudge sitting in an otherwise good pink sky.
+    //
+    // Half way there, because the two keys are within 8% of each other at
+    // noon and at night (0xa2bada against 0x96c0ee, 0x0a1024 against 0x070a18),
+    // so this is arithmetically almost a no-op at both ends and only bites
+    // across the dawn/dusk band where the palette pulls them apart. That is
+    // deliberate: the ramp was checked and passed, and this must not restyle it.
+    this.cloudUniforms.uSkyLight.value.copy(p.ambient).lerp(p.horizon, 0.50);
+    // Enough moon to keep a night deck as a readable silhouette against the
+    // stars and no more. The palette's night ambient alone is ~0.003 linear,
+    // which is black on screen — correct for a moonless sky and wrong for this
+    // one, which has a moon in it (see moonLight below). Squared night so it is
+    // exactly zero all day rather than a small constant nobody notices.
+    this.cloudUniforms.uMoonLight.value.copy(MOON_FILL)
+      .multiplyScalar(night * night * 0.030);
 
     // lights
     const target = focus || camera.position;

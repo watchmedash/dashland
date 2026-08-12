@@ -1642,7 +1642,54 @@ const FOG_FRAG = /* glsl */`
     // thick, wavelength-shifted extinction: red falls off fastest
     vec3 ext = vec3(0.115, 0.052, 0.035);
     vec3 uf = vec3(1.0) - exp(-ext * dist);
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, uWaterFog, clamp(uf, 0.0, 0.96));
+    // The murk is lit from above, exactly like everything it is hiding.
+    //
+    // This mix is the right shape — surface radiance attenuated, in-scattered
+    // light building up behind it — and it was being fed one constant colour
+    // for the whole ocean. uWaterFog is mixed in main from the sun's height and
+    // nothing else, so the water twenty cells down was painted the same pale
+    // cyan as the water just under the surface, at 85% strength three cells out
+    // and 96% (the clamp) past twenty-eight. Measured on the ocean at noon,
+    // that is the whole of the "one flat cyan": with the same frame rendered
+    // with uUnderwater forced to 0, the near bed reads 1/1/7 and a shallow
+    // ridge sixty cells off reads 92/139/188 — the light field has a full
+    // seabed-to-surface gradient in it and the fog was painting over all of it.
+    // Turning uWaterFog red made every one of those pixels red, near and far
+    // alike: nothing of the terrain was surviving to be seen.
+    //
+    // vSun is the fragment's own skylight and already knows the answer: water
+    // is SKY_ATTEN 1 per cell, so it falls a level for every cell of water
+    // overhead and is near zero on a deep bed and near one on a shoal. Scaling
+    // the in-scatter by it means the murk over a trough is dark and the murk
+    // over a reef is bright — which is both what depth looks like and, more to
+    // the point, a *difference* between two parts of the frame where there was
+    // one value before.
+    //
+    // The 0.16 floor is not physics, it is the same argument sunAmt makes a few
+    // hundred lines up: at a hard zero a deep bed is a black rectangle you
+    // navigate by memory, and losing the sense that there is water in front of
+    // you is a worse bug than the one being fixed. It is small enough that the
+    // gradient survives it.
+    //
+    // ### Tried and rejected
+    //
+    // (No backticks anywhere in this comment: it lives inside a GLSL template
+    // literal, so one ends the shader source mid-sentence and the file stops
+    // parsing as JavaScript. It cost a run to be reminded of that.)
+    //
+    // Thinning ext instead. It buys range by making the water clearer, which
+    // fights the wavelength shift that is the good part of this term — halving
+    // it puts red back into a bed twenty cells down, and the reason the sea is
+    // blue is that it does not. It also does nothing for the real complaint:
+    // an evenly-lit murk over an evenly-black bed is still one value, it just
+    // takes longer to get there.
+    //
+    // Dropping the flat 0.58 dim above. That dim is why a submerged sand bed
+    // does not out-glare the beach it runs into; removing it made the shallows
+    // bright and left the deep bed exactly as flat, because the deep bed's
+    // problem was never its own brightness.
+    float murkLit = 0.16 + 0.84 * vSun;
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, uWaterFog * murkLit, clamp(uf, 0.0, 0.96));
   }
 `;
 
@@ -1761,6 +1808,21 @@ function patch(material, opts = {}) {
     shader.fragmentShader = fs;
     material.userData.shader = shader;
   };
+  // These four have their own fog and must not be given three's as well.
+  //
+  // FOG_FRAG goes in after <dithering_fragment> rather than in place of
+  // <fog_fragment>, so three's fog chunk is still sitting in the shader below
+  // it. That cost nothing for as long as no scene ever had a fog — and the
+  // moment main attached one for the underwater tint on entities, every voxel
+  // fragment started paying the water tax twice. Measured on the seabed the
+  // day it was added: 0/22/37 to 0/32/59, the blue channel up 60% on terrain
+  // that had already been fogged correctly.
+  //
+  // Opting out here rather than replacing <fog_fragment> above, because the
+  // aerial-perspective term wants to run near the very end of the fragment
+  // (after the liquid reflection and the mining crack), and <fog_fragment> is
+  // not where that is.
+  material.fog = false;
   material.customProgramCacheKey = () => 'voxel' + (opts.liquid ? 'L' : '') + (opts.cutout ? 'C' : '');
   return material;
 }

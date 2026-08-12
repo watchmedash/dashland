@@ -1650,6 +1650,38 @@ class Game {
     this.width = window.innerWidth; this.height = window.innerHeight;
 
     this.scene = new THREE.Scene();
+    // Scene fog exists for ONE job: the underwater tint, on everything the
+    // voxel shader cannot reach.
+    //
+    // Terrain and seabed are voxel materials and take their water extinction in
+    // FOG_FRAG, per channel, with red going first. Fish, kelp and coral are not
+    // voxel geometry at all — a fish is a loaded model and kelp and coral are
+    // block models, all of them wearing their own MeshStandardMaterial — and
+    // they were getting none of it. That is the whole of "corals and fish keep
+    // full saturation and read as pasted on top": they are the objects the
+    // water tint could not reach.
+    //
+    // Established rather than assumed, by forcing this fog red and seeing what
+    // turned red: the fish, the kelp and the coral did, and every voxel
+    // fragment in the frame did not. Measured on a fish pinned forty cells down
+    // the view axis, one world, two frames: 59/84/101 with the fog off, 0/20/33
+    // with it on — which is the water it is swimming in.
+    //
+    // Attached once and left attached, with density 0 in air, rather than
+    // hung on and taken off as the player's head crosses the surface. Adding
+    // or removing scene.fog flips USE_FOG, which is part of three's program
+    // cache key, so toggling it recompiles every material in the scene — and
+    // the head crosses the waterline repeatedly on any swim. At density 0 the
+    // term is exp(0) exactly, so an air frame is unchanged and pays one varying.
+    //
+    // FogExp2's curve is 1 - exp(-d²·density²) against the shader's
+    // 1 - exp(-ext·d), so the two cannot be matched everywhere; the density is
+    // fitted to the green channel at mid range in _updateSharedUniforms. A fish
+    // very close in is therefore a little less tinted than the rock behind it,
+    // which is a second-order colour error where the first-order one was a
+    // fully saturated fish. The exact fix is to give mob materials the real
+    // FOG_FRAG, and that needs vWorld and vSun varyings they do not have.
+    this.scene.fog = new THREE.FogExp2(0x000000, 0);
     // Far plane is deliberately tight. Nothing depth-tested lives beyond the
     // cloud shell; the sky dome, stars and sun all draw with depthTest off. A
     // huge far plane wrecks depth precision, which shows up as GTAO haze over
@@ -9229,6 +9261,28 @@ class Game {
       const lit = 0.25 + p.sunIntensity * 0.5;
       voxelUniforms.uWaterFog.value.setRGB(0.03 * lit, 0.17 * lit, 0.26 * lit);
       voxelUniforms.uWaterTint.value.setRGB(0.30 * lit, 0.66 * lit, 0.72 * lit);
+      // The same murk, for everything the voxel shader never sees. See the note
+      // where scene.fog is created.
+      //
+      // The shader scales the in-scatter by the fragment's own vSun; a scene fog
+      // gets one colour for the whole frame, so it uses the player's depth
+      // instead, worked out the same way the light field does it — water is
+      // SKY_ATTEN 1 per cell out of MAX_LIGHT 15, so fifteen cells of water is
+      // where daylight runs out. That puts a fish beside you in the same murk
+      // you are standing in, which is the case that matters; a fish at a very
+      // different depth from the camera is wrong by the difference, and there is
+      // no second colour to give it.
+      const depth = Math.max(0, R_SEA - this.player.position.length());
+      const murkLit = 0.16 + 0.84 * Math.max(0, 1 - depth / 15);
+      this.scene.fog.color.copy(voxelUniforms.uWaterFog.value).multiplyScalar(murkLit);
+      // Fitted to the shader's green channel at 22 cells: 1 - exp(-0.052·22) is
+      // 0.681, and 1 - exp(-(22·d)²) matches it at d = 0.0486. Green because it
+      // is the middle of the three and the one the eye reads brightness from.
+      this.scene.fog.density = 0.0486;
+    } else {
+      // Exactly zero, so exp(0) leaves an air frame bit-identical. The fog stays
+      // attached; see scene.fog's own note for why it is not detached here.
+      this.scene.fog.density = 0;
     }
     voxelUniforms.uWind.value = w.wind;
     // Item drops with no 3D art fall out of the world as two crossed cards

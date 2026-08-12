@@ -1,0 +1,260 @@
+# Grapes — a bunch, built out of actual berries.
+#
+# `art/wam/crops/grape_4.wam` hangs three bunches on a trained vine and each one is a single
+# loft whose rings alternate wide and narrow: "six berries' worth of read for a hundred
+# triangles", which is the right trade at two metres on a trellis where a bunch is 20 cm of
+# a 2 m plant. In the fist it is not. A scalloped cone held at arm's length is a purple
+# pinecone, and the check that file carries against turning into an amethyst is exactly the
+# failure this one would ship. So the item pays for the berries: 24 of them, five-sided, in
+# seven tiers down a rachis.
+#
+# **The tiers are what make it a bunch and not a cluster.** Berry count is the obvious knob
+# and it is not the one that matters — a random scatter of 24 balls is gravel at any count.
+# What reads as a bunch is a *taper with structure*: five berries round the shoulder, five,
+# four, four, three, two, one, at radii falling 0.150 / 0.140 / 0.118 / 0.094 / 0.066 /
+# 0.040 / 0, and each tier phase-rotated off the one above it so berries sit in the gaps
+# rather than in columns. That is a pine-cone packing, which is what a real bunch is, and it
+# also means no tier's berries hide the tier below from any angle.
+#
+# **Berries are domed at both poles.** The first sheet capped them `flat`, which is what
+# `lingonberry.wam`'s berries do and correct there — those are 0.08 across and read as dots.
+# At 0.15 in a fist a flat-capped five-sided loft is a *drum*: you see the disc at the top,
+# the disc at the bottom, and 24 short cylinders where the fruit should be. Dome caps at both
+# ends cost four triangles a berry and are the difference between a bunch of grapes and a
+# stack of counters.
+#
+# **Every berry carries the bloom.** The top 40% of each berry is #9563b8 against the
+# #5b2d78 body — `Items.js`'s own pair — and it is doing two jobs. It is the dusty waxy
+# bloom a grape has, and more importantly it is a highlight in a fixed direction on every
+# berry at once, which is what separates 24 spheres into 24 spheres. The whole bunch is one
+# unlit purple mass otherwise: the hand light is flat, the berries touch, and without a
+# per-berry light edge the model is a lump the shape of a bunch. `lingonberry.wam` records
+# the same trick and the same reason.
+#
+# **The stem and the leaf are the label.** A purple tapered mass could be several things;
+# hung off a brown woody stalk with one green leaf beside it, it is grapes and nothing else.
+# The leaf is 0.24 across and flat, which is small for a grape leaf and deliberately so — it
+# is a caption, not foliage, and a leaf big enough to be botanically right covers a third of
+# the fruit at icon size.
+#
+# The bunch is authored point-DOWN with the shoulder at the top, i.e. the way it hangs, and
+# `ItemModels.js` grips it low on the stem so the taper is above the fist.
+#
+# All 24 berries live in one `group`. That is not organisation, it is the only way to say
+# what is true: a berry sitting 0.046 off the axis with a 0.147 diameter *straddles the
+# centerline*, and the lint reports every one of those as a central part built lopsided —
+# nine warnings for a model that is correct. Inside a group the compiler takes the prop as
+# the author's business, which is the right reading here, since the thing that has to be
+# symmetric is the bunch and not any berry in it.
+
+model grape
+  height 0.30
+  style chunky
+
+palette
+  Berry #5b2d78
+  Bloom #9563b8
+  Stem  #6b4a2c
+  Leaf  #4e8a30
+
+skeleton
+  root soil at 0.03
+  # The rachis: the bunch's own axis, running up from the point to the shoulder. Every berry
+  # is placed as a fraction along it and a radius off it, so "make the bunch longer" or
+  # "make it fatter" are one number each rather than 24 coordinates.
+  bone rach parent=soil dir=up pitch=-3 len=0.62
+  # The stalk above the shoulder. The leaf mounts on it, so it exists as a bone rather than
+  # only as a part.
+  bone stalk parent=rach dir=up pitch=8 len=0.16
+
+parts
+  # The woody stalk. Thick for its length and blunt-cut at the top: a bunch is cut off the
+  # cordon with secateurs, not picked, and the cut end is the tell.
+  loft stalk_p bones=stalk..stalk material=Stem sides=5
+    ring 0.00 w=0.070 d=0.070
+    ring 0.72 w=0.052 d=0.052
+    ring 1.00 w=0.058 d=0.058
+    cap start=flat end=flat
+
+  # The leaf. Offset off the axis before it starts, because a central part that reaches only
+  # one way is lopsided by construction and the lint counts it — the offset moves the blade
+  # fully onto its own side of the centerline rather than pretending to be symmetric.
+  #
+  # Flat (`frame=up`, w broad and d thin) and lobed the way `squash_4.wam` lobes
+  # its blades — the width scallops 0.20 / 0.15 / 0.24 / 0.13 along the leaf instead of
+  # swelling once, which is a grape leaf's notched outline for the price of the rings it
+  # already had.
+  loft leaf bone=stalk at=0.62 offset=(0.060,0,0.010) dir=side yaw=-28 tilt=22 len=0.30 material=Leaf frame=up sides=5
+    ring 0.00 w=0.050 d=0.014
+    ring 0.26 w=0.200 d=0.024
+    ring 0.48 w=0.150 d=0.022
+    ring 0.74 w=0.240 d=0.024
+    ring 1.00 w=0.130 d=0.014
+    cap start=flat end=dome
+
+  # ---- the berries ---------------------------------------------------------------
+  #
+  # Generated from the tier table in the header comment and pasted in, which is why they are
+  # numbered rather than named: br01 is the front berry of the shoulder tier and br24 is the
+  # single berry at the point. Editing one by hand is almost always the wrong move — the
+  # thing to change is the tier it belongs to, and then all of them.
+  #
+  # Each berry's y is `t * 0.62 + radius`, not `t * 0.62`: a `dir=down` loft hangs its whole
+  # length below its anchor, so anchoring at t alone puts every berry half a diameter lower
+  # than the tier it belongs to and drops the last one through the floor.
+  group bunch bone=rach at=0.0 dir=up spin=0
+    # tier 1: 5 berries at 0.150 off the axis, 0.96 up it.
+    loft br01 at=(+0.150,0.658,+0.000) dir=down len=0.093 material=Berry sides=5
+      ring 0.00 w=0.132 d=0.132 material=Bloom
+      ring 0.34 w=0.150 d=0.150 material=Berry
+      ring 1.00 w=0.126 d=0.126
+      cap start=dome end=dome
+    loft br02 at=(+0.046,0.658,+0.143) dir=down len=0.093 material=Berry sides=5
+      ring 0.00 w=0.132 d=0.132 material=Bloom
+      ring 0.34 w=0.150 d=0.150 material=Berry
+      ring 1.00 w=0.126 d=0.126
+      cap start=dome end=dome
+    loft br03 at=(-0.121,0.658,+0.088) dir=down len=0.093 material=Berry sides=5
+      ring 0.00 w=0.132 d=0.132 material=Bloom
+      ring 0.34 w=0.150 d=0.150 material=Berry
+      ring 1.00 w=0.126 d=0.126
+      cap start=dome end=dome
+    loft br04 at=(-0.121,0.658,-0.088) dir=down len=0.093 material=Berry sides=5
+      ring 0.00 w=0.132 d=0.132 material=Bloom
+      ring 0.34 w=0.150 d=0.150 material=Berry
+      ring 1.00 w=0.126 d=0.126
+      cap start=dome end=dome
+    loft br05 at=(+0.046,0.658,-0.143) dir=down len=0.093 material=Berry sides=5
+      ring 0.00 w=0.132 d=0.132 material=Bloom
+      ring 0.34 w=0.150 d=0.150 material=Berry
+      ring 1.00 w=0.126 d=0.126
+      cap start=dome end=dome
+    # tier 2: 5 berries at 0.140 off the axis, 0.79 up it.
+    loft br06 at=(+0.113,0.552,+0.082) dir=down len=0.091 material=Berry sides=5
+      ring 0.00 w=0.129 d=0.129 material=Bloom
+      ring 0.34 w=0.147 d=0.147 material=Berry
+      ring 1.00 w=0.123 d=0.123
+      cap start=dome end=dome
+    loft br07 at=(-0.043,0.552,+0.133) dir=down len=0.091 material=Berry sides=5
+      ring 0.00 w=0.129 d=0.129 material=Bloom
+      ring 0.34 w=0.147 d=0.147 material=Berry
+      ring 1.00 w=0.123 d=0.123
+      cap start=dome end=dome
+    loft br08 at=(-0.140,0.552,+0.000) dir=down len=0.091 material=Berry sides=5
+      ring 0.00 w=0.129 d=0.129 material=Bloom
+      ring 0.34 w=0.147 d=0.147 material=Berry
+      ring 1.00 w=0.123 d=0.123
+      cap start=dome end=dome
+    loft br09 at=(-0.043,0.552,-0.133) dir=down len=0.091 material=Berry sides=5
+      ring 0.00 w=0.129 d=0.129 material=Bloom
+      ring 0.34 w=0.147 d=0.147 material=Berry
+      ring 1.00 w=0.123 d=0.123
+      cap start=dome end=dome
+    loft br10 at=(+0.113,0.552,-0.082) dir=down len=0.091 material=Berry sides=5
+      ring 0.00 w=0.129 d=0.129 material=Bloom
+      ring 0.34 w=0.147 d=0.147 material=Berry
+      ring 1.00 w=0.123 d=0.123
+      cap start=dome end=dome
+    # tier 3: 4 berries at 0.118 off the axis, 0.62 up it.
+    loft br11 at=(+0.112,0.445,+0.036) dir=down len=0.089 material=Berry sides=5
+      ring 0.00 w=0.127 d=0.127 material=Bloom
+      ring 0.34 w=0.144 d=0.144 material=Berry
+      ring 1.00 w=0.121 d=0.121
+      cap start=dome end=dome
+    loft br12 at=(-0.036,0.445,+0.112) dir=down len=0.089 material=Berry sides=5
+      ring 0.00 w=0.127 d=0.127 material=Bloom
+      ring 0.34 w=0.144 d=0.144 material=Berry
+      ring 1.00 w=0.121 d=0.121
+      cap start=dome end=dome
+    loft br13 at=(-0.112,0.445,-0.036) dir=down len=0.089 material=Berry sides=5
+      ring 0.00 w=0.127 d=0.127 material=Bloom
+      ring 0.34 w=0.144 d=0.144 material=Berry
+      ring 1.00 w=0.121 d=0.121
+      cap start=dome end=dome
+    loft br14 at=(+0.036,0.445,-0.112) dir=down len=0.089 material=Berry sides=5
+      ring 0.00 w=0.127 d=0.127 material=Bloom
+      ring 0.34 w=0.144 d=0.144 material=Berry
+      ring 1.00 w=0.121 d=0.121
+      cap start=dome end=dome
+    # tier 4: 4 berries at 0.094 off the axis, 0.45 up it.
+    loft br15 at=(+0.047,0.338,+0.081) dir=down len=0.087 material=Berry sides=5
+      ring 0.00 w=0.124 d=0.124 material=Bloom
+      ring 0.34 w=0.141 d=0.141 material=Berry
+      ring 1.00 w=0.118 d=0.118
+      cap start=dome end=dome
+    loft br16 at=(-0.081,0.338,+0.047) dir=down len=0.087 material=Berry sides=5
+      ring 0.00 w=0.124 d=0.124 material=Bloom
+      ring 0.34 w=0.141 d=0.141 material=Berry
+      ring 1.00 w=0.118 d=0.118
+      cap start=dome end=dome
+    loft br17 at=(-0.047,0.338,-0.081) dir=down len=0.087 material=Berry sides=5
+      ring 0.00 w=0.124 d=0.124 material=Bloom
+      ring 0.34 w=0.141 d=0.141 material=Berry
+      ring 1.00 w=0.118 d=0.118
+      cap start=dome end=dome
+    loft br18 at=(+0.081,0.338,-0.047) dir=down len=0.087 material=Berry sides=5
+      ring 0.00 w=0.124 d=0.124 material=Bloom
+      ring 0.34 w=0.141 d=0.141 material=Berry
+      ring 1.00 w=0.118 d=0.118
+      cap start=dome end=dome
+    # tier 5: 3 berries at 0.066 off the axis, 0.29 up it.
+    loft br19 at=(+0.057,0.238,+0.033) dir=down len=0.086 material=Berry sides=5
+      ring 0.00 w=0.121 d=0.121 material=Bloom
+      ring 0.34 w=0.138 d=0.138 material=Berry
+      ring 1.00 w=0.116 d=0.116
+      cap start=dome end=dome
+    loft br20 at=(-0.057,0.238,+0.033) dir=down len=0.086 material=Berry sides=5
+      ring 0.00 w=0.121 d=0.121 material=Bloom
+      ring 0.34 w=0.138 d=0.138 material=Berry
+      ring 1.00 w=0.116 d=0.116
+      cap start=dome end=dome
+    loft br21 at=(-0.000,0.238,-0.066) dir=down len=0.086 material=Berry sides=5
+      ring 0.00 w=0.121 d=0.121 material=Bloom
+      ring 0.34 w=0.138 d=0.138 material=Berry
+      ring 1.00 w=0.116 d=0.116
+      cap start=dome end=dome
+    # tier 6: 2 berries at 0.040 off the axis, 0.15 up it.
+    loft br22 at=(+0.040,0.150,+0.000) dir=down len=0.084 material=Berry sides=5
+      ring 0.00 w=0.119 d=0.119 material=Bloom
+      ring 0.34 w=0.135 d=0.135 material=Berry
+      ring 1.00 w=0.113 d=0.113
+      cap start=dome end=dome
+    loft br23 at=(-0.040,0.150,+0.000) dir=down len=0.084 material=Berry sides=5
+      ring 0.00 w=0.119 d=0.119 material=Bloom
+      ring 0.34 w=0.135 d=0.135 material=Berry
+      ring 1.00 w=0.113 d=0.113
+      cap start=dome end=dome
+    # tier 7: 1 berry at 0.000 off the axis, 0.03 up it.
+    loft br24 at=(+0.000,0.074,+0.000) dir=down len=0.082 material=Berry sides=5
+      ring 0.00 w=0.116 d=0.116 material=Bloom
+      ring 0.34 w=0.132 d=0.132 material=Berry
+      ring 1.00 w=0.111 d=0.111
+      cap start=dome end=dome
+  end
+
+checks
+  # A BUNCH: the shoulder is wide, the point is narrow, and the taper is monotonic. Stated on
+  # the berries themselves rather than on a bounding box, because a bounding box cannot tell
+  # a tapered bunch from a cylinder with a pointed berry stuck on the end.
+  assert dist(br01, br05) > dist(br20, br22)
+  assert y(br01) > y(br24) + 0.40
+  # ...and the widest tier really is at the top: the shoulder berry reaches further off the
+  # axis than anything in the lower half.
+  assert abs(x(br01)) > abs(x(br20)) * 1.8
+  # The berries are ROUND and all much of a size. An egg-shaped berry reads as a bud and a
+  # bunch of mixed sizes reads as gravel, which is the failure the crop model's `cluster: 7`
+  # scatter shipped for two rounds.
+  assert width(br01) / height(br01) in 0.80..1.25
+  assert width(br24) / width(br01) in 0.85..1.05
+  # The stalk is above the fruit and thin — a stalk as fat as a berry is a handle.
+  assert bottom(stalk_p) > y(br01)
+  assert width(stalk_p) < width(br01) * 0.75
+  # The leaf is a caption, not a canopy: it clears the fruit and is a fraction of the bunch.
+  assert width(leaf) < width * 0.75
+  assert bottom(leaf) > y(br01)
+  # Taller than wide, so `ItemModels.js` — which normalises on the Y extent alone — hands
+  # back the size that was authored.
+  assert height / width in 1.15..2.2
+  assert parts == 26
+  assert tris < 1000
+  measure bunch height / width

@@ -1,0 +1,135 @@
+# Snow Peas — four flat paddles, and the flatness is the species.
+#
+# `art/wam/crops/snowpea_4.wam` says it in one line and it is worth repeating here because
+# this model has to survive the same test at a tenth the size: "a snow pea is eaten pod and
+# all and the flatness IS the species". Everything else about the plant — the thread of a
+# stem, the coiled tendrils, the white flowers — belongs to the vine and none of it is in a
+# picked handful. What is left is the pod, and a pod that is not flat is a green bean, which
+# is the item in the next slot along.
+#
+# **`refaxis=` per pod is what stops this being one flat card.** A flat loft pins its thin
+# axis with `frame=fwd`, and `frame=` names a *world* axis — so four pods authored that way
+# are four paddles all facing the same direction, which is a plane, and a plane seen edge-on
+# in the fist is four lines. `fern.wam` and `coral_fan.wam` both record the same trap.
+# Neither `yaw` nor `tilt` digs it out, because neither turns a ring frame that has been
+# pinned to a world axis. `refaxis=(x,y,z)` does: each pod names its own thin direction, 40
+# degrees apart round the bundle, so from any angle at least two pods show a broad face and
+# one shows an edge. That contrast — face against edge — is what says "these things are
+# flat" far more loudly than any single pod's profile can.
+#
+# **The peas show through.** The width scallops 0.155 / 0.185 / 0.170 / 0.190 / 0.160 down
+# the pod and the thickness swells with it, which is four or five peas bulging the wall. A
+# smooth paddle is a leaf; the lumpy edge is the entire difference and it costs no rings,
+# only different numbers on the rings the pod already needed.
+#
+# Colour is `Items.js`'s #7ab355 with its #aede8b shine, and both are much paler and yellower
+# than the green bean's #4f8f34 — the two items sit next to each other in the crop ladder,
+# they are both green things in bundles, and if the hues converge the toolbar has two of one
+# item. The palest pod is the front one, so the handful is lit rather than mottled.
+#
+# The pods are gripped at their stalk ends, which cluster at the bottom of the model where
+# the fist closes, the same arrangement `greenbean.wam` uses. A bundle whose butts are not
+# together is a bush.
+
+model snowpea
+  height 0.30
+  style chunky
+
+palette
+  Pod   #7ab355
+  Sun   #aede8b
+  Shade #5c8f3e
+  Stalk #9dc07a
+
+skeleton
+  root butt at 0.00
+  # One spine for the handful. Everything mounts at its tail and differs only in aim.
+  bone hand parent=butt dir=up len=0.09
+
+parts
+  # Four pods. `tilt` fans them left and right and `pitch` fore and aft — `yaw` would do
+  # nothing at all to a bone already pointing up. Each `refaxis` is the pod's own thin
+  # direction and they are deliberately spread round the compass rather than shared.
+  loft podA bone=hand at=1.0 offset=(0.072,0,0.030) dir=up pitch=4 tilt=-9 len=0.60 material=Sun refaxis=(0,0,1) sides=5
+    ring 0.00 w=0.044 d=0.018 side=0.000
+    ring 0.12 w=0.124 d=0.034 side=0.010
+    ring 0.34 w=0.148 d=0.031 side=0.018
+    ring 0.54 w=0.136 d=0.036 side=0.020
+    ring 0.74 w=0.152 d=0.030 side=0.016
+    ring 0.90 w=0.128 d=0.029 side=0.008
+    ring 1.00 w=0.056 d=0.018 side=0.000
+    cap start=dome end=dome
+  loft podB bone=hand at=1.0 offset=(-0.068,0,0.034) dir=up pitch=5 tilt=11 len=0.56 material=Pod refaxis=(0.64,0,0.77) sides=5
+    ring 0.00 w=0.042 d=0.017 side=0.000
+    ring 0.12 w=0.118 d=0.032 side=-0.010
+    ring 0.34 w=0.141 d=0.029 side=-0.017
+    ring 0.54 w=0.130 d=0.034 side=-0.019
+    ring 0.74 w=0.144 d=0.029 side=-0.015
+    ring 0.90 w=0.122 d=0.028 side=-0.008
+    ring 1.00 w=0.053 d=0.017 side=0.000
+    cap start=dome end=dome
+  loft podC bone=hand at=1.0 offset=(0.062,0,-0.036) dir=up pitch=-11 tilt=-14 len=0.52 material=Shade refaxis=(-0.64,0,0.77) sides=5
+    ring 0.00 w=0.039 d=0.017 side=0.000
+    ring 0.12 w=0.112 d=0.030 side=0.009
+    ring 0.34 w=0.134 d=0.028 side=0.016
+    ring 0.54 w=0.123 d=0.032 side=0.018
+    ring 0.74 w=0.137 d=0.027 side=0.014
+    ring 0.90 w=0.115 d=0.026 side=0.007
+    ring 1.00 w=0.050 d=0.017 side=0.000
+    cap start=dome end=dome
+  loft podD bone=hand at=1.0 offset=(-0.058,0,-0.040) dir=up pitch=-12 tilt=13 len=0.48 material=Shade refaxis=(0.98,0,0.20) sides=5
+    ring 0.00 w=0.037 d=0.016 side=0.000
+    ring 0.12 w=0.106 d=0.028 side=-0.009
+    ring 0.34 w=0.126 d=0.026 side=-0.015
+    ring 0.54 w=0.116 d=0.031 side=-0.017
+    ring 0.74 w=0.130 d=0.025 side=-0.013
+    ring 0.90 w=0.109 d=0.025 side=-0.006
+    ring 1.00 w=0.048 d=0.016 side=0.000
+    cap start=dome end=dome
+
+  # The stalk ends. Short, pale, and pointing down out of the fist: the tell that these were
+  # picked. Three for four pods, because the fourth's butt is behind the others and a stub
+  # nobody can see is 24 triangles spent on nothing.
+  loft stkA bone=hand at=1.0 offset=(0.072,0,0.030) dir=down pitch=-4 tilt=8 len=0.075 material=Stalk sides=4
+    ring 0.00 w=0.034 d=0.026
+    ring 1.00 w=0.020 d=0.016
+    cap start=flat end=dome
+  loft stkB bone=hand at=1.0 offset=(-0.068,0,0.034) dir=down pitch=-4 tilt=-10 len=0.070 material=Stalk sides=4
+    ring 0.00 w=0.032 d=0.025
+    ring 1.00 w=0.019 d=0.015
+    cap start=flat end=dome
+  loft stkC bone=hand at=1.0 offset=(0.062,0,-0.036) dir=down pitch=9 tilt=12 len=0.066 material=Stalk sides=4
+    ring 0.00 w=0.030 d=0.024
+    ring 1.00 w=0.018 d=0.014
+    cap start=flat end=dome
+
+checks
+  # FLAT. The one number this file exists for: a pod's broad face is three times its
+  # thickness or it is a bean. Measured per pod on the bounding box, which is pessimistic
+  # here — the fan's lean puts a little of each pod's length into both readings.
+  assert width(podA) / depth(podA) > 2.2
+  # podB's own bound is much looser and it is not a weaker pod: its `refaxis` is turned 40
+  # degrees off the world axes, so half of its broad face lands in the depth reading and half
+  # of its thickness in the width one. A bounding box cannot measure a paddle held at an
+  # angle to it, and inventing a tighter number here would only mean tuning the pod to suit
+  # the ruler.
+  assert width(podB) / depth(podB) > 1.35
+  # ...and the pods do not all face one way, which is the failure `refaxis=` is here to
+  # prevent. If every thin axis were shared the bundle's own depth would collapse toward one
+  # pod's thickness; instead it is most of a pod's width.
+  assert depth > width(podA) * 1.3
+  # LONG, but nothing like as long as a bean: a snow pea is a short broad paddle and the
+  # bean in the next slot asserts 6:1 on the same measure.
+  assert height(podA) / width(podA) in 2.4..4.6
+  # A HANDFUL: every butt in the same fist.
+  assert dist(podA, podC) < 0.30
+  assert bottom(podA) < 0.10
+  # Upright, so `ItemModels.js` — which normalises on the Y extent alone — hands back the
+  # size that was authored.
+  assert height / width in 1.05..2.2
+  assert top(stkA) < bottom(podA) + 0.06
+  assert bottom(stkA) < 0.03
+  assert parts == 7
+  assert tris < 900
+  measure flat width(podA) / depth(podA)
+  measure fan width / height

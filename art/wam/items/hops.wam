@@ -1,0 +1,122 @@
+# Hops — two strobiles on a shared stalk.
+#
+# A hop cone is the one crop on this farm that is not a fruit, a pod or a root: it is a
+# flower, and specifically a papery cone of overlapping bracts, like a tiny green pine cone
+# made of tissue paper. `art/wam/crops/hops_4.wam` builds fifteen of them at 0.035 apiece
+# hanging in ropes off a bine, where the read is the rope and a single cone is four pixels.
+# Held in a fist there is no bine and no rope, so the cone has to carry the item on its own
+# and it is built at twenty times the relative size, with every bract it can afford.
+#
+# **"Papery" is a profile and a colour boundary, not a texture.** The rings step out and back
+# in down the cone — 0.30 / 0.26 / 0.30 / 0.25 / 0.27 — so the silhouette is a stack of
+# overlapping scales rather than a smooth spindle, and *each step changes material*. That
+# second half is what makes it work at icon size: a 0.04 step in radius is a pixel of
+# silhouette, but a step from #8fa444 to #c3d47c is a hard edge wherever the surface faces,
+# and the vertices split at a material boundary so the edge stays crisp. Six bands of
+# alternating green is a stack of bracts even when the geometry under it is nearly a cone.
+#
+# **Two cones, not one.** The item id is `hops`, plural, and one cone on a stick is a
+# spearhead — the same trap `mushroom.wam` records for a lone toadstool. The pair is also
+# what the alternation needs to stay legible: the second cone is 0.72 the size of the first
+# and leans across it, so the bract bands on the two never line up and the eye reads them as
+# texture on an object rather than as stripes on a cone.
+#
+# The cones point **up**, which is upside down. A hop cone hangs tip-down off its lateral,
+# and hung that way in the fist the two cones dangle below the grip where the hand hides
+# them and the tips point at the floor. Standing them on their bases puts the whole
+# silhouette above the fist, which is what `ItemModels.js` has to work with. This is a held
+# item and not the plant; the plant is in `art/wam/crops/`.
+#
+# Colour is `Items.js`'s #8fa444 with its #c3d47c shine, a dusty yellow-green that is
+# deliberately the least saturated green in the food kit — hops is a brewing herb, it is dry
+# and papery, and the two bright leafy greens next to it in the crop ladder (green bean at
+# #4f8f34, snow pea at #7ab355) are the two items it must not be mistaken for.
+
+model hops
+  height 0.30
+  style chunky
+
+palette
+  Cone  #8fa444
+  Pale  #c3d47c
+  Stalk #6f8a3a
+
+skeleton
+  root soil at 0.0
+  # The lateral the two cones hang on — here it is what they stand on instead, and it is
+  # also the only piece of the plant in the model. Short: a long one reads as a stem with
+  # buds on it, which is a flower.
+  bone stalk parent=soil dir=up pitch=4 len=0.14
+
+parts
+  loft stem bones=soil..stalk material=Stalk sides=5
+    ring 0.00 w=0.075 d=0.075
+    ring 0.40 w=0.055 d=0.055
+    ring 1.00 w=0.048 d=0.048
+    cap start=flat end=flat
+
+  # The leader. It stands straight up in X on purpose: it is the one part of this model that
+  # crosses the centerline, and a central part that leans is lopsided by construction — the
+  # lint says so in as many words. The lean it needs to look grown is spent in `pitch`, which
+  # is out of the mirror plane and costs nothing.
+  #
+  # Twice as long as it is wide, which is the hop cone's proportion — shorter is
+  # a bud and longer is a catkin — and the widest ring is at 0.34, low but not at the base,
+  # so the cone has a shoulder to overhang from.
+  loft coneA bone=stalk at=1.0 dir=up pitch=-7 len=0.60 material=Cone sides=6
+    ring 0.00 w=0.150 d=0.150
+    ring 0.10 w=0.290 d=0.285 material=Pale
+    ring 0.22 w=0.250 d=0.246 material=Cone
+    ring 0.34 w=0.300 d=0.295 material=Pale
+    ring 0.46 w=0.246 d=0.242 material=Cone
+    ring 0.58 w=0.272 d=0.268 material=Pale
+    ring 0.70 w=0.212 d=0.208 material=Cone
+    ring 0.82 w=0.204 d=0.200 material=Pale
+    ring 0.92 w=0.124 d=0.122 material=Cone
+    ring 1.00 w=0.034 d=0.034 tip
+    cap start=dome end=point
+
+  # The second cone. 0.72 of the leader and leaning the other way, mounted lower on the stalk
+  # so the two are offset along their length as well as across it — two cones whose bands
+  # line up read as one striped object cut in half.
+  loft coneB bone=stalk at=0.55 offset=(-0.075,0,0.030) dir=up pitch=9 tilt=17 len=0.44 material=Cone sides=6
+    ring 0.00 w=0.108 d=0.108
+    ring 0.10 w=0.209 d=0.205 material=Pale
+    ring 0.22 w=0.180 d=0.177 material=Cone
+    ring 0.34 w=0.216 d=0.212 material=Pale
+    ring 0.46 w=0.177 d=0.174 material=Cone
+    ring 0.58 w=0.196 d=0.193 material=Pale
+    ring 0.70 w=0.153 d=0.150 material=Cone
+    ring 0.82 w=0.147 d=0.144 material=Pale
+    ring 0.92 w=0.089 d=0.088 material=Cone
+    ring 1.00 w=0.024 d=0.024 tip
+    cap start=dome end=point
+
+checks
+  assert bottom(stem) < 0.02
+  # A CONE, twice as long as it is wide and drawn to a point. The ratio is what separates a
+  # strobile from a bud, and `hops_4.wam` asserts the same band on its own fifteen.
+  assert height(coneA) / width(coneA) in 1.7..2.6
+  assert height(coneB) / width(coneB) in 1.7..2.6
+  # ...and it really does taper: measured as fill, since ring widths are not addressable from
+  # here. A straight tube fills about 0.79 of its own bounding box and a cone 0.26, so
+  # anything under 0.55 has a real shoulder-to-point taper in it. The bound is looser than
+  # `grape_4.wam`'s 0.45 because a hop cone's taper starts higher up — the bracts hold their
+  # width to two thirds of the way along, which is exactly what makes it papery.
+  assert volume(coneA) / (width(coneA) * width(coneA) * height(coneA)) < 0.55
+  # TWO cones, at two sizes, and offset along their length rather than sitting side by side.
+  # The 0.95 ceiling is not the 0.72 the ring widths are authored at: coneB leans 17 degrees
+  # where the leader stands straight, and a bounding box charges a leaning part for its own
+  # length. What the bound is really policing is that the two are not the same cone twice.
+  assert width(coneB) / width(coneA) in 0.6..0.95
+  assert top(coneB) < top(coneA) * 0.92
+  # The pair leans apart: the second cone's mass is clear of the first, or the model is one
+  # cone with a lump on it.
+  assert dist(coneA, coneB) > width(coneA) * 0.5
+  # Upright, so `ItemModels.js` — which normalises on the Y extent alone — hands back the
+  # size that was authored rather than something scaled by its own thickness.
+  assert height / width in 1.15..2.2
+  assert parts == 3
+  assert tris < 900
+  measure cone height(coneA) / width(coneA)
+  measure taper volume(coneA) / (width(coneA) * width(coneA) * height(coneA))

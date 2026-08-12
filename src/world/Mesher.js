@@ -121,9 +121,6 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom', 'saplin
   // all - and one missing from here draws a flat card instead of the model.
   'cactusfruit', 'agave', 'stonecrop', 'icecapmoss',
   'swampreed', 'mireroot', 'lotus', 'truffle',
-  // The orchard. Same rule as the rest and it matters more here, because a
-  // missing name would draw a 1x1 billboard where a four-cell tree should be.
-  'apple_tree', 'cherry_tree', 'plum_tree', 'olive_tree', 'cocoa_tree',
   // The farm. Wheat stays out of this set and keeps its billboard because it
   // has four authored tiles in the atlas and they read fine; these six have no
   // tile at all, so a name missing from here draws an untextured card and a

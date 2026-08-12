@@ -684,6 +684,7 @@ export const POSE = {
 
   berries:     food('cherries', 0.22, false, { grip: 0.22, pos: [0.002, 0.015, -0.007] }),
   carrot:      food('carrot', 0.28, false, { grip: 0.02, pos: [0.002, 0.013, -0.006] }),
+  cherry:      food('cherries', 0.24, false, { grip: 0.04, pos: [0.002, 0.012, -0.006] }),
   corn:        food('corn', 0.30, false, { pos: [0.011, 0.073, -0.034] }),
   tomato:      food('tomato', 0.22, false, { pos: [0.016, 0.104, -0.048] }),
   egg:         food('egg', 0.20, false, { grip: 0.18, pos: [0.009, 0.062, -0.028] }),
@@ -795,6 +796,17 @@ export const POSE = {
   flint:      { file: 'wam/flint',      pack: 'wam', height: 0.19, grip: 0.18, rot: [0.10, -0.75, 0.34],   pos: [0.008, 0.044, -0.02], icon: [0.06, 0.60, -0.24] },
   wheat:      { file: 'wam/wheat',      pack: 'wam', height: 0.36, grip: 0.42, rot: [-0.14, -0.35, 0.34],  pos: [0.005, 0.071, -0.004], icon: [0.06, 0.20, -0.30] },
   seeds:      { file: 'wam/seeds',      pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10],   pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
+  // The six crop seeds share the one seed model, and deliberately so: a seed is
+  // a seed to look at, and six near-identical meshes would be six downloads to
+  // tell them apart by a pixel. The label and the icon tint carry the
+  // difference. Without an entry here each one is a flat card in the hand,
+  // which is what they were.
+  strawberry_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
+  squash_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
+  greenbean_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
+  snowpea_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
+  hops_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
+  grape_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
   // The hide's roll is what lays it across the fist, and it is also what makes
   // its *icon* yaw a different question from every other one in this table: once
   // the roll has turned the model's long axis across the frame, a yaw does not
@@ -1056,11 +1068,45 @@ export const POSE = {
   mireroot:     { file: 'wam/mireroot',     pack: 'wam', height: 0.26, grip: 0.30, rot: [0.10, -0.46, 0.20], pos: [0.0020, 0.0080, -0.0030], icon: [0.30, 0.42, -0.14] },
   lotus:        { file: 'wam/lotus',        pack: 'wam', height: 0.22, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
   truffle:      { file: 'wam/truffle',      pack: 'wam', height: 0.20, grip: 0.34, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0030, -0.0010], icon: [0.70, 0.42, -0.10] },
-  apple_tree:   { file: 'wam/apple_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
-  cherry_tree:  { file: 'wam/cherry_tree',  pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
-  plum_tree:    { file: 'wam/plum_tree',    pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
-  olive_tree:   { file: 'wam/olive_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
-  cocoa_tree:   { file: 'wam/cocoa_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
+
+  // The farm's produce — what the crop below drops, which is a different object
+  // from the crop itself and is modelled separately in `art/wam/items/`. Five
+  // entries, and they exist because without them these five ids fell through to
+  // the hand-drawn card: the owner's report was "the new fruits are 2d in hand",
+  // and a flat card is exactly what an item with no `file` gets.
+  //
+  // The poses split the way the rest of this table does, by what the model needs
+  // the camera to do rather than by what the food is:
+  //
+  //  - the squash is a mass, and a mass reads from anywhere, so it takes the
+  //    lump family's pose gripped through its middle;
+  //  - the beans, the peas and the hops are uprights held at the butt, the
+  //    branching coral's treatment — a shallow yaw, because turning a bundle far
+  //    off square only hides one pod behind another;
+  //  - the snow peas take more turn than the family and a steeper pitch on top
+  //    of it. They are four flat paddles, the family yaw left three of them
+  //    edge-on, and that is the sea fan's problem exactly. Their *icon* takes
+  //    the sea fan's full answer at 1.20 of yaw, which the held pose cannot: a
+  //    quarter turn in the fist swung the bundle out past the right edge of the
+  //    viewport, where the icon camera has no edge to swing past.
+  //
+  // The grape bunch is gripped at 0.40 rather than up at its stalk, where a hand
+  // would really take it: `grip` is a fraction of the model's height, the stalk
+  // is the top eighth of this model, and a fist closing there leaves the whole
+  // bunch hanging below the bottom of the viewport.
+  //
+  // `pos` is the offset from the fist to the item and NOT a lift, per the long
+  // note above — but the fist sits at NDC y -1.03, below the bottom edge, so a
+  // `pos` near zero is an item you cannot see. These five are the food family's
+  // measured range (y 0.08 to 0.10), which is what the sponge, the cluster and
+  // the apple carry: far enough up the arm to be in frame, short enough to stay
+  // in contact. Measured by eye against `apple` and `lingonberry` in the same
+  // world, not solved — worth a pass with the contact solver the note describes.
+  squash:    { file: 'wam/squash',    pack: 'wam', height: 0.26, grip: 0.44, rot: [0.10, -0.46, 0.18], pos: [0.016, 0.095, -0.040], icon: [0.22, 0.42, -0.12] },
+  greenbean: { file: 'wam/greenbean', pack: 'wam', height: 0.28, grip: 0.26, rot: [-0.06, -0.48, 0.24], pos: [0.013, 0.082, -0.022], icon: [0.14, 0.44, -0.18] },
+  snowpea:   { file: 'wam/snowpea',   pack: 'wam', height: 0.26, grip: 0.26, rot: [0.16, -0.62, 0.22], pos: [0.013, 0.082, -0.022], icon: [0.20, 1.20, -0.14] },
+  hops:      { file: 'wam/hops',      pack: 'wam', height: 0.26, grip: 0.28, rot: [0.04, -0.44, 0.22], pos: [0.014, 0.088, -0.026], icon: [0.16, 0.40, -0.16] },
+  grape:     { file: 'wam/grape',     pack: 'wam', height: 0.26, grip: 0.40, rot: [0.06, -0.50, 0.20], pos: [0.016, 0.092, -0.034], icon: [0.18, 0.46, -0.14] },
 
   // The farm. Twenty-four entries for six crops, one per growth stage, and they
   // are here for `file` rather than for the pose: `worldModel` resolves a
@@ -1191,6 +1237,12 @@ export const BY_NAME = {
   flint: 'flint',
   wheat: 'wheat',
   seeds: 'seeds',
+  strawberry_seeds: 'seeds',
+  squash_seeds: 'seeds',
+  greenbean_seeds: 'seeds',
+  snowpea_seeds: 'seeds',
+  hops_seeds: 'seeds',
+  grape_seeds: 'seeds',
   hide: 'hide',
   feather: 'feather',
   raw_copper: 'raw_copper',
@@ -1277,11 +1329,6 @@ export const BY_NAME = {
   mireroot: 'mireroot',
   lotus: 'lotus',
   truffle: 'truffle',
-  apple_tree: 'apple_tree',
-  cherry_tree: 'cherry_tree',
-  plum_tree: 'plum_tree',
-  olive_tree: 'olive_tree',
-  cocoa_tree: 'cocoa_tree',
   marram: 'marram',
   lavender: 'lavender',
   clover: 'clover',
@@ -1336,6 +1383,16 @@ export const BY_NAME = {
   cooked_meat: 'cooked_meat',
   berries: 'berries',
   carrot: 'carrot',
+  // The five picked crops. Identity, and the second half of the fix for "the new
+  // fruits are 2d in hand" — a `POSE` entry alone changes nothing for an item
+  // with no `tool` block, because `poseKeyFor` only ever reaches the table above
+  // through this one.
+  squash: 'squash',
+  greenbean: 'greenbean',
+  snowpea: 'snowpea',
+  hops: 'hops',
+  grape: 'grape',
+  cherry: 'cherries',
   corn: 'corn',
   tomato: 'tomato',
   egg: 'egg',

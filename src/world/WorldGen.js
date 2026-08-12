@@ -4636,34 +4636,21 @@ export class WorldGen {
       case BIOME.SAVANNA:
         if (r < 0.75 * dp) id = ID.golden_grass;
         else if (r < 0.775 * dp) id = ID.aloe;
-        // An olive is the one fruit tree that belongs on dry grass, and a
-        // savanna is the biome with nothing standing in it.
-        else if (r < 0.7800 * dp) id = ID.olive_tree;
         break;
       // Clover under, golden grass over: a plain gets two layers, which is what
       // separates it from a meadow at a glance now that both are green.
       case BIOME.PLAINS:
         if (r < 0.40 * dp) id = ID.clover;
         else if (r < 0.53 * dp) id = ID.golden_grass;
-        // The orchard, appended to the END of each chain on purpose: every
-        // threshold before it is untouched, so adding a tree moves not one
-        // existing plant. Rare by two orders - a fruit tree is a place you
-        // remember, and one every few hundred columns is what makes it one.
-        else if (r < 0.5340 * dp) id = ID.apple_tree;
-        else if (r < 0.5365 * dp) id = ID.plum_tree;
         break;
       case BIOME.MEADOW:
         if (r < 0.42 * dp) id = ID.clover;
         else if (r < 0.55 * dp) id = ID.lavender;
-        else if (r < 0.5545 * dp) id = ID.cherry_tree;
-        else if (r < 0.5570 * dp) id = ID.apple_tree;
         break;
       // The forest floor, and the one place a single species is allowed to own
       // the ground: a fern understorey under oaks is what a forest looks like.
       case BIOME.FOREST:
         if (r < 0.75 * dp) id = ID.fern;
-        else if (r < 0.7530 * dp) id = ID.cocoa_tree;
-        else if (r < 0.7555 * dp) id = ID.cherry_tree;
         break;
       case BIOME.PINE_FOREST:
         if (r < 0.32 * dp) id = ID.fern;

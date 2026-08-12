@@ -1077,53 +1077,6 @@ export const BLOCKS = [
     solid: false, opaque: false, hardness: 0.1, needsFloor: true,
     particle: [0.74, 0.82, 0.80], sound: 'grass',
   }),
-  // --- the orchard --------------------------------------------------------
-  //
-  // Five fruit trees, and they are MODELS rather than stamped voxel canopies -
-  // the only trees on the planet that are. Their sources are in
-  // `art/wam/crops/` and stand 3.4 to 4.2 units tall, authored as trees.
-  //
-  // The trade that buys: the art is used as drawn, and one block id makes a
-  // whole tree instead of a canopy algorithm. The trade that costs: models are
-  // drawn by `BlockModels`, which is a near-player instancing pass, so an
-  // orchard tree appears as you approach rather than standing on the skyline
-  // the way an oak does. That is a known and accepted limit, not an oversight.
-  //
-  // `solid` with `opaque: false` is deliberate and is the pair that makes a
-  // one-cell block behave like a tree: you cannot walk through the trunk, and
-  // light still crosses the cell so the canopy above does not cast a hard voxel
-  // shadow the model's own silhouette contradicts.
-  block({
-    name: 'apple_tree', label: 'Apple Tree', render: R_CROSS,
-    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
-    needsFloor: true, drop: 'apple', dropCount: 3,
-    particle: [0.36, 0.52, 0.26], sound: 'wood',
-  }),
-  block({
-    name: 'cherry_tree', label: 'Cherry Tree', render: R_CROSS,
-    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
-    needsFloor: true, drop: 'cherry', dropCount: 3,
-    particle: [0.62, 0.30, 0.36], sound: 'wood',
-  }),
-  block({
-    name: 'plum_tree', label: 'Plum Tree', render: R_CROSS,
-    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
-    needsFloor: true, drop: 'plum', dropCount: 3,
-    particle: [0.40, 0.28, 0.44], sound: 'wood',
-  }),
-  block({
-    name: 'olive_tree', label: 'Olive Tree', render: R_CROSS,
-    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
-    needsFloor: true, drop: 'olive', dropCount: 3,
-    particle: [0.46, 0.50, 0.32], sound: 'wood',
-  }),
-  block({
-    name: 'cocoa_tree', label: 'Cocoa Tree', render: R_CROSS,
-    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
-    needsFloor: true, drop: 'cocoa', dropCount: 3,
-    particle: [0.44, 0.32, 0.22], sound: 'wood',
-  }),
-
   // The wetland three are defined, modelled and edible, and are deliberately
   // NOT generated yet. `landFloraAt` refuses every submerged column, every lake
   // surface, every lake bed and every spring - it only ever sees dry land - so
@@ -1850,10 +1803,6 @@ grows(['swampreed'], soil(['mud', 'peat', 'clay', 'dirt', 'coarse_dirt', 'sand',
 grows(['mireroot'], soil(['mud', 'peat', 'clay', 'dirt', 'coarse_dirt']));
 grows(['lotus'], soil(['mud', 'clay', 'sand', 'dirt']));
 // The cave floor, on the fungi's terms — see the glowcap entry above.
-// The orchard takes turf and nothing else - a fruit tree on scree or sand is
-// the same wrong picture as a lavender there.
-grows(['apple_tree', 'cherry_tree', 'plum_tree', 'olive_tree', 'cocoa_tree'],
-  soil([], 'turf'));
 grows(['truffle'], soil(['dirt', 'coarse_dirt', 'mud', 'podzol', 'moss_block'], 'rock'));
 
 /**

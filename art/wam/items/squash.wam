@@ -1,0 +1,154 @@
+# Squash — the picked fruit, not the plant.
+#
+# `art/wam/crops/squash_4.wam` already models a squash and this file deliberately does not
+# reuse its shape. That one is a crooked-neck gourd lying in a 2x2 sprawl of leaves, read
+# from directly above at a couple of metres; this one is held at arm's length in a fist and
+# painted into a 32-pixel slot. A crookneck at that size is a comma — the neck is half the
+# silhouette and the neck is the half that reads as "handle" rather than as "food". So the
+# item is the other squash every kitchen has: a plump upright gourd, and the ribs do the
+# work the neck did.
+#
+# **The ribs are six separate lobes, not a texture and not a hexagonal section.** A ribbed
+# gourd was tried twice more cheaply first. A single loft at `sides=6` gives six flat
+# facets, and flat facets at chunky style read as a *cut gem*, not as a pumpkin — the
+# creases are convex where a rib's creases are concave. Vertical `material_arc` stripes give
+# a beach ball. What a rib actually is, is a lobe of flesh that bulges out between two
+# grooves, and that is a shape: a spindle whose ring centres swing out to 0.17 of the height
+# at the equator and back onto the axis at both poles. Six of them, spun 60 degrees apart,
+# meet at the poles and leave a real groove between every neighbouring pair.
+#
+# Authoring it that way costs nothing to say, because the lobe is written **once** in a
+# clean local frame (+Y up the axis, the bulge toward +Z) and mounted six times with a
+# `spin=` — the lingonberry twig idiom. "Make the ribs deeper" is then one number edited in
+# one place instead of six sets of world coordinates that have to stay 60 degrees apart.
+#
+# **Alternating lobes are two oranges, one step apart.** #d98b21 and #b86f16 are close
+# enough to be one gourd and far enough that the rib boundaries survive being lit by a
+# single flat sky term in the hand — the grooves themselves are only a few pixels deep at
+# icon size, and geometry that small is exactly what a flat-shaded renderer smooths away.
+# The colour is `Items.js`'s own `#d98b21`/`#f4b962` pair, so the fruit, the drop and the
+# toolbar tint are all one squash.
+#
+# Height beats width by 1.1, and only just. A gourd that is taller than it is wide is a
+# marrow and a gourd that is wider than it is tall is a pumpkin; the check below holds it in
+# the narrow band between, which is also the band where `ItemModels.js` — which normalises
+# on the Y extent alone — hands back the size that was authored rather than a squash that
+# arrives half again too big for its slot.
+
+model squash
+  height 0.30
+  style chunky
+
+palette
+  Flesh #d98b21
+  Deep  #b86f16
+  Shine #f4b962
+  Stalk #4a7a2e
+
+skeleton
+  root base at 0.04
+  # The axis of the fruit. Nothing is lofted along it: it exists so the six lobe groups and
+  # the peduncle have one spine to hang off, and so "the squash is taller" is one `len`.
+  bone core parent=base dir=up len=0.60
+
+parts
+  # Six lobes. Each is the same spindle: pinched on the axis at both poles, swelling to
+  # `fwd=0.17` off it at the equator. The `fwd=` offsets are what make it a rib rather than
+  # a column — a lobe that stays at one radius all the way up is a stave, and six staves are
+  # a barrel.
+  #
+  # `sides=5` and not more: the lobe is 0.26 wide and the whole fruit is 0.30 m, so one lobe
+  # facet is under two pixels in a toolbar slot. The triangles bought by a rounder section
+  # are invisible; the ones bought by a sixth lobe are the entire read.
+  group lobeA bone=core at=0.0 dir=up spin=0
+    loft lobA at=(0,0,0) dir=up len=0.60 material=Flesh sides=5
+      ring 0.00 w=0.11 d=0.09 fwd=0.02
+      ring 0.16 w=0.28 d=0.22 fwd=0.17
+      ring 0.40 w=0.34 d=0.26 fwd=0.22
+      ring 0.62 w=0.34 d=0.26 fwd=0.22
+      ring 0.86 w=0.26 d=0.20 fwd=0.14
+      ring 1.00 w=0.10 d=0.09 fwd=0.02
+      cap start=dome end=dome
+  end
+  group lobeB bone=core at=0.0 dir=up spin=60
+    loft lobB at=(0,0,0) dir=up len=0.60 material=Deep sides=5
+      ring 0.00 w=0.11 d=0.09 fwd=0.02
+      ring 0.16 w=0.28 d=0.22 fwd=0.17
+      ring 0.40 w=0.34 d=0.26 fwd=0.22
+      ring 0.62 w=0.34 d=0.26 fwd=0.22
+      ring 0.86 w=0.26 d=0.20 fwd=0.14
+      ring 1.00 w=0.10 d=0.09 fwd=0.02
+      cap start=dome end=dome
+  end
+  group lobeC bone=core at=0.0 dir=up spin=120
+    loft lobC at=(0,0,0) dir=up len=0.60 material=Flesh sides=5
+      ring 0.00 w=0.11 d=0.09 fwd=0.02
+      ring 0.16 w=0.28 d=0.22 fwd=0.17
+      ring 0.40 w=0.34 d=0.26 fwd=0.22
+      ring 0.62 w=0.34 d=0.26 fwd=0.22
+      ring 0.86 w=0.26 d=0.20 fwd=0.14
+      ring 1.00 w=0.10 d=0.09 fwd=0.02
+      cap start=dome end=dome
+  end
+  group lobeD bone=core at=0.0 dir=up spin=180
+    loft lobD at=(0,0,0) dir=up len=0.60 material=Deep sides=5
+      ring 0.00 w=0.11 d=0.09 fwd=0.02
+      ring 0.16 w=0.28 d=0.22 fwd=0.17
+      ring 0.40 w=0.34 d=0.26 fwd=0.22
+      ring 0.62 w=0.34 d=0.26 fwd=0.22
+      ring 0.86 w=0.26 d=0.20 fwd=0.14
+      ring 1.00 w=0.10 d=0.09 fwd=0.02
+      cap start=dome end=dome
+  end
+  group lobeE bone=core at=0.0 dir=up spin=240
+    loft lobE at=(0,0,0) dir=up len=0.60 material=Flesh sides=5
+      ring 0.00 w=0.11 d=0.09 fwd=0.02
+      ring 0.16 w=0.28 d=0.22 fwd=0.17
+      ring 0.40 w=0.34 d=0.26 fwd=0.22
+      ring 0.62 w=0.34 d=0.26 fwd=0.22
+      ring 0.86 w=0.26 d=0.20 fwd=0.14
+      ring 1.00 w=0.10 d=0.09 fwd=0.02
+      cap start=dome end=dome
+  end
+  group lobeF bone=core at=0.0 dir=up spin=300
+    loft lobF at=(0,0,0) dir=up len=0.60 material=Deep sides=5
+      ring 0.00 w=0.11 d=0.09 fwd=0.02
+      ring 0.16 w=0.28 d=0.22 fwd=0.17
+      ring 0.40 w=0.34 d=0.26 fwd=0.22
+      ring 0.62 w=0.34 d=0.26 fwd=0.22
+      ring 0.86 w=0.26 d=0.20 fwd=0.14
+      ring 1.00 w=0.10 d=0.09 fwd=0.02
+      cap start=dome end=dome
+  end
+
+  # The peduncle. Woody, green, and stubby — the same tell `squash_4.wam` puts on the end of
+  # its neck: a fruit with a cut stalk on it was picked, and a fruit with no stalk is an egg.
+  # It is also the only non-orange thing on the model, which is what stops an orange blob in
+  # an orange-lit hand from losing its top.
+  loft peduncle bone=core at=1.0 dir=up pitch=-8 len=0.17 material=Stalk sides=5
+    ring 0.00 w=0.10 d=0.10
+    ring 0.45 w=0.070 d=0.070
+    ring 1.00 w=0.085 d=0.085
+    cap start=flat end=flat
+
+checks
+  # Plump: the band between a marrow and a pumpkin, and also the band `ItemModels.js` can
+  # normalise honestly, since it scales on the Y extent alone.
+  assert height / width in 1.02..1.30
+  assert width / depth == 1.0 +- 0.12
+  # RIBBED. Every lobe has to swing out past the axis and come back, or the six of them have
+  # merged into one barrel and the model is a pumpkin-shaped nothing. Measured as the lobe
+  # being wider across than the pinch it starts and ends on: a stave reads 1.0 here.
+  assert width(lobA) > 0.16
+  assert width(lobA) < width * 0.75
+  # ...and the fruit really is six lobes and not one: the lobe reaches nowhere near round
+  # the axis on its own, so the outline has to be assembled out of all six.
+  assert depth(lobA) < depth * 0.85
+  # The stalk sits on top and is small — a peduncle as fat as the fruit is a pumpkin cliche
+  # and eats the silhouette.
+  assert bottom(peduncle) > top(lobA) * 0.86
+  assert width(peduncle) < width(lobA) * 0.55
+  assert parts == 7
+  assert tris < 900
+  measure plump height / width
+  measure rib width(lobA) / width

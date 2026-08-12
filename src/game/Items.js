@@ -124,13 +124,11 @@ const FOOD = [
   // raw / foraged
   { name: 'berries', label: 'Berries', food: 3, color: '#b8283f', shine: '#e4566d' },
   { name: 'carrot', label: 'Carrot', food: 3, color: '#d9711f', shine: '#f2a45c' },
-  // Orchard fruit. Colour-defined rather than art-backed, exactly like the
-  // berries above: the icon painter builds these from the two colours, so a new
-  // fruit costs no atlas and no model.
+  // Wild fruit, shaken out of a canopy rather than grown. It is modelled from
+  // the food pack, so it arrives in the hand as an object like the apple does -
+  // a colour-only entry would be a flat card, which is what these looked like
+  // when they were tied to trees that no longer exist.
   { name: 'cherry', label: 'Cherries', food: 3, color: '#a81e33', shine: '#d64a5e' },
-  { name: 'plum', label: 'Plum', food: 4, color: '#5c2a6b', shine: '#8d55a0' },
-  { name: 'olive', label: 'Olives', food: 2, color: '#5f6b31', shine: '#8d9a56' },
-  { name: 'cocoa', label: 'Cocoa Pod', food: 3, color: '#7a4423', shine: '#a86c42' },
   { name: 'corn', label: 'Corn', food: 3, color: '#d9b02c', shine: '#f5dc78' },
   { name: 'tomato', label: 'Tomato', food: 3, color: '#c33227', shine: '#ee6a55' },
   // The farm's produce. Colour-defined like the orchard fruit above, so five
@@ -1090,7 +1088,13 @@ export function computeDrops(blockId, toolItem, rng = Math.random) {
   if (b.name.startsWith('leaves')) {
     const out = [];
     if (rng() < 0.06) out.push({ item: itemIdOf('sapling'), count: 1 });
+    // Fruit comes out of the canopy that would carry it, which is where the
+    // orchard's job went when the modelled trees were taken out: a fruit tree
+    // you can only see from ten paces away is worse than an oak that sometimes
+    // gives you an apple. Oak keeps the apple it always had; birch carries the
+    // cherries.
     if (b.name === 'leaves_oak' && rng() < 0.04) out.push({ item: itemIdOf('apple'), count: 1 });
+    if (b.name === 'leaves_birch' && rng() < 0.04) out.push({ item: itemIdOf('cherry'), count: 1 });
     if (rng() < 0.03) out.push({ item: itemIdOf('stick'), count: 1 });
     return out;
   }

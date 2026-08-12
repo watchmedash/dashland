@@ -1,0 +1,141 @@
+# Green Beans — a handful, because one bean is a stick.
+#
+# The item is plural in `Items.js` ("Green Beans") and that is not a label detail, it is the
+# whole modelling brief. A single pod at 0.28 in the fist is a green rod with a point on it,
+# and a green rod is what a stick already looks like in this pack — the two would share a
+# silhouette in the toolbar. Five pods gathered at the butt and fanned at the tips read as a
+# handful of something picked, and the fan is what carries it: the outline is a sheaf, which
+# nothing else in the food kit is.
+#
+# **The pods curve, and the curve comes free.** `sweep` bends by degrees per segment, which
+# is exactly the right control for a bean — a runner bean is a long shallow arc, never
+# straight and never hooked. Each pod leaves the bundle at 10-14 degrees off vertical and
+# takes 8 degrees of `back=` per segment, so the tips lean away from the fist and the arc is
+# legible in profile. `art/wam/crops/greenbean_4.wam` builds its pods as straight lofts
+# instead, and correctly: on the vine a pod hangs under gravity and hangs straight. In a
+# hand it is a picked pod that has relaxed.
+#
+# **The knobbles are the seeds, and the tip is blunt.** A bean pod is not a smooth tube; you
+# can count the beans through the wall. The segment radii step 0.036 / 0.050 / 0.040 / 0.052
+# / 0.042 along the pod, a swell every seed's width, and they cost nothing — the segments
+# were needed for the curve anyway.
+#
+# The blunt end is not a detail either. The first sheet ran each pod out to a `tip` over a
+# final segment a fifth of its length, and five tapered spears nine times longer than they
+# are thick are not beans, they are a tussock of grass — the render was unmistakably a clump
+# of leaves. What fixed it was three changes in the same direction: the last segment cut to
+# a twelfth of the pod and left blunt with no `tip` at all, the radii up by 1.7, and
+# `sides=6` instead of 5, since a five-sided tube has a visible ridge that reads as a leaf's
+# midrib. 6:1 and stub-ended is a pod; 9:1 and pointed is foliage.
+#
+# Three greens and they are all `Items.js`'s own: #4f8f34 for the pods, #83c063 for the two
+# that catch the light on the outside of the fan (a handful lit from one side is not one
+# green), and #3a6f26 for the pods that fall behind. Which pod gets which is by *position in
+# the fan*, not at random: the two leaning toward the viewer are the pale ones, so the bundle
+# has a front and a back rather than being speckled.
+#
+# The stalk ends are the tell that these were picked rather than grown here: a short pale
+# stub on the butt of each pod, all five clustered at the bottom of the model where the fist
+# closes. Without them the bundle's lower end is five blunt cuts and reads as cut cable.
+
+model greenbean
+  height 0.30
+  style chunky
+
+palette
+  Pod   #4f8f34
+  Sun   #83c063
+  Shade #3a6f26
+  Stalk #9db55c
+
+skeleton
+  root butt at 0.085
+  # One spine for the whole handful. Every pod mounts on it at the same point and only the
+  # aim differs, which is what makes this a *bundle* — pods that start from five different
+  # places are a bush.
+  bone hand parent=butt dir=up len=0.10
+
+parts
+  # Five pods. The `pitch`/`tilt` pair on each sweep is the fan: pitch tips the pod toward or
+  # away from the viewer, tilt spreads it left and right, and the two together mean no two
+  # pods lie in one plane. Flat is the one thing a handful never is — and note it is `tilt`
+  # and not `yaw`, because yaw turns a bone about the axis an `up` bone already points along
+  # and moves this fan not at all.
+  sweep podA bone=hand at=0.10 offset=(0.030,0,0.020) dir=up pitch=11 tilt=-12 material=Sun sides=6
+    seg len=0.105 r=0.036 back=6
+    seg len=0.105 r=0.050 back=6
+    seg len=0.105 r=0.040 back=6
+    seg len=0.105 r=0.052 back=6
+    seg len=0.095 r=0.042 back=6
+    seg len=0.048 r=0.027 back=6
+  sweep podB bone=hand at=0.10 offset=(-0.026,0,0.032) dir=up pitch=9 tilt=16 material=Sun sides=6
+    seg len=0.100 r=0.034 back=5
+    seg len=0.100 r=0.048 back=5
+    seg len=0.100 r=0.038 back=5
+    seg len=0.100 r=0.049 back=5
+    seg len=0.090 r=0.040 back=5
+    seg len=0.046 r=0.025 back=5
+  sweep podC bone=hand at=0.10 offset=(0.004,0,-0.008) dir=up pitch=-4 tilt=1 material=Pod sides=6
+    seg len=0.111 r=0.038 back=4
+    seg len=0.111 r=0.053 back=4
+    seg len=0.111 r=0.042 back=4
+    seg len=0.111 r=0.055 back=4
+    seg len=0.101 r=0.045 back=4
+    seg len=0.051 r=0.029 back=4
+  sweep podD bone=hand at=0.10 offset=(0.040,0,-0.026) dir=up pitch=-11 tilt=-22 material=Shade sides=6
+    seg len=0.097 r=0.033 back=3
+    seg len=0.097 r=0.046 back=3
+    seg len=0.097 r=0.037 back=3
+    seg len=0.097 r=0.048 back=3
+    seg len=0.087 r=0.039 back=3
+    seg len=0.044 r=0.025 back=3
+  sweep podE bone=hand at=0.10 offset=(-0.036,0,-0.030) dir=up pitch=-12 tilt=24 material=Shade sides=6
+    seg len=0.092 r=0.032 back=3
+    seg len=0.092 r=0.044 back=3
+    seg len=0.092 r=0.035 back=3
+    seg len=0.092 r=0.046 back=3
+    seg len=0.084 r=0.037 back=3
+    seg len=0.042 r=0.024 back=3
+
+  # The cut stalks. Five stubs on the butts, aimed down and slightly out so they splay the
+  # way a picked handful's ends do rather than lining up like a bundle of wires.
+  loft stkA bone=hand at=0.10 offset=(0.030,0,0.020) dir=down pitch=-6 tilt=12 len=0.085 material=Stalk sides=4
+    ring 0.00 w=0.040 d=0.040
+    ring 1.00 w=0.024 d=0.024
+    cap start=flat end=dome
+  loft stkB bone=hand at=0.10 offset=(-0.026,0,0.032) dir=down pitch=-4 tilt=-16 len=0.078 material=Stalk sides=4
+    ring 0.00 w=0.038 d=0.038
+    ring 1.00 w=0.023 d=0.023
+    cap start=flat end=dome
+  loft stkC bone=hand at=0.10 offset=(0.004,0,-0.008) dir=down pitch=2 tilt=-1 len=0.090 material=Stalk sides=4
+    ring 0.00 w=0.041 d=0.041
+    ring 1.00 w=0.025 d=0.025
+    cap start=flat end=dome
+
+checks
+  # A HANDFUL: five pods, and they all start in the same fist. If any butt drifts away from
+  # the others this is a bush and not a bundle.
+  assert dist(podA, podC) < 0.42
+  assert bottom(podA) < 0.14
+  assert bottom(podE) < 0.14
+  # LONG: a pod is many times longer than it is thick, which is the property that separates a
+  # bean from every other green thing in the kit. Measured on the bounding box, so the fan's
+  # lean makes it pessimistic — the true ratio is higher than the bound.
+  assert height(podC) / width(podC) > 3.0
+  # FANNED, in both axes. The first bundle was fanned with `yaw=`, which does nothing at all
+  # to a bone already pointing up — the spread is `tilt` for left-to-right and `pitch` for
+  # front-to-back, and the sheet showed five parallel pods until it was. These two bounds are
+  # what would have caught it: the tips have to be apart in both.
+  assert width > 0.34
+  assert depth > 0.22
+  # ...but still a bundle rather than a spray: taller than it is wide, or `ItemModels.js`
+  # normalises the Y extent of something whose real size is its span and hands back a giant.
+  assert height / width in 1.15..2.4
+  assert height / depth > 1.4
+  # The stalk stubs stay under the pods, at the end the fist closes on.
+  assert top(stkA) < top(podA) * 0.5
+  assert bottom(stkA) < 0.03
+  assert parts == 8
+  assert tris < 900
+  measure fan width / height
+  measure pod height(podC) / width(podC)

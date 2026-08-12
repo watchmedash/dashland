@@ -940,13 +940,6 @@ const MODELLED_PLANTS = {
   // something growing on it rather than as undergrowth.
   cactusfruit: 0.82, agave: 0.66, swampreed: 0.86, lotus: 0.30,
   stonecrop: 0.34, icecapmoss: 0.26, mireroot: 0.52, truffle: 0.22,
-  // The orchard, and the only entries in this table above a single cell. The
-  // number is still a bounding-box height in cells, so these are four-cell
-  // trees standing in a one-cell block - which is exactly what buys a whole
-  // tree for one block id. Set from each model's authored height (3.4 to 4.2)
-  // rather than by eye.
-  apple_tree: 4.2, cherry_tree: 3.8, plum_tree: 3.9,
-  olive_tree: 3.5, cocoa_tree: 3.4,
   // The farm, and the only entries here where the number carries information
   // rather than just scale: a crop's four stages are four models and the
   // heights are what makes the field *read* as growing. A row that arrives at

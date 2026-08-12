@@ -487,6 +487,85 @@ for (const [name, [lo, hi, metal, seed, rough]] of Object.entries(ORE_MINERALS))
   G[name] = (s) => ore(s, [px(lo), px(hi)], metal, seed, rough);
 }
 
+/**
+ * Moss growing over a masonry base — written as a DECAL, so the rock it grows
+ * on is literally the parent block's own tile (see DECALS in bake-textures.mjs).
+ *
+ * Both mossy blocks used to be baked from mossy source materials in the pack:
+ * moss_stone from Wall_with_plants/1 and mossy_stone_brick from Stone Wall/5.
+ * That is the wrong shape for these two, and it failed twice over.
+ *
+ * They came out at 73,76,67 and 75,72,68 — half the luminance of the blocks
+ * they are a variant OF (cobblestone 131,124,114, stone_brick 153,134,128) and
+ * within three counts of each other on every channel, so a mossy cobble and a
+ * mossy brick were the same near-black square. The pack has no lit mossy
+ * masonry, and exposure alone could not fix it: both sources are ALSO rubble
+ * walls, so no amount of brightening was going to make one of them read as cut
+ * brick. Stone Wall/5 in particular is a rubble wall despite living in the
+ * brick folder — that is the whole reason the two tiles shared a look.
+ *
+ * As a decal the rock is free and correct by construction: mossy cobble is
+ * cobblestone with moss on it, mossy brick is stone_brick with moss on it, and
+ * they can never drift from their parents again. What separates them is then
+ * exactly what separates them in life — the masonry underneath, plus how much
+ * moss it holds. Rubble traps water in its gaps and carries broad sheets of it;
+ * a cut face sheds, so brick keeps small scattered colonies and most of the
+ * stone still shows.
+ *
+ * The threshold is a quantile of the patch field rather than a fixed value, for
+ * the same reason `leaves_pine` uses one: coverage then survives the 128px
+ * runtime tile and the 256px baked tile being different rasterisations of the
+ * same noise.
+ */
+function moss(s, { seed, coverage, cells, dark, lite }) {
+  clearAlpha(s);
+  const patch = fbm(s.size, cells, 4, seed);
+  const fuzz = fbm(s.size, 34, 3, seed + 7);
+  const sorted = Float32Array.from(patch).sort();
+  const cut = sorted[Math.floor(sorted.length * (1 - coverage))];
+  const span = Math.max(1e-4, sorted[sorted.length - 1] - cut);
+  s.each((i) => {
+    // Feathered over the top fifth of the patch's own range. A hard cut gives
+    // moss a coastline — a smooth closed curve with stone on one side of it,
+    // which reads as spilled paint; real moss fades out into the stone at its
+    // margins and that fade is most of what makes it read as growth.
+    const m = smoothstep(0, 0.22, (patch[i] - cut) / span);
+    if (m <= 0.004) return;
+    setRGB(s, i, mixc(px(dark), px(lite), fuzz[i] * 0.72 + m * 0.28));
+    s.a[i] = m;
+    s.h[i] = 0.58 + fuzz[i] * 0.34;     // moss stands proud of the stone
+    s.ao[i] = 0.88 - m * 0.12;
+    s.rough[i] = 0.97;                  // nothing about moss is shiny
+  });
+  s.normalStrength = 1.1;
+  return s;
+}
+// Broad wet sheets in the gaps of the rubble. The green is the saturated one of
+// the pair: this is the block that has to read as MOSSY at a glance, since its
+// parent cobblestone is otherwise the commonest grey in the game.
+G.moss_stone = (s) => moss(s, {
+  seed: 1901, coverage: 0.62, cells: 5,
+  dark: [44, 74, 32], lite: [112, 152, 70],
+});
+// Small dry colonies on a shedding face, in a paler grey-green — closer to
+// lichen than to moss, which is what actually grows on cut stone. `cells` is
+// what carries that: at 8 the patches are half the width of the rubble's, so
+// the brick courses stay the pattern you read first and the moss is scattered
+// over them rather than sheeting across them.
+//
+// Coverage was 0.30 on the reasoning that a cut face sheds and should keep most
+// of its stone. Baked, that landed the tile at 142,132,117 — twenty-one counts
+// under stone_brick and with LESS green in it than red, which is not a mossy
+// block, it is a slightly dirty one. The base matters: stone_brick is a pale
+// warm 153,134,128, so a third of a grey-green over it still averages out warm.
+// A mossy variant has to be legible as mossy from across a room, and the way to
+// keep it apart from moss_stone is the pale palette and the small patch scale,
+// not starving it of coverage.
+G.mossy_stone_brick = (s) => moss(s, {
+  seed: 1913, coverage: 0.48, cells: 8,
+  dark: [58, 80, 42], lite: [122, 146, 84],
+});
+
 G.glass = (s) => {
   const f = fbm(s.size, 12, 3, 541);
   s.each((i, x, y, u, v) => {

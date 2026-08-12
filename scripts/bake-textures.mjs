@@ -153,7 +153,9 @@ const MAP = {
   cobblestone: ['Cobble Stone', 3, { bright: 1.9, tint: 0.72, contrast: 1.05, warm: [1.02, 1.0, 1.0] }],
   stone_brick: ['Stone Wall', 4],
   brick: ['Stone Wall', 11],
-  moss_stone: ['Wall_with_plants', 1, { tint: 0.7 }],
+  // moss_stone is not here any more, and neither is mossy_stone_brick. Both are
+  // now procedural moss composited over their own parent block — see the moss
+  // generators in src/render/TextureGen.js and the DECALS table below.
   basalt: ['Volcano', 6],
   obsidian: ['Cave Wall', 6],
   core: ['Volcano', 5],
@@ -245,7 +247,6 @@ const MAP = {
   granite_brick: ['Stone Wall', 9],
   andesite_brick: ['Damaged Wall', 5],
   slate_brick: ['Floor', 6, { bright: 0.85, contrast: 1.1 }],
-  mossy_stone_brick: ['Stone Wall', 5, { tint: 0.7 }],
   sandstone_brick: ['Stone Wall', 7],
   smooth_sandstone: ['Indoor Walls', 3],
 
@@ -361,6 +362,12 @@ const DECALS = {
   door_top: 'planks',
   sign: 'planks',
   fence: 'planks',
+  // A mossy block is its parent block with moss on it, so it is built that way
+  // rather than from a mossy material of its own. This is what guarantees the
+  // two can never drift from the rock they are a variant of again — the whole
+  // of the defect that put both of them at half their parents' luminance.
+  moss_stone: 'cobblestone',
+  mossy_stone_brick: 'stone_brick',
   kiln_side: 'stone_brick',
   kiln_top: 'stone_brick',
   kiln_front: 'stone_brick',

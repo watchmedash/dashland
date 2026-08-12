@@ -949,6 +949,12 @@ const LIQUID_MAP_FRAG = /* glsl */`
    */
   float wGloss = 1.0;
 
+  // Bare "> 2.5" here and a banded "> 2.5 && < 3.5" in LAVA_EMISSIVE, and the
+  // difference is not an oversight. This block is inside LIQUID_MAP_FRAG, which
+  // only ever compiles into the liquid material, and the only wave ids that
+  // reach it are water (2) and lava (3) — leaves (4) are cutout geometry and
+  // never see this shader. LAVA_EMISSIVE is in the SHARED patch, so it does see
+  // leaves, and that one extra id was the canopy self-lighting bug.
   if (vWave > 2.5) {
     // Lava shares the liquid pass but wants none of the water treatment: keep
     // the painted crust and stay opaque. What it does want is to look molten,
@@ -1473,9 +1479,38 @@ const LIGHTS_END = /* glsl */`
  * ahead of blue is fire, and it leaves the dark crust between the cracks alone
  * so the surface keeps the contrast that makes it read as crusted-over rather
  * than as a flat orange sheet.
+ *
+ * ### The band, and why it is a band and not a floor
+ *
+ * `vWave > 2.5` was the test here for a long time and it was **wrong by one
+ * wave id**. The wave codes are set in Mesher: cross plants 1, water 2, lava 3
+ * and **leaves 4**. So every leaf block on the planet passed this test and
+ * emitted 0.42 of its own albedo, always, everywhere — light it made rather
+ * than light it received, in the one material that is nothing but a thin skin
+ * facing the sky. That is the whole of "the forest canopy self-lights at
+ * night", and it was invisible by day for the reason emissives usually are: at
+ * noon the real lighting on a leaf is many times 0.42 of its albedo, so it read
+ * as a slightly flat canopy rather than as a glowing one.
+ *
+ * Measured at midnight in one frame, with every light in the scene knocked out
+ * one at a time — the sky fill to zero, the moon to zero, the sun to zero, the
+ * scene ambient and the entity fill to zero, all five at once — the canopy did
+ * not move: 59.1 luma with the lights on, 50.8 with every last one of them off,
+ * against 0.0 for the ground beside it. Nothing that could be called lighting
+ * was making that pixel, which is what sent the search here. (The prior
+ * suspicion was NIGHT_OPEN_GAIN, on the theory that a lift gated on openSky
+ * lands on the canopy top. It does not survive the numbers: leaves are ZERO in
+ * SKY_ATTEN, so the forest floor has the same openSky as the leaves above it
+ * and takes exactly the same lift, and turning the sky fill off entirely moved
+ * the canopy by 14%.)
+ *
+ * The bound is 3.5 rather than anything cleverer because the codes are small
+ * integers and lava is 3: `floor(aux.w)` is exact, so a half-unit band around
+ * the id it means cannot drift. If a fifth wave type is ever added, it lands
+ * outside this band by construction rather than by being remembered about.
  */
 const LAVA_EMISSIVE = /* glsl */`
-  if (vWave > 2.5) {
+  if (vWave > 2.5 && vWave < 3.5) {
     float lavaHot = smoothstep(0.18, 0.62, diffuseColor.r - diffuseColor.b);
     totalEmissiveRadiance += diffuseColor.rgb * (0.42 + 1.35 * lavaHot);
   }

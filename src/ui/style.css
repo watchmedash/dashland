@@ -543,8 +543,16 @@ h1 em { font-style: normal; font-weight: var(--fw-disp); color: var(--accent-2);
      container. The cap is what matters: a card is never taller than the
      window, so its bottom button is always somewhere the player can reach. */
   max-height: var(--screen-h); overflow-y: auto;
+  /* ...and no scrollbar drawn for it. The cap above has to stay - without it a
+     tall card runs off the bottom of the window and takes its last button with
+     it - but the bar itself is a strip of browser chrome down the edge of a
+     hand-made paper card, and on a menu that almost never overflows it is
+     visible far more often than it is useful. Scrolling still works by wheel,
+     trackpad, touch and keyboard; only the rail is gone. */
+  scrollbar-width: none;
   animation: rise .28s var(--ease);
 }
+.menu-card::-webkit-scrollbar { width: 0; height: 0; }
 .menu-card.small { width: min(320px, 100%); padding: 15px 13px 12px; }
 .menu-card h2 {
   color: var(--ink); font-size: var(--fs-xl); font-weight: var(--fw-disp);

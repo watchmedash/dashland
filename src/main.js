@@ -1686,8 +1686,31 @@ class Game {
     window.addEventListener('beforeunload', () => {
       if (this.state === 'playing' || this.state === 'paused') this.saveGame(false);
     });
+    // Click the world to get the mouse back. This is the *only* way a pointer
+    // lock the browser refused can ever be recovered, which is why it has to
+    // name a spectator alongside a player rather than testing for 'playing'.
+    //
+    // "After dying I can spectate, but when exiting then opening the world
+    // again I can spectate except I can't free look, mouse is not working."
+    // Both halves of that are this line. `_onWorldReady` asks for the lock from
+    // the tail of an async load — the click on Continue is long spent by the
+    // time the planet is up — so Chrome refuses it with "A user gesture is
+    // required to request Pointer Lock" and the world starts unlocked. A
+    // *player* never notices, because the next thing anyone does in a world is
+    // click it, and this handler hands the lock straight back. A spectator
+    // clicked into the same dead handler: state is 'spectating', the test above
+    // was false, nothing was requested, `Input._onMouseMove` kept returning at
+    // its first line, and the look was gone for the rest of the session with no
+    // other door out of it. The live spectator worked only because it is
+    // reached from the death screen's own button, where the gesture is real and
+    // the lock `_spectate` asks for is granted.
+    //
+    // Looking around is the one input a spectator has (see `_update`), so this
+    // is not a convenience for them the way it is for a player: it is the whole
+    // of the mode.
     this.canvas.addEventListener('click', () => {
-      if (this.state === 'playing' && !this.input.locked && !this.ui.screenOpen) this.input.requestLock();
+      if ((this.state === 'playing' || this.spectating)
+        && !this.input.locked && !this.ui.screenOpen) this.input.requestLock();
     });
 
     // Autoplay policy. The context is created in `_onWorldReady`, which is not

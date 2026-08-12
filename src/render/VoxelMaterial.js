@@ -434,6 +434,68 @@ const float NIGHT_OPEN_GAIN = 3.0;
  */
 const float DAY_SHADE_GAIN = 1.2;
 
+/**
+ * How far the sky fill is pulled toward its own luminance before it is used as
+ * a light. **This is the value the trim had when it was chosen, and it is now
+ * divided by dayLift rather than applied flat.**
+ *
+ * ### What it is for
+ *
+ * The dome colour arrives around 0.44 saturation, which is fine as *sky* and
+ * far too strong as the only light reaching a face the sun cannot see. On a
+ * neutral block there is no albedo hue to fight it, so shadow sides render as
+ * blue cards. 0.34 was measured to be the value that keeps the cool cast that
+ * sells daylight shadow while letting the material's own colour through.
+ *
+ * ### Why it is divided
+ *
+ * DAY_SHADE_GAIN arrived later, for the forest floor, and multiplies this same
+ * fill by 2.2 under any open sky. mix(x, luma(x), t) leaves the *ratio* of
+ * chroma to luminance alone, so lifting the fill lifts its colour cast in
+ * absolute terms by exactly the same 2.2 — and the 0.34 was never revisited.
+ * The interaction is what the "mid-distance stone shows the sky fill rather
+ * than its own albedo" report is: a later change quietly invalidated an earlier
+ * change's tuning.
+ *
+ * Measured, seed 4242, a stone block standing in a cleared field at noon, the
+ * one tile the report named (albedo 141/135/134, red 7 ahead of blue):
+ *
+ *   face          before            after
+ *   top, sunlit   157/151/154       159/151/150
+ *   side, shaded  102/104/120       105/104/113
+ *
+ * The shaded side went from blue 18 ahead of red to blue 8 ahead, on a face
+ * that a knockout showed is 96% sky fill (drop the sun and it moves 4 luma;
+ * drop the sky and it collapses to 6/6/7). Aerial perspective is not in this:
+ * at eleven cells the haze is 0.4% and forcing uFogDensity to zero moved that
+ * face by one luma.
+ *
+ * ### Why the divisor and not a new number
+ *
+ * (1 - t) is the fraction of the chroma that survives, so
+ * (1 - 0.34) / dayLift is exactly the chroma that survived before the lift
+ * existed. The trim is therefore *derived* from DAY_SHADE_GAIN rather than
+ * fitted against it: retune the lift and this follows on its own, and there is
+ * no second number to remember.
+ *
+ * It is also free by construction in every place a change here is dangerous.
+ * mix toward luminance is luminance-preserving for any t, so **no pixel in the
+ * game can change brightness** — clear noon ground measured 81.2 before and
+ * 81.3 after on the same frame, sunlit sand 120.8 and 121.1. And dayLift is
+ * exactly 1 wherever openSky or (1 - uNight) is zero, which is a cave, a
+ * sealed room, under a slab roof and the whole of the night, so all four are
+ * bit-identical: midnight open ground reads 5/7/17 either way. The one place
+ * it applies at full strength is an open-sky fragment by day, which is the
+ * only place the report was about.
+ *
+ * A flat 1.0 was tried and rejected. It works - the shaded face lands at
+ * 108/104/106, dead neutral, at the same luminance - but a rock in shadow
+ * under a blue sky *is* blue, and taking the last of it out is a different
+ * picture rather than a fixed one. This restores the tuning that existed; it
+ * does not overrule it.
+ */
+const float SKY_FILL_TRIM = 0.34;
+
 // --- moving-light occlusion --------------------------------------------------
 
 const vec3 OCC_DIM = vec3(${OCC_NI}.0, ${OCC_NJ}.0, ${OCC_NK}.0);
@@ -1322,11 +1384,14 @@ const LIGHTS_END = /* glsl */`
   // The dome colour arrives around 0.44 saturation, which is fine as *sky* but
   // far too strong as the only light reaching a shaded face. On a neutral block
   // there is no albedo hue to fight it, so shadow sides were rendering as flat
-  // blue cards — measured 0.73 saturation on shaded stone. Pulling the fill a
-  // third of the way to its own luminance keeps the cool cast that sells
-  // daylight shadow while letting the material's own colour show through.
-  // (Brightness is preserved: this is a saturation trim, not a dimming, and the
-  // RECIPROCAL_PI division below is unchanged.)
+  // blue cards — measured 0.73 saturation on shaded stone. Pulling the fill
+  // toward its own luminance keeps the cool cast that sells daylight shadow
+  // while letting the material's own colour show through. (Brightness is
+  // preserved: this is a saturation trim, not a dimming, and the RECIPROCAL_PI
+  // division below is unchanged.)
+  //
+  // How far is SKY_FILL_TRIM over dayLift, and the division is the whole of the
+  // "mid-distance stone goes lavender" fix — see that constant.
   //
   // The night floor, and the one term in this shader that can tell "outdoors
   // under an open sky" from "inside a sealed room" — see NIGHT_OPEN_GAIN.
@@ -1357,7 +1422,10 @@ const LIGHTS_END = /* glsl */`
   // light caves.
   float dayLift = 1.0 + DAY_SHADE_GAIN * openSky * (1.0 - uNight);
   vec3 skyTinted = uSkyColor * uSkyIntensity * sunAmt * nightLift * dayLift;
-  vec3 skyFill = mix(skyTinted, vec3(dot(skyTinted, vec3(0.2126, 0.7152, 0.0722))), 0.34);
+  // The saturation trim, divided by the lift that was added after it was
+  // chosen. See SKY_FILL_TRIM.
+  float skyTrim = 1.0 - (1.0 - SKY_FILL_TRIM) / dayLift;
+  vec3 skyFill = mix(skyTinted, vec3(dot(skyTinted, vec3(0.2126, 0.7152, 0.0722))), skyTrim);
   // ground bounce, strongest on downward-facing surfaces
   vec3 upDir = normalize(vWorld - uPlanetCenter);
   float downFace = clamp(-dot(normal, upDir) * 0.5 + 0.5, 0.0, 1.0);

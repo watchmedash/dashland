@@ -620,13 +620,18 @@ const SNOW_BATCH = 12;
 /** How far from the player the season is allowed to work, in columns. */
 const SNOW_RADIUS = 24;
 /**
- * Hysteresis, in blocks of altitude, either side of the snowline.
+ * Hysteresis, in blocks of altitude, between the freezing line and the thawing
+ * one.
  *
  * The same argument as FREEZE_AT/THAW_AT: the line sweeps 9 blocks over a third
  * of a season, so without a dead band the columns sitting exactly on it would
  * be melted by one pass and re-frozen by the next for as long as it took the
  * line to walk past them. A block and a half of band costs a little sharpness
  * at the edge of the snowfield and buys a boundary that only ever moves one way.
+ *
+ * Applied on the *thaw* side only, and `_tickSeasonSnow` says why at length:
+ * centred on the line, it also meant that the coldest day of the year could not
+ * reach ground below altitude 1.5, and a shoreline stayed brown all winter.
  */
 const SNOW_BAND = 1.5;
 /**
@@ -641,8 +646,15 @@ const SNOW_BAND = 1.5;
  *
  * 4 000 is a little over one neighbourhood's worth of ground (a 24-column
  * radius holds 2 400 columns, and only the ones that actually cross the line
- * are recorded), and it is 32 KB in the save as a flat pair array. The cap is
- * doing two jobs at once and that is on purpose: it bounds the memory, and it
+ * are recorded), and it is 32 KB in the save as a flat pair array. Note that
+ * burying plants rather than refusing them - see `buries` - roughly doubled how
+ * densely a neighbourhood fills this: on the plains test site the columns that
+ * hold a tuft or a flower are about half of them. One neighbourhood still fits
+ * inside the cap with room to spare, but a player who winters across several
+ * will now reach it sooner, and reaching it means the season simply stops
+ * spreading rather than misbehaving. Measure before raising it.
+ *
+ * The cap is doing two jobs at once and that is on purpose: it bounds the memory, and it
  * bounds the part of the save this feature can grow.
  */
 const SNOW_MEMORY = 4000;
@@ -6021,16 +6033,78 @@ class Game {
       if (k < 0) continue;
       const cur = this.planet.at(col, k);
       const isSnow = cur === ID.snow;
-      if (!isSnow && !IS_SEASON_GROUND[cur]) continue;
-      const alt = R_MIN + k - R_SEA;
+      /**
+       * A tuft of grass or a flower standing on the ground gets **buried**.
+       *
+       * This is the line that decided what winter looks like, and the first
+       * version of it - refuse any column whose top cell is not ground - made
+       * the season unshippable. Meadow grass carries scattered tufts and
+       * flowers at roughly every other column, so a refusal here snows the
+       * columns between the plants and nothing else: winter arrived as a
+       * literal chessboard of white and brown, and it was not a half-finished
+       * sweep, it was the finished state. Measured on seed 4242, forced winter,
+       * 1 139 open columns in the pass's own radius: coverage climbed for 65
+       * seconds, stopped at 25.7%, and was still 25.7% two minutes later.
+       *
+       * Of the three things snow could do to an occupied column:
+       *
+       *  - **Bury it** - snow goes in the *plant's* cell and the plant is what
+       *    the undo table remembers. Chosen. A cell holds one block id, so this
+       *    is the only option that gets a whole meadow under one unbroken
+       *    surface, which is what a snowfall is; and the plant comes back
+       *    exactly, because the thaw already restores whatever it recorded.
+       *  - **Snow the ground and leave the plant standing.** Rejected: it puts
+       *    a summer-green tuft on top of every snow block on the planet, and it
+       *    is the one variant that writes a solid block *under* an occupied
+       *    cell, which is the assumption `_applySeasonEdits` is built on.
+       *  - **Snow around it.** That is the chessboard, named as a feature.
+       *
+       * `IS_REPLACEABLE` is the predicate rather than a list of plant names,
+       * for the reason it gives itself: it is derived from the render class, so
+       * the sixteenth tuft of ground cover somebody adds is buried by winter on
+       * the day it is added. The cell below still has to be ground this pass
+       * owns, which keeps the rule off a crop (farmland is not season ground,
+       * so a winter field keeps its rows) and off the lower half of anything
+       * two cells tall (a stacked plant's own segment is not ground either).
+       */
+      const buries = !isSnow && !IS_SEASON_GROUND[cur] && IS_REPLACEABLE[cur]
+        && IS_SEASON_GROUND[this.planet.at(col, k - 1)];
+      if (!isSnow && !buries && !IS_SEASON_GROUND[cur]) continue;
       const key = col * D + k;
       if (seen.has(key)) continue;
       seen.add(key);
       const was = this.seasonSnow.get(key);
-      if (freezing && !isSnow && alt > line + SNOW_BAND) {
-        // Cold enough for this column, and it is bare. Either we took the snow
-        // off it and are putting it back, or this is ground that has never been
-        // under snow and we have to remember what it is.
+      // Altitude is the GROUND's, not the cell being written. A buried plant
+      // sits one cell up, and asking the snowline about *that* cell would let a
+      // column with a daisy on it cross the line one block of altitude before
+      // its bare neighbour - a chessboard again, one contour ring wide, along
+      // the edge of every snowfield. `was` names the buried plant, so the same
+      // correction is available on the way back out.
+      const onPlant = buries || (isSnow && was !== undefined && IS_REPLACEABLE[was]);
+      const alt = R_MIN + (onPlant ? k - 1 : k) - R_SEA;
+      if (freezing && !isSnow && alt > line) {
+        // Cold enough for this column, and it is not white yet. Either we took
+        // the snow off it and are putting it back, or this is ground - or a
+        // plant standing on ground - that has never been under snow, and we
+        // have to remember what it is.
+        //
+        // The threshold is the bare snowline here and `line - SNOW_BAND` on the
+        // thaw, rather than the band being centred on the line, and that is the
+        // second half of the chessboard fix. Centred, the deepest winter the
+        // year has - `cold` = 1, so `snowLine` = 0 - could still only reach
+        // ground above altitude 1.5, and every shore, meadow and valley floor
+        // under that stayed brown through a winter that had snowed the hillside
+        // behind it. The band is a *gap between two thresholds* and it does its
+        // job wherever it is put: a column that freezes at line L needs the line
+        // to climb past L + 1.5 before it thaws, which is the same 1.5 blocks of
+        // hysteresis it always had. It is belt and braces even so, because
+        // freezing only runs at `cold` >= 0.55 and thawing only at <= 0.35, and
+        // that alone keeps the two lines 1.8 blocks apart.
+        //
+        // What it does not change is the permanent snowline, which is the thaw's
+        // to set and is still `snowLine(0) - SNOW_BAND` = 7.5: everything winter
+        // lays between 0 and 7.5 comes off again in summer, and only the caps
+        // above that keep it.
         if (was === ID.snow) this.seasonSnow.delete(key);
         else if (this.seasonSnow.size < SNOW_MEMORY) this.seasonSnow.set(key, cur);
         else continue;
@@ -6068,13 +6142,19 @@ class Game {
    *
    * A short window around `colHeight` answers both. Starting three layers above
    * the generated height and giving up seven below it, the first non-air cell
-   * found is the ground and everything above it inside the window is air by
-   * construction - which is the sky test as well, for free: a cave floor, a
-   * cellar and the soil under somebody's floorboards are all far enough from
-   * the height field that the window never reaches them, and a trunk or a
-   * flower standing on the ground is found before the ground is and refuses the
-   * column. Snow does not fall through a roof and it does not settle between
-   * the roots of a tree.
+   * found is the top of the column and everything above it inside the window is
+   * air by construction - which is the sky test as well, for free: a cave
+   * floor, a cellar and the soil under somebody's floorboards are all far
+   * enough from the height field that the window never reaches them. Snow does
+   * not fall through a roof and it does not settle between the roots of a tree.
+   *
+   * What it hands back is the top *cell*, which is not always ground: a trunk
+   * or a flower standing on the ground is found before the ground is. The
+   * caller decides what that means, and it decides differently for the two -
+   * see `buries` in `_tickSeasonSnow`, where a flower is buried and a trunk
+   * refuses the column. This function used to make that call itself by
+   * returning -1 for anything it did not like the look of, and the chessboard
+   * winter is what that cost.
    */
   _seasonGroundK(col) {
     const top = Math.min(D - 2, Math.floor(this.planet.colHeight[col] - R_MIN) + 3);
@@ -6092,10 +6172,13 @@ class Game {
    * The three things every edit has to do - the mirror, the worker's copy, and
    * the occlusion volume the shader marches - and none of the four cascades
    * `_applyEdits` runs afterwards, because none of them can fire here. Nothing
-   * in this batch crowds a cactus: snow and soil are ordinary full blocks and
-   * `NEEDS_ROOM` names neither. Nothing loses its floor: the cell above is air,
-   * which `_seasonGroundK` has already established, so there is no plant to
-   * drop. Nothing is roofed over: the cell above is still air afterwards.
+   * in this batch crowds a cactus: snow, soil and the tufts a thaw hands back
+   * are ordinary blocks and `NEEDS_ROOM` names none of them - a cactus is a
+   * cube and so is never one of the plants winter buries. Nothing loses its
+   * floor: the cell above is air, which `_seasonGroundK` has already
+   * established, so there is nothing standing on what we overwrite, and a plant
+   * put back by a thaw is put back on the ground it was growing in. Nothing is
+   * roofed over: the cell above is still air afterwards.
    * Nothing falls: a swap in place changes no support, and the block that was
    * there was holding up whatever is above it just as well. And no lava is
    * involved, so `_meltSnow` - which is the other, unrelated rule about snow

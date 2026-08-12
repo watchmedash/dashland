@@ -1717,95 +1717,17 @@ select.pick option { color: var(--ink); background: var(--parchment); }
    where the other things you glance at while standing still already are. */
 /* The centre, now that the fight bar has taken the top edge. One word over the
    middle of the view is the whole of what "your line is out" needs to say. */
-/* A line is in the water and nothing is on it yet.
+/* There is no cast indicator on the HUD, and that is the decision.
  *
- * This was the word "Waiting" on a parchment card in the dead centre of the
- * screen, held there for up to a minute of a cast. Reported as bland, and the
- * card was the bland part: a label is the one thing fishing does not need,
- * because the object a fisher actually watches is the float, and a float says
- * "waiting" by behaving like waiting.
+ * It was the word "Waiting" on a parchment plate, then a CSS float bobbing
+ * under the crosshair. Both were answering a question the world already
+ * answers: the rod is in your hands and the bobber is out there on the water
+ * where you threw it. A second float on the glass is the same information
+ * twice, and the one on the glass is the fake one.
  *
- * So the word goes and the instrument arrives: a cork bob on a brass band,
- * riding two slow ripples, sitting just under the crosshair where the eye
- * already is. It is the only animated thing on the HUD, which is the point -
- * when it stops and the fight bar comes up, the change is the signal.
- *
- * Small on purpose. At 20px it never covers what you are aiming at, where the
- * old plate was a hundred-odd pixels of parchment across the middle of the view.
+ * `body.casting` stays. It is not about the plate - it steps the toast stack
+ * down clear of the fight bar, which is the one thing that does need the room.
  */
-#fish-wait {
-  position: absolute; left: 50%; top: calc(50% + 30px);
-  transform: translateX(-50%);
-  width: 60px; height: 44px;
-  pointer-events: none;
-}
-#fish-wait.hidden { display: none; }
-
-/* The float. A red cork over a brass collar on a dark stem, built from one
-   element: the stem is the box, the cork is `::before`, the collar is the
-   border between them. */
-.fw-float {
-  position: absolute; left: 50%; top: 6px;
-  width: 3px; height: 19px; margin-left: -1.5px;
-  border-radius: 1px;
-  background: linear-gradient(180deg, var(--brass-line), var(--wood-dim));
-  box-shadow: 0 0 0 1px var(--hud-hard);
-  animation: fw-bob 2.1s ease-in-out infinite;
-}
-.fw-float::before {
-  content: ''; position: absolute; left: 50%; top: -9px;
-  width: 11px; height: 11px; margin-left: -5.5px;
-  border-radius: 6px 6px 4px 4px;
-  background: linear-gradient(180deg, #e8563f 0 52%, #b8331f 52% 100%);
-  box-shadow:
-    0 0 0 1px var(--hud-hard),
-    inset 0 2px 0 rgba(255, 255, 255, .55),
-    inset 0 -3px 0 rgba(94, 20, 10, .5);
-}
-/* The waterline itself, which does not move. Without it the bob was a pin
-   hanging in the air: the rings alone say "something happened here", and it is
-   the still ellipse that says the stem goes INTO water. Drawn on the wrapper so
-   the bobbing stem slides through it rather than carrying it up and down. */
-#fish-wait::before {
-  content: ''; position: absolute; left: 50%; top: 22px;
-  width: 26px; height: 7px; margin-left: -13px;
-  border-radius: 50%;
-  background: rgba(28, 58, 74, .45);
-  box-shadow: inset 0 1px 0 rgba(226, 160, 82, .35);
-}
-
-/* The rings. Two leaving the stem, offset half a cycle so there is always one
-   on its way out - a single ring reads as a blink. */
-.fw-float::after {
-  content: ''; position: absolute; left: 50%; top: 13px;
-  width: 34px; height: 10px; margin-left: -17px;
-  border: 1px solid rgba(226, 160, 82, .85);
-  border-radius: 50%;
-  animation: fw-ring 2.1s ease-out infinite;
-}
-#fish-wait::after {
-  content: ''; position: absolute; left: 50%; top: 19px;
-  width: 34px; height: 10px; margin-left: -17px;
-  border: 1px solid rgba(226, 160, 82, .55);
-  border-radius: 50%;
-  animation: fw-ring 2.1s ease-out infinite 1.05s;
-}
-
-@keyframes fw-bob {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(3px); }
-}
-@keyframes fw-ring {
-  0%   { transform: scale(.35); opacity: .9; }
-  100% { transform: scale(1.5); opacity: 0; }
-}
-
-/* A float that does not move is just a pin, so reduced motion keeps the rings
-   rather than the bob: one static waterline still says the line is in water. */
-@media (prefers-reduced-motion: reduce) {
-  .fw-float { animation: none; }
-  .fw-float::after, #fish-wait::after { animation: none; opacity: .55; transform: scale(1); }
-}
 /* The toast stack starts at 46px and the fight bar now sits at 62. While a
    cast is out the stack steps down clear of it. The Waiting plate no longer
    collides with anything: it is in the middle of the screen. */

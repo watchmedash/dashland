@@ -1119,6 +1119,13 @@ const DEFAULT_SETTINGS = {
   // needs a torch, and sees none of the night. The slider is still there for
   // anyone who would rather have a short game cycle.
   dayMinutes: 0,
+  // Which quality tier to render at: 'auto', 'high' or 'low'. See QUALITY.
+  //
+  // 'auto' means "ask the device", and the device that answers `pointer: coarse`
+  // is the one that needs the low tier. A player who picks a tier by hand has
+  // said something about their machine that the machine did not say, so the
+  // stored answer wins over the probe from then on.
+  quality: 'auto',
   // Which camera V last left you in.
   //
   // A setting rather than part of the save, because it is a preference about
@@ -1128,9 +1135,116 @@ const DEFAULT_SETTINGS = {
   view: VIEW_FIRST,
 };
 
+/**
+ * The two rendering tiers, and the measurements that chose the low one.
+ *
+ * A phone is not a small desktop. This frame is CPU-bound on *submitting* draw
+ * calls — proved twice over on an RTX 5060 at a phone viewport: the engine's own
+ * CPU frame total tracks wall-clock p50 to within a few percent, and quartering
+ * the pixel count (renderScale 0.5) changed p50 by 0.4ms, which is inside the
+ * noise. A mid-range phone CPU is 3-5x slower single-threaded than that desktop,
+ * so the ~10-11ms of submission measured here is 30-55ms on a phone before its
+ * GPU has drawn anything. Nothing else in the frame is close: 598 chunk uploads
+ * cost 18.7ms of main-thread time *in total* (0.03ms each), and there are never
+ * more than five THREE.Light objects in the scene, so neither streaming nor
+ * lighting is worth a tier.
+ *
+ * Three levers, all of which reduce draw calls, measured in one browser process
+ * in a forest on seed 4242 with a fresh baseline retaken between every one
+ * (run-to-run variance across sessions is +/-20%, so only within-process deltas
+ * mean anything):
+ *
+ *   baseline                     p50 14.5ms  1178 calls  1.38M tris
+ *   AO off                       p50 10.3ms   784 calls  0.81M tris   -29%
+ *   view 110 cells               p50 12.7ms  1011 calls
+ *   view  80 cells               p50 11.7ms   847 calls   -19%
+ *   view  55 cells               p50 10.7ms   719 calls
+ *   renderScale 0.75             p50 14.0ms  (pixels are not the constraint)
+ *   AO off + rs 0.7 + view 80    p50  8.1ms   563 calls  0.69M tris   1.8x
+ *
+ * Then re-measured through this code rather than through the audit's stand-in
+ * levers — `setQuality` flipping the real tier — in one process, alternating so
+ * that every `low` sample has a `high` sample either side. That bracketing is
+ * not ceremony: over a twelve-minute process an *unchanged* `high` went 14.8 ->
+ * 21.4 -> 19.8ms while its draw calls barely moved, so a single before/after
+ * pair could have been read as anything at all.
+ *
+ *   high  p50 14.8ms  1068 calls  1.35M tris  cpu 13.6ms  buffer 786x1704
+ *   low   p50  9.3ms   663 calls  0.75M tris  cpu  8.1ms  buffer 550x1192
+ *   high  p50 21.4ms  1113 calls  1.36M tris  cpu 19.9ms
+ *   low   p50 12.8ms   703 calls  0.75M tris  cpu 11.8ms
+ *   high  p50 19.8ms  1151 calls  1.36M tris  cpu 18.7ms
+ *
+ * Draw calls -38%, triangles -45%, CPU per frame -40%, and both `low` samples
+ * land ~37% under the mean of the two `high` samples that bracket them. The
+ * counts are the trustworthy part and they say the same thing as the clock,
+ * which is what a submission-bound frame should do.
+ *
+ * `low` is that last row. Each part earns its place differently:
+ *
+ *  - **ao: false** is the whole reason a tier exists. It is 29% on its own, and
+ *    it is the only lever that costs picture rather than distance. See
+ *    `PostFX.setAO`.
+ *  - **loadDist 96** is the 80-cell cut expressed the way the streamer measures
+ *    it. The cut in the audit hid *meshes* whose bounding sphere came within 80
+ *    units of the camera; `_streamChunks` measures to a chunk's centre, and a
+ *    chunk's half-diagonal is ~12.9 units, so 96 is the same horizon and it also
+ *    never builds the geometry in the first place — which a phone wants for the
+ *    memory as much as for the calls. `keepDist` keeps the stock 190/150
+ *    hysteresis ratio rather than a second guessed number.
+ *  - **renderScale 0.7** is the cheapest of the three here and the most valuable
+ *    there. It bought almost nothing on the desktop measurement above precisely
+ *    because that machine is not fill-bound — but a phone's GPU is small, its
+ *    memory bandwidth is smaller, and it is the part of this that turns into
+ *    battery and heat. Multiplied into the player's own render-scale slider
+ *    rather than overwriting it, so the two are independent controls.
+ *
+ * The horizon cut is the part with a visible price and it is stated plainly:
+ * distant terrain ends ~54 units nearer, and the aerial haze at that range is
+ * only ~20% (AERIAL_GAIN's curve reaches 0.38 at the desktop load distance), so
+ * a far ridge on a clear noon does not fade out, it stops. That is the trade the
+ * low tier is: a nearer world you can play, against a far one you cannot.
+ */
+const QUALITY = {
+  high: { ao: true, renderScale: 1, loadDist: CHUNK_LOAD_DIST, keepDist: CHUNK_KEEP_DIST },
+  low: {
+    ao: false,
+    renderScale: 0.7,
+    loadDist: 96,
+    keepDist: Math.round(96 * (CHUNK_KEEP_DIST / CHUNK_LOAD_DIST)),
+  },
+};
+
+/**
+ * Which tier this session runs at.
+ *
+ * The touch probe is `TouchControls.wanted()` and deliberately not a second test
+ * of its own: that one is already the game's single answer to "is a fingertip
+ * driving this", it is already the thing that decides whether the on-screen
+ * controls exist, and it already carries the `?touch=0` / `?touch=1` escape
+ * hatch — which now overrides the quality tier too, for free, and is how the
+ * mobile preset is measured and photographed on a desktop.
+ */
+const qualityTier = (settings) => {
+  if (settings.quality === 'low' || settings.quality === 'high') return settings.quality;
+  return TouchControls.wanted() ? 'low' : 'high';
+};
+
 class Game {
   constructor() {
     this.settings = { ...DEFAULT_SETTINGS, ...(Save.settings() || {}) };
+    /**
+     * Resolved before `_initRenderer`, because the pixel ratio and the composer's
+     * buffers are both built from it there and neither is free to rebuild later.
+     * On a mouse-and-keyboard machine this is `QUALITY.high`, whose every field
+     * is the value that was hard-coded before this existed — so desktop runs the
+     * same numbers it always ran.
+     *
+     * `qualityTier` is the resolved name and is what a settings row would tick
+     * its box from: `settings.quality` can say 'auto', and a checkbox cannot.
+     */
+    this.qualityTier = qualityTier(this.settings);
+    this.quality = QUALITY[this.qualityTier];
     this.state = 'loading';
     this.clock = new THREE.Clock();
     this.frameTimes = [];
@@ -1561,12 +1675,16 @@ class Game {
       setTimeout(() => this.audio.thunder(strength, near), (1 - near) * 6500);
     };
     this.seasons = new Seasons();
-    this.postfx = new PostFX(this.renderer, this.scene, this.camera);
+    this.postfx = new PostFX(this.renderer, this.scene, this.camera, { ao: this.quality.ao });
     this.postfx.enabled = this.settings.post;
     this.postfx.setSize(this.width, this.height);
     this.viewModel.setSize(this.width, this.height);
-    // One fixed rendering configuration. Performance is tuned with the render
-    // scale slider instead of preset tiers.
+    // The shadow map is the same on both tiers, deliberately. It looked like the
+    // obvious third thing to cut, and it is not: the sun's map is rebuilt once
+    // per frame by the beauty pass and the AO prepass was made to reuse it (see
+    // `_patchGtaoCutout`), so with AO off there is exactly one shadow pass left
+    // and dropping it would cost every contact shadow in the game for a saving
+    // the low tier has already taken elsewhere.
     this.renderer.shadowMap.enabled = true;
     this.sky.sunLight.shadow.mapSize.set(2048, 2048);
 
@@ -1651,7 +1769,7 @@ class Game {
     // PostFX reads the renderer's pixel ratio when it builds its buffers, so a
     // player who dropped the scale for performance would otherwise get a
     // full-resolution first session every time they reloaded.
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * this.settings.renderScale);
+    renderer.setPixelRatio(this._pixelRatio());
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1849,12 +1967,24 @@ class Game {
     this.saveGame(false);
   }
 
+  /**
+   * Device pixels per CSS pixel, all three factors in one place.
+   *
+   * The tier's scale multiplies the player's rather than replacing it, so they
+   * stay independent: the slider is "how sharp do I want this", the tier is "how
+   * much machine is there". On `high` the tier factor is exactly 1, which is why
+   * a desktop's drawing buffer is the same size it was before tiers existed.
+   */
+  _pixelRatio() {
+    return Math.min(window.devicePixelRatio, 2) * this.settings.renderScale * this.quality.renderScale;
+  }
+
   _resize() {
     this.width = window.innerWidth; this.height = window.innerHeight;
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(this.width, this.height, false);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * this.settings.renderScale);
+    this.renderer.setPixelRatio(this._pixelRatio());
     this.postfx.setSize(this.width, this.height);
     this.viewModel.setSize(this.width, this.height);
     const pr = this.renderer.getPixelRatio();
@@ -1863,6 +1993,40 @@ class Game {
   }
 
   setRenderScale() { this._resize(); }
+
+  /**
+   * Move to another quality tier, live. The seam a settings row would drive.
+   *
+   * @param {'auto'|'high'|'low'} [choice] what to store in settings; omitted,
+   *   this just re-applies whatever is stored (which is what boot needs after a
+   *   load, and what a `?touch=` override needs).
+   *
+   * Everything here is a value, not a program: the AO pass is a flag on a pass
+   * that stays built and stays sized, the render scale is a pixel ratio, and the
+   * horizon is two numbers the streamer reads fresh every quarter second. So
+   * this costs one composer resize and one streaming pass, and nothing in the
+   * scene recompiles. That is a deliberate constraint on what a tier is allowed
+   * to contain — the fog is attached at density 0 for exactly the same reason
+   * (see `_initRenderer`): anything that flips a shader define recompiles every
+   * material in the scene, and a settings row that freezes the game for a second
+   * is a settings row nobody touches twice.
+   *
+   * The streaming pass is forced rather than waited for because the two
+   * directions are not symmetric: dropping to `low` evicts the far ring on the
+   * next tick anyway, but coming back up to `high` would otherwise leave the
+   * player inside a 96-unit bubble until the timer came round.
+   */
+  setQuality(choice) {
+    if (choice) { this.settings.quality = choice; this.persistSettings(); }
+    this.qualityTier = qualityTier(this.settings);
+    this.quality = QUALITY[this.qualityTier];
+    this.postfx?.setAO(this.quality.ao);
+    this._resize();
+    if (this.state === 'playing' || this.state === 'paused' || this.state === 'spectating') {
+      this._streamTimer = 0;
+      this._streamChunks();
+    }
+  }
 
   persistSettings() { Save.writeSettings(this.settings); }
 
@@ -2519,9 +2683,10 @@ class Game {
   }
 
   /**
-   * Keep meshed geometry to what can be seen. Chunks inside CHUNK_LOAD_DIST are
-   * requested, chunks past CHUNK_KEEP_DIST are freed; the gap between the two is
-   * hysteresis so standing on a boundary doesn't rebuild the same chunk forever.
+   * Keep meshed geometry to what can be seen. Chunks inside the tier's load
+   * distance are requested, chunks past its keep distance are freed; the gap
+   * between the two is hysteresis so standing on a boundary doesn't rebuild the
+   * same chunk forever. On `high` those are CHUNK_LOAD_DIST / CHUNK_KEEP_DIST.
    * @param {boolean} initial first batch — the loading screen waits on it
    */
   _streamChunks(initial = false) {
@@ -2531,8 +2696,15 @@ class Game {
     // is never held back, so memory comes down the moment it can.
     const canAdd = initial || !this._streamPending;
     const eye = this.player.position;
-    const load = CHUNK_LOAD_DIST * CHUNK_LOAD_DIST;
-    const keep = CHUNK_KEEP_DIST * CHUNK_KEEP_DIST;
+    // Per tier, not per build: the low tier pulls the horizon in to 96 units.
+    // Both numbers move together, so the hysteresis gap survives (see QUALITY),
+    // and the *mirror* is untouched by either — `dropChunk` frees meshes and
+    // nothing else, so physics, raycasting and every scan over blocks read the
+    // same world on both tiers. The invariant in `_update` ("never move through
+    // ground that has not been built") still holds by a wide margin: 96 units
+    // against a player who cannot exceed about ten.
+    const load = this.quality.loadDist * this.quality.loadDist;
+    const keep = this.quality.keepDist * this.quality.keepDist;
     const add = [], drop = [];
     const live = this.liveChunks;
     for (let id = 0; id < NUM_CHUNKS; id++) {

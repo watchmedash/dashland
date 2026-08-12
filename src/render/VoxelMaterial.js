@@ -1190,6 +1190,32 @@ const ROUGH_FRAG = /* glsl */`
   float roughnessFactor = roughness * armSample.g;
 `;
 
+/**
+ * **`metalness` is 0 on every voxel material, so this whole line is zero, and
+ * that was measured and deliberately left alone.** Written down because it
+ * looks exactly like the oversight it is not: `roughness` two lines up is 1.0
+ * precisely so the map passes through, and the obvious tidy-up is to make this
+ * one 1.0 to match.
+ *
+ * Driven at runtime — the materials are reachable as `game.materials` — the
+ * whole of the change is a specular sheen on the top of a gold block. The three
+ * ores it was raised for (gold, iron, copper) do not move perceptibly, because
+ * an ore's seam masks about 12% of its tile and there is no environment map in
+ * this scene for a metal to reflect, so all metalness can add is a direct-sun
+ * lobe. Nothing goes black, either: the indirect model below is rebuilt from
+ * `diffuseColor.rgb` rather than from three's `material.diffuseColor`, so a
+ * metal keeps its diffuse here whatever this factor says, and a night arena lit
+ * only by a sunstone renders identically at 0 and at 1.
+ *
+ * What stops it is the map itself. 134 of the tiles are baked from a texture
+ * pack and their blue channel is not a metalness map: measured on the atlas,
+ * dirt is 0.86, stone 0.58 and oak leaves 0.53, against snow's 0.16. Passing
+ * that through would make soil the most metallic material on the planet. The
+ * procedural tiles do set a real one (see `s.metal` in TextureGen), so this is
+ * a lever that could exist — it needs the pack half of the channel fixed in the
+ * bake first, and it is worth roughly one shiny block until it also has
+ * something to reflect.
+ */
 const METAL_FRAG = /* glsl */`
   float metalnessFactor = metalness * armSample.b;
 `;

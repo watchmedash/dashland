@@ -846,6 +846,14 @@ export class UI {
     backdrop('#skills', () => g.closeSkills());
     backdrop('#settings', () => this.closeSettings());
     backdrop('#controls', () => this.closeControls());
+    // Slots was the one screen left off this list, and it is the one that could
+    // least afford it. Its Back button is hidden with all the others by the
+    // "no Close buttons on the sheets" rule, which is sound while Escape and
+    // the backdrop are both there - but a phone has no Escape key, so with no
+    // backdrop closer either, tapping New Game by mistake was a one way door
+    // out of which the only exit was reloading the page. Measured on a Pixel 8:
+    // Settings and Controls both closed on a tap outside, Slots did not.
+    backdrop('#slots', () => this.closeSlots());
 
     const s = g.settings;
     const bind = (id, ev, fn) => { $(id).addEventListener(ev, fn); };

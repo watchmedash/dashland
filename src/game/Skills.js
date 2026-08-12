@@ -366,15 +366,17 @@ export function xpForKill(spec, baby = false) {
  * announced, and they still persist through a death when nothing else does.
  * A mark is a record, and a record that pays is a wage.
  */
-export const MARKS = {
-  dawn: { label: 'First Light', hint: 'Survive a night outdoors.' },
-  forge: { label: 'Smelter', hint: 'Fire a kiln.' },
-  harvest: { label: 'Farmer', hint: 'Harvest a crop you planted.' },
-  trade: { label: 'Custom', hint: 'Trade with the merchant.' },
-  slayer: { label: 'Cinder', hint: 'Put down a husk.' },
-  abyss: { label: 'The Deep', hint: 'Find lava underground.' },
-  core: { label: 'The Core', hint: 'Reach the heart of the planet.' },
-};
+// The marks are gone. There is no achievement list.
+//
+// They were seven one-off records - first night outdoors, first kiln, first
+// trade, first husk, lava, the core - and they had already been stripped of
+// their xp when the ladder became kills only. What was left was a badge case,
+// and the owner's call is that this is a pure survival world: the reward for
+// surviving a night outdoors is that you survived it.
+//
+// Removed rather than hidden, so nothing is carrying a list nobody can see.
+// `fromJSON` still tolerates the `marks` key an older save may hold; it simply
+// does not read it.
 
 // --- what death costs --------------------------------------------------------
 //
@@ -515,7 +517,6 @@ export class Skills {
     this.level = {};
     for (const key of BRANCH_ORDER) this.level[key] = 0;
     /** Marks awarded, by key. A Set so awarding twice is free and harmless. */
-    this.marks = new Set();
     /**
      * Points granted outside the two systems above — today that means one
      * thing only, the armour conversion, and it is stored as a plain number
@@ -691,22 +692,6 @@ export class Skills {
    */
   get available() { return this.points - this.spent; }
 
-  /**
-   * Award a one-off mark. It grants no xp — see `MARKS`.
-   *
-   * Idempotent by key, which is what lets a caller fire it from inside a hot
-   * path — `skills.mark('abyss')` every time lava comes into view is fine — and
-   * the key is kept in the set for ever, including through a death. That the
-   * record survives a wipe is now its whole value: it is the only thing about a
-   * character that a death cannot take.
-   *
-   * @returns {boolean} true only the first time, so the caller can toast it
-   */
-  mark(key) {
-    if (!MARKS[key] || this.marks.has(key)) return false;
-    this.marks.add(key);
-    return true;
-  }
 
   /**
    * Convert armour a player already owns into points, once.
@@ -955,7 +940,6 @@ export class Skills {
     for (const key of BRANCH_ORDER) if (this.level[key]) lv[key] = this.level[key];
     const out = { v: 4 };
     if (Object.keys(lv).length) out.lv = lv;
-    if (this.marks.size) out.marks = [...this.marks];
     if (this.bonus) out.bonus = this.bonus;
     if (this.converted) out.converted = 1;
     if (this.xp) out.xp = this.xp;
@@ -992,7 +976,6 @@ export class Skills {
    */
   fromJSON(data) {
     for (const key of BRANCH_ORDER) this.level[key] = 0;
-    this.marks.clear();
     this.bonus = 0;
     this.converted = false;
     this.xp = 0;
@@ -1004,7 +987,6 @@ export class Skills {
         const n = lv[key];
         if (typeof n === 'number' && n > 0) this.level[key] = Math.floor(n);
       }
-      if (Array.isArray(data.marks)) for (const m of data.marks) if (MARKS[m]) this.marks.add(m);
       if (typeof data.bonus === 'number' && data.bonus > 0) this.bonus = Math.floor(data.bonus);
       this.converted = !!data.converted;
       if (typeof data.xp === 'number' && data.xp > 0) this.xp = Math.floor(data.xp);

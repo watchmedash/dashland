@@ -2156,7 +2156,6 @@ export class UI {
     go.addEventListener('click', () => {
       if (fulfilRequest(g.inventory, req, this.shop?.purse)) {
         g.audio.pickup();
-        g._mark('trade');
         g.ui.toast(`Paid ${req.reward} coins`, COIN_ITEM, 2600);
         g.inventory.changed();
         this.refresh();
@@ -2225,8 +2224,7 @@ export class UI {
         const got = buyFrom(g.inventory, mob.stock, line.item, n);
         if (got) {
           g.audio.pickup();
-          g._mark('trade');
-          this.toast(`Bought ${ITEMS[line.item].label}`, line.item, 1400);
+            this.toast(`Bought ${ITEMS[line.item].label}`, line.item, 1400);
         } else g.audio.deny();
         this.refresh();
       }));
@@ -2251,8 +2249,7 @@ export class UI {
           // Any hand that changes counts as a trade — see MARKS.trade. Buying,
           // selling and filling his errand are three ways of doing the one
           // thing the mark is for, which is meeting the merchant at all.
-          g._mark('trade');
-          this.toast(`Sold ${sold} x ${ITEMS[item].label}`, COIN_ITEM, 1400);
+            this.toast(`Sold ${sold} x ${ITEMS[item].label}`, COIN_ITEM, 1400);
           // Say so when the purse is what stopped the sale, or it reads as a bug.
           if (sold < n && mob?.purse && mob.purse.coins < sellPriceOf(item)) {
             this.toast('Out of coin', COIN_ITEM, 2200);

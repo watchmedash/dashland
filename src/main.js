@@ -49,7 +49,7 @@ import {
   bowShot, bowDrawStep, fishTable, fishHard,
 } from './game/Items.js';
 import { Arrows } from './game/Arrows.js';
-import { Skills, MARKS, ON_DEATH } from './game/Skills.js';
+import { Skills, ON_DEATH } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
@@ -1245,7 +1245,6 @@ class Game {
       // branch of `_interact` is the other; a bow-only player was earning
       // nothing at all for combat because only that branch awarded either.
       if (!killed) return;
-      if (mob.spec.hostile) this._mark('slayer');
       // The one source of xp in the game, and it is offered unconditionally:
       // `xpForKill` returns 0 for anything that is not a husk or a monster, so
       // the hostile test lives in one place rather than at each of the two
@@ -2729,24 +2728,8 @@ class Game {
     if (!(t < 0.25 || t > 0.75)) { this._nightOut = 0; return; }
     if (this.shelter < 0.55) return;
     this._nightOut = (this._nightOut ?? 0) + dt;
-    if (this._nightOut >= NIGHT_OUTDOORS) this._mark('dawn');
   }
 
-  /**
-   * Award a mark, and say so. Idempotent — `Skills.mark` swallows repeats — so
-   * callers are free to fire from inside a hot path.
-   */
-  _mark(key) {
-    if (!this.skills.mark(key)) return;
-    const m = MARKS[key];
-    // The name and nothing after it. It used to read "Cinder: 200 XP", and the
-    // half that was a number is gone with the xp a mark used to pay — a toast
-    // that announced 0 XP would be the system explaining its own arithmetic to
-    // a player who had just done something for the first time.
-    this.ui.toast(m.label, 0, 4000);
-    this.audio.ui(760);
-    this.ui.refreshSkills();
-  }
 
   /** Buy one level. Called from the skills screen; returns whether it took. */
   buySkill(key) {
@@ -4143,7 +4126,6 @@ class Game {
     // only record breaking a block leaves. See the head of `Skills.js`.
     // Ripe wheat only. Breaking a green shoot is losing a crop, not harvesting
     // one, and marking it would teach exactly the wrong lesson about farming.
-    if (hit.id === ID.wheat_3) this._mark('harvest');
     this.player.swing();
     // `'right'` explicitly: `ViewModel.actingHand` derives the arm from what is
     // in the two fists — right unless it is empty and the left is not — which is
@@ -4541,7 +4523,6 @@ class Game {
         // A kiln taking light is the closest thing the game has to an event for
         // "you have started smelting", and it is the right one: it fires when
         // fuel, ore and a free output all line up, which is the whole lesson.
-        this._mark('forge');
         k.fuel.count--;
         if (k.fuel.count <= 0) k.fuel.clear();
       }
@@ -5444,7 +5425,6 @@ class Game {
     }
     if (!touching) return;
     this.coreFound = true;
-    this._mark('core');
     this.inventory.add(itemIdOf('hearth'), 1);
     // The hearth's icon rides this toast and the item lands in the bar; a
     // second line spelling out that it keeps the night away is the game
@@ -5827,7 +5807,6 @@ class Game {
     if (sawLava) {
       const c = this.player.cell;
       const surf = this.planet.surfaceK(cidx(c.f, Math.round(c.ci), Math.round(c.cj)));
-      if (surf >= 0 && c.ck < surf - 3) this._mark('abyss');
     }
     this._hlValue = { r, g, b };
     return this._hlValue;
@@ -7487,7 +7466,6 @@ class Game {
         // out of the dark next patch counts for the same mark — and so that
         // clubbing a cow never does.
         const killed = this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge);
-        if (killed && mobHit.mob.spec.hostile) this._mark('slayer');
         // Priced from the creature's own health and damage rather than from a
         // per-species table, so anything added later prices itself. Hostiles
         // only: a cow is worth beef and hide and no xp whatever, and neither is

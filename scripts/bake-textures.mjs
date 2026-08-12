@@ -152,7 +152,26 @@ const MAP = {
   core: ['Volcano', 5],
   lava: ['Volcano', 2],
   glowstone: ['Cave Floor', 7],
-  crystal_block: ['Ice', 1],
+  // Crystal and ice were the same block: 161,218,230 against 169,218,240, eight
+  // counts apart in red and none in green. Small wonder — they were the same
+  // material, Ice/1 and Ice/3, at the same exposure.
+  //
+  // Ice/1 keeps its place because it is the most crystalline thing in the pack:
+  // big angular shards with clean facet edges, where Ice/3 and the rest are
+  // fine flake ice. Every plausible alternative was contact-sheeted and none of
+  // them is a crystal — Mystical is all dark mushroom grotto, Magical Forrest
+  // is four teal moss floors, and the Cave Floor gem variants are already spent
+  // on amethyst/ruby/sapphire/emerald/void, which is exactly the collision
+  // being fixed. So the shape stays and the COLOUR moves.
+  //
+  // Where it moves to is the block's own declaration: crystal_block emits light
+  // at [0.5, 0.8, 1.0] and breaks into [0.55, 0.8, 1.0] particles, so a strong
+  // cyan is the colour the rest of the game already says it is, and the pale
+  // near-white blue it had was the only part of it claiming otherwise. Pulling
+  // red back nearly a third gets there; `contrast` on top is what keeps the
+  // facet edges from flattening once the channel range narrows, and the
+  // roughness trim gives it a gem's sheen against ice's matte.
+  crystal_block: ['Ice', 1, { contrast: 1.35, warm: [0.72, 0.90, 1.0], rough: 0.6 }],
   iron_block: ['Metal Plates', 6],
   gold_block: ['Pile of Gold', 1],
   // "Snow Ground" is a misleading folder name: all eleven variants are snow-

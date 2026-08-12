@@ -115,7 +115,14 @@ const MAP = {
   // most of the chroma comes out first and the exposure goes on afterwards.
   log_birch: ['Tree Bark', 3, { rot90: true, tint: 0.55, bright: 1.16 }],
   log_birch_top: ['Tree Bark', 9],
-  leaves_birch: ['Bush_Hedge', 1, { tint: 0.35, bright: 1.10, holes: 0.21 }],
+  // Not just paler than oak: WARMER than oak, which is where the "cold" reading
+  // came from. Bush_Hedge/1 is a blue-green shrub and the tint that gives the
+  // biome colour room to work took what little yellow it had, landing the tile
+  // at 124,169,130 — a mint, and mint beside oak's 103,137,77 reads as a
+  // different season rather than a different tree. The trim is mostly on BLUE,
+  // because a pale leaf is pale by having more red and green, not by having
+  // more of everything; brightening instead would have walked it toward white.
+  leaves_birch: ['Bush_Hedge', 1, { tint: 0.35, bright: 1.10, warm: [1.14, 1.02, 0.78], holes: 0.21 }],
   // Pine down to the middle of the ladder. The blue lift matters as much as the
   // exposure: Tree Bark/1 raw is 194,141,90, and knocking that back on exposure
   // alone gives a dark ORANGE, which is the one thing pine bark must not be —

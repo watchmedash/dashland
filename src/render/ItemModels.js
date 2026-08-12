@@ -601,9 +601,55 @@ export const POSE = {
   // twentieth of it; standing the stave up on the slot's diagonal, with the arc
   // turned toward the viewer, doubles the covered area and is the pose the
   // silhouette is actually recognisable in.
+  //
+  // **That is what the icon was reaching for and [0.16, 0.40, 0.90] did not
+  // reach it.** The stave went onto the diagonal — 54.8 degrees across the slot,
+  // 0.993 of its length in the screen plane, so that half was right — but the
+  // one measurement that decides whether you are looking at a bow or at its edge
+  // was never checked. The bow lies in its model's X-Z plane and its normal is
+  // model Y; carried through that triple, model Y lands at (-0.721, 0.565,
+  // 0.400), which is **0.400 face-on, 66 degrees off square to the camera**. So
+  // the icon was still looking down the edge of the stave, exactly as the note
+  // above says the held pose was: in the grid it drew a dark hairline about a
+  // quarter the length of the arrow beside it, with the string visible only as a
+  // second hair against the first. The held pose does better than the icon at
+  // 0.775 face-on, which is why the bow in the fist reads and the bow in the
+  // toolbar does not.
+  //
+  // Solved rather than nudged, and the two constraints determine all three
+  // angles between them: model Y onto view +Z (the plane square to the camera)
+  // and model X — the stave — onto the slot's 40-degree diagonal. Build the
+  // basis from those two, take its third column, read the XYZ Euler off it:
+  // [1.571, 0.698, 0]. Measured back through the same chain, **1.000 face-on,
+  // 1.000 of the stave in the screen plane, 40.0 degrees across the slot.**
+  //
+  // 40 degrees and not 45 because it is the fish's number, and for the fish's
+  // reason: a shape half again as long as it is deep is drawn largest across a
+  // square on a diagonal. `fish()`'s own icon is [1.571, 0.698, -1.571] and
+  // shares the first two components with this, which is not a coincidence —
+  // both are "this flat thing, face-on, laid along the diagonal", and the roll
+  // is the only part that differs because the two models carry their length on
+  // different axes.
+  //
+  // **What this does not fix, stated rather than implied: the bow is still the
+  // smallest thing in its row.** Measured off the painted 96px icon, covered
+  // area went 5.3% -> 5.4% and the silhouette box 35x47 -> 39x33, against the
+  // arrow's 41x71 and an iron sword's 64x51 in the same sheet — and the arrow's
+  // 71 is exactly the 0.74 of the box `FILL` aims at, so the arrow is framed and
+  // the bow is not. Turning a flat object face-on cannot change its area
+  // anyway; what it changes is whether you can tell what it is, and that is the
+  // whole of the gain here — the string now separates from the stave instead of
+  // lying along it as a second hair. Why the painter under-fills this one model
+  // is a different question from which way it is pointing, it is not answered
+  // here, and it should be looked at against `ModelIconPainter.paint`'s framing
+  // rather than by scaling this entry.
+  //
+  // The held `rot` is deliberately untouched. It is the one that `SWINGS` and
+  // `setDraw` were authored against, it has been through its own solve, and it
+  // was not what was wrong.
   bow: {
     file: 'bow_A_withString', pack: 'weapons', height: 0.78, grip: 0.5, fitMax: true,
-    rot: [0.12, 2.26, 1.40], pos: [-0.0008, 0.0012, 0.0062], icon: [0.16, 0.40, 0.90],
+    rot: [0.12, 2.26, 1.40], pos: [-0.0008, 0.0012, 0.0062], icon: [1.571, 0.698, 0],
   },
   // **The arrow is the one model in this table whose long axis is Z**, and both
   // of its rotations were written as though it were Y, like the stick and the

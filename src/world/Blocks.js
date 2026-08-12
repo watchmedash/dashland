@@ -335,7 +335,24 @@ export const BLOCKS = [
   block({ name: 'glass', label: 'Glass', render: R_GLASS, all: 'glass', opaque: false, hardness: 0.4, drop: null, particle: [0.8, 0.9, 0.95], sound: 'glass' }),
   block({ name: 'glowstone', label: 'Sunstone', all: 'glowstone', hardness: 0.5, light: 15, lightColor: [1.0, 0.85, 0.55], particle: [1, 0.85, 0.5], sound: 'glass' }),
   block({ name: 'lava', label: 'Lava', render: R_LIQUID, all: 'lava', solid: false, opaque: false, hardness: -1, light: 15, lightColor: [1.0, 0.5, 0.18], particle: [1, 0.45, 0.1], sound: 'water' }),
-  block({ name: 'moss_stone', label: 'Mossy Stone', all: 'moss_stone', hardness: 2.4, tool: 'pick', tint: 'moss', particle: [0.36, 0.44, 0.3], sound: 'stone' }),
+  // **Not tinted, and the reason applies to `mossy_stone_brick` below as well.**
+  //
+  // The biome tint multiplies every fragment of a block, and these two are only
+  // part moss: the rest is the cobble and the brick their names say they are.
+  // Measured on the baked atlas the tile is already a mossy grey-green at
+  // (73, 76, 67), and a plains foliage tint is (0.41, 0.70, 0.29) — so the stone
+  // was arriving at (30, 53, 19), a saturated near-black, beside a cobblestone
+  // of (131, 124, 114). Side by side in the arena the mossy pair were the two
+  // darkest blocks in the game and read as holes rather than as masonry.
+  //
+  // The machinery for "half of this tile is foliage" exists — the per-texel tint
+  // mask in the arm map's alpha, which is what stops a grass block's soil going
+  // olive — but neither of these tiles carries one: their alpha is 255
+  // everywhere, so the choice here is the whole tile or none of it. For a block
+  // that is mostly stone, none of it. The moss is already the right green in the
+  // tile; it simply does not follow the season now, which is the price and is
+  // much the smaller of the two.
+  block({ name: 'moss_stone', label: 'Mossy Stone', all: 'moss_stone', hardness: 2.4, tool: 'pick', particle: [0.36, 0.44, 0.3], sound: 'stone' }),
   block({ name: 'basalt', label: 'Basalt', all: 'basalt', hardness: 2.6, tool: 'pick', particle: [0.26, 0.26, 0.29], sound: 'stone' }),
   // Difficulty is `tier`, not `hardness`: hardness only sets how long the swing
   // takes, while tier decides whether anything drops. These four predate that
@@ -528,7 +545,8 @@ export const BLOCKS = [
   block({ name: 'granite_brick', label: 'Granite Bricks', all: 'granite_brick', hardness: 2.8, tool: 'pick', particle: [0.66, 0.46, 0.5], sound: 'stone' }),
   block({ name: 'andesite_brick', label: 'Andesite Bricks', all: 'andesite_brick', hardness: 2.6, tool: 'pick', particle: [0.52, 0.52, 0.54], sound: 'stone' }),
   block({ name: 'slate_brick', label: 'Slate Bricks', all: 'slate_brick', hardness: 3.2, tool: 'pick', tier: 1, particle: [0.3, 0.34, 0.4], sound: 'stone' }),
-  block({ name: 'mossy_stone_brick', label: 'Mossy Bricks', all: 'mossy_stone_brick', hardness: 2.4, tool: 'pick', tint: 'moss', particle: [0.36, 0.44, 0.3], sound: 'stone' }),
+  // Untinted, for the reason written out over `moss_stone`.
+  block({ name: 'mossy_stone_brick', label: 'Mossy Bricks', all: 'mossy_stone_brick', hardness: 2.4, tool: 'pick', particle: [0.36, 0.44, 0.3], sound: 'stone' }),
   block({ name: 'sandstone_brick', label: 'Sandstone Bricks', all: 'sandstone_brick', hardness: 1.8, tool: 'pick', particle: [0.82, 0.74, 0.52], sound: 'stone' }),
   block({ name: 'smooth_sandstone', label: 'Smooth Sandstone', all: 'smooth_sandstone', hardness: 1.8, tool: 'pick', particle: [0.84, 0.76, 0.56], sound: 'stone' }),
 

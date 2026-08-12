@@ -191,6 +191,48 @@ export function solarDirection(up, dayFraction, out) {
 
 // Exported for the offline palette checks (monotonicity, gamut) — nothing in
 // the game reads either of these from outside this file.
+//
+// --- dusk is NOT compressed relative to dawn. Investigated and closed. -------
+//
+// A recon flagged "sunset is compressed, sunrise is not" off two samples six
+// hundredths of a day apart — dayT 0.72 came back full midday blue and 0.78 full
+// night with stars. Both readings are true and the conclusion drawn from them is
+// not: those two samples straddle the entire evening ramp, which lives between
+// them.
+//
+// It cannot be otherwise, and the reason is one line of arithmetic. This table
+// is keyed on `e`, the sun's elevation, and nothing else; `update` computes that
+// as sunDir · up; and `solarDirection` builds sunDir out of an `east` that is
+// perpendicular to up plus a `zenith` tilted off it by SOLAR_TILT. So the east
+// term contributes nothing to the dot product and
+//
+//     e(dayT) = cos(SOLAR_TILT) * sin(2*pi * (dayT - 0.25))
+//
+// which is exactly mirror-symmetric about noon: e(0.25 + x) = e(0.75 - x). The
+// evening ramp is the morning ramp played backwards, key for key, to the last
+// bit. There is no separate dusk curve that could have been given less room.
+//
+// Measured anyway rather than argued, because this file has been wrong about
+// itself before. One run, one meadow site, clear weather snapped not eased, the
+// clock pinned every 8ms and the observed bounds read back: 35 mirror pairs at
+// 0.005 of a day, dawn 0.150..0.320 facing due east against dusk 0.850..0.680
+// facing due west, interleaved so cloud drift falls on both alike.
+//
+//   sky luma, 10% -> 90% of its own range:   dawn 0.046 of a day, dusk 0.048
+//   horizon warm balance (R-B), same measure: dawn 0.029,          dusk 0.030
+//   largest mirror-pair sky-luma difference through the whole twilight: 2/255
+//
+// Dusk came out a hair LONGER than dawn, by less than one sample step. The one
+// large residual — 22/255 in the deep-night frames — is not a clock difference
+// at all: it is the milky-way band in DOME_FRAG, which points at a fixed world
+// direction, so a west-facing camera has it in shot and an east-facing one does
+// not. Sampling a patch of sky clear of the band puts the two nights at 1.3 and
+// 2.8 of 255.
+//
+// So: nothing to fix here, and no reason to reach for an asymmetric ramp. The
+// thing to check first, if this is ever reported again, is the SAMPLING — the
+// ramp occupies about 0.07 of a day at each end, and any sweep coarser than
+// about 0.01 can jump clean over it.
 export const SKY_KEYS = [
   // elevation, zenith, horizon, sun, fog, ambient, sunIntensity
   { e: -1.00, zen: 0x03050f, hor: 0x070a18, sun: 0x0a0e1e, fog: 0x070a16, amb: 0x0a1024, si: 0.00 },

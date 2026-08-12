@@ -4583,6 +4583,35 @@ export class WorldGen {
     const r = this.colRng(col, 0xa17c)();
 
     let id = 0;
+    // The waterside, before the biome is asked anything.
+    //
+    // There is no swamp biome on this planet, so the first attempt keyed these
+    // three off mud and peat underfoot - and generated exactly nothing, because
+    // this function returns above on every submerged column, lake surface, lake
+    // bed and spring. It only ever sees dry land. Mud is a lake BED block, so
+    // the test could not fire: measured over three sites with 191 and 93 wet
+    // surface columns between them, zero plants.
+    //
+    // The dry column beside water is the one place it can fire, and it is also
+    // the right picture: reeds stand at the bank, not out in the pond. No new
+    // rng is drawn - the same `r` the biome branches use is thresholded here -
+    // so no column's stream moves and nothing downstream shifts.
+    let waterside = false;
+    for (let d = 0; d < 4 && !waterside; d++) {
+      const nb = colNeighbor(col, d);
+      if (nb >= 0 && (this.submerged[nb] || this.lakeSurf[nb] > 0)) waterside = true;
+    }
+    if (waterside) {
+      // Reeds and a lotus only. Mireroot was here and generated nothing:
+      // measured over 1,528 bank columns, the DRY bank is basalt (375) and sand
+      // (251) - the clay and mud are lake BED, which this function excludes
+      // before it ever gets here - and mireroot takes neither. It is a bog
+      // root, so it went to the tundra below, where the ground is coarse dirt.
+      if (r < 0.38 * dp) id = ID.swampreed;
+      else if (r < 0.50 * dp) id = ID.lotus;
+      if (id && this._floraSoilOk(id, surf)) blocks[base + k + 1] = id;
+      return;
+    }
     switch (bi) {
       // Dry and hot. Both of these are an order below everything green: what
       // makes a desert read as a desert is how much of it is nothing.
@@ -4654,6 +4683,10 @@ export class WorldGen {
       case BIOME.TUNDRA:
         if (r < 0.45 * dp) id = surf === ID.snow ? ID.snowbell : ID.cotton_grass;
         else if (r < 0.56 * dp) id = ID.icecapmoss;
+        // The bog root, on the thawed soil the sedge takes. Its soil rule keeps
+        // it off the drifts and the scree, so it marks the wet third of a
+        // tundra the same way the cotton grass does.
+        else if (r < 0.63 * dp) id = ID.mireroot;
         break;
       // Five percent, and it is the highest-value five percent here. A snow
       // field is an hour of white; the snowbell is the only thing in it.

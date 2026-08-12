@@ -1774,9 +1774,14 @@ grows(['stonecrop'], soil(['stone', 'gravel', 'coarse_dirt']));
 grows(['icecapmoss'], soil(['snow', 'gravel', 'stone']));
 // The wetland three. Peat and mud are the bog's own blocks, so these cannot
 // stray onto a lawn even where a marsh meets one.
-grows(['swampreed'], soil(['mud', 'peat', 'clay', 'dirt']));
-grows(['mireroot'], soil(['mud', 'peat', 'clay']));
-grows(['lotus'], soil(['mud', 'clay']));
+// The bank, not the bed. These three stand on the dry column BESIDE water (see
+// the waterside branch in `landFloraAt`), and a bank is whatever the lake pass
+// happened to leave there - sand as often as mud, and grass where a meadow runs
+// down to a pond. Keeping the list to mud and clay is what made the first cut
+// of these three generate nowhere at all.
+grows(['swampreed'], soil(['mud', 'peat', 'clay', 'dirt', 'coarse_dirt', 'sand', 'grass']));
+grows(['mireroot'], soil(['mud', 'peat', 'clay', 'dirt', 'coarse_dirt']));
+grows(['lotus'], soil(['mud', 'clay', 'sand', 'dirt']));
 // The cave floor, on the fungi's terms — see the glowcap entry above.
 // The orchard takes turf and nothing else - a fruit tree on scree or sand is
 // the same wrong picture as a lavender there.

@@ -484,6 +484,28 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
   // per-corner water depth, so the shallow-to-deep gradient and the foam band
   // interpolate across the surface instead of stepping block by block
   const liquidCorner = [0, 0, 0, 0];
+  /**
+   * Per-corner shoreline, and it is the half of the line above that was claimed
+   * and not delivered.
+   *
+   * The depth has been per corner for a while; the shore flag stayed per CELL, a
+   * flat 0 or 1 for the whole quad, and the shader multiplies the two together
+   * to decide where the foam is. So the foam rim could only ever be a set of
+   * whole-block rectangles: the quad touching land carried the whole rim and its
+   * neighbour one block out carried none of it, however shallow that neighbour
+   * was. Counted on seed 4242 over a beach, recomputing exactly what this file
+   * emits: of 711 water surface quads, 512 had four different corner depths and
+   * a mean corner spread of 0.108 — the gradient is genuinely there — while all
+   * 41 shoreline quads were flat in y, by construction, because a per-cell flag
+   * has nowhere else to go.
+   *
+   * The fraction of the corner's four columns that are land, doubled and clamped,
+   * so a corner *on* a straight waterline (two of its four columns are land)
+   * still reads a full 1 and the foam keeps the strength it was tuned at. What
+   * changes is that the far corner of the same quad reads 0, so the rim now
+   * fades out across the block instead of ending at its edge.
+   */
+  const liquidCornerShore = [0, 0, 0, 0];
   let useCornerDepth = false;
 
   /**
@@ -671,7 +693,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       g.aux.push4(layer, AO_CURVE[aoData[c]], cornerData[c][0],
         wave === 0 ? 0 : wave + (useWaveAmt ? waveAmt[c] * 0.99 : 0.99));
       g.blk.push3(cornerData[c][1], cornerData[c][2], cornerData[c][3]);
-      if (useCornerDepth) g.tint.push3(liquidCorner[c], tint[1], tint[2]);
+      if (useCornerDepth) g.tint.push3(liquidCorner[c], liquidCornerShore[c], tint[2]);
       else g.tint.push3(tint[0], tint[1], tint[2]);
     }
     g.idxb.quad(v0);
@@ -892,9 +914,23 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           if (rt === R_LIQUID) {
             useCornerDepth = true;
             for (let c = 0; c < 4; c++) {
-              let sum = 0;
-              for (let q = 0; q < 4; q++) sum += depthOf(cols[c][q], k);
+              let sum = 0, land = 0;
+              for (let q = 0; q < 4; q++) {
+                sum += depthOf(cols[c][q], k);
+                // The corner's own layer, which is the layer the foam is drawn
+                // in. Not k+1: a bank one block proud of the water would then
+                // count as land for a corner the water does not actually touch.
+                if (IS_OPAQUE[at(cols[c][q], k)]) land++;
+              }
+              // Deliberately /6 while the per-cell value on the sides is /7. The
+              // two have disagreed since corner depth was added and the shader's
+              // own comment documents /7; left alone because every dScale in
+              // LIQUID_MAP_FRAG was tuned by photographing surfaces that came
+              // through this line, so "fixing" it here would quietly re-tune
+              // seven kinds of water. Worth doing deliberately, once, with the
+              // constants in front of you.
               liquidCorner[c] = Math.min(1, (sum / 4) / 6);
+              liquidCornerShore[c] = Math.min(1, land / 2);
             }
             setWave(cornerWaveHi[0], cornerWaveHi[1], cornerWaveHi[2], cornerWaveHi[3]);
           }

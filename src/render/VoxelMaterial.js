@@ -1308,10 +1308,17 @@ const LIQUID_MAP_FRAG = /* glsl */`
   // being cut off, and it hides the geometric join with the shore.
   float ripple = texture(uMap, vec3(vTexUv * 2.6 + vec2(uTime * 0.05, uTime * 0.02), vLayer)).r;
   float ripple2 = texture(uMap, vec3(vTexUv * 5.1 - vec2(uTime * 0.03, uTime * 0.06), vLayer)).r;
-  // Keep it to the first block of depth. wShore is only a coarse "some
-  // neighbour is land" flag, so pairing it with a wide depth window turned
-  // every shallow bay into a white field — the rim has to be narrow in depth
-  // to stay a rim.
+  // Keep it to the first block of depth: pairing the shoreline term with a wide
+  // depth window turned every shallow bay into a white field — the rim has to be
+  // narrow in depth to stay a rim.
+  //
+  // wShore used to be a flat per-cell "some neighbour is land" flag, which is
+  // what made the rim a row of whole-block rectangles: the quad against the
+  // beach carried all of it and the quad behind it none, however shallow that
+  // neighbour was. It is now the fraction of the corner's four columns that are
+  // land (see liquidCornerShore in Mesher.js), so it interpolates exactly as the
+  // depth beside it does and the rim fades out across the block. The 1.0 at a
+  // straight waterline is deliberately preserved, so nothing here was re-tuned.
   // A waterfall is foam everywhere and not only where it meets land, so its
   // edge term ignores the shoreline flag. Everything else keeps the narrow rim,
   // scaled by how much white that kind of water has any business having.

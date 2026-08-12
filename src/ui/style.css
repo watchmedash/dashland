@@ -2152,6 +2152,13 @@ body.fighting #toasts { top: 172px; }
   font: 700 var(--fs-lg) var(--font); color: var(--ink);
   letter-spacing: var(--ls-disp);
 }
+/* Where the xp comes from, set as the foot's numbers are: pushed to the right
+   margin, mono, faint. It reads as an annotation on the bar rather than as a
+   second heading, which is the whole of what it should be. */
+.xp-head em {
+  flex: 1; text-align: right; font-style: normal;
+  font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint);
+}
 /* The same anatomy as a vital, cut into paper instead of laid over a planet:
    a ticked slot, a lit fill, and the numbers under it in mono. */
 .xp-bar {

@@ -1713,10 +1713,10 @@ export class UI {
       else cur.count += rec.count;
       made++;
     } while (all && made < 64);
-    // XP is per trip to the bench, not per item — see `xpCraft` in Skills.js.
-    // `made` can be 64 planks off one shift-click and paying by the item would
-    // make plank-spam the best xp in the game.
-    if (made) { g.audio.craft(); g.stats.crafted += made; g.skills.xpCraft(); }
+    // No xp. A trip to the bench used to pay 3, flat, to stop a shift-click of
+    // 64 planks being the best-paying craft in the game; the whole question is
+    // moot now that nothing but a kill pays. `crafted` is still counted.
+    if (made) { g.audio.craft(); g.stats.crafted += made; }
     this.refresh();
   }
 
@@ -1827,7 +1827,6 @@ export class UI {
         if (made) {
           this.game.audio.craft();
           this.game.stats.crafted += made;
-          this.game.skills.xpCraft();
         } else {
           this.game.audio.deny();
         }
@@ -2401,7 +2400,13 @@ export class UI {
 
     const head = document.createElement('div');
     head.className = 'xp-head';
-    head.innerHTML = `<b>Level ${p.level}</b>`;
+    // Three words beside the level, and they are the only sentence on this
+    // screen about where a number comes from. They earn the space because the
+    // answer changed: xp used to come from ore, fish, crafts, the clock and the
+    // marks, and a player who mined all evening and saw the bar sit still would
+    // have no way to find out why. It is a label, not an explanation — how much
+    // a kill is worth is something the planet says by paying you.
+    head.innerHTML = `<b>Level ${p.level}</b><em>XP from kills</em>`;
 
     const bar = document.createElement('div');
     bar.className = 'xp-bar';

@@ -1246,6 +1246,10 @@ class Game {
       // nothing at all for combat because only that branch awarded either.
       if (!killed) return;
       if (mob.spec.hostile) this._mark('slayer');
+      // The one source of xp in the game, and it is offered unconditionally:
+      // `xpForKill` returns 0 for anything that is not a husk or a monster, so
+      // the hostile test lives in one place rather than at each of the two
+      // death paths where it could drift apart.
       this.skills.xpKill(mob.spec, mob.baby > 0);
     };
     // `dig('stone', pos)` stood here, which meant an arrow into a tree sounded
@@ -2735,11 +2739,11 @@ class Game {
   _mark(key) {
     if (!this.skills.mark(key)) return;
     const m = MARKS[key];
-    // The xp, not the level it may or may not have just bought. `_tickSkills`
-    // is a second away at most and it announces the balance, so a mark that
-    // levels you gets both messages in the right order: what you did, then what
-    // it was worth.
-    this.ui.toast(`${m.label}: ${m.xp} XP`, 0, 4000);
+    // The name and nothing after it. It used to read "Cinder: 200 XP", and the
+    // half that was a number is gone with the xp a mark used to pay — a toast
+    // that announced 0 XP would be the system explaining its own arithmetic to
+    // a player who had just done something for the first time.
+    this.ui.toast(m.label, 0, 4000);
     this.audio.ui(760);
     this.ui.refreshSkills();
   }
@@ -4134,12 +4138,9 @@ class Game {
     // Footsteps, embers and bubbles have their own methods and are untouched.
     this.audio.break_(b.sound, center);
     this.stats.mined++;
-    // What the block was worth in xp, which for stone, dirt, wood and leaves is
-    // deliberately nothing — see `xpForBlock`. That zero is the fix for "earning
-    // points is so easy": cobblestone is placeable, so paying for rock at all
-    // makes place-and-rebreak an unlimited faucet faster than any real activity.
-    // Ore cannot be placed back, so a seam pays exactly once per finite world.
-    this.skills.xpMine(b);
+    // `this.skills.xpMine(b)` stood here and paid by ore tier. Mining pays no xp
+    // at all now: the ladder is fed by kills alone, and the counter above is the
+    // only record breaking a block leaves. See the head of `Skills.js`.
     // Ripe wheat only. Breaking a green shoot is losing a crop, not harvesting
     // one, and marking it would teach exactly the wrong lesson about farming.
     if (hit.id === ID.wheat_3) this._mark('harvest');
@@ -7488,8 +7489,9 @@ class Game {
         const killed = this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge);
         if (killed && mobHit.mob.spec.hostile) this._mark('slayer');
         // Priced from the creature's own health and damage rather than from a
-        // per-species table, so anything added later prices itself. A calf pays
-        // less, which is the point: a herd is not a farm.
+        // per-species table, so anything added later prices itself. Hostiles
+        // only: a cow is worth beef and hide and no xp whatever, and neither is
+        // a calf of anything. See `xpForKill`.
         if (killed) this.skills.xpKill(mobHit.mob.spec, mobHit.mob.baby > 0);
         if (held?.tool) this.inventory.damageHeld(1, this.inventory.held());
       }
@@ -8446,7 +8448,8 @@ class Game {
     this.ui.toast(`Caught ${ITEMS[id]?.label}`, id, 2000);
     this.audio.pickup();
     this.stats.fished = (this.stats.fished ?? 0) + 1;
-    this.skills.xpFish();
+    // No xp. A fish used to pay 8, which is a coal seam for standing still, and
+    // the rod is now paid in food and in the fish itself. Kills only.
     // The rod that was cast is the rod that wears, wherever it is being held.
     // `active()` would have charged the catch to a pickaxe in the main hand
     // while the left hand did the fishing.

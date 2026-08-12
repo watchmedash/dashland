@@ -206,8 +206,10 @@
   <!-- ── growth ──────────────────────────────────────────────
        The skill tree, on K, and nothing else. It used to carry an aside listing
        where XP comes from and which firsts were still unearned, which is a
-       manual bolted to a menu: the tree is the screen, and what pays XP is
-       something the planet tells you by paying you. UI.js builds every row from
+       manual bolted to a menu: the tree is the screen. All that survives of the
+       aside is three words beside the level — "XP from kills", written by
+       `_xpBar` — which is a label rather than a manual, and is there because
+       kills are now the only source. UI.js builds every row from
        `skills.summary()`. -->
   <div id="skills" class="overlay hidden">
     <div class="panel skills-panel">

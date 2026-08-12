@@ -1194,7 +1194,9 @@ export class UI {
       character: this._chosen || CHARACTER_IDS[0],
       loadout: [...this._loadout],
       difficulty: this._difficulty,
-      deathRule: this._deathRule,
+      // Extreme does not ask, so it does not answer with whatever the row was
+      // last left on. See `_syncDeathRuleShown`.
+      deathRule: this._difficulty === 'extreme' ? DEFAULT_ON_DEATH : this._deathRule,
     };
   }
 
@@ -1323,6 +1325,7 @@ export class UI {
     }
     sel.onchange = () => {
       this._difficulty = sel.value;
+      this._syncDeathRuleShown();
       this.game.audio.ui(560);
     };
     this._syncDifficulty();
@@ -1331,6 +1334,25 @@ export class UI {
   _syncDifficulty() {
     const sel = this.el.cgDiff;
     if (sel) sel.value = this._difficulty;
+    this._syncDeathRuleShown();
+  }
+
+  /**
+   * Extreme has no "on death", so the row goes away rather than greys out.
+   *
+   * A death on Extreme ends the run: `respawn` routes straight to `_spectate`
+   * and there is no path back onto your feet, so neither answer to "what does
+   * dying cost" ever comes due — the bag is settled once, on a body nobody
+   * will walk to again. A control that cannot change anything is worse than no
+   * control, so the whole row leaves and the card closes up behind it.
+   *
+   * `_deathRule` is left alone while it is hidden. The player's pick survives a
+   * detour through Extreme and is theirs again the moment they come back to a
+   * difficulty where it means something; `newGameChoice` is what refuses to
+   * report a stale answer, and it reports the default instead.
+   */
+  _syncDeathRuleShown() {
+    this._cgDeathRow?.classList.toggle('hidden', this._difficulty === 'extreme');
   }
 
   /**
@@ -1364,6 +1386,9 @@ export class UI {
     row.append(cap, bar);
     after.parentElement.insertBefore(row, after.nextSibling);
     this._cgDeath = bar;
+    // The row, not the bar: Extreme hides the caption with it. See
+    // `_syncDeathRuleShown`.
+    this._cgDeathRow = row;
     return bar;
   }
 
@@ -1383,6 +1408,9 @@ export class UI {
       bar.appendChild(b);
     }
     this._syncDeathRule();
+    // `_buildDifficulty` runs first and has no row to hide yet, so the opening
+    // state is settled here.
+    this._syncDeathRuleShown();
   }
 
   _syncDeathRule() {

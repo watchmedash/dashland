@@ -392,10 +392,41 @@ G.coal_ore = (s) => ore(s, [px([34, 34, 38]), px([70, 70, 76])], 0, 501, 0.72);
 // left underexposed — pale flecks on pale rock. Measured against the stone base
 // it baked over, the old beige managed an RMS luminance difference of 15.1 with
 // the other three ores at 19.5-29.4; a half-way darkening measured *worse*
-// (13.4) because it landed on the rock's own value. Going the whole way to rust
-// puts iron at 19.3, level with gold.
-G.iron_ore = (s) => ore(s, [px([92, 62, 42]), px([146, 108, 78])], 0.45, 511, 0.5);
-G.gold_ore = (s) => ore(s, [px([198, 152, 52]), px([252, 214, 116])], 0.8, 521, 0.32);
+// (13.4) because it landed on the rock's own value.
+//
+// The answer that pass reached — take iron all the way down to rust — bought its
+// contrast with the wrong currency. At [92,62,42]/[146,108,78] the flecks
+// measured 121,95,76 on the baked sheet: a dark chocolate brown, the same value
+// and nearly the same hue as wet soil, so the ore read as dirt caught in the
+// rock rather than as metal, and it sat one small hue step from copper on the
+// same wall. Contrast against the rock is necessary and it is not sufficient —
+// an ore also has to look like the thing it is.
+//
+// Iron is therefore a warm pale metal with a dark core, and takes its legibility
+// from the SPREAD between the two ends rather than from where the pair of them
+// sits: the light end is well above stone's 136 and the dark end well below it,
+// so each fleck carries its own contrast and does not depend on landing on a
+// lighter or darker patch of wall. Hue stays warm-neutral, which is what keeps
+// it apart from silver's cool white on one side and copper's orange on the
+// other.
+//
+// The spread has to be this wide. A first attempt at the pale metal used
+// [106,84,70]/[216,192,166] and measured a mean fleck of 154,135,120 against
+// stone's 141,135,134 — a fifteen-count difference in red and none anywhere
+// else, which is the old beige failure again with a different set of numbers.
+// The blob's shading comes from one smooth noise field, so widening the ends
+// does not sprinkle the tile with noise; it gives every nugget a shadow side and
+// a lit side, which is what a lump of metal in rock looks like and what no
+// single mid-tone can imitate.
+G.iron_ore = (s) => ore(s, [px([104, 66, 40]), px([210, 160, 112])], 0.45, 511, 0.5);
+// Gold and sulfur were the same tile at a glance. Both are yellow minerals in
+// pale grey rock and their flecks measured 201,171,104 and 185,171,87 — sixteen
+// counts apart in red and nothing else, which is not a difference you can see
+// across a shaft. Sulfur is the one that is right, so gold is the one that
+// moves: widening its red-minus-green gap from 30 to 56 turns it amber against
+// sulfur's lemon, and the two now read as different metals rather than as one
+// ore lit twice.
+G.gold_ore = (s) => ore(s, [px([206, 146, 24]), px([255, 208, 86])], 0.8, 521, 0.32);
 G.crystal_ore = (s) => ore(s, [px([94, 178, 226]), px([190, 240, 255])], 0.1, 531, 0.14);
 
 // The rest of the seam. Each entry is [dark, light, metalness, seed, roughness]
@@ -405,34 +436,30 @@ G.crystal_ore = (s) => ore(s, [px([94, 178, 226]), px([190, 240, 255])], 0.1, 53
 // they are a variant of is the *rock*, not the ore, and the baker drops them on
 // slate instead of stone.
 const ORE_MINERALS = {
-  // Copper is the iron problem one step milder, and it survived the pass that
-  // fixed iron because it has a hue where iron's old beige had none. Coverage is
-  // not the issue: every ore is the same blob field with a different seed, and
-  // measured on the baked atlas all of them mask 11.6% of the tile. What copper
-  // lacked was VALUE. Its light end sat at luminance 140 against the stone it
-  // bakes onto at 137, so the lit half of every fleck disappeared into the rock
-  // and only the dark half read as ore — flecks that shrink to nothing at a few
-  // blocks' distance or in a torch-lit shaft. Measured RMS luminance difference
-  // against the stone base: copper 14.2, with coal 29.4, crystal 23.9, silver
-  // 19.6, gold 19.5 and iron 19.3. Dropped a stop and a half and saturated,
-  // which lands copper at 20.2 — inside the family band — and reads as raw
-  // copper ore rather than as pale rust.
+  // Copper has now been reported three times and each pass moved it by less
+  // than the report was asking for, so the history is worth keeping short: it
+  // was too pale, then it was darkened until the flecks read as holes ("it has
+  // blacks on them, only little part is orange"), then both ends were lifted a
+  // little and it came back as "the copper is not total orange". Coverage was
+  // never the problem — every ore is the same blob field with a different seed
+  // and all of them mask about 12% of the tile — and neither is contrast, which
+  // the darkening pass already bought.
   //
-  // ...and that darkening went too far, which is the report "just make the
-  // model orange, it has blacks on them, only little part is orange". The dark
-  // end above is luminance 62 against stone at 137 — more than a stop under the
-  // rock, so at a glance the fleck read as a hole rather than as metal, and only
-  // the narrow lit edge carried any hue at all. Copper is a bright metal; the
-  // one ore on the sheet that should be unmistakably orange was the one reading
-  // black.
+  // What was left is CHROMA. Measured on the baked flecks the last version came
+  // out 181,120,74: red twice the blue, which sounds orange written down and is
+  // terracotta to look at, because the green sits two thirds of the way to the
+  // red and the blue never drops far enough to get out of the way. An orange the
+  // eye calls orange is a narrow thing — red near the top of the range, green a
+  // little under half of it, blue almost gone — and the way to get there is not
+  // to brighten the mineral, it is to pull the green down and the blue out.
   //
-  // Lifted both ends and kept the hue, rather than only lifting the dark end:
-  // a mineral whose two ends straddle the rock reads as texture on the rock,
-  // and what makes an ore legible is being a different COLOUR from it, not
-  // being darker. The light end stays above stone (157 against 137) so the
-  // flecks still separate at distance, which is what the pass above was
-  // protecting and is the thing not to give back.
-  copper_ore: [[168, 84, 30], [238, 140, 58], 0.55, 541, 0.48],
+  // These two are that colour, and they are deliberately the most saturated
+  // entry in the table: copper is the one ore on the sheet whose whole identity
+  // is its hue, and the sulfur beside it shows what a mineral looks like when it
+  // is allowed to be a colour rather than a tinted rock. Both ends stay above
+  // stone's luminance of 136 so the flecks still separate at distance, which is
+  // what the darkening pass was protecting and is the thing not to give back.
+  copper_ore: [[204, 92, 16], [255, 156, 48], 0.55, 541, 0.48],
   silver_ore: [[136, 142, 152], [222, 228, 238], 0.7, 551, 0.3],
   sulfur_ore: [[168, 148, 26], [236, 222, 96], 0.0, 561, 0.62],
   amethyst_ore: [[110, 58, 168], [198, 148, 252], 0.05, 571, 0.16],
@@ -444,14 +471,16 @@ const ORE_MINERALS = {
   // deep matrix it would sit in, so the vein disappeared. Lifted a stop and a
   // half, which is the only way a black mineral reads against black rock.
   deep_coal_ore: [[58, 58, 66], [124, 124, 136], 0, 621, 0.72],
-  // Deep copper keeps the OLD, lighter copper: it bakes onto slate at luminance
-  // 47, so the shallow ore's new dark end would be the same value as its matrix
-  // and the vein would vanish the way deep coal's did. Same mineral, one rock
-  // brighter, for the same reason coal has a deep colour of its own.
-  deep_copper_ore: [[142, 78, 38], [206, 122, 62], 0.55, 631, 0.48],
-  deep_iron_ore: [[92, 62, 42], [146, 108, 78], 0.45, 641, 0.5],
+  // Deep copper used to carry a lighter palette of its own, because the shallow
+  // ore was at the time darker than the slate it would have sat in and the vein
+  // would have vanished the way deep coal's did. That reason is gone now the
+  // shallow mineral is a bright orange, and a copper vein that changes colour
+  // with depth is a copper vein you have to learn twice, so the two share one
+  // palette again.
+  deep_copper_ore: [[204, 92, 16], [255, 156, 48], 0.55, 631, 0.48],
+  deep_iron_ore: [[104, 66, 40], [210, 160, 112], 0.45, 641, 0.5],
   deep_silver_ore: [[136, 142, 152], [222, 228, 238], 0.7, 651, 0.3],
-  deep_gold_ore: [[198, 152, 52], [252, 214, 116], 0.8, 661, 0.32],
+  deep_gold_ore: [[206, 146, 24], [255, 208, 86], 0.8, 661, 0.32],
   deep_crystal_ore: [[94, 178, 226], [190, 240, 255], 0.1, 671, 0.14],
 };
 for (const [name, [lo, hi, metal, seed, rough]] of Object.entries(ORE_MINERALS)) {

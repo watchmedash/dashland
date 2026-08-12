@@ -7672,7 +7672,6 @@ class Game {
         // it. One word, and it stays one word.
         // Not while the float is still in the air: "Waiting" over a throw that
         // has not landed is the plate answering a question nobody asked yet.
-        this.ui.fishWait(!this.fishing.fight && !this.fishing.cast);
         return;
       }
     } else if (this.fishing) {
@@ -8491,7 +8490,6 @@ class Game {
     if (this.bobber) this.bobber.visible = false;
     if (this.fishLine) this.fishLine.visible = false;
     this.ui.fishFight(null);
-    this.ui.fishWait(false);
     this.viewModel.setCast(false);
     this._syncCrosshair();
     this.ui.setHint('');

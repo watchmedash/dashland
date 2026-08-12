@@ -1725,13 +1725,22 @@ select.pick option { color: var(--ink); background: var(--parchment); }
  * where you threw it. A second float on the glass is the same information
  * twice, and the one on the glass is the fake one.
  *
- * `body.casting` stays. It is not about the plate - it steps the toast stack
- * down clear of the fight bar, which is the one thing that does need the room.
+ * What survives is the toast offset, and it belongs to the FIGHT BAR rather
+ * than to the cast. Tying it to the cast is what produced "a second toast
+ * appears": land a fish, the toast arrives at the top of the screen, re-cast
+ * immediately, and the stack jumped from 46px to 172px with the toast still in
+ * it - the same toast, teleporting down the screen, which reads exactly like a
+ * duplicate showing up underneath. The bar is only on screen during the fight,
+ * so that is the only time anything has to move.
  */
 /* The toast stack starts at 46px and the fight bar now sits at 62. While a
    cast is out the stack steps down clear of it. The Waiting plate no longer
    collides with anything: it is in the middle of the screen. */
-body.casting #toasts { top: 172px; }
+/* The bar occupies 62px to about 156px, so the stack clears it at 172. The
+   transition is what stops the move reading as a new toast: it slides rather
+   than cutting, which the eye reads as the same object moving. */
+#toasts { transition: top .16s ease; }
+body.fighting #toasts { top: 172px; }
 
 #debug {
   position: absolute; top: 10px; left: 10px;

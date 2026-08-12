@@ -2635,11 +2635,16 @@ export class UI {
       if (this._fbKey === null) return;
       this._fbKey = null;
       el.classList.add('hidden');
+      // The stack only has to clear this bar, so the bar is what moves it.
+      document.body.classList.remove('fighting');
       return;
     }
     const key = `${s.x.toFixed(3)} ${s.fx.toFixed(3)} ${s.p.toFixed(3)} ${s.half.toFixed(3)} ${s.on ? 1 : 0}`;
     if (key === this._fbKey) return;
-    if (this._fbKey === null || this._fbKey === undefined) el.classList.remove('hidden');
+    if (this._fbKey === null || this._fbKey === undefined) {
+      el.classList.remove('hidden');
+      document.body.classList.add('fighting');
+    }
     this._fbKey = key;
     el.style.setProperty('--fb-x', s.x.toFixed(3));
     el.style.setProperty('--fb-half', s.half.toFixed(3));
@@ -2648,26 +2653,6 @@ export class UI {
     el.classList.toggle('on', !!s.on);
   }
 
-  /**
-   * A line is in the water.
-   *
-   * There is no longer anything on the HUD for this - the bobber is out on the
-   * water where the player threw it, and a second float drawn on the glass was
-   * the same information twice. What survives is the body class, which steps
-   * the toast stack down clear of the fight bar; fishing is the one activity
-   * that raises a bar and a toast at the same moment.
-   *
-   * Still guarded on the value it is about to write, because this is called
-   * every frame of a cast that can last a minute and `classList.toggle` on an
-   * unchanged value is still a style invalidation.
-   *
-   * @param {boolean} on
-   */
-  fishWait(on) {
-    if (this._fishWait === !!on) return;
-    this._fishWait = !!on;
-    document.body.classList.toggle('casting', !!on);
-  }
 
   /**
    * The bow's charge, as the sight closing in on the shot.

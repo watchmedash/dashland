@@ -2570,6 +2570,19 @@ export class UI {
     const existing = [...this.el.toasts.children].find((c) => c.dataset.key === text);
     if (existing) {
       clearTimeout(+existing.dataset.timer);
+      // Bring it back if it was on its way out.
+      //
+      // `_dropToast` marks a node `out` and only takes it off the DOM 340ms
+      // later, and for that third of a second it is still a child carrying its
+      // key - so a second catch of the same fish inside that window merged onto
+      // a corpse. The reset timer was doing nothing, the pending removal fired
+      // anyway, and the toast the player had just earned vanished. Measured:
+      // fire the same text twice across the fade and the stack settles empty.
+      //
+      // So a merge revives: cancel the removal, drop the class, and let it run
+      // its life again from now.
+      clearTimeout(+existing.dataset.kill);
+      existing.classList.remove('out');
       existing.dataset.timer = setTimeout(() => this._dropToast(existing), ms);
       return;
     }
@@ -2589,7 +2602,8 @@ export class UI {
 
   _dropToast(d) {
     d.classList.add('out');
-    setTimeout(() => d.remove(), 340);
+    // Kept so a merge arriving mid-fade can cancel it - see `toast`.
+    d.dataset.kill = setTimeout(() => d.remove(), 340);
   }
 
   setHint(text) {

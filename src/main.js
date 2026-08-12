@@ -5023,6 +5023,22 @@ class Game {
       this.closeScreen();
       this.ui.toast('The merchant moved on.', itemIdOf('coin'), 2600);
     }
+    // The merchant stands still while you are buying from him.
+    //
+    // He kept wandering with the shop screen up, so the stock list belonged to
+    // someone strolling off behind you - and the check above would eventually
+    // close the screen mid-purchase because he had walked out of range. A
+    // shopkeeper who leaves during the transaction is not a shopkeeper.
+    //
+    // Held as a flag on the mob rather than as a test inside the mob loop: the
+    // loop runs over every animal on the planet and has no business knowing
+    // what a UI screen is, and this way exactly one body is ever marked.
+    const shopMob = this.ui.screen === 'shop' ? this.ui.shop : null;
+    if (this._tradingMob !== shopMob) {
+      if (this._tradingMob) this._tradingMob.trading = false;
+      if (shopMob) shopMob.trading = true;
+      this._tradingMob = shopMob;
+    }
     // Drops still fall, still settle, still burn and still expire, because that
     // is the world carrying on. What a spectator cannot do is pick one up, and
     // the way to say so is to hand `Drops` a bag with no room in it rather than

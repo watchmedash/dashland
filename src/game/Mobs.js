@@ -8660,7 +8660,13 @@ export class Mobs {
       // The tumble ends the moment it is back on its feet with the shove spent.
       const tumbling = mob.knockT > 0 || (mob.tumbling && !mob.grounded);
       mob.tumbling = tumbling;
-      if (tumbling) {
+      // Mid-transaction: the body holds its ground. Checked before the tumble
+      // fork so that nothing - not the wander, not a shove, not a knockback -
+      // moves a merchant whose shop is open. `main.js` owns the flag.
+      if (mob.trading) {
+        mob.vel.i = 0; mob.vel.j = 0;
+        mob.tumbling = false;
+      } else if (tumbling) {
         this._tumble(mob, mob.vel.i * dt, mob.vel.j * dt);
         // A thrown body does not get its rotation policed either, for the same
         // reason it does not get the footprint test: it has stopped choosing.

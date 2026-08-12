@@ -106,6 +106,17 @@ const _castU = new THREE.Vector3();
 /** Model up for the float, which is a constant and never anything else. */
 const _bobY = new THREE.Vector3(0, 1, 0);
 
+/**
+ * The four diagonal steps, as (di, dj) pairs for `stepColumn`.
+ *
+ * `COL_NB` only holds the four edge neighbours, so a rule that cares about all
+ * eight cells around a column has to compose two steps for the corners. Shared
+ * by both halves of the NEEDS_ROOM rule — `_crowdedAt` refusing a placement and
+ * `_crushCrowded` breaking what a placement walled in — so the two can never
+ * come to disagree about what "beside" means.
+ */
+const CORNER_STEPS = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+
 /** Three rows of nine, so a crate is worth the eight planks it costs. */
 const CRATE_SLOTS = 27;
 
@@ -922,6 +933,20 @@ const MODELLED_PLANTS = {
   // obstruction rather than as scenery.
   cave_mushroom: 0.42, shelf_fungus: 0.44, crystal_cluster: 0.50,
   driftwood: 0.34,
+  // The wild harvest, in the same three bands as the flora above. The two that
+  // break the horizon are the ones meant to be spotted from off: a prickly pear
+  // is the desert's landmark at knee height, and a reed bed marks water. The
+  // mat-formers stay under 0.35 so a bog or a scree still reads as ground with
+  // something growing on it rather than as undergrowth.
+  cactusfruit: 0.82, agave: 0.66, swampreed: 0.86, lotus: 0.30,
+  stonecrop: 0.34, icecapmoss: 0.26, mireroot: 0.52, truffle: 0.22,
+  // The orchard, and the only entries in this table above a single cell. The
+  // number is still a bounding-box height in cells, so these are four-cell
+  // trees standing in a one-cell block - which is exactly what buys a whole
+  // tree for one block id. Set from each model's authored height (3.4 to 4.2)
+  // rather than by eye.
+  apple_tree: 4.2, cherry_tree: 3.8, plum_tree: 3.9,
+  olive_tree: 3.5, cocoa_tree: 3.4,
 };
 const FLOWER_NAMES = Object.keys(MODELLED_PLANTS);
 const FLOWER_KIND = [];
@@ -3352,6 +3377,21 @@ class Game {
       const id = this.planet.at(nb, k);
       if (crowds(id, this.planet.facingAt(nb, k))) return true;
     }
+    // ...and the corners. "I can't put cacti in left, right, top and bottom but
+    // I can place in right top, left top, left bottom and right bottom" — four
+    // of the eight cells touching a cactus were refusing it and four were not,
+    // which reads as the rule being broken rather than as the rule being about
+    // edges. Two cacti meeting at a corner are still spines against spines.
+    //
+    // `stepColumn` rather than a second `colNeighbor` pass because there is no
+    // diagonal in COL_NB; it composes the two steps and carries them across a
+    // cube seam properly, which is the whole reason not to add i/j by hand.
+    for (const [di, dj] of CORNER_STEPS) {
+      const nb = stepColumn(col, di, dj);
+      if (nb < 0) continue;
+      const id = this.planet.at(nb, k);
+      if (crowds(id, this.planet.facingAt(nb, k))) return true;
+    }
     return false;
   }
 
@@ -3375,8 +3415,13 @@ class Game {
     let doomed = null;
     for (const e of edits) {
       if (!crowds(e.id, e.facing ?? 0)) continue;
-      for (let d = 0; d < 4; d++) {
-        const nb = colNeighbor(e.col, d);
+      for (let d = 0; d < 8; d++) {
+        // The same eight cells `_crowdedAt` refuses a placement into, walked in
+        // reverse: four edges then four corners. The two halves of one rule
+        // have to agree about what "beside" means, or a corner you may not
+        // build into is a corner you may wall up afterwards.
+        const nb = d < 4 ? colNeighbor(e.col, d)
+          : stepColumn(e.col, CORNER_STEPS[d - 4][0], CORNER_STEPS[d - 4][1]);
         if (nb < 0) continue;
         if (!NEEDS_ROOM[this.planet.at(nb, e.k)]) continue;
         const key = nb * D + e.k;
@@ -4930,12 +4975,15 @@ class Game {
     // A spectator collects nothing, which is the same object drops already use.
     const bag = ghost ? Game.NO_POCKETS : {
       collect: (item, count, wear) => {
-        const taken = this.inventory.add(item, count, wear);
-        if (taken > 0) {
-          this.audio.pickup();
-          this.ui.toast(ITEMS[item].label, item, 1500);
-        }
-        return taken;
+        // Picking something up is silent and says nothing.
+        //
+        // It used to make a noise and raise a toast naming the item. Both were
+        // per *item*, so walking through a wood or felling one tree buried the
+        // corner of the screen in a column of labels and fired a burst of
+        // chimes — for something the player can already see land in the hotbar.
+        // The toast stack is for things that happen once and matter: a save, a
+        // skill point, the merchant leaving.
+        return this.inventory.add(item, count, wear);
       },
       hasRoom: (item) => this.inventory.hasRoom(item),
     };

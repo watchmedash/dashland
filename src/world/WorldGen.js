@@ -3883,10 +3883,13 @@ export class WorldGen {
       // ineligible.
       //
       // Not perfect at a cube seam, where the two faces have their own i and j
-      // and parity does not carry across: a pair can still meet exactly on a
-      // seam line. That is a handful of columns on the whole planet against
-      // 1.3 million, and the block rule handles them the moment anyone builds
-      // there.
+      // and the lattice does not carry across: a pair can still meet exactly on
+      // a seam line. Counted rather than guessed at - of 2,583,552 adjacent
+      // column pairs on the planet, 1,856 share parity and every one of them is
+      // a seam crossing, none are inside a face. Half of those are the
+      // even-even ones that could host anything at all, and on seed 4242 not
+      // one of the 928 is in a cactus biome on dry land. The block rule handles
+      // them the moment anyone builds there.
       //
       //
       // 0.069 and not the 0.04 it was, and it is the same compensation the
@@ -3896,8 +3899,26 @@ export class WorldGen {
       // the terrain alone accounts for most of it. Left at 0.04 the fix would
       // have taken the planet from 655 cacti to 380, which is not what "stop
       // generating illegal ones" is supposed to mean. Measured back at 655.
+      // ...and a checkerboard is not enough, because a checkerboard's DIAGONAL
+      // neighbours are all eligible. Reported as "I can't put cacti in left,
+      // right, top and bottom but I can place in right top, left top, left
+      // bottom and right bottom", and it is generated terrain as well as
+      // placement: measured over 1,089 live desert columns, 0 pairs touched
+      // orthogonally (the parity gate works) and 3 pairs touched at a corner,
+      // which is 6 of the 29 cacti there - one in five.
+      //
+      // So take every second column on BOTH axes rather than every second cell
+      // of the sum. The nearest other eligible column is then two steps away
+      // along at least one axis, which no 8-neighbourhood reaches, so no two
+      // cacti can touch at an edge or at a corner. Same shape of rule as
+      // before - a decision off the column's own coordinates, costing no reads
+      // and no rng - just a coarser lattice.
+      //
+      // 0.138 and not 0.069 for the same reason 0.069 was not 0.04: the lattice
+      // went from half the columns to a quarter, so the roll doubles to hold
+      // the desert's cactus count roughly where it was.
       const cp = colParts(col);
-      if (((cp.i + cp.j) & 1) === 0) { kind = 'cactus'; chance = 0.069; }
+      if ((cp.i & 1) === 0 && (cp.j & 1) === 0) { kind = 'cactus'; chance = 0.138; }
     }
 
     if (!kind || rng() > chance * thin) return null;
@@ -4565,34 +4586,55 @@ export class WorldGen {
     switch (bi) {
       // Dry and hot. Both of these are an order below everything green: what
       // makes a desert read as a desert is how much of it is nothing.
+      // The desert's two foods sit above the scrub in this ladder, not below
+      // it: a prickly pear is the thing you are looking for out here, and the
+      // whole point of a desert is that there is little enough of it that
+      // finding one matters. Together they are still under a tenth of the
+      // ground, which keeps the emptiness the branch above is protecting.
       case BIOME.DESERT:
         if (r < 0.075 * dp) id = ID.thornbrush;
         else if (r < 0.092 * dp) id = ID.aloe;
+        else if (r < 0.115 * dp) id = ID.cactusfruit;
+        else if (r < 0.130 * dp) id = ID.agave;
         break;
       case BIOME.BADLANDS:
         if (r < 0.080 * dp) id = ID.thornbrush;
         else if (r < 0.090 * dp) id = ID.firebloom;
+        else if (r < 0.108 * dp) id = ID.cactusfruit;
         break;
       // A savanna *is* its grass, so this is the densest carpet on the planet
       // and the aloe is a rounding error beside it.
       case BIOME.SAVANNA:
         if (r < 0.75 * dp) id = ID.golden_grass;
         else if (r < 0.775 * dp) id = ID.aloe;
+        // An olive is the one fruit tree that belongs on dry grass, and a
+        // savanna is the biome with nothing standing in it.
+        else if (r < 0.7800 * dp) id = ID.olive_tree;
         break;
       // Clover under, golden grass over: a plain gets two layers, which is what
       // separates it from a meadow at a glance now that both are green.
       case BIOME.PLAINS:
         if (r < 0.40 * dp) id = ID.clover;
         else if (r < 0.53 * dp) id = ID.golden_grass;
+        // The orchard, appended to the END of each chain on purpose: every
+        // threshold before it is untouched, so adding a tree moves not one
+        // existing plant. Rare by two orders - a fruit tree is a place you
+        // remember, and one every few hundred columns is what makes it one.
+        else if (r < 0.5340 * dp) id = ID.apple_tree;
+        else if (r < 0.5365 * dp) id = ID.plum_tree;
         break;
       case BIOME.MEADOW:
         if (r < 0.42 * dp) id = ID.clover;
         else if (r < 0.55 * dp) id = ID.lavender;
+        else if (r < 0.5545 * dp) id = ID.cherry_tree;
+        else if (r < 0.5570 * dp) id = ID.apple_tree;
         break;
       // The forest floor, and the one place a single species is allowed to own
       // the ground: a fern understorey under oaks is what a forest looks like.
       case BIOME.FOREST:
         if (r < 0.75 * dp) id = ID.fern;
+        else if (r < 0.7530 * dp) id = ID.cocoa_tree;
+        else if (r < 0.7555 * dp) id = ID.cherry_tree;
         break;
       case BIOME.PINE_FOREST:
         if (r < 0.32 * dp) id = ID.fern;
@@ -4611,14 +4653,33 @@ export class WorldGen {
       // column's stream is unchanged and so is the carpet's density.
       case BIOME.TUNDRA:
         if (r < 0.45 * dp) id = surf === ID.snow ? ID.snowbell : ID.cotton_grass;
+        else if (r < 0.56 * dp) id = ID.icecapmoss;
         break;
       // Five percent, and it is the highest-value five percent here. A snow
       // field is an hour of white; the snowbell is the only thing in it.
       case BIOME.SNOW:
         if (r < 0.10 * dp) id = ID.snowbell;
+        // ...and one thing to eat, so a snowfield is survivable on foot. It
+        // takes snow, which the snowbell also takes, so the two share the white
+        // and the field is no longer a single-species hour.
+        else if (r < 0.20 * dp) id = ID.icecapmoss;
         break;
+      // The largest land biome on the planet — 344,489 columns, more than any
+      // other — and it grew exactly one species. An aster and nothing else is
+      // what made a mountainside read as empty from a distance, and it left the
+      // biome you spend the most time crossing with nothing in it to pick.
+      //
+      // The lingonberry is the right second species and needs no new art: it is
+      // an alpine berry in life, it already exists for the pine forest, and its
+      // soil rule is turf — so it takes the grassy shoulders and `_floraSoilOk`
+      // keeps it off the scree and the bare stone, which is where a berry bush
+      // has no business being anyway.
       case BIOME.MOUNTAIN:
         if (r < 0.22 * dp) id = ID.alpine_aster;
+        else if (r < 0.30 * dp) id = ID.lingonberry;
+        // Stonecrop takes the bare rock the other two refuse, so it fills the
+        // scree rather than competing for the same grassy shoulders.
+        else if (r < 0.40 * dp) id = ID.stonecrop;
         break;
       // Marram binds the dune and driftwood is the beachcomber's find, so the
       // second is two orders below the first. A shoreline with a log on it
@@ -4706,9 +4767,15 @@ export class WorldGen {
       const pShelf = CAVE_SHELF * lush * warm;
       const pCrystal = CAVE_CRYSTAL * lush * cold;
       let id = 0;
+      // The truffle rides the fungus band and is a fifth of it: it takes soil
+      // and never rock (see its soil rule), so it appears only in the dirt
+      // pockets of a shallow cave, which is exactly where one should be dug up
+      // and is rare enough that finding one is an event.
+      const pTruffle = CAVE_MUSH * 0.2 * lush * warm;
       if (r < pMush) id = ID.cave_mushroom;
       else if (r < pMush + pShelf) id = ID.shelf_fungus;
-      else if (r < pMush + pShelf + pCrystal) id = ID.crystal_cluster;
+      else if (r < pMush + pShelf + pTruffle) id = ID.truffle;
+      else if (r < pMush + pShelf + pTruffle + pCrystal) id = ID.crystal_cluster;
       if (id && growsOn(id, floor)) blocks[base + k] = id;
     }
   }

@@ -59,6 +59,11 @@ const BLOCK_FOOD = {
   // reef *and* a dive. Still raw tier: 4 is the ceiling of "edible in a pinch",
   // and nothing you can pick up without a fire goes above it.
   sea_grape: 4,
+  // The wild harvest. A prickly pear is the best of them because a desert is
+  // the worst place to be hungry; the moss and the reed are survival food and
+  // are priced as such. The truffle is small, rare and worth a torch.
+  cactusfruit: 4, agave: 2, stonecrop: 2, icecapmoss: 1,
+  swampreed: 1, mireroot: 3, lotus: 2, truffle: 5,
 };
 
 for (const b of BLOCKS) {
@@ -119,6 +124,13 @@ const FOOD = [
   // raw / foraged
   { name: 'berries', label: 'Berries', food: 3, color: '#b8283f', shine: '#e4566d' },
   { name: 'carrot', label: 'Carrot', food: 3, color: '#d9711f', shine: '#f2a45c' },
+  // Orchard fruit. Colour-defined rather than art-backed, exactly like the
+  // berries above: the icon painter builds these from the two colours, so a new
+  // fruit costs no atlas and no model.
+  { name: 'cherry', label: 'Cherries', food: 3, color: '#a81e33', shine: '#d64a5e' },
+  { name: 'plum', label: 'Plum', food: 4, color: '#5c2a6b', shine: '#8d55a0' },
+  { name: 'olive', label: 'Olives', food: 2, color: '#5f6b31', shine: '#8d9a56' },
+  { name: 'cocoa', label: 'Cocoa Pod', food: 3, color: '#7a4423', shine: '#a86c42' },
   { name: 'corn', label: 'Corn', food: 3, color: '#d9b02c', shine: '#f5dc78' },
   { name: 'tomato', label: 'Tomato', food: 3, color: '#c33227', shine: '#ee6a55' },
   // A chick, a penguin and a parrot each leave one. It used to be the merchant's
@@ -1015,6 +1027,22 @@ export function computeDrops(blockId, toolItem, rng = Math.random) {
     if (rng() < 0.06) out.push({ item: itemIdOf('sapling'), count: 1 });
     if (b.name === 'leaves_oak' && rng() < 0.04) out.push({ item: itemIdOf('apple'), count: 1 });
     if (rng() < 0.03) out.push({ item: itemIdOf('stick'), count: 1 });
+    return out;
+  }
+  // A berry bush gives berries. It is named Lingonberry, it is modelled with
+  // fruit on it, and it dropped two copies of itself and nothing to eat — while
+  // every berry on the planet came out of breaking anonymous tall grass at
+  // about one in fifty. That is the wrong way round: the thing you can see is
+  // the thing that should feed you.
+  //
+  // The bush comes away as well as the fruit, so a stand can still be picked up
+  // and replanted where you want it. Two rolls of one berry rather than a flat
+  // two, so a bush is worth stopping for without a hillside of them trivialising
+  // the cooked tier that `FORAGE` feeds.
+  if (b.name === 'lingonberry') {
+    const berries = (rng() < 0.75 ? 1 : 0) + (rng() < 0.55 ? 1 : 0);
+    const out = [{ item: itemIdOf('lingonberry'), count: 1 }];
+    if (berries) out.push({ item: itemIdOf('berries'), count: berries });
     return out;
   }
   if (b.name === 'tall_grass') {

@@ -1042,6 +1042,117 @@ export const BLOCKS = [
     needsFloor: true, drop: 'stick', dropCount: 2, fuel: 4,
     particle: [0.72, 0.70, 0.64], sound: 'wood',
   }),
+
+  // --- wild harvest ---------------------------------------------------------
+  //
+  // Things you find and eat, as opposed to things you find and look at. The
+  // planet had two of these — the cactus and the pumpkin — and every other
+  // mouthful of wild produce came out of breaking anonymous tall grass at about
+  // one roll in twelve, so the food was in the world but nothing in the world
+  // looked like food. Each of these is a plant you can see from a distance and
+  // recognise, standing in the one biome that explains it.
+  //
+  // Their models were authored long before this and were never wired up: the
+  // sources are in `art/wam/crops/` with four growth rungs each, and the ripe
+  // rung is the one taken here. Growth stages are deliberately NOT used — a
+  // wild plant is simply ripe, and staging it would mean four block ids apiece
+  // and a growth pass, which is the farm's problem and not the forager's.
+  block({
+    name: 'cactusfruit', label: 'Prickly Pear', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.2, needsFloor: true, hurt: 1,
+    particle: [0.36, 0.52, 0.30], sound: 'grass',
+  }),
+  block({
+    name: 'agave', label: 'Agave', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.25, needsFloor: true,
+    particle: [0.52, 0.62, 0.44], sound: 'grass',
+  }),
+  block({
+    name: 'stonecrop', label: 'Stonecrop', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.15, needsFloor: true,
+    particle: [0.62, 0.70, 0.52], sound: 'grass',
+  }),
+  block({
+    name: 'icecapmoss', label: 'Icecap Moss', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.1, needsFloor: true,
+    particle: [0.74, 0.82, 0.80], sound: 'grass',
+  }),
+  // --- the orchard --------------------------------------------------------
+  //
+  // Five fruit trees, and they are MODELS rather than stamped voxel canopies -
+  // the only trees on the planet that are. Their sources are in
+  // `art/wam/crops/` and stand 3.4 to 4.2 units tall, authored as trees.
+  //
+  // The trade that buys: the art is used as drawn, and one block id makes a
+  // whole tree instead of a canopy algorithm. The trade that costs: models are
+  // drawn by `BlockModels`, which is a near-player instancing pass, so an
+  // orchard tree appears as you approach rather than standing on the skyline
+  // the way an oak does. That is a known and accepted limit, not an oversight.
+  //
+  // `solid` with `opaque: false` is deliberate and is the pair that makes a
+  // one-cell block behave like a tree: you cannot walk through the trunk, and
+  // light still crosses the cell so the canopy above does not cast a hard voxel
+  // shadow the model's own silhouette contradicts.
+  block({
+    name: 'apple_tree', label: 'Apple Tree', render: R_CROSS,
+    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
+    needsFloor: true, drop: 'apple', dropCount: 3,
+    particle: [0.36, 0.52, 0.26], sound: 'wood',
+  }),
+  block({
+    name: 'cherry_tree', label: 'Cherry Tree', render: R_CROSS,
+    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
+    needsFloor: true, drop: 'cherry', dropCount: 3,
+    particle: [0.62, 0.30, 0.36], sound: 'wood',
+  }),
+  block({
+    name: 'plum_tree', label: 'Plum Tree', render: R_CROSS,
+    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
+    needsFloor: true, drop: 'plum', dropCount: 3,
+    particle: [0.40, 0.28, 0.44], sound: 'wood',
+  }),
+  block({
+    name: 'olive_tree', label: 'Olive Tree', render: R_CROSS,
+    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
+    needsFloor: true, drop: 'olive', dropCount: 3,
+    particle: [0.46, 0.50, 0.32], sound: 'wood',
+  }),
+  block({
+    name: 'cocoa_tree', label: 'Cocoa Tree', render: R_CROSS,
+    solid: true, opaque: false, hardness: 1.2, tool: 'axe',
+    needsFloor: true, drop: 'cocoa', dropCount: 3,
+    particle: [0.44, 0.32, 0.22], sound: 'wood',
+  }),
+
+  // The wetland three are defined, modelled and edible, and are deliberately
+  // NOT generated yet. `landFloraAt` refuses every submerged column, every lake
+  // surface, every lake bed and every spring - it only ever sees dry land - so
+  // keying them off mud/peat/clay put them nowhere at all: measured over three
+  // sites with 191 and 93 wet surface columns between them, zero plants. Reeds
+  // and a lotus belong at the water's EDGE, which is `seabedFloraAt`'s pass and
+  // not this one. Left here ready rather than deleted, because the models are
+  // exported and the soil rules are written; they need the shallow-water pass.
+  block({
+    name: 'swampreed', label: 'Swamp Reed', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.1, needsFloor: true,
+    particle: [0.48, 0.58, 0.34], sound: 'grass',
+  }),
+  block({
+    name: 'mireroot', label: 'Mireroot', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.2, needsFloor: true,
+    particle: [0.56, 0.44, 0.28], sound: 'grass',
+  }),
+  block({
+    name: 'lotus', label: 'Lotus', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.1, needsFloor: true,
+    particle: [0.88, 0.72, 0.80], sound: 'grass',
+  }),
+  // The one that grows in the dark, and the only forage worth a torch.
+  block({
+    name: 'truffle', label: 'Truffle', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.2, needsFloor: true,
+    particle: [0.42, 0.32, 0.24], sound: 'grass',
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -1650,6 +1761,28 @@ grows(['cave_mushroom', 'shelf_fungus'], soil(['dirt', 'coarse_dirt', 'gravel',
 grows(['crystal_cluster'], soil([], 'rock', 'ore'));
 // Driftwood lands on the strand, which is sand and the shingle beside it.
 grows(['driftwood'], soil(['sand', 'gravel']));
+// --- wild harvest ---
+// Each of these takes the ground its own biome is actually made of, and no
+// more. The rule that matters is the same one the rest of the table follows:
+// the biome says what would like to grow here and the soil says whether it may,
+// so a prickly pear on a lawn is impossible however the biome pass rolls.
+grows(['cactusfruit'], soil(['sand', 'red_sand', 'coarse_dirt'], 'desert'));
+grows(['agave'], soil(['sand', 'coarse_dirt', 'gravel'], 'desert'));
+// A succulent of the scree. It is the one wild food that takes bare rock, which
+// is what makes a mountain worth crossing on foot rather than around.
+grows(['stonecrop'], soil(['stone', 'gravel', 'coarse_dirt']));
+grows(['icecapmoss'], soil(['snow', 'gravel', 'stone']));
+// The wetland three. Peat and mud are the bog's own blocks, so these cannot
+// stray onto a lawn even where a marsh meets one.
+grows(['swampreed'], soil(['mud', 'peat', 'clay', 'dirt']));
+grows(['mireroot'], soil(['mud', 'peat', 'clay']));
+grows(['lotus'], soil(['mud', 'clay']));
+// The cave floor, on the fungi's terms — see the glowcap entry above.
+// The orchard takes turf and nothing else - a fruit tree on scree or sand is
+// the same wrong picture as a lavender there.
+grows(['apple_tree', 'cherry_tree', 'plum_tree', 'olive_tree', 'cocoa_tree'],
+  soil([], 'turf'));
+grows(['truffle'], soil(['dirt', 'coarse_dirt', 'mud', 'podzol', 'moss_block'], 'rock'));
 
 /**
  * May `plant` root on `floor`?

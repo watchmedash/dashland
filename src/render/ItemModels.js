@@ -1041,6 +1041,26 @@ export const POSE = {
   // shapes that exist only in plan view.
   clover:       { file: 'wam/clover',       pack: 'wam', height: 0.24, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.0064, 0.0076, -0.0021], icon: [0.78, 0.46, -0.10] },
   alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.0026, 0.0031, -0.0009], icon: [0.80, 0.42, -0.10] },
+  // The wild harvest and the orchard. `file` is what `worldModel` resolves, so
+  // a modelled block with no entry here plants fine and draws NOTHING - which
+  // is exactly what happened the first time these went in.
+  //
+  // The held pose numbers are the family defaults rather than individually
+  // measured: these are picked up rarely and what matters first is that they
+  // exist in the world. Worth a pass with the turntable later.
+  cactusfruit:  { file: 'wam/cactusfruit',  pack: 'wam', height: 0.30, grip: 0.30, rot: [0.10, -0.46, 0.20], pos: [0.0020, 0.0090, -0.0040], icon: [0.30, 0.42, -0.14] },
+  agave:        { file: 'wam/agave',        pack: 'wam', height: 0.28, grip: 0.32, rot: [0.10, -0.48, 0.20], pos: [0.0020, 0.0090, -0.0040], icon: [0.30, 0.42, -0.14] },
+  stonecrop:    { file: 'wam/stonecrop',    pack: 'wam', height: 0.24, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  icecapmoss:   { file: 'wam/icecapmoss',   pack: 'wam', height: 0.22, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  swampreed:    { file: 'wam/swampreed',    pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.06, -0.44, 0.24], pos: [-0.0003, 0.0067, 0.0009], icon: [0.12, 0.38, -0.16] },
+  mireroot:     { file: 'wam/mireroot',     pack: 'wam', height: 0.26, grip: 0.30, rot: [0.10, -0.46, 0.20], pos: [0.0020, 0.0080, -0.0030], icon: [0.30, 0.42, -0.14] },
+  lotus:        { file: 'wam/lotus',        pack: 'wam', height: 0.22, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  truffle:      { file: 'wam/truffle',      pack: 'wam', height: 0.20, grip: 0.34, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0030, -0.0010], icon: [0.70, 0.42, -0.10] },
+  apple_tree:   { file: 'wam/apple_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
+  cherry_tree:  { file: 'wam/cherry_tree',  pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
+  plum_tree:    { file: 'wam/plum_tree',    pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
+  olive_tree:   { file: 'wam/olive_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
+  cocoa_tree:   { file: 'wam/cocoa_tree',   pack: 'wam', height: 0.34, grip: 0.26, rot: [0.06, -0.44, 0.20], pos: [0.0010, 0.0100, -0.0030], icon: [0.24, 0.40, -0.16] },
 
   // Underground. The mushroom's own pose for the toadstools — a cap is read
   // from slightly below so the overhang shows — and the clam's steeper one for
@@ -1212,6 +1232,19 @@ export const BY_NAME = {
   cotton_grass: 'cotton_grass',
   snowbell: 'snowbell',
   alpine_aster: 'alpine_aster',
+  cactusfruit: 'cactusfruit',
+  agave: 'agave',
+  stonecrop: 'stonecrop',
+  icecapmoss: 'icecapmoss',
+  swampreed: 'swampreed',
+  mireroot: 'mireroot',
+  lotus: 'lotus',
+  truffle: 'truffle',
+  apple_tree: 'apple_tree',
+  cherry_tree: 'cherry_tree',
+  plum_tree: 'plum_tree',
+  olive_tree: 'olive_tree',
+  cocoa_tree: 'cocoa_tree',
   marram: 'marram',
   lavender: 'lavender',
   clover: 'clover',

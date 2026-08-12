@@ -115,7 +115,15 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom', 'saplin
   'thornbrush', 'aloe', 'golden_grass', 'firebloom',
   'cotton_grass', 'snowbell', 'alpine_aster', 'marram',
   'lavender', 'clover', 'fern', 'lingonberry',
-  'cave_mushroom', 'shelf_fungus', 'crystal_cluster', 'driftwood']) {
+  'cave_mushroom', 'shelf_fungus', 'crystal_cluster', 'driftwood',
+  // The wild harvest. Same footing as the rest: authored as models, no tile and
+  // no billboard, so a name here and not in MODELLED_PLANTS draws nothing at
+  // all - and one missing from here draws a flat card instead of the model.
+  'cactusfruit', 'agave', 'stonecrop', 'icecapmoss',
+  'swampreed', 'mireroot', 'lotus', 'truffle',
+  // The orchard. Same rule as the rest and it matters more here, because a
+  // missing name would draw a 1x1 billboard where a four-cell tree should be.
+  'apple_tree', 'cherry_tree', 'plum_tree', 'olive_tree', 'cocoa_tree']) {
   const i = BLOCKS.findIndex((b) => b.name === n);
   if (i > 0) MODELLED_CROSS[i] = 1;
 }

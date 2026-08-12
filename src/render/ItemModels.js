@@ -1404,7 +1404,24 @@ export const BY_NAME = {
   snowpea: 'snowpea',
   hops: 'hops',
   grape: 'grape',
-  cherry: 'cherries',
+  // **`cherry` and not `cherries`**, which is what this said and is the one
+  // entry in the table that named a pose that does not exist. `cherries` is the
+  // *file* in the food kit; the pose built from it is keyed `cherry`, like every
+  // other line here is keyed by the item it belongs to.
+  //
+  // The failure is worse than a missing model, which is why it is written down.
+  // `poseKeyFor` handed back the dangling key, `hasModel` agreed there was a
+  // model, and `iconModel` then read `.icon` off `undefined` and **threw** —
+  // and nothing on the icon path catches that, because `IconFactory._paint`
+  // guards the *render* and not the lookup. So it came out of `icons.item()`
+  // and took the whole inventory repaint down with it, every slot at once, from
+  // the first cherry in the bag. Found by painting all 362 items into one
+  // contact sheet: the page carrying `cherry` drew nothing at all.
+  //
+  // `poseKeyFor` now refuses a dangling name the way it already refused an
+  // unmodelled tool kind, so the next one of these is a plain icon rather than a
+  // dead panel. This line is still the fix; that is the seatbelt.
+  cherry: 'cherry',
   corn: 'corn',
   tomato: 'tomato',
   egg: 'egg',
@@ -1553,7 +1570,15 @@ const ARMOUR_LOOK = {
 /** Which item art maps to which model. */
 export function poseKeyFor(def) {
   if (def.tool) return POSE[def.tool.kind] ? def.tool.kind : null;
-  return BY_NAME[def.name] ?? null;
+  // The same guard as the tool branch above, and it is here because the two
+  // branches disagreeing is what let `cherry -> 'cherries'` become a crash
+  // rather than a missing model. A name that resolves to no pose has to answer
+  // null, exactly as an unmodelled tool kind does: then `hasModel` says no, the
+  // hand-drawn art stands in, and the worst case is one plain icon instead of a
+  // dead inventory. It cannot cost anything when the table is right, because
+  // every value in it is a key of `POSE`.
+  const key = BY_NAME[def.name];
+  return key && POSE[key] ? key : null;
 }
 
 /**
@@ -2246,6 +2271,22 @@ function buildMesh(spec, base, atlas, held) {
  * The waterline inside a pail: a disc across the model's widest axis, set at
  * the height the rim sits at. The bucket's handle arches well above that rim
  * and is part of the same bounding box, hence the fraction rather than the top.
+ *
+ * **Centred on the bounding box and not on the origin**, which is the whole of
+ * the fix here. The disc used to sit at x = z = 0 on the grounds that the
+ * geometry is recentred there — and that stopped being true for exactly this
+ * model when `gripAnchorXZ` went in. A pail is hollow, so its bbox centre is
+ * empty air; the grip anchor is therefore stepped out onto the *wall*, and
+ * `heldGeometry` translates the origin to it. The disc then drew concentric
+ * with the wall rather than with the pail: measured on the icon it hung half
+ * outside the silhouette, a slab of water (and, worse, of lava) floating in mid
+ * air off the right-hand side of the bucket, above the rim. Both the water and
+ * the lava pail showed it, in the grid and in the fist.
+ *
+ * The bbox centre is the right anchor whichever origin the geometry carries: it
+ * is the axis of the pail, which is what a waterline is centred on, and for the
+ * ground template — where the anchor and the origin do coincide — it is the
+ * same point the disc was already at, so nothing that was right moves.
  */
 function fillDisc(geo, hex) {
   geo.computeBoundingBox();
@@ -2259,7 +2300,11 @@ function fillDisc(geo, hex) {
     }),
   );
   disc.rotation.x = -Math.PI / 2;
-  disc.position.y = bb.min.y + (bb.max.y - bb.min.y) * 0.62;
+  disc.position.set(
+    (bb.min.x + bb.max.x) / 2,
+    bb.min.y + (bb.max.y - bb.min.y) * 0.62,
+    (bb.min.z + bb.max.z) / 2,
+  );
   return disc;
 }
 

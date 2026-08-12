@@ -7717,6 +7717,11 @@ class Game {
           this._rodClick();
         }
       }
+      // The arm shows the hold. Every frame rather than on the two edges,
+      // because the charge is a continuous value and the pose eases toward it.
+      this.viewModel.setCastCharge(this.castCharge ?? 0,
+        this.inventory.actingSlot((s2) => ITEMS[s2.item]?.tool?.kind === 'rod')
+          === this.inventory.offhand ? 'left' : 'right');
       this._tickFishing(dt);
       if (this.fishing) {          // holding the line: nothing else to do
         // Nothing is said during the fight. The bar is the instruction.
@@ -7736,6 +7741,7 @@ class Game {
       // still be sitting there next time one is drawn and throw a full-strength
       // cast off a button you never held.
       this.castCharge = 0;
+      this.viewModel.setCastCharge(0);
       if (this.fishing) this._stopFishing();
     }
 

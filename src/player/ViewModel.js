@@ -569,6 +569,28 @@ const CAST = {
   r: [-0.26, 0.06, 0.15],
 };
 
+/**
+ * The wind-up, which is the cast lean run backwards.
+ *
+ * The hold that decides how far the line goes was invisible: the button charged
+ * for three quarters of a second and the arm did not move, so the only way to
+ * know how hard you were about to throw was to throw it. The rod comes back
+ * over the shoulder instead - in and up on the position, rolled back on the
+ * rotation - and `CAST` then takes it forward, so the two poses read as one
+ * motion with the release in the middle.
+ *
+ * Deliberately larger than CAST and opposite in Z. A wind-up you can only just
+ * see is the same problem as no wind-up at all, and this one has to be legible
+ * out of the corner of the eye while you are looking at the water.
+ */
+const WIND = {
+  p: [0.05, 0.06, -0.13],
+  r: [0.42, -0.10, -0.22],
+};
+/** How fast the rod winds back and settles, in units per second. Quicker than
+ *  CAST_RATE so the arm keeps up with a fast flick of the button. */
+const WIND_RATE = 11;
+
 /** How fast the rod leans out and comes back, in units per second. */
 const CAST_RATE = 6;
 
@@ -1024,6 +1046,11 @@ export class ViewModel {
      */
     this._cast = 0;
     this._castT = 0;
+    // The wind-up, and what the shoulder is actually at - the same fact/eased
+    // pair the cast keeps, for the same reason: the charge can go 0 -> 1 -> 0
+    // in a few frames and the arm must not teleport.
+    this._wind = 0;
+    this._windT = 0;
     /** Which fist is holding the cast rod, so the other arm is untouched. */
     this._castHand = 'right';
 
@@ -1634,6 +1661,21 @@ export class ViewModel {
    * @param {'right'|'left'} [hand] the fist the rod is in. Kept from the last
    *   cast on the way down, so the arm that leaned is the arm that comes back.
    */
+  /**
+   * How far the cast is wound up, 0 to 1.
+   *
+   * Told every frame while a rod is in hand, unlike `setCast`, because this is
+   * a continuous value and not an event. Shares `_castHand`, so the fist that
+   * winds up is the fist that throws.
+   *
+   * @param {number} t
+   * @param {'right'|'left'} [hand]
+   */
+  setCastCharge(t, hand) {
+    this._wind = Math.max(0, Math.min(1, t || 0));
+    if (this._wind > 0 && this.hands[hand]) this._castHand = hand;
+  }
+
   setCast(on, hand) {
     this._cast = on ? 1 : 0;
     if (on && this.hands[hand]) this._castHand = hand;
@@ -1795,9 +1837,15 @@ export class ViewModel {
     const rcw = this._castHand === 'left' ? 0 : this._castT;
     const lcw = this._castT - rcw;
 
-    const px = rest.x + bx + _swingP.x * sw + drawX + CAST.p[0] * rcw;
-    const py = rest.y + by + _swingP.y * sw + equipY + drawY + CAST.p[1] * rcw;
-    const pz = rest.z + _swingP.z * sw + drawZ + CAST.p[2] * rcw;
+    // ...and the wind-up, on the same split and its own clock.
+    this._windT += (this._wind - this._windT) * Math.min(1, dt * WIND_RATE);
+    if (this._windT < 0.002) this._windT = 0;
+    const rww = this._castHand === 'left' ? 0 : this._windT;
+    const lww = this._windT - rww;
+
+    const px = rest.x + bx + _swingP.x * sw + drawX + CAST.p[0] * rcw + WIND.p[0] * rww;
+    const py = rest.y + by + _swingP.y * sw + equipY + drawY + CAST.p[1] * rcw + WIND.p[1] * rww;
+    const pz = rest.z + _swingP.z * sw + drawZ + CAST.p[2] * rcw + WIND.p[2] * rww;
 
     // Shoulder anchor sits low-right, just behind the near plane. Everything —
     // bob, swing, equip dip, sprint — is applied here and nowhere else; the fist
@@ -1816,9 +1864,9 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * rdw + CAST.r[0] * rcw,
-      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * rdw + CAST.r[1] * rcw,
-      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * rdw + CAST.r[2] * rcw,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * rdw + CAST.r[0] * rcw + WIND.r[0] * rww,
+      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * rdw + CAST.r[1] * rcw + WIND.r[1] * rww,
+      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * rdw + CAST.r[2] * rcw + WIND.r[2] * rww,
     );
 
     // The offhand arm, on the frames there is one. Everything above has already
@@ -1854,7 +1902,7 @@ export class ViewModel {
         OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05 + DRAW.p[2] * ldw + CAST.p[2] * lcw,
       );
       this.offArmPivot.rotation.set(
-        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55 + DRAW.r[0] * ldw + CAST.r[0] * lcw,
+        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55 + DRAW.r[0] * ldw + CAST.r[0] * lcw + WIND.r[0] * lww,
         OFF_ARM_REST_ROT.y - _swingR.y * osw - DRAW.r[1] * ldw - CAST.r[1] * lcw,
         OFF_ARM_REST_ROT.z - _swingR.z * osw - DRAW.r[2] * ldw - CAST.r[2] * lcw,
       );

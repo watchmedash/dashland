@@ -77,6 +77,28 @@ const MAP = {
   // picked for the oak and birch log sides, so those two species' logs were
   // lying on their side while pine next to them stood up. Quarter-turn them
   // rather than swapping variants, so the species keep their painted colours.
+  // The three species have to make one ladder of value, and the same ladder in
+  // bark as in planks, because a player learns a wood from whichever face is in
+  // front of them. They did not: measured off the baked sheet, log_pine was the
+  // PALEST bark at 194,142,90 while planks_pine was the DARKEST plank at
+  // 89,57,39, so pine was blond as a trunk and near-black as a board. Birch,
+  // the one wood everyone can name on sight because it is pale, sat in the
+  // middle of both sets. log_pine also disagreed with its own block definition,
+  // which declares a particle colour of [0.30, 0.22, 0.14].
+  //
+  // The order is birch palest, pine mid, oak darkest, which is both the
+  // conventional reading and what the sources already want to be. Everything
+  // below is exposure on the EXISTING variants rather than a re-pick: the pack
+  // has ten barks and ten planks, but only two barks (2 and 3) have grain
+  // across the tile for `rot90` to stand up, and the plank set was chosen to
+  // all be cross-grain so a mixed wall doesn't have its boards pointing
+  // different ways. Swapping variants to chase a value would give that up.
+  //
+  // `planks` — oak — is deliberately the one tile NOT touched. It is already
+  // the darkest plank at 150,89,63 once the other two are lifted past it, and
+  // it is the base material every timber decal composites over (crate, bench,
+  // bed, door, sign, fence), so moving it moves eight other blocks for a defect
+  // none of them had.
   log_oak: ['Tree Bark', 2, { rot90: true }],
   log_oak_top: ['Tree Bark', 8],
   // Leaves: `holes` used to punch a third of the tile away, which combined with
@@ -86,10 +108,22 @@ const MAP = {
   // pine variant of Bush_Hedge is far darker at source and used to render as a
   // black tree standing next to lit oaks.
   leaves_oak: ['Bush_Hedge', 6, { tint: 0.35, bright: 1.55, holes: 0.19 }],
-  log_birch: ['Tree Bark', 3, { rot90: true }],
+  // Birch is the pale one, and `tint` is doing the work rather than `bright`.
+  // Raw Tree Bark/3 is a TAN — 174,136,94, eighty counts of red over blue — so
+  // simply exposing it up came out as pale pine, which is the confusion being
+  // fixed. Birch bark is white with the warmth of the paper barely in it, so
+  // most of the chroma comes out first and the exposure goes on afterwards.
+  log_birch: ['Tree Bark', 3, { rot90: true, tint: 0.55, bright: 1.16 }],
   log_birch_top: ['Tree Bark', 9],
   leaves_birch: ['Bush_Hedge', 1, { tint: 0.35, bright: 1.10, holes: 0.21 }],
-  log_pine: ['Tree Bark', 1],
+  // Pine down to the middle of the ladder. The blue lift matters as much as the
+  // exposure: Tree Bark/1 raw is 194,141,90, and knocking that back on exposure
+  // alone gives a dark ORANGE, which is the one thing pine bark must not be —
+  // `leaves_pine` in TextureGen.js already opens holes in the canopy on the
+  // strict budget it does because orange trunk showing through green needles is
+  // what a previous pass shipped. Trimming red and lifting blue takes the same
+  // luminance to a red-brown instead.
+  log_pine: ['Tree Bark', 1, { bright: 0.72, warm: [0.95, 1.0, 1.06] }],
   log_pine_top: ['Tree Bark', 5],
   // leaves_pine is deliberately NOT here. It used to be Bush_Hedge/2, which is
   // a broadleaf shrub — round leaves on brown twigs, near enough the same plant
@@ -216,8 +250,12 @@ const MAP = {
   // Wood Planks 1/6/8/9 run across the tile and 3/4 run along it; the four
   // picked here are all cross-grain like the existing `planks`, so a wall built
   // out of two species doesn't have its boards pointing different ways.
-  planks_birch: ['Wood Planks', 8],
-  planks_pine: ['Wood Planks', 1],
+  // Lifted past oak's untouched 150,89,63 so the plank ladder matches the bark
+  // ladder — see the note over `log_oak`. Birch takes the same tint-then-expose
+  // treatment its bark does, for the same reason; pine takes exposure plus the
+  // same small blue lift, so the two ends of the same tree agree.
+  planks_birch: ['Wood Planks', 8, { tint: 0.5, bright: 1.85 }],
+  planks_pine: ['Wood Planks', 1, { bright: 1.85, warm: [0.98, 1.02, 1.10] }],
   planks_dark: ['Wood Planks', 6],
   planks_grey: ['Wood Planks', 9],
 

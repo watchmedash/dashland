@@ -3,7 +3,7 @@
 // dome shader, so every other system can read the same colours.
 
 import * as THREE from 'three';
-import { R_MAX } from '../world/Constants.js';
+import { R_MAX, R_TERRAIN_MAX } from '../world/Constants.js';
 import { makeRng } from '../util/Noise.js';
 import { voxelUniforms } from './VoxelMaterial.js';
 
@@ -22,6 +22,42 @@ import { voxelUniforms } from './VoxelMaterial.js';
 // comfortably inside while staying far enough out to read as sky rather than as
 // an object hanging over the terrain.
 const DISC_DIST = Math.round(R_MAX * 2.75);
+
+/**
+ * Radius of the lower cloud shell, and how far the upper one sits above it.
+ *
+ * This was `R_MAX + 30` — 379 — and that number was written when R_MAX was the
+ * top of the world. It is not: terrain is allowed up to R_TERRAIN_MAX 347, so
+ * the deck hung 32 blocks over the tallest peak the generator can raise, and
+ * only 94 blocks over the sea.
+ *
+ * 94 is what breaks the elevated view, which is the whole of the recon's third
+ * cloud defect. The noise field is indexed by direction *from the planet's
+ * centre*, so what a viewer sees is that field magnified by R / h, where h is
+ * their distance below the deck. From the beach that was 379/94 = 4.0x, which
+ * is the good look. From 60 blocks up — a hilltop, or the tiny-planet shot the
+ * game is at its best in — h collapses to 34 and the magnification triples to
+ * 11x: the same clouds smeared over the whole frame with no detail left in
+ * them, which is exactly what `recon_r2_high.png` shows.
+ *
+ * The cure is to put the deck far enough away that climbing 60 blocks is not a
+ * large fraction of the distance to it, and then wind the noise frequency back
+ * by the same factor so the view from the ground is unchanged. At R_TERRAIN_MAX
+ * + 120 = 467 with NOISE_SCALE 5.7 (from 9.0):
+ *
+ *   ground (eye 285): 467 / (182 * 5.7) = 0.45   — was 379 / (94 * 9) = 0.448
+ *   60 up  (eye 345): 467 / (122 * 5.7) = 0.67   — was 379 / (34 * 9) = 1.24
+ *
+ * i.e. the good case is preserved to within a percent and the broken one comes
+ * back to within half a stop of it. Raising the shell alone would have shrunk
+ * the clouds everywhere, and raising the frequency alone would have made them
+ * noisy; it is the pair that leaves the picture where it was.
+ *
+ * The gap keeps the same *relative* separation the old 9 had, so the parallax
+ * between the two shells reads the same.
+ */
+const CLOUD_R = R_TERRAIN_MAX + 120;
+const CLOUD_GAP = 11;
 
 const SHADOW_DIST = 30;
 /** Ceiling on that radius: the fixed extent this fitting replaced. */
@@ -301,7 +337,10 @@ float fbm(vec3 p) {
 
 void main() {
   vec3 dir = normalize(vWorld - uCenter);
-  vec3 p = dir * 9.0;
+  // NOISE_SCALE is coupled to CLOUD_R in the JS below and must move with it —
+  // see the note there for the arithmetic. It is noise cells per radian of the
+  // field as seen from the planet's centre, not per unit of anything.
+  vec3 p = dir * 5.7;
   vec3 drift = vec3(uTime * 0.012, uTime * 0.006, -uTime * 0.009);
   // Large-scale weather mask, carving open sky between cloud fields — and it
   // has to widen with the weather. Held at a fixed threshold it zeroed most of
@@ -483,7 +522,7 @@ export class Sky {
     });
     this.clouds = new THREE.Group();
     for (let i = 0; i < 2; i++) {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(R_MAX + 30 + i * 9, 96, 64), cloudMat);
+      const m = new THREE.Mesh(new THREE.SphereGeometry(CLOUD_R + i * CLOUD_GAP, 96, 64), cloudMat);
       m.position.copy(this.center);
       m.renderOrder = 20 + i;
       this.clouds.add(m);

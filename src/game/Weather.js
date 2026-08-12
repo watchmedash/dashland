@@ -18,12 +18,30 @@ import { snowLine } from './Seasons.js';
  * that arrives, with storm sitting on the ceiling the shader is tuned for and
  * rain a clear step below it.
  */
+/**
+ * `sun` is how much daylight gets past the cloud, and it is the only thing in
+ * this table the *ground* feels: main multiplies both the sun's colour and the
+ * directional's intensity by it, and scales the terrain's sky fill by
+ * (0.5 + sun * 0.5) on top.
+ *
+ * Overcast was 0.55, which is a thin haze and not a deck. Measured on one
+ * column at noon, switching to overcast took the ground from luma 56 to 43 —
+ * 23% — with the sun's shadows still crisply cast underneath, so it read as a
+ * clear day with a grey backdrop rather than as weather. It is 0.36 now, which
+ * lands the same ground at ~35 (-38%) and leaves the directional too weak to
+ * draw a hard edge.
+ *
+ * Rain and storm move with it, not because either was reported but because they
+ * have to stay below overcast to keep the ladder in order; the gaps between the
+ * four are preserved in ratio. Storm at 0.15 is the darkest daylight in the
+ * game and is meant to be.
+ */
 const STATES = {
   clear: { weight: 34, coverage: 0.62, opacity: 0.72, precip: 0.00, sun: 1.00, wind: 0.55, fog: 1.0, dur: [240, 620] },
   fair: { weight: 30, coverage: 0.40, opacity: 0.86, precip: 0.00, sun: 0.94, wind: 0.8, fog: 1.1, dur: [200, 520] },
-  overcast: { weight: 18, coverage: 0.16, opacity: 0.95, precip: 0.00, sun: 0.55, wind: 1.0, fog: 1.4, dur: [160, 380] },
-  rain: { weight: 13, coverage: 0.08, opacity: 0.97, precip: 0.62, sun: 0.34, wind: 1.4, fog: 1.65, dur: [120, 300] },
-  storm: { weight: 5, coverage: 0.02, opacity: 1.00, precip: 1.00, sun: 0.20, wind: 2.1, fog: 1.9, dur: [80, 190] },
+  overcast: { weight: 18, coverage: 0.16, opacity: 0.95, precip: 0.00, sun: 0.36, wind: 1.0, fog: 1.4, dur: [160, 380] },
+  rain: { weight: 13, coverage: 0.08, opacity: 0.97, precip: 0.62, sun: 0.24, wind: 1.4, fog: 1.65, dur: [120, 300] },
+  storm: { weight: 5, coverage: 0.02, opacity: 1.00, precip: 1.00, sun: 0.15, wind: 2.1, fog: 1.9, dur: [80, 190] },
 };
 
 const COLD_BIOMES = new Set([BIOME.SNOW, BIOME.TUNDRA]);

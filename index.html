@@ -253,7 +253,9 @@
            what a sentence under each row was doing badly. -->
       <div class="panel-body">
       <div class="settings">
-        <h3 class="set-head">Mouse</h3>
+        <!-- Retitled by TouchControls on a device with no mouse. The slider
+             behind it is the same one and multiplies the same number. -->
+        <h3 class="set-head" id="set-head-look">Mouse</h3>
         <label>Sensitivity <span class="val" id="sens-val">1.00</span>
           <input id="set-sens" type="range" min="0.2" max="3" step="0.05" value="1" />
         </label>
@@ -291,9 +293,9 @@
           <ul class="credit-list">
             <li><strong>Lynocs</strong>, Stylized Texture Pack: the block textures.
               CC0. The pack itself is not resold.</li>
-            <li><strong>Kenney</strong>, Cube Pets, Blocky Characters and Food Kit:
-              every animal, the husk, the merchant, the fifteen you can play as, and
-              the food. CC0.</li>
+            <li><strong>Kenney</strong>, Cube Pets, Blocky Characters, Food Kit and
+              Mobile Controls: every animal, the husk, the merchant, the fifteen you
+              can play as, the food, and the touch controls. CC0.</li>
             <li><strong>Kay Lousberg</strong>, KayKit Bits: the pickaxe, axe, shovel,
               torch, bucket and sword. CC0.</li>
             <li><strong>Squareish Design</strong>, Fruits and Vegetables: the apple
@@ -315,6 +317,21 @@
       <header><h2>Controls</h2><button class="ghost" data-close-controls>Back</button></header>
       <!-- Keys and what they do, and nothing else. -->
       <div class="panel-body">
+      <!-- On a phone none of the rows below this one exist, so they are hidden
+           and this replaces them. Same grid, same caps, and the cap holds the
+           name of the control instead of the key: there is no key. It is short
+           because most of it is already answered by the glyph on the button —
+           the only two rows that are not discoverable by pressing something are
+           the drag and the sprint. -->
+      <div class="controls-touch">
+        <h3 class="ctl-head">Thumbs</h3>
+        <div class="controls-grid">
+          <div><kbd>Drag</kbd><span>Look</span></div>
+          <div><kbd>Stick</kbd><span>Move</span></div>
+          <div><kbd>Stick</kbd><span>Push to the rim to sprint</span></div>
+          <div><kbd>Tap</kbd><span>A slot, to hold it</span></div>
+        </div>
+      </div>
       <h3 class="ctl-head">Move</h3>
       <div class="controls-grid">
         <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>

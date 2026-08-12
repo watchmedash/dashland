@@ -10,6 +10,7 @@ import {
   PlayerCharacter, playerModelUrls, characterUrl, DEFAULT_CHARACTER,
 } from './player/Character.js';
 import { Input } from './player/Input.js';
+import { TouchControls } from './ui/TouchControls.js';
 import { Sky, MOON_FILL } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
 import { Particles } from './render/Particles.js';
@@ -1310,6 +1311,17 @@ class Game {
         this.pause();
       }
     };
+    /**
+     * Thumbs, or nothing at all.
+     *
+     * Built here rather than lazily, because `enableTouch` has to be in effect
+     * before the first `requestLock` goes out: a phone that reached the world
+     * without it would spend the session logging NotAllowedError and pausing
+     * itself every time a screen closed. `null` on a mouse-and-keyboard
+     * machine, and every touch path in the game hangs off this one being
+     * non-null, so desktop runs exactly the code it ran before.
+     */
+    this.touch = TouchControls.wanted() ? new TouchControls(this) : null;
     this.inventory.onChange = () => this.ui.refresh();
 
     this.materials = createVoxelMaterials();
@@ -4777,6 +4789,10 @@ class Game {
     // nothing of the body is drawn over a world it cannot touch.
     if (this.state === 'playing' || this.state === 'paused') this.viewModel.render(this.renderer);
     this.damageFlash = Math.max(0, this.damageFlash - dt * 1.6);
+    // After the update and before the flags are cleared: the layer's visibility
+    // is a function of the state this frame just settled on, and anything it
+    // releases on the way out has to be released before the next frame reads it.
+    this.touch?.sync();
     this.input.endFrame();
   }
 

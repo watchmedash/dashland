@@ -2729,3 +2729,245 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 [data-close-settings][data-close-settings],
 [data-close-controls][data-close-controls],
 [data-close-slots][data-close-slots] { display: none; }
+
+/* ══════════════════════════════════════════════════════════
+   THUMBS
+   ══════════════════════════════════════════════════════════
+   Everything below only exists on `body.touch`, which TouchControls sets and
+   only on a device whose primary pointer is coarse. Nothing here is reachable
+   from a mouse-and-keyboard session, which is how desktop stays byte-identical.
+
+   Two problems, and they pull in opposite directions, which is why they are
+   solved separately. The CONTROLS have to be big: a thumb is nine millimetres
+   across and the other hand is holding the phone. The CHROME has to be small:
+   the whole HUD is sized in absolute pixels, which is a sane sixth of a 1920px
+   monitor and most of a 393px phone — the hotbar ran the full width of the
+   screen and the status chips hung off the right edge. Big controls, small
+   furniture. Anything that treats "mobile" as one scale gets one of them wrong.
+
+   The material is the game's, not Kenney's. The sprites ship as flat white SVG
+   and are used as `mask-image`, so the same wood, brass and ink line every
+   other panel is built from paints through the silhouette. A grey pad laid on
+   this HUD reads as a different game's overlay. */
+
+body.touch {
+  /* One number, and everything in the touch layer is a multiple of it. */
+  --tc-btn: 72px;
+  --tc-sm: 62px;
+  --tc-chip: 46px;
+  /* How much of the bottom of the screen the thumbs own. The hotbar is lifted
+     clear of it, below. */
+  --tc-band: 190px;
+  /* The chrome's own scale. See the last block in this file. */
+  --hud-scale: .74;
+}
+/* A tablet has the room a phone does not, and shrinking a HUD that already fits
+   would only make it hard to read. Width alone decides this one, because by
+   this point we already know it is a touch device. */
+@media (min-width: 820px) {
+  body.touch { --hud-scale: .9; --tc-btn: 80px; --tc-sm: 68px; --tc-band: 210px; }
+}
+/* Landscape on a phone. There is no vertical room to give away, so the band
+   comes in and the buttons tighten rather than the layout reflowing. */
+@media (orientation: landscape) and (max-height: 500px) {
+  body.touch { --tc-btn: 62px; --tc-sm: 54px; --tc-chip: 40px; --tc-band: 128px; --hud-scale: .62; }
+}
+
+/* No page scroll, no rubber band, no pinch, no double-tap zoom, no text
+   selection, no long-press callout. Every one of these is a browser gesture
+   that would otherwise fire in the middle of a drag-to-look, and every one of
+   them was reachable: `touch-action: none` is the only thing that stops a drag
+   from panning the document instead of turning the camera. */
+body.touch, body.touch #view, body.touch #touch {
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#touch {
+  position: fixed; inset: 0;
+  /* Under #hud (z 20), deliberately. The rack and the offhand cell are the only
+     things in the HUD that take a pointer, and the look surface spans the whole
+     viewport; if the surface won that overlap you could no longer choose what
+     is in your hand. */
+  z-index: 19;
+  pointer-events: none;
+}
+#touch.hidden { display: none; }
+#touch > * { pointer-events: auto; }
+
+/* The look surface. Deliberately invisible and deliberately the whole screen:
+   the drag that turns the camera should start wherever the thumb already is,
+   and anything that must not be dragged on is a sibling drawn on top of it. */
+#tc-look { position: absolute; inset: 0; }
+
+/* ── the stick ─────────────────────────────────────────── */
+/* Kenney's pad and nub, cut out of the game's own timber and brass. The pad is
+   the quieter of the two: it is the thing you rest a thumb on, and the nub is
+   the thing you read. */
+#tc-stick {
+  position: absolute; left: 20px; bottom: 26px;
+  width: 124px; height: 124px;
+  display: grid; place-items: center;
+  opacity: .78;
+  transition: opacity .18s ease;
+}
+#tc-stick.on { opacity: 1; }
+#tc-stick::before {
+  content: ''; position: absolute; inset: 0;
+  background: var(--wood);
+  -webkit-mask: url(/touch/stick-pad.svg) center / contain no-repeat;
+  mask: url(/touch/stick-pad.svg) center / contain no-repeat;
+  /* Not `box-shadow`: a mask clips one away. The ink line every other HUD
+     element gets from `--hud-hard` is a tight drop-shadow of the silhouette
+     instead, which follows the cut-out rather than the box. */
+  filter: drop-shadow(0 0 1px var(--hud-hard)) drop-shadow(0 2px 6px rgba(0, 0, 0, .7));
+}
+.tc-nub {
+  position: relative;
+  width: 58px; height: 58px;
+  background: var(--brass);
+  -webkit-mask: url(/touch/stick-nub.svg) center / contain no-repeat;
+  mask: url(/touch/stick-nub.svg) center / contain no-repeat;
+  filter: drop-shadow(0 0 1px var(--brass-line)) drop-shadow(0 2px 4px rgba(0, 0, 0, .6));
+  /* No transition on `transform`. The nub is following a thumb that is already
+     on the glass, and any easing at all reads as the stick lagging the finger. */
+}
+
+/* ── the buttons ───────────────────────────────────────── */
+/* Not masked sprites. These are the hotbar rack's own carcass turned into a
+   disc — same timber, same ink line, same lip that says a thing can be pressed
+   — with a Kenney icon cut out of brass sitting on it. The rack is the piece of
+   furniture the player already reads as pressable, so the buttons are made of
+   it rather than of something new. */
+.tc-btn {
+  position: absolute;
+  width: var(--tc-sm); height: var(--tc-sm);
+  padding: 0; border: none; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--wood);
+  box-shadow:
+    0 0 0 1px var(--wood-line),
+    inset 0 2px 0 rgba(255, 226, 178, .3),
+    inset 0 -2px 0 rgba(0, 0, 0, .45),
+    0 3px 0 rgba(24, 14, 5, .7),
+    0 8px 16px -6px rgba(0, 0, 0, .8);
+  /* Nearly opaque, and it has to be. At .86 the first-person hand shows through
+     — the view model is drawn in the bottom right corner, which is exactly where
+     the two buttons a thumb reaches have to live — and a white sleeve behind a
+     brown disc turns it into a pale blob that reads as broken rather than as
+     transparent. The chips are further from it and can afford to be quieter. */
+  opacity: .94;
+  transition: opacity .14s ease;
+}
+.tc-btn.big { width: var(--tc-btn); height: var(--tc-btn); }
+.tc-btn.chip { width: var(--tc-chip); height: var(--tc-chip); opacity: .7; }
+/* Pressed. The lip goes, the face drops onto the wood and the brass lights up,
+   which is the same three things every other button in this game does. There is
+   no hover state on a touchscreen and there never can be one, so this is the
+   only feedback there is and it has to be unmistakable. */
+/* No outer glow. The first version had one and it read as a pale disc rather
+   than a pressed key: a 14px bloom around a 72px circle is most of the button
+   again, and over bright grass it washed out the timber it was supposed to be
+   sitting in. What is left is the three things a real key does — the lip goes,
+   the face darkens, the brass rim comes up — and it is legible on snow and in a
+   cave, which the glow was not. */
+.tc-btn.on {
+  opacity: 1;
+  background: linear-gradient(180deg, var(--wood-mid), var(--wood-dim));
+  box-shadow:
+    0 0 0 1px var(--wood-line),
+    0 0 0 2px rgba(226, 160, 82, .9),
+    inset 0 3px 7px rgba(14, 8, 2, .7);
+  transform: translateY(3px);
+}
+.tc-btn.on .tc-ico { background: var(--accent-hi); }
+
+.tc-ico {
+  display: block; width: 46%; height: 46%;
+  background: var(--brass);
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .65));
+}
+.ic-mine { -webkit-mask-image: url(/touch/icon-mine.svg); mask-image: url(/touch/icon-mine.svg); }
+.ic-use { -webkit-mask-image: url(/touch/icon-use.svg); mask-image: url(/touch/icon-use.svg); }
+.ic-jump { -webkit-mask-image: url(/touch/icon-jump.svg); mask-image: url(/touch/icon-jump.svg); }
+.ic-bag { -webkit-mask-image: url(/touch/icon-bag.svg); mask-image: url(/touch/icon-bag.svg); }
+.ic-pause { -webkit-mask-image: url(/touch/icon-pause.svg); mask-image: url(/touch/icon-pause.svg); }
+/* Sneak is the jump arrow turned over. Kenney ships no crouch glyph, and an
+   arrow pointing down is what the gesture is. */
+.ic-arrow { -webkit-mask-image: url(/touch/icon-arrow.svg); mask-image: url(/touch/icon-arrow.svg); }
+.ic-arrow.down { transform: rotate(90deg); }
+
+/* The cluster, right hand. Nearest the resting thumb are the two the player
+   presses every few seconds; the two that are occasional sit further in. */
+#tc-use { right: 16px; bottom: 22px; }
+#tc-mine { right: 16px; bottom: 104px; }
+#tc-jump { right: 100px; bottom: 26px; }
+#tc-sneak { right: 100px; bottom: 100px; }
+/* Sneak latches, so it also has to *look* latched while nothing is touching it.
+   The brass rim, which is the same one a selected hotbar cell wears. */
+#tc-sneak.on {
+  transform: none;
+  box-shadow: 0 0 0 1px var(--brass-line), 0 0 0 3px #e2a052, inset 0 3px 7px rgba(14, 8, 2, .7);
+}
+
+/* Bag and pause are not thumb-cluster buttons. They open a screen, which ends
+   whatever you were doing, and a screen you can open by fumbling is worse than
+   one that takes a deliberate reach. Top right, under the chips, quiet. */
+#tc-bag { right: 8px; top: 84px; }
+#tc-pause { right: 8px; top: 138px; }
+
+/* ── the chrome shrinks ────────────────────────────────── */
+/* Every cluster in the HUD is a hard-pixel layout anchored to a corner, so it
+   scales as one thing from that corner and lands exactly where it started, only
+   smaller. Rewriting two hundred rules in relative units was the alternative,
+   and it would have changed the desktop HUD, which is not what was asked for
+   and is the layout the game was tuned in.
+
+   `zoom` would be one line instead of five. It is not used because Safari only
+   grew support for it in 18, and this ships to phones. */
+body.touch #vitals { transform: scale(var(--hud-scale)); transform-origin: top left; }
+body.touch #minimap { transform: scale(var(--hud-scale)); transform-origin: top left; }
+/* The compass carries its own centring transform, so the scale composes onto it
+   the way `#bottom`'s does. It is capped against `--hud-side`, which is the map
+   frame plus a margin, and on a 393px screen that cap leaves a strip wide enough
+   to run into the chips beside it. Scaling from the top centre pulls both ends
+   back off their neighbours at once. */
+body.touch #compass {
+  transform: translateX(-50%) scale(var(--hud-scale));
+  transform-origin: top center;
+}
+body.touch #status-bar {
+  transform: scale(var(--hud-scale)); transform-origin: top right;
+  /* The chips wrap to three rows on a phone and hung off the right edge doing
+     it, because the cap was half the viewport. Two thirds, and they wrap
+     inside it. */
+  max-width: 66vw;
+}
+body.touch #bottom {
+  /* `#bottom` already carries a transform for its own centring, so the scale
+     composes onto it rather than replacing it, and the origin moves to the
+     bottom edge so the rack stays on the floor of the cluster as it shrinks. */
+  transform: translateX(-50%) scale(var(--hud-scale));
+  transform-origin: bottom center;
+  /* Lifted clear of the band the thumbs own. A hotbar under the stick is a
+     hotbar you select from by accident. */
+  bottom: var(--tc-band);
+}
+/* The crosshair does not shrink. It is already 11px, it is what you aim with,
+   and on a phone it is the only thing saying where the Mine button will act. */
+
+/* ── the Controls screen swaps sides ───────────────────── */
+/* The keyboard rows are hidden rather than removed, and the touch block is
+   revealed, so one screen serves both and neither is a fork of the other. The
+   direct-child selectors are what keeps the touch block's own heading and grid
+   out of the hiding rule: they sit one level deeper. */
+.controls-touch { display: none; }
+body.touch .controls-touch { display: block; }
+body.touch #controls .panel-body > .ctl-head,
+body.touch #controls .panel-body > .controls-grid { display: none; }

@@ -3,6 +3,7 @@
 // never snaps.
 
 import { BIOME } from '../world/Constants.js';
+import { snowLine } from './Seasons.js';
 
 /**
  * `fog` tops out at 1.9 because that is where it stops reaching anything.
@@ -84,7 +85,14 @@ export class Weather {
 
     // Deep winter freezes everywhere; the shoulder seasons only push the
     // snowline down the mountains rather than flipping the whole planet.
-    this.cold = COLD_BIOMES.has(biomeId) || altitude > 9 - chill * 9 || chill > 0.75;
+    //
+    // `snowLine` is that middle clause, unchanged, moved to Seasons.js so the
+    // ground cover and the falling precipitation are answering one question
+    // with one number. The biome clause stays here and is deliberately NOT part
+    // of it: a cold biome makes it *snow* at any height, which is a fact about
+    // the sky, while how much of that snow survives on the ground is the
+    // altitude question `snowLine` answers.
+    this.cold = COLD_BIOMES.has(biomeId) || altitude > snowLine(chill) || chill > 0.75;
     this.type = this.cold ? 'snow' : 'rain';
 
     // lightning during storms

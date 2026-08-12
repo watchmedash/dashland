@@ -33,7 +33,7 @@ import { IconFactory } from './ui/Icons.js';
 import { Inventory, Slot, HOTBAR, useKind } from './game/Inventory.js';
 import { Drops } from './game/Drops.js';
 import { Weather } from './game/Weather.js';
-import { Seasons } from './game/Seasons.js';
+import { Seasons, snowLine } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import * as MobModels from './game/MobModels.js';
 import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
@@ -592,6 +592,78 @@ const FREEZE_RADIUS = 24;
  * metres is about "the water at your feet" and nothing else; see `_iceHeard`.
  */
 const ICE_EARSHOT = 5;
+
+// --- seasonal snow cover -----------------------------------------------------
+/**
+ * Seconds between passes, columns sampled per pass, and cells changed per pass.
+ *
+ * Sized against the ice sweep beside it rather than picked fresh, because both
+ * are the same shape of work and the worker pays the same price for each cell:
+ * an edit batch relights a radius of 17 around every seed and remeshes every
+ * chunk that moved. Ice does 14 cells per 1.1s; this does 12 per 0.6s, so the
+ * two together stay in the bracket one of them used to occupy alone. That is
+ * 20 cells a second at the very most, and only while there is anything left to
+ * change: once the ground around you agrees with the season, every pass is a
+ * scan that finds nothing and emits no batch at all, which is the state it
+ * spends most of the year in.
+ *
+ * A 24-column radius is 2 400 columns, so a full change of state over the whole
+ * neighbourhood takes about two minutes of play. That is the feature and not a
+ * budget compromise: snow that appeared everywhere at once on the stroke of
+ * winter would read as a graphics setting being toggled. It creeps out from
+ * wherever you are standing, exactly as the lake ice does.
+ */
+const SNOW_PERIOD = 0.6;
+const SNOW_SCAN = 200;
+const SNOW_BATCH = 12;
+/** How far from the player the season is allowed to work, in columns. */
+const SNOW_RADIUS = 24;
+/**
+ * Hysteresis, in blocks of altitude, either side of the snowline.
+ *
+ * The same argument as FREEZE_AT/THAW_AT: the line sweeps 9 blocks over a third
+ * of a season, so without a dead band the columns sitting exactly on it would
+ * be melted by one pass and re-frozen by the next for as long as it took the
+ * line to walk past them. A block and a half of band costs a little sharpness
+ * at the edge of the snowfield and buys a boundary that only ever moves one way.
+ */
+const SNOW_BAND = 1.5;
+/**
+ * How many cells the season may be holding an undo for at once.
+ *
+ * Every seasonal change records what it replaced, and that record is the only
+ * thing that makes the effect reversible rather than erosive: without it, grass
+ * that freezes over comes back as the dirt underneath and a planet loses its
+ * topsoil one year at a time. So the rule is that the season never changes a
+ * block it cannot undo, and when this table is full it simply stops changing
+ * blocks until a thaw or a freeze hands entries back.
+ *
+ * 4 000 is a little over one neighbourhood's worth of ground (a 24-column
+ * radius holds 2 400 columns, and only the ones that actually cross the line
+ * are recorded), and it is 32 KB in the save as a flat pair array. The cap is
+ * doing two jobs at once and that is on purpose: it bounds the memory, and it
+ * bounds the part of the save this feature can grow.
+ */
+const SNOW_MEMORY = 4000;
+/**
+ * Ground the season is allowed to bury and to uncover.
+ *
+ * A whitelist rather than "anything solid", because this pass runs unattended
+ * over ground a player may have built on. Planks, brick, farmland and ore are
+ * all absent, so a stone path stays a stone path and a field is never quietly
+ * turned to snow and back to plain dirt. Ice of every kind is absent too: ice
+ * is water's business and `_tickFreeze` already owns it, and snow lying on a
+ * glacier has nothing underneath it that a thaw could honestly hand back.
+ *
+ * `snow_brick` is not here either, and that is the same rule the ice thaw
+ * states for itself: what the season put down is the season's to take away. A
+ * built wall of snow bricks is not weather.
+ */
+const IS_SEASON_GROUND = new Uint8Array(N_BLOCKS);
+for (const n of ['grass', 'dirt', 'coarse_dirt', 'podzol', 'peat', 'stone',
+  'gravel', 'clay', 'mud', 'sand', 'red_sand', 'moss_block']) {
+  IS_SEASON_GROUND[ID[n]] = 1;
+}
 /**
  * Falling sand: seconds between passes, and columns settled per pass.
  *
@@ -1084,6 +1156,23 @@ class Game {
      * house on the first warm day. Only what winter froze is winter's to melt.
      */
     this.frozen = new Set();
+    /**
+     * Cells the season has covered in snow or uncovered, keyed like the rest,
+     * each holding the block that was there before it did.
+     *
+     * The same argument as `frozen` and one step further. Ice only has to know
+     * *which* cells winter took, because a thaw can only ever give back water;
+     * snow has to know what it took as well, because the ground under a
+     * snowfield is grass in a meadow, gravel in scree and packed earth in the
+     * tundra, and a season that guessed would flatten all three to dirt over a
+     * couple of years. Reading the column at the time of the melt is what the
+     * melt does when it has no memory of the cell; this is what keeps the round
+     * trip exact when it does.
+     *
+     * Bounded by `SNOW_MEMORY`, which is also the bound on what this feature
+     * can add to a save.
+     */
+    this.seasonSnow = new Map();
     /** Placed hearths, keyed like the rest. See _refreshWards. */
     this.hearths = new Set();
     /** Has the planet already given up its one hearth? */
@@ -1897,6 +1986,7 @@ class Game {
     this.signs.clear();
     this.signSeq++;
     this.frozen.clear();
+    this.seasonSnow.clear();
     this.hearths.clear();
     this.coreFound = false;
     // Cleared with the rest of the world state so a new world cannot inherit
@@ -2538,6 +2628,13 @@ class Game {
       this.signs = new Map(save.signs || []);
       this.signSeq++;
       this.frozen = new Set(save.frozen || []);
+      // Saves written before seasonal snow existed have no table, and a world
+      // that loads without one is not wrong - it is a world whose snow is
+      // wherever the generator and the last session left it, with the season
+      // free to move it from there.
+      this.seasonSnow = new Map();
+      const skin = save.seasonSnow;
+      if (skin) for (let n = 0; n + 1 < skin.length; n += 2) this.seasonSnow.set(skin[n], skin[n + 1]);
       this.hearths = new Set(save.hearths || []);
       this.coreFound = !!save.coreFound;
       // A world started on hard loads as hard. Saves written before this
@@ -3221,6 +3318,14 @@ class Game {
     return { regions, blocks };
   }
 
+  /** `seasonSnow` as [cell, blockBefore, cell, blockBefore, ...]. */
+  _saveSeasonSnow() {
+    const out = new Int32Array(this.seasonSnow.size * 2);
+    let n = 0;
+    for (const [key, id] of this.seasonSnow) { out[n++] = key; out[n++] = id; }
+    return out;
+  }
+
   _savePayload() {
     const c = this.player.cell;
     return {
@@ -3334,6 +3439,12 @@ class Game {
       home: this.homeSpawn ? [this.homeSpawn.col, this.homeSpawn.k] : null,
       signs: [...this.signs],
       frozen: [...this.frozen],
+      // Flat pairs in a typed array rather than the array of two-element arrays
+      // `frozen` gets away with: this table is up to `SNOW_MEMORY` entries and
+      // a structured clone of 4 000 little arrays is both fatter on disk and
+      // slower to write than 8 000 int32s. 32 KB at the ceiling, and a save
+      // that has never seen a winter carries an empty one.
+      seasonSnow: this._saveSeasonSnow(),
       hearths: [...this.hearths],
       coreFound: this.coreFound,
       // Top level rather than inside `player`: how hard the animals hit is a
@@ -5051,6 +5162,7 @@ class Game {
       this._settleGravity();
     });
     this._safeTick('freeze', () => this._tickFreeze(dt));
+    this._safeTick('snowcover', () => this._tickSeasonSnow(dt));
     // Hunger, healing and stamina, all three of which are about a body.
     if (!ghost) this._safeTick('vitals', () => this._tickVitals(dt));
     this._safeTick('grace', () => this._tickGrace(dt));
@@ -5696,6 +5808,210 @@ class Game {
       edits.push({ col, k, id: ID.water });
     }
     if (edits.length) { this._applyEdits(edits); this._iceHeard(edits, false); }
+  }
+
+  /**
+   * The ground under the snowline goes white, and the ground above it comes
+   * back. The seasons' other half.
+   *
+   * Everything else the season touched was a modifier on something that was
+   * already moving: the tint of a leaf, the speed of a crop, whether falling
+   * water lands as rain or as snow. The snow *blocks* were terrain, laid once
+   * by the generator and permanent for ever after, so the snowline in
+   * `Weather` slid up and down a mountain that never changed colour. This is
+   * the part that makes the year mean something on the ground.
+   *
+   * Three rules, and each of them is a bound rather than a preference:
+   *
+   *  - **Near the player only** (`SNOW_RADIUS`), sampled rather than swept,
+   *    exactly as the lake ice is. A sweep of the planet is not a bigger
+   *    version of this feature, it is a different one: it would take every
+   *    region on the map out of "the generator can make this again" and into
+   *    the save.
+   *  - **Twelve cells a pass**, so a season turning costs the same as a lake
+   *    freezing over and never lands a hundred edits on the mesher at once.
+   *  - **Nothing it cannot undo.** See `seasonSnow`. A pass that runs out of
+   *    memory stops rather than making a change it cannot take back.
+   *
+   * ---- why this does not go through `_applyEdits` ----
+   *
+   * `_applyEdits` marks the region edited, which is what puts a region into the
+   * save, and that is right for every block a *player* changes: the generator
+   * cannot make it again. It is wrong for this one. A snow veneer is a function
+   * of terrain the seed already describes and of a season the save already
+   * stores, so both ends of it can be worked out again from a save that says
+   * nothing about it — and it moves over the whole neighbourhood twice a year,
+   * so marking it would put every region the player has ever *stood in* into
+   * the save and undo the fix that took a save from 11.3 MB to 25 KB.
+   *
+   * So `_applySeasonEdits` writes the block, tells the worker, and patches the
+   * occlusion volume, and stops there. What a reload actually looks like:
+   * unedited regions come back the way the generator makes them — snowy — and
+   * this pass restates the season over them within a couple of minutes of
+   * standing there, from the memory that *is* saved. Regions the player has
+   * built in are stored with whatever cover they had at the moment of the save,
+   * which is also right, and the memory undoes it exactly when the year turns.
+   *
+   * ---- and why it does not flicker ----
+   *
+   * A region is generated once per session and never again: the worker's
+   * `ensureRegions` skips anything with `hasDecor` set, and the main thread's
+   * mirror is a full-planet array that eviction does not touch — only chunk
+   * *meshes* are evicted, and a mesh is rebuilt from the mirror. So walking
+   * away from a melted hillside and coming back cannot regenerate its snow. The
+   * one place the generator gets to answer again is a fresh load of the world,
+   * which is the paragraph above.
+   */
+  _tickSeasonSnow(dt) {
+    this._snowT = (this._snowT ?? 0) - dt;
+    if (this._snowT > 0) return;
+    this._snowT = SNOW_PERIOD;
+    // Which way the season is working, on the ice pass's thresholds and for the
+    // ice pass's reason - a shared pair of numbers rather than a second set,
+    // because "cold enough that winter acts" is one question and the lake
+    // beside the hill had better not answer it differently from the hill.
+    //
+    // The direction has to be the season's rather than the altitude's, and that
+    // is worth being plain about, because it was written the other way first
+    // and measured: with both branches live at once, a *summer* pass covers
+    // every ridge above its own line, so high ground gains snow in July, keeps
+    // it, and the drift and gravel the generator textured the cap with are gone
+    // for good. Snow is added while the year is cold and taken away while it is
+    // warm; nothing above the summer line is ever uncovered, which is what a
+    // permanent snowline is, and nothing below it stays white through a summer.
+    const chill = this.seasons.cold;
+    const freezing = chill >= FREEZE_AT;
+    const thawing = chill <= THAW_AT;
+    if (!freezing && !thawing) return;
+    // The same snowline the sky uses, one number for the whole planet and one
+    // read for the whole pass. Each column is then asked about the altitude of
+    // its own ground rather than about the player's.
+    const line = snowLine(chill);
+    const c = this.player.cell;
+    const base = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    const edits = [];
+    /**
+     * Cells this pass has already decided about, and it is not an optimisation.
+     *
+     * The sampling is random over a 2 400-column disc, so 200 draws collide with
+     * themselves a dozen times a pass, and the batch is not written into the
+     * world until the end - which means the second draw on a column reads the
+     * block from *before* the first draw and the memory from *after* it. That
+     * combination is the one state this pass must never be in: a thaw that has
+     * just restored the grass it took, and deleted its note saying so, is read
+     * by the duplicate as a snow cell nobody remembers, and it is uncovered a
+     * second time down to the subsoil. Measured over one forced year on seed
+     * 4242: 23 of about 800 thawed columns came back as the block *under* the
+     * one they started as - 16 of coarse dirt turned to peat, and the rest of
+     * grass, gravel and stone turned to dirt.
+     *
+     * `_crushCrowded` keys its condemned cells by cell index for the same
+     * reason. One pass, one decision per cell.
+     */
+    const seen = new Set();
+    for (let n = 0; n < SNOW_SCAN && edits.length < SNOW_BATCH; n++) {
+      const di = Math.round((Math.random() * 2 - 1) * SNOW_RADIUS);
+      const dj = Math.round((Math.random() * 2 - 1) * SNOW_RADIUS);
+      const col = stepColumn(base, di, dj);
+      if (col < 0 || !this.planet.liveCol(col)) continue;
+      const k = this._seasonGroundK(col);
+      if (k < 0) continue;
+      const cur = this.planet.at(col, k);
+      const isSnow = cur === ID.snow;
+      if (!isSnow && !IS_SEASON_GROUND[cur]) continue;
+      const alt = R_MIN + k - R_SEA;
+      const key = col * D + k;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const was = this.seasonSnow.get(key);
+      if (freezing && !isSnow && alt > line + SNOW_BAND) {
+        // Cold enough for this column, and it is bare. Either we took the snow
+        // off it and are putting it back, or this is ground that has never been
+        // under snow and we have to remember what it is.
+        if (was === ID.snow) this.seasonSnow.delete(key);
+        else if (this.seasonSnow.size < SNOW_MEMORY) this.seasonSnow.set(key, cur);
+        else continue;
+        edits.push({ col, k, id: ID.snow });
+      } else if (thawing && isSnow && alt < line - SNOW_BAND) {
+        let to = was;
+        if (to !== undefined && to !== ID.snow) {
+          this.seasonSnow.delete(key);
+        } else {
+          // Snow the generator laid. What is under it is what a thaw uncovers,
+          // read off the column rather than assumed: dirt under a snowfield,
+          // gravel under a drift, stone on a ridge. If what is under it is not
+          // ground this pass is allowed to expose - packed ice, most often,
+          // which is a glacier and not a snowfall - it stays where it is.
+          to = this.planet.at(col, k - 1);
+          if (!IS_SEASON_GROUND[to]) continue;
+          if (this.seasonSnow.size >= SNOW_MEMORY) continue;
+          this.seasonSnow.set(key, ID.snow);
+        }
+        edits.push({ col, k, id: to });
+      }
+    }
+    if (edits.length) this._applySeasonEdits(edits);
+  }
+
+  /**
+   * The top of the ground in a column, with open air over it, or -1.
+   *
+   * Not `Planet.surfaceK`, and the difference matters twice over. That one
+   * scans the whole 99-layer column from the top down, which is 200 columns'
+   * worth of scanning per pass here for an answer the height field already
+   * knows; and it reports the top of whatever is *standing* on the ground, so
+   * under a tree it hands back the canopy and under a lake it hands back the
+   * bed with ten feet of water over it.
+   *
+   * A short window around `colHeight` answers both. Starting three layers above
+   * the generated height and giving up seven below it, the first non-air cell
+   * found is the ground and everything above it inside the window is air by
+   * construction - which is the sky test as well, for free: a cave floor, a
+   * cellar and the soil under somebody's floorboards are all far enough from
+   * the height field that the window never reaches them, and a trunk or a
+   * flower standing on the ground is found before the ground is and refuses the
+   * column. Snow does not fall through a roof and it does not settle between
+   * the roots of a tree.
+   */
+  _seasonGroundK(col) {
+    const top = Math.min(D - 2, Math.floor(this.planet.colHeight[col] - R_MIN) + 3);
+    const low = Math.max(1, top - 7);
+    for (let k = top; k >= low; k--) {
+      if (this.planet.at(col, k) === 0) continue;
+      return k < top ? k : -1;
+    }
+    return -1;
+  }
+
+  /**
+   * Write a seasonal batch into the world without claiming the player made it.
+   *
+   * The three things every edit has to do - the mirror, the worker's copy, and
+   * the occlusion volume the shader marches - and none of the four cascades
+   * `_applyEdits` runs afterwards, because none of them can fire here. Nothing
+   * in this batch crowds a cactus: snow and soil are ordinary full blocks and
+   * `NEEDS_ROOM` names neither. Nothing loses its floor: the cell above is air,
+   * which `_seasonGroundK` has already established, so there is no plant to
+   * drop. Nothing is roofed over: the cell above is still air afterwards.
+   * Nothing falls: a swap in place changes no support, and the block that was
+   * there was holding up whatever is above it just as well. And no lava is
+   * involved, so `_meltSnow` - which is the other, unrelated rule about snow
+   * disappearing - has nothing to say either.
+   *
+   * `editedRegions` is the deliberate omission. See `_tickSeasonSnow`.
+   */
+  _applySeasonEdits(edits) {
+    for (const e of edits) {
+      // A block change can still open or close a path for water, and the flow
+      // sim is cheap to tell.
+      this.water?.onEdit(e.col, e.k);
+      this.planet.setAt(e.col, e.k, e.id);
+      // Neither snow nor any ground in `IS_SEASON_GROUND` is directional, so
+      // this only ever clears a stale entry - which is exactly what it is for.
+      this.planet.applyFacing(e.col, e.k, e.id);
+    }
+    this.worldWorker.postMessage({ type: 'edit', edits, id: ++this.editSeq });
+    this._patchOcclusion(edits);
   }
 
   /** Hand the current season to the shader that colours the world. */

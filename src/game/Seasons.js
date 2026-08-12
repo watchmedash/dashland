@@ -61,6 +61,41 @@ for (const s of TABLE) {
 }
 
 /**
+ * The altitude, in blocks above sea level, at and above which ground stays
+ * under snow.
+ *
+ * This is the one number the whole snow system turns on, and it lives here
+ * rather than inside Weather or inside the game loop because two separate rules
+ * read it: whether falling water arrives as snow (`Weather.update`) and whether
+ * the ground itself is white (`Game._tickSeasonSnow`). Those two have to agree.
+ * Snow settling onto bare grass, or a snowfield standing in the rain, is the
+ * kind of disagreement a player reads as a bug rather than as weather, and two
+ * copies of one threshold is how a threshold drifts away from itself.
+ *
+ * Summer puts the line at 9, which is the shoulder of the mountains: mean land
+ * is R_SURFACE and alpine ground begins 3.8 above it, so 9 leaves the peaks
+ * white through the warm half of the year and clears everything below them.
+ * Winter walks it down to 0, which is sea level, so in deep winter every land
+ * column is under snow. That 9-to-0 sweep is not new and not invented here: it
+ * is the expression Weather already carried inline, moved rather than rewritten,
+ * kept to the digit so lifting it out changes nothing about the sky.
+ *
+ * There is no separate, lower line for the poles, and it was tried: giving the
+ * SNOW and TUNDRA biomes a six-block discount, on the reasoning that ground
+ * frozen by latitude should not answer to a season the way a mountainside does.
+ * Measured on seed 4242, standing in the ice cap, it made the whole feature
+ * invisible. The snow around that spot lies between altitude 3 and 15 with the
+ * bulk of it at 8 to 12 — a *cap* is high ground, that is what makes it cold —
+ * so a summer line at 3 left 355 of 359 snow columns untouched. One line for
+ * the whole planet retreats the cap to its high half in high summer and takes
+ * it back down to sea level in deep winter, which is the seasonal effect this
+ * is for, and it is one number rather than two that have to be kept in step.
+ *
+ * @param {number} chill 0..1, the season's `cold`.
+ */
+export const snowLine = (chill) => 9 - chill * 9;
+
+/**
  * How much of a season is spent easing into the next.
  *
  * Seasons that switch on a day boundary announce themselves as a bug — the

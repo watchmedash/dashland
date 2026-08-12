@@ -3461,6 +3461,49 @@ class Game {
    * first time you walk into render range. Whether worldgen should be spacing
    * them out at all is a question for WorldGen.
    */
+  /**
+   * Melt snow and ice that lava has just come to rest against.
+   *
+   * Lava flows - the same simulation water uses, at three cells to water's six
+   * - so it arrives beside a snowfield on its own, and a snowbank sitting flush
+   * against it unbothered is the one place the world visibly does not believe
+   * its own lava. Everything else already treats it as heat: it refuses a
+   * cactus, it kills what walks in, it lights the cave it is in.
+   *
+   * Water is deliberately NOT a melter and this is the whole of why: a snowbank
+   * against a cold lake is what a snow biome looks like, and melting on contact
+   * would eat every shoreline in the tundra back from the water. Heat melts
+   * snow; cold water sits next to it.
+   *
+   * Snow goes to air rather than to water, and that is a choice with a reason:
+   * water quenches lava (source to obsidian, flow to cobblestone), so melting
+   * into water would have a glacier meeting a lava lake convert the whole face
+   * of it to stone in a cascade. Steam is the honest picture and it leaves the
+   * lava alone. ICE is the exception - ice is frozen water and melts back into
+   * water, which then quenches, because that is a pond and not a snowfield.
+   *
+   * Runs after the edits are in the world, on the same terms as
+   * `_crushCrowded`, and only over cells beside something newly lava - four
+   * `at` calls per edit, and a normal edit is one block.
+   */
+  _meltSnow(edits) {
+    let melted = null;
+    for (const e of edits) {
+      if (e.id !== ID.lava) continue;
+      for (let d = 0; d < 6; d++) {
+        const nb = d < 4 ? colNeighbor(e.col, d) : e.col;
+        const k = d < 4 ? e.k : (d === 4 ? e.k + 1 : e.k - 1);
+        if (nb < 0 || k < 0 || k >= D) continue;
+        const id = this.planet.at(nb, k);
+        const to = (id === ID.snow || id === ID.snow_brick) ? 0
+          : (id === ID.ice || id === ID.packed_ice || id === ID.blue_ice) ? ID.water : -1;
+        if (to < 0) continue;
+        (melted ??= []).push({ col: nb, k, id: to });
+      }
+    }
+    if (melted) this._applyEdits(melted);
+  }
+
   _crushCrowded(edits) {
     let doomed = null;
     for (const e of edits) {
@@ -3641,6 +3684,7 @@ class Game {
     // in the world and posted to the worker before the cactus beside it comes
     // down, or the two changes race in the mesher over the same chunk.
     this._crushCrowded(edits);
+    this._meltSnow(edits);
     // Then whatever those edits left standing on nothing. After crushing rather
     // than before, so that a segment crushed out of the middle of a stack takes
     // the rest of the column with it — the crush re-enters here with its own

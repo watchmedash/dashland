@@ -1081,33 +1081,161 @@ G.pumpkin_top = (s) => {
   return s;
 };
 
+// A cactus is three things, and the old tile had one and a half of them.
+//
+// It had ribs as `|sin(3πu)|` written straight into the colour, which is a
+// smooth sine — a vertical GRADIENT, not a rib. A saguaro's section is a
+// scallop: a broad flat crest that catches the whole sky, then a groove that
+// falls away sharply and sits in its own shadow. `crest` is that profile,
+// smoothstepped hard so the groove is a narrow dark line and the crest is wide
+// and even, and it drives ao and height as well as albedo so the break is there
+// in the shading and not only in the paint. That is the "no shading break".
+//
+// It had spines as an axis-aligned rectangle — `|((3u) mod 1) - 0.5| < 0.06`
+// against `((8v) mod 1) < 0.12` — which is why they read as printed dashes
+// rather than as anything growing on the plant. Spines grow from an AREOLE, a
+// woolly pad, and they radiate from it. Both are drawn in polar coordinates
+// about the pad's own centre, on a grid measured in TILE space rather than in
+// rib space, so a pad is round rather than stretched three to one by the rib
+// count, and alternate ribs are offset half a row so the pads do not line up
+// into bands across the block.
+//
+// SIZE is the whole of whether that reads as a plant or as a motif. The first
+// attempt gave each pad a 0.026 radius with six needles out to 0.062 — on a
+// 256px tile that is a 32px asterisk, twenty-four of them in a regular lattice,
+// and baked it came out as snowflakes on Christmas wrapping paper. A spine
+// cluster on a real saguaro is a fleck: it is the TEXTURE of the surface, not a
+// feature on it. Everything below is roughly a third of that first size, with
+// more of them, and the needles fan downward rather than radiating evenly,
+// which is both what they do and what keeps them from closing into a star.
+//
+// And it was too saturated: 40,88,42 to 96,148,70 is an emerald, and the recon
+// pass called it "more saturated than anything else in frame" standing in a
+// desert whose sand is 236,184,128. A desert succulent is a dusty blue-green —
+// it carries a wax bloom that scatters the sky back. The palette keeps the same
+// luminance band (the block still has to read as green from across a canyon)
+// and moves the hue toward sage. Not further: taken all the way to r-b 5 it
+// stopped reading as a plant at all and became a painted post, so this sits
+// halfway, at r-b ~10 against the old 15.
+const CACTUS_RIBS = 3;
+/**
+ * The scallop profile across the ribs, 0 in the groove and 1 on the crest.
+ * Shared with `cactus_top` so the cap's edge scallops line up with the flank's
+ * grooves — a cactus whose top does not agree with its sides is a green box.
+ *
+ * `pow` and not a second smoothstep. The crest of a rib is a CYLINDER seen
+ * side-on: it falls away gently either side of its ridge and then plunges into
+ * the groove, so the profile wants to be rounded over most of its width and
+ * steep only at the very bottom. A smoothstep is flat at both ends, which gave
+ * three wide even bands with soft edges — a gradient again, which is the defect.
+ */
+function cactusCrest(u) {
+  return Math.pow(Math.abs(Math.sin(u * Math.PI * CACTUS_RIBS)), 0.55);
+}
+/** The hard dark line at the bottom of a groove, where two ribs meet. */
+function cactusGroove(u) {
+  return smoothstep(0.16, 0.0, Math.abs(Math.sin(u * Math.PI * CACTUS_RIBS)));
+}
+/** Stable per-cell hash, so an areole can be nudged off the lattice. */
+function cellHash(a, b) {
+  let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
 G.cactus_side = (s) => {
-  const f = fbm(s.size, 22, 3, 851);
+  const f = fbm(s.size, 30, 3, 851);
+  const bloom = fbm(s.size, 9, 3, 853);      // uneven wax, so a face is not flat
+  const ROWS = 11;
   s.each((i, x, y, u, v) => {
-    const rib = Math.abs(Math.sin(u * Math.PI * 3));
-    const n = rib * 0.7 + f[i] * 0.3;
-    let c = mixc(px([40, 88, 42]), px([96, 148, 70]), n);
-    const spineX = Math.abs(((u * 3) % 1) - 0.5) < 0.06;
-    const spineY = ((v * 8) % 1) < 0.12;
-    if (spineX && spineY) c = px([232, 228, 190]);
+    const crest = cactusCrest(u);
+    const flesh = crest * 0.74 + f[i] * 0.16 + bloom[i] * 0.10;
+    let c = mixc(px([36, 62, 42]), px([116, 156, 96]), flesh);
+    c = mixc(c, px([22, 40, 30]), cactusGroove(u) * 0.8);
+    let h = crest * 0.86 + f[i] * 0.08;
+    let ao = 0.44 + crest * 0.56;
+    let rough = 0.70;
+
+    // --- areole and spines, in polar coordinates about the pad -------------
+    // `ru`/`rv` are the cell coordinates and dx/dy convert them back to tile
+    // space, so a pad is round rather than stretched by the cell's aspect.
+    const ribI = Math.floor(u * CACTUS_RIBS);
+    const rowOff = (ribI & 1) * 0.5;
+    const ru = (u * CACTUS_RIBS) % 1;
+    const rv = (v * ROWS + rowOff) % 1;
+    // A saguaro's areoles really do run in rows up the ribs, so the lattice is
+    // right; a perfect lattice is not.
+    const rowI = Math.floor(v * ROWS + rowOff);
+    const jx = (cellHash(ribI, rowI) - 0.5) * 0.30;
+    const jy = (cellHash(rowI, ribI + 31) - 0.5) * 0.24;
+    const dx = (ru - 0.5 - jx) / CACTUS_RIBS, dy = (rv - 0.5 - jy) / ROWS;
+    const d = Math.hypot(dx, dy);
+    const pad = smoothstep(0.011, 0.005, d);
+    // The needles fan DOWN, not out: `a` is measured from straight down and the
+    // fan is a cosine window on it, so a cluster is a tuft with a direction
+    // rather than a symmetric star. `sin(a * 2.5)` puts five needles inside the
+    // fan; the exponent keeps them one or two texels wide.
+    const a = Math.atan2(dy, dx) - Math.PI / 2;
+    const fan = Math.max(0, Math.cos(a * 0.8));
+    const ray = Math.pow(Math.abs(Math.sin(a * 2.5)), 26) * fan;
+    const spine = ray * smoothstep(0.007, 0.011, d) * smoothstep(0.024, 0.017, d);
+    if (pad > 0.01) {
+      c = mixc(c, px([182, 176, 148]), pad * 0.9);
+      h = lerp(h, 0.94, pad); ao = lerp(ao, 0.66, pad); rough = lerp(rough, 0.95, pad);
+    }
+    if (spine > 0.01) {
+      c = mixc(c, px([214, 208, 176]), spine * 0.85);
+      h = lerp(h, 0.99, spine); rough = lerp(rough, 0.55, spine);
+    }
     setRGB(s, i, c);
-    s.h[i] = n;
-    s.rough[i] = 0.8;
-    s.ao[i] = 0.6 + rib * 0.4;
+    s.h[i] = h; s.ao[i] = ao; s.rough[i] = rough;
   });
-  s.normalStrength = 1.8;
+  s.normalStrength = 2.2;
   return s;
 };
+/**
+ * The cut top of a cactus: a scalloped green rind around a pale wet pith, with
+ * the pith's fibres running out radially toward the ribs.
+ *
+ * The old version was `1 - distance from centre` over noise — a green dome, and
+ * the recon shot of it is a soft square with a lighter middle that says nothing
+ * about which block it caps.
+ *
+ * The frame is CHEBYSHEV distance, not Euclidean, and that is the whole of why
+ * the first rewrite of this failed as well. A block's top is a square, its rind
+ * follows all four edges at a constant width, and a Euclidean radius drawn on a
+ * square leaves the corners a third further out than the edge midpoints — which
+ * baked as a blurred four-pointed cross. Chebyshev gives a square band of even
+ * width, and the rib phase then bends it in and out along whichever edge is
+ * nearest, so a stack of cactus blocks has its cap notches in line with the
+ * grooves running up its flanks.
+ *
+ * Everything here is quiet on purpose, and the second attempt was not. It had a
+ * hard dark line drawn along the rind's inner boundary and a nine-fold spoke
+ * pattern across the pith, and at three ribs to an edge those two turned the
+ * cap into a four-petal ornament with a sunburst in it — a tile you would put
+ * on a bathroom wall. This is a one-block cap seen from above at the top of a
+ * plant: a green rim, a pale middle, a soft boundary, and no drawing.
+ */
 G.cactus_top = (s) => {
-  const f = fbm(s.size, 14, 3, 861);
+  const f = fbm(s.size, 20, 3, 861);
+  const fibre = fbm(s.size, 34, 2, 863);
   s.each((i, x, y, u, v) => {
-    const d = Math.hypot(u - 0.5, v - 0.5) * 2;
-    const c = mixc(px([56, 106, 50]), px([110, 160, 78]), f[i] * 0.7 + (1 - d) * 0.3);
+    const eu = Math.abs(u - 0.5) * 2, ev = Math.abs(v - 0.5) * 2;
+    const cheb = Math.max(eu, ev);                       // 0 centre, 1 at edge
+    // the nearer edge decides the phase; its crest pushes the rind outward
+    const scallop = eu > ev ? cactusCrest(v) : cactusCrest(u);
+    const r = cheb - scallop * 0.06;
+    const rind = smoothstep(0.44, 0.78, r);              // 1 on the green rim
+    const pith = smoothstep(0.62, 0.34, r);              // 1 in the wet middle
+    let c = mixc(px([112, 146, 102]), px([80, 118, 78]), f[i]);
+    c = mixc(c, mixc(px([46, 74, 50]), px([88, 124, 82]), f[i]), rind * 0.85);
+    c = mixc(c, mixc(px([150, 172, 136]), px([194, 206, 176]), fibre[i]), pith * 0.80);
     setRGB(s, i, c);
-    s.h[i] = 1 - d * 0.5;
-    s.rough[i] = 0.82;
-    s.ao[i] = 0.7 + (1 - d) * 0.3;
+    s.h[i] = 0.34 + pith * 0.44 - rind * 0.2;
+    s.rough[i] = 0.88 - pith * 0.24;                     // the cut face is damp
+    s.ao[i] = 0.64 + pith * 0.28 - rind * 0.12;
   });
+  s.normalStrength = 1.3;
   return s;
 };
 

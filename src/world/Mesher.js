@@ -254,6 +254,9 @@ class Group {
   constructor() {
     this.pos = new Buf(3); this.nrm = new Buf(3); this.tan = new Buf(3);
     this.uv = new Buf(2); this.aux = new Buf(4); this.blk = new Buf(3); this.tint = new Buf(3);
+    // How far this quad's uv runs, so a fragment can tell where its own quad
+    // begins and ends. See the note beside `quadSize` in `emit`.
+    this.qsz = new Buf(2);
     this.idxb = new IBuf(); this.verts = 0;
   }
   get empty() { return this.verts === 0; }
@@ -261,7 +264,7 @@ class Group {
     return {
       position: this.pos.out(), normal: this.nrm.out(), tangent: this.tan.out(),
       uv: this.uv.out(), aux: this.aux.out(), blockLight: this.blk.out(),
-      tint: this.tint.out(), index: this.idxb.out(),
+      tint: this.tint.out(), quadSize: this.qsz.out(), index: this.idxb.out(),
     };
   }
 }
@@ -646,6 +649,21 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       g.nrm.push3(_n[0], _n[1], _n[2]);
       g.tan.push3(_t[0], _t[1], _t[2]);
       g.uv.push2(uv[(c + uvRot) & 3][0], uv[(c + uvRot) & 3][1]);
+      // The quad's own uv extent, carried per vertex because a fragment cannot
+      // recover it: `uv` above runs 0..uMax by 0..vMax, and those are whole
+      // numbers for a greedy-merged cube face (one unit per cell) but a
+      // FRACTION for a shaped block, whose quad covers only part of its tile.
+      // The mining crack overlay is the only consumer — see BREAK_FRAG. Without
+      // this it samples the crack at fract(uv), which is a clean 0..1 only when
+      // the quad happens to be whole cells, so a slab's side face drew half the
+      // pattern with its centre on the top edge and a stair drew that same half
+      // twice, once per box.
+      //
+      // Not for the torch, which is the test case this was wrongly chased with
+      // twice: `rt === R_TORCH` above skips the voxel path entirely, so a torch
+      // has no quads here at all and is drawn by BlockModels with a material
+      // that never includes BREAK_FRAG. No uv arithmetic can crack one.
+      g.qsz.push2(uMax, vMax);
       // The fraction of aux.w is how much of the wave this vertex takes and the
       // integer part is which wave it is, so the amount is scaled by 0.99 and
       // never reaches 1: a full-strength water vertex at 3.0 would floor to 3
@@ -1050,6 +1068,8 @@ function emitCross(g, f, i, j, k, col, id, biomeId, light) {
       g.nrm.push3(upx, upy, upz);
       g.tan.push3(ax, ay, az);
       g.uv.push2(uvp[c][0], uvp[c][1]);
+      // A cross plant's two planes each span their tile exactly once.
+      g.qsz.push2(1, 1);
       g.aux.push4(layer, 1.0, sl, 1 + (sv > 0 ? 0.99 : 0.04));
       g.blk.push3(br, bg, bb);
       g.tint.push3(tint[0], tint[1], tint[2]);

@@ -317,6 +317,7 @@ export class Planet {
       geo.setAttribute('aux', new THREE.BufferAttribute(payload.aux, 4));
       geo.setAttribute('blockLight', new THREE.BufferAttribute(payload.blockLight, 3));
       geo.setAttribute('tint', new THREE.BufferAttribute(payload.tint, 3));
+      geo.setAttribute('quadSize', new THREE.BufferAttribute(payload.quadSize, 2));
       geo.setIndex(new THREE.BufferAttribute(payload.index, 1));
       // Before the arrays are released: this is the one thing on the main thread
       // that does read them, and the sphere it computes is what frustum culling

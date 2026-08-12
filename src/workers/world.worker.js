@@ -94,7 +94,8 @@ function transfers(groups, crossLight) {
   for (const g of groups) {
     if (!g) continue;
     t.push(g.position.buffer, g.normal.buffer, g.tangent.buffer, g.uv.buffer,
-      g.aux.buffer, g.blockLight.buffer, g.tint.buffer, g.index.buffer);
+      g.aux.buffer, g.blockLight.buffer, g.tint.buffer, g.quadSize.buffer,
+      g.index.buffer);
   }
   // Transferred, not copied, exactly like the vertex data. It is only tens of
   // bytes for a typical chunk, but a plain array of {col, k, light} objects

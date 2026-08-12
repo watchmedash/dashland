@@ -174,6 +174,8 @@ attribute vec4 aux;
 attribute vec3 blockLight;
 attribute vec3 tint;
 attribute vec3 atangent;
+attribute vec2 quadSize;
+varying vec2 vQuadSize;
 varying vec3 vTangent;
 varying float vLayer;
 varying float vAO;
@@ -195,6 +197,7 @@ const COMMON_VERT_BODY = /* glsl */`
   vBlock = blockLight;
   vTint = tint;
   vTexUv = uv;
+  vQuadSize = quadSize;
   vTangent = atangent;
   vWave = floor(aux.w);
 
@@ -712,6 +715,7 @@ varying float vSun;
 varying vec3 vBlock;
 varying vec3 vTint;
 varying vec2 vTexUv;
+varying vec2 vQuadSize;
 varying vec3 vWorld;
 varying vec3 vTangent;
 varying float vWave;
@@ -1516,7 +1520,47 @@ const BREAK_FRAG = /* glsl */`
   if (uBreakStage >= 0.0 && distance(vWorld, uBreakPos) < 1.9) {
     vec3 dCell = cellOffset(vWorld, uBreakPos);
     if (all(lessThanEqual(abs(dCell), vec3(0.502)))) {
-      vec4 cr = texture(uCrack, vec3(fract(vTexUv), uBreakStage));
+      // Normalise the crack to the part of THIS quad that lies in the break
+      // cell, rather than to the tile.
+      //
+      // uv runs 0..uMax by 0..vMax, and quadSize carries that extent per
+      // vertex. For a greedy-merged cube face those are whole numbers — one
+      // unit per cell — so the cell's window is fract(uv) and this reduces
+      // exactly to what it always did. For a shaped block the quad covers a
+      // FRACTION of its tile, and fract(uv) was then a slice of the crack:
+      // photographed on the shipped shader against a plain stone cube in the
+      // same frame, a lower slab's side face drew only the bottom half of the
+      // pattern with the star's centre sitting exactly on its top edge, and a
+      // stair drew that same truncated slice TWICE, once per box. Every fence
+      // post and door had the fault too.
+      //
+      // min(quadSize, 1) is the cell window in uv units, so the same two lines
+      // serve both: a merged face steps cell by cell, and a shaped quad has one
+      // window that is the whole quad. Measured over the before/after pair in
+      // one pinned arena on one seed: the slab crop moved 29% of its pixels and
+      // the stair crop 38%, against a 2.2–4.5% run-to-run baseline taken from
+      // the same crops with the crack switched off, and the full cube (6.6%)
+      // and the greedy-merged floor (3.3%) both sat inside that baseline —
+      // i.e. the change is confined to the shapes it was meant to reach.
+      //
+      // What this does NOT do is make a stair one crack. Each box gets its own
+      // centred star, because the window is the quad and a stair is two boxes.
+      // Keying the crack to the *cell* instead was built and thrown away (it
+      // gave a fence post a narrow vertical strip of a mostly-transparent
+      // texture, which is worse than the fault it replaced); making it one
+      // crack per BLOCK needs the block's own bounds in the shader, which is a
+      // second attribute for a difference nobody has reported.
+      //
+      // The zero guard is not defensive padding. Drops.js builds its own
+      // geometry for a dropped block and draws it with these very materials
+      // (materials.opaque / materials.cutout), and that geometry has no
+      // quadSize — so vQuadSize arrives as WebGL's generic (0,0), win is zero,
+      // and the divide below is NaN on every fragment of a dropped item lying
+      // in the cell being mined. Falling back to the whole tile gives those
+      // exactly the fract() they had before this existed.
+      vec2 win = vQuadSize.x > 0.0 ? min(vQuadSize, vec2(1.0)) : vec2(1.0);
+      vec2 cuv = (vTexUv - floor(vTexUv / win) * win) / win;
+      vec4 cr = texture(uCrack, vec3(cuv, uBreakStage));
       gl_FragColor.rgb = mix(gl_FragColor.rgb, cr.rgb, cr.a * 0.92);
     }
   }

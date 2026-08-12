@@ -1795,8 +1795,11 @@ body.fighting #toasts { top: 172px; }
    monitor; the viewport one is what stops a list of recipes from being taller
    than the window it is in. */
 /* Nothing to make is nothing to look at, rather than an empty groove with a
-   line of text stranded under it. */
-#recipe-list:empty { display: none; }
+   line of text stranded under it. The merchant's two counters are the same
+   groove holding the same kind of nothing, and they were left off this rule:
+   an empty shop drew two four-pixel slivers of sunk parchment with "Nothing"
+   marooned underneath each. Same fault, same answer, one selector. */
+#recipe-list:empty, .shop-list:empty { display: none; }
 #recipe-list {
   display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
   max-height: min(330px, 34vh);
@@ -1886,9 +1889,18 @@ body.fighting #toasts { top: 172px; }
     0 0 18px -2px rgba(242, 168, 80, .8);
 }
 
+/* The well hugs the three cells, which is what `align-self: center` was asking
+   for and could never get: `#screen-top`, the box this is dropped into, is a
+   plain block, and `align-self` on a child of a block does nothing at all. So
+   the kiln's well ran the full 536px of the sheet around 176px of furnace and
+   left a hand of bare parchment at each end - the same fault, in the other
+   material, that `.inv-section`'s note records fixing for the bag. `fit-content`
+   plus auto margins is the block-layout spelling of the same intent, and it
+   holds whatever `#screen-top` is made of later. */
 .smelt-area {
   display: flex; align-items: center; justify-content: center; gap: 16px;
-  padding: 12px 16px; border-radius: var(--r-md); align-self: center;
+  padding: 12px 16px; border-radius: var(--r-md);
+  width: fit-content; margin: 0 auto;
   background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
 }
 .smelt-col { display: flex; flex-direction: column; align-items: center; gap: 5px; }
@@ -1962,10 +1974,16 @@ body.fighting #toasts { top: 172px; }
   padding: 5px; border-radius: var(--r-md);
   background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
 }
-/* Set by _refreshShop on the columns that overflow. The partial row at the
-   bottom edge is deliberate; the fade is what keeps it from reading as a
-   rendering fault. */
-.shop-list.scrolls {
+/* Set by `_refreshShop` and `_refreshRecipes` on the lists that overflow. The
+   partial row at the bottom edge is deliberate; the fade is what keeps it from
+   reading as a rendering fault.
+
+   The craftable sidebar was not on this rule and is the list it matters most
+   on, because it is capped at 330px (190 on a narrow window) against a sheet
+   that is usually taller than that: a dozen recipes ended with a row sliced
+   clean in half against a hard edge, with bare parchment below it, on the one
+   screen the player opens every minute. The shop already had the answer. */
+.shop-list.scrolls, #recipe-list.scrolls {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
 }

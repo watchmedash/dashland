@@ -1872,6 +1872,15 @@ export class UI {
       });
       list.appendChild(row);
     }
+
+    // The list is capped well under the sheet's height (see `#recipe-list`), so
+    // a long recipe book ends on a row cut in half against a hard edge. The
+    // half row is the right affordance - it says there is more - but only once
+    // it reads as continuing rather than as clipped, which is the same call
+    // `_refreshShop` makes about its two counters and the same `.scrolls` fade.
+    // Not a static rule, for the same reason it is not one there: a list that
+    // fits would have its last row dimmed for nothing.
+    list.classList.toggle('scrolls', list.scrollHeight > list.clientHeight + 1);
   }
 
   _paintCursor() {

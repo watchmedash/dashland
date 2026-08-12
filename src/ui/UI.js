@@ -1,7 +1,7 @@
 // DOM layer: main menu, compact HUD, inventory / crafting / smelting screens.
 
 import * as THREE from 'three';
-import { BLOCKS } from '../world/Blocks.js';
+import { BLOCKS, R_CROSS } from '../world/Blocks.js';
 import { ITEMS } from '../game/Items.js';
 import { Slot, HOTBAR, TOTAL } from '../game/Inventory.js';
 import { BRANCHES } from '../game/Skills.js';
@@ -1856,7 +1856,14 @@ export class UI {
     // beside it invited the question of where tiers 1-5 were.
     if (def.bow) sub = `Weapon, ${def.tool.durability - slot.wear}/${def.tool.durability}`;
     else if (def.tool) sub = `${def.tool.kind === 'sword' ? 'Weapon' : 'Tool'}, tier ${def.tool.tier}, ${def.tool.durability - slot.wear}/${def.tool.durability}`;
-    else if (def.block !== undefined) sub = 'Block';
+    // "Block" is for something that fills a cell. The cross-rendered family —
+    // aloe, lavender, golden grass, ferns, coral, a shell, a crystal cluster —
+    // are placeable and so they all carry a block id, which is why they were
+    // all being called blocks. They are not, and there is no one word that is
+    // true of all of them either: "Plant" is right for the flora and wrong for
+    // the fungi, the coral and the driftwood. So they get no category line at
+    // all. The name and the icon already say what a lavender is.
+    else if (def.block !== undefined && BLOCKS[def.block].render !== R_CROSS) sub = 'Block';
     else if (def.food) sub = `Food, ${def.food}`;
     else if (def.fuel) sub = 'Fuel';
     this.el.tooltip.innerHTML = `${def.label}${sub ? `<em>${sub}</em>` : ''}`;

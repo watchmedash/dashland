@@ -4138,6 +4138,22 @@ class Game {
     const def = ITEMS[held.item];
     if (!def || def.block === undefined) return false;
     const id = def.block;
+    // Nothing is fixed to a cactus.
+    //
+    // It is spines on every side, which is the whole of its NEEDS_ROOM rule,
+    // and a torch bracketed to one is the same picture that rule already
+    // refuses from the other direction - the cactus would simply come apart the
+    // moment the torch landed beside it. Better to decline the click than to
+    // take the plant down as the answer.
+    //
+    // Refused at the SUPPORT rather than at the destination, because the two
+    // are different cells and it is the surface being built against that is the
+    // problem: a torch on its side, a sign, a ladder, a block stood on its
+    // crown. Another cactus is the one thing allowed, because a cactus grows
+    // out of its own lower segments and that is how a tall one exists at all.
+    if (this.planet.at(hit.col, hit.k) === ID.cactus && id !== ID.cactus) {
+      return false;
+    }
     // Where the block goes. Normally the cell the ray was in just before it hit
     // something — you build *against* a face — but a cell holding a plant is not
     // a face to build against, it is a cell to build *in*. See IS_REPLACEABLE.

@@ -27,7 +27,7 @@ import { UI } from './ui/UI.js';
 // on purpose: it is the UI's list and the UI is where it must stay, but a named
 // import of an export that does not exist yet is a build error, and this half of
 // the feature has to survive the other half not being there. Absent, the start
-// kit falls back to the six torches — see `loadoutStacks`.
+// kit is empty: a new world starts you with nothing in the bag.
 import * as UIModule from './ui/UI.js';
 import { IconFactory } from './ui/Icons.js';
 import { Inventory, Slot, HOTBAR, useKind } from './game/Inventory.js';
@@ -40,7 +40,7 @@ import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
 import { Water, LEVEL_MAX } from './game/Water.js';
 import { Save } from './game/Save.js';
 import {
-  DEFAULT_DIFFICULTY, normalizeDifficulty, mobDamageScale, normalizeLoadout, loadoutStacks,
+  DEFAULT_DIFFICULTY, normalizeDifficulty, mobDamageScale, normalizeLoadout,
   DEFAULT_ON_DEATH, normalizeDeathRule, keepsOnDeath, skillDeathMode,
   huntsOnSight, endsOnDeath,
 } from './game/NewGame.js';
@@ -1021,7 +1021,11 @@ const DEFAULT_SETTINGS = {
   // neither has to earn its place the way an expensive option does, and a HUD
   // element that starts switched off behind a menu is one most players never
   // learn exists.
-  minimap: true, compass: true,
+  // The minimap is OFF until you turn it on. A map in the corner is the thing
+  // that turns a planet you are lost on into a planet you are reading, and this
+  // world is meant to be the first. The compass stays: a bearing is what you
+  // can work out from the sun, a map is not.
+  minimap: false, compass: true,
   // Minutes for one full day and night, or 0 to follow the device clock.
   //
   // 0 is the default: the planet keeps your hours, so its evening is your
@@ -1945,11 +1949,17 @@ class Game {
     // The stacks come from the UI's own option table, so the button and the bag
     // cannot disagree; an item name that no longer exists is skipped rather than
     // added as air.
-    for (const [name, count] of loadoutStacks(UIModule.LOADOUT_OPTIONS, this.loadout)) {
-      const id = itemIdOf(name);
-      if (id) this.inventory.add(id, count);
-      else console.warn(`loadout: no such item "${name}"`);
-    }
+    // You start with nothing.
+    //
+    // The loadout used to put a few stacks in the bag - six torches by default,
+    // or whatever the picker chose. It is gone because the first ten minutes
+    // are the game: the first tree, the first stone, the first night, and a
+    // torch handed over at spawn is the answer to the last of those given away
+    // before the question is asked.
+    //
+    // `loadoutStacks` and the options table stay where they are. They are still
+    // the description of what a start COULD hand you, and nothing about them is
+    // wrong - they are simply not called any more.
   }
 
   /**

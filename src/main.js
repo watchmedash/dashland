@@ -61,6 +61,7 @@ import {
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns, regionOfCol,
+  BIOME,
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
@@ -7983,11 +7984,20 @@ class Game {
         // built over in the minute a line is out, and the catch should be the
         // one you threw into.
         deep: depth >= FISH_DEEP,
-        // Salt if the surface sits at or below sea level, which on this planet
-        // is what an ocean is: lakes are carved into terrain that is by
-        // definition above R_SEA. One comparison, no biome lookup, and it is
-        // the same rule the world generator built the seas with.
-        salt: R_MIN + k < R_SEA,
+        // Salt if this is the SEA, and the altitude test alone was not that.
+        //
+        // It read "surface at or below sea level", on the stated claim that
+        // lakes are carved into terrain above R_SEA. That claim is false:
+        // measured over 193 lake-water columns near one shore, 33 of them -
+        // 17.1% - sit at radius 281 against R_SEA 282 and were being fished as
+        // ocean. Which is how a clownfish came out of a pond.
+        //
+        // The biome is what actually knows. An OCEAN column is sea however deep
+        // it happens to be, and a BEACH column below the waterline is the sea's
+        // own edge - while a pond lying in plains or forest a layer under sea
+        // level is fresh water whatever its altitude says.
+        salt: this.planet.colBiome[wet.col] === BIOME.OCEAN
+          || (this.planet.colBiome[wet.col] === BIOME.BEACH && R_MIN + k < R_SEA),
         // How far the throw actually went, straight-line from the rod tip to
         // the float. Read off the arc rather than off the aim, because those
         // are different numbers the moment the shore is not flat — and it is

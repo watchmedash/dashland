@@ -2796,6 +2796,14 @@ body.touch {
   --tc-band: 190px;
   /* The chrome's own scale. See the last block in this file. */
   --hud-scale: .74;
+  /* The floor of the top band: the lowest the status rail can reach.
+     `#status-bar` sits at `top: 10px`, is 21px per row of chips with a 1px gap
+     and 2px of padding either side, and is scaled from its top-right corner -
+     so four rows of chips, which is what six of them come to inside the cap,
+     is 10 + 91 * scale. 106 is that plus a gap nothing may cross. Anything
+     that wants to be under the whole corner rather than in it measures from
+     here, so there is one number rather than three that have to agree. */
+  --hud-band: calc(10px + 106px * var(--hud-scale));
 }
 /* A tablet has the room a phone does not, and shrinking a HUD that already fits
    would only make it hard to read. Width alone decides this one, because by
@@ -3021,6 +3029,67 @@ body.touch #bottom {
 }
 /* The crosshair does not shrink. It is already 11px, it is what you aim with,
    and on a phone it is the only thing saying where the Mine button will act. */
+
+/* ── the top band is already full ──────────────────────── */
+/* Two things are centred on the top of the screen and both of them were sized
+   for a monitor: the toast stack and the fishing fight bar. Measured on a
+   Pixel 8 at 393x852, with the map on and a save failing:
+ *
+ *     minimap        x 10..122     y 10..122
+ *     status rail    x 247..383    y 10..61   (six chips, wrapped three deep)
+ *     toast stack    x 98..294     y 46..142  -> over BOTH of them
+ *     fight bar      x 98..287     y 62..156  -> over both of them again
+ *
+ * The corners are not going to give the width back: the map is 112px and the
+ * rail is capped at 135, which leaves 126px in the middle of a 393px screen
+ * for a compass that already owns it. So the two centred things move out of
+ * the band rather than being squeezed inside it, and neither loses anything a
+ * player reads - a toast is a sentence and the fight bar is a picture.
+ *
+ * The toast stack goes just under the rail and is boxed between the map and
+ * the two chip buttons on the right edge, so it can no longer reach either
+ * corner at any width. The fight bar goes below the vitals column instead;
+ * see the arithmetic on its `top`, which is the one thing here that is easy to
+ * get wrong. */
+body.touch #toasts {
+  left: calc(var(--map-size) * var(--hud-scale) + 16px);
+  right: calc(var(--tc-chip) + 16px);
+  top: var(--hud-band);
+  transform: none;
+}
+/* Same step-down as the desktop rule, in the phone's own numbers: while a
+   fight is on, the stack drops clear of the bar rather than growing down into
+   it. `180 + 169 * scale` is the bar's own bottom edge plus a gap - see the
+   arithmetic on `top` below, and add the 94px the bar itself stands. */
+body.touch.fighting #toasts { top: calc(190px + 169px * var(--hud-scale)); }
+
+body.touch #fish-bar {
+  /* Under the vitals column, and the arithmetic is worth spelling out because
+     it is the thing that is easy to get wrong here: every scaled cluster uses
+     `transform-origin` at its own anchored corner, so scaling does NOT move
+     the top edge. `#vitals` still begins at 170px whatever the scale is, and
+     only its height - four rows of 15px on a 5px gap, 75 in all - shrinks. So
+     the first line clear of the deepest the vitals ever reach is 180 + 75 *
+     scale, and not any fraction of 170. */
+  top: calc(180px + 75px * var(--hud-scale));
+  /* 48vw was half a monitor and a fifth of a phone. The bar has a 46px groove
+     with a 42px fish in it and does not usefully go under about 300px, so on a
+     phone it takes the width and the `--hud-scale` shrink instead. */
+  width: min(430px, 92vw);
+  transform: translateX(-50%) scale(var(--hud-scale));
+  transform-origin: top center;
+}
+
+/* Landscape has no vertical room to move anything down into - the portrait
+   line lands past the crosshair on a 393px-tall screen - but it does have the
+   width the portrait band was short of, so the bar goes back up under the rail
+   where it
+   clears the map and the chips on the horizontal instead. The toast stack is
+   then the thing that has to step down, which is the desktop rule again. */
+@media (orientation: landscape) and (max-height: 500px) {
+  body.touch #fish-bar { top: var(--hud-band); }
+  body.touch.fighting #toasts { top: calc(var(--hud-band) + 102px * var(--hud-scale)); }
+}
 
 /* ── holding a cell to drop it ─────────────────────────── */
 /* The cell held down long enough to be throwing its contents out. Red rather

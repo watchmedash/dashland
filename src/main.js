@@ -1205,6 +1205,34 @@ class Game {
      */
     this._emitters = [];
     this._emitPool = [];
+    /**
+     * The shared clock the two moving flames flicker on, in seconds.
+     *
+     * It lives here, and it is advanced by the frame rather than by either
+     * flame, because it has two readers and used to have only one writer. It was
+     * created lazily inside `_updateHandLight`, *past* that method's "am I
+     * holding an emitter" early return, and `_updateDropLight` read it — so
+     * until the player had held a light for one frame it was `undefined`, and
+     * the drop light's `Math.sin(undefined * 9.7 + 1.9)` was NaN.
+     *
+     * That is not a wrong flicker, it is a black planet. The NaN goes into
+     * uDropLightColor, the shader adds it to `moving`, `moving` goes into
+     * blockRad and blockRad into indirectDiffuse, and NaN times anything is
+     * still NaN: every terrain fragment on screen resolves to black, in full
+     * daylight, whether or not the flame could reach it. The view model is a
+     * separate material and kept rendering, which is what made it look like a
+     * post-processing fault. Dropping a torch, a lantern, glowstone or a crystal
+     * block anywhere in the world blacked out the whole world, and picking up
+     * *any* light source cured it permanently for the session — because that
+     * first lit hand frame finally assigned the clock a number.
+     *
+     * Initialising it to 0 here would be enough to stop the NaN. Advancing it in
+     * the tick instead is the actual repair: a clock read by two flames should
+     * not be owned by one of them, and while it was, a dropped torch lying on
+     * the ground with nothing in your hands flickered on a *frozen* phase — the
+     * clock only ticked while the hand light was lit. Same bug, quieter symptom.
+     */
+    this._flameT = 0;
     this.seed = 0;
     /**
      * Which of the ten slots this session belongs to, zero-based, or -1 when
@@ -5341,6 +5369,10 @@ class Game {
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
     this.viewModel.setOffhand(this.inventory.offhand.item, this.ui.icons);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
+    // The flicker clock both moving flames read, advanced once, here, before
+    // either of them looks at it. See the field's own note for what happened
+    // while `_updateHandLight` owned it.
+    this._flameT += dt;
     this._updateHandLight(dt);
     this._updateDropLight(dt);
     // After both, because it converts the positions those two just wrote.
@@ -7064,8 +7096,9 @@ class Game {
       return;
     }
     // A flame is never still. The wobble is small and slow enough to read as a
-    // flame rather than as a framerate problem.
-    this._flameT = (this._flameT ?? 0) + dt;
+    // flame rather than as a framerate problem. The clock is `this._flameT`,
+    // advanced by the tick — it is not advanced here, because the drop light
+    // reads it too and this method returns early whenever the hands are empty.
     const flicker = 0.92 + Math.sin(this._flameT * 11.3) * 0.05 + Math.sin(this._flameT * 4.1) * 0.03;
     const lc = block.lightColor || WHITE_L;
     const strength = (emit / 15) * HAND_LIGHT_GAIN * flicker;

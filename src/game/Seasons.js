@@ -38,14 +38,65 @@ export const DAYS_PER_YEAR = DAYS_PER_SEASON * SEASONS;
  * So the shader takes the *brightness* of what it would have drawn and gives it
  * this hue instead. Texture detail and shading survive because they live in the
  * brightness; the colour is simply replaced.
+ *
+ * ---- what this design can and cannot buy ----------------------------------
+ *
+ * Everything living gets ONE hue. Not one per species, not one per tree: the
+ * shader has the surface's luminance and this vector and nothing else, so two
+ * trees can differ in how *bright* their autumn is and never in what colour it
+ * is. The report this table was last tuned against asked for "red/orange/brown
+ * variation across trees", and that is not reachable from here — it wants the
+ * hue jittered per block inside SEASON_FRAG. Written down so the next person
+ * does not spend an afternoon on the table looking for it.
+ *
+ * What IS reachable from here is which single hue, and how completely it takes
+ * over, and both were measured rather than guessed. Photographed at one pinned
+ * site on seed 4242 at noon, six candidates in one run:
+ *
+ *   (1.00, 0.58, 0.13) @ 0.85   the shipped pair — KHAKI. Not gold: the 15% of
+ *                               the leaf's own green that survives at 0.85
+ *                               lands on top of a yellow-orange and the canopy
+ *                               comes out olive-brass, which is the "one flat
+ *                               metallic gold" the report named.
+ *   (1.00, 0.58, 0.13) @ 1.00   the same hue with the green gone — now really
+ *                               is gold, and reads as polished brass, because a
+ *                               hue with a blue channel of 0.13 has almost no
+ *                               chroma left to shade with.
+ *   (0.90, 0.36, 0.12) @ 0.85   russet, and too far: dry bark, not leaves.
+ *   (0.95, 0.45, 0.16) @ 0.85   warm bronze, still faintly olive in the shade.
+ *   (1.00, 0.50, 0.22) @ 0.95   tan. The extra blue flattens it toward mud.
+ *   (0.95, 0.45, 0.16) @ 0.95   SHIPPED. Amber-bronze with the green fully
+ *                               gone, so the leaf detail reads as leaves in
+ *                               different tones rather than as a sheen on a
+ *                               sheet of metal.
+ *
+ * The strength going UP is the counter-intuitive half and it is the half that
+ * mattered. The instinct on "this looks like a filter" is to turn the filter
+ * down; 0.62 was tried on both hues and is worse than either, because a canopy
+ * that is 38% summer green is not a subtler autumn, it is a dying one.
  */
 const TABLE = [
   { name: 'Spring', color: [0.45, 0.80, 0.32], strength: 0.30, growth: 1.25, cold: 0 },
   { name: 'Summer', color: [0.40, 0.72, 0.34], strength: 0.00, growth: 1.00, cold: 0 },
-  { name: 'Autumn', color: [1.00, 0.58, 0.13], strength: 0.85, growth: 0.72, cold: 0 },
+  { name: 'Autumn', color: [0.95, 0.45, 0.16], strength: 0.95, growth: 0.72, cold: 0 },
   // Frost, not moonlight. A bluer winter than this reads as night-time even at
   // noon, because foliage in shade is already blue from the sky light.
-  { name: 'Winter', color: [0.86, 0.89, 0.93], strength: 0.72, growth: 0.28, cold: 1 },
+  //
+  // The old pair, (0.86, 0.89, 0.93) at 0.72, was a near-neutral grey held at
+  // 72%, and the 28% of leaf green left underneath it made the canopy a
+  // grey-green — read on sight as lichen or mildew rather than as anything
+  // cold. Taking the strength to 0.88 is what removes the green; the small
+  // extra blue is what stops the result being concrete. Normalised, the shipped
+  // pair moves from (0.971, 1.005, 1.050) to (0.936, 1.008, 1.128), so the
+  // blue-over-red gap goes from 0.08 to 0.19 — a quarter of the way toward the
+  // blue that was tried and rejected above, not a return to it.
+  //
+  // What winter cannot do, and it is the same wall autumn hits from the other
+  // side: `norm` is divided by its own luminance, so a re-hued surface is
+  // exactly as bright as the one it replaced and winter can never *lighten*
+  // anything. A dark leaf in winter is a dark cold leaf. Snow on the canopy
+  // would have to be snow — geometry or a second tile — and is not a colour.
+  { name: 'Winter', color: [0.78, 0.84, 0.94], strength: 0.88, growth: 0.28, cold: 1 },
 ];
 
 /**

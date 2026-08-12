@@ -9287,7 +9287,38 @@ export class Mobs {
     if (this.blockLightAt && !spec.shade) {
       _lit.copy(mob.pos).addScaledVector(mob.up, mob.spec.height * 0.5);
       const bl = this.blockLightAt(_lit, _blockL);
-      const er = bl.r * tr, eg = bl.g * tg, eb = bl.b * tb;
+      /**
+       * A self-lit body's own light is a FLOOR under this, not something it
+       * overwrites.
+       *
+       * `emissive` is one slot and two things were writing it. spawn() puts
+       * `spec.glow` there — the whole of the ghost, which is lit at 0.55 because
+       * "the ghost looks dark grey instead of white" was reported and the night
+       * floor in Sky.js cannot be raised for one mob. Then this branch assigns
+       * over it every time the block light changes, and `setRGB` is an
+       * assignment, not an add.
+       *
+       * A ghost in an unlit field survived that only by accident: the probe
+       * returns exactly zero there, the 1/255 deadband declines to write, and
+       * the glow stays. Take one ghost anywhere near a torch, a lantern, a lit
+       * kiln or a pool of lava and the slot is replaced by the light — and then
+       * the moment that light is out of range it is written back to BLACK and
+       * stays there for the rest of the body's life.
+       *
+       * Measured, two ghosts at night, one arena, three phases: fresh 0.55 both;
+       * a torch under one, 0.999/0.759/0.419 on it and 0.325/0.247/0.136 on the
+       * other six cells away; torch removed, 0/0/0 on BOTH. The screenshots
+       * either side are two pale white figures and then two dark blue-grey
+       * lumps — the exact bug `glow` was added to fix, restored permanently by
+       * the first torch either of them walks past.
+       *
+       * `tr/tg/tb` multiplies the floor as well, for the reason the paragraph
+       * above gives about the damage flash: a ghost that has been struck has to
+       * redden like everything else rather than holding a white glow through it.
+       */
+      const gl = spec.glow || 0;
+      const er = Math.max(bl.r, gl) * tr, eg = Math.max(bl.g, gl) * tg,
+        eb = Math.max(bl.b, gl) * tb;
       // A 1/255 deadband. A mob walking past a torch changes this every frame
       // and a herd is ~22 part materials each; the guard means a still animal
       // in an unlit field costs one comparison rather than a write per part.

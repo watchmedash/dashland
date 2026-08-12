@@ -1578,8 +1578,16 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 #fish-bar {
   position: absolute; left: 50%; top: 62px;
   transform: translateX(-50%);
-  width: min(620px, 68vw);
-  padding: 13px 15px 15px;
+  /* 620px was most of the screen for a fish 42px across - the fish came out at
+     6.8% of the case it was swimming in, and the report was that the bar is too
+     big compared to the fish you are catching. The groove's HEIGHT is not the
+     lever: 46px is measured against the 42px icon and shrinking it makes the
+     species unreadable, which is the thing it was widened to show. So the case
+     loses width only. At 430 the fish is a tenth of it and the shuttle reads as
+     a window rather than as a distant slot, and the whole fitting stops
+     spanning half the view. */
+  width: min(430px, 48vw);
+  padding: 11px 13px 13px;
   border-radius: var(--r-lg);
   /* Wood, with a rivet in each corner: the same construction the panels are
      made of, at HUD weight. The rivets are the only reason this reads as a

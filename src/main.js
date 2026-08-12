@@ -117,6 +117,24 @@ const _bobY = new THREE.Vector3(0, 1, 0);
  */
 const CORNER_STEPS = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
 
+/**
+ * The colour a mouthful of this food sheds, as linear RGB.
+ *
+ * Items carry a `color` hex for the icon painter, and the crumb emitter wants
+ * three floats, so this is the one place the two meet. A food with no colour of
+ * its own - the modelled ones, which get their look from the mesh - falls back
+ * to a dull crust brown rather than to white, because a white crumb reads as a
+ * spark and the one thing these must not look like is fire.
+ */
+const CRUMB_FALLBACK = [0.60, 0.44, 0.28];
+function foodCrumbColor(item) {
+  const hex = item?.color;
+  if (typeof hex !== 'string' || hex.length !== 7) return CRUMB_FALLBACK;
+  const n = parseInt(hex.slice(1), 16);
+  if (Number.isNaN(n)) return CRUMB_FALLBACK;
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
 /** Three rows of nine, so a crate is worth the eight planks it costs. */
 const CRATE_SLOTS = 27;
 
@@ -7723,10 +7741,24 @@ class Game {
     // `step('grass')` at nine a second was a footstep standing in for a bite,
     // and it was the wrong instrument at the wrong rate; `eat()` is four
     // irregular wet grains and a swallow, sized to the 1.3s the meal takes.
+    // Nothing to gain, so nothing is eaten.
+    //
+    // The meal was going down whatever state you were in: at a full bar the
+    // energy line clamps to 1 and the health line to maxHealth, so the food
+    // left the bag and bought nothing at all. That is a silent loss of an item
+    // the player deliberately spent, which is worse than the click doing
+    // nothing. Both are checked because food does both jobs - a full stomach
+    // with a hurt player is still a meal worth eating.
+    if (this.energy >= 1 && this.player.health >= this.player.maxHealth) {
+      this.eating = 0;
+      this.ui.setHint('Not hungry');
+      return;
+    }
     if (this.eating === 0) this.audio.eat();
     this.eating += dt;
-    if (Math.random() < dt * 9) {
-      this.particles.footDust(this.player.eye, this.player.up, ID.dirt);
+    // Crumbs in the food's own colour, not `footDust(ID.dirt)` - see `crumbs`.
+    if (Math.random() < dt * 7) {
+      this.particles.crumbs(this.player.eye, this.player.up, foodCrumbColor(heldItem));
     }
     if (this.eating < 1.3) return;
     this.eating = 0;

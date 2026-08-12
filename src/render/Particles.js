@@ -353,6 +353,43 @@ export class Particles {
     }
   }
 
+  /**
+   * Crumbs off a mouthful.
+   *
+   * Eating used to borrow `footDust` with `ID.dirt`, which is four clods of
+   * SOIL a quarter of a cell wide, thrown upward at nine bursts a second, from
+   * a point level with the eye. Standing still and eating an apple put a fog of
+   * dirt around the player's own head - the report was that it looked ugly, and
+   * the instrument was simply wrong: it is the emitter for a boot landing on
+   * ground, doing duty for a bite.
+   *
+   * So: two crumbs, a third of the size, in the food's own colour, spawned in a
+   * tight cluster and thrown DOWN and outward the way something falling off a
+   * mouthful goes. `col` is the item's palette colour, so an apple sheds red
+   * and bread sheds brown without a table mapping one to the other.
+   */
+  crumbs(pos, up, col) {
+    for (let i = 0; i < 2; i++) {
+      const p = this._spawn();
+      if (!p) return;
+      p.alive = true;
+      p.pos.copy(pos).addScaledVector(up, -0.12);
+      p.pos.x += (Math.random() - 0.5) * 0.12;
+      p.pos.y += (Math.random() - 0.5) * 0.12;
+      p.pos.z += (Math.random() - 0.5) * 0.12;
+      // Down, not up. Gravity does the rest, so this only has to leave the lip.
+      p.vel.copy(up).multiplyScalar(-0.25 - Math.random() * 0.25);
+      p.vel.x += (Math.random() - 0.5) * 0.35;
+      p.vel.y += (Math.random() - 0.5) * 0.35;
+      p.vel.z += (Math.random() - 0.5) * 0.35;
+      p.rot.setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
+      p.spin.set(0, 0, 0);
+      p.life = 0; p.maxLife = 0.30 + Math.random() * 0.25;
+      p.size = 0.016 + Math.random() * 0.018;
+      p.color.setRGB(col[0], col[1], col[2]);
+    }
+  }
+
   splash(pos, up, strength = 1) {
     for (let i = 0; i < 18 * strength; i++) {
       const p = this._spawn();

@@ -284,8 +284,27 @@ const MAP = {
   // moss_stone is not here any more, and neither is mossy_stone_brick. Both are
   // now procedural moss composited over their own parent block — see the moss
   // generators in src/render/TextureGen.js and the DECALS table below.
-  basalt: ['Volcano', 6],
-  obsidian: ['Cave Wall', 6],
+  // The "crimson", and by the numbers the most saturated block in the game's
+  // underground: Volcano/6 baked to 113,37,24, saturation 0.654 — a brick red,
+  // four times the ceiling and five times any ore block beside it. Basalt is
+  // black. It is the darkest common rock there is, it is what the deep ocean
+  // floor and the volcano cone are both made of, and painting it red made every
+  // one of those surfaces read as fired clay.
+  //
+  // `tint` at 0.88 takes it to a warm near-black and `bright` puts back the ten
+  // counts of luminance the eye loses when the chroma goes, which is also what
+  // keeps it clear of `slate` (49, cool) — the two meet on the deep ocean floor
+  // and now separate by warmth, by ten counts of value and by std-dev 37.8
+  // against 20.6, which is basalt's coarse vesicular pattern and slate's
+  // smoothness. That is a value-and-texture separation, which is the one the
+  // family is supposed to use.
+  basalt: ['Volcano', 6, { tint: 0.88, bright: 1.12 }],
+  // Obsidian was a PURPLE at 0.452 — 56,31,84, more blue than red on a rock
+  // that is supposed to be glass. It keeps a violet cast, because obsidian
+  // genuinely has one and because at luminance 40 there is very little chroma
+  // in absolute terms whatever the ratio says; 0.82 leaves it as a sheen on
+  // black rather than as the colour of the block.
+  obsidian: ['Cave Wall', 6, { tint: 0.82 }],
   core: ['Volcano', 5],
   lava: ['Volcano', 2],
   glowstone: ['Cave Floor', 7],
@@ -343,12 +362,74 @@ const MAP = {
   // *stalagmite fields* seen side-on, so as a cube face they came out as rows
   // of teeth. Sedimentary slabs instead — a rock face, which is what the walls
   // of a shaft are.
-  limestone: ['Ground', 6, { bright: 1.08 }],
+  //
+  // --- the chroma budget, which is what the seven `tint`s below are for ------
+  //
+  // A carved chamber at the granite band (18 cells under the surface, roof and
+  // floor asserted solid) has ANDESITE, LIMESTONE, TUFF, GRANITE and MARBLE in
+  // one shell along with six ores. Measured off the baked sheet, those rocks
+  // ran at HSL saturations of 0.047, 0.344, 0.097, 0.252 and 0.038, and the
+  // deep band under them added azurite 0.133, geode 0.117, crystal_stone 0.317,
+  // basalt 0.654 and obsidian 0.452. The ore blocks in the same chamber
+  // measured 0.02 to 0.13 as whole tiles.
+  //
+  // That is the defect stated as a number: THE MATRIX WAS MORE SATURATED THAN
+  // THE ORE IN IT, by up to five times. A vein of copper cannot read as a find
+  // when the wall it sits in is a stronger colour than the copper, and a
+  // chamber whose adjacent faces are crimson, olive-yellow, magenta, lilac and
+  // teal is a colour chart rather than a place cut out of rock.
+  //
+  // So the underground now has a chroma CEILING, and the rocks that were
+  // already inside it set where it is: stone 0.031, marble 0.038, andesite
+  // 0.047, gravel 0.064, cobblestone 0.070, tuff 0.097, slate 0.098. Nothing a
+  // player digs through is allowed far past 0.10, and every rock below is
+  // brought to it by `tint` — which pulls each pixel toward its OWN luminance,
+  // so a tile keeps its value, its std-dev and its whole painted pattern and
+  // gives up only its hue. That is deliberate: the brief for the family is that
+  // deep rocks differ by VALUE and TEXTURE, and after this the band spans
+  // luminance 40 (obsidian) to 170 (marble, azurite) with every source picture
+  // untouched. What is left of each hue is a CAST — limestone warm-cream,
+  // granite warm-grey, tuff green-grey, azurite and geode blue-grey,
+  // crystal_stone teal, basalt and obsidian near-black warm and violet — which
+  // is enough to tell two rocks apart in a torchlit chamber and not enough to
+  // compete with a mineral.
+  //
+  // Rejected: re-picking sources. Every one of these is the right PICTURE — the
+  // recon never complained about a pattern, only about a palette — and the
+  // pack's cave folders were already contact-sheeted twice for these slots (see
+  // the stalagmite note above and the crystal_block note below). Rejected also:
+  // desaturating the ORES to match. The ores are settled and sulfur is the
+  // quality bar; if a mineral reads better against a calmer wall that is the
+  // whole point, and the wall is the thing that was wrong.
+  //
+  // Limestone was the "olive-yellow / saturated yellow" of the report and it is
+  // the worst of the pale rocks: 191,159,124 is a TAN, and under a torch (which
+  // is [1.0, 0.76, 0.42], a strong orange) a tan wall goes to lemon. `tint`
+  // takes it to a cream. `bright` comes off 1.08 at the same time, because
+  // limestone and marble are the two rocks of the SAME band and once both are
+  // near-neutral they can no longer be told apart by hue — so the pair is
+  // separated by value instead, marble the pale one at L=170 and limestone
+  // twenty counts under it.
+  limestone: ['Ground', 6, { tint: 0.72, bright: 1.0 }],
   // Ground 14 is the pack's only pale stone that is not also a brick, but it is
   // flecked green with moss. Pulled most of the way to luminance so it reads as
-  // stone rather than as a second mossy block.
+  // stone rather than as a second mossy block. Already inside the ceiling at
+  // 0.038 and therefore untouched — it is the tile the others are brought to.
   marble: ['Ground', 14, { tint: 0.5, bright: 1.14 }],
-  granite: ['Cave Wall', 7, { bright: 1.35, contrast: 1.12 }],
+  // The "hot magenta cobble", and the single worst tile underground. Cave Wall
+  // 7 at this exposure baked to 160,96,112: a PINK, thirty counts more red than
+  // blue and sixty more than green, and the pink is why the walls stayed
+  // magenta at zero torchlight — the cave's ambient fill is the sky's, which is
+  // blue, and a blue fill on a pink rock is magenta, not dark.
+  //
+  // Granite really does carry a warm cast — the feldspar in it is pink — so the
+  // hue is not wrong in kind, only in amount. `tint` at 0.75 leaves about a
+  // quarter of it: enough that granite is still the warm-grey rock of its band
+  // against tuff's green-grey and andesite's neutral, and far too little to be
+  // the loudest thing in a chamber. Its std-dev of 45.9 — the coarse speckle
+  // that is what actually says "granite" — is untouched, because `tint` cannot
+  // touch it.
+  granite: ['Cave Wall', 7, { bright: 1.35, contrast: 1.12, tint: 0.75 }],
   // Burned Earth is one rubble painted at three exposures, so it supplies the
   // whole neutral value ramp: pale ash in the mantle, mid-grey andesite in the
   // middle crust, near-black slate at the bottom. They are three bands apart in
@@ -357,10 +438,33 @@ const MAP = {
   slate: ['Burned Earth', 3, { bright: 1.0, contrast: 1.25, warm: [0.96, 0.98, 1.06] }],
   ash_stone: ['Burned Earth', 1, { bright: 1.75, tint: 0.9 }],
   tuff: ['Ground', 15, { bright: 1.4, contrast: 1.15 }],
+  // magma_stone is deliberately NOT tinted. It measures 92,80,68 at saturation
+  // 0.149, above the ceiling — and it is one of the two blocks in the deepest
+  // band that EMIT (light 3, colour [1.0, 0.7, 0.35]). A rock that is its own
+  // light source is allowed to be the colour of that light; the ceiling is for
+  // rock you have to carry a torch to see.
   magma_stone: ['Cave Wall', 5, { bright: 1.15 }],
-  geode_stone: ['Cave Wall', 8, { bright: 1.15 }],
-  crystal_stone: ['Cave Wall', 9, { bright: 1.1 }],
-  azurite: ['Ground', 7, { bright: 1.1 }],
+  // The "lilac with yellow dots". Only 0.117 to start with, so the touch is
+  // light — the lilac is what makes a geode wall read as something worth
+  // breaking open, and killing it would cost the block its whole reason to
+  // exist. What 0.35 buys is that the lilac stops being a HUE next to the slate
+  // it sits in and becomes a cool cast on a pale rock.
+  geode_stone: ['Cave Wall', 8, { bright: 1.15, tint: 0.35 }],
+  // The deliberate exception, and the one rock allowed to stay above the
+  // ceiling. Crystalline rock is the second emitter of the last band (light 5,
+  // [0.4, 0.85, 1.0]) and the band's whole job is that "reaching it should look
+  // like arriving somewhere rather than like more of the same grey" — the note
+  // on `stratum` in WorldGen.js. So it keeps half its teal (0.317 -> ~0.17)
+  // rather than all or none of it: still unmistakably the blue-green rock, no
+  // longer the most saturated surface in a chamber that also contains sapphire.
+  crystal_stone: ['Cave Wall', 9, { bright: 1.1, tint: 0.45 }],
+  // The "navy with white dots". Ground/7 bakes to a pale blue-grey at 0.133,
+  // which is only a little over the ceiling — but azurite sits in the SLATE
+  // band, where its neighbours are slate at luminance 49 and geode at 131, so
+  // it is a bright blue rock in a near-black stratum and the hue reads far
+  // louder than the number suggests. The value gap is worth keeping (it is what
+  // makes an azurite outcrop legible as a seam host); the hue is not.
+  azurite: ['Ground', 7, { bright: 1.1, tint: 0.35 }],
 
   // --- cut stone ------------------------------------------------------------
   // Smooth stone is the *same rock* as stone with the grain taken off, so it is

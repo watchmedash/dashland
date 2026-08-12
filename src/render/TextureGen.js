@@ -566,6 +566,101 @@ G.mossy_stone_brick = (s) => moss(s, {
   dark: [58, 80, 42], lite: [122, 146, 84],
 });
 
+// --- detail composited over a tile's OWN pack material ---------------------
+// The two below are decals like the mossy pair, except that the material
+// underneath is the SAME tile's pack bake rather than a different block's. See
+// SELF_DECALS in scripts/bake-textures.mjs for the compositing step; here they
+// are just alpha-masked detail, and nothing in the shipped game ever draws them
+// on their own (the runtime always loads the baked atlas — loadTileAtlas throws
+// rather than falling back to this module).
+
+/**
+ * Wrap-around soft dash, used for birch lenticels. Everything is drawn modulo
+ * the tile so a mark that runs off the right edge comes back on the left, which
+ * is the only way a hand-placed mark survives on a tiling texture — a lenticel
+ * clipped at the edge would draw a hairline down every block join.
+ */
+function dash(s, cx, cy, halfLen, halfThick, col, alpha, tilt = 0) {
+  const size = s.size;
+  const pad = Math.ceil(halfLen + halfThick + 2);
+  for (let oy = -pad; oy <= pad; oy++) {
+    for (let ox = -pad; ox <= pad; ox++) {
+      // rotate into the dash's own frame, then treat it as a rounded capsule
+      const c = Math.cos(tilt), sn = Math.sin(tilt);
+      const lx = ox * c + oy * sn, ly = -ox * sn + oy * c;
+      // ends taper rather than stopping square: a lenticel is a lens
+      const t = Math.abs(lx) / halfLen;
+      if (t >= 1) continue;
+      const th = halfThick * Math.sqrt(1 - t * t);
+      const m = smoothstep(th + 0.9, th - 0.4, Math.abs(ly)) * alpha;
+      if (m <= 0.01) continue;
+      // Rounded, and this is not cosmetic: a fractional index into a
+      // Float32Array reads `undefined` and writes nowhere, so the first version
+      // of this — which passed `rng() * size` straight through — drew a
+      // perfectly correct set of lenticels into the void and baked a tile that
+      // measured, to a tenth of a count, exactly the tile without them.
+      const x = ((((cx + ox) | 0) % size) + size) % size;
+      const y = ((((cy + oy) | 0) % size) + size) % size;
+      const i = y * size + x;
+      if (m <= s.a[i]) continue;
+      setRGB(s, i, px(col));
+      s.a[i] = m;
+      s.h[i] = 0.16;          // a lenticel is a slit, so it reads as a dent
+      s.ao[i] = 0.72;
+      s.rough[i] = 0.95;
+    }
+  }
+}
+
+/**
+ * Birch lenticels.
+ *
+ * The bark tile itself is Tree Bark/3 turned upright and desaturated (see the
+ * MAP entry), and as a picture that is a pale slabby bark running vertically —
+ * which is what the recon pass called "grey-lavender marble with no birch
+ * marks". Nothing in the pack is birch; every bark variant was contact-sheeted
+ * and the ten of them are oak, pine and generic hardwood. So the species mark
+ * is drawn rather than sourced, exactly as the mossy pair are.
+ *
+ * What makes a birch a birch at a glance is one thing and it is not the colour:
+ * it is that the marks run ACROSS the trunk while the grain runs up it. The
+ * dashes here are horizontal, they are the only horizontal thing on the tile,
+ * and that single cross-grain is worth more than any exposure change — a pale
+ * trunk with vertical marks is a poplar.
+ *
+ * Two scales, because a birch has two kinds of mark: many small lenticels, and
+ * a few big black scars where a branch was shed, each with a lifted lip under
+ * it. Without the scars the tile reads as pinstripe fabric; without the small
+ * ones the scars read as damage. Coverage is deliberately under a twentieth of
+ * the tile — the ladder puts this bark at the pale end and a heavy hand here
+ * walks it straight back down it.
+ */
+G.log_birch = (s) => {
+  clearAlpha(s);
+  const rng = makeRng(2207);
+  const size = s.size;
+  const k = size / 256;                       // authored at the baked size
+  // small lenticels
+  for (let n = 0; n < 54; n++) {
+    const len = (4 + rng() * 20) * k;
+    const th = (0.9 + rng() * 1.1) * k;
+    dash(s, rng() * size, rng() * size, len, th,
+      // not black: a lenticel is a corky slit, and pure black on a 180-count
+      // bark is a drawn line rather than a hole in a surface
+      [52 + rng() * 26, 44 + rng() * 22, 40 + rng() * 20], 0.72 + rng() * 0.22,
+      (rng() - 0.5) * 0.16);
+  }
+  // shed-branch scars: a long dark lens with a pale lip along its underside
+  for (let n = 0; n < 4; n++) {
+    const cx = rng() * size, cy = rng() * size;
+    const len = (16 + rng() * 16) * k;
+    dash(s, cx, cy, len, (2.4 + rng() * 1.6) * k, [30, 25, 23], 0.95, (rng() - 0.5) * 0.2);
+    dash(s, cx, cy + 3.2 * k, len * 0.86, 1.2 * k, [226, 219, 205], 0.55, (rng() - 0.5) * 0.2);
+  }
+  s.normalStrength = 1.0;
+  return s;
+};
+
 G.glass = (s) => {
   const f = fbm(s.size, 12, 3, 541);
   s.each((i, x, y, u, v) => {

@@ -164,7 +164,13 @@ const MAP = {
   // simply exposing it up came out as pale pine, which is the confusion being
   // fixed. Birch bark is white with the warmth of the paper barely in it, so
   // most of the chroma comes out first and the exposure goes on afterwards.
-  log_birch: ['Tree Bark', 3, { rot90: true, tint: 0.55, bright: 1.16 }],
+  // The exposure is unchanged in kind and only lifted from 1.16 to 1.216, to
+  // pay for the lenticels that SELF_DECALS now draws over this tile: measured,
+  // the marks cost the finished tile 8.0 counts of luminance, and the ladder
+  // wants the FINISHED number to stay at 180,161,139 with its cut end +14 above
+  // it. See G.log_birch in src/render/TextureGen.js for why the marks are drawn
+  // rather than sourced.
+  log_birch: ['Tree Bark', 3, { rot90: true, tint: 0.55, bright: 1.216 }],
   // Birch's cap changes VARIANT, which none of the other wood tiles did. Tree
   // Bark/9 is craggy split bark at L=72, and the only way to get it onto a bark
   // now sitting at L=163 is roughly bright 2.4 — tried, and it comes out a
@@ -195,7 +201,36 @@ const MAP = {
   // strict budget it does because orange trunk showing through green needles is
   // what a previous pass shipped. Trimming red and lifting blue takes the same
   // luminance to a red-brown instead.
-  log_pine: ['Tree Bark', 1, { bright: 0.72, warm: [0.95, 1.0, 1.06] }],
+  //
+  // The VARIANT changes here and the colour does not. Tree Bark/1 is a blond
+  // swirl — irregular flame-shaped blotches, no consistent direction — and it
+  // failed at both ends of the range at once: close up in a pine forest it is
+  // polished plywood, and in the tundra at fifteen blocks, where the mip has
+  // taken the fine grain off and left only the blotches, it is a brown zigzag
+  // that reads as camouflage wrap. One picture, two reports.
+  //
+  // Tree Bark/9 is craggy split bark: deep vertical furrows running the whole
+  // height of the tile, which is what a conifer actually has and, more to the
+  // point, is DIRECTIONAL. That is what survives distance. A blotch mips into a
+  // smear; a furrow mips into a vertical streak, and a vertical streak on a
+  // standing trunk is still a trunk. It also needs no `rot90` — it already runs
+  // the right way, which is why it is available at all (see the note above:
+  // only variants 2 and 3 have cross-grain for `rot90` to stand up).
+  //
+  // Tree Bark/7 was the other upright candidate and is rejected: its fibres are
+  // too even, so it reads as rope, and at the exposure the ladder needs it goes
+  // a strong orange — the exact hue the entry it replaces was fighting.
+  //
+  // `tint` before `bright` rather than `warm` after it. Raw variant 9 is a dark
+  // red-brown at 111,64,43 and the ladder wants 132,102,68 — a 1.45x lift on
+  // luminance but only 1.19x on red, so a pure exposure comes out as a bright
+  // rust. Desaturating first and exposing afterwards is the same move
+  // `log_birch` makes for the same reason, and it lands the tile at 130,101,67
+  // against the ladder's 132,102,68, with r-b at 64 exactly as before. Std-dev
+  // goes 18.8 -> 27, which is the furrows arriving and is checked against oak:
+  // oak sits at 16.5 on a mean of 77, so in proportion to its own luminance
+  // this bark is barely above it.
+  log_pine: ['Tree Bark', 9, { tint: 0.22, bright: 1.42, warm: [0.90, 1.08, 0.95] }],
   // Pine's cap keeps its variant — Tree Bark/5 is already within a few counts
   // of the luminance the ladder wants — and the whole fix is chroma. Raw it is
   // 96 counts of red over blue against bark that the entry above deliberately
@@ -494,6 +529,21 @@ const DECALS = {
   deep_crystal_ore: 'slate',
 };
 
+// Procedural detail composited over a tile's OWN pack material.
+//
+// DECALS above puts one tile's generator over a DIFFERENT tile's material,
+// which is what a mossy variant needs — it is a variant OF another block. This
+// one is not a variant of anything: it is one material that the pack gets most
+// of the way right and cannot finish. Birch bark exists in no texture pack on
+// disk here and the ten Tree Bark variants are all oak, pine and generic
+// hardwood, so the species mark has to be drawn on.
+//
+// The mechanism is the same composite, reading the decal out of the untouched
+// procedural pass (`base`) instead of out of the working buffer, because the
+// working buffer has by this point been overwritten with the pack material —
+// which is exactly the thing we want to composite ONTO.
+const SELF_DECALS = ['log_birch'];
+
 // ---------------------------------------------------------------------------
 
 const layerIndex = Object.fromEntries(TILES.map((t, i) => [t, i]));
@@ -718,6 +768,30 @@ function compositeDecal(tileName, baseName) {
   return true;
 }
 
+/**
+ * Composite a tile's own procedural detail over its own baked pack material.
+ * Same maths as compositeDecal, but the mask and the detail come from `base`
+ * (the procedural pass as it was generated) rather than from the layer buffers,
+ * which `bakeTile` has already replaced with the pack material.
+ */
+function compositeSelfDecal(tileName) {
+  const li = layerIndex[tileName];
+  if (li === undefined) return false;
+  const off = li * per;
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const o = off + i * 4;
+    const m = base.albedo[o + 3] / 255;
+    if (m <= 0) continue;
+    for (let c = 0; c < 3; c++) {
+      albedo[o + c] = base.albedo[o + c] * m + albedo[o + c] * (1 - m);
+      normal[o + c] = base.normal[o + c] * m + normal[o + c] * (1 - m);
+      arm[o + c] = base.arm[o + c] * m + arm[o + c] * (1 - m);
+    }
+    albedo[o + 3] = 255;
+  }
+  return true;
+}
+
 // --- run --------------------------------------------------------------------
 
 let baked = 0;
@@ -726,6 +800,13 @@ for (const [tile, [cat, variant, opts]] of Object.entries(MAP)) {
   if (ok) { baked++; process.stdout.write(`\r  materials: ${baked}/${Object.keys(MAP).length}  `); }
 }
 console.log('');
+
+// Before the fringes, not after: snow_side and grass_side are built by copying
+// texels out of the `snow` and `dirt` layers, so anything composited onto those
+// two has to already be there or the flank of a block stops matching its top.
+for (const tile of SELF_DECALS) {
+  if (compositeSelfDecal(tile)) console.log(`  self-decal: ${tile}`);
+}
 
 for (const [tile, cfg] of Object.entries(FRINGE)) {
   if (bakeFringe(tile, cfg)) console.log(`  fringe: ${tile}`);

@@ -417,7 +417,22 @@ const ORE_MINERALS = {
   // 19.6, gold 19.5 and iron 19.3. Dropped a stop and a half and saturated,
   // which lands copper at 20.2 — inside the family band — and reads as raw
   // copper ore rather than as pale rust.
-  copper_ore: [[104, 48, 18], [188, 96, 34], 0.55, 541, 0.48],
+  //
+  // ...and that darkening went too far, which is the report "just make the
+  // model orange, it has blacks on them, only little part is orange". The dark
+  // end above is luminance 62 against stone at 137 — more than a stop under the
+  // rock, so at a glance the fleck read as a hole rather than as metal, and only
+  // the narrow lit edge carried any hue at all. Copper is a bright metal; the
+  // one ore on the sheet that should be unmistakably orange was the one reading
+  // black.
+  //
+  // Lifted both ends and kept the hue, rather than only lifting the dark end:
+  // a mineral whose two ends straddle the rock reads as texture on the rock,
+  // and what makes an ore legible is being a different COLOUR from it, not
+  // being darker. The light end stays above stone (157 against 137) so the
+  // flecks still separate at distance, which is what the pass above was
+  // protecting and is the thing not to give back.
+  copper_ore: [[168, 84, 30], [238, 140, 58], 0.55, 541, 0.48],
   silver_ore: [[136, 142, 152], [222, 228, 238], 0.7, 551, 0.3],
   sulfur_ore: [[168, 148, 26], [236, 222, 96], 0.0, 561, 0.62],
   amethyst_ore: [[110, 58, 168], [198, 148, 252], 0.05, 571, 0.16],

@@ -5810,7 +5810,24 @@ class Game {
         }
       }
     }
-    if (sawLava) this._mark('abyss');
+    // "Find lava underground" - so the player has to actually be underground,
+    // and not merely standing on ground that happens to have some under it.
+    //
+    // `sawLava` is set by the emitter scan above, which sweeps a box three
+    // layers below the feet to four above and does not care whether anything in
+    // it is visible. Spawning on a column with a lava pocket under it therefore
+    // awarded the mark - 200 xp - on the first frame of a new world, for
+    // finding nothing. Reported as "I just spawned in a new world and I got
+    // 200exp for some reason".
+    //
+    // The depth test is the mark's own wording made true: you are under the
+    // surface of the column you are standing in, by more than the scan reaches
+    // down, so the lava it found is lava you have gone to.
+    if (sawLava) {
+      const c = this.player.cell;
+      const surf = this.planet.surfaceK(cidx(c.f, Math.round(c.ci), Math.round(c.cj)));
+      if (surf >= 0 && c.ck < surf - 3) this._mark('abyss');
+    }
     this._hlValue = { r, g, b };
     return this._hlValue;
   }

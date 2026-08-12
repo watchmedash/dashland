@@ -47,7 +47,23 @@ const MAP = {
   // around its own mean, and trimming the blue back below the red gives the
   // rock something of its own to show in both sun and shade.
   stone: ['Cave Wall', 10, { bright: 1.8, contrast: 1.22, warm: [1.06, 1.0, 0.9] }],
-  dirt: ['Mud', 6],
+  // `repeat: 2` and nothing else — the colour is untouched at 140,102,70,
+  // because the colour was never what was wrong with it.
+  //
+  // Mud/6 is a field of soft rounded clods about a third of a tile across, so
+  // at one copy per block face you get two or three of them, each with the
+  // pack's painted rim-light on it. That is a BOULDER, and since dirt is the
+  // base of both fringe tiles it is also the largest single surface in every
+  // terraced landscape in the game — the report's "chocolate lump" is the same
+  // three clods repeated identically down a whole cliff.
+  //
+  // Halving them puts eight or nine clods on a face, which is soil. Rejected
+  // first: swapping material. Mud/4 is bigger slabs (worse), Mud/8 is stones in
+  // earth and is already spent on coarse_dirt, Mud/1 is dirt_path. Rejected
+  // second: `repeat: 3`, which is finer still but at nine copies the pack's own
+  // diagonal lay starts to read as a woven grid across the block, and the whole
+  // complaint here is about a pattern you can see repeating.
+  dirt: ['Mud', 6, { repeat: 2 }],
   grass_top: ['Grass', 2, { tint: 0.55, bright: 1.06 }],
   // Sand/3 is a DIRECTIONAL SWIRL — long soft ridges all lying the same way,
   // with dark hairlines between them — and at one copy per block face, on every

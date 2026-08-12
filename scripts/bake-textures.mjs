@@ -49,9 +49,30 @@ const MAP = {
   stone: ['Cave Wall', 10, { bright: 1.8, contrast: 1.22, warm: [1.06, 1.0, 0.9] }],
   dirt: ['Mud', 6],
   grass_top: ['Grass', 2, { tint: 0.55, bright: 1.06 }],
-  sand: ['Sand', 3],
+  // Sand/3 is a DIRECTIONAL SWIRL — long soft ridges all lying the same way,
+  // with dark hairlines between them — and at one copy per block face, on every
+  // block, a sand floor came out as a stack of polished planks. It is the same
+  // failure mode as the barks below and it was worse here, because sand is the
+  // whole ground in two biomes and there is nothing else in frame to break it.
+  //
+  // Sand/5 is a rippled dune field instead: many small crescent ripples rather
+  // than a few long ridges, so it has a scale of its own and no grain to read
+  // as timber. At `repeat: 2` a face carries roughly thirty ripples, which is
+  // granularity you can see at arm's length and which mips down to an even
+  // sandy tone rather than to stripes. Measured, the tile's characteristic
+  // feature width falls from 0.20 of a block to 0.06.
+  //
+  // Sand/1 was the other candidate — it is the only variant with actual grit
+  // painted into it — and it was rejected at every repeat: its shapes are broad
+  // soft blobs, and tiled up to get the grit small enough the blobs interlock
+  // into a basketweave. Sand/6 and Sand/2 are the same swirl family as Sand/3.
+  //
+  // `bright`/`warm` hold the tile at the colour it already had (236,184,128):
+  // the palette was never the complaint, and sand is what the desert's whole
+  // light balance was tuned against.
+  sand: ['Sand', 5, { repeat: 2, bright: 1.09, warm: [0.96, 1.01, 1.10] }],
   sandstone: ['Desert', 3],
-  sandstone_top: ['Sand', 3],
+  sandstone_top: ['Sand', 5, { repeat: 2, bright: 1.09, warm: [0.96, 1.01, 1.10] }],
   // Beach/6 is pale sand — it read as a second sand block, not as gravel.
   //
   // The two Cobble Stone variants were then the wrong way round, and the
@@ -332,8 +353,31 @@ const MAP = {
   dried_mud: ['Mud', 7],
   peat: ['Mud', 2, { bright: 0.55 }],
   podzol_top: ['Mud', 9],
-  red_sand: ['Sand', 10, { warm: [1.08, 0.86, 0.7] }],
-  red_sandstone: ['Desert', 4, { warm: [1.12, 0.82, 0.68] }],
+  // Red sand is sand with iron in it, so it is now literally the same material
+  // as `sand` with a red trim, and the two share a grain the way they should.
+  // Sand/10 was the worst offender of the swirl family — a hard diagonal
+  // marbling that made a badlands floor read as varnished burl.
+  //
+  // `contrast` earns its place: crushing green and blue by a third to get the
+  // red also crushes the tile's luminance range, and without the widening this
+  // landed at std-dev 11.8 against the old tile's 21. It is kept modest at 1.18
+  // because contrast is applied before `warm`, so a heavy hand here clips the
+  // red channel at the top and drags r-b from 148 up past 180 — tried at 1.45
+  // and 1.60 and both came out a fluorescent orange rather than a red sand.
+  red_sand: ['Sand', 5, { repeat: 2, contrast: 1.18, bright: 1.09, warm: [0.845, 0.652, 0.540] }],
+  // A badlands is red_sand on top of red_sandstone and nothing else, so those
+  // two tiles ARE the biome's banding — and they measured 211,120,63 and
+  // 221,120,58, one and a half counts of luminance apart. Every terrace edge in
+  // the biome was therefore invisible and the whole place read, correctly, as
+  // one flat sheet of terracotta.
+  //
+  // The rock is the one that moves, because the sand's colour is shared with
+  // the desert. Down 30 counts of luminance and further off orange, so a
+  // terrace now steps light-sand / dark-rock / light-sand down a canyon wall.
+  // `contrast` keeps Desert/4's cracked slabs legible after the exposure cut —
+  // without it the darkening flattens the very detail that says "rock" rather
+  // than "more sand".
+  red_sandstone: ['Desert', 4, { bright: 0.80, contrast: 1.1, warm: [1.12, 0.78, 0.60] }],
   moss_block: ['Swamp', 4, { tint: 0.6 }],
 
   // --- ice ------------------------------------------------------------------

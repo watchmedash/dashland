@@ -321,6 +321,30 @@ const FISH_CAST_RANGE = 28;
  * beside you rather than reaching the far side of the planet.
  */
 const FISH_CAST_SPEED = 17;
+/**
+ * The wind-up: how long the button has to be held for a cast at full stretch,
+ * and how short a flick of it throws.
+ *
+ * A cast used to leave the rod at one speed however you pressed the button, so
+ * the only thing that decided where the float landed was where you were
+ * looking - and over a wide lake that meant aiming at the sky to reach the
+ * middle of it. Holding the throw is the control that was missing: the aim says
+ * WHERE and the hold says HOW FAR.
+ *
+ * 0.75s to full, which is a touch shorter than the bow's draw, because a cast
+ * is a thing you do fifty times an evening and a bow shot is not. The floor is
+ * 0.42 rather than something near zero so the shortest throw is a short throw
+ * and not a dropped one.
+ *
+ * Measured off an ordinary sea shore, landing distance by hold: 0.5 -> 11.5
+ * cells, 0.75 -> 14.1, full -> 18.0. Below about a third the float came down on
+ * the bank and the cast was refused with "Cast at open water" - which is the
+ * honest answer to an under-thrown cast rather than a bug, but it does mean a
+ * flick from a high or shallow bank can fall short. Range goes as the square of
+ * speed, so the low end of the dial is where the distance changes fastest.
+ */
+const FISH_WINDUP_TIME = 0.75;
+const FISH_CAST_MIN = 0.42;
 const FISH_CAST_G = 0.55;
 /**
  * The longest piece of the arc tested as a single point, in cells.
@@ -7671,10 +7695,27 @@ class Game {
       // Once the fight is on, the button is the control and not a click any
       // more: a press that reeled in mid-fight would throw the fish away on the
       // first thing the player instinctively does, which is grab the button.
-      if (!this.fishing?.fight
-          && input.clicked[2] && input.locked && this.useCooldown === 0) {
-        this.useCooldown = 0.3;
-        this._rodClick();
+      // Hold to wind up, let go to throw - but only when there is no line out.
+      // With a cast on the water the button is still the single click that
+      // reels in, because holding it to bring a fish back would mean the
+      // instinctive grab at the button during a fight was also a wind-up.
+      if (!this.fishing?.fight) {
+        const down = !!input.buttons[2] && input.locked;
+        if (!this.fishing) {
+          if (down) {
+            this.castCharge = Math.min(1, (this.castCharge ?? 0) + dt / FISH_WINDUP_TIME);
+          } else if (this.castCharge > 0) {
+            const power = this.castCharge;
+            this.castCharge = 0;
+            if (this.useCooldown === 0) {
+              this.useCooldown = 0.3;
+              this._rodClick(power);
+            }
+          }
+        } else if (input.clicked[2] && this.useCooldown === 0) {
+          this.useCooldown = 0.3;
+          this._rodClick();
+        }
       }
       this._tickFishing(dt);
       if (this.fishing) {          // holding the line: nothing else to do
@@ -7690,8 +7731,12 @@ class Game {
         // has not landed is the plate answering a question nobody asked yet.
         return;
       }
-    } else if (this.fishing) {
-      this._stopFishing();
+    } else {
+      // Put the rod away mid-wind-up and the charge goes with it, or it would
+      // still be sitting there next time one is drawn and throw a full-strength
+      // cast off a button you never held.
+      this.castCharge = 0;
+      if (this.fishing) this._stopFishing();
     }
 
     if (input.clicked[2] && hit && input.locked && this.useCooldown === 0) {
@@ -7836,10 +7881,15 @@ class Game {
    * @param {number[]} [path] filled with x, y, z, t per step when given
    * @returns {{col:number, k:number}|null} the water cell it entered, or null
    */
-  _castArc(from, dir, path) {
+  _castArc(from, dir, path, power = 1) {
     if (path) path.length = 0;
     const p = _castP.copy(from);
-    const v = _castV.copy(dir).normalize().multiplyScalar(FISH_CAST_SPEED);
+    // Power scales the launch speed, so the wind-up buys distance along the arc
+    // the aim already chose rather than flattening it. Range is roughly the
+    // square of speed under gravity, so the 0.42 floor still throws about a
+    // fifth of the full distance - short, not useless.
+    const v = _castV.copy(dir).normalize()
+      .multiplyScalar(FISH_CAST_SPEED * (FISH_CAST_MIN + (1 - FISH_CAST_MIN) * power));
     const g = GRAVITY * FISH_CAST_G;
     for (let t = 0; t < FISH_CAST_TIME;) {
       const speed = v.length();
@@ -7888,7 +7938,7 @@ class Game {
       && p.at(col, k + 2) === 0;
   }
 
-  _rodClick() {
+  _rodClick(power = 1) {
     if (!this.fishing) {
       // Thrown from the rod's tip and not from the eye. Half a cell out along
       // the aim is enough that the first probe is never inside the block the
@@ -7899,7 +7949,7 @@ class Game {
       const tip = this.player.eye.clone()
         .addScaledVector(this.player.lookDir, 0.5);
       const path = [];
-      const wet = this._castArc(tip, this.player.lookDir, path);
+      const wet = this._castArc(tip, this.player.lookDir, path, power);
       if (!wet) {
         this.ui.setHint('Cast at open water');
         return;

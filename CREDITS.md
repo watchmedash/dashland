@@ -29,6 +29,17 @@ merchant and the fifteen player characters. Pig and hog are deliberately unused.
 [kenney.nl](https://www.kenney.nl) — **CC0**. 28 models: the foraged, cooked and
 baked line-up.
 
+## Touch controls — Mobile Controls by **Kenney**
+
+[kenney.nl](https://www.kenney.nl) — **CC0**. Eight SVGs in `public/touch/`: the
+thumbstick pad and nub, and six icons. Nothing else from the pack was copied in.
+
+They are drawn as CSS `mask-image` rather than as pictures, so the wood, brass
+and ink line the rest of the HUD is built from paint through the silhouettes and
+the controls belong to this game's furniture instead of sitting on top of it.
+The one recolour is the sneak glyph, which is the pack's arrow turned to point
+down: there is no crouch icon in the set.
+
 ## Held tools and weapons — KayKit "Bits" packs by **Kay Lousberg**
 
 [kaylousberg.com](https://www.kaylousberg.com) — **CC0**. Pickaxe, axe, shovel,

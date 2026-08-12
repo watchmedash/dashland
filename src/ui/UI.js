@@ -1046,7 +1046,13 @@ export class UI {
         open.innerHTML = `<b>${num}</b>`
           + `<span class="slot-who">${characterName(meta.character)}</span>`
           + `<span class="slot-when">Day ${meta.day || 1}, ${playedFor(meta.playtime)} played</span>`
-          + `<span class="slot-ago">Saved ${agoText(meta.savedAt)}</span>`;
+          // The time, and not the word "Saved" in front of it ten times. The
+          // column is 105px wide on a 520px sheet and "Saved 13 months ago"
+          // wants 114, so the one row whose age is worth reading was the one
+          // that ellipsised - on a 1920px monitor, not only on a phone. What
+          // the column holds is already obvious from the two lines beside it,
+          // and a label repeated on every row is not a label.
+          + `<span class="slot-ago">${agoText(meta.savedAt)}</span>`;
       } else {
         open.innerHTML = `<b>${num}</b><span class="slot-who empty">Empty</span>`;
       }

@@ -104,7 +104,23 @@ const MAP = {
   // cobblestone.
   gravel: ['Cobble Stone', 5, { bright: 1.05, tint: 0.82, warm: [1.02, 1.0, 0.97], repeat: 2 }],
   clay: ['Mud', 5],
-  ice: ['Ice', 3],
+  // Ice sits IN a snowfield — it is the frozen puddle in the drift, and it is
+  // almost always seen with snow on three sides of it. At 169,218,240 against
+  // snow's 241,245,250 it was 35 counts of luminance and 61 counts of r-b away
+  // from its neighbour, which is not ice in snow, it is a cyan tile inset in a
+  // white floor, and the block edge between them reads as a painted border.
+  //
+  // Real ice next to snow is nearly as bright, because it is the same water:
+  // what separates them is that snow scatters white and ice transmits, so ice
+  // is a little darker and keeps its blue in the depth. Half the chroma out and
+  // the exposure up puts it 14 counts under snow instead of 35, with r-b at -40
+  // instead of -72 — still unmistakably the blue block, no longer a decal.
+  //
+  // The variant does not move. Ice/3 is fine flake ice and the tile it must NOT
+  // converge on is crystal_block, which was deliberately taken the other way
+  // (Ice/1, strong cyan, per the note there); lifting ice increases that gap
+  // rather than closing it.
+  ice: ['Ice', 3, { tint: 0.30, bright: 1.10, warm: [1.05, 1.0, 0.99] }],
   water: ['Water', 1],
 
   // Bark on a standing trunk has to run up the side face, the way planks and
@@ -532,17 +548,18 @@ const DECALS = {
 // Procedural detail composited over a tile's OWN pack material.
 //
 // DECALS above puts one tile's generator over a DIFFERENT tile's material,
-// which is what a mossy variant needs — it is a variant OF another block. This
-// one is not a variant of anything: it is one material that the pack gets most
-// of the way right and cannot finish. Birch bark exists in no texture pack on
-// disk here and the ten Tree Bark variants are all oak, pine and generic
-// hardwood, so the species mark has to be drawn on.
+// which is what a mossy variant needs — it is a variant OF another block. These
+// two are not variants of anything: they are one material that the pack gets
+// most of the way right and cannot finish. Birch bark exists in no texture pack
+// on disk here and the ten Tree Bark variants are all oak, pine and generic
+// hardwood, so the species mark has to be drawn on. Snow is the right picture
+// and simply has too little of its own detail to carry a block face.
 //
 // The mechanism is the same composite, reading the decal out of the untouched
 // procedural pass (`base`) instead of out of the working buffer, because the
 // working buffer has by this point been overwritten with the pack material —
 // which is exactly the thing we want to composite ONTO.
-const SELF_DECALS = ['log_birch'];
+const SELF_DECALS = ['log_birch', 'snow'];
 
 // ---------------------------------------------------------------------------
 

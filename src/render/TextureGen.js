@@ -661,6 +661,59 @@ G.log_birch = (s) => {
   return s;
 };
 
+/**
+ * Snow grain.
+ *
+ * Snow/1 is the right PICTURE for a drift — soft wind-blown swirls, chosen over
+ * Snow Ground/11's hard-edged cells for exactly that reason, and that choice
+ * stands. But it measures a luminance std-dev of 12.9, the lowest of any
+ * surface tile in the game, and a block face carrying almost no variation of
+ * its own shows whatever the renderer puts on it instead: the per-block ambient
+ * occlusion becomes the strongest signal on the surface, and a drift comes out
+ * as a stack of separately-shaded cubes. That is the "styrofoam" report.
+ *
+ * The fix has to add variation WITHOUT adding block-scale contrast, or it
+ * undoes the reason Snow/1 was picked. So the grain is high-frequency (cells 74
+ * against the swirl's own handful), and it is written as SPARSE SPECKS rather
+ * than as a full-coverage wash.
+ *
+ * The specks matter, and the first version got this exactly wrong. A decal is
+ * composited by lerping toward the decal, so it can only ever pull the surface
+ * toward whatever it contains — it cannot add. A quiet grain laid over the
+ * whole tile at alpha 0.55 therefore did not add fine detail, it averaged away
+ * 55% of the swirl that was already there: measured, the tile's std-dev fell
+ * from 12.9 to 5.9, which is the reported defect made worse in the name of
+ * fixing it. Alpha now rises only at the top and bottom of the grain's own
+ * range, so most of the tile is untouched Snow/1 and the marks are crystals
+ * catching or dropping the light between them.
+ *
+ * The other half of the work is ROUGHNESS. Snow is packed crystal and it glints
+ * in patches; the composite lerps ARM by the same mask, so the glints land
+ * exactly where the bright specks are and nowhere else, which is what a sunlit
+ * drift does. Roughness range is deliberately wider than the albedo range —
+ * a specular sparkle costs no block-scale contrast at all.
+ */
+G.snow = (s) => {
+  clearAlpha(s);
+  const grain = fbm(s.size, 74, 2, 2311);
+  const clump = fbm(s.size, 22, 3, 2317);
+  s.each((i) => {
+    const g = grain[i] * 0.74 + clump[i] * 0.26;
+    // symmetric about the middle of the grain's range, so the two tails cancel
+    // in the mean and the tile stays at the 241,245,250 the fringe expects
+    const hi = smoothstep(0.60, 0.86, g), lo = smoothstep(0.40, 0.14, g);
+    const m = Math.max(hi, lo);
+    if (m <= 0.01) return;
+    setRGB(s, i, hi > lo ? px([252, 253, 255]) : px([223, 229, 242]));
+    s.a[i] = m * 0.85;
+    s.h[i] = 0.5 + (hi - lo) * 0.5;
+    s.ao[i] = 1 - lo * 0.10;
+    s.rough[i] = hi > lo ? 0.26 : 0.99;
+  });
+  s.normalStrength = 1.1;
+  return s;
+};
+
 G.glass = (s) => {
   const f = fbm(s.size, 12, 3, 541);
   s.each((i, x, y, u, v) => {

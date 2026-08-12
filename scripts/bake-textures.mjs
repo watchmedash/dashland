@@ -99,6 +99,20 @@ const MAP = {
   // it is the base material every timber decal composites over (crate, bench,
   // bed, door, sign, fence), so moving it moves eight other blocks for a defect
   // none of them had.
+  //
+  // The three `_top` tiles are the cut end, and they belong on the same ladder
+  // as the bark or a felled trunk reads as two different woods from one step to
+  // the side. The ladder above left them behind: log_birch_top was 111,65,43, a
+  // dark brown cap on a bark now measuring 180,161,139, and log_pine_top was
+  // 165,104,70 against bark at 132,102,68 — so birch's cut end was darker than
+  // its bark and pine's was an orange lighter than its own.
+  //
+  // The offset each cap takes from its own side is +14 counts of luminance and
+  // slightly LESS chroma, which is what a cut end is: raw heartwood, not
+  // weathered outer bark. Oak sets that figure rather than being fitted to it —
+  // Tree Bark/8 untouched is L=90 against the bark's L=76 — and the other two
+  // are brought to it. Oak's cap therefore stays exactly as it was; it was
+  // never the tile that broke.
   log_oak: ['Tree Bark', 2, { rot90: true }],
   log_oak_top: ['Tree Bark', 8],
   // Leaves: `holes` used to punch a third of the tile away, which combined with
@@ -114,7 +128,21 @@ const MAP = {
   // fixed. Birch bark is white with the warmth of the paper barely in it, so
   // most of the chroma comes out first and the exposure goes on afterwards.
   log_birch: ['Tree Bark', 3, { rot90: true, tint: 0.55, bright: 1.16 }],
-  log_birch_top: ['Tree Bark', 9],
+  // Birch's cap changes VARIANT, which none of the other wood tiles did. Tree
+  // Bark/9 is craggy split bark at L=72, and the only way to get it onto a bark
+  // now sitting at L=163 is roughly bright 2.4 — tried, and it comes out a
+  // washed-flat picture of bark, which is the one thing a cut end must not look
+  // like. Tree Bark/10 is wavy grain with knots in it, the same family as the
+  // oak cap next to it, and reaches the target on a much gentler exposure with
+  // its detail intact. Tree Bark/1 was the other pale candidate at a gentler
+  // 1.18 still, and was rejected because it is `log_pine`'s own bark: birch's
+  // cut end would have been a lightened print of the pine trunk beside it.
+  //
+  // `tint` is high because variant 10 is a strong red-brown, 96 counts of red
+  // over blue, and the exposure multiplies whatever chroma survives it. Pulling
+  // most of the colour out first lands the cap at 32 counts, just inside the
+  // bark's own 41, instead of a pale ORANGE cap on a white trunk.
+  log_birch_top: ['Tree Bark', 10, { tint: 0.81, bright: 1.78 }],
   // Not just paler than oak: WARMER than oak, which is where the "cold" reading
   // came from. Bush_Hedge/1 is a blue-green shrub and the tint that gives the
   // biome colour room to work took what little yellow it had, landing the tile
@@ -131,7 +159,19 @@ const MAP = {
   // what a previous pass shipped. Trimming red and lifting blue takes the same
   // luminance to a red-brown instead.
   log_pine: ['Tree Bark', 1, { bright: 0.72, warm: [0.95, 1.0, 1.06] }],
-  log_pine_top: ['Tree Bark', 5],
+  // Pine's cap keeps its variant — Tree Bark/5 is already within a few counts
+  // of the luminance the ladder wants — and the whole fix is chroma. Raw it is
+  // 96 counts of red over blue against bark that the entry above deliberately
+  // walked down to 64, so the cap was reading as the orange that trunk was
+  // taken off. `tint` rather than the bark's `warm`: the bark needed its hue
+  // moved off orange while holding its exposure, the cap only needs the colour
+  // turned down, and desaturating symmetrically keeps it the same hue as the
+  // bark it sits on. It lands at 60 counts, just inside the bark's 64.
+  //
+  // NOTE neither cap takes `rot90`. The two bark tiles need it because their
+  // grain runs across the source and a standing trunk's does not; a cut end has
+  // no up, and turning one only turns it against the cap on the log beside it.
+  log_pine_top: ['Tree Bark', 5, { tint: 0.40, bright: 1.05 }],
   // leaves_pine is deliberately NOT here. It used to be Bush_Hedge/2, which is
   // a broadleaf shrub — round leaves on brown twigs, near enough the same plant
   // as the oak and birch tiles it stood next to. Every category in the pack was

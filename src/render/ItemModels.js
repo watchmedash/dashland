@@ -278,9 +278,21 @@ function fish(file, height, extra = {}) {
   return {
     file: `fish/fish-${file}`, pack: 'fish', height,
     spin: [-Math.PI / 2, 0, 0],
-    grip: 0.16,
+    // Held in the middle of the body, and offset into the palm.
+    //
+    // Reported as "fish float and are not attached to the hand compared to
+    // other items", and the numbers said the same thing: every other held
+    // object in the game - the pearl, every food - grips at 0.5 with an offset
+    // of a few hundredths, while this template gripped at 0.16 with an offset
+    // of -0.137 across and +0.143 up. 0.16 is the tail fin, and the offset then
+    // carried the whole body up and to the LEFT, clear of the fist. Screenshot
+    // before the change: a clownfish hanging in mid-air beside the hand.
+    //
+    // 0.5 is the middle of the body, which is where a hand holds a fish, and
+    // the offset is the pearl's - the item this was compared against.
+    grip: 0.5,
     rot: [1.5708, 0.6283, -1.5708],
-    pos: [-0.1367, 0.1433, -0.0312],
+    pos: [0.0110, 0.0640, -0.0270],
     icon: [1.571, 0.698, -1.571],
     ...extra,
   };

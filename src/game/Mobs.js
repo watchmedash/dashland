@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx } from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn,
+  centerDir,
 } from '../world/Sphere.js';
 import {
   ID, IS_SHAPED, IS_LEAF, IS_TREE, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
@@ -1474,6 +1475,9 @@ const pet = (file, o) => ({
   idleMax: o.idleMax ?? 5,
   ...(o.hops ? { hops: true, hopImpulse: o.hopImpulse ?? 3.8 } : null),
   ...(o.cold ? { cold: true } : null),
+  // "Cold" is a coat; "polar" is an address. A snowy MOUNTAIN top is cold, and
+  // it is not the Antarctic — see the note on POLAR_SIN_LAT.
+  ...(o.polar ? { polar: true } : null),
   ...(o.aquatic ? { aquatic: true } : null),
   // Aquatic is "water is the only place I will go"; amphibious is "water is not
   // a wall". They are separate because they are not two ends of one axis: a
@@ -1842,6 +1846,9 @@ const SPECIES = {
     // the ice apart from the bear, so it is not down with the chicks.
     label: 'Penguin', h: 0.80, hp: 6, spd: 1.10, shy: 0.6, turn: 3.2, accel: 5.5,
     drops: [['poultry', 1, 1], ['feather', 1, 2], ['egg', 1, 1]], cold: true,
+    // Not merely cold-blooded-proof: it has to be at the bottom (or top) of the
+    // world. See POLAR_SIN_LAT and _isPolarColumn.
+    polar: true,
   }),
 
   // --- small and skittish ---
@@ -3019,6 +3026,37 @@ const MONSTER_BY_BIOME = {
   // MEADOW is missing on purpose — see above.
 };
 
+/**
+ * How far from the equator a column has to be before a `polar` species will
+ * spawn on it: |sin(latitude)| >= this, i.e. about 42 degrees.
+ *
+ * The report was "penguins are spawning in places not in pole", and the biome
+ * table alone cannot answer it. Penguins are drawn from `SPAWN_BY_BIOME.SNOW`,
+ * and SNOW is a *temperature* verdict — temperature falls with altitude as well
+ * as with latitude, so every snow-capped peak on the planet is snow, including
+ * tropical ones. Measured on seed 4242: 12,247 SNOW columns lie within 30
+ * degrees of the equator and 9,809 of those sit in patches whose four
+ * neighbours are snow too, so they are standable ground rather than specks. On
+ * the most equatorial of them — **latitude 3.46 degrees**, 35 units above sea
+ * level — `_pickWildlife` returned penguin in **43.7% of 4,000 draws**.
+ *
+ * 0.667 keeps 79% of the planet's snow as penguin ground (the |sin| >= 0.667
+ * bands hold 154,335 of 194,228 snow columns) while removing the tropical
+ * mountaintops entirely, so this costs the polar regions almost nothing.
+ *
+ * A latitude rule rather than a "not MOUNTAIN" one on purpose: the biome is the
+ * wrong instrument twice over, because a genuinely polar peak is MOUNTAIN too
+ * and would lose its penguins for the same bad reason.
+ *
+ * Only the penguin carries `polar` today. The polar bear is the obvious second
+ * candidate and is deliberately left alone — it is the owner's call whether a
+ * bear on a high cold mountain reads as wrong the way a penguin does.
+ */
+const POLAR_SIN_LAT = 0.667;
+/** Scratch for _isPolarColumn, which runs on every wildlife draw. */
+const _polarParts = { f: 0, i: 0, j: 0 };
+const _polarDir = [0, 0, 0];
+
 const COMMON = ['bunny', 'bunny', 'bee', 'caterpillar', 'fox'];
 const SPAWN_BY_BIOME = {
   SNOW: ['penguin', 'penguin', 'polar', 'fox', 'deer'],
@@ -3790,6 +3828,23 @@ export class Mobs {
   }
 
   /**
+   * Is this column far enough from the equator to count as polar ground?
+   *
+   * Read off the column's own direction rather than from anything the biome
+   * pass stored, for the reason POLAR_SIN_LAT gives: the biome knows the
+   * temperature, and temperature is not latitude. `centerDir` is a lookup into
+   * a table built once at startup, so this is three array reads and an abs.
+   *
+   * The pole axis is +Y, which is the axis `colHeight`'s climate falls off
+   * along and the one the sky rotates about.
+   */
+  _isPolarColumn(col) {
+    const q = colParts(col, _polarParts);
+    centerDir(q.f, q.i, q.j, _polarDir);
+    return Math.abs(_polarDir[1]) >= POLAR_SIN_LAT;
+  }
+
+  /**
    * The biome's list, and one species drawn from the half of it that flies or
    * the half that does not.
    *
@@ -3816,10 +3871,17 @@ export class Mobs {
     // still no filtered list allocated, and the weights are the only thing
     // that changed — see spawnWeight for what they are and why they are not
     // written into the tables by hand.
+    // A `polar` species is refused outright on tropical ground, before it can
+    // take a share of the weight — dropping it from the reservoir rather than
+    // re-rolling means the remaining species divide the whole slot between
+    // them, so a snowy peak keeps its full complement of foxes and deer instead
+    // of spawning 44% nothing.
+    const polarOk = this._isPolarColumn(col);
     let pick = null, total = 0;
     for (let n = 0; n < list.length; n++) {
       const spec = SPECIES[list[n]];
       if (!spec || !!spec.flies !== wantFlier) continue;
+      if (spec.polar && !polarOk) continue;
       total += spec.spawnWeight;
       if (Math.random() < spec.spawnWeight / total) pick = list[n];
     }

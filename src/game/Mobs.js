@@ -3773,11 +3773,37 @@ export class Mobs {
       mob.request = rollRequest(rng);
     }
     if (spec.lamp) {
-      // The only warm light on the planet that walks. Positioned in model units
-      // — the root's scale is rewritten every frame by _animate, so anything
-      // measured in cells here would be scaled twice.
+      // The only warm light on the planet that walks.
       const lamp = new THREE.PointLight(0xffcf8a, 2.4, 8, 2);
-      lamp.position.set(0, MobModels.modelHeight(url) * 1.15, 0);
+      /**
+       * Clear of his own head, and that is the whole of this number.
+       *
+       * It read 1.15, which put the light 3.10 model units up against a rig
+       * that measures 2.70 — four hundredths of a world unit above the crown
+       * once the per-species scale is applied. A PointLight with `decay` 2 is
+       * physically correct, so irradiance goes as 1/r² and at four hundredths
+       * of a unit the merchant's own head is receiving something in the tens:
+       * photographed at four cells in broad daylight, the top of his head was
+       * pure white with a bloom halo around it and the navy of his jacket had
+       * washed out to brown. At night it was worse — the face a player walks up
+       * to trade with was a burning blob with no features in it at all. The
+       * light was doing to the man carrying it exactly what a bare bulb held
+       * against your nose would.
+       *
+       * 1.75 puts it 4.73 model units up, about 0.95 of a world unit clear of
+       * the crown, which drops what his head receives by a factor of ~500 and
+       * leaves him legible in both — verified against a lamp-off control in the
+       * same frame. Nothing is drawn at the light's position, so a lamp hanging
+       * in the air over him costs nothing visually; what you see is still a warm
+       * pool of light with a trader standing in it, which is the whole point of
+       * `lamp` (see the spec).
+       *
+       * Still in model units, and still for the reason below: `_animate`
+       * rewrites the root's scale every frame, so a number in cells here would
+       * be scaled twice — and it also means this clearance stays proportional
+       * for a merchant who rolled small.
+       */
+      lamp.position.set(0, MobModels.modelHeight(url) * 1.75, 0);
       model.root.add(lamp);
     }
     this.list.push(mob);

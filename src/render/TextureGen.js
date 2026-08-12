@@ -776,7 +776,19 @@ function stem(s, x0, y0, x1, y1, w, col, wobble = 0) {
   }
 }
 
-function blob(s, cx, cy, r, col, jitterSeed) {
+/**
+ * @param {number} [ao] ambient occlusion to leave behind, if the caller wants
+ *   the blob to sit IN its surroundings rather than on top of them.
+ *
+ *   `clearAlpha` fills ao with 1, so by default a petal is the one surface in a
+ *   landscape carrying no occlusion at all: the dirt it grows out of is shaded
+ *   by the block above it and by its own per-block AO, and the flower is not.
+ *   That is half of why the flowers read as litter — they were not only more
+ *   saturated than everything around them, they were lit harder as well. This
+ *   is the cheap half of the "no value integration" report and it costs the
+ *   sprite no hue at all.
+ */
+function blob(s, cx, cy, r, col, jitterSeed, ao) {
   const size = s.size;
   const rng = makeRng(jitterSeed);
   const lobes = 5 + Math.floor(rng() * 3);
@@ -793,30 +805,92 @@ function blob(s, cx, cy, r, col, jitterSeed) {
         const shade = 0.7 + 0.3 * (1 - d / rr);
         setRGB(s, i, [col[0] * shade, col[1] * shade, col[2] * shade]);
         s.h[i] = 0.5 + (1 - d / rr) * 0.5;
+        // The rim of a petal is what curls away from the light, so the
+        // occlusion follows the same radius the shading already does.
+        if (ao !== undefined) s.ao[i] = ao + (1 - ao) * (1 - d / rr) * 0.6;
       }
     }
   }
 }
 
+/**
+ * Three blooms on stems.
+ *
+ * The palettes below are the second set. The first were pure hues at the top of
+ * the range — 204,46,58 / 76,116,216 / 246,192,44, at HSL saturations of 0.633,
+ * 0.642 and 0.919 — and the recon caught what that does on the ground: a
+ * meadow terrace of brown dirt with electric blue and crimson dots sitting on
+ * it reads as DROPPED PLASTIC, not as something growing. Three things were
+ * wrong and all three are fixed here rather than by turning one dial down:
+ *
+ * 1. CHROMA. A flower is not the most saturated object in a landscape; it is
+ *    barely more saturated than the leaf beside it. Measured on the baked
+ *    sheet, tall_grass sits at 0.407 and grass_top at 0.247, so a petal at
+ *    0.92 was more than twice as loud as the plant it grows among. The petals
+ *    now land near 0.4-0.55 — still the loudest thing in a meadow, no longer
+ *    loud enough to look manufactured.
+ *
+ * 2. THE WHITE EYE. flower_blue's centre was 240,240,250, a near-white dot on a
+ *    saturated blue disc, which is exactly the read of a plastic bead with a
+ *    specular hit on it. A real bloom's eye is DARKER than its petals — it is a
+ *    hole full of stamens — so the pale centre goes warm and drops well under
+ *    the petal it sits in.
+ *
+ * 3. VALUE. Every bloom was `mixc(petal, white, rng * 0.2)`: variation that only
+ *    ever went UP, so a clump of three was three discs of the same colour, two
+ *    of them washed toward white. They now range between a shaded and a lit
+ *    version of the same petal, which is what gives a clump any form at all,
+ *    and `blob` leaves ambient occlusion behind so the petal is not the one
+ *    unshaded surface in the frame. See the note on `blob`.
+ *
+ * All three species move together on purpose. Only red and blue were reported,
+ * but gold was measured at 0.919 — the most saturated of the three — and
+ * calming two of a set of three would simply have promoted the third into the
+ * defect. They are one generator and one visual category.
+ *
+ * Deliberately NOT done: shrinking the blooms, or thinning them out. A flower
+ * has to stay findable, and the report asked for exactly that; every change
+ * here is to colour and shading, so the silhouette a player scans for is the
+ * one that was already there.
+ */
 function flower(s, petal, center, seed) {
   clearAlpha(s);
   const rng = makeRng(seed);
+  // The shaded and lit ends of ONE petal colour, rather than a lerp toward
+  // white: mixing to white desaturates as it brightens, so the lit face of a
+  // bloom used to be a different, paler flower.
+  const dark = [petal[0] * 0.66, petal[1] * 0.66, petal[2] * 0.72];
+  const lite = mixc(petal, [1, 1, 1], 0.14);
   for (let k = 0; k < 3; k++) {
     const x = 0.28 + k * 0.22 + rng() * 0.05;
     const top = 0.3 + rng() * 0.16;
     stem(s, x, 0.98, x, top + 0.06, 0.016, px([64, 104, 44]), 0.02);
     // leaves
     stem(s, x, 0.72, x + (k % 2 ? 0.1 : -0.1), 0.62, 0.012, px([80, 126, 52]));
-    const p = mixc(petal, [1, 1, 1], rng() * 0.2);
-    blob(s, x, top, 0.075 + rng() * 0.02, p, seed + k * 17);
-    blob(s, x, top, 0.026, center, seed + k * 31);
+    const p = mixc(dark, lite, rng());
+    blob(s, x, top, 0.075 + rng() * 0.02, p, seed + k * 17, 0.72);
+    blob(s, x, top, 0.026, center, seed + k * 31, 0.58);
   }
   return s;
 }
 
-G.flower_red = (s) => flower(s, px([204, 46, 58]), px([250, 220, 120]), 701);
-G.flower_blue = (s) => flower(s, px([76, 116, 216]), px([240, 240, 250]), 711);
-G.flower_gold = (s) => flower(s, px([246, 192, 44]), px([120, 78, 24]), 721);
+// A campion red rather than a pillar-box one, with a pollen centre that is
+// warm and dim instead of a headlight.
+G.flower_red = (s) => flower(s, px([170, 62, 66]), px([206, 176, 104]), 701);
+// Cornflower. The blue keeps its identity — it is the one cool flower and the
+// only thing in a meadow that is not warm — and gives up the electricity.
+//
+// This one took two passes, and the first is worth recording because it looked
+// right on paper. 92,120,180 dropped the petal's saturation from 0.642 to 0.370
+// and rendered as a flower that was still the loudest object in the frame: a
+// blue in a green meadow is the one hue with nothing near it, so it carries
+// further than its chroma figure suggests and it is the last thing to blend in.
+// The second half of the move is therefore VALUE rather than more chroma —
+// the petal now sits at the grass's own luminance instead of six counts over
+// it, which is what stops it reading as something lying ON the grass.
+G.flower_blue = (s) => flower(s, px([86, 112, 168]), px([200, 200, 186]), 711);
+// The dark eye here was always right and does not move; only the petal does.
+G.flower_gold = (s) => flower(s, px([206, 172, 92]), px([116, 78, 30]), 721);
 
 G.tall_grass = (s) => {
   clearAlpha(s);

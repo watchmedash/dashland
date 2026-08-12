@@ -991,13 +991,67 @@ vec3 cellOffset(vec3 p, vec3 cen) {
  * through untouched — only the colour changes. uSeasonColor arrives normalised
  * to luminance 1, which is what keeps a re-hued surface exactly as bright as
  * the one it replaced.
+ *
+ * ---- why the hue is jittered here and nowhere else ------------------------
+ *
+ * The season table hands over ONE hue, so every tinted surface on the planet
+ * turned the same colour on the same day: an autumn wood was a single sheet of
+ * bronze with no red in it and no green left anywhere. `Seasons.js` records the
+ * ceiling it hit and points here, because per-tree colour is not something a
+ * table of four entries can express — it needs a value that varies across the
+ * world, and the only such value the fragment stage has is where the fragment
+ * *is*.
+ *
+ * So: a stable hash of the cell, turned into a small channel-wise multiplier on
+ * the season hue, and then renormalised back to luminance 1. Four properties,
+ * each of them load-bearing:
+ *
+ *  - **Renormalised.** The multiplier changes chroma only; the re-hued surface
+ *    is still exactly as bright as the one it replaced. Without that, half the
+ *    canopy would be a stop darker than the other half, and winter — which is
+ *    forbidden from lightening anything, for the reason `Seasons.js` gives —
+ *    would have found a back door to doing it.
+ *  - **World space, not screen space.** `seasonCell` is derived from `vWorld`,
+ *    so a leaf's colour is a property of the leaf. Any noise in screen space
+ *    makes the whole canopy crawl as the player walks, which is worse than the
+ *    flat bronze it replaces.
+ *  - **Two scales, coarse dominant.** A hash per block alone is confetti: a
+ *    canopy where every cell disagrees with its neighbour reads as static, not
+ *    as a wood. The 5-cell clump is about the size of a small canopy, so
+ *    neighbouring trees mostly disagree and a single tree mostly agrees, and a
+ *    quarter as much per-block jitter on top stops the clumps reading as cubes.
+ *  - **Scaled by the season's own chroma**, which is what keeps this from
+ *    needing a "how autumnal is it" uniform that nothing else wants. Normalised,
+ *    autumn's hue spans 1.40 between its brightest and dimmest channel, spring
+ *    0.75, winter 0.19 and summer nothing at all — which is the order these
+ *    seasons should vary in anyway. Autumn gets the full swing, a spring wood
+ *    gets half of it, winter's frost stays as even as frost is, and summer is
+ *    untouched because `uSeasonStrength` is 0.
+ *
+ * The swing itself is (+0.15, -0.15, -0.35) per unit: toward rust one way and
+ * toward the green it has not lost yet the other. Rejected: rotating in HSV,
+ * which costs two conversions per fragment to move along a hue circle nobody
+ * asked for — the useful axis in a wood is dry-to-green, not a full spectrum,
+ * and a plain multiply lands on it. Rejected: ±0.6 on the same axis, which put
+ * plum and lime in the same stand; this is meant to be read as one wood in
+ * autumn, not as bunting.
  */
 const SEASON_FRAG = /* glsl */`
   vec3 blockTint = mix(vec3(1.0), vTint, tintMask);
   vec3 seasonBase = diffuseColor.rgb * blockTint;
   float living = clamp(length(vec3(1.0) - blockTint) * 4.0, 0.0, 1.0);
   float seasonLum = dot(seasonBase, vec3(0.299, 0.587, 0.114));
-  vec3 rehued = mix(seasonBase, seasonLum * uSeasonColor, uSeasonStrength);
+  // Per-stand and per-block hash of the cell. Different constants from the tone
+  // jitter further down, which shares the same cell: correlated, every block
+  // that came out bright would also come out red.
+  float sCoarse = fract(sin(dot(floor(seasonCell * 0.2), vec3(41.113, 17.907, 83.551))) * 31741.7231);
+  float sFine = fract(sin(dot(seasonCell, vec3(63.719, 11.443, 29.887))) * 18397.4127);
+  float sJit = seasonVary * clamp((sCoarse - 0.5) * 1.6 + (sFine - 0.5) * 0.5, -1.0, 1.0);
+  vec3 sHue = uSeasonColor * (vec3(1.0) + vec3(0.15, -0.15, -0.35) * sJit
+    * clamp((max(max(uSeasonColor.r, uSeasonColor.g), uSeasonColor.b)
+           - min(min(uSeasonColor.r, uSeasonColor.g), uSeasonColor.b)) / 1.40, 0.0, 1.0));
+  sHue /= max(dot(sHue, vec3(0.299, 0.587, 0.114)), 1e-4);
+  vec3 rehued = mix(seasonBase, seasonLum * sHue, uSeasonStrength);
   diffuseColor.rgb = mix(seasonBase, rehued, living);
 `;
 
@@ -1007,12 +1061,16 @@ const MAP_FRAG = /* glsl */`
   // Solid faces only. A cut-out tile's arm alpha is its own business and the
   // liquid path has no biome tint to mask, so both leave tintMask at 1.
   tintMask = texture(uArm, vec3(vTexUv, vLayer)).a;
+  // The centre of the cell this fragment belongs to. Declared before the season
+  // rather than after it because both want it: the season hashes it for hue and
+  // the tone jitter below hashes it for brightness.
+  vec3 seasonCell = floor(vWorld - normalize(vNormal) * 0.5) + 0.5;
+  float seasonVary = 1.0;
 ${SEASON_FRAG}
 
   // Per-voxel tone jitter: identical blocks stop reading as tiled wallpaper.
-  vec3 cell = floor(vWorld - normalize(vNormal) * 0.5) + 0.5;
-  float vh = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-  float vh2 = fract(sin(dot(cell, vec3(93.9898, 27.345, 61.117))) * 24634.6345);
+  float vh = fract(sin(dot(seasonCell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  float vh2 = fract(sin(dot(seasonCell, vec3(93.9898, 27.345, 61.117))) * 24634.6345);
   diffuseColor.rgb *= 0.93 + vh * 0.14;
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.04, 1.0, 0.95), vh2 - 0.5);
 `;
@@ -1029,10 +1087,11 @@ const CUTOUT_MAP_FRAG = /* glsl */`
                              dFdx(vTexUv) * 0.3, dFdy(vTexUv) * 0.3).a;
   diffuseColor *= texel;
   diffuseColor.a = min(diffuseColor.a, aSharp);
+  vec3 seasonCell = floor(vWorld - normalize(vNormal) * 0.5) + 0.5;
+  float seasonVary = 1.0;
 ${SEASON_FRAG}
 
-  vec3 cell = floor(vWorld - normalize(vNormal) * 0.5) + 0.5;
-  float vh = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  float vh = fract(sin(dot(seasonCell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
   diffuseColor.rgb *= 0.93 + vh * 0.14;
 `;
 
@@ -2365,6 +2424,13 @@ export function createItemBlockMaterial() {
         // Same per-texel tint mask the world uses, or the grass block in the
         // hand keeps the olive sides the one in the ground has lost.
         tintMask = texture(uArm, vec3(vTexUv, vLayer)).a;
+        // No world position in this material - it draws a block in the hand or
+        // an item spinning on the ground, both of which move, so a cell hashed
+        // out of one would make the hue swim as the item turns. The variation
+        // is switched off instead and the held block gets the season's plain
+        // hue, which is also the average of what the wood outside is doing.
+        vec3 seasonCell = vec3(0.0);
+        float seasonVary = 0.0;
 ${SEASON_FRAG}
       `)
       // Emissive that follows the texture instead of flooding the whole cube.

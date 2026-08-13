@@ -45,6 +45,7 @@ import * as MobModels from './game/MobModels.js';
 import { explode } from './game/Explosion.js';
 import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
 import { Water, LEVEL_MAX } from './game/Water.js';
+import { Whirlpools, WHIRL_R, WHIRL_CUE, K_SEA } from './game/Whirlpool.js';
 import { Save } from './game/Save.js';
 import {
   DEFAULT_DIFFICULTY, normalizeDifficulty, mobDamageScale, normalizeLoadout,
@@ -1737,6 +1738,16 @@ class Game {
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
     /**
+     * Where the sea goes down a hole. Built here with a seed of 0 and re-seeded
+     * by `newGame`/`continueGame`, the same way everything else that depends on
+     * which planet this is gets set up: the object outlives a world, the seed
+     * does not.
+     *
+     * It owns no state beyond that seed and writes nothing to a save. See
+     * `game/Whirlpool.js` for why a whirlpool is not a block and not generated.
+     */
+    this.whirlpools = new Whirlpools(this.planet, 0);
+    /**
      * Cells that may hold a sand or gravel block with nothing under it, as
      * `col * D + k`. Seeded by every edit, drained on a clock. See
      * `_seedGravity` and `_settleGravity`.
@@ -2575,6 +2586,10 @@ class Game {
     this.seed = Number.isFinite(opts.seed)
       ? (opts.seed | 0)
       : (Math.random() * 0x7fffffff) | 0;
+    // Two planets must not have their whirlpools in the same places. The sites
+    // are a pure function of (seed, column), so this is the whole of what makes
+    // them a property of this world rather than of the lattice.
+    this.whirlpools.reset(this.seed);
     this._pendingSave = null;
     this._startWorker();
     this.worldWorker.postMessage({ type: 'init', seed: this.seed });
@@ -2685,6 +2700,7 @@ class Game {
     this.ui.progress(0, 'Recalling your planet');
     this._resetWorld();
     this.seed = data.seed;
+    this.whirlpools.reset(this.seed);
     this._pendingSave = data;
     // Who you were on this planet, set here rather than with the rest of
     // `save.player` in `_placeEntities` — that runs when the first terrain
@@ -5616,6 +5632,10 @@ class Game {
     // flag threaded through the one that has all the physics in it. It also
     // means the body's water flags stay false, so the splash, the bubbles and
     // the breath below are all simply never true.
+    // Strictly before the physics: `whirlPull` is integrated inside the swim
+    // branch, so setting it afterwards would be a frame of lag on a force that
+    // is fighting a held key. See `_tickWhirl`.
+    this._safeTick('whirl', () => this._tickWhirl(dt));
     if (ghost) this._drift(dt, input);
     else if (onBuiltGround) this.player.update(dt, act);
     if (this.player.inWater && !wasInWater) {
@@ -6092,6 +6112,90 @@ class Game {
     // colour off `inSink` alone would flicker it to grey on those frames.
     if (id) this._buriedColor = BLOCKS[id].particle;
     this._buried += ((p.headInSink ? 0.9 : 0) - this._buried) * Math.min(1, 9 * dt);
+  }
+
+  /**
+   * The whirlpool: the drag it puts on a body, and the broken water and the
+   * churn that say it is there.
+   *
+   * Runs BEFORE `Player.update` rather than after it, and that ordering is the
+   * only subtle thing in here. `whirlPull` is read inside the swim branch and
+   * integrated there along with buoyancy and the swim key, so writing it
+   * afterwards would apply this frame's drag to next frame's position — a
+   * frame of lag on a force that is fighting a held key, which is exactly the
+   * kind of thing that reads as the controls being unreliable.
+   *
+   * **The cue reaches nearly four times further than the drag does**, which is
+   * the whole of the legibility argument for a hazard that is made of nothing.
+   * Quicksand has a colour and powder snow has a label; this has neither, so
+   * what it gets instead is a patch of sea that is visibly and audibly not
+   * behaving like sea, from WHIRL_CUE columns away — seven seconds of swimming
+   * before the funnel can touch you. The ripples are thrown on the water's own
+   * layer rather than at the player, so it is a place that is doing something
+   * rather than something happening to you, and they get denser toward the eye
+   * because that is where the falloff says the danger is.
+   *
+   * Nothing here damages anything. The only way a whirlpool kills is by holding
+   * you under until the breath meter runs out, which is `_update`'s existing
+   * drowning path and needs nothing added to it — and it takes a player who
+   * does nothing at all for nine seconds, with the meter on screen.
+   */
+  _tickWhirl(dt) {
+    const p = this.player;
+    p.whirlPull = 0;
+    if (this.spectating) { this._whirlT = 0; return; }
+    const c = p.cell;
+    const ci = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
+    const cj = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
+    const col = cidx(c.f, ci, cj);
+
+    // The drag. Gated on being in water and not on being near one, because
+    // `pullAt` is already the narrower test and asking it twice would be two
+    // places that have to agree about where the funnel is.
+    if (p.inWater && !p.inLava) p.whirlPull = this.whirlpools.pullAt(col, Math.floor(c.ck));
+
+    const eye = this.whirlpools.centreWithin(col, WHIRL_CUE);
+    if (eye < 0) { this._whirlT = 0; return; }
+
+    // Broken water, on the sea's own layer over the funnel.
+    //
+    // The first version of this was ripples at radius 0.5 to 1.8, eight a
+    // second, and the screenshot is why it is not that any more: from thirteen
+    // columns off it read as four faint rings on a flat blue sheet, which is
+    // indistinguishable from a light shower and therefore not a warning at all.
+    // What it takes to be visible at the range the drag has to be avoided from
+    // is rings two to five cells across at three times the rate, plus actual
+    // white water — `splash` throws droplets that catch the light and are the
+    // only thing here you can see against a bright sea from a distance.
+    this._whirlT = (this._whirlT || 0) - dt;
+    if (this._whirlT <= 0) {
+      this._whirlT = 0.04;
+      // sqrt of a uniform draw would spread these evenly over the disc; the
+      // draw is deliberately left un-rooted so they crowd the middle, which is
+      // where the pull is strongest and where the eye should be drawn.
+      const a = Math.random() * Math.PI * 2;
+      const rr = Math.random() * WHIRL_R;
+      const at = stepColumn(eye, Math.round(Math.cos(a) * rr), Math.round(Math.sin(a) * rr));
+      const pos = this.planet.centerOf(at, K_SEA, _v1);
+      _v2.copy(pos).normalize();
+      this.particles.ripple(pos, _v2, 2.0 + Math.random() * 3.0, 1);
+      // A quarter of the rings get spray with them. Any more and the general
+      // particle pool is a fountain that starves the dig crumbs and the embers;
+      // this is about five a second, which is a steady boil rather than a
+      // firework.
+      if (Math.random() < 0.22) this.particles.splash(pos, _v2, 0.7 + Math.random() * 0.5);
+    }
+
+    // The churn, on its own slower timer and at a strength that is how far into
+    // the funnel the listener is — so swimming towards one gets louder rather
+    // than more frequent, which is what a large thing sounds like.
+    this._whirlSndT = (this._whirlSndT || 0) - dt;
+    if (this._whirlSndT <= 0) {
+      this._whirlSndT = 1.9 + Math.random() * 0.6;
+      const eyePos = this.planet.centerOf(eye, K_SEA, _v1);
+      const d = eyePos.distanceTo(p.position);
+      this.audio.churn(eyePos, Math.max(0.15, 1 - d / (WHIRL_CUE + WHIRL_R)));
+    }
   }
 
   /**

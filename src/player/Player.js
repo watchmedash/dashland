@@ -389,6 +389,16 @@ export class Player {
     /** Feet in the pool's top layer, which is the one place a jump works. */
     this.sinkTop = false;
     /**
+     * Downward drag from a whirlpool, in cells/s², written by the Game each
+     * frame and 0 everywhere else on the planet.
+     *
+     * A field set from outside rather than something this class works out, for
+     * the same reason `energy`, `water` and `skills` are: a Player built with
+     * nothing attached has to move exactly as it always did, and where the
+     * whirlpools are is not a question about a body. See `game/Whirlpool.js`.
+     */
+    this.whirlPull = 0;
+    /**
      * Eye inside a sink block: buried, and the one state in the game where the
      * camera is inside opaque geometry on purpose. The Game turns it into a
      * full-screen tint — without one you would be looking at the inside faces of
@@ -1184,6 +1194,17 @@ export class Player {
       this.vel.k -= GRAVITY * 0.22 * dt;
       if (input.down('Space')) this.vel.k += 15 * dt;
       if (this.crouching) this.vel.k -= 9 * dt;
+      // A whirlpool, and the reason it is here rather than blended over the
+      // velocity is the reason a river's current is added rather than blended
+      // (see FLOW_PUSH): a blow is a moment and should override you, a body of
+      // water doing something is a condition you swim against. Added, the swim
+      // key still works and simply loses; blended, holding Space would do
+      // literally nothing, which is a wall rather than a hazard.
+      //
+      // It touches the radial axis and only the radial axis. Horizontal speed
+      // is untouched anywhere in the funnel, which is the whole of the escape
+      // and the whole of the promise that this cannot drown a player who acts.
+      if (this.whirlPull > 0 && !this.inLava) this.vel.k -= this.whirlPull * dt;
       this.vel.k *= Math.max(0, 1 - 3.2 * dt);
       this.vel.k = Math.max(this.vel.k, -5);
     } else if (this.inSink) {

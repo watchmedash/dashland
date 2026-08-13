@@ -869,6 +869,66 @@ export class Audio {
    */
   sink(mat, pos) { this._burst(mat, { gain: 0.46, pitch: 0.52, dur: 2.1, pos, cat: 'step' }); }
 
+  /**
+   * A whirlpool turning: the sound that tells you the sea in front of you is
+   * doing something.
+   *
+   * Deliberately not a splash and deliberately not `squall`. A splash is water
+   * displaced once, and every water sound in this file until now is an event —
+   * a step, a stroke, a dive, a surface. This is a *condition*, so it is built
+   * the other way round: a long, slow swell with no transient at all, low
+   * enough that it carries over the ambience without competing with anything,
+   * and re-fired on a timer by the caller so that swimming towards one gets
+   * louder rather than more frequent.
+   *
+   * Two layers for the same reason `squall` has two. The band-passed hiss is
+   * broken water at the rim; the low body is the volume of it moving, and it is
+   * the layer that makes this read as something large rather than as a tap
+   * running. `strength` is how much of the funnel you are in, so the body is
+   * what comes up as you get closer to the middle.
+   *
+   * @param {number} strength 0..1 — how deep into the funnel the listener is
+   */
+  churn(pos = null, strength = 1) {
+    if (!this._live() || !this._take('block', 3.4)) return;
+    const t = this.ctx.currentTime;
+    const d = 2.0 + Math.random() * 0.6;
+    const out = this._dest(pos, d + 0.2, true);
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    src.playbackRate.value = 0.42 + Math.random() * 0.18;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 0.7;
+    // Falls rather than rises, which is the whole of what separates this from
+    // wind. Air arriving gets brighter as it comes; water going down a hole
+    // gets darker as it goes, and the ear reads a descending band as something
+    // being swallowed.
+    bp.frequency.setValueAtTime(620, t);
+    bp.frequency.linearRampToValueAtTime(210, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.055 * (0.4 + strength * 0.6), t + d * 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.1);
+
+    const lo = this.ctx.createBufferSource();
+    lo.buffer = this.noiseBuf;
+    lo.loop = true;
+    lo.playbackRate.value = 0.18;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 120; lp.Q.value = 0.7;
+    const lg = this.ctx.createGain();
+    lg.gain.setValueAtTime(0.0001, t);
+    lg.gain.linearRampToValueAtTime(0.085 * strength, t + d * 0.45);
+    lg.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    lo.connect(lp).connect(lg).connect(out);
+    lo.start(t, Math.random() * 2); lo.stop(t + d + 0.1);
+  }
+
   dig(mat, pos) { this._burst(mat, { gain: 0.18, pitch: 1.1, dur: 0.55, pos }); }
   break_(mat, pos) { this._burst(mat, { gain: 0.5, pitch: 0.9, dur: 1.7, pos }); }
   place(mat, pos) { this._burst(mat, { gain: 0.42, pitch: 1.15, dur: 1.1, pos }); }

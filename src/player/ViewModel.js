@@ -267,13 +267,65 @@ const HAND_TILT = new THREE.Euler(0.24, 0.44, -0.805, 'ZYX');
 // — "a stub coming up from the corner, not a limb across the screen" — but it is
 // the number to move first if the hand ever reads as missing.
 const REST = new THREE.Vector3(0.56, -0.656, -0.365);
-// The empty fist takes the same 0.06 to the right and **none of the 0.08 down**,
-// and that asymmetry is measured rather than sloppy: with nothing in it this
-// hand already shows only 0.66% of the frame, and 0.08 lower takes it to 0.00 —
-// the limb leaves the frame entirely and a bare-handed punch is played by an
-// invisible arm. There is no item here for the drop to compose, so there is
-// nothing to buy with it.
-const REST_EMPTY = new THREE.Vector3(0.62, -0.636, -0.285);
+/**
+ * Where the fist goes when there is nothing in it.
+ *
+ * **The reported bug — "breaking a block with barehand have no animation as
+ * hand is not showing as punching" — was this constant, and the hand was not
+ * unanimated but off screen.** `punch()` was firing, the track was sampling, the
+ * shoulder was moving; the limb it moved was simply outside the viewport for
+ * every frame of the swing. Traced through the real chain at 16:9, with the fist
+ * at `REST + Rx(ARM_REST_ROT.x) . HAND_LOCAL`:
+ *
+ *     rest point            fist in view space          fist in NDC
+ *     REST                  (0.560, -0.520, -0.720)     (0.625, -1.031)
+ *     REST_EMPTY, was       (0.620, -0.500, -0.640)     (0.778, -1.116)
+ *     REST_EMPTY, now       (0.560, -0.363, -0.720)     (0.625, -0.720)
+ *
+ * The viewport is -1..1. Both of the first two rows are below its bottom edge,
+ * and the reason the *held* case survives that is the thing in the fist: a
+ * pickaxe is `HELD_SCALE * 0.54` long and reaches up into frame from a grip that
+ * is not in it. An empty hand has nothing to reach with, so it is simply gone.
+ *
+ * **What the old note got wrong, since it is worth naming.** It claimed the
+ * empty hand kept the 0.06 to the right and none of the 0.08 down "because 0.08
+ * lower takes it to 0.00" — and the y it wrote is indeed 0.02 *higher* than
+ * `REST`'s. But it also pulled z from -0.365 to -0.285, and a fist 0.08 nearer
+ * the eye sees a frame that much smaller: the half-height at the fist goes 0.504
+ * to 0.448, so the same view-space y is 8% further out of shot. The two edits
+ * were made for opposite reasons and only one of them was measured. Nearer the
+ * eye is not the same as higher up the screen.
+ *
+ * **So the depth goes back to `REST`'s and the height is solved.** At the fist's
+ * depth of 0.72 the half-height is 0.5041, and NDC y -0.72 — low in the frame,
+ * clear of the hotbar, with the forearm running off the bottom corner — wants
+ * `F.y = -0.363`, which is the number below plus `HAND_LOCAL`'s carry. That is
+ * `REST` with the fist lifted 0.157 and nothing else changed, which is exactly
+ * the trade `REST`'s own closing note offers: "it is the number to move first if
+ * the hand ever reads as missing."
+ *
+ * **And the punch really was played to an empty screen.** Rasterised silhouette
+ * of the right arm alone — the view model's own scene rendered to a 1280x720
+ * target with the character's real glTF limb on the shoulder, everything else
+ * cleared, non-black pixels counted — sampled across the `default` jab that a
+ * bare fist used to swing:
+ *
+ *     swing clock       old REST_EMPTY      new REST_EMPTY
+ *     0.00 (rest)         0.000%              2.990%
+ *     0.25                0.000%              1.931%
+ *     0.38                0.000%              1.547%
+ *     0.50 (the strike)   0.000%              1.227%
+ *
+ * Zero. Not small, not clipped at the corner — no pixels at any point in the
+ * animation. Whatever `punch()` did was correct and invisible, which is exactly
+ * what the report describes and why it describes it as the hand "not showing".
+ * At the new rest point the limb enters at NDC y -1.0 and tops out at -0.616.
+ *
+ * Only ever read when the **right** fist is empty (see `update`), so no held
+ * item's composition moves by a thousandth: `REST` is untouched and the tool
+ * case renders the identical pixels it rendered before.
+ */
+const REST_EMPTY = new THREE.Vector3(0.56, -0.499, -0.365);
 
 // Fist position in arm-local space. The counter-rotation cancels the arm's rest
 // tilt: an item's own pose is then expressed in view space, the way it reads on
@@ -726,8 +778,56 @@ const SWINGS = {
       { t: 1.00, p: [0, 0, 0], r: [0, 0, 0], e: 'linear' },
     ],
   },
-  // Blocks, torches, food, bare hands: the old short jab, which is still the
-  // right motion for placing and for a plain punch.
+  /**
+   * The bare fist, and it is its own track rather than `default`'s.
+   *
+   * `default` is what a block, a torch or an apple swings on, and those are all
+   * *placing* motions with an object in the hand that the eye is already
+   * following. A bare punch has no object, so the fist itself is the whole of
+   * the animation and it has to carry the stroke on its own — which means a
+   * wind-up you can see and a drive that arrives, not a half-second dip.
+   *
+   * It is a separate entry and not a retune of `default` for one reason: every
+   * block, torch and item of food in the game swings on `default`, and none of
+   * them was reported. One report, one change.
+   *
+   * The amplitudes are the pickaxe's shape at the sword's pace. Pitch is the
+   * axis that reads here — the fist is 0.38 out along the limb, so 0.4 rad at
+   * the shoulder is most of the lower third of the screen — and the wind-up is
+   * deliberately shorter than the strike so the blow lands rather than rocks.
+   * `rate` 4.0 makes the whole thing 250ms, between the sword's 217 and the
+   * jab's 278: a punch is quick and it is not a slash.
+   *
+   * Rasterised on the same silhouette measurement as `REST_EMPTY`, right arm
+   * alone at 16:9, with the top of the limb in NDC beside it:
+   *
+   *     key                 coverage   top      fist in NDC
+   *     0.00  rest            2.99%    -0.616   (0.625, -0.720)
+   *     0.20  cock back       4.09%    -0.385   (0.761, -0.484)
+   *     0.46  land it         1.86%    -0.677   (0.449, -0.778)
+   *
+   * The stroke is therefore *up and nearer, then away and across* — the fist
+   * grows by a third into the wind-up and falls to two thirds of rest on the
+   * blow. That is the right way round: a punch that only got bigger would be a
+   * hand pushed at the camera, and one that only got smaller would be a hand
+   * being withdrawn.
+   */
+  fist: {
+    rate: 4.0,
+    keys: [
+      { t: 0.00, p: [0, 0, 0], r: [0, 0, 0], e: 'out' },
+      // Cock back. `p.z` is +0.06 and deliberately small: coming toward the eye
+      // is what makes a wind-up read, and it is also how the bow draw once ended
+      // up as a hand looming over its own bow (see `DRAW`). At 0.06 the fist
+      // grows 9% and stops.
+      { t: 0.20, p: [0.03, 0.06, 0.06], r: [0.30, 0.05, -0.07], e: 'in' },
+      { t: 0.46, p: [-0.03, -0.03, -0.25], r: [-0.40, -0.07, 0.09], e: 'out' }, // land it
+      { t: 0.60, p: [-0.02, 0.00, -0.14], r: [-0.22, -0.04, 0.05], e: 'out3' }, // knock back
+      { t: 1.00, p: [0, 0, 0], r: [0, 0, 0], e: 'linear' },
+    ],
+  },
+  // Blocks, torches, food: the old short jab, which is still the right motion
+  // for placing. A bare hand has `fist` above.
   default: {
     rate: 3.6,
     keys: [
@@ -1249,8 +1349,11 @@ export class ViewModel {
     h.item = itemId;
     // Which swing plays is a property of what's in the fist, so it's resolved
     // on equip rather than looked up every frame. Everything without a tool
-    // kind — blocks, torches, food, empty hands — falls back to the jab.
-    h.track = SWINGS[ITEMS[itemId]?.tool?.kind] || SWINGS.default;
+    // kind — blocks, torches, food — falls back to the jab; an *empty* fist
+    // gets `fist`, which is the punch the jab was standing in for.
+    h.track = itemId > 0
+      ? (SWINGS[ITEMS[itemId]?.tool?.kind] || SWINGS.default)
+      : SWINGS.fist;
     this._clearMesh(h);
     if (!itemId) return;
 

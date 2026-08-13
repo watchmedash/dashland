@@ -437,22 +437,40 @@ const MAX_DROWNED = 5;
  *
  * This is the owner's own caveat — "water isn't really that safe at night maybe
  * except for the shallow ones" — and it is enforced twice, because the two
- * halves of it are different questions.
+ * halves of it are different questions. Here it is about the *column*; the
+ * other half is `_playerAfloat` in `_hunt`, which asks it about the player.
  *
- * Here it is about the *column*: four layers is twice the depth a player can
- * stand up in, so a beach shelf, a ford and the rim of a lake hold none of
- * these at all. Measured on seed 4242 over 20,000 water columns sampled from
- * the spawn ring: 61.4% are under four layers deep and are excluded outright.
- * Against DEEP_WATER (8, the anglerfish line) only 17.9% would qualify, which
- * would confine the whole mechanic to open ocean and leave every lake and river
- * safe — the opposite of "water isn't safe at night".
+ * Five is not a round number, it is the measured one. Stand the player in still
+ * water of every depth in turn and read `_playerAfloat` (which is `inWater &&
+ * !grounded`) twenty times a second for a second at each, seed 4242:
  *
- * The other half is about the *player*, and it is `_playerAfloat` in `_hunt`: a
- * drowned only pursues someone who is out of their depth. Wade in to your waist
- * at the shore and the thing in the deep will not come for you, which is what
- * makes the shallows a refuge rather than a shorter walk to the same death.
+ *   depth  1  2  3  4    5     6     7    8    9
+ *   afloat 0  0  0  0   10%   40%   75%  100% 100%
+ *
+ * Four layers is the deepest water a player still stands up in — every sample
+ * grounded — and five is the first depth at which they can be out of their
+ * depth at all. So this is exactly the line between water that can drown you
+ * and water that cannot, and setting it here means no drowned ever exists in
+ * water where the player is always safe on their feet. Four was tried first and
+ * is one layer too generous: it is the last depth on the safe side of that
+ * table, so it put bodies in water nobody can be caught in.
+ *
+ * What it costs the mechanic, on the same seed over 11,106 water columns
+ * sampled from the spawn ring — measured against the fish's own denominator,
+ * since `_waterLayer` already refuses anything under two layers and that is the
+ * water the game actually puts bodies in:
+ *
+ *   >= 2 layers (all the water the fish use)   8,682 columns
+ *   >= 5 layers (this)                         68.1%   of them
+ *   >= 8 layers (DEEP_WATER, the anglerfish)   52.2%
+ *
+ * So a third of the water on this planet is off limits to them, and it is the
+ * third at the edges: shelves, fords, lake rims and the shallow end of every
+ * beach. DEEP_WATER was the obvious alternative and takes only a sixth more,
+ * for a line that means nothing to a swimmer — a player is fully afloat from
+ * eight and equally afloat at five.
  */
-const DROWNED_DEPTH = 4;
+const DROWNED_DEPTH = 5;
 /**
  * The longest a drowned may survive the sunrise, in seconds.
  *
@@ -3265,9 +3283,18 @@ for (const [name, id] of Object.entries(BIOME)) BIOME_NAME[id] = name;
  * The three numbers are read against the texture underneath them, which is a
  * green corpse in torn clothes: the multiply cannot desaturate one, so a "grey"
  * husk is made by pulling the green down toward the other two rather than by
- * asking for grey. Anything above 1 is a genuine brightening and is kept under
- * 1.25 — CHARACTER_GAIN in MobModels.js has already lifted this pack by 1.42,
- * and a fourth of that again is where the paint starts to blow out.
+ * asking for grey.
+ *
+ * Every channel is at or under 1, and that is the correction the first pass
+ * needed rather than a style rule. CHARACTER_GAIN in MobModels.js has already
+ * lifted this pack to 1.42, so a tint above 1 puts the material colour past
+ * 1.7 — and past 1 the tone mapping is doing the compressing, not the paint.
+ * Measured: the first set of tints ran 0.70 to 1.22, which came out of spawn as
+ * material colours of [1.71, 1.51, 1.00] for the sand husk against [1.42, 1.42,
+ * 1.42] for the plain one, and in a daylit frame at eight cells the four hot
+ * biomes were indistinguishable — four screenshots of the same creature. Under
+ * 1 the tint darkens instead, which nothing downstream compresses, and the
+ * same four separate at a glance.
  *
  * The three keys that are not biomes:
  *   CAVE     the husks from `_findDarkColumn`, which have never seen the sun
@@ -3283,36 +3310,35 @@ const HUSK_KIND = {
   // creature outside your own door should stay the one you learned the game on.
   MEADOW: { label: 'Husk', tint: [1.00, 1.00, 1.00] },
   PLAINS: { label: 'Husk', tint: [1.00, 1.00, 1.00] },
-  // Sun-bleached. Red and green up, blue down: sand light on a dead body.
-  DESERT: { label: 'Sand Husk', tint: [1.20, 1.06, 0.70] },
-  SAVANNA: { label: 'Dust Husk', tint: [1.16, 1.00, 0.74] },
+  // Sun-bleached bone, and the ochre the same sun leaves on everything else.
+  // Two hot biomes side by side, so they are separated by value as well as by
+  // hue: the desert one is the pale of the two and the savanna one the dark.
+  DESERT: { label: 'Sand Husk', tint: [1.00, 0.92, 0.52] },
+  SAVANNA: { label: 'Dust Husk', tint: [0.90, 0.60, 0.24] },
   // Iron in the ground and iron in the corpse.
-  BADLANDS: { label: 'Rust Husk', tint: [1.22, 0.76, 0.60] },
+  BADLANDS: { label: 'Rust Husk', tint: [1.00, 0.34, 0.22] },
   // Frost. The one direction the base texture has almost nothing of, which is
   // why the cold biomes read as the biggest change of the twelve.
-  SNOW: { label: 'Frost Husk', tint: [0.74, 0.94, 1.24] },
-  TUNDRA: { label: 'Frost Husk', tint: [0.82, 0.96, 1.16] },
-  // Stone: the green pulled down to meet the red and the blue, which is as
-  // close to grey as a multiply gets.
-  MOUNTAIN: { label: 'Stone Husk', tint: [0.94, 0.84, 0.90] },
+  SNOW: { label: 'Frost Husk', tint: [0.40, 0.68, 1.00] },
+  TUNDRA: { label: 'Frost Husk', tint: [0.56, 0.80, 1.00] },
+  // Stone: every channel down and the green down furthest, which is as close to
+  // grey as a multiply gets on a body that is painted green to begin with.
+  MOUNTAIN: { label: 'Stone Husk', tint: [0.72, 0.62, 0.70] },
   // Deeper into its own green, and darker, because a forest at night is.
-  FOREST: { label: 'Moss Husk', tint: [0.76, 1.02, 0.68] },
-  PINE_FOREST: { label: 'Moss Husk', tint: [0.72, 0.94, 0.74] },
+  FOREST: { label: 'Moss Husk', tint: [0.40, 0.90, 0.32] },
+  PINE_FOREST: { label: 'Moss Husk', tint: [0.34, 0.66, 0.44] },
   // Salt. Not the drowned — this is the one that walks the beach.
-  BEACH: { label: 'Brine Husk', tint: [0.86, 1.08, 1.02] },
-  OCEAN: { label: 'Brine Husk', tint: [0.82, 1.04, 1.04] },
+  BEACH: { label: 'Brine Husk', tint: [0.62, 1.00, 0.90] },
+  OCEAN: { label: 'Brine Husk', tint: [0.44, 0.92, 0.86] },
   // Underground, and it shows. Blue-grey and dim: nothing down there has ever
   // been bleached by anything.
-  CAVE: { label: 'Pale Husk', tint: [0.78, 0.80, 0.94] },
-  // Well under 1 on every channel, because this one is lit from inside — see
+  CAVE: { label: 'Pale Husk', tint: [0.50, 0.54, 0.76] },
+  // The darkest of the fourteen, because this one is lit from inside — see
   // `glow` on the species. Without the pull-down the emissive floor and the
   // albedo add up to a body that is brighter underwater than the husk is in
   // open daylight, which is the opposite of a thing you nearly miss.
-  DROWNED: { label: 'Drowned', tint: [0.52, 0.86, 1.00] },
+  DROWNED: { label: 'Drowned', tint: [0.26, 0.60, 0.80] },
 };
-/** Scratch, so the per-spawn lookup allocates nothing. */
-const _tint = new THREE.Color();
-
 /**
  * What counts as forage for a bee. Blooms and the things that grow beside them;
  * leaves are checked separately through IS_LEAF, so a tree counts without every
@@ -3966,14 +3992,13 @@ export class Mobs {
         // on every animal on the planet. See `lit()` for the version of this
         // that renders the model flat white.
         if (m.color && spec.shade) m.color.multiplyScalar(spec.shade);
-        // ...and the same operation again for the biome husks. Same clones,
-        // same rule, same reason it is safe: a multiply into `color` with the
-        // map object passed across untouched. Placed here rather than after the
-        // `baseColor` capture below on purpose — every later read of the colour
-        // (the damage flash, the block light's `tr/tg/tb`) has to be working
-        // against the frost husk's own paint, or being hit would flash it back
-        // to an ordinary husk for a fifth of a second.
-        if (m.color && kind) m.color.multiply(_tint.setRGB(...kind.tint));
+        // (The biome husks are NOT painted here. A multiply into `color` at
+        // spawn is the obvious place for it and it only reaches the diffuse
+        // term, which is the one term a husk is never seen by — see the long
+        // note on `tr/tg/tb` in `_animate`, which is where it moved to and why.
+        // `baseColor` below therefore stays the material's own colour, and the
+        // paint is re-applied on top of it every frame along with the damage
+        // flash, exactly as `shade` is not and does not need to be.)
         // A self-lit mob. `emissiveMap` is already the albedo for anything that
         // has one (see above), so this only has to set how much of it survives
         // the dark; without a map the flat emissive colour carries it.
@@ -4026,6 +4051,16 @@ export class Mobs {
        * reads `mob.label ?? mob.spec.label`, so only the biome husks set it.
        */
       label: kind ? kind.label : null,
+      /**
+       * ...and the paint that goes with the name, as three plain numbers so the
+       * per-frame tint can start from them without a lookup or an allocation.
+       * 1/1/1 for everything that is not a biome husk, which is every species
+       * but two, and which costs those bodies exactly the three multiplies they
+       * were already doing against a hard-coded 1.
+       */
+      kindR: kind ? kind.tint[0] : 1,
+      kindG: kind ? kind.tint[1] : 1,
+      kindB: kind ? kind.tint[2] : 1,
       scale, sizeJitter,
       cell: { f, ci: i + 0.5, cj: j + 0.5, ck: k + 1.02 },
       vel: { i: 0, j: 0, k: 0 },
@@ -9951,7 +9986,29 @@ export class Mobs {
     // Multiplied into the texture rather than added on top of it, so a struck
     // animal reddens instead of glowing. `owned` is this mob's own material
     // clones; the map inside them is shared and never written to.
-    let tr = 1, tg = 1, tb = 1;
+    //
+    // ...and this is also where the biome husks are painted, rather than at
+    // spawn, which is where it was first written and where it did not work.
+    //
+    // `color` only reaches the *diffuse* term. The two lights a husk is ever
+    // actually seen by both bypass it: block light arrives as `emissive x
+    // emissiveMap` (see the floor below), and `spec.glow` arrives the same way,
+    // so a body beside a torch or a self-lit drowned is drawn as `texel x
+    // emissive` with the albedo contributing almost nothing. Measured: thirteen
+    // husks photographed one at a time on the same arena cell at midnight with
+    // two torches down, material colours running from [0.37, 0.85, 1.14] to
+    // [1.42, 1.42, 1.42] — and thirteen identical green bodies in the frame.
+    // The paint was correct and invisible, because at night there is barely any
+    // diffuse term for it to be in.
+    //
+    // Seeding `tr/tg/tb` here fixes both at once: they multiply the albedo four
+    // lines further down *and* the emissive floor, which is exactly the reason
+    // the damage flash is already written this way — the note on `er/eg/eb`
+    // says a struck ghost has to redden rather than hold a white glow through
+    // it, and a frost husk beside a torch has to stay blue for the same reason.
+    // Being struck and being on fire still assign over it, deliberately: those
+    // two have to read the same on every body in the game.
+    let tr = mob.kindR, tg = mob.kindG, tb = mob.kindB;
 
     // --- this body's own sky, not the player's -------------------------------
     //

@@ -4765,14 +4765,45 @@ class Game {
    * gate. A gate is one cell tall, so it is its own only half — which is the
    * whole of the difference and is why the swing below is shared rather than
    * copied.
+   * **Paired from the foot of the run, not from the cell below.** "Is there a
+   * door under me, so I must be a top half" is only true while doors do not
+   * touch, and nothing stops them: a door is not `NEEDS_FLOOR`, so the only
+   * placement rule it has is that the cell above is air, and the cell above a
+   * door's top half always is. Stack two in a doorway — doors at k=10..11 and
+   * k=12..13 — and the old test read the *lower* half of the upper door as an
+   * upper half, pairing one cell of each door:
+   *
+   *     click k=10  ->  [10, 11]   the lower door, right
+   *     click k=11  ->  [10, 11]   the lower door, right
+   *     click k=12  ->  [11, 12]   half of each, WRONG
+   *     click k=13  ->  [12, 13]   half of each, WRONG
+   *
+   * Which mints doors and eats blocks. Break at k=12 and the game takes down 11
+   * and 12 and hands back one door, leaving orphans at 10 and 13; breaking the
+   * orphan at 10 pairs [10, 11] and pays a second door, and breaking the orphan
+   * at 13 sees no door beneath it, claims [13, 14], and clears whatever was
+   * standing at 14 with no drop at all. Two doors in, three doors out, and the
+   * block above them gone. `_toggleDoor` swings the same mispaired cells, so a
+   * stack of two also opened as two staggered halves.
+   *
+   * Walking down to the foot of the contiguous run and pairing off it is exact
+   * for any number of stacked doors, because every door in a run is two cells
+   * and the run therefore alternates bottom, top, bottom, top from its base.
+   *
    * @returns {number[]|null} the k values, low first
    */
   _doorHalves(col, k) {
     const id = this.planet.at(col, k);
     if (IS_GATE[id]) return [k];
     if (!IS_DOOR[id]) return null;
-    const below = IS_DOOR[this.planet.at(col, k - 1)];
-    return below ? [k - 1, k] : [k, k + 1];
+    let base = k;
+    while (base > 0 && IS_DOOR[this.planet.at(col, base - 1)]) base--;
+    const bottom = k - ((k - base) & 1);
+    // The lone half is a world already broken — a save from before this, or a
+    // crater through a doorway. Answering with the one cell that is really a
+    // door beats claiming a neighbour that is not.
+    return bottom + 1 < D && IS_DOOR[this.planet.at(col, bottom + 1)]
+      ? [bottom, bottom + 1] : [bottom];
   }
 
   /** Swing a door or a gate, and refuse if you are standing in it. */

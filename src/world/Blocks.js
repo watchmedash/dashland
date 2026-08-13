@@ -591,7 +591,32 @@ export const BLOCKS = [
   block({ name: 'podzol', label: 'Podzol', top: 'podzol_top', side: 'dirt', bottom: 'dirt', hardness: 0.65, tool: 'shovel', particle: [0.34, 0.3, 0.18], sound: 'soil' }),
   block({ name: 'red_sand', label: 'Red Sand', all: 'red_sand', hardness: 0.5, tool: 'shovel', particle: [0.75, 0.42, 0.22], sound: 'sand', gravity: true }),
   block({ name: 'red_sandstone', label: 'Red Sandstone', top: 'red_sand', side: 'red_sandstone', hardness: 1.6, tool: 'pick', particle: [0.68, 0.4, 0.24], sound: 'stone' }),
-  block({ name: 'moss_block', label: 'Moss Block', all: 'moss_block', hardness: 0.4, tool: 'shovel', tint: 'moss', particle: [0.3, 0.46, 0.24], sound: 'grass' }),
+  // **Untinted, and it is the same argument made over `moss_stone` above, only
+  // harder.** That one is untinted because a biome tint multiplies a block that
+  // is only part moss. This one is moss all the way through - so the objection
+  // is not the palette, it is that the tint asks a question this block is in no
+  // position to answer.
+  //
+  // `tintOf` reads `colBiome[col]`, which is the biome of the SURFACE column.
+  // Moss generates as a mineral vein from band 124 downwards, and on the seabed
+  // and lake banks. So a vein took its green from whatever happened to be
+  // growing in the daylight a hundred cells over its head, and one block came
+  // out four different colours: measured on a cleared pad in four biomes, each
+  // normalised against an untinted `moss_stone` wall shot in the same light so
+  // exposure divides out, the blue channel swings 0.53 to 0.79 - 49% end to end
+  // - and green-excess runs 20.9 in a pine forest to 47.5 on plains. A dull
+  // olive at one end and a saturated leaf green at the other.
+  //
+  // It is not academic underground: a census of 34,913 columns found 10 places
+  // where a moss vein touches `moss_stone` vertically, which is about 370
+  // planet-wide before horizontal contacts, and the vein was found under eight
+  // different surface biomes. Tinted against untinted, in the dark, at random.
+  //
+  // One line rather than three: the tint lives in `Mesher.tintOf`,
+  // `Icons.tintRGB` and `Drops.dropTint`, and killing it in the atlas instead
+  // would have fixed the wall and the icon while leaving the dropped cube
+  // green, because `Drops` does not honour the arm-map tint mask.
+  block({ name: 'moss_block', label: 'Moss Block', all: 'moss_block', hardness: 0.4, tool: 'shovel', particle: [0.3, 0.46, 0.24], sound: 'grass' }),
 
   // --- ice -----------------------------------------------------------------
   // Opaque, unlike `ice`: these are the compacted forms, and a transparent

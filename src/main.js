@@ -2126,6 +2126,11 @@ class Game {
     window.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('beforeunload', () => {
       if (this.state === 'playing' || this.state === 'paused') this.saveGame(false);
+      // Unconditionally, and unlike the world write above it this one lands:
+      // the record is a synchronous localStorage string rather than seconds of
+      // IndexedDB. See `Achievements.flush` for what the ten-second flush timer
+      // was costing.
+      this.achievements.flush();
     });
     // Click the world to get the mouse back. This is the *only* way a pointer
     // lock the browser refused can ever be recovered, which is why it has to
@@ -2175,7 +2180,14 @@ class Game {
     // graph running in a tab the browser is trying to throttle, which on a
     // phone is battery.
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { this.audio.ctx?.suspend?.(); this._saveOnHide(); }
+      if (document.hidden) {
+        this.audio.ctx?.suspend?.();
+        this._saveOnHide();
+        // Outside `_saveOnHide`, which is gated on being in a world and rate
+        // limited to one write in fifteen seconds. Neither applies to a 2 KB
+        // string, and the marks are earned on a screen as well as in a world.
+        this.achievements.flush();
+      }
       else this.audio.resume();
     });
   }

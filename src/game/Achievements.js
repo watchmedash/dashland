@@ -288,6 +288,22 @@ export class Achievements {
     this._dirty = false;
   }
 
+  /**
+   * Write the record now, whatever the flush timer says.
+   *
+   * The timer is a rate limit on writing 2 KB of JSON, and a rate limit is a
+   * window in which the last thing you did is only in memory. Measured: clear
+   * the record, mine a seam through `mined`, run one `scan`, and the tab goes
+   * away with `_flush` at 7 seconds — the set held the seam and localStorage
+   * held an empty array. Up to ten seconds of marks died with the page every
+   * time, and the marks are the one thing here that is not in the world file.
+   *
+   * Cheap enough to call on the way out of anything: `save` is a synchronous
+   * `localStorage.setItem`, which is the reason it can run in `beforeunload` at
+   * all while the world write cannot.
+   */
+  flush() { if (this._dirty) this.save(); }
+
   /** Throw the whole record away. The settings screen's reset button. */
   clear() {
     this.rec = blank();

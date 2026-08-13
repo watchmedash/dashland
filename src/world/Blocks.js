@@ -1326,9 +1326,17 @@ export const BLOCKS = [
   // section showing through.
   //
   // Not `gravity`. Sand and gravel FALL; quicksand is the pool they fell into
-  // and stayed in. It does mean loose sand dropped over a pool falls straight
-  // through it — `_settleGravity` lands on solid — and filling a pool in with
-  // a shovelful of the dune beside it is a legitimate way past one.
+  // and stayed in.
+  //
+  // What loose sand dropped over a pool does is land ON it, and that is worth
+  // knowing because it is the one tool a player has against one. `_fallsThrough`
+  // is air-or-plant and deliberately not "anything non-solid" — see the note
+  // there about liquid and `Water.sources` — so a falling block stops at the
+  // first quicksand cell and rests on the surface. Measured: a sand block
+  // released at k+4 over a two-deep pool settles at k+1, level with the rim,
+  // and a body stands on it grounded and out of the sink. So a shovelful of the
+  // dune beside it is a plank across, not a filling-in, and the pool is still
+  // there underneath when the plank is broken.
   block({
     name: 'quicksand', label: 'Quicksand', top: 'mud', side: 'sand', bottom: 'sand',
     solid: false, sink: 0.9, hardness: 0.5, tool: 'shovel',

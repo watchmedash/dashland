@@ -515,9 +515,34 @@ const MAP = {
   mosaic_green: ['Tiles', 3],
   plaster: ['Indoor Walls', 1],
   shingle_red: ['Roof', 1],
-  shingle_green: ['Roof', 10],
+  // The green roof and the rose roof were on each other's names, and the two
+  // blocks' own declarations are what proves it rather than an opinion about
+  // hue. `shingle_green` declares a break particle of [0.36, 0.46, 0.30] =
+  // 92,117,77, a green; it was baking to 155,85,92, a plum. `shingle_rose`
+  // declares [0.80, 0.55, 0.55] = 204,140,140, a rose; it was baking to
+  // 93,112,88, a sage green. Each label was wearing the other's colour, and it
+  // is not only a menu problem: the ruin palettes in Structures.js pair
+  // `brick_olive` walls (122,124,54) and `brick_jade` (170,181,114) with a
+  // GREEN roof, and `brick_tan`/`brick_rose` (158,105,79 / 184,128,96) with a
+  // ROSE one, so every ruin built out of those four palettes was showing a
+  // mauve roof on a green house or a green roof on a pink one.
+  //
+  // Roof/9 is the only green in the eleven-variant folder, so it simply moves
+  // to the name that wants it. Rose does NOT take Roof/10 in the swap: 155,85,92
+  // is that tile's *average* of a roof painted half purple and half orange, and
+  // close up it is two clashing colours on one surface. Roof/8 is a single even
+  // pale pink at 223,146,134 — within 19,6,6 counts of the colour the block
+  // itself declares — which is the tile the name was written for. Roof/10 ends
+  // up unused, and that is the right outcome for it.
+  //
+  // `bright` is the one lever on top, and it is about the family rather than
+  // about rose. Raw Roof/8 is luminance 161 against red's 98, dark's 64 and
+  // green's 107, so untouched it would be the one roof in the set that reads as
+  // a light source. 0.78 lands it at 126: still the palest of the four, by the
+  // ~20 counts that make it the light roof, instead of by 55.
+  shingle_green: ['Roof', 9],
   shingle_dark: ['Roof', 3],
-  shingle_rose: ['Roof', 9],
+  shingle_rose: ['Roof', 8, { bright: 0.78 }],
 
   // --- timber ---------------------------------------------------------------
   // Wood Planks 1/6/8/9 run across the tile and 3/4 run along it; the four
@@ -537,7 +562,43 @@ const MAP = {
   mud: ['Mud', 4, { bright: 0.7 }],
   dried_mud: ['Mud', 7],
   peat: ['Mud', 2, { bright: 0.55 }],
-  podzol_top: ['Mud', 9],
+  // Mud/9 is a CAMOUFLAGE PATTERN. It is the one variant in the folder that is
+  // not earth at all: angular khaki, olive and dark-brown blotches with hard
+  // edges, the DPM look, and it was the top face of the pine forest floor.
+  // Measured on seed 4242, a 13x13 column census around a pine-forest site put
+  // podzol on 78 of 169 surface columns — 46% of the biome's ground — so this
+  // was the second most common surface a player walks on in that biome and it
+  // was patterned army fabric. It is the same failure the note over `log_pine`
+  // rejected Tree Bark/1 for, in the same words ("a brown zigzag that reads as
+  // camouflage wrap"), and it was already shipped on a floor.
+  //
+  // Mud/3 is the only unused variant left in the folder, and it is what was
+  // wanted: dark crumbly soil with fine cracks, isotropic, no directional lay
+  // and no motif big enough to pick out and count. `repeat: 2` for the same
+  // reason `dirt` takes it — one copy of any Mud variant puts two or three
+  // painted clods on a face, which is a boulder, and podzol is dirt's
+  // neighbour so the two have to be at the same grain.
+  //
+  // `bright` is set from the block's own declaration rather than from its
+  // neighbours. Podzol declares a break particle of [0.34, 0.30, 0.18] =
+  // 87,77,46, luminance 77, and raw Mud/3 is 94,61,43 at luminance 66.7, so
+  // 1.15 lands the tile at 108,70,49 — luminance 77, on the number the block
+  // has been claiming all along, against the 109.5 the camo tile was actually
+  // rendering. r-b goes 45 -> 59, i.e. the khaki becomes brown.
+  //
+  // Tried 1.44 first, to put the top within ten counts of the `dirt` its own
+  // side and bottom faces use, on the theory that a cap far off its own flanks
+  // reads as two materials stacked. Rejected on the baked tile: at that
+  // exposure Mud/3's painted highlights clip warm and the soil comes out as a
+  // field of orange rolls, near enough `coarse_dirt`, which is a block podzol
+  // already has to be told apart from in a tundra. A dark cap on dirt sides is
+  // what podzol looks like anyway.
+  //
+  // It lands 5 counts over `mud` and 19 over `peat`, which is closer than the
+  // rock family is allowed to sit — and is fine here because none of the three
+  // ever meets another: podzol is pine forest, mud is the warm seabed, peat is
+  // the tundra bog.
+  podzol_top: ['Mud', 3, { repeat: 2, bright: 1.15 }],
   // Red sand is sand with iron in it, so it is now literally the same material
   // as `sand` with a red trim, and the two share a grain the way they should.
   // Sand/10 was the worst offender of the swirl family — a hard diagonal

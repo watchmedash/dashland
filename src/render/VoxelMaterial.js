@@ -1134,21 +1134,49 @@ const SEASON_FRAG = /* glsl */`
  * are the top of the outermost shell — which is exactly where a real snowfall
  * would be, for free.
  *
- * The 0.30 floor on every other face is not laziness. Without it a canopy seen
- * from the ground - which is how a player sees nearly every canopy - is
- * unchanged, because you are looking at side faces; the tree only reads as snowy
- * from above. A wash over the sides is rime rather than snowfall and it is what
- * makes the wood read cold at eye level. 0.18 was tried first and photographed:
- * against a settled snowfield the near canopy was still the dark blue-grey that
- * the report was about, because the strongest side face in the frame was
- * carrying 15% white and the average one 8%.
+ * A side face still has to carry something, and that is not laziness. Without
+ * it a canopy seen from the ground - which is how a player sees nearly every
+ * canopy - is unchanged, because you are looking at side faces; the tree only
+ * reads as snowy from above. A wash over the sides is rime rather than snowfall
+ * and it is what makes the wood read cold at eye level. 0.18 was tried first
+ * and photographed: against a settled snowfield the near canopy was still the
+ * dark blue-grey that the report was about, because the strongest side face in
+ * the frame was carrying 15% white and the average one 8%.
  *
- * And the per-cell hash is what stops it reading as a filter. One flat white
- * multiplier over a whole wood is the mistake the season table already made
- * once and wrote down; a stand-sized clump plus a per-block jitter gives some
- * blocks a load and others almost none, which is what a canopy after snow
- * actually looks like. Same two-scale construction as SEASON_FRAG's hue jitter,
- * different constants, for the reason that one gives.
+ * ---- what "sliced and diced" was -------------------------------------------
+ *
+ * Reported against the first version of this, and it was three separate things
+ * all pushing the same way. All three are fixed above; the numbers are the ones
+ * that changed.
+ *
+ * ONE, the weight was `0.30 + 0.70 * sky * sky` with `sky` a CLAMPED cosine. A
+ * clamp cannot tell a side face from a bottom face - both come out 0 - so every
+ * one of a leaf cube's five non-top faces carried the same 0.30, and a cube
+ * frosted identically on all six sides is a white slab, not snow lying on
+ * something. The same expression is kept over the SIGNED cosine and multiplied
+ * by a shoulder that closes on anything facing down, so a top face still weighs
+ * 1, a side face still weighs 0.30, and an underside now weighs 0. That is the
+ * whole of "thinning underneath", and the eye-level rime the paragraph above
+ * bought is untouched.
+ *
+ * TWO, the drift hash was enormous. `0.55 + (nCoarse-0.5)*1.5 + (nFine-0.5)*0.6`
+ * spans -0.5 to 1.6 against a 0..1 clamp, so a stand-sized patch was routinely
+ * pinned hard at 0 or hard at 1 and the per-BLOCK term swung a further +/-0.30
+ * on top. Neighbouring leaf cubes could therefore differ by 0.6 of the whole
+ * range with a cube-sharp edge between them: the canopy diced into cells. The
+ * two scales are kept, because one flat white multiplier over a whole wood is
+ * the mistake the season table already made once and wrote down - but at
+ * +/-0.21 per stand and +/-0.08 per block, which never clamps at either end and
+ * never puts a bare cube against a full one. The mean is 0.58 against the old
+ * expression's 0.55, so the loaded blocks are as loaded as they were.
+ *
+ * THREE, nothing asked what was ABOVE a leaf, so a needle buried under three
+ * more courses was as white as the crown - snow drawn per cube rather than as
+ * one snowfall over the tree. `vSun` is the answer and it is already in the
+ * fragment: it is baked voxel skylight, so a buried leaf carries a low one by
+ * construction and an outer-shell leaf a high one. No new vertex data, no new
+ * uniform, no pass. The ramp is deliberately wide (0.15 to 0.70) so the edge of
+ * a stand fades rather than cuts.
  *
  * `vWave` is BANDED rather than tested open-ended. The wave ids are cross 1,
  * water 2, lava 3, leaves 4, cold-ground leaves 5, and an open `> 2.5` here is
@@ -1190,17 +1218,27 @@ const LEAF_SNOW_FRAG = /* glsl */`
   if (snowCap > 0.002 && vWave > 3.5 && vWave < 5.5) {
     vec3 upW = normalize(vWorld - uPlanetCenter);
     vec3 wn = normalize(vWorldNormal);
-    float sky = clamp(dot(wn, upW), 0.0, 1.0);
+    // The cosine SIGNED, and kept signed. A top face still weighs 1 and a side
+    // face still weighs the 0.30 the paragraph above bought and measured; the
+    // second factor is the whole of the change, and it is zero on anything
+    // facing down. A clamp could not do that, because it reports a side face
+    // and an underside as the same 0.
+    float up = dot(wn, upW);
+    float sky = (0.30 + 0.70 * max(up, 0.0) * max(up, 0.0)) * smoothstep(-0.55, -0.05, up);
+    // What is above this leaf. vSun is baked skylight, so it is near 1 on the
+    // outer shell of a canopy and near 0 three courses in - the one signal in
+    // the fragment that knows a buried needle from an exposed one.
+    float open = smoothstep(0.15, 0.70, vSun);
     vec3 snowCell = floor(vWorld - wn * 0.5) + 0.5;
     float nCoarse = fract(sin(dot(floor(snowCell * 0.2), vec3(27.331, 59.117, 13.907))) * 24571.3319);
     float nFine = fract(sin(dot(snowCell, vec3(45.229, 83.311, 19.673))) * 11923.7717);
-    float drift = clamp(0.55 + (nCoarse - 0.5) * 1.5 + (nFine - 0.5) * 0.6, 0.0, 1.0);
+    float drift = clamp(0.58 + (nCoarse - 0.5) * 0.42 + (nFine - 0.5) * 0.16, 0.0, 1.0);
     // 0.85 is a ceiling, not a taste setting. At 1.0 the most loaded blocks
     // reach the snow block's own albedo exactly and stop being leaves at all:
     // the near canopy photographed as a white boulder with holes in it. A
     // seventh of the needle left showing is what keeps the silhouette reading
     // as a tree under snow rather than as snow in the shape of a tree.
-    float lay = snowCap * drift * (0.30 + 0.70 * sky * sky) * 0.85;
+    float lay = snowCap * drift * sky * open * 0.85;
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.93, 0.98), clamp(lay, 0.0, 1.0));
   }
 `;

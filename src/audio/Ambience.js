@@ -101,7 +101,7 @@ export class Ambience {
     // Which beds a recording has taken over. Until a name goes true here the
     // noise version is the only thing that plays, which is also what happens
     // for the whole session if the download fails.
-    this._sampled = { rain: false, surf: false, crickets: false, cicada: false };
+    this._sampled = { rain: false, surf: false, fire: false, crickets: false, cicada: false };
     // world-anchored panners the placed beds hang off, keyed by feature
     this.places = {};
     this.stats = { oneShots: 0, dropped: 0, rearms: 0 };
@@ -112,6 +112,11 @@ export class Ambience {
       rain: 0, surf: 0, biome: 2, time: 0.35, openness: 1,
       spring: false,
     };
+    // Panners for the two fire beds, built on adoption rather than in `_build`
+    // — unlike the falls and the springs there is no synthesised fire to hang
+    // them off, so with no recording there is nothing for them to carry.
+    this._firePlace = null;
+    this._lavaPlace = null;
     this._build();
     this._tick = this._tick.bind(this);
     this._timer = setTimeout(this._tick, 1200);
@@ -208,7 +213,7 @@ export class Ambience {
    * Two sources, rates `rate` and `rate * spread`, each started at its own
    * random offset so they are decorrelated from the first sample.
    */
-  _sampleBed(name, buf, dur, { rate = 1, spread = 0.94, into = null } = {}) {
+  _sampleBed(name, buf, dur, { rate = 1, spread = 0.94, into = null, filter = null } = {}) {
     const ctx = this.ctx;
     const level = ctx.createGain();
     level.gain.value = 0;
@@ -247,9 +252,19 @@ export class Ambience {
       s.start(0, Math.random() * s.loopEnd);
       srcs.push(s);
     }
-    level.connect(into || this.out);
+    // One filter after the level gain rather than one per copy: the two copies
+    // are the same recording and want the same colour, and this halves the node
+    // count on the two beds that use it.
+    let f = null;
+    if (filter) {
+      f = ctx.createBiquadFilter();
+      f.type = filter.type; f.frequency.value = filter.freq; f.Q.value = filter.q ?? 0.7;
+      level.connect(f).connect(into || this.out);
+    } else {
+      level.connect(into || this.out);
+    }
     // Shaped like a `_bed` so `_arm` can drive it without caring which it is.
-    this.beds[name] = { src: srcs[0], srcs, f: null, level, am: null };
+    this.beds[name] = { src: srcs[0], srcs, f, level, am: null };
     this._armed[name] = 0;
     return this.beds[name];
   }
@@ -273,6 +288,29 @@ export class Ambience {
       this._sampleBed('cricketSmp', buf, 6.0, { rate: 1, spread: 0.94 });
     } else if (name === 'cicada') {
       this._sampleBed('cicadaSmp', buf, 6.0, { rate: 1, spread: 0.96 });
+    } else if (name === 'fire') {
+      // One recording, two beds, and that is a measurement rather than a
+      // saving that happened to work. A torch is a small fire: fast fine
+      // crackle and no body, which is the recording with its bottom taken off.
+      // Lava is the same combustion an order of magnitude larger and slower,
+      // which is the same recording at rate 0.48 with its top taken off — that
+      // reads at 31/63/125 Hz +15.5/+13.2/+4.3 dB against its own 250 Hz and
+      // falls away 18 dB by 1 kHz, i.e. a magma rumble, out of a source whose
+      // unfiltered spectrum is flat from 250 Hz to 4 kHz. A second file would
+      // have bought a slightly different rumble for 40 kB.
+      //
+      // 22m and 34m: a torch is a thing you find by looking, a lava lake is a
+      // thing that should warn you before you walk into it.
+      const fire = this._firePlace = this._place('fire', 22);
+      const lava = this._lavaPlace = this._place('lava', 34);
+      this._sampleBed('fireSmp', buf, 6.0, {
+        rate: 1, spread: 0.94, into: fire,
+        filter: { type: 'highpass', freq: 240, q: 0.7 },
+      });
+      this._sampleBed('lavaSmp', buf, 6.0, {
+        rate: 0.48, spread: 0.91, into: lava,
+        filter: { type: 'lowpass', freq: 640, q: 0.8 },
+      });
     } else return false;
     this._sampled[name] = true;
     return true;
@@ -448,6 +486,15 @@ export class Ambience {
     // spring at about -48, clear of the wind but not competing with it.
     this._placeSet('fall', s.fall, ['fallRoar', 'fallHiss'], [0.180, 0.070]);
     this._placeSet('spring', s.spring, ['springBub', 'springHiss'], [0.150, 0.040]);
+    // Fire. Guarded on the flag rather than on the source, because unlike every
+    // other bed in here these two do not exist until the recording lands, and
+    // `_placeSet` would fade a bed that was never built. `size` is how much of
+    // it there is: one torch on a wall against a room lit by six, one cell of
+    // lava against the surface of a lake.
+    if (this._sampled.fire) {
+      this._placeSet('fire', s.fire, ['fireSmp'], [0.52]);
+      this._placeSet('lava', s.lava, ['lavaSmp'], [0.88]);
+    }
     // Only the spring is remembered: `_tick` throws bubble bursts off the pool
     // and there is no equivalent one-shot over a waterfall, whose two beds are
     // already continuous.

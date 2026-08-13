@@ -37,6 +37,12 @@ export const SAMPLES = {
   surf: 'surf_loop.ogg',
   // 2.7s. Layered ON TOP of the procedural rumble, not a replacement for it.
   thunderCrack: 'thunder_crack.ogg',
+
+  // 6.0s seamless loop. Replaces NOTHING: there was no continuous fire sound in
+  // the game at all, so a torch, a lit kiln and a lava lake were silent. Serves
+  // both placed fire beds — the lava one is this same buffer at rate 0.48
+  // through a lowpass, which is why there is no second file for it.
+  fire: 'fire_loop.ogg',
   // 6.0s seamless loops. Replace the `cricket` and `cicada` noise beds.
   crickets: 'crickets_loop.ogg',
   cicada: 'cicada_loop.ogg',
@@ -53,7 +59,7 @@ export const SAMPLES = {
  * synthesised stand-in, so until it lands there is nothing at all.
  */
 export const LOAD_ORDER = [
-  'rain', 'surf', 'thunderCrack',
+  'rain', 'surf', 'fire', 'thunderCrack',
   'crickets', 'cicada',
 ];
 

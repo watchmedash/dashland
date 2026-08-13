@@ -1496,6 +1496,22 @@ class Game {
     this._fallSrc = { x: 0, y: 0, z: 0, size: 1 };
     this._springSrc = { x: 0, y: 0, z: 0, size: 1 };
     /**
+     * The nearest thing that is burning, and the nearest lava, for the two
+     * placed fire beds. Filled by `_handLight`, which is already walking every
+     * emitting cell within eight of you and is already cached behind the cell
+     * you stand in — so this is a comparison per emitter and no new scan.
+     *
+     * `size` is how much of it there is rather than how close it is; distance
+     * is the panner's job. One torch in a corridor and a lava lake are two
+     * different sounds, not the same sound at two volumes.
+     */
+    this._fireAt = new THREE.Vector3();
+    this._lavaAt = new THREE.Vector3();
+    this._fireNear = false;
+    this._lavaNear = false;
+    this._fireSrc = { x: 0, y: 0, z: 0, size: 1 };
+    this._lavaSrc = { x: 0, y: 0, z: 0, size: 1 };
+    /**
      * Every *light-emitting* cell near the player — torches, lanterns, lit
      * kilns, glowstone, crystal, lava — in world space, refilled by the same
      * scan. `_flameCells` above is the subset of these that is actually on fire
@@ -7411,6 +7427,13 @@ class Game {
     // push and a `centerOf` on a cache miss.
     const emitters = this._emitters;
     emitters.length = 0;
+    // And one step further again, for the two placed fire beds. Same argument
+    // as the flames: this loop already visits every burning and every molten
+    // cell in range and already knows how far away each one is, so the nearest
+    // of each costs a comparison. `n` is the count, which is the difference
+    // between a torch and a bonfire, and between a spill and a lake.
+    let fireN = 0, fireD2 = Infinity, fireCol = 0, fireK = 0;
+    let lavaN = 0, lavaD2 = Infinity, lavaCol = 0, lavaK = 0;
     // The scan has to reach at least as far as the brightest light carries, or
     // the contribution clips at the boundary instead of fading — walking away
     // from a torch would step the hand light from 0.21 straight to 0.
@@ -7434,6 +7457,13 @@ class Game {
           // Falloff in cells, capped at the scan radius so it always reaches
           // exactly zero at the edge rather than being cut off mid-curve.
           const d2 = di * di + dj * dj + dk * dk;
+          if (FLAME_BLOCKS.has(id)) {
+            fireN++;
+            if (d2 < fireD2) { fireD2 = d2; fireCol = col; fireK = k; }
+          } else if (id === ID.lava) {
+            lavaN++;
+            if (d2 < lavaD2) { lavaD2 = d2; lavaCol = col; lavaK = k; }
+          }
           const reach = Math.min(emit * 0.55 + 1, RAD);
           const lc = bl.lightColor || WHITE_L;
 
@@ -7494,6 +7524,22 @@ class Game {
       const c = this.player.cell;
       const surf = this.planet.surfaceK(cidx(c.f, Math.round(c.ci), Math.round(c.cj)));
     }
+
+    // A single torch on a wall is a small, close, quiet thing and six of them
+    // round a camp is a fire; one cell of spilled lava trickles and the surface
+    // of a lake roars. Both curves start well above zero because the nearest
+    // one is the one you are standing next to either way.
+    this._fireNear = fireN > 0;
+    this._lavaNear = lavaN > 0;
+    if (fireN) {
+      this.planet.centerOf(fireCol, fireK, this._fireAt);
+      this._fireSrc.size = Math.min(1, 0.55 + fireN / 9);
+    }
+    if (lavaN) {
+      this.planet.centerOf(lavaCol, lavaK, this._lavaAt);
+      this._lavaSrc.size = Math.min(1, 0.40 + lavaN / 16);
+    }
+
     this._hlValue = { r, g, b };
     return this._hlValue;
   }
@@ -10622,6 +10668,17 @@ class Game {
       this._springSrc.x = this._springAt.x; this._springSrc.y = this._springAt.y;
       this._springSrc.z = this._springAt.z;
     }
+    // `_handLight` is the producer and it runs earlier in the same frame, so
+    // these are this frame's answer. It caches behind the cell the player is in
+    // and `editSeq`, which is also exactly when the answer can change.
+    if (this._fireNear) {
+      this._fireSrc.x = this._fireAt.x; this._fireSrc.y = this._fireAt.y;
+      this._fireSrc.z = this._fireAt.z;
+    }
+    if (this._lavaNear) {
+      this._lavaSrc.x = this._lavaAt.x; this._lavaSrc.y = this._lavaAt.y;
+      this._lavaSrc.z = this._lavaAt.z;
+    }
 
     this.audio.setAmbience({
       wind: (0.3 + high * 0.7) * (0.6 + this.weather.wind * 0.5),
@@ -10641,6 +10698,8 @@ class Game {
       depth: Math.max(0, -alt),
       fall: this._fallNear ? this._fallSrc : null,
       spring: this._springNear ? this._springSrc : null,
+      fire: this._fireNear ? this._fireSrc : null,
+      lava: this._lavaNear ? this._lavaSrc : null,
     });
   }
 

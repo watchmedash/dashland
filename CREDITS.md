@@ -435,6 +435,7 @@ Fire and the two insect beds:
 
 | shipped file | bytes | source recording | publisher |
 |---|---|---|---|
+| `fire_loop.ogg` | 40,815 | `FIRECrkl_Fire Crackling, Popping, Witch's Cauldron_344 Audio_Haunting Ambiences Vol 5.wav` | **344 Audio** (Haunting Ambiences Vol. 5) |
 | `crickets_loop.ogg` | 47,554 | `AMBSubn_Ambience, Forest Crickets, Birds, Connecticut 02_344 Audio_East Coast America.wav` | **344 Audio** (East Coast America Vol. 1) |
 | `cicada_loop.ogg` | 47,998 | `AMBTrop_Loop Ambience Jungle Night Humid Birds Bug Chirps 01_ESM_SNLS.wav` | **Epic Stock Media** (Synthesized Nature Loops and Sounds) |
 

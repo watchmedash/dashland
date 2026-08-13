@@ -37,6 +37,7 @@ import { Weather } from './game/Weather.js';
 import { Seasons, snowLine } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import * as MobModels from './game/MobModels.js';
+import { explode } from './game/Explosion.js';
 import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
 import { Water, LEVEL_MAX } from './game/Water.js';
 import { Save } from './game/Save.js';
@@ -1094,6 +1095,30 @@ const MODELLED_PLANTS = {
   // is the thing worth seeing from the path.
   watermelon_0: 0.22, watermelon_1: 0.38, watermelon_2: 0.52, watermelon_3: 0.66,
 };
+/**
+ * Blocks that keep their cube and get a model standing ON TOP of it.
+ *
+ * The two lists above are for blocks that ARE a model — a name in
+ * `MODELLED_CROSS` stops the mesher emitting anything, and the model is the
+ * whole picture. A cooker is not that. It is an ordinary opaque cube, it is
+ * solid, you stand on it and you mine it, and none of that should change; what
+ * it wants is a pot on the hot plate.
+ *
+ * So this list is deliberately NOT in `MODELLED_CROSS`. The mesher draws the
+ * cube exactly as it draws a kiln, and the scan below adds one instance in the
+ * cell ABOVE, which is what puts the pot on the lid of the block rather than
+ * inside it. Same value as `MODELLED_PLANTS`: a bounding-box height in cells,
+ * so 0.55 is a pot a little over half a cell tall standing on a full block.
+ *
+ * It is worth having as a list of one rather than as a special case, because
+ * the whole reason the cooker is assembled out of tiles the atlas already has
+ * (see `kitchen` in Blocks.js) is that new tiles mean a rebake. A model on top
+ * is how any future machine gets a face of its own for free.
+ */
+const MODELLED_TOPPERS = { kitchen: 0.55 };
+const TOPPER_KIND = [];
+for (const n of Object.keys(MODELLED_TOPPERS)) if (ID[n]) TOPPER_KIND[ID[n]] = n;
+
 const FLOWER_NAMES = Object.keys(MODELLED_PLANTS);
 const FLOWER_KIND = [];
 for (const n of FLOWER_NAMES) if (ID[n]) FLOWER_KIND[ID[n]] = n;
@@ -1558,6 +1583,18 @@ class Game {
     // hard.
     this.mobs.onAttack = (dmg, mob) => this._takeHit(dmg * this.mobDamageMul, mob);
     this.mobs.onBurn = (mob) => this.particles.embers(mob.pos, mob.up, 2, 0.55);
+    // The crater, and the fuse that precedes it. Two wires, and everything they
+    // reach is in `game/Explosion.js` — Mobs owns when a thing goes off and
+    // knows nothing about blocks; that module owns the hole and knows nothing
+    // about mobs. `explode` needs `_applyEdits` and `_takeHit`, so it is handed
+    // the game rather than four callbacks.
+    this.mobs.onBlast = (mob) => explode(this, mob.pos, mob);
+    this.mobs.onFuse = (mob, secs, armed) => {
+      // Once, on arming: `Audio.fuse` schedules the whole swell on the audio
+      // clock, so it must not be re-fired per frame.
+      if (armed) this.audio.fuse(mob.pos, secs);
+      if (secs > 0) this.particles.fuse(mob.pos, mob.up, 1 - secs / mob.spec.blast);
+    };
     // A torch on the ground has to light the animal standing next to it, and
     // nothing in the scene graph can tell it so — see `_entityLight`. Handed
     // over as a probe rather than as a per-mob light so that Mobs owns *when*
@@ -7354,12 +7391,14 @@ class Game {
     const bm = this.blockModels;
     bm.prime('torch', itemIdOf('torch'), { height: 0.95, lean: true });
     for (const n of FLOWER_NAMES) bm.prime(n, itemIdOf(n), { height: MODELLED_PLANTS[n] });
+    for (const n in MODELLED_TOPPERS) bm.prime(n, itemIdOf(n), { height: MODELLED_TOPPERS[n] });
 
     const c = this.player.cell;
     const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
     const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
     const lists = this._modelLists || (this._modelLists = { torch: [] });
     for (const n of FLOWER_NAMES) lists[n] = lists[n] || [];
+    for (const n in MODELLED_TOPPERS) lists[n] = lists[n] || [];
 
     if (this._tmCol !== baseCol || this._tmK !== ck || this._tmSeq !== this.editSeq) {
       this._tmCol = baseCol; this._tmK = ck; this._tmSeq = this.editSeq;
@@ -7391,11 +7430,23 @@ class Game {
             // is a lit wall with nothing lighting it.
             const nearK = dk >= -7 && dk <= 7;
             const flower = nearK ? FLOWER_KIND[id] : 0;
-            if (!flower && !(torchable && IS_TORCH[id])) continue;
+            const topper = nearK ? TOPPER_KIND[id] : 0;
+            if (!flower && !topper && !(torchable && IS_TORCH[id])) continue;
             const p = colParts(col);
             tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
             const pos = this.planet.centerOf(col, k, new THREE.Vector3());
             const up = new THREE.Vector3(_frame.up[0], _frame.up[1], _frame.up[2]);
+
+            if (topper) {
+              // The cell above, which is where a pot on a stove is. No spin:
+              // the block is directional and a pot turned to a different angle
+              // from the fire door underneath it would read as two objects.
+              lists[topper].push({
+                pos: this.planet.centerOf(col, k + 1, new THREE.Vector3()),
+                up, out: null, d2, col, k, light: -1,
+              });
+              continue;
+            }
 
             if (flower) {
               // A turn derived from the cell, not from a counter or `Math.random`:
@@ -8425,7 +8476,8 @@ class Game {
       // rather than vanishing into a run-on: "WEST GATE\nkeep out" reads as
       // "WEST GATE keep out" and not as "WEST GATEkeep out".
       this.ui.setHint(text ? `"${text.replace(/\s*\n\s*/g, ' ')}"` : 'A blank sign');
-    } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit)) {
+    } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit
+                       || hit.id === ID.kitchen)) {
       this.ui.setHint(null);
     } else if (needTool || dragHint || tillHint) {
       // Both can be true — a wrong tool on a wet seam is the worst case in the
@@ -8606,6 +8658,11 @@ class Game {
     if (input.clicked[2] && hit && input.locked && this.useCooldown === 0) {
       this.useCooldown = 0.22;
       if (hit.id === ID.bench) { this.openScreen('bench'); return; }
+      // The cooker. It carries no state object, unlike the kiln and the crate:
+      // it works out of `inventory.craft` exactly as the workbench does, so
+      // there is nothing to look up here and nothing to save, and closing the
+      // screen already spills whatever is left in the grid onto the floor.
+      if (hit.id === ID.kitchen) { this.openScreen('kitchen'); return; }
       if (hit.id === ID.kiln || hit.id === ID.kiln_lit) {
         this.openScreen('kiln', this._kilnAt(hit.col, hit.k));
         return;

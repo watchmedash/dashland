@@ -779,6 +779,27 @@ export const POSE = {
   // The stew pot takes the flat pose for the same reason the bowls do: side-on
   // it is a grey cylinder, and everything that says "stew" is inside it.
   stew:        food('pot-stew', 0.30, true, { pos: [0.017, 0.11, -0.051] }),
+  /**
+   * The cooking station, held and standing on its own block.
+   *
+   * A lidded pot rather than a brick cube, and it is the one full-block item in
+   * the game with a model. The note at the head of `BY_NAME` says a full block
+   * is better as its cube preview and it is right about the lantern, which is a
+   * lamp whose whole shape is the cube. It is not right here: the cooker's
+   * identity is the pot on top of it, not the brickwork, and a brick cube in
+   * the hand is indistinguishable from a brick.
+   *
+   * **One state, and it is the open pot.** The kit carries `pot`, `pot-lid`,
+   * `pot-stew` and `pot-stew-lid`, which is a ready-made idle / cooking / done
+   * machine — and there is nothing here to drive it. The station holds no
+   * ingredients between uses (see `_buildCraftUI` in UI.js): it works out of
+   * the player's own craft grid, so the only thing an open pot could report is
+   * what the player is carrying, and that would open every cooker on the planet
+   * at once. A lid that never moves is honest; a lid that moves for the wrong
+   * reason is not. If the station is ever given its own slots, the other three
+   * models are the state machine and this is where they go.
+   */
+  kitchen:     food('pot', 0.24, true, { pos: [0.014, 0.088, -0.041] }),
   pizza:       food('pizza', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
   burger:      food('burger-cheese', 0.26, false, { pos: [0.02, 0.13, -0.06] }),
 
@@ -1499,6 +1520,7 @@ export const BY_NAME = {
   pie: 'pie',
   cake: 'cake',
   stew: 'stew',
+  kitchen: 'kitchen',
   pizza: 'pizza',
   burger: 'burger',
   cookie: 'cookie',

@@ -1879,6 +1879,20 @@ body.fighting #toasts { top: 172px; }
     0 0 0 3px var(--brass-line);
 }
 .craft-out .islot img { width: 50px; height: 50px; }
+/* "Needs a Kitchen", under the empty output cell.
+   Every food recipe left the workbench, so the one thing this has to do is stop
+   a bench that suddenly makes no bread reading as a broken bench. It is sized
+   and coloured off the sidebar's own empty line rather than given a look of its
+   own, because it is the same sentence in a different place. Absolutely
+   positioned so that appearing and disappearing cannot move the output cell
+   under a thumb that is reaching for it. */
+.craft-out { position: relative; }
+.craft-note {
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  margin-top: 4px; white-space: nowrap;
+  font-size: var(--fs-sm); color: var(--ink-faint); font-family: var(--mono);
+}
+.craft-note.hidden { display: none; }
 .craft-out .islot:hover {
   background: linear-gradient(180deg, rgba(110, 62, 12, .8), rgba(180, 122, 44, .6) 60%, rgba(214, 158, 74, .5));
   box-shadow:

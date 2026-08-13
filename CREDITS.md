@@ -26,8 +26,9 @@ merchant and the fifteen player characters. Pig and hog are deliberately unused.
 
 ## Food — Food Kit by **Kenney**
 
-[kenney.nl](https://www.kenney.nl) — **CC0**. 28 models: the foraged, cooked and
-baked line-up.
+[kenney.nl](https://www.kenney.nl) — **CC0**. 29 models: the foraged, cooked and
+baked line-up, plus `pot.glb`, which is the cooking station's own face — it stands
+on top of the block rather than being held.
 
 ## Touch controls — Mobile Controls by **Kenney**
 

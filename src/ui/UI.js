@@ -5,10 +5,12 @@ import { BLOCKS, R_CROSS } from '../world/Blocks.js';
 import { ITEMS } from '../game/Items.js';
 import { Slot, HOTBAR, TOTAL } from '../game/Inventory.js';
 import { BRANCHES } from '../game/Skills.js';
-import { findRecipe, availableRecipes, craftFromInventory } from '../game/Recipes.js';
+import {
+  findRecipe, availableRecipes, craftFromInventory, kitchenFallback, isKitchenIngredient,
+} from '../game/Recipes.js';
 import { itemIdOf } from '../game/Items.js';
 import {
-  COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest,
+  COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest, valueOf,
 } from '../game/Trade.js';
 import * as Character from '../player/Character.js';
 import { CharacterPicker, CHARACTER_IDS, characterUrl } from '../player/Character.js';
@@ -1756,13 +1758,13 @@ export class UI {
 
   _takeOutput(all) {
     const g = this.game;
-    const size = this.screen === 'bench' ? 3 : 2;
-    const rec = findRecipe(g.inventory.craftGrid(size), size, size, this.screen === 'bench');
+    const size = this._craftSize();
+    const rec = this._craftResult();
     if (!rec) return;
     const cur = g.inventory.cursor;
     let made = 0;
     do {
-      const r = findRecipe(g.inventory.craftGrid(size), size, size, this.screen === 'bench');
+      const r = this._craftResult();
       if (!r || r.out !== rec.out) break;
       if (!cur.empty && (cur.item !== rec.out || cur.count + rec.count > (ITEMS[rec.out]?.stack ?? 64))) break;
       g.inventory.consumeCraft(size);
@@ -1842,8 +1844,9 @@ export class UI {
   _refreshRecipes() {
     const list = this.el.recipeList;
     if (!list || !this.icons) return;
-    const hasTable = this.screen === 'bench';
-    const options = availableRecipes(this.game.inventory, hasTable);
+    const station = this._station();
+    const hasTable = this._craftSize() === 3;
+    const options = availableRecipes(this.game.inventory, hasTable, station);
 
     // An empty badge still paints its background — hide the pill entirely
     // rather than leaving a stray orange sliver next to the heading.
@@ -1852,7 +1855,7 @@ export class UI {
     this.el.recipeEmpty.classList.toggle('hidden', options.length > 0);
     // Two words, and the second one only when the bench would change the
     // answer. What a workbench is for is not this label's job.
-    this.el.recipeEmpty.textContent = hasTable ? 'Nothing yet' : 'Nothing yet, without a bench';
+    this.el.recipeEmpty.textContent = (hasTable || station) ? 'Nothing yet' : 'Nothing yet, without a bench';
 
     list.innerHTML = '';
     for (const { recipe, cost } of options) {
@@ -1954,16 +1957,24 @@ export class UI {
     this.shop = kind === 'shop' ? state || null : null;
     this.el.screenTitle.textContent =
       kind === 'bench' ? 'Workbench' : kind === 'kiln' ? 'Kiln'
-        : kind === 'shop' ? 'Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
+        : kind === 'kitchen' ? 'Kitchen'
+          : kind === 'shop' ? 'Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
     this.el.screenTop.innerHTML = '';
-    this.craftSlots = null; this.craftMap = null; this.kilnSlots = null;
+    this.craftSlots = null; this.craftMap = null; this.kilnSlots = null; this.craftNote = null;
     this.crateSlots = null; this.offhandEl = null;
     this.shopEls = null;
 
     if (kind === 'kiln') this._buildKilnUI();
     else if (kind === 'crate') this._buildCrateUI();
     else if (kind === 'shop') this._buildShopUI();
-    else this._buildCraftUI(kind === 'bench' ? 3 : 2);
+    // The kitchen IS the bench screen: three by three cells, a filter on what
+    // they take, and a second answer behind the output slot. It holds no state
+    // of its own, deliberately. It works out of `inventory.craft` exactly as
+    // the workbench does, so `Game.closeScreen` already spills whatever is left
+    // in it as drops on the floor. A station that never keeps your ingredients
+    // cannot lose them, which is a stronger promise than saving them would have
+    // been, and it costs no save code, no load code and no break-drop.
+    else this._buildCraftUI(this._craftSize());
 
     // The craftable sidebar is dead weight while trading — the merchant's two
     // lists want the width more than a recipe book does. A crate has no craft
@@ -2004,10 +2015,17 @@ export class UI {
     this.craftSlots = [];
     this.craftMap = [];
     const indices = size === 2 ? [0, 1, 3, 4] : [0, 1, 2, 3, 4, 5, 6, 7, 8];
+    // The cooker takes food and cooking ingredients and refuses everything
+    // else. `accepts` is the filter `_wireSlot` has carried unused since the
+    // armour slots were deleted, and its rule is the right one here: a
+    // restricted slot still gives up what it holds, so a cell can always be
+    // emptied. A refusal is a low beep and nothing moves. No copy, because a
+    // cell that will not take a cobblestone has already said so.
+    const accepts = this._station() === 'kitchen' ? isKitchenIngredient : undefined;
     indices.forEach((gi, k) => {
       const d = document.createElement('div');
       d.className = 'islot';
-      this._wireSlot(d, () => inv.craft[gi]);
+      this._wireSlot(d, () => inv.craft[gi], { accepts });
       grid.appendChild(d);
       this.craftSlots.push(d);
       this.craftMap.push(inv.craft[gi]);
@@ -2024,6 +2042,9 @@ export class UI {
     this.craftOutSlot = new Slot();
     this._wireSlot(this.craftOut, () => this.craftOutSlot, { output: true });
     outWrap.appendChild(this.craftOut);
+    this.craftNote = document.createElement('span');
+    this.craftNote.className = 'craft-note hidden';
+    outWrap.appendChild(this.craftNote);
     wrap.append(this._buildOffhandUI(), grid, arrow, outWrap);
     this.el.screenTop.appendChild(wrap);
   }
@@ -2064,12 +2085,54 @@ export class UI {
     return col;
   }
 
+  /**
+   * Which bench the open screen crafts at, and how wide its grid is.
+   *
+   * Four places used to spell `this.screen === 'bench' ? 3 : 2` out in full and
+   * a fifth asked the same question as `hasTable`. A third station makes that
+   * five copies of one fact, and five chances for the output slot, the take,
+   * the sidebar and the builder to disagree about where the player is standing.
+   * One pair of one-liners instead.
+   */
+  _station() { return this.screen === 'kitchen' ? 'kitchen' : null; }
+
+  _craftSize() { return (this.screen === 'bench' || this.screen === 'kitchen') ? 3 : 2; }
+
+  /**
+   * What the grid currently makes, as `{out, count}` or null.
+   *
+   * The kitchen is the only screen with a second answer behind the first. A
+   * named recipe wins if there is one; failing that `kitchenFallback` turns the
+   * pile into one of the five improvised dishes, which is the owner's rule that
+   * no set of edibles ever comes back with nothing. See Recipes.js for why that
+   * cannot be a table and why the ladder it lands on cannot be farmed.
+   */
+  _craftResult() {
+    const size = this._craftSize();
+    const grid = this.game.inventory.craftGrid(size);
+    const rec = findRecipe(grid, size, size, size === 3, this._station());
+    if (rec) return rec;
+    if (this._station() !== 'kitchen') return null;
+    return kitchenFallback(grid.map((s) => (s && s.count > 0 ? s.item : 0)).filter(Boolean), valueOf);
+  }
+
   _refreshCraftOutput() {
-    const size = this.screen === 'bench' ? 3 : 2;
-    const rec = findRecipe(this.game.inventory.craftGrid(size), size, size, this.screen === 'bench');
+    const rec = this._craftResult();
     if (rec) this.craftOutSlot.set(rec.out, rec.count);
     else this.craftOutSlot.clear();
     this._paint(this.craftOut, this.craftOutSlot);
+    // A recipe that has stopped working must not be a mystery. Every food
+    // recipe moved to the kitchen, so a player who knows the bread recipe puts
+    // three wheat on the bench and gets nothing back, which reads as a bug
+    // unless the game says otherwise. Same shape as the sidebar's existing
+    // "without a bench" line: name the thing that is missing, and stop.
+    if (this.craftNote) {
+      const size = this._craftSize();
+      const miss = !rec && this._station() === null
+        && !!findRecipe(this.game.inventory.craftGrid(size), size, size, true, 'kitchen');
+      this.craftNote.textContent = miss ? 'Needs a Kitchen' : '';
+      this.craftNote.classList.toggle('hidden', !miss);
+    }
   }
 
   /**

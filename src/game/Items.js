@@ -1025,8 +1025,13 @@ export function harvestHint(blockId, toolItem) {
   // applies them: the wrong *kind* of tool (pick blocks only) and too low a
   // tier. Both end with the block gone and nothing on the floor, so both have
   // to be said out loud before the swing.
-  const wrongKind = b.tool === 'pick' && toolItem?.tool?.kind !== 'pick';
-  const underTier = b.tier > 0 && held < b.tier;
+  // Ores only, exactly as `computeDrops` now gates. Left in step with it even
+  // though nothing calls this: a hint that names a price the drop table no
+  // longer charges is worse than no hint, and the day someone wires this up is
+  // not the day to discover it was describing the old rule.
+  const isOre = b.name.endsWith('_ore');
+  const wrongKind = isOre && b.tool === 'pick' && toolItem?.tool?.kind !== 'pick';
+  const underTier = isOre && b.tier > 0 && held < b.tier;
   if (!wrongKind && !underTier) return null;
   const kind = TOOL_KINDS[b.tool]?.label ?? 'Tool';
   // One line, never two. When both are true the tier message is the one to
@@ -1163,20 +1168,38 @@ export function computeDrops(blockId, toolItem, rng = Math.random) {
     return out;
   }
 
-  // Rock needs a pickaxe, and nothing else will do.
+  // **An ore is the only thing a tool can refuse to pay out.**
   //
-  // The tier gate below has always been able to say "that pickaxe is not good
-  // enough"; it could never say "that is not a pickaxe", so an axe took stone
-  // apart and handed you the cobble. Minecraft's split is the one worth
-  // copying and it is a split, not a blanket rule: **only `pick` blocks are
-  // gated on the kind.** Timber and soil come apart in your hands and always
-  // did — an axe is a speed, not a licence — so a log still drops with a
-  // shovel, and dirt still drops with a fist. That keeps the punishment on the
-  // one family where a player already expects it and where the wrong answer is
-  // recoverable (the block is still there until you swing at it, and
-  // `harvestHint` names the pickaxe before you do).
-  if (b.tool === 'pick' && toolItem?.tool?.kind !== 'pick') return [];
-  if (b.tier > tier) return [];   // wrong tool: the block shatters with nothing to show
+  // Both gates below used to apply to every `pick` block in the game, which is
+  // Minecraft's rule and is the rule this file was written to copy. The owner
+  // has ruled the other way, and the report is the argument: "I tried breaking
+  // some blocks like mossy stone, stone and it didn't drop anything, that makes
+  // sense in ores not to drop any ore but not to drop block doesn't make sense,
+  // it supposed to take longer base on tools and barehanded but it should still
+  // drop."
+  //
+  // Which is a distinction the old rule could not draw. `tool: 'pick'` is worn
+  // by 60-odd blocks and only a dozen of them are seams — plain stone, every
+  // brick, the slates, the crafted metal blocks and the kiln all carried it, so
+  // a player with an axe in hand took a wall apart and got nothing back from
+  // any of it. Losing a seam you were not equipped for is a rule about
+  // prospecting; losing your own wall is just a tax on having picked up the
+  // wrong tool, and the game has no way to say which one just happened.
+  //
+  // The time is where the tool ladder still speaks, and it speaks loudly enough
+  // on its own: `handSpeed` puts a bare fist at a third of a pickaxe's rate on
+  // rock, so stone is 9.90s by hand against 1.10s with a wooden pick. Nine
+  // times slower is not a soft rule.
+  //
+  // Named off `_ore` rather than off the `tier` field, because `tier` is worn by
+  // plenty of blocks that are not seams (slate, the hell and magma bricks, the
+  // iron and gold blocks, the kiln) and every seam in the table ends in `_ore`,
+  // voidstone included. The planet core is not exempted here because it never
+  // arrives: `_breakBlock` refuses it outright and its mining bar never moves.
+  if (b.name.endsWith('_ore')) {
+    if (b.tool === 'pick' && toolItem?.tool?.kind !== 'pick') return [];
+    if (b.tier > tier) return [];   // wrong tool: the seam shatters with nothing to show
+  }
   const name = b.drop;
   if (!name) return [];
   const id = itemIdOf(name);

@@ -1343,6 +1343,10 @@ const monster = (file, o) => ({
   // fields they do not name, so a spec can carry `glow` only because this line
   // exists - a typo here is invisible rather than loud.
   ...(o.glow ? { glow: o.glow } : null),
+  // Seconds of fuse, for the one species that has one. Absent on every other
+  // row, which is what `_hunt` tests: no `blast`, no arming branch, and the
+  // swing it has always taken.
+  ...(o.blast ? { blast: o.blast } : null),
 });
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
@@ -2084,6 +2088,58 @@ const SPECIES = {
     label: 'Sporeling', h: 1.2, hp: 14, spd: 1.20, shy: 0, turn: 4.0, accel: 7.5,
     dmg: 3, reach: 1.2, swing: 1.1, aggro: 12, drops: [['mushroom', 1, 3]],
   }),
+  /**
+   * The one that does not swing.
+   *
+   * Every other hostile on this table answers the same question — how hard, how
+   * often, from how far — and the whole of this one is that it answers none of
+   * them. It walks at you, and when it arrives it arms, and a second and a half
+   * later it is gone and so is the ground you were standing on.
+   *
+   * Priced against the roster it has to live in:
+   *
+   *   hp 10 (15 after HOSTILE_HP)   the frailest monster in the game by a
+   *       clear margin — the sporeling is next at 21 — and that is the
+   *       counterplay, not a mistake. Killing it before it reaches you is the
+   *       whole fight, so it has to be killable in the two or three seconds
+   *       the approach gives you, and a bow has to be able to finish it at
+   *       range.
+   *   spd 1.05                      the cyclops' pace, which is 3.15 cells/s
+   *       against a player walk of 4.4. You can ALWAYS leave. That is not a
+   *       weakness in the design, it is the same rule the husk was retuned to
+   *       obey (see the note there on 1.28 against 4.4) and it is what makes
+   *       the fuse a warning rather than a sentence: a player who reacts to the
+   *       hiss by running is out of HURT_R before it goes off.
+   *   aggro 12                      the shortest ring on the table. It is a
+   *       thing you walk into, never a thing that crosses a valley for you.
+   *   reach 1.6, swing 1.0          not a blow. `swing` is the rearm delay
+   *       after a fuse is aborted, and `reach` is the distance at which one
+   *       starts. Nothing pushes a pending hit for this species — see the
+   *       `blast` branch in `_hunt`.
+   *
+   * `blast` is the flag the whole behaviour hangs off, and it carries the fuse
+   * length rather than being a boolean, because the fuse is the design. 1.5s is
+   * Minecraft's number and it is right for the same reason: long enough that a
+   * player who reacts gets away, short enough that a player who freezes does
+   * not.
+   *
+   * The drops pay for killing it and NOT for surviving it. A cinderling that
+   * detonates leaves nothing at all — see `_detonate` — so sulfur and cinder
+   * are the reward for shooting it on the approach, which is precisely the
+   * behaviour the mob is built to teach.
+   */
+  cinderling: monster('cinderling', {
+    label: 'Cinderling', h: 1.3, hp: 10, spd: 1.05, shy: 0, turn: 3.4, accel: 7.0,
+    dmg: 0, reach: 1.6, swing: 1.0, aggro: 12,
+    blast: 1.5,
+    // The model is untextured — five flat baseColour materials and no map at
+    // all, unlike every other monster in the pack — so `spec.glow` here is a
+    // flat emissive over the whole body rather than `emissive * emissiveMap`.
+    // Low, and deliberately: this is the resting ember, and the fuse ramp in
+    // `_animate` climbs from it. A body that already glows has nowhere to go.
+    glow: 0.10,
+    drops: [['sulfur', 1, 2], ['cinder', 1, 1]],
+  }),
   // --- and the ones with wings ---
   //
   // `hover` has to sit *inside* `reach`, and that is not obvious until you
@@ -2466,6 +2522,20 @@ const lootBulk = (h) => clamp(
 
 /** Seconds of the scale pop that stands in for a missing attack clip. */
 const LUNGE_TIME = 0.3;
+
+/**
+ * How far past its own reach the player has to get for a cinderling to call the
+ * fuse off, as a multiple of `spec.reach`.
+ *
+ * 2.4 against reach 1.6 is 3.84 cells, and the number that matters is the one
+ * it is NOT: `HURT_R` in Explosion.js is 4.5. So the abort ring sits inside the
+ * blast ring on purpose — reaching it stops the *next* fuse, and does nothing
+ * whatsoever about the one already burning, which will still reach you for 2 of
+ * 20 on the way out. One step back is a reprieve; three is an escape. Anything
+ * larger than 2.8 here would make the two rings coincide and turn "get clear"
+ * into a binary the player cannot see the edge of.
+ */
+const FUSE_ABORT = 2.4;
 
 // --- the night stalk ---------------------------------------------------------
 // The one time an animal comes for the player unasked, and every number here
@@ -3016,13 +3086,31 @@ const BLOOM = new Set(
  *
  * A biome with no entry has no monsters at all, and that is the point: the
  * meadow you build your hut in stays yours.
+ *
+ * ---- and it is now the first line of defence for the player's base ----------
+ *
+ * The cinderling is the only thing in this game that can delete a block the
+ * player laid, so "where does it spawn" stopped being flavour the day it was
+ * added. It is in MOUNTAIN and BADLANDS and nowhere else, which is the two
+ * least likely places on the planet to find a hut: MEADOW has no monsters at
+ * all, and PLAINS, FOREST and PINE_FOREST — the other biomes anyone builds in —
+ * get aliens, sporelings and ghosts, none of which can move a block.
+ *
+ * That is one of three things standing between it and a base, and the other two
+ * are in the behaviour rather than the table. It only ever arms on the player,
+ * so one wandering through an empty build does nothing at all; and it is slower
+ * than a walk, so a player who hears the fuse and leaves takes the blast with
+ * them. Together those are this game's answer to the question Minecraft answers
+ * with difficulty settings and mob-proofing, and it is deliberately a *design*
+ * answer rather than a toggle: nothing here needs the player to have read a
+ * wiki before their wall is safe.
  */
 const MONSTER_BY_BIOME = {
   SNOW: ['yeti', 'yeti', 'ghost'],
   TUNDRA: ['yeti', 'skull'],
-  MOUNTAIN: ['cyclops', 'bat', 'dragon'],
+  MOUNTAIN: ['cyclops', 'bat', 'dragon', 'cinderling'],
   DESERT: ['cactus_monster', 'cactus_monster', 'skull'],
-  BADLANDS: ['demon', 'greendemon', 'demon', 'skull', 'dragon'],
+  BADLANDS: ['demon', 'greendemon', 'demon', 'skull', 'dragon', 'cinderling'],
   SAVANNA: ['greendemon', 'skull'],
   FOREST: ['mushroom_monster', 'mushroom_monster', 'ghost'],
   PINE_FOREST: ['mushroom_monster', 'ghost', 'bat'],
@@ -3155,6 +3243,28 @@ export class Mobs {
     this.onSound = null;
     /** (damage, mob) => void — a hostile landed a blow on the player. */
     this.onAttack = null;
+    /**
+     * (mob) => void — something has just detonated where it stands.
+     *
+     * Its own door rather than a swing through `onAttack`, because a blast is
+     * not a blow: it moves blocks, it hurts by distance rather than by contact,
+     * and it must not be eaten by the hurt guard that exists to stop two swings
+     * landing inside one immunity window. Mobs owns the fuse and knows nothing
+     * about the crater; main wires this to `Explosion.explode`, which owns the
+     * crater and knows nothing about the fuse.
+     */
+    this.onBlast = null;
+    /**
+     * (mob, secondsLeft, justArmed) => void — a fuse is burning.
+     *
+     * Fired on the arming frame with `justArmed` true, every frame after it
+     * with `justArmed` false, and once with `secondsLeft` 0 when a fuse is
+     * called off. One callback rather than two because the two things main does
+     * with it — schedule the hiss once, throw a spark per frame — are told
+     * apart by the flag, and a second callback would be a second thing a
+     * harness has to remember to wire.
+     */
+    this.onFuse = null;
     /** (mob) => void — a hostile is alight, for smoke and embers. */
     this.onBurn = null;
     /**
@@ -3719,6 +3829,11 @@ export class Mobs {
       fromCave: false,     // which spawn budget it belongs to
       swingT: 0,           // hostiles: cooldown left before the next blow
       lungeT: 0,           // seconds left of the pounce pop — see _lunge
+      // Seconds left of the fuse, 0 when not armed. Zero on every species,
+      // because a field that only exists on one of them is a field the shared
+      // update loop has to guard on every frame for every mob on the planet.
+      fuseT: 0,
+
       burnT: 0,            // hostiles: seconds alight in daylight
       hauntT: 0,           // phantoms: seconds left before an unbroken stare ends
       // --- predation ---
@@ -6748,6 +6863,19 @@ export class Mobs {
       // somewhere else. The name is load-bearing elsewhere and not worth
       // churning; this note is the cheaper fix.
       mob.state = 'idle';
+      // The one species that does not swing. It arrives, it arms, and the
+      // 1.5 seconds after this line are the entire mechanic — see `_tickFuse`.
+      //
+      // Placed here, inside the branch that already means "close enough, and
+      // the line is clear", rather than as a fifth behaviour above: everything
+      // that had to be true for a yeti to raise an arm has to be true for this
+      // to start a fuse, including `_blowClearPlayer`, so a cinderling cannot
+      // arm at you through a wall.
+      if (spec.blast) {
+        if (mob.fuseT <= 0 && mob.swingT <= 0) this._arm(mob);
+        mob.stateT = 0.5;
+        return true;
+      }
       if (mob.swingT <= 0) {
         mob.swingT = spec.swing;
         this._lunge(mob);
@@ -7009,6 +7137,96 @@ export class Mobs {
     const named = clips.attack && mob.model.actions[clips.attack];
     MobModels.playOnce(mob.model, named ? clips.attack : clips.run, named ? 1.35 : 2.1);
     mob.lungeT = LUNGE_TIME;
+  }
+
+  /**
+   * Light the fuse.
+   *
+   * The sound is fired once, here, for the whole fuse rather than a puff a
+   * frame: `Audio.fuse` schedules its own ramp on the WebAudio clock, so it
+   * cannot be throttled apart mid-swell by the voice budget and it stays
+   * exactly in step with `fuseT` however the frame rate behaves. That matters —
+   * the pitch of the hiss IS the clock, and a clock that drifts from the thing
+   * it is timing is worse than no clock.
+   */
+  _arm(mob) {
+    mob.fuseT = mob.spec.blast;
+    if (this.onFuse) this.onFuse(mob, mob.fuseT, true);
+  }
+
+  /**
+   * Run a lit fuse for one frame, and decide whether it goes off or goes out.
+   *
+   * ---- the abort, which is the whole point ----------------------------------
+   *
+   * A fuse you cannot escape is a damage number with a delay on it. This one is
+   * called off if the player leaves `reach * ABORT`, which at reach 1.6 and
+   * ABORT 2.4 is 3.84 cells — comfortably inside HURT_R, so getting out of the
+   * abort range is NOT the same as getting out of the blast, and a player who
+   * turns and walks at the first hiss is still clipped by the edge of one that
+   * has already committed. It is the second step that saves you, not the first.
+   *
+   * Deliberately measured to the player's *feet* (`player.position`), the same
+   * point `dist` in the update loop uses, so the arm test and the abort test
+   * cannot disagree about how far away you are and leave a mob flickering
+   * between armed and not.
+   *
+   * On abort the fuse resets and `swingT` takes the species' `swing` — which is
+   * the only thing that field means for this mob. Without it a player standing
+   * on the abort boundary re-arms it sixty times a second and the hiss becomes
+   * a machine gun.
+   *
+   * Losing the target does NOT abort. Once it is lit it stays lit as long as
+   * you are near it, because a mob that disarms the instant it loses line of
+   * sight can be defused by stepping behind a tree, and stepping behind a tree
+   * is supposed to be the thing that saves you from the *blast*, not the thing
+   * that cancels it.
+   *
+   * @returns {boolean} true if it went off and the body is gone.
+   */
+  _tickFuse(mob, dt, dist) {
+    mob.fuseT -= dt;
+    if (mob.fuseT <= 0) { this._detonate(mob); return true; }
+    if (dist > mob.spec.reach * FUSE_ABORT) {
+      mob.fuseT = 0;
+      mob.swingT = mob.spec.swing;
+      if (this.onFuse) this.onFuse(mob, 0, false);
+      return false;
+    }
+    // Every frame while it is lit, so the sparks are the caller's to rate.
+    // `justArmed` false, which is how main tells the one-shot hiss apart from
+    // the per-frame spark without a second callback.
+    if (this.onFuse) this.onFuse(mob, mob.fuseT, false);
+    return false;
+  }
+
+  /**
+   * It goes off.
+   *
+   * The body is removed through `_vanished` rather than `_die`, and the note on
+   * that list already gives the reason word for word: no drops, no death clip,
+   * no sound, no body left on the ground. All three would be wrong here.
+   *
+   *   no sound   `Audio.blast` is the death. A species cry underneath an
+   *              explosion is a second announcement of the same event, and the
+   *              quieter of the two.
+   *   no body    there is a crater where it was standing. A corpse lying in it
+   *              is a corpse that did not explode.
+   *   no drops   and this is the one that is a balance decision rather than a
+   *              presentational one. A cinderling pays out sulfur and cinder
+   *              when you KILL it and nothing at all when it detonates, so the
+   *              loot is a reward for shooting it on the approach — the exact
+   *              behaviour the mob exists to teach. Letting it pop and then
+   *              collecting the drops out of the crater would pay the player
+   *              for the mistake.
+   *
+   * `onBlast` before the removal, so the crater is centred on a body that is
+   * still where the player last saw it.
+   */
+  _detonate(mob) {
+    mob.fuseT = 0;
+    if (this.onBlast) this.onBlast(mob);
+    this._vanished.push(mob);
   }
 
   /**
@@ -8130,6 +8348,21 @@ export class Mobs {
       mob.idleT += dt;
       mob.swingT = Math.max(0, mob.swingT - dt);
 
+      // A lit fuse, before anything can steer the body carrying it.
+      //
+      // Above the behaviours rather than inside `_hunt` on purpose, and the
+      // reason is what happens when the chase ends. `_hunt` returns early in
+      // four places — the player swam out of reach, the stall timer gave up,
+      // the hunt cooldown is running — and a fuse ticked inside it would simply
+      // stop in all four, leaving an armed cinderling standing there hissing
+      // forever. Once it is lit, the only two things that put it out are the
+      // player getting clear and the mob dying, and both are in `_tickFuse`.
+      //
+      // `continue` on detonation because the body is gone: it is on `_vanished`
+      // and everything below this line would be steering, animating and
+      // separating a mob that no longer exists.
+      if (mob.fuseT > 0 && this._tickFuse(mob, dt, dist)) continue;
+
       // A husk killed by the sun plays out its death before it is removed.
       if (mob.dying > 0) {
         mob.dying -= dt;
@@ -9157,6 +9390,48 @@ export class Mobs {
     else root.quaternion.slerp(_q, 1 - Math.exp(-16 * dt));
 
     _rpos.copy(mob.pos);
+    /**
+     * A gait for a model that shipped without one.
+     *
+     * Every other rig in the game arrives with its animation authored — eight
+     * or ten named clips, which is the first line of `MobModels.js` and the
+     * reason none of this was ever needed. The cinderling's does not: its GLB
+     * carries fourteen meshes, five materials and **zero** `animations`, so
+     * `MobModels.play` and `playOnce` both no-op on it (they return at their
+     * first line on a missing action) and the body is a rigid mesh sliding
+     * across the ground like a decal.
+     *
+     * So it gets a hop instead of a rig. Not an attempt at legs — there is no
+     * skeleton to move and no clip to blend — but at what a small round thing
+     * does when it walks: it leaves the ground, and it squashes when it lands.
+     * `mob.gait` is the ground it is actually covering (the same measure the
+     * clip chooser uses, and for the same reason: a body walled in must not
+     * keep animating), so a standing cinderling is perfectly still and a
+     * charging one is bouncing hard.
+     *
+     * Position and scale only, never the quaternion. The orientation on the
+     * line above is a *persistent* slerp toward the heading, so multiplying a
+     * per-frame roll into it would compound against the smoothing and drift;
+     * position and scale are both rewritten from scratch every frame and can be
+     * added to safely. This is the same rule the note on `root.scale` states.
+     *
+     * Gated on the model genuinely having no clips rather than on the species,
+     * so the next unanimated model that arrives gets this for free and every
+     * animated one is untouched — the clock is not even advanced for them.
+     */
+    if (mob.noClips === undefined) mob.noClips = Object.keys(model.actions).length === 0;
+    let hopSquash = 0;
+    if (mob.noClips) {
+      mob.animCycle = (mob.animCycle || 0) + dt * (3.0 + mob.gait * 2.2);
+      const step = Math.min(1, mob.gait / Math.max(0.2, spec.speed));
+      const s = Math.sin(mob.animCycle);
+      // |sin| rather than sin: a hop leaves the ground and comes back to it, it
+      // does not sink through it.
+      _rpos.addScaledVector(mob.up, Math.abs(s) * 0.12 * step * mob.scale);
+      // Squashed at the bottom of the bounce and stretched at the top, which is
+      // the whole of why a hop reads as weight rather than as a float.
+      hopSquash = (Math.abs(s) - 0.5) * 0.16 * step;
+    }
     root.position.copy(_rpos);
     // `grown` is the permanent size a predator has eaten its way to; `lungeT`
     // is the momentary pounce, easing out over LUNGE_TIME so a pet with no
@@ -9164,8 +9439,30 @@ export class Mobs {
     // the reason growthScale documents: this line owns root.scale, and anything
     // written to it elsewhere is gone on the next frame.
     const lunge = mob.lungeT > 0 ? 1 + 0.16 * (mob.lungeT / LUNGE_TIME) : 1;
-    root.scale.setScalar(mob.scale * mob.grown * growthScale(mob) * lunge
+    // The swell. Third term through this one line, and it is here rather than
+    // anywhere else for the reason the comment above states: this line OWNS
+    // root.scale, and anything written to it elsewhere is gone next frame.
+    //
+    // 1.0 to 1.45 over the fuse, squared like the glow so it is slow then
+    // sudden, with a shudder laid over the top whose rate climbs with it. The
+    // size is what carries the tell at distance — colour and sound both fall
+    // off with range and a silhouette getting half again as big does not — and
+    // the shudder is what stops a smooth scale reading as the thing walking
+    // toward the camera.
+    const swell = mob.fuseT > 0
+      ? 1 + 0.45 * (1 - mob.fuseT / spec.blast) ** 2
+        + 0.05 * Math.sin(mob.idleT * (14 + 40 * (1 - mob.fuseT / spec.blast)))
+      : 1;
+    root.scale.setScalar(mob.scale * mob.grown * growthScale(mob) * lunge * swell
       * (mob.hurtT > 0 ? 1.09 : 1));
+    // The hop's squash, after the one line that owns the scale rather than
+    // instead of it, and volume-preserving so a squashed body gets wider rather
+    // than smaller. Zero for every animated species, whose clips do this
+    // themselves.
+    if (hopSquash) {
+      const y = 1 + hopSquash, xz = 1 / Math.sqrt(y);
+      root.scale.set(root.scale.x * xz, root.scale.y * y, root.scale.z * xz);
+    }
 
     // --- animation ---
     // The clips carry the whole performance — gait, idle sway, the eating dip.
@@ -9314,6 +9611,40 @@ export class Mobs {
       const beat = 0.65 + Math.abs(Math.sin(mob.idleT * 9)) * 0.35;
       tr = 1; tg = 0.55 * beat; tb = 0.22 * beat;
     }
+    // The fuse, in the albedo. Below the two above it because being struck or
+    // being on fire are things the player has just caused and needs confirmed;
+    // the fuse has a second and a half of its own to be read in, and a sound
+    // and a silhouette carrying it besides.
+    //
+    // Not a beat. Everything else that flashes in this file pulses on a fixed
+    // rate, which says "something is wrong with this animal" and says it at the
+    // same speed for the whole time it is true. A fuse has to say how far
+    // through it is, so this is a monotone ramp toward white-hot with a flicker
+    // that *quickens* as it climbs — the same information the rising whistle in
+    // `Audio.fuse` carries, in the channel a player looking at it will read.
+    else if (mob.fuseT > 0) {
+      const heat = 1 - mob.fuseT / spec.blast;
+      const flick = 0.85 + Math.abs(Math.sin(mob.idleT * (7 + 22 * heat))) * 0.15;
+      // Toward hot, and no further. The first pass multiplied the albedo by up
+      // to 2.4 on top of the emissive ramp below, and the screenshot at 80% of
+      // the fuse was a featureless white ellipse: no eyes, no mouth, no legs,
+      // no read on which way it was facing. That is a worse tell than a dim
+      // one, because the thing the player is being warned about has stopped
+      // being a thing. The body has to survive to the last frame — it is the
+      // silhouette that says "cinderling" and the brightness that says "now" —
+      // so the albedo only ever warms, and the glow below carries the urgency.
+      //
+      // Skewed hard toward red, and that is the second thing the first pass got
+      // wrong. An even lift is a body being *bleached*, which is what a pale
+      // cream cinderling on green grass looked like — plainly different from
+      // its resting self and not plainly ABOUT to do anything. These three
+      // numbers are also what tints the glow below, because that is written as
+      // `emissive x tint`, so the same skew is what turns a neutral grey lamp
+      // into a hot one. At 80% of the fuse it is 1.88 / 1.36 / 1.08.
+      tr = (1 + 1.10 * heat) * flick;
+      tg = (1 + 0.45 * heat) * flick;
+      tb = (1 + 0.10 * heat) * flick;
+    }
     if (mob.tintR !== tr || mob.tintG !== tg || mob.tintB !== tb) {
       mob.tintR = tr; mob.tintG = tg; mob.tintB = tb;
       // Multiplied into the material's own colour, not written over it.
@@ -9387,9 +9718,36 @@ export class Mobs {
        * above gives about the damage flash: a ghost that has been struck has to
        * redden like everything else rather than holding a white glow through it.
        */
+      // ...and a third writer, for the length of a fuse. Folded into the same
+      // floor rather than given a slot of its own, because there is only one
+      // `emissive` and the paragraph above is the record of what happens when
+      // two things assume they own it. A lit cinderling climbs from its resting
+      // 0.10 to 1.0 over the fuse, which on an untextured body (no
+      // `emissiveMap` — see the note in `spawn`) is a flat self-lit white
+      // washing out the albedo underneath: the thing goes from a dull red lizard
+      // to a lamp, and it does it fastest in the last half second.
+      //
+      // Squared, so the ramp is slow then sudden. A linear climb spends the
+      // first half of the fuse in the part of the range the eye reads as
+      // "slightly brighter", which is the half the player most needs to be told
+      // about; ramping late means the moment it becomes unmistakable is a moment
+      // there is still time to act on.
+      // Capped at 0.62 rather than run to 1. An emissive of 1 on an untextured
+      // body is the full white of the material with the diffuse contributing
+      // nothing, which is exactly the blown-out ellipse the albedo note above
+      // records; 0.62 is bright enough to be the brightest thing in a daylit
+      // frame and still lets the green and the eyes through underneath it.
+      const fuse = mob.fuseT > 0 ? 0.62 * (1 - mob.fuseT / spec.blast) ** 2 : 0;
+      // Per channel, and this is the third correction the tell needed. Written
+      // as one number it is a neutral grey lamp, and the tint multiplier is far
+      // too weak a lever to make grey read as hot: a green body plus a white
+      // glow is a CREAM body, which is what the screenshot showed twice. 1 /
+      // 0.42 / 0.12 is an ember, so the same green body plus this glow is an
+      // orange one, and the change is unmistakable at a glance across a field.
       const gl = spec.glow || 0;
-      const er = Math.max(bl.r, gl) * tr, eg = Math.max(bl.g, gl) * tg,
-        eb = Math.max(bl.b, gl) * tb;
+      const er = Math.max(bl.r, gl, fuse) * tr,
+        eg = Math.max(bl.g, gl, fuse * 0.42) * tg,
+        eb = Math.max(bl.b, gl, fuse * 0.12) * tb;
       // A 1/255 deadband. A mob walking past a torch changes this every frame
       // and a herd is ~22 part materials each; the guard means a still animal
       // in an unlit field costs one comparison rather than a write per part.

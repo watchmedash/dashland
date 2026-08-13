@@ -73,6 +73,30 @@ any kind, which is also the reason they exist as models rather than as tiles:
 the block atlas is baked partly from a licensed pack, and nothing about this
 family needed to go near it.
 
+## Cinderling — UNRESOLVED LICENCE, must be settled before release
+
+`public/models/monsters/monster-cinderling.glb` is `Dragon-402.glb` from a pack
+supplied as `cute-monsters`, renamed on the way in. It is the only art in this
+repository whose licence is not known.
+
+Every other pack listed above arrived with an explicit `License.txt` marking it
+CC0. This one carries no licence file of any kind, no author name and no source
+URL, and it ships its `.blend` and `.blend1` sources alongside the export, which
+is the shape of a marketplace asset rather than of a free one. Nothing here is a
+claim that it is unlicensed — it is a statement that we do not know, and that
+nobody has looked it up, because guessing at a licence is worse than recording
+that there is a question.
+
+This matters more than it would in a hobby project. The game ships commercially
+on Steam, the Microsoft Store and mobile, and a store takedown over one 400KB
+model is not a risk worth carrying for one mob. The options, in the order they
+should be tried: find the pack's origin and its terms; replace the model with a
+WAM original, which the toolchain in `wam/` already builds and which is how the
+reef and the raw materials were made; or drop the species. Only the model is at
+stake — the mechanic is entirely ours and lives in `game/Explosion.js` and the
+fuse machinery in `game/Mobs.js`, so a replacement body is a one-line change to
+`SPECIES.cinderling.urls` and nothing else.
+
 ## Sound — no third-party audio
 
 Every sound in the game is synthesised at runtime from oscillators and one

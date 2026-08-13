@@ -322,12 +322,29 @@ G.fence = (s) => {
   // box, so whatever is here gets cropped to a narrow strip at an offset it
   // cannot predict. Anything with a border or a centred feature would land
   // half-on. Uniform grain crops to more grain wherever it is cut.
+  //
+  // The grain used to be a stain rather than a grain. It went down at 35%
+  // coverage everywhere and 85% in the dark lines, in a colour twice as dark as
+  // the plank under it, which pulled the whole tile to 105.5,65.8,42.7 against
+  // planks' 150.2,89.7,63.0 — the darkest timber in the game bar the deliberate
+  // `planks_dark`, darker even than an oak log, and darkest of all on a fence's
+  // thin posts where the geometry's own occlusion takes another cut. Shot
+  // against a plank wall in the same frame, a fence run measured luminance 39.0
+  // and saturation 0.79 to the wall's 64.3 and 0.72. A dark, saturated warm
+  // brown is what "the fences are very red" looks like: the hue was never the
+  // outlier (17.1 against the wall's 15.5), the value and the saturation were.
+  //
+  // So the grain lines keep their darkness and the timber between them is bare
+  // plank: coverage now runs from nothing up to 85% instead of from 35% up.
+  // Same frame after: 57.3 and 0.714 against the wall's 72.0 and 0.702, and the
+  // tile 126.3,76.0,52.0 — between `door` and `bench_side`, where a fence
+  // belongs, instead of below an oak log.
   clearAlpha(s);
   s.each((i, x, y, u, v) => {
     const g = Math.sin(u * 47.1 + Math.sin(v * 3.3) * 0.8) * 0.5 + 0.5;
     const streak = Math.pow(g, 3);
-    const m = 0.35 + streak * 0.5;
-    setRGB(s, i, px([74 - streak * 18, 52 - streak * 14, 30 - streak * 9]));
+    const m = streak * 0.85;
+    setRGB(s, i, px([92 - streak * 30, 60 - streak * 20, 37 - streak * 13]));
     s.a[i] = m;
     // The grain is cut into the timber, so the dark lines sit low.
     s.h[i] = 0.85 - streak * 0.6;
@@ -338,26 +355,58 @@ G.fence = (s) => {
   return s;
 };
 
+// The plank mean this tile washes its panel back toward. `planks` bakes to
+// 150,89,63 and the note over `log_oak` in bake-textures.mjs records that it is
+// the one plank tile deliberately left alone precisely because eight blocks
+// composite over it, so this number is safe to write down here.
+const SIGN_PLANK = px([150, 89, 63]);
+/**
+ * How far the writing panel is washed back toward that mean. Because the wash
+ * IS the base's own mean, the panel's colour and hue do not move at all — only
+ * its spread, which falls by (1 - WASH)^2.
+ *
+ * 0.55 was tried first and left the plank swinging 39..80 behind the letters,
+ * which is still half again the 28 counts the ink itself carries. 0.68 takes it
+ * to 50..79 (sd 10.1) and the board still reads as timber in the shot: the
+ * grain and a knot survive, planed rather than sanded off.
+ */
+const SIGN_WASH = 0.68;
+
 G.sign = (s) => {
-  // A framed board with three ruled lines suggesting writing. Actual letters
-  // would be unreadable at this size and wrong for every sign but one, so this
-  // says "there are words here" and the hint line says what they are.
+  // A planed board in a frame, and nothing else on it.
+  //
+  // This used to carry three ruled lines "suggesting writing", on the grounds
+  // that "actual letters would be unreadable at this size". That is no longer
+  // true: SignText.js draws the player's own words over this tile, so the rules
+  // sat directly behind the message — the middle one lands on v 0.5, which is
+  // where the first line of a two-line sign is written — and the board's own
+  // grain was the loudest thing on it.
+  //
+  // Measured on a written sign read at two cells, differenced against the same
+  // frame with the glyph mesh hidden so the mask is exact: the ink carried 31
+  // counts of luminance against the plank behind it, while the panel swung
+  // 20..91 (sd 26.0) on its own. The letters were quieter than the wood they
+  // were cut into. Afterwards the panel swings 50..79 (sd 10.1) and the ink
+  // stands 31 counts clear of it — ink over grain goes 1.19 to 3.05.
+  //
+  // So the panel is washed toward the plank's own mean. That keeps the board's
+  // colour and hue exactly where they were and takes the grain, the board seams
+  // and the relief down with the same stroke, because the baker blends normal
+  // and arm through the decal's alpha along with albedo.
   clearAlpha(s);
   s.each((i, x, y, u, v) => {
     const border = Math.min(u, 1 - u, v, 1 - v);
     const frame = smoothstep(0.09, 0.05, border);
-    // Three ruled lines, inset from the frame.
-    const inset = u > 0.18 && u < 0.82;
-    let rule = 0;
-    for (const ly of [0.34, 0.5, 0.66]) {
-      rule = Math.max(rule, smoothstep(0.022, 0.012, Math.abs(v - ly)) * (inset ? 1 : 0));
-    }
-    const m = Math.max(frame, rule * 0.7);
+    // Everything the frame does not claim is writing surface.
+    const wash = (1 - frame) * SIGN_WASH;
+    const m = frame + wash;
     if (m <= 0.004) return;
-    setRGB(s, i, rule > frame ? px([96, 74, 48]) : px([78, 52, 28]));
+    setRGB(s, i, mixc(px([78, 52, 28]), SIGN_PLANK, wash / m));
     s.a[i] = m;
-    s.h[i] = rule > frame ? 0.3 : 0.95;
-    s.ao[i] = 0.85;
+    // Flat panel, frame proud of it: a board with an edge, not a board with a
+    // pattern pressed into it.
+    s.h[i] = 0.55 + frame * 0.40;
+    s.ao[i] = 1 - frame * 0.15;
     s.rough[i] = 0.9;
   });
   s.normalStrength = 1.8;

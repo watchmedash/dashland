@@ -1,0 +1,103 @@
+# Watermelon, vine (rung 2 of 4).
+#
+# The sprawl starting: true lobed leaves instead of `watermelon_1.wam`'s oblong cotyledons,
+# on real petioles, and nothing else. No flower, no melon — the rung differs in PARTS, which
+# is why there are four sources rather than one model at four scales.
+#
+# The petioles stand much steeper here than at the ripe rung (60 degrees against 34) and are
+# half as long. That is the young plant: a vine has not run yet, so the leaves are held up
+# over the crown rather than laid out across the bed, and the whole thing is a tuft rather
+# than a mat. Three leaf pairs, not five — a young plant is sparse, and adding the count back
+# one rung later is a change the player can actually see.
+#
+# See `watermelon_4.wam` for the melon and `icecapmoss_3.wam` for the naming rules.
+
+model watermelon
+  height 0.62
+  style chunky
+
+palette
+  Wood      #4a7a2e
+  Green     #5f9e3a
+  DarkGreen #44762b
+
+skeleton
+  root crown at 0.022
+  mirror
+    bone ptA parent=crown dir=side yaw=18  tilt=60 len=0.117
+    bone ptB parent=crown dir=side yaw=72  tilt=52 len=0.134
+    bone ptD parent=crown dir=side yaw=-86 tilt=48 len=0.125
+  end
+
+  # A short central hub, so the `mound` loft has a symmetric chain to run along — a central
+  # part lofted to one side of a mirrored pair is lopsided by construction, and the lint says
+  # so in as many words.
+  bone hub parent=crown dir=up len=0.030
+
+parts
+  loft mound bones=crown..hub material=Wood sides=6
+    ring 0.00 w=0.11 d=0.11
+    ring 1.00 w=0.055 d=0.055
+    cap start=dome end=dome
+
+  mirror
+    loft stalkA bones=ptA..ptA material=Wood sides=5
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.033 d=0.033
+      cap start=dome end=flat
+    loft stalkB bones=ptB..ptB material=Wood sides=5
+      ring 0.00 w=0.048 d=0.048
+      ring 1.00 w=0.032 d=0.032
+      cap start=dome end=flat
+    loft stalkD bones=ptD..ptD material=Wood sides=5
+      ring 0.00 w=0.044 d=0.044
+      ring 1.00 w=0.029 d=0.029
+      cap start=dome end=flat
+  end
+
+  # The lobing is already the ripe rung's — five rings pinching twice — because that is the
+  # crop's identity and a rung that reads as a generic tuft is a rung the player cannot name.
+  mirror
+    loft lfA bone=ptA at=1.00 dir=side yaw=18 tilt=18 len=0.179 material=Green frame=up sides=6
+      ring 0.00 w=0.09 d=0.028
+      ring 0.20 w=0.42 d=0.050
+      ring 0.38 w=0.22 d=0.040
+      ring 0.58 w=0.46 d=0.050
+      ring 0.78 w=0.24 d=0.040
+      ring 1.00 w=0.16 d=0.024
+      cap start=flat end=dome
+    loft lfB bone=ptB at=1.00 dir=side yaw=72 tilt=24 len=0.197 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.09 d=0.028
+      ring 0.20 w=0.45 d=0.052
+      ring 0.38 w=0.23 d=0.042
+      ring 0.58 w=0.49 d=0.052
+      ring 0.78 w=0.25 d=0.041
+      ring 1.00 w=0.17 d=0.025
+      cap start=flat end=dome
+    loft lfD bone=ptD at=1.00 dir=side yaw=-86 tilt=26 len=0.188 material=Green frame=up sides=6
+      ring 0.00 w=0.09 d=0.027
+      ring 0.20 w=0.43 d=0.050
+      ring 0.38 w=0.22 d=0.040
+      ring 0.58 w=0.47 d=0.050
+      ring 0.78 w=0.24 d=0.040
+      ring 1.00 w=0.16 d=0.024
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(mound) < 0.05
+  # Sparser in PARTS than every rung above it: three leaf pairs and their stalks, plus the
+  # mound. No flower, no melon.
+  assert parts == 13
+  # A tuft, not yet a mat, and it must not out-top the rungs above it.
+  assert height in 0.10..0.26
+  assert width / height < 3.4
+  # Still deeply lobed, so the crop is identifiable a rung before it fruits.
+  #
+  # A looser bound than the 0.30 the flat rungs assert, and the reason is `width()` rather
+  # than the blade: it measures a part's extent along the world x axis, and at this rung the
+  # petiole stands at 60 degrees so the blade is tipped up and projects shorter. The rings
+  # are identical to the ripe rung's. Measured 0.213 as authored; 0.19 is the bound that
+  # still catches the blade collapsing without asserting a projection this rung cannot have.
+  assert width(lfA.l) > 0.19
+  assert tris < 1400

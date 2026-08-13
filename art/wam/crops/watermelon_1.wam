@@ -1,0 +1,54 @@
+# Watermelon, seedling (rung 1 of 4).
+#
+# Two seed leaves on a stub. A cucurbit's cotyledons are the one thing about it anybody would
+# recognise at this size — plain paddles, nothing like the deeply cut true leaves that arrive
+# one rung later — so the ladder changes SHAPE on the first step rather than just scale,
+# which is the rule the four-source ladder exists for.
+#
+# The one difference from `squash_1.wam`, and it is deliberate rather than incidental: a
+# watermelon cotyledon is OBLONG where a squash's is round. The blade here is 0.17 long by
+# 0.115 wide against the squash's 0.14 by 0.156, so the pair reads as two fingers rather than
+# two coins. That is the only thing separating two seedlings that are otherwise the same
+# plant, and it is worth having — a player who sows two beds wants to know which is which
+# before the fruit arrives, and the fruit is three rungs away.
+#
+# See `watermelon_4.wam` for the melon and `icecapmoss_3.wam` for the naming rules.
+
+model watermelon
+  height 0.62
+  style chunky
+
+palette
+  Wood      #4a7a2e
+  Green     #5f9e3a
+  DarkGreen #44762b
+
+skeleton
+  root crown at 0.0
+  bone stem parent=crown dir=up len=0.080
+
+parts
+  loft shoot bones=crown..stem material=Wood sides=6
+    ring 0.00 w=0.042 d=0.042
+    ring 1.00 w=0.030 d=0.030
+    cap start=flat end=flat
+
+  mirror
+    loft cotA bone=stem at=1.00 dir=side tilt=8 len=0.17 material=Green frame=up sides=5
+      ring 0.00 w=0.028 d=0.014
+      ring 0.28 w=0.105 d=0.024
+      ring 0.72 w=0.115 d=0.024
+      ring 1.00 w=0.070 d=0.014
+      cap start=flat end=dome
+  end
+
+checks
+  assert bottom(shoot) < 0.01
+  # A seedling: three parts, two cotyledons, no petioles, no lobes, no fruit.
+  assert parts == 3
+  assert height < 0.16
+  # OBLONG, not round, and not lobed: the blade swells once and does not scallop back, and
+  # it is meaningfully longer than it is wide. This is the assertion that keeps it from
+  # drifting back into being the squash seedling.
+  assert width(cotA.l) > 0.10
+  assert tris < 300

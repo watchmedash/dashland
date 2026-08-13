@@ -548,6 +548,7 @@ const WARES = [
   ['snowpea_seeds', 2, 6],
   ['hops_seeds', 2, 6],
   ['grape_seeds', 2, 6],
+  ['watermelon_seeds', 2, 6],
   ['sapling', 2, 6],
   ['wheat', 4, 10],
   ['stick', 8, 20],

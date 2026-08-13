@@ -865,6 +865,7 @@ export const POSE = {
   snowpea_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
   hops_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
   grape_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
+  watermelon_seeds: { file: 'wam/seeds', pack: 'wam', height: 0.17, grip: 0.14, rot: [0.30, -0.55, 0.10], pos: [0.012, 0.03, -0.03], icon: [0.42, 0.60, 0] },
   // The hide's roll is what lays it across the fist, and it is also what makes
   // its *icon* yaw a different question from every other one in this table: once
   // the roll has turned the model's long axis across the frame, a yaw does not
@@ -1165,8 +1166,14 @@ export const POSE = {
   snowpea:   { file: 'wam/snowpea',   pack: 'wam', height: 0.26, grip: 0.26, rot: [0.16, -0.62, 0.22], pos: [0.013, 0.082, -0.022], icon: [0.20, 1.20, -0.14] },
   hops:      { file: 'wam/hops',      pack: 'wam', height: 0.26, grip: 0.28, rot: [0.04, -0.44, 0.22], pos: [0.014, 0.088, -0.026], icon: [0.16, 0.40, -0.16] },
   grape:     { file: 'wam/grape',     pack: 'wam', height: 0.26, grip: 0.40, rot: [0.06, -0.50, 0.20], pos: [0.016, 0.092, -0.034], icon: [0.18, 0.46, -0.14] },
+  // The melon is the one piece of produce on this planet a hand closes *around*
+  // rather than over, so it takes the largest height in the food family and a
+  // grip near the middle of its own long axis. Its source stands it on its end
+  // for exactly this: `height` here normalises on the Y extent, and the model's
+  // Y extent is the melon's length.
+  watermelon: { file: 'wam/watermelon', pack: 'wam', height: 0.34, grip: 0.50, rot: [0.06, -0.48, 0.16], pos: [0.016, 0.095, -0.036], icon: [0.16, 0.44, -0.12] },
 
-  // The farm. Twenty-four entries for six crops, one per growth stage, and they
+  // The farm. Twenty-eight entries for seven crops, one per growth stage, and they
   // are here for `file` rather than for the pose: `worldModel` resolves a
   // planted block's art through this table, so a crop stage with no line here
   // sows, grows, ticks and drops correctly and draws absolutely nothing. That
@@ -1202,6 +1209,10 @@ export const POSE = {
   grape_1:      { file: 'wam/grape_1',      pack: 'wam', height: 0.26, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
   grape_2:      { file: 'wam/grape_2',      pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
   grape_3:      { file: 'wam/grape_3',      pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  watermelon_0: { file: 'wam/watermelon_0', pack: 'wam', height: 0.22, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  watermelon_1: { file: 'wam/watermelon_1', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  watermelon_2: { file: 'wam/watermelon_2', pack: 'wam', height: 0.26, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  watermelon_3: { file: 'wam/watermelon_3', pack: 'wam', height: 0.28, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
 
   // Underground. The mushroom's own pose for the toadstools — a cap is read
   // from slightly below so the overhang shows — and the clam's steeper one for
@@ -1301,6 +1312,7 @@ export const BY_NAME = {
   snowpea_seeds: 'seeds',
   hops_seeds: 'seeds',
   grape_seeds: 'seeds',
+  watermelon_seeds: 'seeds',
   hide: 'hide',
   feather: 'feather',
   raw_copper: 'raw_copper',
@@ -1422,6 +1434,10 @@ export const BY_NAME = {
   grape_1: 'grape_1',
   grape_2: 'grape_2',
   grape_3: 'grape_3',
+  watermelon_0: 'watermelon_0',
+  watermelon_1: 'watermelon_1',
+  watermelon_2: 'watermelon_2',
+  watermelon_3: 'watermelon_3',
   cave_mushroom: 'cave_mushroom',
   shelf_fungus: 'shelf_fungus',
   crystal_cluster: 'crystal_cluster',
@@ -1450,6 +1466,7 @@ export const BY_NAME = {
   snowpea: 'snowpea',
   hops: 'hops',
   grape: 'grape',
+  watermelon: 'watermelon',
   // **`cherry` and not `cherries`**, which is what this said and is the one
   // entry in the table that named a pose that does not exist. `cherries` is the
   // *file* in the food kit; the pose built from it is keyed `cherry`, like every

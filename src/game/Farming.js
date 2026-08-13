@@ -22,7 +22,7 @@ import { ID, IS_REPLACEABLE, RENDER_TYPE, R_LIQUID } from '../world/Blocks.js';
  * its four blocks and this list, and nothing else here.
  */
 export const CROP_FAMILIES = ['wheat', 'strawberry', 'squash', 'greenbean',
-  'snowpea', 'hops', 'grape']
+  'snowpea', 'hops', 'grape', 'watermelon']
   .map((n) => ({ name: n, first: ID[`${n}_0`], last: ID[`${n}_3`] }))
   .filter((f) => f.first !== undefined && f.last !== undefined);
 

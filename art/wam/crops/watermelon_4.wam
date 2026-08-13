@@ -1,0 +1,216 @@
+# Watermelon, ripe (rung 4 of 4).
+#
+# The owner asked for this one by name — "no watermelon and other things" — and it was the
+# one crop in the shipped six with no source at all. `squash_4.wam` is the nearest relative
+# and this file is deliberately built on its skeleton: both are cucurbits, both sprawl, both
+# hang one fruit off a crown in a 2x2 of lobed leaves. What is NOT shared is the only thing
+# that makes a watermelon a watermelon, and it is worth saying why each half had to differ.
+#
+# ---- why the squash gourd could not simply be re-coloured -----------------------------
+#
+# `squash_4.wam` records that its whole reason for existing is a CROOKED NECK — a bulb on
+# the soil with a thin hook rising off it, built as one loft along a two-bone chain. That
+# silhouette is the opposite of this one. A watermelon has no neck, no waist and no hook: it
+# is a single smooth barrel lying on its side, and every ring here is symmetric about the
+# middle of its own length for exactly that reason. Re-tinting the gourd would have shipped a
+# yellow squash painted green, which is the failure the squash file itself warns about one
+# rung up.
+#
+# ---- the stripes, which are the whole read -------------------------------------------
+#
+# At the size a crop is actually seen — a third of a cell, looked down on from a standing
+# player — a plain green ellipsoid on green leaves is a blob. The stripes are not decoration,
+# they are the entire difference between "melon" and "big leaf". So they are authored with
+# `material_arc`, which runs a band AROUND the tube: 0 degrees is the `w` axis, 90 the `d`,
+# and an arc holds its angle the whole length of the loft. On a melon lofted along its own
+# long axis that is a stripe running nose to tail, which is where a watermelon's stripes
+# actually run. Six of them, evenly spaced.
+#
+# The SPEC is explicit that this replaces authoring the band as a separate part, "which
+# always read as a disconnected slab with a hard seam" — and on a fruit this small a seam
+# would have been most of the fruit.
+#
+# ---- colour ---------------------------------------------------------------------------
+#
+# `export_items.py` bakes `baseColorFactor` into COLOR_0, so unlike the engine
+# `icecapmoss_3.wam` describes, the hex in this palette is what ships. The rind is therefore
+# a pale yellow-green rather than a leaf green: it has to separate from `Green` and
+# `DarkGreen` lying two centimetres away from it, and a rind authored at true watermelon
+# green disappears into the foliage from above.
+#
+# See `icecapmoss_3.wam` for the material-name and no-`textures` rules.
+
+model watermelon
+  height 0.62
+  style chunky
+
+palette
+  Wood      #4a7a2e
+  Green     #5f9e3a
+  DarkGreen #44762b
+  Berry     #a9d65e
+  Stripe    #24521c
+
+skeleton
+  root crown at 0.030
+  # Petioles, shallow and long. A mound crop SPRAWLS and the blades have to reach most of
+  # the way across the 2x2 the style gives it — the same reasoning, and the same four
+  # angles, as the squash.
+  mirror
+    bone ptA parent=crown dir=side yaw=18  tilt=34 len=0.229
+    bone ptB parent=crown dir=side yaw=72  tilt=26 len=0.264
+    bone ptC parent=crown dir=side yaw=-34 tilt=40 len=0.211
+    bone ptD parent=crown dir=side yaw=-86 tilt=22 len=0.246
+  end
+
+  # A short central hub so the `mound` loft has a symmetric chain to run along. A central
+  # part lofted to one side of a mirrored pair is lopsided by construction and the lint
+  # says so in as many words.
+  bone hub parent=crown dir=up len=0.06
+
+  # THE MELON. One bone, lying flat: `tilt=0` on a `side` bone is level, and level is the
+  # point — the fruit rests on the soil along its own length. Not mirrored, because there is
+  # one melon on the plant.
+  bone ml parent=crown offset=(-0.15,0.122,0.17) dir=side yaw=-112 tilt=0 len=0.34
+
+parts
+  loft mound bones=crown..hub material=Wood sides=6
+    ring 0.00 w=0.11 d=0.11
+    ring 1.00 w=0.055 d=0.055
+    cap start=dome end=dome
+  mirror
+    loft stalkA bones=ptA..ptA material=Wood sides=5
+      ring 0.00 w=0.050 d=0.050
+      ring 1.00 w=0.033 d=0.033
+      cap start=dome end=flat
+  end
+
+  mirror
+    loft stalkB bones=ptB..ptB material=Wood sides=5
+      ring 0.00 w=0.048 d=0.048
+      ring 1.00 w=0.032 d=0.032
+      cap start=dome end=flat
+    loft stalkC bones=ptC..ptC material=Wood sides=5
+      ring 0.00 w=0.046 d=0.046
+      ring 1.00 w=0.030 d=0.030
+      cap start=dome end=flat
+    loft stalkD bones=ptD..ptD material=Wood sides=5
+      ring 0.00 w=0.044 d=0.044
+      ring 1.00 w=0.029 d=0.029
+      cap start=dome end=flat
+  end
+
+  # ---- the leaves ----------------------------------------------------------------
+  #
+  # `frame=up` with w WIDE and d THIN: a flat blade lying face-up. The width then SCALLOPS
+  # along the blade instead of swelling once, which is the lobing.
+  #
+  # Cut DEEPER than the squash's. A watermelon leaf is pinnately lobed almost to the midrib
+  # while a squash leaf is merely scalloped, so the narrow rings here go to 0.22 and 0.26 of
+  # the blade width against the squash's 0.29 and 0.31. Five rings rather than four, so the
+  # outline pinches twice and reads as separate lobes rather than one wavy edge. It is the
+  # cheapest available difference between two crops that otherwise share a silhouette, and
+  # at this size it is the only leaf-level difference that survives.
+  mirror
+    loft lfA bone=ptA at=1.00 dir=side yaw=18 tilt=-16 len=0.352 material=Green frame=up sides=6
+      ring 0.00 w=0.09 d=0.028
+      ring 0.20 w=0.42 d=0.050
+      ring 0.38 w=0.22 d=0.040
+      ring 0.58 w=0.46 d=0.050
+      ring 0.78 w=0.24 d=0.040
+      ring 1.00 w=0.16 d=0.024
+      cap start=flat end=dome
+    loft lfB bone=ptB at=1.00 dir=side yaw=72 tilt=-10 len=0.387 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.09 d=0.028
+      ring 0.20 w=0.45 d=0.052
+      ring 0.38 w=0.23 d=0.042
+      ring 0.58 w=0.49 d=0.052
+      ring 0.78 w=0.25 d=0.041
+      ring 1.00 w=0.17 d=0.025
+      cap start=flat end=dome
+    loft lfC bone=ptC at=1.00 dir=side yaw=-34 tilt=-20 len=0.334 material=DarkGreen frame=up sides=6
+      ring 0.00 w=0.08 d=0.026
+      ring 0.20 w=0.40 d=0.048
+      ring 0.38 w=0.21 d=0.038
+      ring 0.58 w=0.43 d=0.048
+      ring 0.78 w=0.22 d=0.038
+      ring 1.00 w=0.15 d=0.023
+      cap start=flat end=dome
+    loft lfD bone=ptD at=1.00 dir=side yaw=-86 tilt=-8 len=0.370 material=Green frame=up sides=6
+      ring 0.00 w=0.09 d=0.027
+      ring 0.20 w=0.43 d=0.050
+      ring 0.38 w=0.22 d=0.040
+      ring 0.58 w=0.47 d=0.050
+      ring 0.78 w=0.24 d=0.040
+      ring 1.00 w=0.16 d=0.024
+      cap start=flat end=dome
+    # Two blades held UP over the crown, and held much higher than the squash's.
+    #
+    # The squash gets its height from its crooked neck, which tops out at 0.34 of the model.
+    # A watermelon lies flat by definition and has nothing to offer there, so the first cut
+    # of this file measured 0.27 tall against 1.23 deep — an aspect of 4.5 where the squash
+    # is 3.3. That is not a cosmetic difference: `familyScale` caps the family on the LARGER
+    # ground axis, so a plant that flat arrives in the world scaled down until the melon is
+    # a pebble. The upright pair is therefore doing structural work, not just breaking up
+    # the puddle, and `tilt` here is 64 degrees where the squash uses 48.
+    loft lfE bone=ptA at=0.30 dir=side yaw=44 tilt=64 len=0.340 material=Green frame=up sides=6
+      ring 0.00 w=0.07 d=0.024
+      ring 0.20 w=0.33 d=0.044
+      ring 0.38 w=0.17 d=0.036
+      ring 0.58 w=0.36 d=0.044
+      ring 0.78 w=0.18 d=0.036
+      ring 1.00 w=0.12 d=0.021
+      cap start=flat end=dome
+  end
+
+  # ---- the melon -----------------------------------------------------------------
+  #
+  # A barrel, not a sphere and not a gourd: fat and near-constant across the middle two
+  # thirds and rounded off hard at both ends, which is the shape that separates a watermelon
+  # from every round fruit already on this planet. Symmetric about its own half length by
+  # construction — the rings mirror at 0.50 — because any waist at all starts to read as the
+  # squash's neck.
+  #
+  # `refaxis` pins the cross-section frame. The bone is horizontal, which is exactly the
+  # case the SPEC says to pin: left automatic, the rings flip ninety degrees at the frame's
+  # switchover and the stripes would spiral instead of running nose to tail.
+  #
+  # Twelve sides rather than the leaves' six. This is the one object on the plot the player
+  # actually looks at, and six sides at this diameter faceted hard enough that the stripes
+  # landed on flat panels and read as painted-on chevrons.
+  loft melon bones=ml..ml material=Berry sides=12 frame=up refaxis=(0.37,0,0.93) material_arc=Stripe:0-11,Stripe:60-71,Stripe:120-131,Stripe:180-191,Stripe:240-251,Stripe:300-311
+    ring 0.00 w=0.060 d=0.060
+    ring 0.10 w=0.205 d=0.205
+    ring 0.26 w=0.278 d=0.278
+    ring 0.50 w=0.295 d=0.295
+    ring 0.74 w=0.278 d=0.278
+    ring 0.90 w=0.205 d=0.205
+    ring 1.00 w=0.060 d=0.060
+    cap start=dome end=dome
+
+checks
+  # A BARREL LYING DOWN. The two assertions that say "watermelon" and that the squash's
+  # gourd fails: the fruit is longer than it is tall, and it is level rather than hooked.
+  assert width(melon) > height(melon) * 1.05
+  assert top(melon) - bottom(melon) < 0.30
+  # It rests ON the soil. A melon floating a centimetre up is the classic seating bug.
+  assert bottom(melon) < 0.045
+  # ...and is not buried in it either.
+  assert bottom(melon) > -0.005
+  # No waist: the middle is the widest part and the ends are genuinely narrower, which is
+  # what makes it a barrel rather than the squash's bulb-and-neck.
+  assert top(melon) > 0.20
+  # The melon is the biggest single object on the plot and is NOT lost in the foliage.
+  assert volume(melon) > volume(lfA.l)
+  # DEEPLY lobed leaves: broad, and much wider than the petiole carrying them.
+  assert width(lfA.l) > 0.30
+  # A sprawl: much wider than tall, which `wide` in the recipe pays for.
+  assert width / height in 2.0..3.4
+  # ...in BOTH ground axes. `familyScale` caps on the larger of the two, so a plant modest
+  # in x and enormous in z arrives short.
+  assert depth / height < 3.40
+  assert bottom(mound) < 0.06
+  # Budget: footprint 2, so TRI_BUDGET * 2 = 5200 before the decimator steps in.
+  assert tris < 3400
+  measure sprawl width / height
+  measure melonaspect width(melon) / height(melon)

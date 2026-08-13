@@ -134,7 +134,21 @@ ITEMS = [
     # therefore reskins ten inventory slots, not two.
     "armour_legs", "armour_boots",
     "armour_helm", "armour_chest",
-    # The six farm crops are NOT listed here, and the omission is deliberate
+    # The picked melon — `art/wam/items/watermelon.wam`, the fruit on its own
+    # rather than the plant. It is a plain file like every other name above and
+    # belongs here for the reason the README gives: a model not in this list is
+    # silently skipped, so it survives the first hand export and disappears the
+    # next time somebody rebuilds everything.
+    #
+    # It is the ONLY produce item here, and that is worth flagging rather than
+    # quietly matching: `squash`, `greenbean`, `snowpea`, `hops` and `grape` all
+    # have sources in `art/wam/items/` and compiled `.gltf`s in
+    # `public/models/wam/`, and none of the five is in this list. They were
+    # exported by hand and a full rebuild would drop all five. Left alone here
+    # because they are not this change's to fix, but they are a real gap.
+    "watermelon",
+    # The seven farm crops' STAGE models are NOT listed here, and that omission
+    # is deliberate
     # rather than an oversight. Every other name in this list is a file: the
     # loop below reads `wam/out/<name>.gltf`. The crops are the one family
     # whose authored name and whose game name differ — they are modelled as

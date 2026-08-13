@@ -1,0 +1,83 @@
+# Watermelon — the picked fruit, not the plant.
+#
+# `art/wam/crops/watermelon_4.wam` already models a melon and this file does not reuse it,
+# for the reason `squash.wam` sets out: that one is a fruit lying in a 2x2 sprawl of leaves
+# read from two metres up, and this one is held at arm's length in a fist and painted into a
+# 32-pixel slot. Handing the crop model to the inventory would put four leaves and a mound
+# of stem in the slot and the melon would be the small green thing in the middle of them.
+#
+# **It stands on its end, and that is a rendering constraint rather than a choice.**
+# `ItemModels.js` normalises every model by its Y extent alone and closes the fist somewhere
+# along Y, so a melon authored lying down — which is how a melon actually lies — would be
+# scaled by its own thickness and gripped across its side. `export_items.py` has a `LYING`
+# map that stands such models up on export, but that is for bars and loaves whose long axis
+# is unambiguous; a melon is only slightly longer than it is round, and the honest fix is to
+# author the axis the renderer already expects. So: an oblong melon on its end, which is
+# also how a greengrocer stacks them.
+#
+# **The stripes are the whole read, exactly as on the crop.** Six dark bands running pole to
+# pole, authored with `material_arc` — an arc holds its angle for the length of the loft, and
+# on a melon lofted along its own long axis that is a stripe from top to bottom. At icon size
+# the stripes are two or three pixels each and they are still the only thing separating this
+# from a lime, a cabbage and the green apple that is not in the game yet but will be.
+#
+# `sides=12` rather than the squash's 5. The squash can afford a coarse section because its
+# silhouette is carried by six lobes; a melon's silhouette is a smooth curve and nothing
+# else, so a coarse section reads as a cut gem — and worse, the stripes then land one per
+# flat facet and become painted chevrons instead of bands wrapping a curve.
+#
+# Colour is the crop's rind pair, so the fruit in the bed, the drop on the ground and the
+# toolbar slot are all one melon.
+
+model watermelon
+  height 0.30
+  style chunky
+
+palette
+  Rind   #a9d65e
+  Stripe #24521c
+  Stalk  #4a7a2e
+
+skeleton
+  root base at 0.02
+  # The axis of the fruit. "The melon is longer" is one `len` on this bone.
+  bone core parent=base dir=up len=0.62
+
+parts
+  # The melon: a barrel, symmetric about its own half length. Every ring mirrors across
+  # `0.50` deliberately — any asymmetry at all starts to read as a gourd or a pear, and the
+  # one thing a watermelon is, is even at both ends.
+  loft melon bones=core..core material=Rind sides=12 material_arc=Stripe:0-11,Stripe:60-71,Stripe:120-131,Stripe:180-191,Stripe:240-251,Stripe:300-311
+    ring 0.00 w=0.10 d=0.10
+    ring 0.10 w=0.34 d=0.34
+    ring 0.30 w=0.46 d=0.46
+    ring 0.50 w=0.49 d=0.49
+    ring 0.70 w=0.46 d=0.46
+    ring 0.90 w=0.34 d=0.34
+    ring 1.00 w=0.10 d=0.10
+    cap start=dome end=dome
+
+  # The cut stalk. Same tell as the squash's peduncle and it is doing the same job twice
+  # over: a fruit with a cut stalk was picked and a fruit without one is an egg, and it is
+  # the only non-green thing near the top, which is what stops the melon losing its end
+  # against a green-lit hand. Short — a watermelon's stalk is a stub, not a handle.
+  loft stalk bone=core at=1.0 dir=up pitch=-6 len=0.10 material=Stalk sides=5
+    ring 0.00 w=0.075 d=0.075
+    ring 1.00 w=0.060 d=0.060
+    cap start=flat end=flat
+
+checks
+  # Oblong, and in the band `ItemModels.js` can normalise honestly since it scales on the Y
+  # extent alone. Rounder than this is a cabbage; longer is a marrow.
+  assert height / width in 1.15..1.65
+  # Round in section: a melon flattened on one axis is a squash.
+  assert width / depth == 1.0 +- 0.10
+  # EVEN AT BOTH ENDS. The assertion that keeps it from drifting into a pear: the widest
+  # ring is the middle one, and the two poles are the same size as each other.
+  assert width(melon) > 0.40
+  # The stalk sits on top and is small. A stalk as fat as the fruit eats the silhouette.
+  assert bottom(stalk) > top(melon) * 0.86
+  assert width(stalk) < width(melon) * 0.30
+  assert parts == 2
+  assert tris < 900
+  measure oblong height / width

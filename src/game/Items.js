@@ -153,6 +153,11 @@ const FOOD = [
   { name: 'snowpea', label: 'Snow Peas', food: 2, color: '#7ab355', shine: '#aede8b' },
   { name: 'hops', label: 'Hops', food: 2, color: '#8fa444', shine: '#c3d47c' },
   { name: 'grape', label: 'Grapes', food: 3, color: '#5b2d78', shine: '#9563b8' },
+  // The melon, and the only raw item on the planet at the 4 ceiling besides the
+  // squash and the apple. It is a whole fruit rather than a handful — the model
+  // is one melon a hand closes around — so paying less than the gourd beside it
+  // would read as a bug rather than as balance.
+  { name: 'watermelon', label: 'Watermelon', food: 4, color: '#a9d65e', shine: '#c9ea8a' },
   // A chick, a penguin and a parrot each leave one. It used to be the merchant's
   // cheapest line and nothing else at all, which made the whole baking half of
   // the kitchen a thing you bought rather than a thing you kept birds for.
@@ -296,6 +301,7 @@ const MATERIALS = [
   { name: 'snowpea_seeds', label: 'Snow Pea Seeds', color: '#7d9a68', shine: '#b6cda3' },
   { name: 'hops_seeds', label: 'Hops Seeds', color: '#7d8a45', shine: '#b3bd7c' },
   { name: 'grape_seeds', label: 'Grape Seeds', color: '#553f6b', shine: '#8a72a1' },
+  { name: 'watermelon_seeds', label: 'Watermelon Seeds', color: '#2e3a22', shine: '#6d7a52' },
   { name: 'apple', label: 'Apple', art: 'apple', food: 4 },
   { name: 'bread', label: 'Bread', art: 'bread', food: 8 },
   { name: 'roast', label: 'Roast Pumpkin', art: 'roast', food: 6 },
@@ -1078,6 +1084,7 @@ const CROP_PRODUCE = {
   snowpea: 'snowpea',
   hops: 'hops',
   grape: 'grape',
+  watermelon: 'watermelon',
 };
 
 /**

@@ -1127,7 +1127,7 @@ export const BLOCKS = [
 
   // --- the farm ------------------------------------------------------------
   //
-  // Six crops beside the wheat, and the ONE rule that governs how they are
+  // Seven crops beside the wheat, and the ONE rule that governs how they are
   // written down: each crop's four stages must be four *consecutive* ids.
   // `game/Farming.js` grows a plant by incrementing its block id and stops at
   // the last rung of its own family, so a stray block slipped between
@@ -1181,6 +1181,14 @@ export const BLOCKS = [
   block({ name: 'grape_1', label: 'Grape Vine', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'grape_seeds', particle: [0.34, 0.52, 0.28], sound: 'grass' }),
   block({ name: 'grape_2', label: 'Grape Vine', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'grape_seeds', particle: [0.40, 0.46, 0.36], sound: 'grass' }),
   block({ name: 'grape_3', label: 'Ripe Grapes', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'grape', dropCount: 2, particle: [0.44, 0.24, 0.52], sound: 'grass' }),
+
+  // The melon, asked for by name. It is the biggest thing that grows on this
+  // planet's soil and its ripe particle is the rind rather than the flesh: the
+  // player breaking it is looking at the outside of it.
+  block({ name: 'watermelon_0', label: 'Watermelon', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'watermelon_seeds', particle: [0.30, 0.50, 0.24], sound: 'grass' }),
+  block({ name: 'watermelon_1', label: 'Watermelon', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'watermelon_seeds', particle: [0.33, 0.54, 0.26], sound: 'grass' }),
+  block({ name: 'watermelon_2', label: 'Watermelon', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'watermelon_seeds', particle: [0.55, 0.60, 0.26], sound: 'grass' }),
+  block({ name: 'watermelon_3', label: 'Ripe Watermelon', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'watermelon', dropCount: 2, particle: [0.42, 0.66, 0.24], sound: 'grass' }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -1747,7 +1755,8 @@ grows(['wheat_0', 'wheat_1', 'wheat_2', 'wheat_3',
   'greenbean_0', 'greenbean_1', 'greenbean_2', 'greenbean_3',
   'snowpea_0', 'snowpea_1', 'snowpea_2', 'snowpea_3',
   'hops_0', 'hops_1', 'hops_2', 'hops_3',
-  'grape_0', 'grape_1', 'grape_2', 'grape_3'],
+  'grape_0', 'grape_1', 'grape_2', 'grape_3',
+  'watermelon_0', 'watermelon_1', 'watermelon_2', 'watermelon_3'],
 soil(['farmland', 'farmland_wet']));
 // The reef, the carpet and the deep light: the seabed, all of it. Kelp adds
 // itself, because a stalk is a run of one block (see STACKS).

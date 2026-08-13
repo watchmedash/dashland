@@ -1085,6 +1085,14 @@ const MODELLED_PLANTS = {
   snowpea_0: 0.22, snowpea_1: 0.38, snowpea_2: 0.52, snowpea_3: 0.62,
   hops_0: 0.26, hops_1: 0.46, hops_2: 0.68, hops_3: 0.90,
   grape_0: 0.26, grape_1: 0.46, grape_2: 0.66, grape_3: 0.86,
+  // The melon gets the mound crops' ladder and not the climbers'. It sprawls:
+  // its source asserts `width / height` between 2 and 3.4, so this number is a
+  // *bounding box height* being spent on something two and a half times as wide
+  // as it is tall, and the climbers' 0.90 would have put a melon most of two
+  // cells across the bed. The last rung is 0.66 rather than the mound crops'
+  // 0.62 because the ripe model is the only one carrying a fruit and the fruit
+  // is the thing worth seeing from the path.
+  watermelon_0: 0.22, watermelon_1: 0.38, watermelon_2: 0.52, watermelon_3: 0.66,
 };
 const FLOWER_NAMES = Object.keys(MODELLED_PLANTS);
 const FLOWER_KIND = [];

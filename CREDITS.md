@@ -280,6 +280,41 @@ If the ingots should be chunkier, the cheap and coherent fix is to re-loft the
 WAM ingot as a trapezoid in `art/wam/items/*_ingot.wam`, which is our own
 toolchain and a small edit, not a new pack and a new 26 KB atlas for four items.
 
+## Board Game Bits (1.0) by **Kay Lousberg** — supplied, INSPECTED AND NOT USED
+
+[kaylousberg.com](https://www.kaylousberg.com) — **CC0**, stated in the pack's
+own `License.txt` and so **read off disk**. Fifteen coins — copper, silver and
+gold in blank, 1, 2, 5 and 10 denominations — plus dice and badges over one
+`boardgame_bits_texture.png`.
+
+This was the cheapest of the four supplied packs to try and the lowest stakes:
+`coin` is an item, not a block, so there is no id to spend and no render class to
+build. It was wired in and shot beside ours, and the first attempt was thrown
+away because the pose was wrong — the disc lies in XZ and came out edge-on,
+which is a fact about the harness and not about the model. Stood up with a
+`spin` so the icon camera sees the face, the two are the same size on screen
+(3,908 icon pixels against 3,888) and the comparison is fair.
+
+**Ours is still better, narrowly, and free.** Measured on the icon, the WAM coin
+means **L 105.9 at saturation 0.718** and the supplied one **L 102.8 at 0.638** —
+level on brightness and a tenth flatter. Ours also lands on the colour the item
+declares: `coin` is authored `#d9a52b`, hue 43, and the WAM model renders hue 43
+against the supplied coin's 37. The shapes differ in the way that decides it:
+ours is struck, with a raised device in the middle, and `coin_gold` is a blank
+rimmed disc. A blank disc reads as a token, and the thing in the player's purse
+should read as money.
+
+The cost settles what the measurements leave close. Ours carries its palette on
+its vertices and needs no atlas at all, so it costs nothing beyond the model
+already in `public/models/wam/`. Importing this one means a new `PACKS` entry and
+a 35 KB texture fetched for exactly one item.
+
+**What the pack does offer is a design question rather than an art swap.** It has
+copper, silver and gold at five denominations and the game has one `coin`. If
+currency is ever given denominations, this pack has the art for it ready and its
+licence is clean. That is a change to the economy, not to a model, and it is not
+made here.
+
 ## Sound — no third-party audio
 
 Every sound in the game is synthesised at runtime from oscillators and one

@@ -1,15 +1,30 @@
 # Raw copper — ore still in its host rock.
 #
-# Copper's vein is the one that has to fight the host rock rather than sit on
+# Copper's rock is the one that has to fight the metal rather than sit beside
 # it: the ore is a warm orange and so is the dun stone around it. The stone is
-# therefore pulled grey-cool here, away from raw_iron's dun, so the two colours
-# still separate at the width of a 45-degree stripe.
+# therefore pulled grey-cool here, away from raw_iron's dun, so the metal and
+# the matrix still separate where they meet.
 #
-# The point of a *raw* ore is that it is mostly stone: a dun lump with metal
-# showing in the fractures. So the metal is `material_arc` veins running down
-# two faces of the same loft rather than blobs stuck on the outside — a vein is
-# a stripe *around* the tube, which is exactly what that construct is for, and
-# authoring it as separate parts gives you shiny warts.
+# This used to be built the other way round — `material=Stone` with the metal
+# as two narrow `material_arc` veins — on the reasoning that a *raw* ore is
+# mostly its host rock. Measured in the hotbar that came out at 16% metal by
+# pixel and a mean of 71,57,49: a dark grey pebble with a smear on it, and the
+# four raw ores landed within ten counts of each other on every channel
+# (copper 71,57,49, iron 76,67,58, gold 76,69,54, silver 69,68,66) — one item
+# in four colours nobody can tell apart at 46px, while the four ingots beside
+# them are unmistakable. That is the report: the copper is not orange.
+#
+# So the materials are swapped. The metal is the loft's own material and the
+# rock is what is banded onto it, which keeps every good thing about the old
+# construction — a vein is still a stripe *around* the tube, still one loft,
+# still no shiny warts stuck on the outside — and only changes which of the two
+# is the ground and which is the figure. An ore lump you have just prised out of
+# a wall is a lump OF the metal with rock still clinging to it, so this is also
+# the truer picture, and it is the one that survives being 46 pixels wide.
+#
+# The stone arcs sit on the back and one flank rather than being spread evenly,
+# because a rock patch you can see all the way round reads as dirt on the metal;
+# a rock patch with an edge to it reads as the matrix the lump broke out of.
 #
 # Held next to `raw_gold`, only the vein colour differs. That is deliberate:
 # they come out of the same rock, and the smelted ingots are where the two
@@ -28,16 +43,17 @@ skeleton
   bone lump parent=base dir=up pitch=-6 len=0.58
 
 parts
-  # `sides=8` is set by the veins, not by the silhouette: an arc snaps to the
-  # ring's own vertices, so the narrowest stripe the mesh can carry is one
-  # segment — 60° at six sides, which is a painted half, not a vein. Eight sides
-  # buys a 45° stripe, and holding the rolls close together keeps the two veins
-  # running down the lump instead of spiralling round it.
-  loft ore bones=base..lump material=Stone sides=8 shape=squarish
-    ring 0.00 w=0.36 d=0.32 roll=6
-    ring 0.26 w=0.60 d=0.50 roll=10 fwd=0.03 material_arc=Vein:270-315
-    ring 0.60 w=0.62 d=0.52 roll=4 side=-0.03 material_arc=Vein:45-90,Vein:180-225
-    ring 0.86 w=0.42 d=0.34 roll=8 fwd=-0.03
+  # `sides=8` is set by the material boundary, not by the silhouette: an arc
+  # snaps to the ring's own vertices, so the coarsest the mesh can cut is one
+  # segment — 60° at six sides, which cannot land a rock face on a lump this
+  # small without eating half of it. Eight sides puts the seam every 45°, and
+  # holding the rolls close together keeps the rock face running straight down
+  # the lump instead of spiralling round it.
+  loft ore bones=base..lump material=Vein sides=8 shape=squarish
+    ring 0.00 w=0.36 d=0.32 roll=6 material_arc=Stone:135-225
+    ring 0.26 w=0.60 d=0.50 roll=10 fwd=0.03 material_arc=Stone:135-225
+    ring 0.60 w=0.62 d=0.52 roll=4 side=-0.03 material_arc=Stone:135-225
+    ring 0.86 w=0.42 d=0.34 roll=8 fwd=-0.03 material_arc=Stone:135-225
     ring 1.00 w=0.18 d=0.16 roll=6
     cap start=flat end=flat
 

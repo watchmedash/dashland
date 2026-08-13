@@ -253,11 +253,11 @@ and the KayKit nuggets re-introduce that collapse in the same place:
 | icon | current (WAM) | supplied (KayKit) |
 | --- | --- | --- |
 | `raw_iron`   | 107,84,64 &nbsp; sat 0.371 &nbsp; **hue 28** | 59,70,77 &nbsp; sat 0.271 &nbsp; **hue 203** |
-| `raw_silver` | 110,111,114 &nbsp; sat 0.095 &nbsp; **hue 216** | 78,96,104 &nbsp; sat 0.282 &nbsp; **hue 199** |
+| `raw_silver` | 110,111,114 &nbsp; sat 0.095 &nbsp; **hue 225** | 78,96,104 &nbsp; sat 0.282 &nbsp; **hue 199** |
 
 KayKit's iron and silver are **one hue at two brightnesses** — four degrees
 apart, with saturations that match to a hundredth — which is a milder form of
-the exact failure `f24b795` measured and removed. Ours are 188 degrees apart: a
+the exact failure `f24b795` measured and removed. Ours are 197 degrees apart: a
 warm brown lump and a neutral white one, told apart at a glance in a hotbar. On
 a contact sheet of all nine icons the supplied iron and silver nuggets are the
 same object twice; ours are not.

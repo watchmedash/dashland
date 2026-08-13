@@ -268,6 +268,31 @@ const MOB_VOICE = {
     kind: 'chitter', base: 3100, dur: 0.20, gain: 0.64, urgent: true,
     grains: 2, gap: 0.055, glide: 0.45, wave: 'sine', band: 5200,
   },
+  cinderling: {
+    // The one monster that is meant to be hard to hear, and the only entry in
+    // this whole table without `urgent`.
+    //
+    // Every other hostile carries it, and the comment above says why: a
+    // monster's approach tell must not be swallowed by a sheep standing between
+    // you. This is the exception that proves it. A creeper works because the
+    // approach is silent and the *fuse* is not, so a cinderling that announced
+    // itself from fourteen cells away would have no mechanic left — the whole
+    // fight is "you did not notice it", and the fairness is paid for once, in
+    // full, by `Audio.fuse` giving you a second and a half of the loudest
+    // arming cue in the game. Buying it twice would just make it a slower yeti.
+    //
+    // So: a low bellows breath, two soft puffs, no pitch, no swell, and inside
+    // the shared 0.45s idle floor where a rabbit can and will mute it.
+    //
+    // The gain is arithmetic off `mushroom_monster`, not a measurement, and it
+    // is written down as such: that row renders at -36.2 on the 400Hz-weighted
+    // meter at gain 0.752, and 0.30 is -8dB on it, which should land near -44
+    // — the quietest thing on the roster bar the caterpillar. The band is an
+    // octave lower than the mushroom's, which the weighting will take a little
+    // more off again, and that is in the right direction.
+    kind: 'noisevox', base: 1, dur: 0.90, gain: 0.30,
+    grains: 2, gap: 0.28, lo: 140, hi: 480, q: 1.2, at: 0.09,
+  },
 
   // --- the large animals ---------------------------------------------------
   //
@@ -971,6 +996,180 @@ export class Audio {
     hg.gain.exponentialRampToValueAtTime(0.0004, t + d);
     hs.connect(hp).connect(hg).connect(out);
     hs.start(t + 0.08, Math.random() * 2); hs.stop(t + d + 0.05);
+  }
+
+  /**
+   * The fuse. A rising hiss, and it is the whole design of the mob that makes
+   * it.
+   *
+   * A creeper works because of the second and a half between the hiss and the
+   * bang, and the hiss has exactly one job: to be recognised, instantly, by
+   * somebody who is looking the other way. So it is built against what it must
+   * not be confused with rather than against what a fuse "sounds like":
+   *
+   *   not the lava hiss  `lavaDip`'s steam is high, thin and *falling* away at
+   *                      the tail of something else. This RISES, over its whole
+   *                      length, and it rises through the sibilant band the ear
+   *                      is most sensitive to. Nothing else on the planet
+   *                      sweeps upward for a second.
+   *   not a mob voice    it goes on `hit` rather than `mob`, so a paddock of
+   *                      idling animals cannot spend the budget it needs. Every
+   *                      other approach cue in the game learned this the hard
+   *                      way — see the note on `priority` in `mob()`.
+   *   not quiet          the approach is meant to be silent and this is meant
+   *                      to be the opposite of it. 0.16 through a bandpass is
+   *                      well under thunder and well over a footstep, and the
+   *                      mix now has a soft-clip ceiling so a loud one-shot is
+   *                      caught rather than clipped.
+   *
+   * The whistle on top is a tuned partial climbing a minor sixth, and it is
+   * doing the work the noise cannot: broadband hiss has no pitch, so a hiss
+   * alone tells you something is happening but not how far through it is. The
+   * pitch is the clock.
+   *
+   * One call per arming, not one a frame. `d` is the full fuse.
+   */
+  fuse(pos, d = 1.5) {
+    if (!this._live() || !this._take('hit', d + 0.4)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, d + 0.4, true);
+
+    // The hiss: noise through a bandpass climbing 700 -> 5200, opening as it
+    // goes. Pressure escaping through a hole that is getting wider.
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    src.playbackRate.value = 1.15;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(700, t);
+    bp.frequency.exponentialRampToValueAtTime(5200, t + d);
+    bp.Q.setValueAtTime(3.2, t);
+    bp.Q.linearRampToValueAtTime(0.8, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.055, t + 0.08);
+    // Most of the swell in the last third. A ramp that is loud from the start
+    // gives the player the same information at 0.2s and at 1.2s, which wastes
+    // the one part of the fuse they are meant to be reacting inside.
+    g.gain.linearRampToValueAtTime(0.09, t + d * 0.6);
+    g.gain.linearRampToValueAtTime(0.16, t + d * 0.97);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    // The clock. A minor sixth over the fuse, so where in the climb it is IS
+    // how much time is left.
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(440, t);
+    o.frequency.exponentialRampToValueAtTime(440 * 1.6, t + d);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.linearRampToValueAtTime(0.014, t + d * 0.5);
+    og.gain.linearRampToValueAtTime(0.036, t + d * 0.97);
+    og.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    o.connect(og).connect(out);
+    o.start(t); o.stop(t + d + 0.05);
+  }
+
+  /**
+   * The bang.
+   *
+   * Thunder's anatomy, compressed. A storm and an explosion are the same three
+   * layers — a bright transient, a broadband body, and a sub you feel — and the
+   * difference between them is entirely one of time: thunder's crack arrives
+   * late and its rumble runs for three seconds because the sound is coming from
+   * a mile up. This one is all front. The crack is at t=0, the body is a
+   * third of a second, and the tail is a second of low rubble rather than a
+   * rolling boom.
+   *
+   * On `weather` rather than `hit`, and that is the load-bearing choice: a
+   * blast is a once-in-a-session event competing with a footstep budget it does
+   * not belong in, and `weather` is the category sized for the one other thing
+   * in the game this loud. Nothing else takes it unless a storm is directly
+   * overhead, and a thunderclap during an explosion losing to the explosion is
+   * the right way round.
+   *
+   * Peak 0.62 rather than thunder's 0.95. It is closer, it is dry (no reverb
+   * tail to hide behind) and the soft-clip ceiling in the mix is doing real
+   * work above 0.6 — a limiter pinned by every explosion makes them all sound
+   * the same size, which is exactly the failure the note on `thunder`'s clamp
+   * records.
+   */
+  blast(pos = null) {
+    if (!this._live() || !this._take('weather', 2.4)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 2.4);
+    const boom = 1.1 + Math.random() * 0.5;
+
+    // --- crack: the leading edge, immediate and bright ----------------------
+    const cs = this.ctx.createBufferSource();
+    cs.buffer = this.noiseBuf;
+    cs.playbackRate.value = 1.6;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(2400, t);
+    hp.frequency.exponentialRampToValueAtTime(300, t + 0.16);
+    const cg = this.ctx.createGain();
+    cg.gain.setValueAtTime(0.0001, t);
+    cg.gain.linearRampToValueAtTime(0.42, t + 0.002);
+    cg.gain.exponentialRampToValueAtTime(0.0006, t + 0.18);
+    cs.connect(hp).connect(cg).connect(out);
+    cs.start(t, Math.random() * 2); cs.stop(t + 0.25);
+
+    // --- body: noise through a fast-closing low-pass ------------------------
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    src.playbackRate.value = 0.30 + Math.random() * 0.14;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(2200, t);
+    lp.frequency.exponentialRampToValueAtTime(70, t + boom);
+    lp.Q.value = 0.7;
+    const bg = this.ctx.createGain();
+    bg.gain.setValueAtTime(0.0001, t);
+    bg.gain.linearRampToValueAtTime(0.62, t + 0.012);
+    bg.gain.exponentialRampToValueAtTime(0.11, t + 0.30);
+    bg.gain.exponentialRampToValueAtTime(0.0004, t + boom);
+    src.connect(lp).connect(bg).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + boom + 0.1);
+
+    // --- sub: the pressure, dropping an octave and a half in a third of a second
+    const sub = this.ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(96, t);
+    sub.frequency.exponentialRampToValueAtTime(28, t + 0.34);
+    const sg = this.ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t);
+    sg.gain.linearRampToValueAtTime(0.52, t + 0.014);
+    sg.gain.exponentialRampToValueAtTime(0.0004, t + 0.62);
+    sub.connect(sg).connect(out);
+    sub.start(t); sub.stop(t + 0.7);
+
+    // --- rubble: what is still coming down after the bang -------------------
+    // Not decoration. The crater lands a beat after the flash and this is the
+    // only thing in the sound that says so; without it the ground opening is
+    // silent and the whole event is over in a third of a second.
+    const bits = 4 + ((Math.random() * 4) | 0);
+    for (let i = 0; i < bits; i++) {
+      const st = t + 0.14 + Math.random() * 0.75;
+      const sd = 0.06 + Math.random() * 0.1;
+      const s2 = this.ctx.createBufferSource();
+      s2.buffer = this.noiseBuf;
+      s2.playbackRate.value = 0.5 + Math.random() * 0.5;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 180 + Math.random() * 700;
+      bp.Q.value = 1.1;
+      const g2 = this.ctx.createGain();
+      g2.gain.setValueAtTime(0.0001, st);
+      g2.gain.linearRampToValueAtTime(0.05 + Math.random() * 0.07, st + 0.004);
+      g2.gain.exponentialRampToValueAtTime(0.0004, st + sd);
+      s2.connect(bp).connect(g2).connect(out);
+      s2.start(st, Math.random() * 2); s2.stop(st + sd + 0.05);
+    }
   }
 
   /** One swimming stroke. Deliberately soft; it repeats every second or so. */

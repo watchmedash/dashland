@@ -2,7 +2,7 @@
 
 import * as THREE from 'three';
 import { GRAVITY, R_MIN } from '../world/Constants.js';
-import { BLOCKS } from '../world/Blocks.js';
+import { BLOCKS, ID } from '../world/Blocks.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -618,6 +618,88 @@ export class Particles {
       p.size = 0.03 + Math.random() * 0.045;
       p.color.setRGB(1.0, 0.45 + Math.random() * 0.35, 0.12);
     }
+  }
+
+  /**
+   * A blast: the fireball, and everything the crater used to be.
+   *
+   * Three populations rather than one, because an explosion is three things
+   * arriving at different speeds and a single burst reads as a firework:
+   *
+   *   debris  the crater, thrown. Tumbling cubes on the ordinary (non-buoyant)
+   *           branch, so they arc, bounce and settle — which is the part that
+   *           says a hole was just made in the ground rather than a light went
+   *           off. Coloured off `dirt`'s particle swatch rather than sampled
+   *           per cell: this fires *after* `_applyEdits` has already turned
+   *           those cells to air, so there is nothing left to sample, and a
+   *           crater is mostly soil in every biome that has one.
+   *   embers  the fireball. Buoyant and short, so it rises and is gone inside
+   *           half a second — the flash, not a fire.
+   *   smoke   the column left behind. Steam particles, which already grow as
+   *           they age, but dark: `color` on a steam particle is its peak
+   *           opacity, and the material is additive, so "dark smoke" here is
+   *           thin white smoke. It is the shape that reads, not the shade.
+   *
+   * The counts are the largest single ask any emitter in this file makes, and
+   * that is deliberate — `_spawn` returns null once the pool is full and every
+   * loop below bails on it, so the pool is the budget and this simply spends
+   * all of it. An explosion is allowed to be the loudest thing on screen for a
+   * second.
+   */
+  blast(pos, up, strength = 1) {
+    const dirt = BLOCKS[ID.dirt]?.particle || [0.36, 0.26, 0.18];
+    for (let i = 0; i < 34 * strength; i++) {
+      const p = this._spawn();
+      if (!p) break;
+      p.alive = true;
+      p.pos.copy(pos);
+      p.pos.x += (Math.random() - 0.5) * 1.2;
+      p.pos.y += (Math.random() - 0.5) * 1.2;
+      p.pos.z += (Math.random() - 0.5) * 1.2;
+      // Up and out, hard. The vertical bias is what makes it a crater and not
+      // a shotgun: a burst thrown evenly in every direction puts most of its
+      // debris into the ground on the first frame.
+      p.vel.copy(up).multiplyScalar(3.5 + Math.random() * 5.5);
+      p.vel.x += (Math.random() - 0.5) * 9;
+      p.vel.y += (Math.random() - 0.5) * 9;
+      p.vel.z += (Math.random() - 0.5) * 9;
+      p.rot.setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
+      p.spin.set((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9);
+      p.life = 0; p.maxLife = 0.9 + Math.random() * 0.9;
+      p.size = 0.06 + Math.random() * 0.11;
+      const v = 0.75 + Math.random() * 0.5;
+      p.color.setRGB(dirt[0] * v, dirt[1] * v, dirt[2] * v);
+    }
+    this.embers(pos, up, (16 * strength) | 0, 1.6);
+    for (let i = 0; i < 7 * strength; i++) this.steam(pos, up, 1.5, 0);
+  }
+
+  /**
+   * The fuse. One puff a frame off an arming mob, so the rate is the caller's.
+   *
+   * Deliberately NOT `embers`: an ember is something already burning coming off
+   * a body, and this has to read as pressure building inside one. So it is a
+   * single spark thrown outward from the body rather than a plume rising off
+   * it, and it gets whiter as `heat` climbs — the same cue a poker gives.
+   */
+  fuse(pos, up, heat = 0) {
+    const p = this._spawn();
+    if (!p) return;
+    p.alive = true;
+    p.buoyant = true;
+    p.pos.copy(pos);
+    p.pos.x += (Math.random() - 0.5) * 0.7;
+    p.pos.y += (Math.random() - 0.5) * 0.7;
+    p.pos.z += (Math.random() - 0.5) * 0.7;
+    p.vel.copy(up).multiplyScalar(0.8 + Math.random() * 1.4);
+    p.vel.x += (Math.random() - 0.5) * 1.6;
+    p.vel.y += (Math.random() - 0.5) * 1.6;
+    p.vel.z += (Math.random() - 0.5) * 1.6;
+    p.rot.identity();
+    p.spin.set(0, 0, 0);
+    p.life = 0; p.maxLife = 0.25 + Math.random() * 0.3;
+    p.size = 0.03 + Math.random() * 0.05 + heat * 0.03;
+    p.color.setRGB(1.0, 0.4 + heat * 0.55, 0.1 + heat * 0.7);
   }
 
   /**

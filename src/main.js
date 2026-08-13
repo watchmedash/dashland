@@ -2200,6 +2200,10 @@ class Game {
     // the planet being torn down, and a spectator flag left set would open the
     // next one with no hotbar and nothing able to see the player.
     this._deadOnLoad = false;
+    // Nor does the next planet inherit the hush the last one was killed under.
+    // `_die` turns the ambient bed down and only `respawn` and `_spectate` turn
+    // it back up, and quitting to the menu off the death screen goes past both.
+    this.audio.setWorldQuiet(false);
     // A failed load is over once the world it failed on is gone; the next
     // attempt has to be able to report its own failure. See `_loadFailed`,
     // which sets this after calling here for exactly that reason.
@@ -3300,6 +3304,11 @@ class Game {
     // The one event in the game that had no sound at all. `hurt()` fires on the
     // blow that kills, and then the world simply stopped.
     this.audio.death();
+    // And then the world stops with them. The ambient bed drives itself off its
+    // own timer rather than off `_update`, so without this the dawn chorus goes
+    // on singing over the card that says you are dead. Given back by `respawn`
+    // and by `_spectate`, which are the only two doors out of this state.
+    this.audio.setWorldQuiet(true);
     this.input.exitLock();
     this.closeScreen();
     this.closeSkills();
@@ -3402,6 +3411,7 @@ class Game {
   respawn() {
     if (this.runEnds) { this._spectate(); return; }
     this.ui.hideDeath();
+    this.audio.setWorldQuiet(false);
     this.player.health = this.player.maxHealth;
     this.breath = 1;
     // Everything that was still hurting you when you died. "After dying I am
@@ -3464,6 +3474,11 @@ class Game {
   _spectate() {
     if (this.spectating) return;
     this.ui.hideDeath();
+    // A spectator is looking at the planet, so the planet gets its sound back.
+    // Unconditional rather than paired with `_die`, because the other caller is
+    // `_onWorldReady` opening a save that was written dead, which never passed
+    // through `_die` at all.
+    this.audio.setWorldQuiet(false);
     this.closeScreen();
     this.closeSkills();
     this.state = 'spectating';
@@ -9424,7 +9439,11 @@ class Game {
       this.water.level.delete(key);
       this.water.onEdit(wet.col, wet.k);
       this._swapInHand(heldSlot, itemIdOf(FILLED[kind]));
-      this.audio.splash();
+      // `kind` is the thing being scooped, and it is not always water. A splash
+      // is a bright slap and a run of RISING bubbles, which is what an ear uses
+      // to tell water from anything else, so a pail of lava sounded like a pail
+      // of pond — on the one liquid where the sound is the warning.
+      if (kind === 'lava') this.audio.lavaDip(); else this.audio.splash();
       this.player.swing();
       this.viewModel.punch(this._handOf(heldSlot));
       return true;
@@ -9457,7 +9476,8 @@ class Game {
     // Poured water is a spring, not a puddle: it feeds a flow and never drains.
     this.water.addSource(target.col, target.k);
     this._swapInHand(heldSlot, itemIdOf('bucket'));
-    this.audio.splash();
+    // Same rule pouring as scooping: `pouring` is the block going in the ground.
+    if (pouring === ID.lava) this.audio.lavaDip(); else this.audio.splash();
     this.player.swing();
     this.viewModel.punch(this._handOf(heldSlot));
     return true;

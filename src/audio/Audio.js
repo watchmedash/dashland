@@ -899,6 +899,80 @@ export class Audio {
     }
   }
 
+  /**
+   * The bucket, in lava. Both ways round: scooping a source and pouring one.
+   *
+   * It used to be `splash()`, which is a body of water displaced — a bright
+   * broadband slap and a run of RISING bubble resonances. That rise is exactly
+   * what the ear reads as water, so a pail of molten rock sounded like a pail
+   * of pond, which is the one liquid on the planet it must not be confused
+   * with: the sound is the only warning you get that the thing about to land at
+   * your feet will set you on fire.
+   *
+   * So it is built as the inverse of `splash` at every point that carries the
+   * meaning. Dark instead of bright — the noise body opens at 900Hz rather than
+   * 2600 and falls to 90. Slow instead of sharp: a 60ms swell in place of a 6ms
+   * slap, because this is something viscous moving rather than something thin
+   * breaking. And the resonances FALL, half as many of them, an octave down and
+   * three times as long, which is a heavy fluid closing over itself.
+   *
+   * The hiss on top is the only bright thing in it and it is deliberately last
+   * and quiet: it is what tells you the pool is hot without making it sparkle.
+   */
+  lavaDip(pos) {
+    if (!this._live() || !this._take('player', 1.2)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.75 + Math.random() * 0.3;
+    const out = this._dest(pos, d * 1.6 + 0.4);
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.playbackRate.value = 0.35 + Math.random() * 0.2;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900 + Math.random() * 400, t);
+    lp.frequency.exponentialRampToValueAtTime(90, t + d);
+    lp.Q.value = 1.4;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.19, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    src.connect(lp).connect(g).connect(out);
+    src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    // The glugs. Falling, not rising — see above.
+    const n = 2 + ((Math.random() * 2) | 0);
+    for (let i = 0; i < n; i++) {
+      const tn = t + 0.05 + i * (0.09 + Math.random() * 0.10);
+      const bd = 0.16 + Math.random() * 0.12;
+      const f = 150 + Math.random() * 190;
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f, tn);
+      o.frequency.exponentialRampToValueAtTime(f * (0.45 + Math.random() * 0.2), tn + bd);
+      const bg = this.ctx.createGain();
+      bg.gain.setValueAtTime(0.0001, tn);
+      bg.gain.linearRampToValueAtTime(0.070, tn + 0.02);
+      bg.gain.exponentialRampToValueAtTime(0.0004, tn + bd);
+      o.connect(bg).connect(out);
+      o.start(tn); o.stop(tn + bd + 0.03);
+    }
+
+    // Steam off the surface. Late, thin and quiet: heat, not sparkle.
+    const hs = this.ctx.createBufferSource();
+    hs.buffer = this.noiseBuf;
+    hs.playbackRate.value = 1.3;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 3200;
+    const hg = this.ctx.createGain();
+    hg.gain.setValueAtTime(0.0001, t + 0.08);
+    hg.gain.linearRampToValueAtTime(0.019, t + 0.22);
+    hg.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    hs.connect(hp).connect(hg).connect(out);
+    hs.start(t + 0.08, Math.random() * 2); hs.stop(t + d + 0.05);
+  }
+
   /** One swimming stroke. Deliberately soft; it repeats every second or so. */
   swim(pos) {
     if (!this._live() || !this._take('step', 0.5)) return;
@@ -2481,10 +2555,53 @@ export class Audio {
   }
 
   _startAmbience() {
+    // Its own tap into the reverb rather than `reverbGain` directly, which is
+    // what it used to be handed. The send is the one path out of the ambience
+    // that does not run through `ambBus` — it goes voice, send, convolver,
+    // master — so turning the bus down for a death screen would have left every
+    // bird's tail still sounding at the send level. One node in front of the
+    // shared send gives `setWorldQuiet` something to close that is the
+    // ambience's alone and leaves the game's own reverb untouched.
+    this.ambSend = this.ctx.createGain();
+    this.ambSend.gain.value = 1;
+    this.ambSend.connect(this.reverbGain);
     this.ambience = new Ambience(
-      this.ctx, this.ambBus, this.reverbGain, this.noiseBuf,
+      this.ctx, this.ambBus, this.ambSend, this.noiseBuf,
       (cat) => this._take(cat, 3),
     );
+  }
+
+  /**
+   * Take the world's own sound away, or give it back.
+   *
+   * For the death screen. The game's noise voices stop on their own when they
+   * die, because they are made by `_update` and `_update` is not running — but
+   * the ambient beds are self-driving and `Ambience._tick` keeps throwing
+   * one-shots off its own timer, so a player who has just been killed listens
+   * to birdsong over the card telling them so.
+   *
+   * The whole bed hangs off one bus, so this is one gain and it catches
+   * everything: the beds, the placed waterfalls and springs, and every one-shot
+   * `_tick` fires. The bed is left running underneath rather than torn down,
+   * because it has to be exactly where it was when the player stands back up.
+   *
+   * Deliberately not a mute: half a second out, a slower second and a half
+   * back, so death is a room going quiet rather than a cut, and waking up is
+   * the world arriving rather than a switch. And deliberately only the ambience
+   * bus — the music keeps playing over the card, which is a score doing its
+   * job, not a bird that has not noticed.
+   */
+  setWorldQuiet(on) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    // Cancel first: dying inside the fade back up, or respawning inside the
+    // fade down, otherwise leaves the older ramp running to its own target.
+    for (const p of [this.ambBus.gain, this.ambSend?.gain]) {
+      if (!p) continue;
+      p.cancelScheduledValues(t);
+      p.setValueAtTime(p.value, t);
+      p.linearRampToValueAtTime(on ? 0.0001 : 1, t + (on ? 0.5 : 1.5));
+    }
   }
 
   /**

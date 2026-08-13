@@ -308,6 +308,21 @@ const _foot = new THREE.Vector3();
 const _parts = { f: 0, i: 0, j: 0 };
 
 /**
+ * Is this column's surface under water?
+ *
+ * The same question `siteTornado` asks of a candidate, spelled once so the walk
+ * and the siting cannot drift apart about where the sea is. `surfaceK` answers
+ * with the *bed* under water, which is exactly why the test has to be about the
+ * cell above it rather than about the height: a funnel seated by height alone
+ * stands on a sea floor fifteen cells under the surface, drawn from a point
+ * nobody can see, still shoving and lifting whoever is swimming over it.
+ */
+function afloat(planet, col) {
+  const k = planet.surfaceK(col);
+  return k < 0 || planet.liquidAt(col, k + 1);
+}
+
+/**
  * Roll for, and site, a new funnel.
  *
  * Separate from the constructor because siting can fail — the ground under the
@@ -504,9 +519,27 @@ export class Tornado {
     // it is worth a column; stepping a copy and asking which column it landed in
     // asks the same question sixty times and gets the same answer. `_seat` keeps
     // the bearing this builds up — see the note there.
-    this.pos.addScaledVector(_dir, SPEED * dt * this.strength);
+    const step = SPEED * dt * this.strength;
+    this.pos.addScaledVector(_dir, step);
     const at = planet.cellAt(this.pos.x, this.pos.y, this.pos.z);
-    if (at) this.col = at.col;
+    if (at && at.col !== this.col) {
+      if (afloat(planet, at.col)) {
+        // Not out to sea. `siteTornado` refuses a column whose surface is under
+        // water and the head of this file says why — a waterspout is a different
+        // thing and would want water physics nobody has written — but the walk
+        // never re-asked, because until the step above worked there was no walk.
+        // A funnel that reaches the shore turns and follows it.
+        //
+        // The step is taken back rather than merely not adopted: the position is
+        // what the next frame walks from, so leaving it out over the water would
+        // let the foot drift off its column indefinitely while `col` stayed on
+        // the beach, and the drawn funnel would slide away from the ground it is
+        // standing on.
+        this.pos.addScaledVector(_dir, -step);
+        this._bearing += Math.PI * (0.5 + Math.random() * 0.5);
+        this._turn = (Math.random() - 0.5) * 0.16;
+      } else this.col = at.col;
+    }
     this._seat();
   }
 

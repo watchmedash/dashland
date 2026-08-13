@@ -37,7 +37,25 @@ export const SAMPLES = {
   surf: 'surf_loop.ogg',
   // 2.7s. Layered ON TOP of the procedural rumble, not a replacement for it.
   thunderCrack: 'thunder_crack.ogg',
+  // 6.0s seamless loops. Replace the `cricket` and `cicada` noise beds.
+  crickets: 'crickets_loop.ogg',
+  cicada: 'cicada_loop.ogg',
 };
+
+/**
+ * Load order, loudest-gap-first.
+ *
+ * `loadAll` is sequential (see below) so this list is a priority order, and it
+ * is not the order the object literal happens to be in. The two weather beds
+ * come first because a storm is the loudest thing in the game and the one a
+ * player is most likely to be standing in during the first minute; fire is
+ * third because it is the only entry here that replaces silence rather than a
+ * synthesised stand-in, so until it lands there is nothing at all.
+ */
+export const LOAD_ORDER = [
+  'rain', 'surf', 'thunderCrack',
+  'crickets', 'cicada',
+];
 
 export class Samples {
   constructor(ctx) {
@@ -110,8 +128,14 @@ export class Samples {
    * gaps and the last one lands late with no consequence, because every
    * consumer is still making the procedural sound until it does.
    */
-  async loadAll(names = Object.keys(SAMPLES)) {
-    for (const n of names) await this.load(n);
+  async loadAll(names = LOAD_ORDER, onReady = null) {
+    for (const n of names) {
+      const b = await this.load(n);
+      // Per file, not once at the end. The list is fifteen entries long and
+      // strictly sequential, so waiting for the last one would hold the rain
+      // bed hostage to a monster growl that nothing is waiting for.
+      if (b && onReady) { try { onReady(n, b); } catch { /* never a caller's problem */ } }
+    }
     return this.stats;
   }
 }

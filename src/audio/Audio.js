@@ -1,10 +1,14 @@
 // Almost entirely procedural audio. Noise-shaped impacts for footsteps and
 // block interaction, a layered ambient bed, and a slow generative pad.
 //
-// Three recorded files are the exception — a rain loop, a surf loop and a
-// thunder crack, loaded by Samples.js and detailed there. They are additions to
-// the graph and never a dependency of it: every one of them has a synthesised
-// implementation that runs until the download lands and forever if it does not.
+// Fifteen recorded files are the exception, loaded by Samples.js and detailed
+// there: five looping beds (rain, surf, fire, crickets, cicadas), five monster
+// throats, and five layered transients (thunder, two flesh impacts, an arrow
+// rattle and a blast). They are additions to the graph and never a dependency
+// of it: every one of them has a synthesised implementation that runs until the
+// download lands and forever if it does not. The one exception to THAT is fire,
+// which replaces silence rather than a synthesised stand-in, because the game
+// had no continuous fire sound of any kind.
 //
 // Buses
 // -----
@@ -410,6 +414,7 @@ const MOB_VOICE = {
   // happens at all.
 };
 
+
 // idle / attack / hurt / death are the same instrument played differently.
 //
 // `drop` is where the pitch ends up as a multiple of where it began, and it is
@@ -570,13 +575,12 @@ export class Audio {
    */
   _startSamples() {
     this.samples = new Samples(this.ctx);
-    this.samples.loadAll().then(() => {
-      // Hand the two bed buffers over as they land. `adopt` rides the noise bed
-      // down and the recording up through the ambience's normal level ramp, so
-      // this can happen at any moment, including mid-storm, without a click.
-      if (!this.ambience) return;
-      this.ambience.adopt('rain', this.samples.get('rain'));
-      this.ambience.adopt('surf', this.samples.get('surf'));
+    // Hand each bed buffer over as it lands. `adopt` rides the noise bed down
+    // and the recording up through the ambience's normal level ramp, so this
+    // can happen at any moment, including mid-storm, without a click, and it
+    // ignores any name it does not own — the one-shot buffers go past it.
+    this.samples.loadAll(undefined, (name, buf) => {
+      if (this.ambience) this.ambience.adopt(name, buf);
     });
   }
 
@@ -2191,6 +2195,7 @@ export class Audio {
    * An arrow arriving. A hard tick tuned by what it hit, plus a shaft ring on
    * anything that is not flesh. `dig('stone')` stood in for this everywhere,
    * which meant an arrow into a tree sounded like a pickaxe.
+   *
    */
   impact(mat = 'wood', pos = null) {
     if (!this._live() || !this._take('hit', 0.5)) return;
@@ -2733,6 +2738,7 @@ export class Audio {
     return true;
   }
 
+
   /**
    * Soft flesh impact — a damp low thump under a short muffled slap. Nothing
    * like the crisp grass footstep this replaced.
@@ -2772,6 +2778,7 @@ export class Audio {
     src.connect(lp).connect(ng).connect(out);
     src.start(t, Math.random() * 2);
     src.stop(t + dur + 0.05);
+
   }
 
   // --- weather ---------------------------------------------------------------

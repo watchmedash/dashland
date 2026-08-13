@@ -101,7 +101,7 @@ export class Ambience {
     // Which beds a recording has taken over. Until a name goes true here the
     // noise version is the only thing that plays, which is also what happens
     // for the whole session if the download fails.
-    this._sampled = { rain: false, surf: false };
+    this._sampled = { rain: false, surf: false, crickets: false, cicada: false };
     // world-anchored panners the placed beds hang off, keyed by feature
     this.places = {};
     this.stats = { oneShots: 0, dropped: 0, rearms: 0 };
@@ -269,6 +269,10 @@ export class Ambience {
       this._sampleBed('rainSmp', buf, 6.0, { rate: 1, spread: 0.94 });
     } else if (name === 'surf') {
       this._sampleBed('surfSmp', buf, 12.0, { rate: 1, spread: 0.96 });
+    } else if (name === 'crickets') {
+      this._sampleBed('cricketSmp', buf, 6.0, { rate: 1, spread: 0.94 });
+    } else if (name === 'cicada') {
+      this._sampleBed('cicadaSmp', buf, 6.0, { rate: 1, spread: 0.96 });
     } else return false;
     this._sampled[name] = true;
     return true;
@@ -422,8 +426,19 @@ export class Ambience {
     // had also never been heard at all, because `time` was never passed and a
     // meadow at midnight scored night = 0. Tripled now that they can actually
     // happen, which puts them just under the wind rather than under the floor.
-    this._arm('cricket', air.cricket * night * dry * out * 0.090);
-    this._arm('cicada', air.cicada * (1 - night) * dry * out * 0.060);
+    // Recorded or synthesised, the same exact-complement handover the rain and
+    // the surf use. The recordings are quieter per unit level than the noise
+    // beds were because a real cricket field already carries its own dynamics:
+    // the AM chop that made the noise bed sound alive is 6 dB of level swing
+    // that the recording does not need on top of its own.
+    const cricketAmt = air.cricket * night * dry * out;
+    const cicadaAmt = air.cicada * (1 - night) * dry * out;
+    const smK = this._sampled.crickets ? 1 : 0;
+    const smD = this._sampled.cicada ? 1 : 0;
+    this._arm('cricket', cricketAmt * 0.090 * (1 - smK));
+    this._arm('cicada', cicadaAmt * 0.060 * (1 - smD));
+    if (smK) this._arm('cricketSmp', cricketAmt * 0.0115);
+    if (smD) this._arm('cicadaSmp', cicadaAmt * 0.0127);
 
     // Placed sources. `size` is how much water is actually falling, so a bucket
     // poured off a ledge trickles and a worldgen fall roars; without it every

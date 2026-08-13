@@ -406,31 +406,54 @@ seals a room with nothing shipping on top of it. It should be built for the
 workbench, by whoever ships the workbench, which is the deliberate way the
 Survival Kit note already asked for.
 
-## Sound — three recorded files, everything else synthesised
+## Sound — seventeen recorded files, everything else synthesised
 
-134 of the game's 137 sounds are synthesised at runtime from oscillators and one
-generated noise buffer. There is no `<audio>` element anywhere.
+The engine is still a synthesiser. Every sound in the game is built at runtime
+from oscillators and one generated noise buffer, and fifteen of them
+additionally have a recording layered into or substituted for part of that.
+There is no `<audio>` element anywhere.
 
-The exceptions are three files in `public/audio/`, listed in the next section.
-They are the only audio assets in the repository, the only use of
-`decodeAudioData`, and the only media fetch. Everything else on this page that
-says the game has no audio files predates them and has been corrected in place.
+The fifteen files are in `public/audio/`, listed in the next section. They are
+the only audio assets in the repository, the only use of `decodeAudioData`, and
+the only media fetch. Everything else on this page that says the game has no
+audio files predates them and has been corrected in place.
 
-### Recorded ambience and thunder — Sonniss GDC 2026 bundle, IMPORTED
+### Recorded ambience, fire, voices and impacts — Sonniss GDC 2026 bundle, IMPORTED
 
-Three files, 148,870 bytes of Ogg Opus total, cut from two publishers' source
-recordings in the **Sonniss.com GDC 2026 Game Audio Bundle**.
+Fifteen files, 369,210 bytes of Ogg Opus total, cut from six publishers'
+source recordings in the **Sonniss.com GDC 2026 Game Audio Bundle**.
+
+Weather, taken first:
 
 | shipped file | bytes | source recording | publisher |
 |---|---|---|---|
-| `public/audio/rain_loop.ogg` | 45,010 | `STORM_StormAmbience13_InMotionAudio_BackGardenStorm.wav` | **InMotionAudio** (Back Garden Storm) |
-| `public/audio/surf_loop.ogg` | 85,553 | `WATRWave_Soft Waves Cliffs_JSE_RCoN_Stereo.wav` | **Just Sound Effects** (Rocky Coast of Norway) |
-| `public/audio/thunder_crack.ogg` | 18,307 | `STORM_Texas Rain Thunder Initial Crash Boom Storm 01 Clap Lightning_ESM_CPS.wav` | **Epic Stock Media** (Public Spaces: Storms, Lakes, Parks and Rural Nature Exteriors) |
+| `rain_loop.ogg` | 45,010 | `STORM_StormAmbience13_InMotionAudio_BackGardenStorm.wav` | **InMotionAudio** (Back Garden Storm) |
+| `surf_loop.ogg` | 85,553 | `WATRWave_Soft Waves Cliffs_JSE_RCoN_Stereo.wav` | **Just Sound Effects** (Rocky Coast of Norway) |
+| `thunder_crack.ogg` | 18,307 | `STORM_Texas Rain Thunder Initial Crash Boom Storm 01 Clap Lightning_ESM_CPS.wav` | **Epic Stock Media** (Public Spaces: Storms, Lakes, Parks and Rural Nature Exteriors) |
 
-All three are heavily edited rather than lifted: trimmed out of takes of 132 to
-243 seconds, converted to mono, high-passed, level-matched, and in the rain and
-surf cases crossfaded into seamless loops. The bundle's licence permits this
-explicitly. None of them is shipped as it came.
+Fire and the two insect beds:
+
+| shipped file | bytes | source recording | publisher |
+|---|---|---|---|
+| `crickets_loop.ogg` | 47,554 | `AMBSubn_Ambience, Forest Crickets, Birds, Connecticut 02_344 Audio_East Coast America.wav` | **344 Audio** (East Coast America Vol. 1) |
+| `cicada_loop.ogg` | 47,998 | `AMBTrop_Loop Ambience Jungle Night Humid Birds Bug Chirps 01_ESM_SNLS.wav` | **Epic Stock Media** (Synthesized Nature Loops and Sounds) |
+
+
+
+Every one of them is heavily edited rather than lifted: trimmed out of takes of
+0.4 to 243 seconds, converted to mono, high-passed, level-matched, and for the
+five beds crossfaded into seamless loops. The bitrate is chosen per file by
+measurement rather than set by policy — the lowest of 40/48/56/64/80/96 kbps
+whose decode holds every octave band within 25 dB of the loudest to inside
+0.5 dB, keeps the envelope correlated to 0.95 (0.99 for a transient) and moves
+the crest factor by under 0.5 dB. That lands them between 40 and 64 kbps.
+
+Two of the fifteen do more than one job, which is why the list is shorter than
+the number of sounds it makes. `fire_loop.ogg` is both fire beds: the torch one
+is it high-passed at 240 Hz, the lava one is the same buffer at playback rate
+0.48 through a 640 Hz low-pass. `shriek_bug.ogg` is six species at rates from
+0.62 to 2.00. The bundle's licence permits this explicitly. None of them is
+shipped as it came.
 
 **The licence, read on Sonniss's own terms page rather than from a summary.**
 Commercial use in a paid game is permitted, which covers the Steam, Microsoft
@@ -504,8 +527,8 @@ Other sources, checked and recorded so they are not re-checked:
     unusable. Filter by URL, never by eye.
   * **Sonniss GDC Game Audio Bundle** — royalty-free rather than CC0, and the
     best fit for the water, animal and bow categories Kenney does not have.
-    **Three files from the 2026 bundle are now in the game**; see the section
-    above for the licence terms and the full list. Worth knowing before mining
+    **Fifteen files from the 2026 bundle are now in the game**; see the
+    section above for the licence terms and the full list. Worth knowing before mining
     it again: it is a promotional sampler, not a library — 347 wavs across 323
     publishers, about one file each, averaging 22 MB, so it is broad, shallow,
     and made of long pristine takes rather than game-ready one-shots. It
@@ -534,8 +557,8 @@ It is recorded here rather than left unmentioned because it is the largest and
 most convenient pile of exactly-right-sounding game audio on that disk, it sits
 in the same folder as ten packs that *are* CC0, and a future session looking for
 a footstep will find it first. Nothing from it has been imported — audited, not
-assumed: `public/audio/` holds exactly three files and all three are accounted
-for above, from Sonniss. Nothing from this dump may be added, including as a
+assumed: `public/audio/` holds exactly fifteen files and all fifteen are
+accounted for above, from Sonniss. Nothing from this dump may be added, including as a
 placeholder, including "just to hear what it would sound like in place", because
 a placeholder is how a shipped asset gets made. It was not used as a tonal
 reference by ear either.

@@ -2181,11 +2181,26 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     const axis = byte & 3, open = (byte >> 2) & 1;
     const t = DOOR_THICK;
     if (!open) {
-      // Standing in the opening: a leaf across the way you were walking.
-      if (axis < 2) out.push([0.5 - t / 2, 0, 0, 0.5 + t / 2, 1, 1]);
-      else out.push([0, 0.5 - t / 2, 0, 1, 0.5 + t / 2, 1]);
+      // Shut: the leaf hangs on the FACE of its cell, not down the middle of
+      // it. `axis` is the direction the door was placed from, so the leaf goes
+      // against that face and a door set into a one-cell wall finishes flush
+      // with the wall — which is the whole of "the door is in the middle of a
+      // block instead of the edge". Centred, a doorway showed a stone reveal on
+      // both sides and the leaf floated in the gap between them.
+      if (axis === 0) out.push([1 - t, 0, 0, 1, 1, 1]);
+      else if (axis === 1) out.push([0, 0, 0, t, 1, 1]);
+      else if (axis === 2) out.push([0, 1 - t, 0, 1, 1, 1]);
+      else out.push([0, 0, 0, 1, t, 1]);
     } else {
-      // Swung aside, flat against the wall it hinges on, leaving the way clear.
+      // Swung aside, flat against the side wall, leaving the way clear.
+      //
+      // Unchanged, and it has to be: the hinge is the vertical edge where the
+      // shut leaf meets the low side wall, and rotating either shut pose a
+      // quarter turn about that edge lands on exactly this box. A leaf shut at
+      // i=1 hinged at (i=1, j=0) sweeps to j=0..t spanning i, and so does one
+      // shut at i=0 hinged at (i=0, j=0). So both faces of the doorway swing
+      // the same way and there is still only one open shape per axis pair,
+      // which is what keeps the state inside the three bits the side table has.
       if (axis < 2) out.push([0, 0, 0, 1, t, 1]);
       else out.push([0, 0, 0, t, 1, 1]);
     }

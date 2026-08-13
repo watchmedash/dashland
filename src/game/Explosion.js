@@ -211,6 +211,21 @@ export function explode(game, pos, cause = null) {
     }
   }
 
+  // What the crater was standing on top of, before it stops standing there.
+  //
+  // A kiln's three slots, a crate's twenty-seven and a sign's line of text are
+  // not in the block array — they are in maps on the Game keyed by cell, and
+  // `_applyEdits` knows nothing about them. Turning a crate to air without this
+  // eats what was in it and leaves the entry behind, so a crate placed on the
+  // same cell later opens full of somebody's old ore. `_emptyContainer` is the
+  // same call the pick makes; the pick is just the other way a cell stops
+  // being a crate. It runs before the edits so `_crateAt` can still see what is
+  // there.
+  for (const e of edits) {
+    const id = planet.at(e.col, e.k);
+    game._emptyContainer(e.col, e.k, id, planet.centerOf(e.col, e.k, _c));
+  }
+
   // The one door. `_applyEdits` marks the region edited so the crater is in the
   // partial save, tells the worker so the mirror and the mesh agree, patches the
   // occlusion volume, and runs the crush / unsupported / gravity passes — so a

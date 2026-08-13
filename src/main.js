@@ -4930,6 +4930,60 @@ class Game {
     return db >= 0 ? 2 : 3;
   }
 
+  /**
+   * Hand back whatever a cell was holding, and forget it ever held it.
+   *
+   * Three blocks in the game own state that is not in the block array — a kiln's
+   * three slots, a crate's twenty-seven, a sign's line of text — and all three
+   * live in maps keyed by cell. `_applyEdits` is the one door every block change
+   * comes through, and it knows nothing about those maps: emptying them was
+   * written inline in `_breakBlock`, which is only one of the ways a cell can
+   * stop being a crate.
+   *
+   * The other way shipped with the cinderling. `Explosion.explode` builds its
+   * crater and calls `_applyEdits` straight, so a blast through a storeroom
+   * turned every crate in it to air with the contents still in the map: the
+   * items were gone from the world, gone from the ground, and still on disk,
+   * because `_savePayload` writes `crates` by key and the key no longer had a
+   * crate over it. Place a new crate on the same cell later and `_place` finds
+   * the entry already there, leaves it alone, and the old contents are back.
+   * So: eaten, then duplicated. A kiln mid-smelt lost its ore, its fuel and its
+   * ingots the same way.
+   *
+   * Extracted rather than copied so the blast and the pick can never drift.
+   *
+   * @param {number} col
+   * @param {number} k
+   * @param {number} id what is standing there now
+   * @param {THREE.Vector3} center where to put what comes out
+   */
+  _emptyContainer(col, k, id, center) {
+    const key = col * D + k;
+    const kiln = this.kilns.get(key);
+    if (kiln) {
+      for (const s of [kiln.input, kiln.fuel, kiln.output]) {
+        if (!s.empty) this.drops.spawn(center.x, center.y, center.z, s.item, s.count, s.wear);
+      }
+      this.kilns.delete(key);
+      if (this.ui.screen === 'kiln' && this.ui.kiln === kiln) this.closeScreen();
+    }
+
+    if (IS_SIGN[id]) { this.signs.delete(key); this.signSeq++; }
+
+    // `_crateAt`, not `.get` — a worldgen cache you break without opening still
+    // has to hand over its contents.
+    const crate = id === ID.crate ? this._crateAt(col, k) : null;
+    if (crate) {
+      // Everything comes back out. Silently eating a full crate of ore because
+      // you mis-clicked would be the single worst thing this game could do.
+      for (const s of crate.slots) {
+        if (!s.empty) this.drops.spawn(center.x, center.y, center.z, s.item, s.count, s.wear);
+      }
+      this.crates.delete(key);
+      if (this.ui.screen === 'crate' && this.ui.crate === crate) this.closeScreen();
+    }
+  }
+
   _breakBlock(hit) {
     const b = BLOCKS[hit.id];
     if (b.hardness < 0 || hit.id === ID.core) return;
@@ -4971,30 +5025,7 @@ class Game {
       this.drops.spawn(center.x, center.y, center.z, d.item, d.count);
     }
 
-    const key = hit.col * D + hit.k;
-    const kiln = this.kilns.get(key);
-    if (kiln) {
-      for (const s of [kiln.input, kiln.fuel, kiln.output]) {
-        if (!s.empty) this.drops.spawn(center.x, center.y, center.z, s.item, s.count, s.wear);
-      }
-      this.kilns.delete(key);
-      if (this.ui.screen === 'kiln' && this.ui.kiln === kiln) this.closeScreen();
-    }
-
-    // `_crateAt`, not `.get` — a worldgen cache you break without opening still
-    // has to hand over its contents.
-    if (IS_SIGN[hit.id]) { this.signs.delete(key); this.signSeq++; }
-
-    const crate = hit.id === ID.crate ? this._crateAt(hit.col, hit.k) : null;
-    if (crate) {
-      // Everything comes back out. Silently eating a full crate of ore because
-      // you mis-clicked would be the single worst thing this game could do.
-      for (const s of crate.slots) {
-        if (!s.empty) this.drops.spawn(center.x, center.y, center.z, s.item, s.count, s.wear);
-      }
-      this.crates.delete(key);
-      if (this.ui.screen === 'crate' && this.ui.crate === crate) this.closeScreen();
-    }
+    this._emptyContainer(hit.col, hit.k, hit.id, center);
 
     this._applyEdits(edits);
     // No burst of little cubes here any more. The crack overlay already draws

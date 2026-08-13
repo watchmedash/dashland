@@ -138,9 +138,14 @@ export const voxelUniforms = {
   uSeasonColor: { value: new THREE.Vector3(1, 1, 1) },
   uSeasonStrength: { value: 0 },
   /**
-   * How much snow is lying on the canopy, 0..1. See LEAF_SNOW_FRAG. Driven from
-   * `Seasons.cold` in `Game._pushSeason`, so it is 0 in three seasons out of
-   * four and this whole term is a dead branch outside winter.
+   * How much snow the SEASON is laying on the canopy, 0..1. See LEAF_SNOW_FRAG.
+   * Driven from `Seasons.cold` in `Game._pushSeason`, so it is 0 in three
+   * seasons out of four.
+   *
+   * Not the whole of the term. A canopy standing on a snowfield is white all
+   * year and says so with its wave id instead, and the shader takes the `max`
+   * of the two, so this being 0 no longer means the branch is dead - it means
+   * only the temperate woods are out of it.
    */
   uSnowCap: { value: 0 },
   // The only light in the world that moves — whatever the player is holding.
@@ -1146,11 +1151,43 @@ const SEASON_FRAG = /* glsl */`
  * different constants, for the reason that one gives.
  *
  * `vWave` is BANDED rather than tested open-ended. The wave ids are cross 1,
- * water 2, lava 3, leaves 4, and an open `> 2.5` here is the exact bug that once
- * made every leaf on the planet emissive.
+ * water 2, lava 3, leaves 4, cold-ground leaves 5, and an open `> 2.5` here is
+ * the exact bug that once made every leaf on the planet emissive. Both leaf
+ * bands are wanted, so the band is (3.5, 5.5) and not an open `> 3.5`: the next
+ * id anyone adds is 6 and it must not arrive already white.
+ *
+ * ---- and the ground it stands on -------------------------------------------
+ *
+ * The season alone answers "is the year cold", which leaves the case the report
+ * was actually about half-done: a snowfield and the polar cap are cold *all*
+ * year, so a conifer standing on permanent snow in high summer went back to
+ * being a plain green tree over white ground.
+ *
+ * The ground is the one thing this fragment cannot work out for itself, and it
+ * is worth being exact about why, because both obvious shortcuts are wrong. A
+ * leaf knows its own altitude and that is five to twelve blocks above the
+ * ground it grew from, so an altitude gate whitens every sea-level forest in
+ * July. It knows its own latitude, and a snowfield is not a latitude: worldgen
+ * builds it from `1 - 1.35*|lat|` plus three octaves of fbm minus an altitude
+ * term, then relaxes the height field, then de-speckles the biomes, then grows
+ * beaches into them, and nothing survives that as a closed form a shader could
+ * evaluate. The COLUMN knows, and the mesher is already holding the column when
+ * it writes the wave id, so the answer rides in as wave 5. See WAVE_LEAVES_COLD
+ * in Mesher.js for the cost, which is one integer compare and no new byte
+ * anywhere - not in the vertex, not in the save.
+ *
+ * The two conditions take a `max`, not a sum. They are not two snowfalls, they
+ * are two reasons to believe in the same one: a pine in a snowfield in December
+ * is under the same snow it was under in July, and adding them would let the
+ * one place on the planet where both are true be the one place the canopy
+ * becomes a featureless white blob. `max` also keeps every constant below
+ * meaning what it already meant - the floor, the ceiling and the drift are
+ * still measured against a cap of 1 - so winter over a snowfield looks exactly
+ * like winter anywhere else, which is correct, because it is.
  */
 const LEAF_SNOW_FRAG = /* glsl */`
-  if (uSnowCap > 0.002 && vWave > 3.5 && vWave < 4.5) {
+  float snowCap = max(uSnowCap, (vWave > 4.5 && vWave < 5.5) ? 1.0 : 0.0);
+  if (snowCap > 0.002 && vWave > 3.5 && vWave < 5.5) {
     vec3 upW = normalize(vWorld - uPlanetCenter);
     vec3 wn = normalize(vWorldNormal);
     float sky = clamp(dot(wn, upW), 0.0, 1.0);
@@ -1163,7 +1200,7 @@ const LEAF_SNOW_FRAG = /* glsl */`
     // the near canopy photographed as a white boulder with holes in it. A
     // seventh of the needle left showing is what keeps the silhouette reading
     // as a tree under snow rather than as snow in the shape of a tree.
-    float lay = uSnowCap * drift * (0.30 + 0.70 * sky * sky) * 0.85;
+    float lay = snowCap * drift * (0.30 + 0.70 * sky * sky) * 0.85;
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.93, 0.98), clamp(lay, 0.0, 1.0));
   }
 `;

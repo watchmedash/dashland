@@ -4,7 +4,7 @@
 // the column axis, which is perfectly straight, so merging introduces no error.
 
 import {
-  F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME_COLORS,
+  F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME, BIOME_COLORS,
 } from './Constants.js';
 import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn } from './Sphere.js';
 import {
@@ -70,14 +70,47 @@ for (let i = 0; i < N_BLOCKS; i++) {
   else GROUP[i] = GROUP_OPAQUE;
 }
 
+/** Leaves. Sways in the wind, and LEAF_SNOW_FRAG whitens it in winter. */
+const WAVE_LEAVES = 4;
+/**
+ * Leaves whose COLUMN is a snowfield, which is the same wave in every respect
+ * the vertex shader cares about — the leaf branch there is `wType > 3.5` and
+ * takes both — and a different one in the only respect the fragment shader
+ * does: LEAF_SNOW_FRAG holds this one white all year instead of only in winter.
+ *
+ * This exists because the ground a tree grew from is the one thing a leaf
+ * fragment cannot work out for itself. It knows its own altitude, which is five
+ * to twelve blocks above that ground, so an altitude gate whitens every
+ * sea-level forest in July; it cannot know the biome, because a snowfield is
+ * `1 - 1.35*|lat|` plus three octaves of fbm minus an altitude term, relaxed,
+ * de-speckled and then grown into by the beach pass, none of which is a
+ * closed-form function of a world position. The column knows, the mesher is
+ * already holding the column, and the wave id is the one channel that reaches
+ * the fragment with a whole integer to spare in it.
+ *
+ * Cost is one comparison in `emit`, no new attribute, no new byte per vertex,
+ * and nothing at all in the save: a wave id is meshed, never stored.
+ *
+ * BIOME.SNOW and not COLD_BIOMES, which would add TUNDRA. A snowfield's top
+ * block is `ID.snow` for every column of it, so the ground under those trees is
+ * white by construction at any latitude and in any season. Tundra's is drifted
+ * — snow, gravel and coarse dirt by a noise threshold — so it is a brown and
+ * white mottle in July and a canopy laid solid white over it would be the
+ * inconsistency this is trying to remove. Weather.js puts tundra in COLD_BIOMES
+ * to decide that falling precipitation there is snow rather than rain, which is
+ * a question about the sky and not about the ground.
+ */
+const WAVE_LEAVES_COLD = 5;
+
 const WAVE = new Uint8Array(N_BLOCKS);
 for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
   if (b.render === R_CROSS) WAVE[i] = 1;
   else if (b.name === 'water') WAVE[i] = 2;
   else if (b.name === 'lava') WAVE[i] = 3;
-  else if (b.name.startsWith('leaves')) WAVE[i] = 4;
+  else if (b.name.startsWith('leaves')) WAVE[i] = WAVE_LEAVES;
 }
+
 
 /**
  * Cross blocks that are drawn as real geometry instead, and so must not also be
@@ -663,7 +696,12 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
     const tint = GROUP[id] === GROUP_LIQUID
       ? [liquidDepth, liquidShore, liquidStyle]
       : (UNTINTED_LAYER[layer] ? WHITE : tintOf(id, biomeId));
-    const wave = WAVE[id];
+    // A leaf standing over a snowfield gets its own wave id, so the shader can
+    // keep it under snow in July as well as in December. See WAVE_LEAVES_COLD.
+    // `biomeId` is the column's, already resolved for the tint on the line
+    // above, so this costs one integer compare on the quads of one block class.
+    const wave = (WAVE[id] === WAVE_LEAVES && biomeId === BIOME.SNOW)
+      ? WAVE_LEAVES_COLD : WAVE[id];
     const uv = [[0, 0], [uMax, 0], [uMax, vMax], [0, vMax]];
     const pts = [p0, p1, p2, p3];
     const v0 = g.verts;

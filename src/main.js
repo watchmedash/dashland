@@ -1497,6 +1497,11 @@ class Game {
     this.viewModel = new ViewModel((id) => this.drops.createItemMesh(id));
     this.sky = new Sky(this.scene, this.renderer);
     this.particles = new Particles(this.scene, this.planet);
+    // `setQuality` also does this, but it only runs when the tier CHANGES, and
+    // a session that never opens the settings never calls it. The particles are
+    // built long after the tier is resolved, so this is where the starting
+    // value has to be handed over.
+    this.particles.setQuality(this.qualityTier === 'low');
     this.blockModels = new BlockModels(this.scene);
     this.signText = new SignText(this.scene);
     this.drops = new Drops(this.scene, this.planet, this.materials);
@@ -2034,6 +2039,7 @@ class Game {
     this.qualityTier = qualityTier(this.settings);
     this.quality = QUALITY[this.qualityTier];
     this.postfx?.setAO(this.quality.ao);
+    this.particles?.setQuality(this.qualityTier === 'low');
     if (this.mobs) this.mobs.loadDist = this.quality.loadDist;
     this._resize();
     if (this.state === 'playing' || this.state === 'paused' || this.state === 'spectating') {

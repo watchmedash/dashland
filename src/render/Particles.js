@@ -10,6 +10,11 @@ const _s = new THREE.Vector3(1, 1, 1);
 const _m = new THREE.Matrix4();
 const _c = new THREE.Color();
 const _probe = new THREE.Vector3();
+// The tangent basis rain rings are scattered over. Two more scratch vectors
+// rather than reusing _v, because _rainRipples holds the basis across the whole
+// spawn loop and _v is rewritten inside it.
+const _t1 = new THREE.Vector3();
+const _t2 = new THREE.Vector3();
 
 const MAX_DEBRIS = 900;
 
@@ -25,6 +30,38 @@ const MAX_BUBBLES = 64;
  * rather than as warm water.
  */
 const MAX_STEAM = 128;
+
+/**
+ * Expanding rings on the surface of water.
+ *
+ * 192 because the rain is the load-bearing case and it is a *rate* rather than
+ * an event: at the storm cap this spawns RAIN_RIPPLE_RATE a second over a life
+ * of RIPPLE_LIFE, i.e. ~48 live rings, and every splash in the game throws
+ * three more on top. 192 is four times the steady state, which leaves room for
+ * a dive into a downpour without the ring that matters being the one silently
+ * dropped.
+ */
+const MAX_RIPPLES = 192;
+
+/**
+ * Rings a second at full storm intensity, before the quality scale.
+ *
+ * Chosen by what it looks like rather than by a drop count: real rain at 14
+ * units of radius is thousands of impacts a second and drawing them is neither
+ * affordable nor legible. 54 is the point where the surface reads as *being
+ * rained on* — the eye picks up a continuous stipple rather than countable
+ * individual events — and going past it stops changing the read and only costs
+ * instances.
+ */
+const RAIN_RIPPLE_RATE = 80;
+
+/** Radius of the disc around the camera that rain rings are scattered over. */
+const RAIN_RIPPLE_R = 14;
+
+const RIPPLE_LIFE = 0.9;
+
+/** The plane's own normal, for aiming a ring along a local up. */
+const RING_N = new THREE.Vector3(0, 0, 1);
 
 export class Particles {
   constructor(scene, planet) {
@@ -82,6 +119,29 @@ export class Particles {
     this.bubbleMesh.layers.enable(1);
     scene.add(this.bubbleMesh);
 
+    // --- ripple rings ---
+    this.ripples = this._buildRipples(scene);
+    this.ripplePool = [];
+    for (let i = 0; i < MAX_RIPPLES; i++) {
+      this.ripplePool.push({
+        alive: false, pos: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0),
+        life: 0, maxLife: RIPPLE_LIFE, radius: 0.4, strength: 1,
+      });
+    }
+    /**
+     * Fractional rings owed to the rain, carried between frames.
+     *
+     * A rate this low against a 16 ms frame is well under one ring per frame,
+     * so rounding it per frame would spawn either nothing or one, i.e. the rate
+     * would quantise to 0 or 60 a second and nothing in between. Accumulating
+     * the remainder is what makes RAIN_RIPPLE_RATE mean what it says.
+     */
+    this._rainOwed = 0;
+    /**
+     * 1 on the high tier, 0.45 on low. See `setQuality`.
+     */
+    this.rippleScale = 1;
+
     // --- steam ---
     // Its own mesh and its own material, and it cannot borrow either of the
     // other two. Debris is opaque lit cubes; bubbles are small, hard-edged and
@@ -108,6 +168,115 @@ export class Particles {
     this.weatherMode = 'clear';
     this.weatherIntensity = 0;
     this.submerged = false;
+  }
+
+  /**
+   * The rings an impact leaves on water.
+   *
+   * One instanced quad per ring, lying flat on the surface, with the annulus
+   * drawn in the fragment shader from a per-instance phase. Drawing the ring in
+   * the shader rather than as a ring *mesh* is what makes it affordable: the
+   * geometry is two triangles whatever the ring is doing, the expansion is a
+   * scalar rather than a vertex rebuild, and the whole system is one draw call.
+   *
+   * Alpha-blended and not additive, which is the opposite of the choice steam
+   * makes and for the opposite reason. Steam is vapour scattering light, so it
+   * adds; a ripple crest is not a light source, it is a piece of surface tilted
+   * to catch the sky, and what it does is *replace* the water under it with a
+   * paler colour. Additive was tried first and blows out to white over a sunlit
+   * shallow, which reads as a bleach stain rather than as a wave.
+   *
+   * `depthWrite` off and `depthTest` on. The liquid material also writes no
+   * depth, so a ring cannot z-fight the water it sits on however the swell has
+   * moved the surface that frame; the depth test still runs against the opaque
+   * seabed, so a ring behind a headland is correctly hidden.
+   */
+  _buildRipples(scene) {
+    const geo = new THREE.PlaneGeometry(1, 1);
+    this.ripplePhase = new THREE.InstancedBufferAttribute(new Float32Array(MAX_RIPPLES), 1);
+    this.rippleStrength = new THREE.InstancedBufferAttribute(new Float32Array(MAX_RIPPLES), 1);
+    geo.setAttribute('aPhase', this.ripplePhase);
+    geo.setAttribute('aStrength', this.rippleStrength);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color(0xdff2ff) } },
+      vertexShader: /* glsl */`
+        attribute float aPhase;
+        attribute float aStrength;
+        varying float vPhase;
+        varying float vStrength;
+        varying vec2 vRUv;
+        void main() {
+          vPhase = aPhase;
+          vStrength = aStrength;
+          vRUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform vec3 uColor;
+        varying float vPhase;
+        varying float vStrength;
+        varying vec2 vRUv;
+        void main() {
+          // Distance from the centre of the quad, 0 at the middle and 1 at the
+          // edge, so the ring's radius and the phase are the same number.
+          float d = length(vRUv - 0.5) * 2.0;
+          if (d > 1.0) discard;
+          float t = vPhase;
+          // The crest thins as it spreads. A ring of constant width reads as a
+          // painted circle growing; a real one carries a fixed amount of water
+          // round an ever longer circumference and gets finer as it goes.
+          float w = 0.02 + 0.20 * (1.0 - 0.55 * t);
+          float a = smoothstep(w, 0.0, abs(d - t));
+          // One impact throws more than one wave. A second, slower crest at 58%
+          // of the leading one is the difference between a hoop and a ripple;
+          // at 45% weight it is read as structure rather than counted.
+          a = max(a, smoothstep(w * 0.8, 0.0, abs(d - t * 0.58)) * 0.45);
+          // Squared fade out, linear fade in. The fade-in matters more than it
+          // sounds: at t=0 the ring is a filled dot the width of w, and without
+          // it every impact starts life as a visible blob.
+          a *= smoothstep(0.0, 0.12, t) * (1.0 - t) * (1.0 - t);
+          gl_FragColor = vec4(uColor, a * vStrength);
+        }
+      `,
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.InstancedMesh(geo, mat, MAX_RIPPLES);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.count = 0;
+    // Above the water (6) and below the bubbles (11): a droplet thrown up by a
+    // splash is in the air in front of the ring its own impact made.
+    mesh.renderOrder = 10;
+    mesh.layers.enable(1);
+    scene.add(mesh);
+    return mesh;
+  }
+
+  /**
+   * One expanding ring, centred on `pos` and lying across `up`.
+   *
+   * `radius` is where the crest ends up, in cells, and is the only thing that
+   * separates a raindrop from a diver: the shape, the timing and the fade are
+   * the same event at two scales.
+   */
+  ripple(pos, up, radius = 0.5, strength = 1) {
+    for (let i = 0; i < this.ripplePool.length; i++) {
+      const r = this.ripplePool[i];
+      if (r.alive) continue;
+      r.alive = true;
+      r.pos.copy(pos);
+      r.up.copy(up);
+      r.life = 0;
+      // Bigger rings run longer, but not proportionally — a wave slows as it
+      // spreads, so a ring four times the radius lasts about twice as long.
+      r.maxLife = RIPPLE_LIFE * (0.7 + 0.5 * Math.sqrt(radius));
+      r.radius = radius;
+      r.strength = strength;
+      return;
+    }
   }
 
   /**
@@ -391,6 +560,21 @@ export class Particles {
   }
 
   splash(pos, up, strength = 1) {
+    // The ring goes here rather than at the six call sites, and that is the
+    // whole reason it is worth doing: every splash in the game already comes
+    // through this function — the player diving in and climbing out, a fish
+    // breaking the surface, a fish landing after a fight, a bucket emptied —
+    // and all of them get the surface disturbance without a line changing
+    // anywhere else.
+    //
+    // Two rings, not one. A body entering water throws a crest immediately and
+    // a second, wider one as the hole it made collapses; the delay is faked by
+    // starting the outer one smaller and letting it run to a larger radius,
+    // which costs nothing and is most of the read. Scaled by strength so the
+    // player at 1.2 makes a metre-and-a-half disturbance and a fish at 0.35
+    // makes a dimple.
+    this.ripple(pos, up, 0.55 + 1.0 * strength, strength * 0.85);
+    this.ripple(pos, up, 0.30 + 0.5 * strength, strength * 0.55);
     for (let i = 0; i < 18 * strength; i++) {
       const p = this._spawn();
       if (!p) return;
@@ -644,7 +828,105 @@ export class Particles {
     // The probe costs ~60 block lookups, so only pay for it while something is
     // actually falling and visible.
     wu.uWaterR.value = this.weather.visible ? this._waterSurfaceRadius(camera, up) : 0;
+
+    this._rainRipples(dt, camera, up, wu.uWaterR.value);
+    this._updateRipples(dt);
   }
+
+  /**
+   * Rain landing on water.
+   *
+   * The gap this closes is a hole rather than a polish pass: the weather shader
+   * kills every drop at the waterline (`uWaterR`, see `_buildWeather`) because
+   * a storm carrying on underneath the sea is worse, and nothing was put in its
+   * place. So rain over water simply ceased to exist a metre before it arrived,
+   * and standing on a beach in a downpour the sea was the one flat, dry, silent
+   * surface in the frame.
+   *
+   * Rides the radius the weather shader is already using, so the rings land on
+   * exactly the surface the drops are being cut at and the two cannot disagree.
+   *
+   * Each candidate is tested against the world before it is used. Scattering
+   * over a disc assumes the whole disc is water, which is false at every
+   * shoreline, and without the test a beach gets rained-on rings on the sand.
+   * One block lookup per spawn, at a few dozen a second.
+   */
+  _rainRipples(dt, camera, up, waterR) {
+    if (waterR <= 0 || this.weatherMode !== 'rain' || this.submerged) { this._rainOwed = 0; return; }
+    this._rainOwed += dt * RAIN_RIPPLE_RATE * this.weatherIntensity * this.rippleScale;
+    let n = Math.floor(this._rainOwed);
+    if (n <= 0) return;
+    this._rainOwed -= n;
+    // A frame that ran long must not be allowed to empty the pool in one go.
+    n = Math.min(n, 8);
+    // Any vector not parallel to up gives a tangent basis; which one is
+    // arbitrary, since the ring positions inside it are random anyway.
+    if (Math.abs(up.y) > 0.9) _t1.set(1, 0, 0); else _t1.set(0, 1, 0);
+    _t1.cross(up).normalize();
+    _t2.copy(up).cross(_t1).normalize();
+    const R = RAIN_RIPPLE_R * this.rippleScale;
+    for (let i = 0; i < n; i++) {
+      // sqrt on the radius, or every ring lands in a knot around the camera.
+      const rr = Math.sqrt(Math.random()) * R;
+      const th = Math.random() * Math.PI * 2;
+      _probe.copy(camera.position)
+        .addScaledVector(_t1, Math.cos(th) * rr)
+        .addScaledVector(_t2, Math.sin(th) * rr);
+      // Back onto the water's own sphere. Half a cell down, so the test lands
+      // inside the water cell rather than in the air directly above it.
+      _probe.setLength(waterR - 0.5);
+      if (!this.planet.isLiquidWorld(_probe.x, _probe.y, _probe.z)) continue;
+      _v.copy(_probe).normalize();
+      _probe.copy(_v).multiplyScalar(waterR);
+      // Sized in CELLS, and deliberately far larger than a raindrop.
+      //
+      // The first pass used a physical 0.22-0.38, which is about what a drop
+      // actually throws, and measured 0.11% of the frame moving against the
+      // no-rings arm at full storm with 39 rings live — i.e. correct and
+      // invisible. A block is a metre here and the whole world is drawn at that
+      // grain, so an impact has to be a fraction OF A BLOCK rather than a
+      // fraction of a metre before it survives being drawn twenty cells away.
+      // 0.45-0.85 is the point where the sea reads as stippled rather than as
+      // occasionally marked.
+      this.ripple(_probe, _v, 0.45 + Math.random() * 0.40, 0.75 + Math.random() * 0.25);
+    }
+  }
+
+  _updateRipples(dt) {
+    let n = 0;
+    for (const r of this.ripplePool) {
+      if (!r.alive) continue;
+      r.life += dt;
+      if (r.life >= r.maxLife) { r.alive = false; continue; }
+      if (n >= MAX_RIPPLES) continue;
+      _q.setFromUnitVectors(RING_N, r.up);
+      // The quad is the ring at full extent; the phase inside it does the
+      // expanding. Scaling the quad instead would shrink the crest's width
+      // along with its radius and the ring would come out as a hard hoop.
+      _s.setScalar(r.radius * 2);
+      _m.compose(r.pos, _q, _s);
+      this.ripples.setMatrixAt(n, _m);
+      this.ripplePhase.setX(n, r.life / r.maxLife);
+      this.rippleStrength.setX(n, r.strength);
+      n++;
+    }
+    this.ripples.count = n;
+    if (n > 0) {
+      this.ripples.instanceMatrix.needsUpdate = true;
+      this.ripplePhase.needsUpdate = true;
+      this.rippleStrength.needsUpdate = true;
+    }
+  }
+
+  /**
+   * The low tier gets fewer, tighter rain rings.
+   *
+   * Not none: the rings are one draw call of two triangles and the cost that
+   * scales is the per-spawn world lookup and the fill, so cutting the rate and
+   * the radius together takes most of both while leaving the sea in a storm
+   * looking like it is being rained on. See `QUALITY` in main.
+   */
+  setQuality(low) { this.rippleScale = low ? 0.45 : 1; }
 
   setPixelRatio(r) {
     this.motes.material.uniforms.uPixelRatio.value = r;

@@ -145,6 +145,91 @@ So the door, the fence gate and the ladder are all procedural geometry in
 Using the six door variants as the per-wood door family is a separate question
 and is deliberately left open.
 
+## Wooden crate — supplied, INSPECTED AND NOT USED
+
+`model/WoodenCrate`: one FBX (`WoodenCrate01.fbx`) and one uncompressed 24-bit
+TGA (`WoodenCrate01_d.tga`). The owner states **CC0**. **There is no licence file
+of any kind in the folder**, so as with the doors and the fences above the terms
+are recorded as stated by the owner and not as something read off disk.
+
+It converts cleanly and it is a good crate. Headless Blender 5.1 imported the
+FBX, kept only `WoodenCrate01_LOD0` of the three stacked LODs — a merge of all
+three would z-fight, and the pipeline in `render/ItemModels.js` merges every mesh
+in a file into one geometry — and exported 228 triangles as GLB with the texture
+as a sibling. The TGA was decoded by hand (type 2, bottom-origin, BGR) and
+re-encoded to WebP at 6 KB against the PNG's 116 KB. The mesh is a **perfect
+1 x 1 x 1 unit cube in extent**, which is the one thing this game most wants from
+a block model and the reason it was taken as far as a render before being turned
+down.
+
+**It is turned down on colour, measured off the source art rather than off a
+screenshot.** The game's own `crate` tile in `public/tiles/albedo.webp` means
+**L 83.0, saturation 0.60**; the supplied diffuse means **L 56.9, saturation
+0.43** — a third darker and a third flatter. Standing the model in a real world
+cell beside the cube it would replace, in one frame under one sun, the cube read
+**L 51.9** and the model **L 8.6**. The gap widens rather than narrows in place
+because a loose model gets scene light only: a `BlockModels` kind that does not
+sway keeps its pack's shared material and so cannot carry the per-instance block
+light the flowers get, which for a torch is right and for a box you stack in a
+cave is not.
+
+The two pictures are also not the same crate. The tile is hand-painted boards
+with a frame, nail heads and a full X brace; the model's diffuse is one flat
+photographic panel with a single diagonal. A crate is a **solid block players
+stack, wall and stand on**, so every one of those costs is paid on every copy of
+it, against a tile that already draws the better crate for nothing. It is not
+better in the hand or in the icon either, for the same reason and one more: the
+block item's icon and held model are drawn from the same atlas cube that gets
+placed, so a modelled crate there would put a dark photographic box in your fist
+and a bright painted one on the ground.
+
+## Survival Kit (2.0) by **Kenney** — supplied, INSPECTED, one recommended
+
+[kenney.nl](https://www.kenney.nl) — **CC0**, stated in the pack's own
+`License.txt`, so unlike the crate and the doors this one is verified on disk.
+80 models in GLB, OBJ and FBX over one shared `colormap.png`, which is the same
+shape as the Food Kit already credited above and would load through the existing
+`PACKS` entry pattern with no new machinery.
+
+Nothing from it is imported yet. Per model, measured:
+
+  * **`workbench.glb` — recommended, and the only thing here that beats its
+    cube.** 236 triangles, 0.326 x 0.287 x 0.296, so it is nearly cubic in mass:
+    a solid top over short legs that fills its cell's footprint rather than
+    perching in it. Injected into a real world cell it read **L 87.1,
+    saturation 0.54**, which sits between the game's own blocks (crate cube L
+    51.9) and its plank floor (L 112.9) — it belongs to this palette, which is
+    unsurprising, because the Kenney pot standing on the kitchen block is out of
+    the sibling Food Kit. The `bench` cube it would replace is banded wood that
+    reads as a stack of logs and says nothing about crafting.
+    **It is not shipped because it cannot be, cheaply.** A workbench is
+    `R_CUBE`, and drawing a model in its cell means the mesher must stop emitting
+    that cube *and* the block must stop culling its neighbours' faces, or a
+    bench set against a wall shows daylight through the wall between its legs.
+    That is a new render class in `world/Blocks.js`, an entry in
+    `world/Mesher.js`, a scan in `main.js` and a `POSE` plus name-map pair in
+    `render/ItemModels.js` — five files, and a change to how the game's
+    most-placed station seals a room. Worth doing deliberately, not in passing.
+  * **`bedroll.glb` — turned down.** 0.310 x 0.125 x 0.608: a mat twice as long
+    as it is wide and an eighth as tall. The `bed` is a **single** full cube
+    (`world/Blocks.js`, one `block({ name: 'bed' ... })`; `bed_top` and
+    `bed_side` are its tile names, not two blocks), so there is no two-cell frame
+    for a 2:1 roll to lie along. Fitted to one cell it is a mat over half the
+    floor and a fifth of the height, on top of a solid cube the player still
+    walks on the top of; stood in a second cell the way the kitchen's pot is, it
+    makes the bed two cells tall, which is not the bed this game has. The red
+    cube with its pillow band already reads as a bed from across a room, and it
+    is the block `homeSpawn` and the "Your bed is gone" path in `respawn` are
+    written against.
+  * **`bedroll-packed.glb`** is a good rolled bedroll and would make a good icon
+    for a bed whose placed block was also a bedroll. It is not one, so it would
+    only put a different object in the hand from the one that lands.
+  * **`bedroll-frame.glb`** is a crossed-pole drying frame. It is not part of a
+    bed.
+  * **`campfire-pit.glb`, `campfire-stand.glb`, `campfire-fishing-stand.glb`**
+    are not part of this task and were only glanced at, but the hearth is the
+    obvious home for one of them if that block is ever revisited.
+
 ## Sound — no third-party audio
 
 Every sound in the game is synthesised at runtime from oscillators and one

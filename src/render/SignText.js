@@ -9,11 +9,11 @@ import * as THREE from 'three';
  * hundred of both". Both halves of that follow from one sign owning one
  * texture. Neither survives giving every sign in the world the SAME texture.
  *
- * So the glyphs are drawn once, into one 512x192 atlas of the 95 printable
- * ASCII characters (~96 KB of GPU memory, for any number of signs), and a sign
- * is quads with UVs into it. Every sign near the player goes into a single
- * merged geometry with a single material: one draw call for the lot, whether
- * that is one sign or a hundred.
+ * So the glyphs are drawn once, into one 768x288 atlas of the 95 printable
+ * ASCII characters (under a megabyte of GPU memory, for any number of signs),
+ * and a sign is quads with UVs into it. Every sign near the player goes into a
+ * single merged geometry with a single material: one draw call for the lot,
+ * whether that is one sign or a hundred.
  *
  * ### Why it reads as carved rather than printed
  *
@@ -23,13 +23,25 @@ import * as THREE from 'three';
  * tinting would multiply both passes by the same colour and flatten the two
  * back into one. The scene lights it like any other model, so writing goes dark
  * at dusk with the board it is cut into.
+ *
+ * The highlight has to be a hairline, though. Offset a twenty-third of a cell
+ * at 85% it covered as many pixels as the letter did, and two passes of equal
+ * area average to their mean the moment a mip is taken: the writing turned to
+ * grey smudge at any distance. It is the edge of a groove, not a second copy
+ * of the letter, so it is drawn as one.
  */
 
 const GLYPH0 = 32;               // space
 const GLYPH1 = 126;              // ~
 const COLS = 16;
 const ROWS = 6;                  // 16 * 6 = 96 cells for 95 glyphs
-const CELL = 32;                 // px per glyph cell in the atlas
+/**
+ * px per glyph cell in the atlas. 48 rather than 32 because a sign read at two
+ * cells draws a letter about forty screen pixels tall, and a 32px cell was
+ * magnifying it: the writing was soft before it was ever mipped. The atlas is
+ * 768x288 (~0.9 MB with its mip chain, once, for every sign on the planet).
+ */
+const CELL = 48;
 
 /** 48 characters is the sign's own limit, and 12 x 4 is exactly 48. */
 const LINE_CHARS = 12;
@@ -61,6 +73,8 @@ const _n = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
 const _o = new THREE.Vector3();
+const _ax = new THREE.Vector3();
+const _t = new THREE.Vector3();
 
 /**
  * Wrap to at most LINES lines of at most LINE_CHARS.
@@ -101,7 +115,11 @@ export class SignText {
     this.material = new THREE.MeshLambertMaterial({
       map: buildAtlas(),
       transparent: true,
-      alphaTest: 0.35,
+      // A stroke is a couple of atlas pixels wide, so three mips down its
+      // coverage is a fraction. At 0.35 the test threw the whole letter away
+      // and a sign at nine cells was blank board; at 0.14 the stroke stays and
+      // only the very edge of it feathers.
+      alphaTest: 0.14,
       // The quads sit a hair off the board and face the same way it does, so
       // they never need to be written to depth to sort against each other.
       depthWrite: false,
@@ -152,12 +170,31 @@ export class SignText {
       const ea = s.ea, eb = s.eb, up = s.up;
       const alongI = (s.dir & 3) < 2;
       const sgn = (s.dir & 1) ? -1 : 1;
-      if (alongI) _n.set(ea[0], ea[1], ea[2]).multiplyScalar(sgn);
-      else _n.set(eb[0], eb[1], eb[2]).multiplyScalar(sgn);
+      const nAxis = alongI ? ea : eb;   // the cell axis the board faces along
+      const wAxis = alongI ? eb : ea;   // the cell axis the board runs along
+      _ax.set(nAxis[0], nAxis[1], nAxis[2]);
       _up.set(up[0], up[1], up[2]);
+      // The writing runs along the board's OWN width axis. It used to run
+      // along `up x n`, and on a cubesphere those are not the same line: the
+      // two tangent axes of a cell are not perpendicular to each other, and
+      // measured 7.3 degrees out on an ordinary cell. So a row of glyphs left
+      // the face of the plank at 0.127 of a cell for every cell of line
+      // length. Half of a full line is 0.37 of a cell, which buried the far
+      // end of the line 0.033 behind a board it was lifted 0.014 clear of: the
+      // last letter of a line was cut off on a clean vertical line by the
+      // plank's own depth, and cut off at the other end on a sign facing the
+      // other way.
+      _right.set(wAxis[0], wAxis[1], wAxis[2]);
       // A viewer looking along -n with `up` up has their right at up x n. Get
-      // this backwards and every sign in the world is written in mirror.
-      _right.crossVectors(_up, _n);
+      // this backwards and every sign in the world is written in mirror; the
+      // width axis is the same line, so it only needs pointing the same way.
+      _t.copy(_up).cross(_ax).multiplyScalar(sgn);
+      if (_right.dot(_t) < 0) _right.negate();
+      // A face of constant cell-i (or constant cell-j) is a plane through the
+      // planet's centre, so the plank's front is flat and its normal is the
+      // one perpendicular to the two directions that actually lie in it. `ea`
+      // is a degree or two off that, which is what tilted the writing.
+      _n.crossVectors(_right, _up).normalize();
 
       // Centre of the writing, in world units: out of the cell centre to the
       // board's front face, then up to the middle of the board.
@@ -172,7 +209,10 @@ export class SignText {
         ? (sgn > 0 ? SIGN_THICK + LIFT : 1 - SIGN_THICK - LIFT)
         : 0.5 + sgn * (SIGN_THICK / 2 + LIFT);
       const midK = wall ? WALL_MID_K : BOARD_MID_K;
-      const outward = (face - 0.5) * (alongI ? s.arcA : s.arcB) * sgn;
+      // `face` is a cell-local coordinate along `_ax`; the lift has to be
+      // measured square to the plank, so take the component of that step that
+      // lies along the plank's own normal.
+      const outward = (face - 0.5) * (alongI ? s.arcA : s.arcB) * _ax.dot(_n);
       _o.copy(s.pos)
         .addScaledVector(_n, outward)
         .addScaledVector(_up, midK - 0.5);
@@ -275,16 +315,44 @@ function buildAtlas() {
   const x = cv.getContext('2d');
   x.textAlign = 'center';
   x.textBaseline = 'middle';
-  x.font = `700 ${Math.round(CELL * 0.74)}px "Trebuchet MS", "Segoe UI", sans-serif`;
+  const FONT = '"Trebuchet MS", "Segoe UI", sans-serif';
+  const STROKE = CELL * 0.045;   // ink weight held on past the first mip
+  // How far the groove's lit edge shows. The ink's own stroke spreads half its
+  // width outward and eats into this, so the offset has to clear that before
+  // any of the highlight is visible at all: at 0.028 the letters came out flat
+  // black paint. What is left over is about a third of a stroke width, which
+  // is a lit edge rather than the second copy of the letter it used to be.
+  const OFF = STROKE / 2 + CELL * 0.026;
+
+  // A letter used to fill about half the height of its cell, so a quad sized
+  // to the board carried a letter half the size the board could have shown.
+  // Ask for as much of the cell as the widest glyph allows and let the widest
+  // glyph set the size, rather than guessing one that fits.
+  let size = Math.round(CELL * 0.88);
+  x.font = `700 ${size}px ${FONT}`;
+  let widest = 0;
+  for (let g = 0; g <= GLYPH1 - GLYPH0; g++) {
+    widest = Math.max(widest, x.measureText(String.fromCharCode(GLYPH0 + g)).width);
+  }
+  const room = CELL - OFF - STROKE;
+  if (widest > room) size = Math.max(8, Math.floor(size * room / widest));
+  x.font = `700 ${size}px ${FONT}`;
+  x.lineJoin = 'round';
+  x.lineWidth = STROKE;
+
   for (let g = 0; g <= GLYPH1 - GLYPH0; g++) {
     const ch = String.fromCharCode(GLYPH0 + g);
     if (ch === ' ') continue;
     const cx = (g % COLS) * CELL + CELL / 2;
     const cy = Math.floor(g / COLS) * CELL + CELL / 2;
-    // Light below-right first, dark ink over it: a groove lit from above.
-    x.fillStyle = 'rgba(214, 186, 140, .85)';
-    x.fillText(ch, cx + 1.4, cy + 1.4);
-    x.fillStyle = 'rgba(38, 24, 12, .95)';
+    // Light below-right first, dark ink over it: a groove lit from above. The
+    // offset is a hairline and the ink is stroked as well as filled, so what
+    // survives into the mips is the letter and not the pair averaged.
+    x.fillStyle = 'rgba(226, 201, 158, .62)';
+    x.fillText(ch, cx + OFF, cy + OFF);
+    x.strokeStyle = 'rgb(30, 18, 8)';
+    x.strokeText(ch, cx, cy);
+    x.fillStyle = 'rgb(30, 18, 8)';
     x.fillText(ch, cx, cy);
   }
   const tex = new THREE.CanvasTexture(cv);
@@ -295,7 +363,9 @@ function buildAtlas() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  tex.anisotropy = 4;
+  // Signs are read across a field, at a glancing angle as often as head on.
+  // three.js clamps this to whatever the card actually offers.
+  tex.anisotropy = 16;
   tex.generateMipmaps = true;
   return tex;
 }

@@ -177,6 +177,22 @@ function writeIndex(index) {
 
 const inRange = (i) => Number.isInteger(i) && i >= 0 && i < SLOT_COUNT;
 
+/**
+ * When a summary was written, as a number that can be ordered.
+ *
+ * Not `| 0`, which is what this used to be and which is wrong by construction:
+ * `savedAt` is `Date.now()`, and a bitwise operator truncates its operand to a
+ * signed 32-bit integer, so a millisecond timestamp wraps every 49.7 days and
+ * spends half of every cycle negative. Measured on the day this was found:
+ * `1786641671836 | 0` is -64,723,300 and a save from forty days earlier is
+ * +774,243,996, so the newer planet compared as the older one.
+ *
+ * `Number(...) || 0` keeps the two things the truncation was doing on purpose —
+ * a summary with no `savedAt` (the pre-slot migration) and one that `repairIndex`
+ * rebuilt with a zero both sort as oldest — without capping the value.
+ */
+const savedAt = (meta) => Number(meta?.savedAt) || 0;
+
 export const Save = {
   SLOT_COUNT,
 
@@ -195,7 +211,7 @@ export const Save = {
     const index = readIndex();
     let best = -1;
     for (let i = 0; i < SLOT_COUNT; i++) {
-      if (index[i] && (best < 0 || (index[i].savedAt | 0) > (index[best].savedAt | 0))) best = i;
+      if (index[i] && (best < 0 || savedAt(index[i]) > savedAt(index[best]))) best = i;
     }
     return best;
   },

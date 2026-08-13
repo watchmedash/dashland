@@ -187,6 +187,22 @@ export class Planet {
      * around the player at all times and nothing in the game reaches that far.
      */
     this.live = new Uint8Array(NUM_REGIONS);
+    /**
+     * Which regions have had a byte written into them, as distinct from `live`,
+     * which is which have been *generated*.
+     *
+     * They are nearly the same set and must not be conflated: `live` is what
+     * physics consults to tell built ground from ground that has not arrived,
+     * and marking a region live because something wrote one voxel into it would
+     * be a lie in exactly the direction that walks the player off a cliff. This
+     * is only ever asked "is any of this region non-zero", which is what
+     * `resetWorld` needs and nothing else does.
+     *
+     * Maintained in the two places that write `blocks` and nowhere else —
+     * `applyRegions` and `setAt`. Nothing outside this file touches the array:
+     * every `planet.blocks[...]` in `src/` is a read.
+     */
+    this._written = new Uint8Array(NUM_REGIONS);
     /** Height field for the whole planet — cheap, eager, and always complete. */
     this.colHeight = new Float32Array(COLUMNS);
   }
@@ -197,9 +213,36 @@ export class Planet {
     this.colHeight = colHeight;
   }
 
-  /** Wipe the mirror between worlds. The arrays are kept; only the data goes. */
+  /**
+   * Wipe the mirror between worlds. The arrays are kept; only the data goes.
+   *
+   * Region by region rather than `blocks.fill(0)` over the whole array, and the
+   * reason is residency rather than the memset. The mirror is 122 MB of which a
+   * session touches the regions it has actually streamed — about 10 MB after a
+   * first load — and a full-array fill writes every page of it, so the process
+   * holds the whole thing resident for the rest of the run whatever the player
+   * does. Measured on this machine, writing one byte per 4 KB page of an array
+   * this size costs 129 MB of working set. This runs on every new game and every
+   * save load, so it was not an edge case: it was the reason the mirror was
+   * always fully resident.
+   *
+   * Exact, not an optimisation that mostly holds. `_written` is set by both
+   * writers of `blocks` and by nothing else, so a region it does not name has
+   * never been written since the last reset and is still the zeroes the array
+   * was allocated with.
+   */
   resetWorld() {
-    this.blocks.fill(0);
+    const tmp = new Int32Array(REGION_COLS);
+    for (let rid = 0; rid < NUM_REGIONS; rid++) {
+      if (!this._written[rid]) continue;
+      regionColumns(rid, tmp);
+      // Sixteen contiguous runs, not 256, for the reason `applyRegions` gives.
+      for (let row = 0; row < CHUNK_T; row++) {
+        const base = tmp[row * CHUNK_T] * D;
+        this.blocks.fill(0, base, base + CHUNK_T * D);
+      }
+    }
+    this._written.fill(0);
     this.live.fill(0);
     this.facing.clear();
   }
@@ -224,6 +267,7 @@ export class Planet {
         o += CHUNK_T * D;
       }
       this.live[rid] = 1;
+      this._written[rid] = 1;
       onRegion?.(rid);
     }
   }
@@ -282,7 +326,14 @@ export class Planet {
   // --- voxel access ---------------------------------------------------------
 
   at(col, k) { return (k < 0 || k >= D) ? 0 : this.blocks[col * D + k]; }
-  setAt(col, k, id) { if (k >= 0 && k < D) this.blocks[col * D + k] = id; }
+  // The second of the two writers, so it carries the `_written` mark too. An
+  // edit almost always lands in a region `applyRegions` has already marked; the
+  // mark is here so `resetWorld` stays correct without having to assume that.
+  setAt(col, k, id) {
+    if (k < 0 || k >= D) return;
+    this.blocks[col * D + k] = id;
+    this._written[regionOfCol(col)] = 1;
+  }
   solidAt(col, k) { return (k < 0 || k >= D) ? false : IS_SOLID[this.blocks[col * D + k]] === 1; }
   liquidAt(col, k) { return (k < 0 || k >= D) ? false : RENDER_TYPE[this.blocks[col * D + k]] === R_LIQUID; }
 

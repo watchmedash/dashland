@@ -491,7 +491,13 @@ export const BLOCKS = [
   // are dangerous now; without this the only exits from a shaft are pillaring
   // out of it or cutting a staircase you did not want.
   block({
-    name: 'ladder', label: 'Ladder', render: R_LADDER, all: 'ladder',
+    // `side` is the cut-out ladder tile and `top` is solid planking, and the
+    // split is load-bearing rather than decorative. The world draws the stiles
+    // and rungs as real timber off `top` (every box carries the cap flag, see
+    // blockBoxes), while the inventory icon draws `side` flat and so is still
+    // the whole ladder in one square — see FLAT_TILE in `ui/Icons.js`.
+    name: 'ladder', label: 'Ladder', render: R_LADDER,
+    top: 'planks', side: 'ladder', bottom: 'planks', front: 'planks',
     directional: true, opaque: false, hardness: 0.4, tool: 'axe',
     particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 6,
   }),
@@ -1553,6 +1559,12 @@ export const SIGN_WALL = 4;
 /** How thick a torch shaft is. */
 export const TORCH_THICK = 0.14;
 
+/**
+ * How far a ladder stands off the wall it is fixed to. Thin enough that a
+ * ladder in a one-block shaft still leaves room to stand in the shaft.
+ */
+export const LADDER_THICK = 0.14;
+
 /** Width of a fence post, centred in its cell. */
 export const FENCE_POST = 0.25;
 /** Thickness of a rail. See R_FENCE. */
@@ -2207,14 +2219,40 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     return out;
   }
   if (IS_LADDER[id]) {
-    // An eighth of a cell thick, flat against the named wall. Thin enough that
-    // a ladder in a one-block shaft still leaves room to stand in the shaft.
-    const t = 0.14;
+    // Two stiles and four rungs, built like a fence is built, and NOT one flat
+    // plate any more.
+    //
+    // The plate was a single full-cell box wearing the `ladder` tile on all six
+    // faces, and that tile is deliberately mostly holes (see the note in
+    // `scripts/bake-textures.mjs` about it keeping its own alpha). Face on it
+    // was fine. Its four EDGE faces are 0.14-wide strips of the same cut-out
+    // texture, so from any other angle the alpha test threw nearly all of them
+    // away and a ladder had no sides at all — a decal on the rock, against a
+    // fence made of real timber right beside it. That is "ladder still have
+    // missing sides like before not looking as good as the fence models", and
+    // it is geometry, not texture: no tile can put a side on a face whose whole
+    // job is to be transparent.
+    //
+    // So the holes are holes now. Every box carries the cap flag (the 7th
+    // element — see emitBox) so it wears the block's `top` tile, which is solid
+    // planking, on every one of its faces. `side` stays the ladder cut-out
+    // because that tile is still the whole picture of a ladder and is what the
+    // inventory icon draws flat; see FLAT_TILE in `ui/Icons.js`.
     const dir = byte & 3;
-    if (dir === 0) out.push([1 - t, 0, 0, 1, 1, 1]);
-    else if (dir === 1) out.push([0, 0, 0, t, 1, 1]);
-    else if (dir === 2) out.push([0, 1 - t, 0, 1, 1, 1]);
-    else out.push([0, 0, 0, 1, t, 1]);
+    // (across, depth-from-the-wall, k) -> the cell, for whichever wall it is on.
+    const put = (a0, a1, d0, d1, k0, k1) => {
+      if (dir === 0) out.push([1 - d1, a0, k0, 1 - d0, a1, k1, 1]);
+      else if (dir === 1) out.push([d0, a0, k0, d1, a1, k1, 1]);
+      else if (dir === 2) out.push([a0, 1 - d1, k0, a1, 1 - d0, k1, 1]);
+      else out.push([a0, d0, k0, a1, d1, k1, 1]);
+    };
+    const t = LADDER_THICK;
+    put(0.08, 0.24, 0, t, 0, 1);          // stiles, full height so a run joins
+    put(0.76, 0.92, 0, t, 0, 1);
+    // Rungs abut the stiles exactly rather than overlapping them, so the seam
+    // faces are dropped as interior and nothing z-fights, and they are inset
+    // from both the wall and the front so the stiles read as the frame.
+    for (let n = 0; n < 4; n++) put(0.24, 0.76, 0.02, t - 0.02, 0.02 + n * 0.25, 0.10 + n * 0.25);
     return out;
   }
   if (IS_SLAB[id]) {

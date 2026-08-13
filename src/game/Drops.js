@@ -538,19 +538,31 @@ function getBlockGeo(blockId) {
     const x0 = b[0] - 0.5, x1 = b[3] - 0.5;
     const z0 = b[1] - 0.5, z1 = b[4] - 0.5;
     const y0 = b[2] - 0.5, y1 = b[5] - 0.5;
+    // A box may ask for its cap tile on every one of its faces — the 7th
+    // element, which `emitBox` in the mesher already honours. This is the
+    // fourth reader of `blockBoxes` and it has to honour the whole description,
+    // not the first six numbers of it: without this a ladder's stiles wear the
+    // cut-out ladder tile on three of their six faces in the fist while the
+    // same stiles are solid planking on the wall, and a torch head burns on its
+    // top only when it is held and on every side when it is placed.
+    const cap = b[6] ? TILE_TOP[blockId] : -1;
+    const top = cap >= 0 ? cap : TILE_TOP[blockId];
+    const bot = cap >= 0 ? cap : TILE_BOTTOM[blockId];
+    const front = cap >= 0 ? cap : TILE_FRONT[blockId];
+    const side = cap >= 0 ? cap : TILE_SIDE[blockId];
     const faces = [
-      { n: [0, 1, 0], layer: TILE_TOP[blockId], u: x1 - x0, v: z1 - z0,
+      { n: [0, 1, 0], layer: top, u: x1 - x0, v: z1 - z0,
         c: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]] },
-      { n: [0, -1, 0], layer: TILE_BOTTOM[blockId], u: x1 - x0, v: z1 - z0,
+      { n: [0, -1, 0], layer: bot, u: x1 - x0, v: z1 - z0,
         c: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]] },
       // directional blocks wear their front on +z so a tumbling drop still reads
-      { n: [0, 0, 1], layer: TILE_FRONT[blockId], u: x1 - x0, v: y1 - y0,
+      { n: [0, 0, 1], layer: front, u: x1 - x0, v: y1 - y0,
         c: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]] },
-      { n: [0, 0, -1], layer: TILE_SIDE[blockId], u: x1 - x0, v: y1 - y0,
+      { n: [0, 0, -1], layer: side, u: x1 - x0, v: y1 - y0,
         c: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]] },
-      { n: [1, 0, 0], layer: TILE_SIDE[blockId], u: z1 - z0, v: y1 - y0,
+      { n: [1, 0, 0], layer: side, u: z1 - z0, v: y1 - y0,
         c: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]] },
-      { n: [-1, 0, 0], layer: TILE_SIDE[blockId], u: z1 - z0, v: y1 - y0,
+      { n: [-1, 0, 0], layer: side, u: z1 - z0, v: y1 - y0,
         c: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]] },
     ];
     for (const f of faces) {

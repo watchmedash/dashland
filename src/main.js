@@ -2558,6 +2558,24 @@ class Game {
     this.breath = 1;
     this.energy = 1;
     this.soakT = 0;
+    // The rest of the family `soakT` belongs to. It was the only one of the
+    // eight cleared here, and the other seven are all clocks that count damage
+    // out over the following seconds — so they crossed planets. Eat a deathcap,
+    // quit to the menu, start a new world, and you arrived on a planet that has
+    // never had a mushroom on it losing a point every three seconds to one; the
+    // burn does the same after a lava death, and the chill after a drift.
+    // `respawn` has cleared exactly this list since the same bug was found on
+    // the bed, and quitting is the other way a body starts somewhere new.
+    this.player.burning = 0;
+    this._scaldT = 0;
+    this._starve = 0;
+    this.chillT = 0;
+    this._chillT = 0;
+    this._chillSaid = false;
+    this.poisonT = 0;
+    this._poisonT = 0;
+    this.sporeT = 0;
+    this._sporeSaid = false;
     this.graceT = 0;
     // Cleared here as well as when it runs out: quitting to the menu mid-grace
     // and loading a save would otherwise leave the flag set on the mob system

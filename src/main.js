@@ -2510,6 +2510,19 @@ class Game {
     // head of Tornado.js.
     this.tornado = null;
     this.particles.tornadoOff();
+    // ...and the sky that was making it. `Weather` was built once in the
+    // constructor and never touched again, so quitting a storm and starting a
+    // new planet opened it under the old one's rain: measured on a fresh seed,
+    // `state` storm, `precip` 1, `sun` 0.15, `fog` 1.9, all inherited. Its
+    // `tornadoCooldown` came across too, which is worse than cosmetic — it is
+    // the field written to guarantee that "a brand new world cannot be met by
+    // one in its first storm", and a world entered on a spent cooldown has no
+    // such guarantee.
+    //
+    // Assigned from a fresh instance rather than field by field so the
+    // constructor stays the one place a fair sky is described. `onThunder` is a
+    // wire from this file and outlives the weather it was hung on.
+    Object.assign(this.weather, new Weather(), { onThunder: this.weather.onThunder });
     this.mobs.clear();
     // The flow sim keys everything by cell index, so its sources and levels are
     // meaningless against a different planet — carried over, they marked cells

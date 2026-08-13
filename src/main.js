@@ -23,6 +23,10 @@ import {
 import { loadTileAtlas } from './render/TileAtlas.js';
 import { bobberGeometry } from './render/ItemModels.js';
 import { Audio } from './audio/Audio.js';
+// The one night curve. `Ambience` owns it because it was the first thing that
+// needed to know, and a second definition here would be a second answer to
+// "is it dark" that could drift from the crickets and the owls.
+import { nightness } from './audio/Ambience.js';
 import { UI } from './ui/UI.js';
 // The loadout table, read through the namespace rather than as a named import
 // on purpose: it is the UI's list and the UI is where it must stay, but a named
@@ -862,6 +866,14 @@ const _occLocal = new THREE.Vector3();
  * _beginGrace.
  */
 const NEW_WORLD_GRACE = 180;
+/**
+ * Torches handed to a player whose brand new planet opens in the dark.
+ *
+ * Five is enough to light a hole to sit out the first night in and is not
+ * enough to light a camp, which is the line the grace timer draws too: the
+ * night is survivable, not skipped. See `_beginGrace`.
+ */
+const NIGHT_START_TORCHES = 5;
 
 /**
  * How deep counts as having reached the core, and how far a placed hearth
@@ -2410,6 +2422,40 @@ class Game {
     this.graceT = NEW_WORLD_GRACE;
     this.mobs.spawnGrace = true;
     for (const m of [...this.mobs.list]) if (m.spec.hostile) this.mobs._die(m, []);
+    /*
+     * Five torches, but only if the planet you have just made is already dark.
+     *
+     * The day clock is synced to the real one by default (`dayMinutes: 0`, so
+     * `timeOfDay` returns `Sky.clockFraction`, which is the OS clock), which
+     * means the hour a new world opens on is the hour it is where the player is
+     * sitting. Start a game after dinner and you arrive at night - on a planet
+     * with no bed, nothing built, nothing lit, and, since the starting loadout
+     * was removed below, nothing in your hands either.
+     *
+     * That is a different game from the one the daytime player gets, and not in
+     * a way anybody chose: the argument for taking the loadout away is that the
+     * first ten minutes are the game and a torch given at spawn answers the
+     * first night before it is asked. It is a good argument, and it assumes you
+     * can see. The grace timer right above already concedes the same point in
+     * the other currency - it holds the monsters off for three minutes - so
+     * this is that concession finished, for the half of the day it was missing.
+     *
+     * Every difficulty, deliberately and at the owner's instruction. Extreme is
+     * meant to be harsh about what it costs you to die, not about what time you
+     * happened to press New Game.
+     *
+     * `nightness` rather than a bare hour comparison: it is the same curve the
+     * ambience uses to decide when to swap birds for owls, and one answer to
+     * "is it dark" is worth more than a number of my own here. Above zero means
+     * the sun is down.
+     */
+    if (nightness(this.timeOfDay()) > 0) {
+      const torch = itemIdOf('torch');
+      if (torch) {
+        this.inventory.add(torch, NIGHT_START_TORCHES);
+        this.ui.toast('Night start. Five torches.', torch, 5000);
+      }
+    }
     // What the player chose to bring, or the six torches if they chose nothing.
     // The stacks come from the UI's own option table, so the button and the bag
     // cannot disagree; an item name that no longer exists is skipped rather than

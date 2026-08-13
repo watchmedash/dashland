@@ -72,6 +72,18 @@ const GradeShader = {
     uLift: { value: new THREE.Vector3(0.004, 0.006, 0.012) },
     uDamage: { value: 0 },
     uUnderwater: { value: 0 },
+    /**
+     * Buried: eye inside a sink block. `xyz` is the colour of the stuff, `w` is
+     * how much of the screen it has.
+     *
+     * The one state in the game where the camera is deliberately inside opaque
+     * geometry, so it is the one place a screen tint is doing real work rather
+     * than decorating. A cell's faces are culled from the inside and its
+     * neighbours' shared faces are culled against it, so with nothing here a
+     * player at the bottom of a pool sees a torn view of the level from the
+     * wrong side. This is not a mood; it is what stops that being visible.
+     */
+    uBuried: { value: new THREE.Vector4(0, 0, 0, 0) },
     uResolution: { value: new THREE.Vector2(1, 1) },
   },
   vertexShader: /* glsl */`
@@ -83,6 +95,7 @@ const GradeShader = {
     uniform sampler2D tDiffuse;
     uniform float uTime, uVignette, uGrain, uAberration, uSaturation, uContrast, uDamage, uUnderwater;
     uniform vec3 uLift;
+    uniform vec4 uBuried;
     uniform vec2 uResolution;
     varying vec2 vUv;
 
@@ -126,6 +139,18 @@ const GradeShader = {
       // luminance ~1 so it costs no exposure. See SHADOW_TINT.
       float tl = clamp(dot(col, LUMA), 0.0, 1.0);
       col *= mix(SHADOW_TINT, HIGHLIGHT_TINT, smoothstep(0.06, 0.72, tl));
+
+      // Buried. Before the vignette rather than after it, so the corners of a
+      // packed screen still fall away and the picture keeps a shape — a flat
+      // fill edge to edge reads as the renderer having died.
+      if (uBuried.w > 0.001) {
+        // Strongest at the middle, where the stuff is pressed against the lens,
+        // and it never quite reaches 1: a hint of the world stays visible at
+        // the rim, which is what tells the player they are looking at something
+        // rather than at nothing.
+        float pack = uBuried.w * (1.0 - 0.22 * smoothstep(0.02, 0.25, r2));
+        col = mix(col, uBuried.rgb, pack);
+      }
 
       // vignette
       float vig = 1.0 - uVignette * smoothstep(0.18, 0.92, r2 * 1.6);
@@ -452,6 +477,12 @@ export class PostFX {
     this.grade.uniforms.uTime.value += dt;
     this.grade.uniforms.uDamage.value = state.damage;
     this.grade.uniforms.uUnderwater.value = state.underwater ? 1 : 0;
+    // `state.buried` is [r, g, b, amount] or absent. Absent is the case on
+    // every frame but the handful a player spends under a pool, so it costs a
+    // single compare the rest of the time.
+    const bu = this.grade.uniforms.uBuried.value;
+    if (state.buried) bu.set(state.buried[0], state.buried[1], state.buried[2], state.buried[3]);
+    else bu.w = 0;
     if (state.underwater) {
       this.grade.uniforms.uSaturation.value = 0.86;
       this.grade.uniforms.uLift.value.set(0.0, 0.02, 0.05);

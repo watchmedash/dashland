@@ -525,6 +525,50 @@ const LOG_IDS = {
   pine: [ID.log_pine_i, ID.log_pine_j],
 };
 
+/**
+ * Quicksand pools: how big, how rare, and how deep.
+ *
+ * Not on a lattice, unlike the springs, the lakes and the fallen logs, and the
+ * difference is what the feature IS. Those three are objects — a pool, a tarn,
+ * a trunk — that have a centre, a radius and a rim, and a lattice is how you
+ * ask "is there one near this column" in O(1). A patch of ground that has gone
+ * soft has no centre. It is a property of the ground, like the podzol under a
+ * pine wood and the drift over tundra, and both of those are noise fields read
+ * per column in exactly this pass. So this is one more `fbm3` beside `patch`,
+ * and it costs a column what those cost.
+ *
+ * QS_FREQ 34 against `patch`'s 14, which that comment measures at "a blob about
+ * twenty columns across": the same arithmetic puts one of these at about eight,
+ * and the part of it standing over the threshold at four to six. That is the
+ * size it has to be. Much larger and there is no way round it and no way out of
+ * the middle of it; much smaller and it is a puddle you step over without ever
+ * finding out what it was.
+ *
+ * QS_RIM is the whole of the legibility argument, and it is worth more than the
+ * colour. A pool is TWO layers deep in the middle and ONE at the edge, so the
+ * first thing that happens to anybody walking into one is that they go in up to
+ * the knee, in a patch of ground that is visibly not the colour of the desert,
+ * and stop. Standing in the shallow ring is not a trap: one layer of quicksand
+ * bottoms out with the feet on solid sand and the whole body in the clear.
+ * Everything that follows is then a choice the player made with the evidence in
+ * front of them, which is the difference between a hazard and an ambush.
+ */
+const QS_FREQ = 34;
+const QS_THR = 0.40;
+const QS_RIM = 0.06;
+/**
+ * Rock that must stand under a pool before a cave may open, in blocks.
+ *
+ * The ordinary skin is 2.2, which is exactly wrong here by about a cell. A
+ * two-layer pool occupies depths 0..2, so its floor is the cell centred at
+ * depth 2.5 — and 2.5 is past 2.2, so the carve is allowed to take it. The
+ * result is not a cosmetic seam: it is a pool of quicksand with the roof of a
+ * cavern for a bottom, and a body that sinks through it arrives in the dark at
+ * whatever speed the drop is worth. This is the pool depth plus the ordinary
+ * skin, so the floor is solid and so is the cell under it.
+ */
+const QS_CAVE_CLEAR = 4.4;
+
 /** Shared scratch for the per-column passes — they are called a million times. */
 const _fillDir = [0, 0, 0];
 /** Aquifers and springs get their own, because they run inside the others. */
@@ -1912,6 +1956,52 @@ export class WorldGen {
   // --- per-column voxel work -------------------------------------------------
 
   /**
+   * How many layers of quicksand this column wears, or 0.
+   *
+   * Its own method rather than four lines inside `fillColumn`, because the cave
+   * carve has to ask the same question — see QS_CAVE_CLEAR — and the two
+   * answers must be the same answer. Recomputed there rather than stored: a
+   * `Uint8Array(COLUMNS)` is 1.3 MB resident to cache one `fbm3`, and both
+   * callers already have the direction vector in hand.
+   *
+   * Every test here reads a global table that is fixed before any voxel is
+   * written, so this gives the same answer whichever region asks and in
+   * whatever order — which is the rule every pass in this file lives by.
+   *
+   * The site tests, and what each one is keeping out:
+   *
+   *   - **desert only.** Quicksand is saturated sand and it has to read as the
+   *     ground it is in; the desert is the one biome where a dark wet patch is
+   *     both plausible and unmistakably not what is round it. Beach was in this
+   *     clause first and came out again because it is provably dead: a beach
+   *     column that clears the waterline test below does not exist on any of
+   *     the three seeds measured, and a clause that never fires is a claim
+   *     about the planet that is not true.
+   *   - **not in a canyon.** The gorge floor already has a palette of its own
+   *     and it is the one place a player has no way to walk round anything.
+   *   - **not a lake bed or bank.** A lake's containment is an argument about
+   *     the ring of columns round it being solid rock at the water's own
+   *     layers, and putting a two-block hole in that ring would be putting a
+   *     hole in the argument. Quicksand is impermeable to the flow sim, so
+   *     nothing would visibly leak — the bank would simply stop being the
+   *     thing the proof is about, which is worse.
+   *   - **well clear of the waterline.** Same rule from the sea's side, plus
+   *     the plain one: a pool at the tideline is a pool full of water, and a
+   *     hazard you cannot tell from a shallow is not a hazard.
+   *   - **not steep.** `rocky` repaints anything over 1.35 of slope to bare
+   *     stone anyway, and sand does not pool on a dune face.
+   */
+  sinkDepthOf(col, dir) {
+    if (this.colBiome[col] !== BIOME.DESERT) return 0;
+    if (this.canyonMask[col] || this.lakeKind[col] || this.submerged[col]) return 0;
+    if (this.colSlope[col] > 0.9) return 0;
+    if (this.colHeight[col] < R_SEA + 1.6) return 0;
+    const q = this.nDetail.fbm3(dir[0] * QS_FREQ, dir[1] * QS_FREQ, dir[2] * QS_FREQ, 3, 2, 0.5);
+    if (q <= QS_THR) return 0;
+    return q > QS_THR + QS_RIM ? 2 : 1;
+  }
+
+  /**
    * Rock, soil and sea for one column. Reads nothing but this column's own
    * entry in the global tables, which is what makes it safe to run in any order
    * and at any time.
@@ -2139,6 +2229,18 @@ export class WorldGen {
       }
     }
 
+    /**
+     * A patch of ground that is not ground, over the top of everything the
+     * biome and the lake decided.
+     *
+     * Last, like the lake bed and for the same reason: it replaces the surface
+     * rather than tinting it, and anything that ran after it would repaint a
+     * pool back into sand. What is UNDER it is untouched — `sub` is still
+     * sandstone under a desert pool — so the floor a body settles on is the
+     * floor that column was always going to have.
+     */
+    const sinkD = this.sinkDepthOf(col, dir);
+
     for (let k = 0; k < D; k++) {
       const r = R_MIN + k + 0.5;
       let id;
@@ -2156,7 +2258,8 @@ export class WorldGen {
         id = ((r <= R_SEA && submerged[col]) || r <= lakeSurf[col]) ? ID.water : ID.air;
       } else {
         const depth = h - r;
-        if (depth < 1.0) id = top;
+        if (depth < sinkD) id = ID.quicksand;
+        else if (depth < 1.0) id = top;
         else if (depth < 4.0) id = sub;
         else id = this.stratum(r, dir[0], dir[1], dir[2]);
       }
@@ -2182,7 +2285,11 @@ export class WorldGen {
       // genuinely reach the floor to open; it does so where a passage runs
       // close underneath, which is a handful of openings per canyon rather
       // than a sieve.
-      const skin = canyonMask[col] ? 1.0 : 2.2;
+      // A quicksand pool needs more rock under it than a skin. See
+      // QS_CAVE_CLEAR: the ordinary 2.2 leaves the pool's own floor cell
+      // carveable, and a pool with a cavern under it is a hole, not a hazard.
+      const skin = canyonMask[col] ? 1.0
+        : (this.sinkDepthOf(col, dir) ? QS_CAVE_CLEAR : 2.2);
       /**
        * Under a lake — bed or bank — the skin rule is not enough on its own,
        * and the way it fails is the flood bug rather than a cosmetic one.

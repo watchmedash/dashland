@@ -230,6 +230,9 @@ function block(o) {
     submerged: o.submerged ?? false,
     // 1 for a block that holds up another of its own kind. See `supports`.
     stacks: o.stacks ?? false,
+    // Cells per second a body sinks through this block, or 0 for the 249
+    // blocks that are either a floor or thin air. See SINK.
+    sink: o.sink ?? 0,
   };
 }
 
@@ -1289,6 +1292,48 @@ export const BLOCKS = [
     directional: true, opaque: false, hardness: 2.0, tool: 'axe',
     particle: [0.58, 0.42, 0.25], sound: 'wood', fuel: 5,
   }),
+
+  // --- ground that stops being ground ----------------------------------------
+  //
+  // "can we add more hazard places, we have lava but what about quicksand".
+  //
+  // The first member of a family of two (powder snow is the other), and the
+  // family is a single field: `sink`. Everything in the block table until now
+  // was either something a body stands on or something it walks through, and
+  // this is the third thing — a cell you fall INTO and then have to get out
+  // of. `solid: false` is what makes the collision loop skip it, exactly as it
+  // skips a flower, and `sink` is what stops that being a hole in the world.
+  // See SINK for the whole rule and `Player.update` for the four lines that
+  // implement it.
+  //
+  // Appended on the end and `NOT_OBTAINABLE` with a hand-written item at the
+  // foot of `game/Items.js`, for the reason the gate above gives at length: the
+  // block-item loop runs at the TOP of that file, so a block appended here
+  // would append an ITEM in the middle of the array and push the coin, the
+  // ingots, the tools, the armour, the buckets and the fifteen fish up by one.
+  //
+  // **The tiles are the legibility, and they are both tiles the atlas already
+  // has.** Sand on the sides, because that is what it is and because a bank cut
+  // through a pool has to match the dune it is cut into; `mud` on top, because
+  // saturated sand is dark and wet and that dark patch is the whole warning. A
+  // player looking at a desert sees one thing that is not the colour of the
+  // desert, and the crosshair says "Quicksand" from up to LOOK_RANGE away
+  // before a foot is anywhere near it. Sand on top would have been the cruel
+  // version and it is the version this deliberately is not.
+  //
+  // Opaque, and that is the default rather than a choice: it has to cull the
+  // sand beside it or a pool would be a glass tank with the dune's cross
+  // section showing through.
+  //
+  // Not `gravity`. Sand and gravel FALL; quicksand is the pool they fell into
+  // and stayed in. It does mean loose sand dropped over a pool falls straight
+  // through it — `_settleGravity` lands on solid — and filling a pool in with
+  // a shovelful of the dune beside it is a legitimate way past one.
+  block({
+    name: 'quicksand', label: 'Quicksand', top: 'mud', side: 'sand', bottom: 'sand',
+    solid: false, sink: 0.9, hardness: 0.5, tool: 'shovel',
+    particle: [0.56, 0.47, 0.33], sound: 'sand',
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -1540,6 +1585,31 @@ export const IS_REPLACEABLE = new Uint8Array(N_BLOCKS);
  * *keeps* it and moves it down.
  */
 export const HAS_GRAVITY = new Uint8Array(N_BLOCKS);
+/**
+ * Cells per second a body sinks through this block. 0 for everything that is
+ * either a floor or thin air, which is everything but quicksand today.
+ *
+ * **The third kind of cell.** A block is solid and you stand on it, or it is
+ * not and you pass through it as if it were not there. `sink` is the case in
+ * between: `IS_SOLID` is 0, so the collision loop skips the cell entirely and a
+ * body falls into it exactly as it falls into air — and then this number takes
+ * over from gravity and lowers it at a fixed, slow rate instead. Terminal by
+ * construction rather than by a clamp, which is what stops a body ever
+ * gathering the speed to tunnel out through the floor underneath.
+ *
+ * A table rather than a check for one id, and not because a second one is
+ * *imaginable* — the second one is already named. Powder snow is the same
+ * physics with a different number and a cold clock hung off it, and building
+ * the two as one family is the difference between a player learning one rule
+ * and learning two.
+ *
+ * The rest of the rule — that struggling drives you down and holding still
+ * floats you up, that you leave over the rim rather than straight up, that a
+ * fall into one is not a fall — is not here, for the same reason the cactus's
+ * cadence is not in CONTACT_HURT: the block owns the number, the body owns what
+ * to do about it. See `Player.update`.
+ */
+export const SINK = new Float32Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -2010,6 +2080,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   STACKS[i] = b.stacks ? 1 : 0;
   IS_REPLACEABLE[i] = b.render === R_CROSS ? 1 : 0;
   HAS_GRAVITY[i] = b.gravity ? 1 : 0;
+  SINK[i] = b.sink;
   // Reef life is exempt: `DROWNS` means "the water would destroy this", and
   // water is the only place a coral or a kelp stalk can be. The opposite rule —
   // these may only be placed *in* water — lives in `main.js`, where the cell

@@ -45,6 +45,11 @@ const NOT_OBTAINABLE = new Set([
   // The fence gate, for exactly the same reason and by exactly the same
   // machine. Its `add()` is at the foot of this file, under the dishes.
   'fence_gate',
+  // Quicksand, for exactly the same reason again. Its `add()` is at the foot of
+  // this file, under the gate. It is a *generated* block rather than a crafted
+  // one, which changes nothing here: the loop below does not care where a block
+  // comes from, only that an item made by it lands at 232.
+  'quicksand',
 ]);
 
 /**
@@ -1045,6 +1050,17 @@ for (const d of DISHES) add(d);
 // by one, so `fence_gate` is in `NOT_OBTAINABLE` up there and arrives here
 // instead. See the long note beside the kitchen, which is the same trap.
 add({ name: 'fence_gate', label: 'Fence Gate', block: ID.fence_gate, sound: 'wood' });
+
+// --- the hazards ------------------------------------------------------------
+//
+// Under the gate, and last for the same reason it is last. Everything above
+// this line is in somebody's save.
+//
+// These two are dug up rather than crafted, so unlike the gate there is no
+// recipe to reach them — a shovel and a pool is the whole route. They are held
+// and placed like any other block, which is deliberate: a trap you can dig out
+// and lay somewhere else is worth far more than one you can only fall into.
+add({ name: 'quicksand', label: 'Quicksand', block: ID.quicksand, sound: 'sand' });
 
 /** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
 export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);

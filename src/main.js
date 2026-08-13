@@ -38,6 +38,7 @@ import { IconFactory } from './ui/Icons.js';
 import { Inventory, Slot, HOTBAR, useKind } from './game/Inventory.js';
 import { Drops } from './game/Drops.js';
 import { Weather } from './game/Weather.js';
+import { siteTornado } from './game/Tornado.js';
 import { Seasons, snowLine } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import * as MobModels from './game/MobModels.js';
@@ -1711,6 +1712,8 @@ class Game {
      */
     this.falling = new Set();
     this.fallTimer = 0;
+    /** The funnel in flight, or null. Never saved: see the head of Tornado.js. */
+    this.tornado = null;
     // A current carries what is in it. Both are built before the sim is, so
     // they take the reference here rather than through their constructors.
     this.player.water = this.water;
@@ -1786,6 +1789,14 @@ class Game {
     /** Seconds since the last swing landed, for the attack rhythm. */
     this.attackT = ATTACK_PERIOD;
     this.damageFlash = 0;
+    /**
+     * How much of the screen the stuff you are buried in has, 0..1, and what
+     * colour it is. See `_tickSink`.
+     */
+    this._buried = 0;
+    this._buriedColor = [0, 0, 0];
+    /** The sink block the feet were in last frame, for the edge. */
+    this._wasSink = 0;
     /**
      * The spyglass, on C: 0 is the normal view and 1 is fully narrowed.
      *
@@ -2355,6 +2366,12 @@ class Game {
     // whatever generated there.
     this.arrows.clear();
     this.bow.t = 0;
+    // A funnel holds a column index and a world position, both of which mean
+    // something else entirely on the next planet. Same reason as the arrows
+    // above, and it is never restored on load either — see the save note at the
+    // head of Tornado.js.
+    this.tornado = null;
+    this.particles.tornadoOff();
     this.mobs.clear();
     // The flow sim keys everything by cell index, so its sources and levels are
     // meaningless against a different planet — carried over, they marked cells
@@ -5241,7 +5258,15 @@ class Game {
     else this._frozenUpdate(dt);
 
     voxelUniforms.uTime.value += dt;
-    this.postfx.render(dt, { damage: this.damageFlash, underwater: this.player.headInWater });
+    this.postfx.render(dt, {
+      damage: this.damageFlash,
+      underwater: this.player.headInWater,
+      // Under a pool. The colour is the block's own `particle` colour, which is
+      // already the answer to "what does a handful of this look like" and is
+      // what the crumbs and the foot dust are tinted with — so being buried in
+      // it and kicking it up match without a second number to keep in step.
+      buried: this._buried > 0.002 ? [...this._buriedColor, this._buried] : null,
+    });
     // No hands. `viewModel.enabled` is already false for a spectator — see the
     // gate in `_syncViewModel` — and this is the second half of the same thing:
     // nothing of the body is drawn over a world it cannot touch.
@@ -5593,6 +5618,12 @@ class Game {
       this._drownTimer = 0;
       this.player.burning = 0;
       this.soakT = 0;
+      // A spectator's `headInSink` is stale for the same reason `headInWater`
+      // is — `Player.update` no longer runs — so a player who died at the
+      // bottom of a pool would watch their own world through a screen full of
+      // sand for ever.
+      this._buried = 0;
+      this._wasSink = 0;
     } else if (this.player.headInWater) {
       // Nine seconds of air, stretched by the lungs branch — 27 at lungs 4.
       // The bar is still 0..1, so what the skill changes is how long it takes
@@ -5618,6 +5649,7 @@ class Game {
       this._tickFire(dt);
       this._tickContact(dt);
       this._tickSoak(dt);
+      this._tickSink(dt);
     }
 
     // Four times a second is plenty: a sprint covers about 2 units in that time
@@ -5742,6 +5774,13 @@ class Game {
     const biomeId = this.planet.colBiome[cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)))] ?? 2;
     const altitude = this.player.position.length() - R_SEA;
     this.weather.update(dt, biomeId, altitude, this.seasons.cold);
+    // A funnel, if the sky wants one and the ground will take one. Weather owns
+    // the odds and Tornado.js owns everything else — see the head of that file
+    // for why, and for the whole design. Six lines here is the entire footprint
+    // in main.
+    if (this.tornado) {
+      if (!this.tornado.update(dt)) { this.tornado = null; this.particles.tornadoOff(); }
+    } else if (this.weather.wantsTornado(dt)) this._spawnTornado();
     // The leading edge of a rain band. `precip` eases toward its target at
     // dt*0.14, so the bed already fades in over about seven seconds — what it
     // has never had is a FRONT, and the first a player knew of a storm was
@@ -5848,6 +5887,34 @@ class Game {
    *   `Skills.soak` wants, and it means a damage source added tomorrow has to
    *   opt in by name instead of inheriting a 45% discount by defaulting to true.
    */
+  /**
+   * Site a funnel now, if the ground nearby will take one.
+   *
+   * A method rather than four lines inline because the harness has to be able to
+   * ask for one on demand — a mechanic that appears once every three quarters of
+   * an hour is otherwise untestable, and the alternative is a test that edits the
+   * odds and therefore never measures the shipped ones.
+   *
+   * The cooldown is re-armed only once siting has actually succeeded. Siting
+   * fails over ocean, forest and mountain, and a refused roll that still burned
+   * seven minutes of cooldown would be a bug nobody could ever see happening.
+   *
+   * @returns {boolean} whether one formed
+   */
+  _spawnTornado() {
+    if (this.tornado) return false;
+    const t = siteTornado(this);
+    if (!t) return false;
+    this.tornado = t;
+    this.weather.armedTornado();
+    // The existing weather-front gust, unchanged — the same sound a storm's
+    // arrival already makes, which is the point: the player has heard it before
+    // and knows it means the sky has changed its mind.
+    this.audio.squall(1);
+    this.ui.toast('Tornado');
+    return true;
+  }
+
   _takeHit(damage, cause, guarded = true, kind = 'blow') {
     const p = this.player;
     // There is nothing there to hit. This is the single door every blow, every
@@ -5928,6 +5995,50 @@ class Game {
       }
     }
     this.damageFlash = Math.max(this.damageFlash, p.burning > 0 ? 0.14 : 0);
+  }
+
+  /**
+   * Going under, and being under: the seen and heard half of a sink block.
+   *
+   * The physics is entirely in `Player.update` and there is deliberately no
+   * damage here at all — see `SINK` in Blocks.js, and the note on the block
+   * itself for why quicksand traps rather than kills. What this owns is the
+   * three things a player needs in order to understand what just happened to
+   * them, and all three are cues rather than rules:
+   *
+   *   - **the sound of the ground going.** One shot on the edge, in the block's
+   *     own material, and `Audio.sink` is built as the inverse of a footstep so
+   *     that it is unmistakably the sand you were walking on. Once per entry,
+   *     not per frame: a body bobbing at the surface of a pool crosses the edge
+   *     several times a second and a per-frame sound would be a buzz.
+   *   - **the stuff itself, kicked up.** `footDust` takes a block id and is
+   *     already tinted from that block's own `particle` colour, which is the
+   *     same colour the screen goes below. One number, three consumers.
+   *   - **the screen, when the eye goes under.** Eased rather than snapped, at
+   *     a rate that reaches most of the way in about a quarter of a second —
+   *     fast enough to be the same event as the sound, slow enough that bobbing
+   *     at the surface pulses rather than strobes.
+   *
+   * There is no clock in here and nothing accumulates, so there is nothing for
+   * `respawn` to clear: leaving the pool is leaving the pool. The one field
+   * that outlives a frame is `_buried`, and it is driven straight off the
+   * player's current state, so a body that stops being in a pool for any reason
+   * — including dying in one — fades out on its own.
+   */
+  _tickSink(dt) {
+    const p = this.player;
+    const id = p.inSink;
+    if (id && id !== this._wasSink) {
+      this.audio.sink(BLOCKS[id].sound, p.position);
+      this.particles.footDust(p.position, p.up, id);
+    }
+    this._wasSink = id;
+
+    // Held over the frames the feet are momentarily above the pool and the head
+    // is not, which is every frame of bobbing at the surface. Reading the
+    // colour off `inSink` alone would flicker it to grey on those frames.
+    if (id) this._buriedColor = BLOCKS[id].particle;
+    this._buried += ((p.headInSink ? 0.9 : 0) - this._buried) * Math.min(1, 9 * dt);
   }
 
   /**

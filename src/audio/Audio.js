@@ -853,6 +853,22 @@ export class Audio {
     src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
   }
 
+  /**
+   * The ground giving way under you: going under in quicksand or powder snow.
+   *
+   * Deliberately built as the inverse of `step` rather than as a new noise. A
+   * step is short, bright and on top of the material; this is the same material
+   * with the transient taken off and the tail left on — pitch well down so the
+   * band sits under the walking sound, and more than twice the duration, so
+   * what you hear is a long soft collapse instead of a tap. That relationship
+   * is the point: it has to be recognisably the sand or the snow you were just
+   * walking on, doing something that is not walking.
+   *
+   * No second layer and no scuff. `step`'s scuff is a foot rolling on a
+   * surface, and the whole news here is that there is no surface.
+   */
+  sink(mat, pos) { this._burst(mat, { gain: 0.46, pitch: 0.52, dur: 2.1, pos, cat: 'step' }); }
+
   dig(mat, pos) { this._burst(mat, { gain: 0.18, pitch: 1.1, dur: 0.55, pos }); }
   break_(mat, pos) { this._burst(mat, { gain: 0.5, pitch: 0.9, dur: 1.7, pos }); }
   place(mat, pos) { this._burst(mat, { gain: 0.42, pitch: 1.15, dur: 1.1, pos }); }

@@ -7,7 +7,7 @@ import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
 import { cellToWorld, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
 import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
-  CONTACT_HURT,
+  CONTACT_HURT, SINK,
 } from '../world/Blocks.js';
 // Imported rather than re-declared so there is exactly one "how much slower is
 // water" number in the game. Items.js owns it, Skills.js quotes it in prose
@@ -113,6 +113,46 @@ const LADDER_GRIP = 0.62;
  * doesn't. A current you cannot leave is not a river, it is a wall.
  */
 const FLOW_PUSH = 11;
+
+/**
+ * What fraction of your speed a sink block leaves you with.
+ *
+ * 0.32 puts a walk through quicksand at 4.4 * 0.32 = 1.41 cells/s — half the
+ * 2.73 of swimming, and the slowest a body moves anywhere in this game. That is
+ * the point: the water penalty (0.62) is a place you can cross, and this has to
+ * be a place you would rather go round.
+ *
+ * Sprint is not exempted and does not need excluding by name. It multiplies the
+ * same 0.32, so a sprint through a pool makes 2.18 cells/s — faster, and the
+ * `moving` test below means it is also driving you straight to the bottom,
+ * which is the trade the whole hazard is built on.
+ */
+const SINK_MOVE = 0.32;
+/**
+ * Cells per second you rise while you hold still in a sink block.
+ *
+ * Deliberately slower than any block's `sink` rate. That asymmetry IS the
+ * hazard: at quicksand's 0.9 down against 0.55 up, a second of struggling costs
+ * you a second and a half of standing still, so a player who panics loses
+ * ground and a player who stops gets it back. Both directions are alive, so
+ * there is never a frame where the pool has you and nothing you can do matters,
+ * which is the line between a hazard and a bug report.
+ *
+ * It also has to be strong enough that being caught is never permanent with
+ * nothing in hand. Measured with no equipment, from the floor of a two-deep
+ * pool: 2.1s of holding nothing floats the feet back to the rim.
+ */
+const SINK_RISE = 0.55;
+/**
+ * How fast the vertical rate converges on whichever of the two it is aiming
+ * for, per second.
+ *
+ * Not instant, and not for smoothness. It is what makes the shuffle out of a
+ * pool a rhythm the player can feel: a tap of forward does not put the body at
+ * full sink speed, so short steps cost less depth than long ones and learning
+ * that is learning how to get out. 9/s settles in about a third of a second.
+ */
+const SINK_RATE_LERP = 9;
 
 /**
  * Camera modes, in the order the cycle key walks them.
@@ -335,6 +375,26 @@ export class Player {
      */
     this.skills = null;
     this.headInWater = false;
+    /**
+     * The sink block the feet are inside, or 0. See SINK in Blocks.js.
+     *
+     * The id and not a boolean, because the two things that read it outside
+     * this class both want to know *which*: the Game plays the block's own
+     * material as the sound of going under, and the cold clock only runs in
+     * powder snow.
+     */
+    this.inSink = 0;
+    /** Its `SINK` rate, cached so the physics does not look the table up twice. */
+    this.sinkRate = 0;
+    /** Feet in the pool's top layer, which is the one place a jump works. */
+    this.sinkTop = false;
+    /**
+     * Eye inside a sink block: buried, and the one state in the game where the
+     * camera is inside opaque geometry on purpose. The Game turns it into a
+     * full-screen tint — without one you would be looking at the inside faces of
+     * the neighbouring cells, which reads as the world having fallen apart.
+     */
+    this.headInSink = false;
     /** feet in hot spring water — see the tuff test in `update` */
     this.inSpring = false;
     /** seconds still alight after leaving the lava */
@@ -968,6 +1028,33 @@ export class Player {
     this.inLava = feetId === ID.lava;
     this.headInWater = p.isLiquidWorld(headP.x, headP.y, headP.z) && !this.inLava;
 
+    // Ground that is not ground. Read off the feet cell exactly as `inWater`
+    // is, so the two answer the same question about the same cell and cannot
+    // disagree about which one the body is standing in.
+    //
+    // Water wins where they meet, and they do meet — quicksand is impermeable
+    // to the flow sim (it is not `IS_REPLACEABLE`, so `Water._canEnter` calls
+    // it a wall), but a pool with a bucket emptied into it puts water in the
+    // cell above and a body wading there is swimming, not sinking. Swimming is
+    // the more forgiving of the two and the one the player can see.
+    this.inSink = this.inWater ? 0 : (SINK[feetId] > 0 ? feetId : 0);
+    this.sinkRate = SINK[this.inSink];
+    this.headInSink = !this.inWater
+      && SINK[p.blockAtWorld(headP.x, headP.y, headP.z)] > 0;
+    /**
+     * Feet still in the pool's top layer: there is open air directly over them.
+     *
+     * This is what a jump is allowed to push off, and the window is deliberately
+     * about ONE cell rather than about a distance. A body sinking at quicksand's
+     * 0.9 cells/s crosses that layer in a little over a second, so falling into
+     * a pool gives you a second to get back out of it and no more — react and
+     * you were only ever knee deep, dither and you have to float back up before
+     * you can leave. Nothing about it needs explaining and it does not need
+     * aiming; it is simply that you cannot kick off from something you are
+     * already under.
+     */
+    this.sinkTop = !!this.inSink && SINK[p.at(feet.col, feet.k + 1)] === 0;
+
     // A hot spring is the only water on the planet with tuff under it: the four
     // lake beds are mud/peat/clay/sand/gravel/slate/basalt and the seabed is
     // sand and gravel, so three block reads identify a pool without the worker
@@ -999,6 +1086,7 @@ export class Player {
     let speed = (this.crouching ? 2.0 : this.sprinting ? 6.8 : 4.4)
       * (this.skills?.speedScale ?? 1) * this._energyScale();
     if (this.inWater) speed *= 0.62;
+    if (this.inSink) speed *= SINK_MOVE;
 
     const right = _c.copy(this.forward).cross(this.up).normalize();
     const wish = _a.set(0, 0, 0).addScaledVector(this.forward, iz).addScaledVector(right, ix);
@@ -1011,7 +1099,11 @@ export class Player {
       this.vel.i += (wi - this.vel.i) * t;
       this.vel.j += (wj - this.vel.j) * t;
     } else {
-      const damp = this.grounded ? 14 : this.inWater ? 4 : 1.2;
+      // A sink block damps harder than water and harder than the ground. Let go
+      // of the keys in one and the body stops where it is rather than coasting,
+      // which is what "held" feels like — and it also means holding still is a
+      // clean, unambiguous input rather than a slow drift you have to wait out.
+      const damp = this.inSink ? 18 : this.grounded ? 14 : this.inWater ? 4 : 1.2;
       const f2 = Math.max(0, 1 - damp * dt);
       this.vel.i *= f2; this.vel.j *= f2;
     }
@@ -1061,7 +1153,7 @@ export class Player {
     // Declared here rather than at the integrate step below, because the ladder
     // test needs it first and `const` does not hoist.
     const height = this.crouching ? HEIGHT - 0.35 : HEIGHT;
-    this.onLadder = !this.inWater && this._touchingLadder(height);
+    this.onLadder = !this.inWater && !this.inSink && this._touchingLadder(height);
     if (this.onLadder) {
       // Holding forward *into* the ladder climbs it, which is the whole of how
       // anyone expects a ladder to work and was the one way it did not: Space
@@ -1094,6 +1186,47 @@ export class Player {
       if (this.crouching) this.vel.k -= 9 * dt;
       this.vel.k *= Math.max(0, 1 - 3.2 * dt);
       this.vel.k = Math.max(this.vel.k, -5);
+    } else if (this.inSink) {
+      /*
+       * The whole of the hazard, and it is one sentence: **struggle and you go
+       * down, hold still and you come up.**
+       *
+       * Gravity is not applied at all here, and that is the load-bearing line
+       * rather than an optimisation. A body accelerating under gravity through
+       * a cell it does not collide with is a body that reaches 26 cells/s and
+       * leaves the world through the floor; the sink rate is a *velocity*, so it
+       * is terminal from the first frame and there is nothing to clamp.
+       *
+       * **Jump is the whole lesson, and it works in exactly one place.** With
+       * the feet still in the pool's top layer it is an ordinary jump and it is
+       * the way out. One layer down, with the stuff closed over your feet, it
+       * is not a jump at all — it counts as struggling and it drives you
+       * further under, which is the one thing a player will do by reflex when
+       * the ground gives way. So the rule the pool teaches is *get back to the
+       * top first, then push off*, and it teaches it by having the reflex fail
+       * in a way you can immediately undo.
+       *
+       * The jump was not in the first version of this and the measurement is
+       * why it is here. Without it a pool is inescapable, and not obviously so:
+       * floating to the surface puts the feet level with the rim, so walking
+       * off the edge LOOKS like the way out — but a step is movement, movement
+       * sinks you, and half a second of walking drops the feet below the top of
+       * the rim block, which is then a wall. Driven unequipped in a five-wide
+       * two-deep pool: ten shuffle cycles over sixty seconds and the body never
+       * once left. A hazard with no exit is not a hazard.
+       *
+       * There is still no climb and nothing to aim. The impulse is the ordinary
+       * 8.4, which clears 1.36 cells against this planet's gravity — more than
+       * the one cell a pool's lip ever stands proud of the surface you are
+       * floating at.
+       */
+      if (this.sinkTop && input.down('Space')) {
+        this.vel.k = 8.4;
+      } else {
+        const struggling = moving || input.down('Space');
+        const target = struggling ? -this.sinkRate : SINK_RISE;
+        this.vel.k += (target - this.vel.k) * Math.min(1, SINK_RATE_LERP * dt);
+      }
     } else {
       this.vel.k -= GRAVITY * dt;
       if (this.grounded && input.down('Space')) {
@@ -1213,7 +1346,14 @@ export class Player {
     // climbing down a long shaft charges you for the whole descent the moment
     // you step off at the bottom.
     if (this.onLadder) this.fallStart = null;
-    if (!this.grounded && !this.inWater && !this.onLadder) {
+    // A pool breaks a fall, exactly as water does, and this is not a courtesy
+    // — it is the difference between a hazard and a hidden instant death. A
+    // drift of powder snow in a mountain hollow is precisely the thing a player
+    // lands in at speed after missing a ledge, and charging for the drop as
+    // well as the burial would make the softest surface on the planet the most
+    // lethal. It is also Minecraft's rule for the same block.
+    if (this.inSink) this.fallStart = null;
+    if (!this.grounded && !this.inWater && !this.inSink && !this.onLadder) {
       if (this.fallStart === null && this.vel.k < -0.2) this.fallStart = r;
       // Track the highest point, not the point where the descent began: a jump
       // off a ledge starts the clock *after* the arc has already peaked, so a

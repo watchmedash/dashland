@@ -1726,7 +1726,7 @@ class Game {
     // the shaft itself, which is the right answer for a miss into the dirt too.
     this.arrows.onStick = (pos) => {
       const id = this.planet.blockAtWorld(pos.x, pos.y, pos.z);
-      this.audio.impact(id ? BLOCKS[id].sound : 'wood', pos);
+      this.audio.impact(id ? BLOCKS[id].sound : 'wood', pos, true);
     };
     // An arrow burning up in lava, given the same embers a dropped item gets
     // there — it is the same event and should not read as two different ones.

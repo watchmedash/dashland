@@ -453,6 +453,14 @@ demon and dragon, which turned out to be a synthesis win. See `MOB_SAMPLE` in
 | `exhale_husk.ogg` | 4,775 | `CREAHmn_Violent Humanoid Creature Exhale Short 4_SNDBTS_VB-SE.wav` | **SoundBits** (Vox Bestiae: Source Elements) |
 | `yell_pain.ogg` | 12,232 | `CREAMnstr_Designed Sea Beast Creature Pain Intense Yell Long 04_ESM_HC4.wav` | **Epic Stock Media** (Humanoid Creatures Vol 4) |
 
+Impacts, all four layered over the synthesised version rather than replacing it:
+
+| shipped file | bytes | source recording | publisher |
+|---|---|---|---|
+| `hit_flesh.ogg` | 5,378 | `GORESplt_Gore Designed Transient Heavy Impact Smash 01_ESM_HALG.wav` | **Epic Stock Media** (Halloween Game) |
+| `punch.ogg` | 4,359 | `FGHTImpt_Combat Punch Impact Light Hit Delay Crunchy Vintage Quick Smack 05_ESM_AG.wav` | **Epic Stock Media** (Anime Game) |
+| `arrow_hit.ogg` | 8,117 | `Arrow Hit Rattle.wav` | **Cinematic Sound Design** (Cartoon Bloopers) |
+| `blast_crack.ogg` | 7,435 | `EXPLDsgn_Explosion Small Blast Enemy Death Crunchy Boom Cartoon Noisy Crash Impact Delay 03_ESM_AG.wav` | **Epic Stock Media** (Anime Game) |
 
 Every one of them is heavily edited rather than lifted: trimmed out of takes of
 0.4 to 243 seconds, converted to mono, high-passed, level-matched, and for the

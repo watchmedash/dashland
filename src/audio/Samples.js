@@ -56,6 +56,12 @@ export const SAMPLES = {
   exhaleHusk: 'exhale_husk.ogg',
   // Swapped in for the layer above when the voice is a hurt or a death.
   yellPain: 'yell_pain.ogg',
+
+  // Impacts, all layered rather than substituted.
+  hitFlesh: 'hit_flesh.ogg',
+  punch: 'punch.ogg',
+  arrowHit: 'arrow_hit.ogg',
+  blastCrack: 'blast_crack.ogg',
 };
 
 /**
@@ -71,6 +77,7 @@ export const SAMPLES = {
 export const LOAD_ORDER = [
   'rain', 'surf', 'fire', 'thunderCrack',
   'shriekBug', 'wailGhost', 'gurgleDeep', 'exhaleHusk', 'yellPain',
+  'hitFlesh', 'punch', 'arrowHit', 'blastCrack',
   'crickets', 'cicada',
 ];
 

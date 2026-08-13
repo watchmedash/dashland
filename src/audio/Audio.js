@@ -1323,19 +1323,27 @@ export class Audio {
     const boom = 1.1 + Math.random() * 0.5;
 
     // --- crack: the leading edge, immediate and bright ----------------------
-    const cs = this.ctx.createBufferSource();
-    cs.buffer = this.noiseBuf;
-    cs.playbackRate.value = 1.6;
-    const hp = this.ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.setValueAtTime(2400, t);
-    hp.frequency.exponentialRampToValueAtTime(300, t + 0.16);
-    const cg = this.ctx.createGain();
-    cg.gain.setValueAtTime(0.0001, t);
-    cg.gain.linearRampToValueAtTime(0.42, t + 0.002);
-    cg.gain.exponentialRampToValueAtTime(0.0006, t + 0.18);
-    cs.connect(hp).connect(cg).connect(out);
-    cs.start(t, Math.random() * 2); cs.stop(t + 0.25);
+    // The same split thunder got, and for the same reason. The body, the sub
+    // and the rubble below all stay synthesised: they re-roll their count,
+    // spacing and depth on every call, so no two blasts have the same tail, and
+    // a recording of a tail is the part a player would learn. The leading edge
+    // is the part synthesis cannot make — a swept noise burst is a whoosh, and
+    // a detonation is a shockwave arriving all at once. Only that is swapped.
+    if (!this._shot('blastCrack', out, t, { gain: 0.55, rate: [0.82, 1.20] })) {
+      const cs = this.ctx.createBufferSource();
+      cs.buffer = this.noiseBuf;
+      cs.playbackRate.value = 1.6;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.setValueAtTime(2400, t);
+      hp.frequency.exponentialRampToValueAtTime(300, t + 0.16);
+      const cg = this.ctx.createGain();
+      cg.gain.setValueAtTime(0.0001, t);
+      cg.gain.linearRampToValueAtTime(0.42, t + 0.002);
+      cg.gain.exponentialRampToValueAtTime(0.0006, t + 0.18);
+      cs.connect(hp).connect(cg).connect(out);
+      cs.start(t, Math.random() * 2); cs.stop(t + 0.25);
+    }
 
     // --- body: noise through a fast-closing low-pass ------------------------
     const src = this.ctx.createBufferSource();
@@ -2276,13 +2284,29 @@ export class Audio {
    * anything that is not flesh. `dig('stone')` stood in for this everywhere,
    * which meant an arrow into a tree sounded like a pickaxe.
    *
+   * `shaft` adds the recorded rattle of a wooden arrow settling in whatever it
+   * has just buried itself in, and is only true on the arrow-stick path. It is
+   * deliberately NOT on the crit tick, which shares this method and passes
+   * 'metal': a critical blow from a sword is not an arrow, and a shaft rattling
+   * out of it would be the game reporting a shot that was never fired.
    */
-  impact(mat = 'wood', pos = null) {
+  impact(mat = 'wood', pos = null, shaft = false) {
     if (!this._live() || !this._take('hit', 0.5)) return;
     const cfg = MATERIAL_TUNING[mat] || MATERIAL_TUNING.wood;
     const t = this.ctx.currentTime;
     const out = this._dest(pos, 0.6, false);
     this._noiseHit(out, t, { gain: 0.30, lo: cfg.lo, hi: cfg.hi * 1.4, q: 1.0, dur: 0.07 });
+    // Under the tick, not over it: the tick is the arrowhead stopping and it
+    // has to stay the first thing heard. The cutoff carries the material — a
+    // shaft in soil barely rattles at all, one in stone rings the whole way up.
+    if (shaft) {
+      this._shot('arrowHit', out, t, {
+        gain: 0.14 * (cfg.tone < 0.15 ? 0.6 : 1), rate: [0.88, 1.24], cut: cfg.hi * 1.6,
+        // Twelve milliseconds behind the tick, not on top of it. The arrowhead
+        // stopping is the event; the shaft is what happens next.
+        delay: 0.012,
+      });
+    }
     const o = this.ctx.createOscillator();
     o.type = 'triangle';
     const f = Math.max(90, (cfg.body || 240) * 1.4);
@@ -2918,6 +2942,47 @@ export class Audio {
     src.start(t, Math.random() * 2);
     src.stop(t + dur + 0.05);
 
+    // The crunch, layered over the whump. Two recordings, chosen per play, so
+    // the sound a player triggers more often than any other in a fight cannot
+    // machine-gun off one buffer — and both are high-passed at 180 Hz in the
+    // file itself so neither of them touches the 132 Hz body above. The synth
+    // owns the weight, the recording owns the texture, and they do not overlap.
+    this._shot(Math.random() < 0.5 ? 'hitFlesh' : 'punch', out, t, {
+      gain: 0.135 * amt, rate: [0.86, 1.22],
+    });
+  }
+
+  /**
+   * One recorded transient over a synthesised one. The shape every layered
+   * one-shot in here shares, because they all want the same four things moved
+   * per play and none of them wants to say so four times.
+   *
+   * Returns false when the buffer is not there, which is how each caller knows
+   * to leave its procedural version alone rather than duplicating the test.
+   */
+  _shot(name, out, t, { gain = 1, rate = [0.9, 1.1], cut = 0, offset = 0, delay = 0 } = {}) {
+    if (!this.samples) return false;
+    const buf = this.samples.get(name);
+    if (!buf) return false;
+    const r = rate[0] + Math.random() * (rate[1] - rate[0]);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = r;
+    const g = this.ctx.createGain();
+    g.gain.value = gain * (0.85 + Math.random() * 0.30);
+    let head = src;
+    if (cut) {
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = cut * (0.8 + Math.random() * 0.5);
+      lp.Q.value = 0.5;
+      src.connect(lp); head = lp;
+    }
+    head.connect(g).connect(out);
+    const off = offset ? Math.min(Math.random() * offset, Math.max(0, buf.duration - 0.1)) : 0;
+    src.start(t + delay, off);
+    src.stop(t + delay + buf.duration / r + 0.05);
+    return true;
   }
 
   // --- weather ---------------------------------------------------------------

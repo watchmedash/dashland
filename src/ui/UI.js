@@ -473,8 +473,7 @@ export class UI {
       chargen: $('chargen'), cgCanvas: $('cg-canvas'), cgStatus: $('cg-status'),
       cgWho: $('cg-who'), cgKit: $('cg-kit'), cgKitCount: $('cg-kit-count'),
       cgDiff: $('cg-diff'),
-      skills: $('skills'), skPoints: $('sk-points'), skSub: $('sk-sub'),
-      skTree: $('sk-tree'),
+      skills: $('skills'), skHead: $('sk-head'), skTree: $('sk-tree'),
       confirm: $('confirm'), cfTitle: $('cf-title'), cfBody: $('cf-body'),
       cfYes: $('cf-yes'), cfNo: $('cf-no'),
     };
@@ -2507,100 +2506,121 @@ export class UI {
   refreshSkills() {
     if (!this.skillsOpen) return;
     const sk = this.game.skills;
-    const left = sk.available;
-
-    this.el.skPoints.textContent = left;
-    this.el.skPoints.classList.toggle('none', left <= 0);
-    // The number, and the word for what it is. It used to carry the spend and
-    // the lifetime total beside it, which is two more numbers than the question
-    // "can I afford this row" has ever needed.
-    this.el.skSub.textContent = left === 1 ? 'point' : 'points';
+    this._xpHead(sk);
 
     const tree = this.el.skTree;
     tree.innerHTML = '';
-    tree.appendChild(this._xpBar(sk));
+    // Three pairs, not six rows. The tree is a root and a leaf three times over
+    // and the old screen said so with a 26px indent and a drawn elbow, which
+    // cost a ragged left edge and two pieces of chrome to state a relationship
+    // that a shared card states for free. A leaf is the second thing in its
+    // root's card; that is the whole of the drawing.
+    let card = null;
     for (const s of sk.summary()) {
-      const row = document.createElement('div');
-      // Leaves are indented under their root. The prerequisite is the shape of
-      // this tree and a flat list of six would hide it — a player who cannot
-      // see that Lungs sits behind Agility reads "Needs Agility 2" as a refusal
-      // rather than as a route.
-      row.className = `skill-row${BRANCHES[s.key].needs ? ' leaf' : ''}`;
-      if (s.level >= s.max) row.classList.add('maxed');
-
-      const head = document.createElement('div');
-      head.className = 'skill-head-row';
-      const name = document.createElement('span');
-      name.className = 'skill-name';
-      name.textContent = s.label;
-      const pips = document.createElement('span');
-      pips.className = 'skill-pips';
-      // Drawn as one pip per level rather than as "3/5", so the shape of what
-      // is left is legible without reading a number — and so a branch with
-      // three levels visibly is a shorter branch than one with five.
-      for (let i = 0; i < s.max; i++) {
-        const p = document.createElement('i');
-        if (i < s.level) p.className = 'on';
-        pips.appendChild(p);
+      const leaf = !!BRANCHES[s.key].needs;
+      if (!leaf || !card) {
+        card = document.createElement('div');
+        card.className = 'skill-pair';
+        tree.appendChild(card);
       }
-      head.append(name, pips);
-
-      const blurb = document.createElement('p');
-      blurb.className = 'skill-blurb';
-      blurb.textContent = s.blurb;
-
-      const buy = document.createElement('button');
-      buy.className = 'skill-buy';
-      if (s.blocked) {
-        buy.disabled = true;
-        // The module's own wording, not this file's. `blockedBy` is where the
-        // one decision about how a refusal is phrased lives.
-        buy.textContent = s.blocked;
-        // "Not enough points" is the one refusal that is about the player's
-        // balance rather than about the branch, and it is the one they can do
-        // something about — so it still shows the price.
-        if (s.blocked === 'Not enough points') buy.textContent = `Learn ${s.cost}`;
-        buy.classList.toggle('short', s.blocked === 'Not enough points');
-      } else {
-        buy.textContent = `Learn ${s.cost}`;
-        buy.onclick = () => this.game.buySkill(s.key);
-      }
-
-      row.append(head, blurb, buy);
-      tree.appendChild(row);
+      card.appendChild(this._skillRow(s, leaf));
     }
   }
 
   /**
-   * The level bar: what you are, what the next level needs, in xp.
+   * One branch, as a row you press.
    *
-   * This is the fix for the complaint that earning points was confusing, and
-   * the confusion had a precise cause worth recording so it is not rebuilt. The
-   * screen used to print `Blocks mined  0/22`, in which the 22 was the maximum
-   * number of *points* the source could ever pay while the 0 was a count of
-   * *blocks* — two different units, one slash, neither labelled. A player read
-   * it as "0 of 22 blocks" and then mined a thousand expecting linear pay.
+   * The row is the button. It used to carry one 108px brass plate each, six of
+   * them down the right margin, and at any moment at most two of those were
+   * pressable — the other four were grey rectangles reading "Fully learned" or
+   * "Needs Hands 3", which is a refusal drawn at the size of an offer. The row
+   * is now the hit target, which is also the larger one under a thumb, and what
+   * sits on the right is a price rather than a control.
    *
-   * There is one number now and it says what it is. The bar fills toward the
-   * next level and the shortfall is stated in xp. The line that used to sit
-   * beside the level, saying each one costs 5% more than the last, has gone
-   * with the aside: the curve is something a player feels, and a menu that
-   * announces its own arithmetic is a menu explaining the game to itself.
+   * The price is set as the point balance in the head is set, dark plate and
+   * lit numeral, because it is the same unit. There is no "Learn" on it: the
+   * screen's whole subject is spending points on branches, the number is on the
+   * branch, and a word repeated on six rows is furniture rather than a label.
+   *
+   * "Fully learned" is gone entirely. Five lit pips already say it, and saying
+   * it twice on the widest element in the row is how a finished branch ended up
+   * shouting louder than an available one.
    */
-  _xpBar(sk) {
+  _skillRow(s, leaf) {
+    const row = document.createElement('button');
+    const maxed = s.level >= s.max;
+    row.className = `skill-row${leaf ? ' leaf' : ''}${maxed ? ' maxed' : ''}`;
+    row.disabled = !!s.blocked;
+
+    const head = document.createElement('div');
+    head.className = 'skill-head-row';
+    const name = document.createElement('span');
+    name.className = 'skill-name';
+    name.textContent = s.label;
+    const pips = document.createElement('span');
+    pips.className = 'skill-pips';
+    // Drawn as one pip per level rather than as "3/5", so the shape of what
+    // is left is legible without reading a number — and so a branch with
+    // three levels visibly is a shorter branch than one with five.
+    for (let i = 0; i < s.max; i++) {
+      const p = document.createElement('i');
+      if (i < s.level) p.className = 'on';
+      pips.appendChild(p);
+    }
+    head.append(name, pips);
+
+    if (!maxed) {
+      // A locked leaf is the one refusal worth words: it names a route rather
+      // than a shortage, and the wording is `blockedBy`'s, not this file's.
+      // Everything else shows the price, dimmed when it cannot be paid — the
+      // balance is at the top of the screen, so "not enough" is a comparison
+      // the player can already make.
+      const tag = document.createElement('span');
+      const route = s.blocked && s.blocked !== 'Not enough points';
+      tag.className = route ? 'skill-lock' : `skill-cost${s.blocked ? ' dim' : ''}`;
+      tag.textContent = route ? s.blocked : s.cost;
+      head.appendChild(tag);
+    }
+
+    const blurb = document.createElement('p');
+    blurb.className = 'skill-blurb';
+    blurb.textContent = s.blurb;
+
+    row.append(head, blurb);
+    if (!s.blocked) row.onclick = () => this.game.buySkill(s.key);
+    return row;
+  }
+
+  /**
+   * The head: what you are, what you have to spend, and how far to the next.
+   *
+   * One card, and it was two. A plate holding the point balance sat above a
+   * card holding the level and the bar, so the first thing on the screen was
+   * the same question asked twice in two materials. The balance now rides on
+   * the right of the level, which is where the eye already goes, and the tree
+   * begins a whole banner nearer the top of the sheet.
+   *
+   * The lifetime xp total went with the second card. It is the one number here
+   * that no decision is downstream of: nothing on this screen is bought with
+   * it, it only ever rises, and it was the widest thing in the foot. What is
+   * left is the shortfall to the next level, which is the number a player is
+   * actually waiting on.
+   *
+   * The bar itself is unchanged, and so is the curve behind it. This is a
+   * redraw, not a re-tune.
+   */
+  _xpHead(sk) {
     const p = sk.xpProgress();
-    const box = document.createElement('div');
+    const left = sk.available;
+    const box = this.el.skHead;
     box.className = `xp-block${p.maxed ? ' maxed' : ''}`;
+    box.innerHTML = '';
 
     const head = document.createElement('div');
     head.className = 'xp-head';
-    // Three words beside the level, and they are the only sentence on this
-    // screen about where a number comes from. They earn the space because the
-    // answer changed: xp used to come from ore, fish, crafts, the clock and the
-    // marks, and a player who mined all evening and saw the bar sit still would
-    // have no way to find out why. It is a label, not an explanation — how much
-    // a kill is worth is something the planet says by paying you.
-    head.innerHTML = `<b>Level ${p.level}</b><em>XP from kills</em>`;
+    head.innerHTML = `<b>Level ${p.level}</b>`
+      + `<span class="xp-pts${left <= 0 ? ' none' : ''}"><i>${left}</i>`
+      + `${left === 1 ? 'point' : 'points'}</span>`;
 
     const bar = document.createElement('div');
     bar.className = 'xp-bar';
@@ -2610,13 +2630,15 @@ export class UI {
 
     const foot = document.createElement('div');
     foot.className = 'xp-foot';
-    const total = `${p.xp.toLocaleString('en-GB')} xp`;
-    foot.innerHTML = p.maxed
-      ? `<span>${total}</span><em>Maxed</em>`
-      : `<span>${total}</span><em>${p.toNext.toLocaleString('en-GB')} to next</em>`;
+    // Three words, and they are the only sentence on this screen about where a
+    // number comes from. They earn the space because the answer changed: xp
+    // used to come from ore, fish, crafts, the clock and the marks, and a
+    // player who mined all evening and saw the bar sit still would have no way
+    // to find out why. It is a label, not an explanation.
+    foot.innerHTML = `<span>XP from kills</span>`
+      + (p.maxed ? '<em>Maxed</em>' : `<em>${p.toNext.toLocaleString('en-GB')} to next</em>`);
 
     box.append(head, bar, foot);
-    return box;
   }
 
   // --- HUD updates ----------------------------------------------------------

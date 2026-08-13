@@ -208,23 +208,28 @@
        where XP comes from and which firsts were still unearned, which is a
        manual bolted to a menu: the tree is the screen. All that survives of the
        aside is three words beside the level — "XP from kills", written by
-       `_xpBar` — which is a label rather than a manual, and is there because
-       kills are now the only source. UI.js builds every row from
-       `skills.summary()`. -->
+       `_xpHead` — which is a label rather than a manual, and is there because
+       kills are now the only source. UI.js builds the head and every row from
+       `skills.summary()` and `skills.xpProgress()`.
+
+       There is one banner above the tree and there used to be two: a plate
+       holding the point balance, and under it a card holding the level and the
+       bar. They were one question asked twice — how much have I got — so they
+       are one card now, level on the left and balance on the right, and the
+       tree starts a whole banner higher up the sheet. Unlearn moved into the
+       header with Close, where a screen's own actions live; it is destructive
+       and it was sitting at the top of the reading order. -->
   <div id="skills" class="overlay hidden">
     <div class="panel skills-panel">
       <header>
         <h2>Growth</h2>
+        <button class="ghost" id="sk-reset">Unlearn</button>
         <button class="ghost" data-close-skills>Close <kbd>K</kbd></button>
       </header>
       <!-- The balance stays out of the scrolling body on purpose: every row in
            the tree is a question about that number, and scrolling it away
            makes each of them unanswerable. -->
-      <div class="skills-bar">
-        <span class="skill-points" id="sk-points">0</span>
-        <p class="skill-sub" id="sk-sub">points</p>
-        <button class="ghost" id="sk-reset">Unlearn everything</button>
-      </div>
+      <div class="xp-block" id="sk-head"></div>
       <div class="panel-body">
         <div class="skill-tree" id="sk-tree"></div>
       </div>

@@ -624,7 +624,7 @@ h1 em { font-style: normal; font-weight: var(--fw-disp); color: var(--accent-2);
    appeared never did because from the container's point of view everything
    fitted. Stated once here for every list in the game rather than per screen,
    because the next list somebody adds will have the same default. */
-.slot-row, .recipe-row, .shop-row, .skill-row, .toast { flex: none; }
+.slot-row, .recipe-row, .shop-row, .skill-pair, .toast { flex: none; }
 
 /* THE KEY. Rule 2: a parchment face standing on `--lip` of wood, with an ink
    line all the way round. Hover raises the face and the lip grows with it;
@@ -2064,75 +2064,57 @@ body.fighting #toasts { top: 172px; }
 
 .skills-panel { width: min(560px, 100%); }
 
-/* The balance, and the one destructive button on the screen, on one line. The
-   number is the largest thing on the panel because every row below it is a
-   question about whether this number is big enough. */
-.skills-bar {
-  flex: none;
-  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
-  padding: 8px 12px; border-radius: var(--r-md);
-  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
-}
-.skill-points {
-  font: var(--fw-disp) var(--fs-2xl)/1 var(--mono); color: #ffd79a;
-  letter-spacing: .02em; padding: 5px 12px; border-radius: var(--r-sm);
-  text-shadow: 0 0 10px rgba(255, 178, 74, .7);
-  background: linear-gradient(180deg, rgba(24, 15, 5, .92), rgba(56, 37, 15, .84));
-  box-shadow:
-    inset 0 0 0 1px rgba(12, 7, 2, .9),
-    inset 0 2px 5px rgba(0, 0, 0, .6),
-    0 1px 0 rgba(255, 255, 255, .6);
-}
-/* Nothing to spend is not an error, so it goes quiet rather than red. */
-.skill-points.none { color: rgba(255, 215, 154, .3); text-shadow: none; }
-.skill-sub {
-  flex: 1; color: var(--ink-faint);
-  font-size: var(--fs-xs); font-weight: 700;
-  letter-spacing: var(--ls-cap); text-transform: uppercase;
-}
-.skills-bar .ghost { align-self: center; }
+/* THREE CARDS, NOT SIX ROWS.
+   The model is a root and a leaf, three times over, and the screen used to
+   state that with a 26px indent and a drawn elbow per leaf: a ragged left edge
+   and two pieces of chrome to say what sharing a card says for free. A pair is
+   one object with a hairline through it, and the leaf is the half below the
+   line. Nothing is indented, so the tree has one left margin.
 
-.skill-tree { display: flex; flex-direction: column; gap: 6px; }
-.skill-row {
-  position: relative;
-  display: grid; grid-template-columns: 1fr auto; gap: 3px 14px;
-  align-items: center;
-  padding: 10px 13px 10px 16px; border-radius: var(--r-md);
+   There is no brass key on this screen, and that is the rule kept rather than
+   broken. It had six brass-shaped plates down the right margin, at most two of
+   them ever pressable and the rest grey rectangles reading "Fully learned" or
+   "Needs Hands 3" — a refusal drawn at the size of an offer. The row is the
+   button now and what is left on the right is a price, set in the same dark
+   plate and lit numeral as the balance in the head, because it is the same
+   unit. */
+.skill-tree { display: flex; flex-direction: column; gap: 8px; }
+.skill-pair {
+  position: relative; overflow: hidden;
+  border-radius: var(--r-md);
   background: var(--paper-cell); box-shadow: var(--emboss);
-  transition: box-shadow var(--t-fast) ease, transform var(--t-fast) var(--ease);
 }
-/* The spine. Every row in the game that can be acted on carries one, and it
-   lights when the row is live: the settings list, the skills, the recipes. */
-.skill-row::after {
+/* The spine. Every group in the game that can be acted on carries one, and it
+   lights when a live row inside it is under the pointer. */
+.skill-pair::after {
   content: ''; position: absolute; left: 4px; top: 8px; bottom: 8px; width: 3px;
   border-radius: 2px; background: rgba(96, 66, 28, .25);
   box-shadow: inset 0 1px 1px rgba(0, 0, 0, .25);
+  pointer-events: none; transition: background var(--t-fast) ease;
 }
-.skill-row:hover { box-shadow: var(--emboss-lift); transform: translateY(-1px); }
-.skill-row:hover::after { background: var(--brass); }
-/* A leaf is indented under its root and joined to it by a drawn elbow, so the
-   shape of the tree is visible without reading a single prerequisite. The
-   elbow is two borders of an empty box, which is the same way every other
-   arrow and chevron in this game is made. */
-.skill-row.leaf { margin-left: 26px; }
-.skill-row.leaf::before {
-  content: ''; position: absolute; right: 100%; top: -3px;
-  width: 14px; height: calc(50% + 3px);
-  margin-right: 6px;
-  border-left: 2px solid rgba(122, 94, 54, .4);
-  border-bottom: 2px solid rgba(122, 94, 54, .4);
-  border-bottom-left-radius: 6px;
-  pointer-events: none;
+.skill-pair:has(.skill-row:hover:not(:disabled))::after { background: var(--brass); }
+
+/* A row inside the card: a button with no button on it. The card carries the
+   material, so the row carries only its own state. */
+.panel .skill-row {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 10px 13px 11px 16px; border: none; border-radius: 0;
+  background: none; box-shadow: none; color: var(--ink); font: inherit;
+  transition: background var(--t-fast) ease;
 }
-/* Bought out. Green, and quieter than an unbought row rather than louder:
-   there is nothing left to do here. */
-/* Bought out. Nothing left to do here, so the row goes quiet and its spine
-   goes solid brass: earned, not available. */
-.skill-row.maxed {
-  background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7));
-  box-shadow: var(--emboss);
+.panel .skill-row:hover:not(:disabled) { background: rgba(255, 253, 247, .7); }
+.panel .skill-row:active:not(:disabled) { background: rgba(122, 94, 54, .12); }
+.panel .skill-row:disabled { cursor: default; }
+/* The leaf is the half below the line, and set in a little from it. That is
+   the whole of the prerequisite drawing: what is under Agility is behind it. */
+.skill-row.leaf {
+  padding-left: 30px;
+  border-top: 1px solid rgba(122, 94, 54, .22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7);
 }
-.skill-row.maxed::after { background: var(--brass); box-shadow: 0 0 0 1px rgba(70, 32, 6, .5); }
+/* Bought out. Nothing left to do here, so the row goes quiet rather than loud;
+   five lit pips are the announcement and they need no second one. */
+.panel .skill-row.maxed { background: rgba(122, 94, 54, .07); }
 .skill-head-row { display: flex; align-items: center; gap: 10px; }
 .skill-name {
   font: 700 var(--fs-md) var(--font); color: var(--ink);
@@ -2150,7 +2132,7 @@ body.fighting #toasts { top: 172px; }
     0 1px 0 rgba(255, 255, 255, .6);
 }
 .skill-pips i {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 7px; height: 7px; border-radius: 50%;
   background: rgba(0, 0, 0, .5);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7), 0 1px 0 rgba(255, 220, 170, .12);
 }
@@ -2159,68 +2141,89 @@ body.fighting #toasts { top: 172px; }
   background: radial-gradient(circle at 40% 32%, #fff0cd 0 20%, #f3b661 48%, #c47a2a 78%, #8c4d13 100%);
   box-shadow: 0 0 0 1px rgba(70, 32, 6, .8), 0 0 7px rgba(242, 180, 92, .95);
 }
+/* The price: the same plate as the balance in the head, one size down. Same
+   material, same unit, so the comparison the row is asking the player to make
+   is between two objects that look like each other. */
+.skill-cost {
+  margin-left: auto; min-width: 22px; text-align: center;
+  padding: 4px 7px; border-radius: var(--r-sm);
+  font: var(--fw-disp) var(--fs-sm)/1 var(--mono); letter-spacing: .02em;
+  color: #ffd79a; text-shadow: 0 0 8px rgba(255, 178, 74, .65);
+  background: linear-gradient(180deg, rgba(24, 15, 5, .92), rgba(56, 37, 15, .84));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 2px 5px rgba(0, 0, 0, .6),
+    0 1px 0 rgba(255, 255, 255, .6);
+}
+/* A price you CAN pay gets a warm ring round the plate. That ring is the whole
+   affordance on this screen: there is no hover on a phone, so the thing that
+   says "this row is a button today" has to be visible standing still. */
+.skill-row:not(:disabled) .skill-cost {
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 2px 5px rgba(0, 0, 0, .6),
+    0 0 0 1px rgba(216, 152, 72, .9),
+    0 0 8px -1px rgba(242, 180, 92, .7),
+    0 1px 0 rgba(255, 255, 255, .6);
+}
+/* A price you cannot pay is still the price. It goes unlit, the way the
+   balance does when it reads zero. */
+.skill-cost.dim { color: rgba(255, 215, 154, .32); text-shadow: none; }
+/* The one refusal worth words, because it names a route rather than a
+   shortage. `blockedBy` in Skills.js owns the wording. */
+.skill-lock {
+  margin-left: auto;
+  font: 700 var(--fs-2xs) var(--mono); letter-spacing: var(--ls-cap);
+  text-transform: uppercase; color: var(--ink-faint); white-space: nowrap;
+}
 /* Not prose: one line of what the level does, set as a spec rather than as a
    sentence about the game. */
 .skill-blurb {
-  grid-column: 1; font-size: var(--fs-sm); font-weight: 500;
+  margin-top: 3px;
+  font-size: var(--fs-sm); font-weight: 500;
   color: var(--ink-soft); line-height: 1.4;
 }
-/* Spans both rows of the row's grid so the button is centred against the name
-   and the blurb together. */
-.skill-buy { grid-column: 2; grid-row: 1 / 3; align-self: center; }
-/* Brass, like every other accepted action in the game. It used to be green,
-   which was a fourth material on a screen that already had three. */
-.panel .skill-buy {
-  border: none; border-radius: var(--r-md); cursor: pointer; min-width: 108px;
-  padding: 9px 13px; font: var(--fw-disp) var(--fs-xs)/1 var(--font);
-  letter-spacing: var(--ls-cap); text-transform: uppercase;
-  color: #3a1c06; text-shadow: 0 1px 0 rgba(255, 232, 190, .5);
-  background: var(--brass);
-  box-shadow:
-    0 0 0 1px var(--brass-line),
-    inset 0 1px 0 rgba(255, 250, 232, .7),
-    inset 0 -3px 6px -2px rgba(120, 54, 8, .5),
-    0 var(--lip) 0 #703a10,
-    0 calc(var(--lip) + 4px) 9px -4px rgba(90, 44, 8, .6);
-}
-.panel .skill-buy:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
-.panel .skill-buy:active:not(:disabled) {
-  transform: translateY(var(--lip));
-  box-shadow: 0 0 0 1px var(--brass-line), inset 0 2px 5px rgba(96, 42, 6, .55);
-}
-/* A refusal is a hole in the sheet, not a faded button: there is visibly
-   nothing to press. */
-.panel .skill-buy:disabled {
-  cursor: default; opacity: 1; transform: none;
-  background: var(--pocket-floor); box-shadow: var(--pocket);
-  color: rgba(255, 236, 200, .38); text-shadow: 0 1px 0 rgba(0, 0, 0, .4);
-}
-.panel .skill-buy.short { color: rgba(255, 214, 150, .55); }
+.skill-row:disabled .skill-name { color: var(--ink-soft); }
+.skill-row:disabled .skill-blurb { color: var(--ink-faint); }
 
-/* The level bar, at the head of the tree because it is the thing the whole
-   column is downstream of. */
-/* The level bar heads the tree because every row below it is downstream of it.
+/* THE HEAD. One card, and it was two: a plate holding the point balance sat
+   above a card holding the level and the bar, so the first thing on the screen
+   was one question asked twice in two materials. The balance rides on the right
+   of the level now and the tree starts a whole banner higher.
+
    It is the parchment's version of a vital: the same anatomy as the health bar
-   in the HUD — a ticked groove, a lit fill, a mono number on the right — cut
-   into paper instead of laid on a plate. */
+   in the HUD — a ticked groove, a lit fill, mono type under it — cut into paper
+   instead of laid on a plate. */
 .xp-block {
-  padding: 11px 13px 10px; border-radius: var(--r-md); margin-bottom: 10px;
+  flex: none;
+  padding: 11px 13px 10px; border-radius: var(--r-md); margin-bottom: 12px;
   background: var(--paper-cell); box-shadow: var(--emboss);
 }
-.xp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+.xp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
 .xp-head b {
-  font: 700 var(--fs-lg) var(--font); color: var(--ink);
+  flex: 1; font: 700 var(--fs-lg) var(--font); color: var(--ink);
   letter-spacing: var(--ls-disp);
 }
-/* Where the xp comes from, set as the foot's numbers are: pushed to the right
-   margin, mono, faint. It reads as an annotation on the bar rather than as a
-   second heading, which is the whole of what it should be. */
-.xp-head em {
-  flex: 1; text-align: right; font-style: normal;
-  font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint);
+/* The balance: the plate the prices on the rows are cut from, one size up, and
+   the word for what it is beside it. */
+.xp-pts {
+  display: flex; align-items: center; gap: 7px;
+  font: 700 var(--fs-xs) var(--font); color: var(--ink-faint);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
 }
-/* The same anatomy as a vital, cut into paper instead of laid over a planet:
-   a ticked slot, a lit fill, and the numbers under it in mono. */
+.xp-pts i {
+  min-width: 26px; text-align: center; font-style: normal;
+  padding: 5px 9px; border-radius: var(--r-sm);
+  font: var(--fw-disp) var(--fs-xl)/1 var(--mono); letter-spacing: .02em;
+  color: #ffd79a; text-shadow: 0 0 10px rgba(255, 178, 74, .7);
+  background: linear-gradient(180deg, rgba(24, 15, 5, .92), rgba(56, 37, 15, .84));
+  box-shadow:
+    inset 0 0 0 1px rgba(12, 7, 2, .9),
+    inset 0 2px 5px rgba(0, 0, 0, .6),
+    0 1px 0 rgba(255, 255, 255, .6);
+}
+/* Nothing to spend is not an error, so it goes quiet rather than red. */
+.xp-pts.none i { color: rgba(255, 215, 154, .3); text-shadow: none; }
 .xp-bar {
   height: 12px; border-radius: var(--r-sm); overflow: hidden;
   background:
@@ -2237,12 +2240,16 @@ body.fighting #toasts { top: 172px; }
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 0 12px 0 rgba(242, 180, 92, .85);
   transition: width .4s var(--ease);
 }
+/* The lifetime xp total used to sit on the left of this line and is gone. It
+   was the one number on the screen no decision was downstream of: nothing is
+   bought with it and it only ever rises. What is left is where the xp comes
+   from and what the next level is short by. */
 .xp-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; }
-.xp-foot span { font: 700 var(--fs-xs) var(--mono); color: var(--ink); }
-.xp-foot em {
-  flex: 1; text-align: right; font-style: normal;
+.xp-foot span, .xp-foot em {
+  flex: 1; font-style: normal;
   font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint);
 }
+.xp-foot em { text-align: right; color: var(--ink-soft); }
 .xp-block.maxed { background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7)); }
 .xp-block.maxed .xp-bar i { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55); }
 

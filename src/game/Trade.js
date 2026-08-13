@@ -625,12 +625,24 @@ const COIN = itemIdOf('coin');
  *
  * Food is admitted by its property rather than by name on purpose. The pantry
  * grows; a trader who only knew about bread would look emptier every patch.
+ *
+ * The two flags are the exceptions `larderPool` refuses, and they are asked
+ * here rather than there because this is the question everything else asks.
+ * Without them the two disagreed about forty-seven items — the fifteen raw fish
+ * and the thirty-two composed dishes — and `larderPool` won, because it is the
+ * one that fills the pack. So this said yes about goods no merchant on the
+ * planet has ever carried, and every other caller inherited that answer:
+ * `rollRequest` will not ask you to fetch something he stocks, and was
+ * therefore silently barred from asking for a fish; `Achievements` sizes its
+ * marks off what a player can obtain and had to strike the composed dishes back
+ * out by hand. See `larderPool`, which now asks this instead of keeping a
+ * second copy of the rule.
  */
 export function canBuy(itemId) {
   if (!itemId || itemId === COIN) return false;
   if (WARE_IDS.has(itemId)) return true;
   const def = ITEMS[itemId];
-  return !!(def && def.food && !def.tool);
+  return !!(def && def.food && !def.tool && !def.wild && !def.improvised);
 }
 
 /**
@@ -669,17 +681,16 @@ function larderPool() {
   const pool = [];
   for (let id = 1; id < N_ITEMS; id++) {
     const def = ITEMS[id];
-    // `wild` is the fish species, and it is the one thing this pool refuses by
-    // flag rather than by property. Admitting by `food` is what lets the pantry
-    // grow without this file being edited, and it is right for anything a
-    // kitchen makes; it is wrong for fifteen raw fish, which would be half the
-    // pool and would put the one thing a rod exists to produce on a shelf.
-    // `improvised` is the thirty-two composed dishes, and they are refused for
-    // the same reason `wild` is: admitting by `food` is right for anything a
-    // kitchen makes on purpose, and wrong for a name the kitchen invents on the
-    // spot for a pile of leftovers. Thirty-two of them would be a third of this
-    // pool. The original five rungs carry no flag and stay on the shelf.
-    if (!def || WARE_IDS.has(id) || !def.food || def.tool || def.wild || def.improvised) continue;
+    // `canBuy` is the rule, and asking it is the point: the two `wild` and
+    // `improvised` exclusions used to live here as a second copy of it, and a
+    // second copy is a disagreement waiting to be found. `wild` is the fifteen
+    // fish species, which would be half this pool and would put the one thing a
+    // rod exists to produce on a shelf. `improvised` is the thirty-two composed
+    // dishes, refused for the same reason: admitting by `food` is right for
+    // anything a kitchen makes on purpose, and wrong for a name it invents on
+    // the spot for a pile of leftovers. The original five rungs carry no flag
+    // and stay on the shelf.
+    if (!def || WARE_IDS.has(id) || !canBuy(id)) continue;
     // Rich food in smaller lots, so a merchant is never a canteen — and sweets
     // in smaller lots still, because the whole point of the treat band is that
     // it is dear. A line of five lollipops in every third pack would make the

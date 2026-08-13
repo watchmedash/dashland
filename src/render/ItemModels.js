@@ -817,6 +817,75 @@ export const POSE = {
   candy:       food('lollypop', 0.28, false, { grip: 0.02, pos: [0.002, 0.011, -0.005], rot: [-0.95, -2.13, -0.63] }),
   croissant:   food('croissant', 0.26, true, { pos: [0.013, 0.083, -0.038] }),
 
+  // --- the kitchen's catalogue ----------------------------------------------
+  //
+  // Forty-one dishes off the Kenney food kit, which the owner pointed at for
+  // exactly this. Every one of them is a model the pack already had rather than
+  // a `.wam` authored for it: the loader, the atlas and the `food()` helper
+  // above have been carrying this pack since the first fourteen meals, so a
+  // dish that the kit can represent costs one line here and nothing else.
+  //
+  // Reuse is deliberate where it happens. Six files serve two dishes each — a
+  // broth bowl is a broth bowl whether the broth is glowcap or chowder — which
+  // is the same call `berries` and `cherry` already share `cherries` on, and
+  // `meat`, `cooked_meat` and both poultries already make about a drumstick.
+  //
+  // **One number and one flag per dish, and no solved framing.** The rest of
+  // this table carries hand-solved `pos` and `rot` triples, several of them
+  // Newton-stepped against a measured Jacobian, and every one of those is a
+  // measurement of one object. Forty-one of them is not a thing to do by eye,
+  // and doing it badly is worse than not doing it: the family default is the
+  // pose the food kit was fitted to and it lands every dish inside the
+  // silhouette band the existing meals occupy. `flat` is the one bit that
+  // genuinely cannot be defaulted — a plate or an open bowl is modelled lying
+  // in the XZ plane and reads as a line edge-on, which is the fault the note on
+  // `food()` describes. It is set per dish against what the model is.
+  //
+  // 0.28 rather than the kit's spread of 0.20 to 0.30 because these are dishes
+  // rather than ingredients: a Royal Roast should not arrive in the hand at the
+  // size of a cherry. Anything that reads wrong is one number here.
+  scrap_bowl:       food('bowl', 0.28, false),
+  mixed_bowl:       food('bowl-cereal', 0.28, true),
+  hearty_bowl:      food('bowl-broth', 0.28, true),
+  feast_plate:      food('plate-deep', 0.28, true),
+  grand_platter:    food('plate-rectangle', 0.28, true),
+  fruit_cup:        food('ice-cream-cup', 0.28, false),
+  berry_jam:        food('honey', 0.28, false),
+  melon_ice:        food('popsicle', 0.28, false),
+  hard_tack:        food('loaf-baguette', 0.28, false),
+  trail_mix:        food('bag', 0.28, false),
+  cactus_cooler:    food('frappe', 0.28, false),
+  kelp_crisps:      food('fries', 0.28, false),
+  stuffed_mushroom: food('dim-sum', 0.28, true),
+  glow_broth:       food('bowl-soup', 0.28, true),
+  honey_toast:      food('waffle', 0.28, true),
+  omelette:         food('plate-dinner', 0.28, true),
+  fish_cakes:       food('rice-ball', 0.28, false),
+  crab_roll:        food('sub', 0.28, false),
+  veg_skewer:       food('skewer-vegetables', 0.28, false),
+  poultry_wrap:     food('taco', 0.28, false),
+  kelp_noodles:     food('chinese', 0.28, true),
+  pumpkin_soup:     food('bowl-cereal', 0.28, true),
+  bean_pot:         food('pan-stew', 0.28, true),
+  sushi_plate:      food('maki-salmon', 0.28, true),
+  sausage_roll:     food('meat-sausage', 0.28, false),
+  reef_chowder:     food('bowl-broth', 0.28, true),
+  roast_dinner:     food('plate-sauerkraut', 0.28, true),
+  harbour_paella:   food('pan-stew', 0.28, true),
+  meat_pie:         food('mincemeat-pie', 0.28, true),
+  glazed_bird:      food('turkey', 0.28, false),
+  truffle_pasta:    food('steamer', 0.28, false),
+  stuffed_squash:   food('pumpkin', 0.28, false),
+  lotus_curry:      food('tajine', 0.28, false),
+  desert_tagine:    food('tajine', 0.28, false),
+  frost_pudding:    food('pudding', 0.28, false),
+  abyss_platter:    food('maki-roe', 0.28, true),
+  truffle_feast:    food('styrofoam-dinner', 0.28, true),
+  royal_roast:      food('whole-ham', 0.28, false),
+  harvest_feast:    food('plate-dinner', 0.28, true),
+  reef_banquet:     food('steamer', 0.28, false),
+  grand_gateau:     food('cake-birthday', 0.28, false),
+
   // --- the fish -------------------------------------------------------------
   //
   // Fifteen species, and `height` is the only thing that varies: it is what the
@@ -1530,6 +1599,49 @@ export const BY_NAME = {
   muffin: 'muffin',
   candy: 'candy',
   croissant: 'croissant',
+  // The kitchen catalogue. Identity throughout, written out rather than
+  // inferred, because this table is also the list of what has a model.
+  scrap_bowl:       'scrap_bowl',
+  mixed_bowl:       'mixed_bowl',
+  hearty_bowl:      'hearty_bowl',
+  feast_plate:      'feast_plate',
+  grand_platter:    'grand_platter',
+  fruit_cup:        'fruit_cup',
+  berry_jam:        'berry_jam',
+  melon_ice:        'melon_ice',
+  hard_tack:        'hard_tack',
+  trail_mix:        'trail_mix',
+  cactus_cooler:    'cactus_cooler',
+  kelp_crisps:      'kelp_crisps',
+  stuffed_mushroom: 'stuffed_mushroom',
+  glow_broth:       'glow_broth',
+  honey_toast:      'honey_toast',
+  omelette:         'omelette',
+  fish_cakes:       'fish_cakes',
+  crab_roll:        'crab_roll',
+  veg_skewer:       'veg_skewer',
+  poultry_wrap:     'poultry_wrap',
+  kelp_noodles:     'kelp_noodles',
+  pumpkin_soup:     'pumpkin_soup',
+  bean_pot:         'bean_pot',
+  sushi_plate:      'sushi_plate',
+  sausage_roll:     'sausage_roll',
+  reef_chowder:     'reef_chowder',
+  roast_dinner:     'roast_dinner',
+  harbour_paella:   'harbour_paella',
+  meat_pie:         'meat_pie',
+  glazed_bird:      'glazed_bird',
+  truffle_pasta:    'truffle_pasta',
+  stuffed_squash:   'stuffed_squash',
+  lotus_curry:      'lotus_curry',
+  desert_tagine:    'desert_tagine',
+  frost_pudding:    'frost_pudding',
+  abyss_platter:    'abyss_platter',
+  truffle_feast:    'truffle_feast',
+  royal_roast:      'royal_roast',
+  harvest_feast:    'harvest_feast',
+  reef_banquet:     'reef_banquet',
+  grand_gateau:     'grand_gateau',
   // The fifteen species. Identity again, and the map is what makes them models
   // rather than sprites in all three places at once: the fist, the icon grid and
   // the ground drop. `fish` above stays the food kit's fillet — see the note on

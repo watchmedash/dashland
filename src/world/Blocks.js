@@ -1214,6 +1214,28 @@ export const BLOCKS = [
   block({ name: 'watermelon_1', label: 'Watermelon', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'watermelon_seeds', particle: [0.33, 0.54, 0.26], sound: 'grass' }),
   block({ name: 'watermelon_2', label: 'Watermelon', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'watermelon_seeds', particle: [0.55, 0.60, 0.26], sound: 'grass' }),
   block({ name: 'watermelon_3', label: 'Ripe Watermelon', render: R_CROSS, solid: false, opaque: false, hardness: 0.05, needsFloor: true, drop: 'watermelon', dropCount: 2, particle: [0.42, 0.66, 0.24], sound: 'grass' }),
+
+  // --- the kitchen ----------------------------------------------------------
+  //
+  // The cooking station: a bench that only takes things you could eat. Appended
+  // here, on the end, for the reason the note above `watermelon_0` gives at
+  // length — an id is what a saved chunk stores.
+  //
+  // **It carries no new tile.** Every tile name in `TILES` is a layer of a
+  // baked texture array, and the bake is driven from a texture pack that does
+  // not live in this tree; adding a name would mean rebuilding all three
+  // atlases and committing three new binaries, which is a large and shared
+  // change to make for one machine. So the cooker is assembled out of tiles the
+  // game already has, and the assembly is deliberate rather than a compromise:
+  // brick sides and a fire door say *this is a fire you cook on* in exactly the
+  // vocabulary the kiln already taught, and the hearth top is the hot plate.
+  // What actually tells the two apart at ten paces is the pot standing on it —
+  // see `MODELLED_TOPPERS` in main.js — which is a model rather than a tile and
+  // therefore costs no atlas layer either.
+  //
+  // Directional for the same reason the kiln is: `front` is the fire door, and
+  // a cooker whose door faced a wall would read as a plain brick block.
+  block({ name: 'kitchen', label: 'Kitchen', top: 'hearth', side: 'brick', front: 'kiln_front', bottom: 'brick', hardness: 2.4, tool: 'pick', tier: 0, drop: 'kitchen', particle: [0.62, 0.34, 0.26], sound: 'stone' }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));

@@ -268,6 +268,31 @@ const OVERRIDE = {
   // level with a sea sponge, chocolate just under an amethyst.
   cheese: 16,
   chocolate: 22,
+  /**
+   * The five improvised dishes, and these are the only food prices in the game
+   * that are typed rather than derived.
+   *
+   * They have to be. Every other dish on the planet has a recipe, so `raw`
+   * walks its ingredient bill and the sell cap in `buildSellPrices` holds it
+   * under the sum of its parts for free. These five have no recipe at all —
+   * they are what the cooker makes of a pile that matches nothing — so there is
+   * no bill to walk and `intrinsic` would price them off `1.1 * food`, which
+   * came out at 2 and 6 coins for the bottom two rungs and put both *above*
+   * their own entry gates. A two-coin dish you can make out of two one-coin
+   * scraps is a coin press.
+   *
+   * So each number here is set strictly under the coin gate that rung is
+   * awarded at (see `IMPROVISED_LADDER` in Recipes.js): 1 < 2, 4 < 5, 10 < 12,
+   * 22 < 26, 45 < 50. **That inequality is the whole anti-exploit guarantee on
+   * the coin side** — the gate is a lower bound on what went in, the price is
+   * an upper bound on what comes out, and they are compared directly rather
+   * than searched for. Move one of these and move the gate with it.
+   */
+  scrap_bowl: 1,
+  mixed_bowl: 4,
+  hearty_bowl: 10,
+  feast_plate: 22,
+  grand_platter: 45,
 };
 
 /**

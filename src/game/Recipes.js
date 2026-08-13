@@ -1,7 +1,7 @@
 // Crafting + smelting recipes. Shaped recipes use a character grid; shapeless
 // ones just need the right multiset of ingredients.
 
-import { itemIdOf, FISH_ITEMS } from './Items.js';
+import { itemIdOf, FISH_ITEMS, ITEMS } from './Items.js';
 
 /** @type {Array<{out:string,count:number,shape?:string[],key?:object,in?:string[],table?:boolean}>} */
 const RAW = [
@@ -222,21 +222,40 @@ const RAW = [
   { out: 'glowstone_verdant', count: 1, in: ['glowstone', 'emerald'] },
   { out: 'glowstone_azure', count: 1, in: ['glowstone', 'sapphire'] },
 
-  // --- food ---
+  // --- the kitchen ----------------------------------------------------------
+  //
+  // **Every food recipe in the game is `station: 'kitchen'` and none of them
+  // works at a workbench any more.** The owner: *"crafting table shouldn't have
+  // any food recipes anymore"*. So the cooking station is not a second route to
+  // dinner, it is the only one, and the bench goes back to being a bench.
+  //
+  // The move was driven off the *result*, not off a hand-written list: every
+  // recipe in this file whose output item carries a `food` value is below this
+  // line and carries the flag. That is twenty-three recipes covering fourteen
+  // dishes, bread and the lingonberry handful, enumerated by walking `RECIPES`
+  // and testing `ITEMS[r.out].food` rather than by reading down the file, which
+  // is the only way to be sure none was missed. `berries` is in here for that
+  // reason and it is the right call anyway: two lingonberries into a handful is
+  // food prep.
   //
   // Everything here is shapeless: a meal is a set of ingredients, not an
   // arrangement, and a shaped grid for soup would only be a memory test. The
-  // exception is the cake, whose 3x2 pattern is what forces it onto a bench —
-  // the one recipe that should not be makeable standing in a field.
+  // cake used to be the exception — a 3x2 pattern whose whole job was to force
+  // it onto a bench — and that job is gone: the station *is* the gate now, so
+  // the cake is shapeless like everything else it sits beside.
+  //
+  // `table` is likewise dropped from every one of them. A recipe cannot be both
+  // a bench recipe and a kitchen recipe, and leaving the flag on would have
+  // meant a stew that needed a workbench standing next to the cooker.
   //
   // Two things here used to have no recipe at all: anything built on an egg,
   // because an egg was trader stock, and every treat, because the planet had no
   // sweetener. Birds drop eggs now and bees drop honeycomb, so both branches
   // are written out below and `shopOnly` is down to the two imports the planet
   // genuinely cannot make (see Items.js).
-  { out: 'bread', count: 1, table: true, shape: ['WWW'], key: { W: 'wheat' } },
-  { out: 'salad', count: 1, in: ['carrot', 'tomato', 'corn'] },
-  { out: 'soup', count: 1, in: ['mushroom', 'mushroom', 'carrot'] },
+  { out: 'bread', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'wheat'] },
+  { out: 'salad', count: 1, station: 'kitchen', in: ['carrot', 'tomato', 'corn'] },
+  { out: 'soup', count: 1, station: 'kitchen', in: ['mushroom', 'mushroom', 'carrot'] },
   // The same soup out of the common cave fungus, and it takes *three* where the
   // glowcap takes two. That ratio is not flavour, it is the price: a cave
   // mushroom is two coins to a glowcap's three, so three of them come to
@@ -247,22 +266,22 @@ const RAW = [
   // It is worth the line because the cave mushroom is described in Blocks.js as
   // "the one you walk past", and until now the game agreed with that far too
   // literally: it carpeted every cavern and fed into nothing.
-  { out: 'soup', count: 1, in: ['cave_mushroom', 'cave_mushroom', 'cave_mushroom', 'carrot'] },
+  { out: 'soup', count: 1, station: 'kitchen', in: ['cave_mushroom', 'cave_mushroom', 'cave_mushroom', 'carrot'] },
   // Two lingonberries make a handful of berries, which is the one addition here
   // that opens a whole branch rather than a single line: the cake, the cookie,
   // the muffin, Rose Bricks and Rose Shingles all want `berries`, and a pine
   // forest had none. The shrub drops two at a time, so one plant is one craft.
-  { out: 'berries', count: 1, in: ['lingonberry', 'lingonberry'] },
-  { out: 'sandwich', count: 1, in: ['bread', 'cooked_meat', 'tomato'] },
-  { out: 'stew', count: 1, table: true, in: ['cooked_meat', 'carrot', 'corn', 'mushroom'] },
-  { out: 'pie', count: 1, table: true, in: ['wheat', 'wheat', 'pumpkin'] },
-  { out: 'cake', count: 1, table: true, shape: ['BBB', 'WWW'], key: { B: 'berries', W: 'wheat' } },
+  { out: 'berries', count: 1, station: 'kitchen', in: ['lingonberry', 'lingonberry'] },
+  { out: 'sandwich', count: 1, station: 'kitchen', in: ['bread', 'cooked_meat', 'tomato'] },
+  { out: 'stew', count: 1, station: 'kitchen', in: ['cooked_meat', 'carrot', 'corn', 'mushroom'] },
+  { out: 'pie', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'pumpkin'] },
+  { out: 'cake', count: 1, station: 'kitchen', in: ['berries', 'berries', 'berries', 'wheat', 'wheat', 'wheat'] },
   // The comb went into the cookie, and it had to. Wheat and berries alone came
   // to three coins for four points of nourishment, which made a cookie *better
   // rations than bread* — the exact inversion the ladder in Items.js exists to
   // prevent. Two to a craft still, so the batch is generous; it is the sugar
   // that costs.
-  { out: 'cookie', count: 2, in: ['wheat', 'berries', 'honeycomb'] },
+  { out: 'cookie', count: 2, station: 'kitchen', in: ['wheat', 'berries', 'honeycomb'] },
 
   // --- food from the sea ---
   //
@@ -286,20 +305,20 @@ const RAW = [
   //  - the sandwich is a fish sandwich, which needs a rod rather than a herd.
   //  - the stew is a chowder: it is the bench recipe, and the one that pays for
   //    having bothered to dry the kelp.
-  { out: 'salad', count: 1, in: ['sea_lettuce', 'sea_grape', 'kelp'] },
-  { out: 'sandwich', count: 1, in: ['bread', 'cooked_fish', 'sea_lettuce'] },
-  { out: 'stew', count: 1, table: true, in: ['cooked_fish', 'dried_kelp', 'carrot', 'mushroom'] },
+  { out: 'salad', count: 1, station: 'kitchen', in: ['sea_lettuce', 'sea_grape', 'kelp'] },
+  { out: 'sandwich', count: 1, station: 'kitchen', in: ['bread', 'cooked_fish', 'sea_lettuce'] },
+  { out: 'stew', count: 1, station: 'kitchen', in: ['cooked_fish', 'dried_kelp', 'carrot', 'mushroom'] },
   // The burger is where the sea lettuce earns its name. Both versions take it —
   // there is no land salad leaf on this planet, so the *only* burger is a
   // burger with a dive in it, and that is the point rather than a compromise.
-  { out: 'burger', count: 1, table: true, in: ['bread', 'cooked_meat', 'tomato', 'sea_lettuce'] },
-  { out: 'burger', count: 1, table: true, in: ['bread', 'cooked_fish', 'tomato', 'sea_lettuce'] },
+  { out: 'burger', count: 1, station: 'kitchen', in: ['bread', 'cooked_meat', 'tomato', 'sea_lettuce'] },
+  { out: 'burger', count: 1, station: 'kitchen', in: ['bread', 'cooked_fish', 'tomato', 'sea_lettuce'] },
   // Pizza, twice. The land one is the marinara it has to be — there is no
   // cheese to put on it — and the sea one is the only recipe in the file that
   // wants a crab, which until now was a mob that dropped an ingredient with
   // nowhere to go.
-  { out: 'pizza', count: 1, table: true, in: ['wheat', 'wheat', 'tomato', 'mushroom', 'cooked_meat'] },
-  { out: 'pizza', count: 1, table: true, in: ['wheat', 'wheat', 'tomato', 'dried_kelp', 'cooked_crab_meat'] },
+  { out: 'pizza', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'tomato', 'mushroom', 'cooked_meat'] },
+  { out: 'pizza', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'tomato', 'dried_kelp', 'cooked_crab_meat'] },
 
   // --- baking ---------------------------------------------------------------
   //
@@ -313,7 +332,7 @@ const RAW = [
   // comb. That is what makes the band a band rather than a label: a sweet is
   // dearer per point of nourishment than any staple or meal on the planet, and
   // it is dearer for one reason you can point at.
-  { out: 'pancakes', count: 1, in: ['wheat', 'egg', 'honeycomb'] },
+  { out: 'pancakes', count: 1, station: 'kitchen', in: ['wheat', 'egg', 'honeycomb'] },
   // Two handfuls of berries, not one, and the second one is a price fix rather
   // than a flavour note.
   //
@@ -327,15 +346,109 @@ const RAW = [
   // only four points wide with seven sweets already in it; fixing it from the
   // bill costs one lingonberry pair and reads correctly — a berry muffin with
   // twice the berries. Measured after: croissant 19c for 5, muffin 21c for 6.
-  { out: 'muffin', count: 1, in: ['wheat', 'berries', 'berries', 'egg', 'honeycomb'] },
-  { out: 'croissant', count: 1, in: ['wheat', 'wheat', 'egg', 'honeycomb'] },
-  { out: 'donut', count: 1, in: ['wheat', 'wheat', 'honeycomb'] },
+  { out: 'muffin', count: 1, station: 'kitchen', in: ['wheat', 'berries', 'berries', 'egg', 'honeycomb'] },
+  { out: 'croissant', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'egg', 'honeycomb'] },
+  { out: 'donut', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'honeycomb'] },
   // Ice from a cold coast, berries from the grass and a comb from a hive. No
   // dairy anywhere in it, which is honest: this is a berry ice, and it is the
   // one recipe on the planet that needs a climate rather than a building.
-  { out: 'ice_cream', count: 1, in: ['ice', 'berries', 'honeycomb'] },
+  { out: 'ice_cream', count: 1, station: 'kitchen', in: ['ice', 'berries', 'honeycomb'] },
   // Two to a craft, and the stick is the stick it is served on.
-  { out: 'candy', count: 2, in: ['honeycomb', 'stick'] },
+  { out: 'candy', count: 2, station: 'kitchen', in: ['honeycomb', 'stick'] },
+
+  // --- the catalogue --------------------------------------------------------
+  //
+  // Thirty-six dishes the kitchen exists for. The ladder they sit on is in
+  // `DISHES` in Items.js; what is decided *here* is the bill, and the bill is
+  // what the merchant reads — `Trade.valueOf` walks the cheapest recipe for an
+  // item, so every price in this catalogue is a consequence of these lines
+  // rather than a number anybody typed.
+  //
+  // Three things the list is deliberately doing beyond "more food":
+  //
+  //  - **it gives the dead ends a use.** Hops was a crop you could grow and do
+  //    nothing with; the three wetland plants, the two desert ones and the two
+  //    cold ones dropped themselves and fed nothing. Every one of them is an
+  //    ingredient below, which is cheaper than inventing a system for each.
+  //  - **it gives the rare fish a second exit.** Fifteen species had exactly
+  //    two fates, the pan and the merchant, and the pan flattens all fifteen
+  //    into one fillet. The Abyss Platter is the only recipe on the planet that
+  //    cares *which* fish you landed.
+  //  - **it uses the nine slots.** The Harvest Feast is seven ingredients and
+  //    the Reef Banquet six, which is the only reason a 3x3 grid is a 3x3 grid
+  //    rather than a row.
+  //
+  // Duplicates are spelled out one slot at a time (`['corn', 'corn']`), which
+  // is what the shapeless matcher counts — see `findRecipe`.
+
+  // snacks
+  { out: 'fruit_cup', count: 1, station: 'kitchen', in: ['apple', 'berries', 'cherry'] },
+  { out: 'berry_jam', count: 1, station: 'kitchen', in: ['berries', 'berries', 'honeycomb'] },
+  { out: 'melon_ice', count: 1, station: 'kitchen', in: ['watermelon', 'ice', 'honeycomb'] },
+  { out: 'hard_tack', count: 2, station: 'kitchen', in: ['wheat', 'wheat'] },
+  { out: 'trail_mix', count: 1, station: 'kitchen', in: ['berries', 'corn', 'stonecrop'] },
+  { out: 'cactus_cooler', count: 1, station: 'kitchen', in: ['cactusfruit', 'agave', 'ice'] },
+  { out: 'kelp_crisps', count: 1, station: 'kitchen', in: ['dried_kelp', 'dried_kelp'] },
+  { out: 'stuffed_mushroom', count: 1, station: 'kitchen', in: ['mushroom', 'mushroom', 'cheese'] },
+  { out: 'glow_broth', count: 1, station: 'kitchen', in: ['cave_mushroom', 'cave_mushroom', 'mireroot'] },
+  { out: 'honey_toast', count: 1, station: 'kitchen', in: ['bread', 'honeycomb'] },
+
+  // plates
+  { out: 'omelette', count: 1, station: 'kitchen', in: ['egg', 'egg', 'mushroom'] },
+  { out: 'fish_cakes', count: 1, station: 'kitchen', in: ['cooked_fish', 'wheat', 'egg'] },
+  { out: 'crab_roll', count: 1, station: 'kitchen', in: ['bread', 'cooked_crab_meat', 'sea_lettuce'] },
+  { out: 'veg_skewer', count: 1, station: 'kitchen', in: ['squash', 'greenbean', 'tomato', 'stick'] },
+  { out: 'poultry_wrap', count: 1, station: 'kitchen', in: ['bread', 'cooked_poultry', 'snowpea'] },
+  { out: 'kelp_noodles', count: 1, station: 'kitchen', in: ['dried_kelp', 'wheat', 'tomato'] },
+  { out: 'pumpkin_soup', count: 1, station: 'kitchen', in: ['pumpkin', 'carrot', 'mushroom'] },
+  { out: 'bean_pot', count: 1, station: 'kitchen', in: ['greenbean', 'greenbean', 'squash', 'corn'] },
+  // The one dish that wants a fish raw. Everything else that meets a fire is a
+  // fillet; this is the reason to carry one home whole.
+  { out: 'sushi_plate', count: 1, station: 'kitchen', in: ['fish', 'sea_lettuce', 'wheat'] },
+  // Hops, at last. It is a bitter flower nobody would eat and Items.js says so;
+  // what it is actually for is seasoning something fatty.
+  { out: 'sausage_roll', count: 1, station: 'kitchen', in: ['bread', 'cooked_meat', 'hops'] },
+
+  // meals
+  { out: 'reef_chowder', count: 1, station: 'kitchen', in: ['cooked_fish', 'cooked_crab_meat', 'dried_kelp', 'corn'] },
+  { out: 'roast_dinner', count: 1, station: 'kitchen', in: ['cooked_meat', 'roast', 'carrot', 'squash'] },
+  { out: 'harbour_paella', count: 1, station: 'kitchen', in: ['wheat', 'cooked_fish', 'cooked_crab_meat', 'tomato', 'greenbean'] },
+  { out: 'meat_pie', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'cooked_meat', 'mushroom'] },
+  { out: 'glazed_bird', count: 1, station: 'kitchen', in: ['cooked_poultry', 'roast', 'snowpea', 'honeycomb'] },
+  { out: 'truffle_pasta', count: 1, station: 'kitchen', in: ['wheat', 'truffle', 'cheese'] },
+  { out: 'stuffed_squash', count: 1, station: 'kitchen', in: ['squash', 'cooked_meat', 'corn', 'mushroom'] },
+  // The wetland three, in one pot. A bog was somewhere you got wet and nothing
+  // else; this is the reason to wade into one.
+  { out: 'lotus_curry', count: 1, station: 'kitchen', in: ['lotus', 'swampreed', 'mireroot', 'corn', 'tomato'] },
+  { out: 'desert_tagine', count: 1, station: 'kitchen', in: ['cactusfruit', 'agave', 'cooked_meat', 'tomato'] },
+  { out: 'frost_pudding', count: 1, station: 'kitchen', in: ['ice', 'icecapmoss', 'berries', 'honeycomb', 'egg'] },
+
+  // feasts
+  // The only recipe in the game that names a species. Three abyss fish is eight
+  // cells of water and no light, three times over.
+  { out: 'abyss_platter', count: 1, station: 'kitchen', in: ['anglerfish', 'blobfish', 'goblinshark', 'sea_lettuce'] },
+  { out: 'truffle_feast', count: 1, station: 'kitchen', in: ['truffle', 'truffle', 'cooked_meat', 'bread', 'cheese'] },
+  { out: 'royal_roast', count: 1, station: 'kitchen', in: ['cooked_meat', 'cooked_poultry', 'roast', 'truffle', 'honeycomb'] },
+  // Seven slots, one of every bed in the field. This is the farm's own trophy
+  // and it is the reason to plant all six crops rather than the best two.
+  { out: 'harvest_feast', count: 1, station: 'kitchen', in: ['squash', 'corn', 'carrot', 'tomato', 'greenbean', 'snowpea', 'bread'] },
+  { out: 'reef_banquet', count: 1, station: 'kitchen', in: ['cooked_fish', 'cooked_crab_meat', 'sea_grape', 'sea_lettuce', 'dried_kelp', 'bread'] },
+  { out: 'grand_gateau', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'berries', 'berries', 'egg', 'honeycomb', 'cheese'] },
+
+  // --- the cooker itself ----------------------------------------------------
+  //
+  // Deliberately early on the ladder, and that is a consequence of taking food
+  // off the bench rather than a preference: the station is now the only way to
+  // cook anything at all, so a player who cannot build one cannot eat anything
+  // he did not pick off a bush. Three planks and three cobblestone is the
+  // second thing you make after the bench and before the first pickaxe wears
+  // out — chop a tree, make a bench, make a wooden pick, mine six stone. There
+  // is no metal in it, no fuel, no gate, and nothing you have to find.
+  //
+  // It is a bench recipe (`table`) because a 3x2 pattern cannot fit anywhere
+  // else, and that is fine: the bench is free and universal, and it is what the
+  // kiln already costs.
+  { out: 'kitchen', count: 1, table: true, shape: ['PPP', 'CCC'], key: { P: 'planks', C: 'cobblestone' } },
 
   // --- tools ---
   ...['wood:planks', 'stone:cobblestone', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder'].flatMap((spec) => {
@@ -449,7 +562,15 @@ function removeFamily(inventory, id, count) {
 }
 
 export const RECIPES = RAW.map((r) => {
-  const rec = { out: itemIdOf(r.out), count: r.count, table: !!r.table, undo: !!r.undo };
+  const rec = {
+    out: itemIdOf(r.out), count: r.count, table: !!r.table, undo: !!r.undo,
+    // Which bench this is made at. `null` is the player's own 2x2 and the
+    // workbench; `'kitchen'` is the cooking station and nothing else. See
+    // `findRecipe`, where the test is equality rather than a subset — a recipe
+    // belongs to exactly one station, so a kitchen recipe cannot be made at a
+    // bench and a bench recipe cannot be made at a cooker.
+    station: r.station || null,
+  };
   if (r.shape) {
     rec.kind = 'shaped';
     rec.h = r.shape.length;
@@ -557,13 +678,14 @@ for (const [name, ticks] of Object.entries({
  * @param {Array<{item:number,count:number}|null>} grid row-major, size w*h
  * @param {boolean} hasTable
  */
-export function findRecipe(grid, w, h, hasTable) {
+export function findRecipe(grid, w, h, hasTable, station = null) {
   const ids = grid.map((s) => (s && s.count > 0 ? s.item : 0));
 
   // shapeless: compare sorted non-empty ids
   const present = ids.filter((v) => v).sort((a, b) => a - b);
 
   for (const r of RECIPES) {
+    if (r.station !== station) continue;
     if (r.table && !hasTable) continue;
     if (r.kind === 'shapeless') {
       if (present.length !== r.ingredients.length) continue;
@@ -603,6 +725,116 @@ export function smeltingFor(itemId) {
   return SMELTING.find((s) => s.in === itemId) || null;
 }
 
+// --- the kitchen ------------------------------------------------------------
+
+/**
+ * The seven things the cooker takes that you would not eat on their own.
+ *
+ * The station's rule is "edible things only" and that rule is `def.food`, which
+ * is right for sixty-nine ingredients and wrong for exactly these: wheat is not
+ * food and bread is, a mushroom is not food and soup is, and a lollipop needs a
+ * stick. Refusing them would mean the cooker could not make bread, soup, pie,
+ * ice cream, a skewer or a sweet — six recipes that already existed and that
+ * every player already knows.
+ *
+ * So the door is `food` OR this list, and the list is short and closed on
+ * purpose: it is the ingredients the *existing* recipes name, plus nothing. A
+ * cooker that took cobblestone because someone might one day want to grind it
+ * is a cooker with no rule at all.
+ *
+ * The number is the nourishment the fallback counts them as, and it is not the
+ * same question as "how much good does eating this do" — nobody eats a stick.
+ * It is "how much of a meal is this", and it exists so that a grid of wheat and
+ * mushrooms is not worth zero to the arithmetic below. Every value is at least
+ * 1, which is what makes the tier-1 gate reachable by any two slots at all.
+ */
+const PANTRY = {
+  wheat: 2, mushroom: 2, cave_mushroom: 2, pumpkin: 3, ice: 1, stick: 1, lingonberry: 1,
+};
+const PANTRY_FOOD = new Map();
+for (const [name, n] of Object.entries(PANTRY)) {
+  const id = itemIdOf(name);
+  if (id) PANTRY_FOOD.set(id, n);
+}
+
+/** Will the cooking station take this item at all? */
+export function isKitchenIngredient(id) {
+  if (!id) return false;
+  return !!ITEMS[id]?.food || PANTRY_FOOD.has(id);
+}
+
+/** How much of a meal this ingredient is, for the fallback's arithmetic. */
+export function kitchenNutrition(id) {
+  return ITEMS[id]?.food || PANTRY_FOOD.get(id) || 0;
+}
+
+/**
+ * The improvised ladder: what a set of ingredients has to be worth to come back
+ * as each rung.
+ *
+ * **The two gates are the whole anti-exploit argument and they are checked
+ * against the same two numbers the rung is authored with.** `food` is at or
+ * under `needFood` and `price` is strictly under `needValue` on every row (see
+ * the table in `IMPROVISED` in Items.js), so:
+ *
+ *   - you can never eat more out of the cooker than you put into it, and
+ *   - you can never sell the dish for more than the ingredients would fetch.
+ *
+ * Both follow from the row alone. There is no combination to search for,
+ * because the gate is a lower bound on the input and the rung is an upper bound
+ * on the output, and they are compared directly.
+ *
+ * `needValue` is in whole coins as `Trade.valueOf` reports them, which is why
+ * that function is passed in rather than imported: `Trade.js` already imports
+ * this module for `RECIPES` and `recipeCost`, and importing it back would close
+ * a cycle around two tables that are both built at module scope.
+ */
+const IMPROVISED_GATES = [
+  { name: 'scrap_bowl', needFood: 2, needValue: 2 },
+  { name: 'mixed_bowl', needFood: 6, needValue: 5 },
+  { name: 'hearty_bowl', needFood: 10, needValue: 12 },
+  { name: 'feast_plate', needFood: 15, needValue: 26 },
+  { name: 'grand_platter', needFood: 20, needValue: 50 },
+];
+export const IMPROVISED_LADDER = IMPROVISED_GATES.map((g) => ({ ...g, out: itemIdOf(g.name) }));
+
+/**
+ * What the cooker makes of a set of ingredients that matches no named recipe.
+ *
+ * The owner's rule: *"everything ingredients should have a result … fish with
+ * another fish equals something"*. Sixty-nine ingredients in nine slots cannot
+ * be a table, so this is the floor under the catalogue — the highest rung of
+ * `IMPROVISED_LADDER` whose two gates the pile clears.
+ *
+ * **Two filled slots is the minimum, and one is not a combination.** A single
+ * apple in the grid comes back with nothing, deliberately: the only honest
+ * outputs for one ingredient are itself (a craft that does nothing) or
+ * something better than itself (a craft that makes food out of nothing), and
+ * the first is a bug the player will report and the second is the exploit this
+ * whole file is written to avoid.
+ *
+ * @param {number[]} ids one item id per filled slot, duplicates included
+ * @param {(id:number)=>number} valueOf `Trade.valueOf`
+ * @returns {{out:number, count:number, kind:'improvised'}|null}
+ */
+export function kitchenFallback(ids, valueOf) {
+  const kept = ids.filter((id) => id && isKitchenIngredient(id));
+  if (kept.length !== ids.filter(Boolean).length) return null;   // something inedible is in there
+  if (kept.length < 2) return null;
+
+  let food = 0, value = 0;
+  for (const id of kept) {
+    food += kitchenNutrition(id);
+    value += valueOf(id);
+  }
+  let best = null;
+  for (const rung of IMPROVISED_LADDER) {
+    if (!rung.out) continue;
+    if (food >= rung.needFood && value >= rung.needValue) best = rung;
+  }
+  return best ? { out: best.out, count: 1, kind: 'improvised' } : null;
+}
+
 /** Ingredient multiset a recipe consumes, as [{item, count}]. */
 export function recipeCost(recipe) {
   const need = new Map();
@@ -612,9 +844,10 @@ export function recipeCost(recipe) {
 }
 
 /** Every recipe the player can make right now, cheapest-looking first. */
-export function availableRecipes(inventory, hasTable) {
+export function availableRecipes(inventory, hasTable, station = null) {
   const out = [];
   for (const r of RECIPES) {
+    if (r.station !== station) continue;
     if (r.table && !hasTable) continue;
     const cost = recipeCost(r);
     if (cost.every((c) => countFamily(inventory, c.item) >= c.count)) out.push({ recipe: r, cost });

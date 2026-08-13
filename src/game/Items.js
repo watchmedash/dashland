@@ -25,6 +25,23 @@ const NOT_OBTAINABLE = new Set([
   // ordinary upright log when chopped, so nothing puts one in a hand anyway;
   // this only stops a stray item existing for the trader to price.
   'log_oak_i', 'log_oak_j', 'log_birch_i', 'log_birch_j', 'log_pine_i', 'log_pine_j',
+  // The kitchen, and it is here for a reason that has nothing to do with
+  // whether you can hold one — you can, and there is an `add()` for it at the
+  // very foot of this file.
+  //
+  // **This loop runs before `MATERIALS`, the tool ladder and the armour ladder,
+  // so every item it makes sits in the middle of the array.** Block items
+  // occupy ids 1..231 and `coin` is 232; a block appended to the end of
+  // `BLOCKS` therefore appends an *item* at 232 and pushes the coin, every
+  // ingot, every tool, every armour piece, the bow, the buckets and all fifteen
+  // fish up by one. Ids are what saves store, so that is a save-corrupting
+  // edit dressed up as an append.
+  //
+  // Excluding the block here and adding its item by hand at the end of the file
+  // is what buys both halves at once: the *block* id is appended (chunks are
+  // safe) and the *item* id is appended (bags, crates and shop stock are safe).
+  // Anything modelled on this machine should do the same.
+  'kitchen',
 ]);
 
 /**
@@ -884,6 +901,140 @@ for (const f of FISH_SPECIES) {
     food: fishFood(f.rarity), rarity: f.rarity, wild: true,
   });
 }
+
+// --- the kitchen ------------------------------------------------------------
+//
+// **Appended here, at the very end, for the reason the bow, the honeycomb, the
+// lava bucket and the fifteen fish all give at length: ids are save state.**
+// `MATERIALS` is spread in before the tool and armour loops and the block loop
+// runs before all three, so nothing new goes anywhere but the bottom of this
+// file. The order below is now frozen.
+//
+// The block item comes first because it is the one thing here that is not food:
+// `kitchen` is in `NOT_OBTAINABLE` precisely so it can be added by hand, down
+// here, instead of at the top with the other blocks. See the note there.
+add({ name: 'kitchen', label: 'Kitchen', block: ID.kitchen, sound: 'stone' });
+
+/**
+ * The improvised dishes: five rungs, and the floor under "every combination of
+ * edibles gives you something".
+ *
+ * The owner's rule is that no set of ingredients ever comes back empty, and
+ * that cannot be a table — sixty-nine ingredients in nine slots is more
+ * combinations than there are atoms to write them on. So the signature recipes
+ * below are the ones worth *finding*, and anything that matches none of them
+ * lands on one of these five instead, chosen by what went in.
+ *
+ * **The tier is gated on the ingredients, and the gates are what make this
+ * unexploitable.** `kitchenFallback` in Recipes.js awards the highest rung
+ * whose two gates the input clears — total nourishment and total coin value —
+ * and each rung is authored *at or under* its own gates:
+ *
+ *     rung            food   price    needs food in   needs coin in
+ *     scrap_bowl        2       1           2               2
+ *     mixed_bowl        5       4           6               5
+ *     hearty_bowl       8      10          10              12
+ *     feast_plate      12      22          15              26
+ *     grand_platter    16      45          20              50
+ *
+ * Read down the last three columns: you can never eat more than you put in and
+ * you can never sell it for more than the parts. That is the whole guarantee,
+ * and it is structural rather than measured — there is no combination to find
+ * that beats it, because the gate is checked against the same numbers the rung
+ * is priced against.
+ *
+ * Which also says what these are *for*, and it is not reward. A generic dish is
+ * a way to turn nine slots of odds and ends into one slot you can carry, and it
+ * is deliberately never better than eating the pile. The reward is the named
+ * recipes; this is the promise that nothing is ever wasted.
+ *
+ * Priced by `OVERRIDE` in Trade.js rather than derived, because a dish with no
+ * recipe has no ingredient bill to derive from.
+ */
+const IMPROVISED = [
+  { name: 'scrap_bowl', label: 'Scrap Bowl', food: 2, color: '#8a7a52', shine: '#bcae86' },
+  { name: 'mixed_bowl', label: 'Mixed Bowl', food: 5, color: '#a8813f', shine: '#d9b478' },
+  { name: 'hearty_bowl', label: 'Hearty Bowl', food: 8, cooked: true, stack: 32, color: '#9c5c2c', shine: '#d1935c' },
+  { name: 'feast_plate', label: 'Feast Plate', food: 12, cooked: true, stack: 16, color: '#b06a2e', shine: '#e2a266' },
+  { name: 'grand_platter', label: 'Grand Platter', food: 16, cooked: true, stack: 8, color: '#c07a34', shine: '#f0b877' },
+];
+for (const d of IMPROVISED) add(d);
+
+/**
+ * The catalogue: thirty-six dishes that only the kitchen can make.
+ *
+ * The owner asked for "a lot of new foods" with "scaled benefits and tiers and
+ * pricing depends on rarity and cost", and the ladder here is read off the one
+ * already written down at the head of this file rather than invented beside it.
+ * Four bands, and the band is the `stack` as much as the number:
+ *
+ *   5-7    snacks, stack 64. One or two things and no fire worth the name.
+ *   8-10   plates, stack 32. The simple-cooked band, assembled.
+ *   11-14  meals, stack 16. Level with the seven meals the bench used to make.
+ *   15-17  feasts, stack 8. Above every existing meal, and every one of them
+ *          has something scarce in it: a truffle, an abyss fish, a dive, or
+ *          seven crops at once. This is where "pricing depends on rarity" lands
+ *          — nothing here is expensive because the number says so, it is
+ *          expensive because `Trade.valueOf` adds up the bill.
+ *
+ * **Not one price is typed here.** Every dish has a recipe, and the trader
+ * derives a price from the cheapest recipe that makes it (see `raw` in
+ * Trade.js), so a dish built out of a goblin shark is dear because a goblin
+ * shark is dear. The sell side is capped at the sum of the parts by
+ * `buildSellPrices`, which is what stops any of these being a coin press.
+ *
+ * `treat: true` carries the same meaning it always did: allowed to feed less
+ * than its parts, required to cost more, stocked in ones and twos.
+ */
+const DISHES = [
+  // --- snacks ---------------------------------------------------------------
+  { name: 'fruit_cup', label: 'Fruit Cup', food: 6, color: '#c8523f', shine: '#eb8a72' },
+  { name: 'berry_jam', label: 'Berry Jam', food: 6, treat: true, color: '#9c1f3a', shine: '#d4536b' },
+  { name: 'melon_ice', label: 'Melon Ice', food: 5, treat: true, color: '#8fd07a', shine: '#c8ecb8' },
+  { name: 'hard_tack', label: 'Hard Tack', food: 5, cooked: true, color: '#c2a06a', shine: '#e6cea0' },
+  { name: 'trail_mix', label: 'Trail Mix', food: 6, color: '#8f6b3c', shine: '#c39c68' },
+  { name: 'cactus_cooler', label: 'Cactus Cooler', food: 6, color: '#4fb08a', shine: '#95dcc0' },
+  { name: 'kelp_crisps', label: 'Kelp Crisps', food: 8, cooked: true, color: '#556b2a', shine: '#93a866' },
+  { name: 'stuffed_mushroom', label: 'Stuffed Mushroom', food: 7, cooked: true, color: '#b3894f', shine: '#e0bc8c' },
+  { name: 'glow_broth', label: 'Glowcap Broth', food: 7, cooked: true, color: '#6f8a4a', shine: '#a9c084' },
+  { name: 'honey_toast', label: 'Honey Toast', food: 7, treat: true, color: '#cf9a35', shine: '#f2cc78' },
+
+  // --- plates ---------------------------------------------------------------
+  { name: 'omelette', label: 'Omelette', food: 9, cooked: true, stack: 32, color: '#e2c85e', shine: '#f7e8a4' },
+  { name: 'fish_cakes', label: 'Fish Cakes', food: 10, cooked: true, stack: 32, color: '#d6b98c', shine: '#f2e0c2' },
+  { name: 'crab_roll', label: 'Crab Roll', food: 10, stack: 32, color: '#d97a4c', shine: '#f5ab86' },
+  { name: 'veg_skewer', label: 'Vegetable Skewer', food: 9, cooked: true, stack: 32, color: '#7f9c3c', shine: '#b6cd76' },
+  { name: 'poultry_wrap', label: 'Poultry Wrap', food: 10, stack: 32, color: '#c69a55', shine: '#e8c68e' },
+  { name: 'kelp_noodles', label: 'Kelp Noodles', food: 9, cooked: true, stack: 32, color: '#8a9c52', shine: '#c0cf8e' },
+  { name: 'pumpkin_soup', label: 'Pumpkin Soup', food: 9, cooked: true, stack: 32, color: '#cc7a26', shine: '#f0ab63' },
+  { name: 'bean_pot', label: 'Bean Pot', food: 8, cooked: true, stack: 32, color: '#5f7a35', shine: '#96b06c' },
+  { name: 'sushi_plate', label: 'Sushi Plate', food: 10, stack: 32, color: '#e0d6bc', shine: '#f6efe0' },
+  { name: 'sausage_roll', label: 'Sausage Roll', food: 10, cooked: true, stack: 32, color: '#a85c34', shine: '#d9906a' },
+
+  // --- meals ----------------------------------------------------------------
+  { name: 'reef_chowder', label: 'Reef Chowder', food: 12, cooked: true, stack: 16, color: '#c8b48e', shine: '#eeddbc' },
+  { name: 'roast_dinner', label: 'Roast Dinner', food: 13, cooked: true, stack: 16, color: '#8f5228', shine: '#c48a58' },
+  { name: 'harbour_paella', label: 'Harbour Paella', food: 13, cooked: true, stack: 16, color: '#d6a83a', shine: '#f4d283' },
+  { name: 'meat_pie', label: 'Meat Pie', food: 12, cooked: true, stack: 16, color: '#a8712f', shine: '#d9a670' },
+  { name: 'glazed_bird', label: 'Glazed Bird', food: 13, cooked: true, stack: 16, color: '#b87434', shine: '#e5aa71' },
+  { name: 'truffle_pasta', label: 'Truffle Pasta', food: 14, cooked: true, stack: 16, color: '#c9b06a', shine: '#ecd9a8' },
+  { name: 'stuffed_squash', label: 'Stuffed Squash', food: 12, cooked: true, stack: 16, color: '#c8832a', shine: '#ebb56a' },
+  { name: 'lotus_curry', label: 'Lotus Curry', food: 12, cooked: true, stack: 16, color: '#c07a1e', shine: '#e8ac5e' },
+  { name: 'desert_tagine', label: 'Desert Tagine', food: 12, cooked: true, stack: 16, color: '#b0522a', shine: '#e08c5f' },
+  { name: 'frost_pudding', label: 'Frost Pudding', food: 11, treat: true, stack: 16, color: '#d8e2ec', shine: '#f4f8fc' },
+
+  // --- feasts ---------------------------------------------------------------
+  { name: 'abyss_platter', label: 'Abyss Platter', food: 16, stack: 8, color: '#43566a', shine: '#8ea3b8' },
+  { name: 'truffle_feast', label: 'Truffle Feast', food: 17, cooked: true, stack: 8, color: '#8a6b3a', shine: '#c2a271' },
+  { name: 'royal_roast', label: 'Royal Roast', food: 17, cooked: true, stack: 8, color: '#a85c2a', shine: '#dc9a63' },
+  { name: 'harvest_feast', label: 'Harvest Feast', food: 15, cooked: true, stack: 8, color: '#b8862c', shine: '#e6bd6e' },
+  { name: 'reef_banquet', label: 'Reef Banquet', food: 16, cooked: true, stack: 8, color: '#7aa8a0', shine: '#b8dcd6' },
+  { name: 'grand_gateau', label: 'Grand Gateau', food: 15, treat: true, stack: 8, color: '#f0e2d2', shine: '#f8b4c4' },
+];
+for (const d of DISHES) add(d);
+
+/** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
+export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);
 
 /** The species, sorted by rarity. Trade.js reads it for prices, main.js for the catch. */
 export const FISH = FISH_SPECIES;

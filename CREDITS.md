@@ -413,6 +413,96 @@ generated noise buffer. There is no audio file in the repository of any format,
 no `decodeAudioData`, no media fetch, and no `<audio>` element — audited, not
 assumed. So there is nothing here to licence and nothing to attribute.
 
+### Sampled SFX — SURVEYED AND NOT IMPORTED
+
+A survey was run because the game had never had one and "look online for
+commercially free sound" is a reasonable request. Nothing was downloaded and
+nothing was imported. This section records what is out there, so the question
+does not have to be reopened from nothing.
+
+**Kenney is the only source with no strings at all.** kenney.nl publishes ten
+audio packs and every one of them is marked CC0; the support page states *"all
+game assets on the asset pages are public domain licensed (CC0). You're free to
+use them, even in commercial projects"* and *"Attribution is not required."*
+Three of the ten are on-genre: **Impact Sounds** (130 files, 801 KB — footsteps
+on carpet, concrete, grass, snow and wood at five variations each, plus glass,
+metal, wood, plank, tin and a dedicated mining impact set), **RPG Audio** (50
+files, 965 KB — doors, creaks, chop, cloth, coins, pots, books) and **Interface
+Sounds** (100 files, 835 KB — clicks, toggles, confirms, errors). The other
+seven are sci-fi, chiptune, casino, music stings or spoken English and are not
+this game.
+
+**It is not imported, and the reason is what the three packs cover rather than
+what they cost.** They cover footsteps, mining and UI. Those are precisely the
+sounds this game plays hundreds of times a session, and a fixed sample plays
+identically every time: five recorded footsteps on grass is five, while the
+procedural one randomises pitch, filter centre, Q, noise start offset, scuff
+delay and scuff length on every single step and now takes an impact scale as
+well. Swapping continuous variation for a five-deep round-robin is what makes a
+sampled footstep machine-gun, and it would be paid on the most-heard sound in
+the game. Meanwhile Kenney publishes **no animal or creature vocalisations, no
+water, and no bow** — and this game has forty-one voiced species, a lake you
+swim in and a bow. The one clean-licence source covers the category that should
+stay procedural and none of the category where a sample would actually buy
+character.
+
+The architecture cost is real and points the same way. The game has no audio
+loading of any kind — no loader, no decode, no buffer cache, no per-sound voice
+pooling for sampled playback — and the built bundle is already 1.4 MB and
+warning about chunk size. The three packs are 2.6 MB of OGG, which nearly
+triples the download before a single sample is decoded into memory, on a mobile
+target that is already a release blocker.
+
+So the verdict is **hybrid in principle, and not yet worth starting**: if
+samples are ever brought in, the place for them is a small number of rare,
+character-carrying one-shots — a boss roar, a level-up sting — and never the
+footstep, the dig or the block break.
+
+Other sources, checked and recorded so they are not re-checked:
+
+  * **Freesound** — 379,244 of its 731,792 sounds are CC0, and the filter is
+    **off by default**, so roughly ten per cent of an unfiltered result page is
+    CC-BY-NC or Sampling+ and commercially disqualifying. Its terms put the
+    warranty on the uploader, not on Freesound. Usable with a per-file log.
+  * **OpenGameArt** — 893 CC0 sound effects behind the right filter URL.
+    Licences are per submission and frequently multi-licensed, and some
+    submissions offer GPL only, which for a closed commercial build is
+    unusable. Filter by URL, never by eye.
+  * **Sonniss GDC Game Audio Bundle** — royalty-free rather than CC0, and the
+    best fit for the water, animal and bow categories Kenney does not have. The
+    agreement grants *"a worldwide, non-exclusive, royalty-free license"* for
+    *"personal and commercial projects without attribution"* and bars only
+    selling the effects as they come. Keep the licence PDF of the specific
+    year's bundle, because the terms are reissued annually.
+  * **Pixabay** — permissive text, but it explicitly disclaims any warranty
+    that consents or licences were obtained for uploaded content and makes the
+    user indemnify it. For a paid store release that is the wrong end of the
+    risk. **No.**
+  * **Mixkit** — names games explicitly, but the grant is *"freely revocable"*,
+    does not transfer with a sold or published project, and bars redistribution
+    *"with source files"*. **No.**
+  * **Zapsplat** — the free tier requires visible credit to "ZapSplat" and is
+    mp3-only. This file is not in the build and there is no in-game credits
+    screen, so the free tier costs the same thing CC-BY costs. Premium removes
+    the requirement. **Only if bought.**
+
+### The Minecraft asset dump — MUST NOT BE USED, FOR ANYTHING
+
+`model/minecraft-assets-26.2` contains **4,871 `.ogg` files and 369 MB of
+sound** under `assets/minecraft/sounds`, alongside the full texture and data
+trees. This is an extraction of Mojang's shipped assets. Every one of those
+files is copyright Microsoft/Mojang and none of it is licensed for use in
+another product, free or paid.
+
+It is recorded here rather than left unmentioned because it is the largest and
+most convenient pile of exactly-right-sounding game audio on that disk, it sits
+in the same folder as ten packs that *are* CC0, and a future session looking for
+a footstep will find it first. Nothing from it has been imported — audited,
+not assumed: there is no audio file of any format in this repository. Nothing
+from it may be, including as a placeholder, including "just to hear what it
+would sound like in place", because a placeholder is how a shipped asset gets
+made.
+
 ## Engine
 
 [three.js](https://threejs.org/) — MIT.

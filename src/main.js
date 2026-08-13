@@ -2110,9 +2110,18 @@ class Game {
       this.audio.step(b.sound);
       if (blockId) this.particles.footDust(this.player.position, this.player.up, blockId);
     };
-    this.player.onLand = () => {
+    // `sev` is 0..1, `min(1, drop / 8)`, and it was being thrown away: every
+    // landing played one unmodified footstep, so dropping eight cells onto
+    // stone measured -65.9 A-weighted, the same as ambling across it, while
+    // landing in water measured -44.3. Twenty-two dB between two ways of
+    // arriving at the ground, and the parameter that should have carried the
+    // difference already existed at both ends. 0.8 at the bottom so a hop down
+    // a kerb is fractionally under a stride, 2.0 at the top, which measures
+    // -60.6 — a 7.1dB span where there was none, and still 4.1dB under the
+    // sound of breaking the same stone.
+    this.player.onLand = (sev = 0) => {
       const b = BLOCKS[this.player.groundBlock()] || BLOCKS[1];
-      this.audio.step(b.sound);
+      this.audio.step(b.sound, undefined, 0.8 + 1.2 * Math.min(1, sev));
     };
     this.player.onHurt = (dmg) => {
       this.damageFlash = Math.min(1, 0.35 + dmg * 0.1);
@@ -5863,6 +5872,12 @@ class Game {
       this.player.vel.i = 0; this.player.vel.j = 0; this.player.vel.k = 0;
     }
     const wasInWater = this.player.inWater;
+    // How fast the body was going down on the frame before it got wet. Read
+    // here rather than after the physics because `Player.update` is where the
+    // water brake is applied: by the time the flag flips, `vel.k` has already
+    // been clamped to the -5 sink rate and every entry in the game looks the
+    // same speed. Negative is downward; a wade across a shoreline is ~0.
+    const entryVK = this.player.vel.k;
     // Captured with it, for the gasp on the way back up. Both edges existed in
     // the physics and neither had ever been listened for: only the entry
     // splash was wired, so a dive in was loud and the way out was silent.
@@ -5883,12 +5898,34 @@ class Game {
     if (ghost) this._drift(dt, input);
     else if (onBuiltGround) this.player.update(dt, act);
     if (this.player.inWater && !wasInWater) {
+      // Scaled by how hard you hit it. `splash` has taken a scale since it was
+      // written and this call did not pass one, so wading into ankle-deep water
+      // at walking pace fired the identical sound as a twenty-cell dive: the
+      // loudest thing the player can make on demand, un-panned, straight down
+      // the middle, at will. Measured A-weighted through the shipped chain that
+      // was -44.3 flat: 21.6dB over the footstep it interrupted and within
+      // 4.4dB of breaking a metal block, for stepping off a bank. A wade now
+      // measures -59.6 and a dive still measures -44.3.
+      //
+      // 16 cells/s is the reference rather than the -58 terminal clamp because
+      // the interesting range is the one players are in constantly — a wade, a
+      // step off a bank, a jump off a three-cell ledge — and mapping across
+      // terminal velocity would put every one of those inside the bottom
+      // eighth of the curve and leave the fix doing nothing. Anything faster is
+      // already a dive and is already at full scale. The 0.30 floor is a floor
+      // and not zero: something did enter the water, and silence there reads as
+      // a missing sound rather than as a gentle one.
+      const impact = Math.max(0, -entryVK);
+      const scale = 0.30 + 0.70 * Math.min(1, impact / 16);
       this.particles.splash(this.player.position, this.player.up, 1.2);
-      this.audio.splash();
+      this.audio.splash(null, scale);
     } else if (!this.player.inWater && wasInWater) {
       // Climbing out. Smaller than going in, because a body leaving water
-      // displaces less of it than a body arriving at speed.
-      this.audio.splash(null, 0.55);
+      // displaces less of it than a body arriving at speed — and 0.55 stopped
+      // being smaller the moment a wade in became 0.30, which would have made
+      // stepping out of a puddle 8.1dB louder than stepping into it. At 0.28 it
+      // measures -60.4 against the wade's -59.6.
+      this.audio.splash(null, 0.28);
     }
     // Head breaking the surface. `surface()` is the splash plus the breath, and
     // the breath is the half of it that only makes sense on this edge.

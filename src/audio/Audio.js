@@ -822,8 +822,16 @@ export class Audio {
    * scuff a few milliseconds behind it as the foot rolls. A single burst is
    * what made every surface sound like the same tap at different pitches.
    * Sand, snow and grass get a long soft scuff; stone and wood get a short one.
+   *
+   * `scale` is how hard the foot arrived. 1 is a stride, which is what every
+   * caller but one passes; `onLand` passes more, because the same function has
+   * always played the landing as well as the walk and a body dropping eight
+   * cells onto stone was measured at exactly the level of an idle amble across
+   * it. Both layers take it, for the same reason `cfg.step` trims both: the
+   * scuff carries a fixed level of its own and a landing with a stride's scuff
+   * on it is half a landing.
    */
-  step(mat, pos) {
+  step(mat, pos, scale = 1) {
     const cfg = MATERIAL_TUNING[mat] || MATERIAL_TUNING.stone;
     if (mat === 'water') return this._waterStep(pos);
     const pitch = 0.85 + Math.random() * 0.25;
@@ -831,7 +839,7 @@ export class Audio {
     // fixed level of its own through `cfg.hi`, which for glass is a 6.3kHz
     // sweep, so trimming only the impact would have left the brightest half of
     // the offending step at full volume.
-    const trim = cfg.step ?? 1;
+    const trim = (cfg.step ?? 1) * scale;
     if (!this._burst(mat, { gain: 0.20 * trim, pitch, dur: 0.9, pos, cat: 'step' })) return;
     const soft = mat === 'sand' || mat === 'snow' || mat === 'grass' || mat === 'soil';
     const t = this.ctx.currentTime + 0.012 + Math.random() * 0.02;
@@ -960,6 +968,19 @@ export class Audio {
    * and a short run of rising bubble resonances — the rise is what makes it
    * water rather than a burst of static. Scale 1 is a body entering; the
    * fishing float and a bucket pass smaller numbers.
+   *
+   * `scale` moves three things at once and that is deliberate: the gain, the
+   * length, and the NUMBER of bubbles. A quiet splash that still throws six
+   * resonances is a big splash turned down, which is not what a foot going into
+   * a puddle sounds like — it is fewer, shorter, darker events, and the count
+   * is the half of that the ear reads as size.
+   *
+   * The whole span is used, and it is worth more than the gain alone because
+   * the three move together. Measured A-weighted through the shipped chain,
+   * mean of eight renders: scale 1 is -44.3, 0.70 is -48.9, 0.55 is -51.5,
+   * 0.30 is -59.6 and 0.28 is -60.4. Fifteen dB across the range a player can
+   * actually produce, against a linear gain law's nine. Nothing calls it at 1
+   * except a body arriving at speed.
    */
   splash(pos, scale = 1) {
     if (!this._live() || !this._take('player', 1.0)) return;

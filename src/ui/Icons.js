@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import {
   BLOCKS, TINT_ID, R_CROSS, R_LIQUID, R_SLAB, R_STAIR,
-  R_LADDER, R_DOOR, R_SIGN, R_FENCE,
+  R_LADDER, R_DOOR, R_SIGN, R_FENCE, R_GATE,
 } from '../world/Blocks.js';
 import { BIOME_COLORS } from '../world/Constants.js';
 import { ITEMS } from '../game/Items.js';
@@ -69,6 +69,19 @@ export const SHAPES = {
     { x0: 0.44, x1: 0.56, y0: 0.30, y1: 0.44, z0: 0.06, z1: 0.94 },
     { x0: 0.44, x1: 0.56, y0: 0.66, y1: 0.80, z0: 0.06, z1: 0.94 },
     { x0: 0.38, x1: 0.62, y0: 0, y1: 1, z0: 0.72, z1: 0.94 },
+  ],
+  // The gate, and it wears the same tile as the fence, so the ONLY thing that
+  // tells the two apart in a nine-slot bar is the silhouette. Left as the
+  // generic cube it was a plank swatch and nothing else. So: the gate's own
+  // shape, stiles at the cell walls where the neighbour's rails arrive and the
+  // whole leaf standing off the ground at GATE_LOW, which is exactly the gap
+  // that identifies a shut gate in the world. Far stile first, near last, for
+  // the reason above.
+  [R_GATE]: [
+    { x0: 0.42, x1: 0.58, y0: 0.30, y1: 1, z0: 0, z1: 0.16 },
+    { x0: 0.44, x1: 0.56, y0: 0.36, y1: 0.52, z0: 0, z1: 1 },
+    { x0: 0.44, x1: 0.56, y0: 0.72, y1: 0.88, z0: 0, z1: 1 },
+    { x0: 0.42, x1: 0.58, y0: 0.30, y1: 1, z0: 0.84, z1: 1 },
   ],
 };
 

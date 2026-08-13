@@ -431,7 +431,7 @@ export class UI {
 
     this.el = {
       loader: $('loader'), loadFill: $('load-fill'), loadStatus: $('load-status'),
-      menu: $('menu'), mmContinue: $('mm-continue'),
+      menu: $('menu'), mmContinue: $('mm-continue'), mmNew: $('mm-new'),
       hud: $('hud'), crosshair: $('crosshair'), hotbar: $('hotbar'), offhand: $('offhand'),
       itemName: $('item-name'), lookAt: $('look-at'),
       vHealth: $('v-health'), vFood: $('v-food'),
@@ -1001,10 +1001,37 @@ export class UI {
     // Still just "Continue": what it opens is the list, and the list is where
     // a planet's day, its age and who lives on it belong. All this button has
     // to say is whether there is anything to continue at all.
-    this.el.mmContinue.disabled = !Save.hasSave();
+    this._syncContinue();
   }
 
   hideMenu() { this.el.menu.classList.add('hidden'); }
+
+  /**
+   * Show Continue only when there is something to continue, and hand the brass
+   * key to whichever button is actually live.
+   *
+   * It used to be `disabled = !hasSave()`, which is honest and was still wrong
+   * on the one screen that matters most: the first one a new player ever sees.
+   * `mm-continue` carries `.primary`, and `style.css` calls that "THE BRASS KEY.
+   * One per screen" - so on a fresh browser the emphasised, brightest, most
+   * obviously-press-me control was the dead one, and New Game, the only thing
+   * that could be done at all, sat under it in plain trim.
+   *
+   * Hidden rather than disabled because a greyed row is a promise that pressing
+   * it will one day do something, and on the first run it is a promise about a
+   * feature the player has no way to have used yet. Once a planet exists the
+   * button comes back and takes the key with it, which is the right emphasis
+   * from then on: returning to a world you have is the common case, and making
+   * a new one is not.
+   */
+  _syncContinue() {
+    const has = Save.hasSave();
+    this.el.mmContinue.classList.toggle('hidden', !has);
+    this.el.mmContinue.disabled = !has;
+    // Exactly one primary either way.
+    this.el.mmContinue.classList.toggle('primary', has);
+    this.el.mmNew.classList.toggle('primary', !has);
+  }
 
   // --- the ten save slots ---------------------------------------------------
 
@@ -1127,7 +1154,7 @@ export class UI {
     this._paintSlots();
     // The main menu is behind this screen and its Continue button may have
     // just become the last thing pointing at nothing.
-    this.el.mmContinue.disabled = !Save.hasSave();
+    this._syncContinue();
     this.game.audio.ui(320);
   }
 
@@ -1936,6 +1963,14 @@ export class UI {
     else if (def.block !== undefined && BLOCKS[def.block].render !== R_CROSS) sub = 'Block';
     else if (def.food) sub = `Food, ${def.food}`;
     else if (def.fuel) sub = 'Fuel';
+    // The warning, and it is the whole of "legible before it hurts you" for the
+    // two poisonous foods. Appended rather than replacing the food line, because
+    // a player still has to be able to see what a bad fish is worth to a
+    // trader; and appended here rather than written into either item's label,
+    // because the label is what the toast and the crosshair read and "Raw
+    // Pufferfish (Poisonous)" in a hint line is an explanation of a system,
+    // which the house style forbids. One word, on the line that already exists.
+    if (def.poison) sub = sub ? `${sub} · Poisonous` : 'Poisonous';
     this.el.tooltip.innerHTML = `${def.label}${sub ? `<em>${sub}</em>` : ''}`;
     this.el.tooltip.classList.remove('hidden');
     this.el.tooltip.style.left = `${this._cursorXY.x}px`;

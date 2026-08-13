@@ -60,6 +60,20 @@
 // sea lettuce, sea grape). It is under the water, the funnel is not, and
 // dredging a reef by walking a storm over it is not a mechanic anyone asked for.
 //
+// Measured end to end rather than argued: marched through mixed woodland for
+// thirty seconds it cleared 550 cells of ten kinds, and the hardest thing it
+// took was 0.25 —
+//
+//     leaves_pine 284   leaves_birch 80   leaves_oak 68
+//     tall_grass   69   alpine_aster 28   clover     9
+//     lingonberry   5   flower_red    3   golden_grass 2   swampreed 2
+//
+// Not one log, not one dirt, not one stone. Which is the answer to "what does it
+// do to trees": it takes the canopy and leaves the trunk standing, and a
+// stripped wood is a thing you can see happened. (The pine canopy shape and its
+// leaf count both moved today under commit 6444f9f; nothing here reads the
+// shape, only the hardness, so a thinner fir simply loses fewer cells.)
+//
 // ---- what stops it flattening an unattended base ----------------------------
 //
 // Three things, and none of them is a difficulty toggle:
@@ -97,6 +111,13 @@
 // tuning:
 //
 //     fall damage = (drop - FALL_FREE) * FALL_PER_BLOCK = (9 - 3) * 1 = 6
+//
+// Measured, not asserted. Held in the core for twelve seconds and released, the
+// player peaked at 8.92 cells above where they were taken from — LIFT_MAX, to
+// within the frame the cut lands on — and the landing cost 2 on one run and 7 on
+// another. The 7 is not the cap failing: the funnel had carried the player one
+// cell downhill while it held them, and (8.92 + 1 - 3) = 6.92 rounds to 7. The
+// number this file controls is the lift, and the lift is 9.
 //
 // **Worst case for an unarmoured player at full health: 6 of 20.** For scale, a
 // yeti swings for 7 and kills a stationary unarmoured player in three blows;
@@ -157,6 +178,26 @@
 // and last six seconds of its life are harmless. It cannot touch down at full
 // force.
 //
+// ---- what it costs ----------------------------------------------------------
+//
+// Measured in the real game, paired against the idle median taken seconds
+// earlier at the same spot on the same seed, funnel at full strength and filling
+// the frame at 11.5 cells:
+//
+//     high tier   18.8 -> 19.1 ms   (+0.3, +1.6%)
+//     low  tier   16.7 -> 16.6 ms   (nothing measurable)
+//
+// The terrain writing is not where the money goes. Timing the one door across a
+// whole run: 56 calls, 594 cells, and `_applyEdits` costs 0.1ms at both the 50th
+// and 90th percentile and 0.3ms at its worst. One batch a pass at 6 Hz is why.
+//
+// There is one 24ms spike and it is not this file's: the first `Drops.spawn` of
+// any item kind builds a mesh, which measures 24.3ms against a 0.1ms median for
+// every call after it. Mining a single flower pays exactly the same cost. A
+// tornado meets several species in a hurry, so it is more likely than most
+// things to trip several of them close together, which is what SHRED_DROPS
+// bounds.
+//
 // ---- saves ------------------------------------------------------------------
 //
 // The terrain it changed persists, for free and correctly: every edit goes
@@ -176,7 +217,7 @@ import * as THREE from 'three';
 import { BLOCKS, ID } from '../world/Blocks.js';
 import { computeDrops } from './Items.js';
 import { colParts, patchColumn } from '../world/Sphere.js';
-import { D, BIOME, cidx } from '../world/Constants.js';
+import { D, BIOME, GRAVITY, cidx } from '../world/Constants.js';
 
 /** Cells from the axis inside which you are lifted rather than merely dragged. */
 const CORE_R = 3.0;
@@ -202,7 +243,18 @@ const LEASH = 150;
 const SHRED_HARDNESS = 0.35;
 /** Seconds between terrain passes. */
 const SHRED_PERIOD = 1 / 6;
-/** Drop entities a single terrain pass may spawn. */
+/**
+ * Drop entities a single terrain pass may spawn.
+ *
+ * A rate limit and not a total, deliberately, because `Drops` already owns the
+ * total: it caps the world at 260 and evicts ordinary litter before anything
+ * from a death, so a tornado cannot flood the planet however long it runs. What
+ * this bounds is the *spike* — without it a single pass through a meadow could
+ * ask for forty drops at once, and the first spawn of any item kind builds a
+ * mesh, which measured at 24.3ms against a 0.1ms median.
+ *
+ * Measured over a 30s run through mixed woodland: 550 cells taken, 66 drops.
+ */
 const SHRED_DROPS = 6;
 /** Layers above and below the funnel's foot the shred reaches. */
 const SHRED_UP = 8, SHRED_DOWN = 2;
@@ -216,8 +268,25 @@ const SUCK = 0.45;
 const PLAYER_FORCE = 11.0;
 /** Layers/s of updraft in the core. A jump leaves the ground at 8.4. */
 const LIFT_RATE = 8.5;
-/** Cells above the ground it took you from that the lift stops. Caps the fall. */
+/**
+ * Cells above the ground it took you from that you may end up. Caps the fall,
+ * and is the whole of the damage argument: (9 - 3 free) * 1 = 6 of 20.
+ */
 const LIFT_MAX = 9;
+/**
+ * How far you keep going after the updraft lets go.
+ *
+ * Measured before it was derived. Cutting the lift at LIFT_MAX and walking away
+ * put the player 10.3 cells up, not 9, and 10.3 rounds the fall to 7 damage
+ * rather than 6 — level with a yeti swing instead of under one, which is exactly
+ * the claim this file makes and would have been wrong.
+ *
+ * It is not a fudge factor: a body leaving at LIFT_RATE under GRAVITY coasts
+ * v² / 2g = 8.5² / 52 = 1.39 cells, and 9 + 1.39 = 10.39 is the number that was
+ * measured. Cutting the lift a coast early is what makes LIFT_MAX mean the
+ * height you actually reach.
+ */
+const LIFT_COAST = (LIFT_RATE * LIFT_RATE) / (2 * GRAVITY);
 /** Seconds of knock refreshed each frame. See the note at the head. */
 const KNOCK_HOLD = 0.24;
 
@@ -458,7 +527,7 @@ export class Tornado {
     if (d < CORE_R && this.strength > 0.3) {
       const r = p.position.length();
       if (!this._held) { this._held = true; this._heldFrom = r; }
-      if (r < this._heldFrom + LIFT_MAX) {
+      if (r < this._heldFrom + LIFT_MAX - LIFT_COAST) {
         p.vel.k = Math.max(p.vel.k, LIFT_RATE * this.strength);
         p.grounded = false;
       }

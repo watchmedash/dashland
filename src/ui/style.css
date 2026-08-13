@@ -2665,6 +2665,55 @@ kbd {
    edge and reads as printed on the key instead. */
 button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba(70, 46, 18, .25); color: var(--ink-soft); }
 
+/* ── achievements ──────────────────────────────────────── */
+
+/* The screen is a list of twelve rows and nothing else, so the whole of the
+   design is in the row, and the row has one job: say how far along you are.
+   A padlock says "no" twelve times over and a player learns nothing from any
+   of them; "17 / 41 ores" is a sentence about tonight.
+
+   The count and the bar are therefore the right-hand column rather than a
+   badge in the corner, and they are the same anatomy as the level bar on the
+   Growth screen — a ticked groove and a lit fill. A player who has read one
+   has read the other. */
+.ach-tally { font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint); }
+/* A WELL: what is in it is writing, so it stays parchment. Same tray as the
+   save slots, for the same reason. See the rule at `.inv-section`. */
+.ach-list {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 7px; border-radius: var(--r-lg);
+  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+}
+/* Two columns and two rows: the name over its line on the left, the meter
+   spanning both on the right. 190px is what "10,000 / 10,000" needs in mono
+   with a bar under it. */
+.ach-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 190px;
+  align-items: center; gap: 3px 14px;
+  padding: 9px 11px; border-radius: var(--r-md);
+  background: var(--paper-cell); box-shadow: var(--emboss);
+}
+.ach-name {
+  grid-column: 1;
+  font: var(--fw-disp) var(--fs-md)/1.2 var(--font);
+  color: var(--ink); text-shadow: var(--carved);
+}
+.ach-note { grid-column: 1; font-size: var(--fs-sm); color: var(--ink-soft); }
+.ach-meter { grid-column: 2; grid-row: 1 / span 2; }
+.ach-count {
+  display: block; margin-bottom: 5px; text-align: right;
+  font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint);
+}
+/* `.xp-bar i` carries a 3px floor so a level with no progress still shows the
+   fill exists. Here it must not: eleven brass slivers on a fresh record read
+   as eleven marks already begun. */
+.ach-meter .xp-bar i { min-width: 0; }
+/* Finished. The same lit sheet a maxed branch gets on the Growth screen, and
+   the count comes forward out of the annotation grey — no tick, no medal, no
+   second vocabulary for a state the bar already shows full. */
+.ach-row.done { background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7)); }
+.ach-row.done .ach-count { color: var(--ink); }
+
 /* ── narrow windows ────────────────────────────────────── */
 /* The nine-column grid and the 236px sidebar together need ~760px of viewport.
    Below that the grid used to overflow the panel and get clipped on both
@@ -2694,6 +2743,15 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
      the label start colliding. Below that they are one column, which is
      longer and readable rather than shorter and not. */
   .controls-grid { grid-template-columns: 1fr; }
+
+  /* An achievement row does the same. At 393px the sheet is 365px wide inside
+     its padding and a 190px meter leaves 175px for the name and its line, so
+     "Survive a night in the open." wrapped to three lines beside a bar with
+     nothing under it. Stacked, the row is the name, the line, then the count
+     and the bar full width — taller by 20px, and the twelve of them scroll,
+     which is what the body was already built to do. */
+  .ach-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .ach-meter { grid-column: 1; grid-row: auto; margin-top: 5px; }
 
   /* A save row stacks rather than keeping a third column it cannot fill. At
      393px the flexible tracks divide 130px between them, which leaves the

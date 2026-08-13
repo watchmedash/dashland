@@ -31,6 +31,7 @@
         <button id="mm-new">New Game</button>
         <button id="mm-settings">Settings</button>
         <button id="mm-controls">Controls</button>
+        <button id="mm-achievements">Achievements</button>
       </div>
     </div>
   </div>
@@ -244,6 +245,7 @@
         <button id="pz-resume" class="primary">Resume</button>
         <button id="pz-settings">Settings</button>
         <button id="pz-controls">Controls</button>
+        <button id="pz-achievements">Achievements</button>
         <button id="pz-save">Save Game</button>
         <button id="pz-quit">Save &amp; Quit to Menu</button>
       </div>
@@ -390,6 +392,29 @@
         <div><kbd>F3</kbd><span>Debug overlay</span></div>
         <div><kbd>Esc</kbd><span>Pause</span></div>
       </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── achievements ────────────────────────────────────── -->
+  <!-- Its own sheet, opened from the menu and from the pause card exactly as
+       Settings and Controls are, and built out of the same three parts: a
+       header that stays, a body that scrolls, one Back. UI.js fills the list —
+       every row and every total in it is derived from the game's own tables at
+       import (see `Achievements.js`), so there is nothing here to keep in step
+       with a new ore, a new species or a new dish.
+
+       No padlocks. A mark you have not finished shows how far along it is,
+       which is the whole request: "17 / 41", not a grey square. -->
+  <div id="achievements" class="overlay hidden">
+    <div class="panel">
+      <header>
+        <h2>Achievements</h2>
+        <span id="ach-tally" class="ach-tally"></span>
+        <button class="ghost" data-close-achievements>Back</button>
+      </header>
+      <div class="panel-body">
+        <div id="ach-list" class="ach-list"></div>
       </div>
     </div>
   </div>

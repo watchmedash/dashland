@@ -463,6 +463,7 @@ export class UI {
       recipePanel: $('recipe-panel'),
       recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeEmpty: $('recipe-empty'),
       pause: $('pause'), settings: $('settings'), controls: $('controls'), death: $('death'),
+      achievements: $('achievements'), achList: $('ach-list'), achTally: $('ach-tally'),
       deathCause: $('death-cause'), deathLost: $('death-lost'), dzRespawn: $('dz-respawn'),
       // The two clusters a spectator has no use for: what is left of a body,
       // and what it was carrying. Held by id so `setSpectator` can put them
@@ -812,6 +813,7 @@ export class UI {
     $('mm-new').onclick = () => this.openSlots('new');
     $('mm-settings').onclick = () => this.openSettings();
     $('mm-controls').onclick = () => this.openControls();
+    $('mm-achievements').onclick = () => this.openAchievements();
     document.querySelector('[data-close-slots]').onclick = () => this.closeSlots();
 
     // The id first, so today's `beginWorld(id)` is untouched, and the whole
@@ -826,6 +828,7 @@ export class UI {
     $('pz-resume').onclick = () => g.resume();
     $('pz-settings').onclick = () => this.openSettings();
     $('pz-controls').onclick = () => this.openControls();
+    $('pz-achievements').onclick = () => this.openAchievements();
     $('pz-save').onclick = () => g.saveGame(true);
     $('pz-quit').onclick = () => g.quitToMenu();
 
@@ -847,6 +850,7 @@ export class UI {
     this.el.cfNo.onclick = () => this._settleConfirm(false);
     document.querySelector('[data-close-settings]').onclick = () => this.closeSettings();
     document.querySelector('[data-close-controls]').onclick = () => this.closeControls();
+    document.querySelector('[data-close-achievements]').onclick = () => this.closeAchievements();
 
     // Clicking the dark outside a sheet closes it, the way the key that opened
     // it does. The overlay IS the backdrop - the sheet is its child - so the
@@ -862,6 +866,7 @@ export class UI {
     backdrop('#skills', () => g.closeSkills());
     backdrop('#settings', () => this.closeSettings());
     backdrop('#controls', () => this.closeControls());
+    backdrop('#achievements', () => this.closeAchievements());
     // Slots was the one screen left off this list, and it is the one that could
     // least afford it. Its Back button is hidden with all the others by the
     // "no Close buttons on the sheets" rule, which is sound while Escape and
@@ -1575,12 +1580,60 @@ export class UI {
   closeSettings() { this.el.settings.classList.add('hidden'); }
   openControls() { this.el.controls.classList.remove('hidden'); }
   closeControls() { this.el.controls.classList.add('hidden'); }
+
+  /**
+   * The record, painted at the moment it is opened.
+   *
+   * Nothing here is on a timer and nothing here listens for a change. The
+   * screen is only ever looked at while the game is paused or at the menu, so
+   * a repaint per open is a repaint per look, and the alternative — twelve
+   * rows kept live against a scan that runs once a second — would be a second
+   * clock for a sheet nobody is watching while they play.
+   */
+  openAchievements() { this.paintAchievements(); this.el.achievements.classList.remove('hidden'); }
+  closeAchievements() { this.el.achievements.classList.add('hidden'); }
+
+  /**
+   * Twelve rows, and every one of them shows a number.
+   *
+   * `progress()` hands back the marks already clamped and already told whether
+   * they are finished; this decides only how to *say* the two numbers. Three
+   * ways, because three kinds of thing are being counted: a flag has no scale
+   * and gets a word, a stretch of time is unreadable as 86,400, and everything
+   * else is a plain grouped count.
+   */
+  paintAchievements() {
+    const a = this.game?.achievements;
+    if (!a) return;
+    const t = a.tally();
+    this.el.achTally.textContent = `${t.done} / ${t.total}`;
+    this.el.achList.innerHTML = a.progress().map((r) => {
+      const count = r.kind === 'flag'
+        ? (r.done ? 'Done' : 'Not yet')
+        : r.time
+          ? `${playedFor(r.have)} / ${Math.round(r.need / 3600)}h`
+          : `${r.have.toLocaleString('en-GB')} / ${r.need.toLocaleString('en-GB')}`;
+      const pct = Math.max(0, Math.min(100, (100 * r.have) / r.need));
+      return `<div class="ach-row${r.done ? ' done' : ''}">`
+        + `<div class="ach-name">${r.label}</div>`
+        + `<div class="ach-note">${r.note}</div>`
+        + `<div class="ach-meter"><b class="ach-count">${count}</b>`
+        + `<div class="xp-bar"><i style="width:${pct.toFixed(1)}%"></i></div></div>`
+        + '</div>';
+    }).join('');
+  }
+
   get anyModalOpen() {
-    return !this.el.settings.classList.contains('hidden') || !this.el.controls.classList.contains('hidden');
+    return !this.el.settings.classList.contains('hidden')
+      || !this.el.controls.classList.contains('hidden')
+      || !this.el.achievements.classList.contains('hidden');
   }
 
   openPause() { this.el.pause.classList.remove('hidden'); }
-  closePause() { this.el.pause.classList.add('hidden'); this.closeSettings(); this.closeControls(); }
+  closePause() {
+    this.el.pause.classList.add('hidden');
+    this.closeSettings(); this.closeControls(); this.closeAchievements();
+  }
   get pauseOpen() { return !this.el.pause.classList.contains('hidden'); }
 
   /**

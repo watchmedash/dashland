@@ -3613,7 +3613,7 @@ class Game {
    */
   _escape() {
     const ui = this.ui;
-    if (ui.anyModalOpen) { ui.closeSettings(); ui.closeControls(); return; }
+    if (ui.anyModalOpen) { ui.closeSettings(); ui.closeControls(); ui.closeAchievements(); return; }
     if (ui.deathOpen) return;
     if (ui.skillsOpen) { this.closeSkills(); return; }
     if (ui.pauseOpen) { this.resume(); return; }

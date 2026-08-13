@@ -865,6 +865,16 @@ export class UI {
     // reads all three, and the owner took them out again: the panel was trimmed
     // on purpose and a slider nobody asked for is another line to scroll past.
     // `setRenderScale` therefore has no caller, which is correct.
+    // One line, because `setQuality` is the whole of it: it stores the choice,
+    // resolves the tier, moves the AO pass, re-sizes the buffers and re-streams
+    // the chunk ring itself. Writing `s.quality` here as the rows above write
+    // their own field would set the value twice and skip all of that.
+    //
+    // A three-way select for auto/high/low was considered and earns nothing: a
+    // player who wants the low tier on a machine the probe called high is the
+    // only person this row is for, and 'auto' is what the box being clear
+    // already means to everyone else.
+    bind('set-lowspec', 'change', (e) => g.setQuality(e.target.checked ? 'low' : 'high'));
     bind('set-post', 'change', (e) => { s.post = e.target.checked; g.postfx.enabled = e.target.checked; g.persistSettings(); });
     bind('set-bob', 'change', (e) => { s.bob = e.target.checked; g.persistSettings(); });
     bind('set-invert', 'change', (e) => { s.invertY = e.target.checked; g.input.invertY = e.target.checked; g.persistSettings(); });
@@ -893,6 +903,11 @@ export class UI {
     $('set-sens').value = s.sensitivity; $('sens-val').textContent = s.sensitivity.toFixed(2);
     $('set-vol').value = Math.round(s.volume * 100); $('vol-val').textContent = Math.round(s.volume * 100);
     $('set-mus').value = Math.round(s.music * 100); $('mus-val').textContent = Math.round(s.music * 100);
+    // The resolved tier, never `s.quality`: the stored value is 'auto' until
+    // somebody touches this box, and a checkbox cannot say 'auto'. On a phone
+    // it therefore opens already ticked, which is the truth about what the
+    // session is running.
+    $('set-lowspec').checked = this.game.qualityTier === 'low';
     $('set-post').checked = s.post;
     $('set-bob').checked = s.bob;
     $('set-invert').checked = s.invertY;

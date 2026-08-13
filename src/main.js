@@ -1093,8 +1093,15 @@ const SPORE_PUFF = 0.55;
  * purpose: the puff off a deathcap and the puff off a poisoned player are the
  * same green, so a player who has met the mushroom recognises what a bad fish
  * has done to them without being told twice.
+ *
+ * It is a *pale* yellow-green and not the cap's olive, which was the first try
+ * and was measured invisible: the deathcap grows in a forest, the ground under
+ * it is dark green grass, and a mid-olive particle over it is the same value
+ * and the same hue as the thing it is meant to warn you about. Spores in life
+ * are a pale dust and the pale reads, which is the same argument the model's
+ * bone-white stalk makes one paragraph away.
  */
-const SPORE_COLOR = [0.62, 0.76, 0.26];
+const SPORE_COLOR = [0.90, 0.95, 0.44];
 
 for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID[n]);
 
@@ -6378,7 +6385,11 @@ class Game {
         // second time round: something giving way underfoot and letting go of
         // what was inside it.
         if (!this._sporeSaid) { this._sporeSaid = true; this.audio.sink('grass', p.position); }
-        if (Math.random() < dt * 6) this.particles.crumbs(p.eye, p.up, SPORE_COLOR);
+        // Off the cap rather than off the head: this half of the cue is news
+        // about the mushroom you are standing in, and it has to be visible when
+        // you look DOWN at the thing your feet are in. `position` is the body's
+        // foot, which is where the caps are.
+        if (Math.random() < dt * 9) this.particles.spores(p.position, p.up, SPORE_COLOR, 0.7);
       }
       if (this.sporeT >= SPORE_BITE) {
         // Rearmed rather than left charged, so standing in a patch doses you
@@ -6398,11 +6409,17 @@ class Game {
     // --- the dose, which is `burning` with a different cadence ---------------
     if (this.poisonT <= 0) return;
     this.poisonT = Math.max(0, this.poisonT - dt);
-    // A thin trickle of the same green off the player themselves, so the state
-    // is visible for the whole twelve seconds and not only on the four frames
-    // it charges. Three a second against the crumb emitter's two particles is
-    // six, which is nothing beside the eighty steam instances a hot spring runs.
-    if (Math.random() < dt * 3) this.particles.crumbs(p.eye, p.up, SPORE_COLOR);
+    // A thin trickle of the same green around the body for the whole twelve
+    // seconds, so the state is visible and not only the four frames it charges.
+    //
+    // **At the foot and not at the eye**, which the hot spring's steam can
+    // afford and this cannot. Steam is an additive white sprite that fades; a
+    // spore is an opaque tinted quad, and one 0.09 across spawned inside the
+    // near plane fills a third of the screen with a flat green wedge. Measured
+    // on a screenshot, which is the only way that was ever going to be found.
+    // The foot is a metre and a half away and is where the player looks when
+    // they look at their own feet, which is what a poisoned player does.
+    if (Math.random() < dt * 2.5) this.particles.spores(p.position, p.up, SPORE_COLOR, 0.45);
 
     this._poisonT = (this._poisonT || 0) + dt;
     if (this._poisonT < POISON_PERIOD) return;

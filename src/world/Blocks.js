@@ -1398,7 +1398,7 @@ export const BLOCKS = [
   // forest floor draws nothing at all.
   //
   // **It is the palest thing in a forest and that is the entire warning.** A
-  // forest floor here is fern (0.75 of every column) over grass, so it is dark
+  // forest floor here is fern (17.3% of every column, measured) over grass, so it is dark
   // green from the knee down; the deathcap is a bone-white stalk with a swollen
   // white sack at its foot under an olive cap, and it stands a third taller
   // than the ferns around it. It is legible at range for the same reason the

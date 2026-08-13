@@ -598,6 +598,50 @@ export class Particles {
     }
   }
 
+  /**
+   * A cloud of spores, and the one warning a deathcap gives before it doses
+   * you.
+   *
+   * The first cut of this borrowed `crumbs` and it was measured invisible: a
+   * crumb is 0.016-0.034 across and lives 0.30-0.55 seconds, because it is a
+   * flake off a mouthful and is meant to be nearly nothing. On a screenshot of
+   * a player stood in a mushroom it did not read at all, which is fatal for a
+   * cue whose entire job is to arrive before the damage.
+   *
+   * `steam` was the other candidate and could not be used: it carries its fade
+   * in `color` as a scalar over an additive white material, so a steam puff is
+   * white by construction and there is no green in it. A poison that puffed the
+   * same white as the hot spring and the cold snap would also have been the
+   * third thing on the planet saying the same thing.
+   *
+   * So: the crumb's tinted material, at four times the size, three times the
+   * life, and drifting *up* and outward rather than falling. Three at a time,
+   * because one particle a frame reads as a speck and a cloud is what a
+   * mushroom releasing spores looks like.
+   */
+  spores(pos, up, col, spread = 0.35) {
+    for (let i = 0; i < 3; i++) {
+      const p = this._spawn();
+      if (!p) return;
+      p.alive = true;
+      p.pos.copy(pos);
+      p.pos.x += (Math.random() - 0.5) * spread;
+      p.pos.y += (Math.random() - 0.5) * spread;
+      p.pos.z += (Math.random() - 0.5) * spread;
+      // Up, slowly. Spores hang; they do not fall like crumbs and they do not
+      // climb like steam off a spring.
+      p.vel.copy(up).multiplyScalar(0.16 + Math.random() * 0.22);
+      p.vel.x += (Math.random() - 0.5) * 0.28;
+      p.vel.y += (Math.random() - 0.5) * 0.28;
+      p.vel.z += (Math.random() - 0.5) * 0.28;
+      p.rot.setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6));
+      p.spin.set(0, 0, 0);
+      p.life = 0; p.maxLife = 0.9 + Math.random() * 0.7;
+      p.size = 0.042 + Math.random() * 0.040;
+      p.color.setRGB(col[0], col[1], col[2]);
+    }
+  }
+
   splash(pos, up, strength = 1) {
     // The ring goes here rather than at the six call sites, and that is the
     // whole reason it is worth doing: every splash in the game already comes

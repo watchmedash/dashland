@@ -4547,7 +4547,33 @@ export class WorldGen {
       for (let l = 0; l <= levels; l++) {
         const lq = l - (l % 2);
         const t = 1 - lq / levels;
-        const r = rad * (1 - t * 0.82) + 0.4;
+        /*
+         * A spire still has to be a spire, not a bare pole.
+         *
+         * Reported: "some pine trees have exposed 2 layer trunk without leaves
+         * under the top leaf". The crown course is `rad * 0.18 + 0.4`, and when
+         * `rad` damps under about 3.06 that lands below 1.0 - at which point
+         * `hypot(1, 0) = 1.0 > r` throws out all four neighbours and the course
+         * places only `(0, 0)`, which is the trunk's own column, where `set`
+         * refuses because a log is already there. So the course placed NOTHING,
+         * and the whorl quantisation above made it the top TWO courses at once,
+         * which is exactly the two bare layers in the report. The single tip
+         * leaf still went on above them.
+         *
+         * Computed across the size range before the floor:
+         *
+         *   rad 3.4, h 9   l=0 r=1.01 -> 5 cells   l=1 r=1.01 -> 5 cells
+         *   rad 3.0, h 9   l=0 r=0.94 -> 1 cell    l=1 r=0.94 -> 1 cell
+         *
+         * which is why it was "some" pines: `rad` varies per tree and only the
+         * ones that damp below the threshold fail. At exactly 1.0 the four
+         * neighbours come back, because the test is `>` and not `>=`.
+         *
+         * The widest course does not move and the vertical extent does not
+         * change, so `_treeSize`'s `reach` and `hiK` are untouched and both
+         * remain upper bounds.
+         */
+        const r = Math.max(rad * (1 - t * 0.82) + 0.4, 1.0);
         if (r <= 0) continue;
         const ri = Math.ceil(r);
         for (let di = -ri; di <= ri; di++)

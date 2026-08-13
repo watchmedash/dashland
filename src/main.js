@@ -8979,14 +8979,19 @@ class Game {
     // cast only runs on frames where the near one found nothing, which is
     // exactly when there is no highlight to disagree with, and it stops at the
     // first thing it meets so a wall still hides what is behind it.
+    // `mob.label` before `mob.spec.label`, because one species now has more
+    // than one name: the husk is painted by the biome it was found in and calls
+    // itself a Frost Husk on a snowfield and a Moss Husk in a wood. Only those
+    // set the per-mob field; everything else leaves it null and reads its
+    // species name exactly as before. See HUSK_KIND in game/Mobs.js.
     let named = mobHit && (!hit || mobHit.dist < hit.dist)
-      ? (mobHit.mob.spec.label ?? null)
+      ? (mobHit.mob.label ?? mobHit.mob.spec.label ?? null)
       : (hit ? (BLOCKS[this.planet.at(hit.col, hit.k)]?.label ?? null) : null);
     if (!named) {
       const far = this.planet.raycast(this.player.eye, this.player.lookDir, LOOK_RANGE);
       const farMob = this.mobs.raycast(this.player.eye, this.player.lookDir, LOOK_RANGE);
       named = farMob && (!far || farMob.dist < far.dist)
-        ? (farMob.mob.spec.label ?? null)
+        ? (farMob.mob.label ?? farMob.mob.spec.label ?? null)
         : (far ? (BLOCKS[this.planet.at(far.col, far.k)]?.label ?? null) : null);
     }
     this.ui.setLookAt(named);

@@ -80,22 +80,22 @@ import * as MobModels from './MobModels.js';
  * the arithmetic says otherwise and the arithmetic is misleading.
  *
  * 84 land + 18 aquatic + 18 flying + 18 surface husks (a savage world) + 4 cave
- * husks + 3 monsters + 1 merchant is 146 against a ceiling of 134, which reads
- * as an over-subscription that would starve whatever spawns last — husks,
- * monsters and the merchant, in that order. It is not one, because the two
- * halves cannot be full at the same time: the surface husk budget only opens at
- * night, and night is exactly when `_bedDown` takes the land and flier budgets
- * down to NIGHT_WILDLIFE of themselves.
+ * husks + 5 drowned + 3 monsters + 1 merchant is 151 against a ceiling of 134,
+ * which reads as an over-subscription that would starve whatever spawns last —
+ * husks, monsters and the merchant, in that order. It is not one, because the
+ * two halves cannot be full at the same time: the surface husk and drowned
+ * budgets only open at night, and night is exactly when `_bedDown` takes the
+ * land and flier budgets down to NIGHT_WILDLIFE of themselves.
  *
  * Driven from the sun direction the spawner actually reads, five minutes of
  * each clock with the first ninety seconds thrown away while the population
  * walks from one budget to the other:
  *
- *   day    84 land, 18 water, 18 air,  0 husks, 3 monsters, 1 trader = 124
- *   night  34 land, 18 water,  7 air,  8 husks, 3 monsters, 1 trader =  71
+ *   day    84 land, 18 water, 18 air,  0 husks, 0 drowned, 3 monsters, 1 trader = 124
+ *   night  34 land, 18 water,  7 air,  8 husks, 5 drowned, 3 monsters, 1 trader =  76
  *
  * So the true peak is the daytime 124, ten under this ceiling, and the sum of
- * 146 is a number no clock can produce. If a budget is ever raised, check the
+ * 151 is a number no clock can produce. If a budget is ever raised, check the
  * *day* line — that is the one with the headroom left in it, and there is not
  * much of it.
  *
@@ -362,9 +362,9 @@ const MAX_HOSTILE_SURFACE = 8;
  * land and flier budgets down to NIGHT_WILDLIFE. Re-measured against the
  * restored wildlife budgets, five minutes of each clock:
  *
- *   day    84 land, 18 water, 18 air,  0 husks, 3 monsters, 1 trader = 124
- *   night  34 land, 18 water,  7 air,  8 husks, 3 monsters, 1 trader =  71
- *   night, savage, this number       14 husks                        =  77
+ *   day    84 land, 18 water, 18 air,  0 husks, 0 drowned, 3 monsters, 1 trader = 124
+ *   night  34 land, 18 water,  7 air,  8 husks, 5 drowned, 3 monsters, 1 trader =  76
+ *   night, savage, this number       14 husks, 5 drowned                        =  82
  *
  * So the peak roster is the day's 124 whatever this is set to, and no other
  * population loses a slot: the wildlife budgets are separate numbers and the
@@ -396,6 +396,76 @@ const MAX_HOSTILE_SAVAGE = 14;
 const MAX_MONSTERS = 3;
 const MONSTER_CHANCE = 0.05;
 const MAX_HOSTILE_CAVE = 4;
+/**
+ * ...and the third husk budget: the ones in the water.
+ *
+ * The arithmetic is the same argument MAX_HOSTILE_SAVAGE makes, run once more
+ * for a population that is night-only and therefore lands on the *night* line,
+ * which is the half with the slack in it:
+ *
+ *   day    84 land, 18 water, 18 air,  0 husks, 0 drowned, 3 monsters, 1 trader = 124
+ *   night  34 land, 18 water,  7 air,  8 husks, 5 drowned, 3 monsters, 1 trader =  76
+ *   night, savage                     14 husks, 5 drowned                       =  82
+ *
+ * The peak roster is still the day's 124 of 134, untouched, because a drowned
+ * cannot exist in daylight — it is spawned only while `night` and retired by
+ * `_dawnCull`. Night goes 71 -> 76, and savage night 77 -> 82, both still more
+ * than fifty under the ceiling.
+ *
+ * The one moment the two halves overlap is sunrise, and the drowned are the
+ * population that clears it *fastest*: `_dawnCull` starts retiring them on the
+ * first spawn tick of daylight and DROWNED_LINGER bounds the worst case at
+ * twenty seconds, while the land budget refills at SPAWN_PER_TICK per
+ * SPAWN_PERIOD and takes minutes to climb from 34 back to 84. The drowned are
+ * gone long before the day line is anywhere near 124.
+ *
+ * Five rather than eight because the fight is not the same fight. A husk is met
+ * standing up, with a weapon and a floor; a drowned is met by someone treading
+ * water, who swims at 0.62 of a walk and cannot back away uphill. What bounds
+ * the worst case is not this number in any case — HURT_IMMUNITY in main.js is
+ * 0.5s, so *any* pack is capped at one blow every half second, which for the
+ * drowned's 2 damage is 4 half-hearts a second against a 20 bar: five seconds
+ * from full, exactly the same floor eight husks have. Five is what decides how
+ * hard the water is to leave, and leaving it is always the answer.
+ *
+ * Not scaled by `crowdScale`, for the reason the other two hostile caps are
+ * not: how dangerous a night is is a difficulty decision, not a quality tier.
+ */
+const MAX_DROWNED = 5;
+/**
+ * How deep the water has to be before one will spawn in it, in layers.
+ *
+ * This is the owner's own caveat — "water isn't really that safe at night maybe
+ * except for the shallow ones" — and it is enforced twice, because the two
+ * halves of it are different questions.
+ *
+ * Here it is about the *column*: four layers is twice the depth a player can
+ * stand up in, so a beach shelf, a ford and the rim of a lake hold none of
+ * these at all. Measured on seed 4242 over 20,000 water columns sampled from
+ * the spawn ring: 61.4% are under four layers deep and are excluded outright.
+ * Against DEEP_WATER (8, the anglerfish line) only 17.9% would qualify, which
+ * would confine the whole mechanic to open ocean and leave every lake and river
+ * safe — the opposite of "water isn't safe at night".
+ *
+ * The other half is about the *player*, and it is `_playerAfloat` in `_hunt`: a
+ * drowned only pursues someone who is out of their depth. Wade in to your waist
+ * at the shore and the thing in the deep will not come for you, which is what
+ * makes the shallows a refuge rather than a shorter walk to the same death.
+ */
+const DROWNED_DEPTH = 4;
+/**
+ * The longest a drowned may survive the sunrise, in seconds.
+ *
+ * `_dawnCull` retires them the way `_bedDown` retires the herd — furthest
+ * first, never inside NIGHT_BED_DIST — because a body blinking out in front of
+ * a swimmer is a bug report and not a dawn. That rule alone would let one that
+ * is actively chasing the player follow them into the morning forever, so this
+ * is the backstop: twenty seconds after the sun comes up it goes wherever it
+ * is standing. Twenty is long enough to swim to any shore from anywhere the
+ * spawn depth allows, so the player always gets out under their own power and
+ * the vanishing is the night letting go rather than the fight being taken away.
+ */
+const DROWNED_LINGER = 20;
 /**
  * How far a placed light keeps husks out, in columns and layers. Eight columns
  * is a little short of a torch's actual glow, deliberately: a corridor you have
@@ -2185,9 +2255,40 @@ const SPECIES = {
     drops: [],
   }),
 
-  // --- the one thing that wants you dead ---
+  /**
+   * --- the one thing that wants you dead, and the twelve faces it wears ---
+   *
+   * `urls` is the same list-the-spawner-draws-from the fish note above
+   * describes, and it stays two bodies. What is new is that the *colour* is
+   * drawn from the biome instead of from the seed — see HUSK_KIND — so a husk
+   * out of a snowfield and a husk out of a badlands are the same rig, the same
+   * budget, the same save field and plainly not the same creature.
+   *
+   * Colour rather than a third and fourth body, and that is a fact about the
+   * asset pack rather than a preference. Of the eighteen `character-*.glb` in
+   * Kenney's Blocky Characters, exactly two are undead: `l` and `o`, the two
+   * already here. The other sixteen are living people — an astronaut, two
+   * office workers in suits, a bride, a doctor, a chef, a ninja. There is no
+   * third zombie to give the desert, and dressing the night shift in a wedding
+   * dress is not a variant, it is a different game. So the pack decides this:
+   * two silhouettes, and the biome paints them.
+   *
+   * `tint` is a multiply into `color` on the per-mob material clones spawn()
+   * already makes — the same safe operation `shade` performs, on the same
+   * clones, with the map object passed across untouched. Nothing is
+   * re-uploaded. See `lit()` for the version of this that renders a mob white.
+   *
+   * Deliberately body-only: every one of the twelve has the husk's health,
+   * damage, reach, swing and speed to the digit. A desert husk that hits harder
+   * is a balance change wearing a paint job, and the night is already tuned —
+   * the ladder above prices this thing at 2.6 dps and 7.7 seconds, and twelve
+   * biomes is twelve chances to quietly break that. Variety here is meant to be
+   * something you notice, not something that kills you.
+   */
   husk: {
     label: 'Husk', urls: [CHAR('l'), CHAR('o')], clips: CHAR_CLIPS, height: 1.72,
+    // Read by spawn(), which asks HUSK_KIND for the column's biome.
+    biomeTint: true,
     // 1.50 put a chasing husk at 1.50 x CHASE_SPEED = 4.5 cells/s against a
     // player who walks at 4.4 — it matched your pace exactly, so walking away
     // was not an option and the only answer to one was to turn and fight or
@@ -2211,6 +2312,89 @@ const SPECIES = {
     // take no damage at all. Night had threat on paper and none in play.
     aggroRange: 34,       // cells it will notice you from
     burns: true,          // direct daylight sets it alight
+  },
+
+  /**
+   * --- and the thirteenth biome, which is under the water ---
+   *
+   * There is a note further up, on the guard in `_hunt`, that says this thing
+   * into existence without meaning to: "The husk is deliberately *not* exempt.
+   * Deep water is a refuge from it for as long as you are willing to tread it,
+   * and it is waiting on the bank when you get out." That was a good rule and
+   * it is still the rule for the husk. It also made the ocean the one place on
+   * a hostile planet where nothing at all could reach you, at any hour, and
+   * "water isn't really that safe at night" is the answer to it.
+   *
+   * Everything that makes this fair is a flag it already had to have:
+   *
+   *   `aquatic`   is "water is the only place I will go", and `_stepTo` and
+   *               `_footprintCost` both enforce it, so this cannot follow you
+   *               onto the bank any more than a husk can follow you into the
+   *               sea. The two of them own opposite halves of the shoreline.
+   *   `nightOnly` is the spawn gate and the dawn cull, below.
+   *   `hostile`   is what makes it acquire you unasked. It is *excluded* from
+   *               `_countHostile` by its `aquatic` flag, or it would eat the
+   *               surface husks' budget while being unable to reach a player
+   *               standing on grass — the exact failure the cave/surface split
+   *               was made to fix, one habitat further out.
+   *
+   * A separate species rather than a husk variant because the two differ in
+   * every field that matters: budget, spawn search, day behaviour, drops and
+   * pace. `biomeTint` is a paint job; this is a different animal.
+   *
+   * Weaker than a husk per blow and slower in the chase, on purpose. A husk is
+   * met standing up; this is met by someone treading water at 0.62 of a walk
+   * with no ground to back onto and a swing that is worth very little. 2 damage
+   * on a 1.30s swing is 1.54 dps against the husk's 2.6, i.e. thirteen seconds
+   * from a full bar rather than eight, and the chase is 1.15 x CHASE_SPEED =
+   * 3.45 against a swim of 2.73 — it closes, steadily, and the shore is always
+   * the answer. See MAX_DROWNED for what a pack of them is bounded at.
+   */
+  drowned: {
+    // A name and nothing else, like every other label in this table.
+    label: 'Drowned', urls: [CHAR('l'), CHAR('o')], clips: CHAR_CLIPS, height: 1.72,
+    health: Math.round(10 * HOSTILE_HP), speed: 1.15, skittish: 0, turn: 3.2, accel: 6.0,
+    // Where it has been rather than what it was carrying. The cinder is the
+    // husk's own signature payment and it is kept, which makes a deep dive on a
+    // dark night a second route to the one material that is worth being outside
+    // for. Kelp is the ocean floor it came off.
+    drops: [['kelp', 0, 2], ['cinder', 0, 1]],
+    grazeChance: 0, idleMin: 1.5, idleMax: 3.5,
+    hostile: true,
+    aquatic: true,
+    /** Spawned only while `night`, and retired by `_dawnCull`. */
+    nightOnly: true,
+    damage: 2,
+    reach: 1.25,
+    swing: 1.30,
+    aggroRange: 34,
+    /**
+     * No `burns`. Daylight is not what ends this thing — `_dawnCull` is — and
+     * the two would fight: `_skyLit` reads SKY_ATTEN, which water does not
+     * attenuate, so `burns` would set fire to a body ten layers under the sea
+     * at sunrise. It would also pay out: a burning husk still drops, so a
+     * player could farm the dawn by watching the shallows. The cull is a
+     * release, not a death. Nothing drops and nothing sounds.
+     */
+    burns: false,
+    /**
+     * Just enough of its own albedo to survive the dark, and no light.
+     *
+     * Mobs get no scene light in this game — two PointLight attempts failed,
+     * because three tests a light's layers against the camera and not against
+     * each object — so anything a body is to be seen by has to be in its
+     * material. `glow` is the existing path for that: it reuses `map` as the
+     * emissive map, so this is `texel * 0.20` added to the lit term rather than
+     * a flat wash of colour, and the thing stays a textured body.
+     *
+     * 0.20 against the fish's 0.55 on purpose. A fish is meant to be found in
+     * the dark; this is meant to be *nearly* missed. It also has to survive the
+     * ocean shallows' bioluminescence at night without either vanishing into it
+     * or reading as part of it, and a fifth of albedo sits under that glow
+     * rather than in it.
+     */
+    glow: 0.20,
+    biomeTint: true,
   },
 
   // --- the one thing that is only ever seen ---
@@ -3069,6 +3253,67 @@ const BIOME_NAME = [];
 for (const [name, id] of Object.entries(BIOME)) BIOME_NAME[id] = name;
 
 /**
+ * Which husk this ground makes.
+ *
+ * Keyed by biome name, exactly as MONSTER_BY_BIOME and SPAWN_BY_BIOME are, so
+ * all three tables answer "what lives here" in the same shape and a new biome
+ * is one line in each. A biome with no entry falls back to `DEFAULT`, which is
+ * the husk as it has always looked — so a table that forgets one cannot spawn
+ * an invisible or a white creature, only an ordinary husk.
+ *
+ * `tint` is a per-channel multiply into the material colour and nothing more.
+ * The three numbers are read against the texture underneath them, which is a
+ * green corpse in torn clothes: the multiply cannot desaturate one, so a "grey"
+ * husk is made by pulling the green down toward the other two rather than by
+ * asking for grey. Anything above 1 is a genuine brightening and is kept under
+ * 1.25 — CHARACTER_GAIN in MobModels.js has already lifted this pack by 1.42,
+ * and a fourth of that again is where the paint starts to blow out.
+ *
+ * The three keys that are not biomes:
+ *   CAVE     the husks from `_findDarkColumn`, which have never seen the sun
+ *            whatever biome is on the roof. `fromCave` is the flag, and it is
+ *            the same one the split budget and the save field already key on.
+ *   DROWNED  the one that is not a husk at all — see the species.
+ *   DEFAULT  the fallback, and the baseline the other twelve are read against.
+ */
+const HUSK_KIND = {
+  DEFAULT: { label: 'Husk', tint: [1.00, 1.00, 1.00] },
+  // The two biomes anybody actually builds in keep the husk they have always
+  // had. The variety is meant to be a reward for going somewhere, and the
+  // creature outside your own door should stay the one you learned the game on.
+  MEADOW: { label: 'Husk', tint: [1.00, 1.00, 1.00] },
+  PLAINS: { label: 'Husk', tint: [1.00, 1.00, 1.00] },
+  // Sun-bleached. Red and green up, blue down: sand light on a dead body.
+  DESERT: { label: 'Sand Husk', tint: [1.20, 1.06, 0.70] },
+  SAVANNA: { label: 'Dust Husk', tint: [1.16, 1.00, 0.74] },
+  // Iron in the ground and iron in the corpse.
+  BADLANDS: { label: 'Rust Husk', tint: [1.22, 0.76, 0.60] },
+  // Frost. The one direction the base texture has almost nothing of, which is
+  // why the cold biomes read as the biggest change of the twelve.
+  SNOW: { label: 'Frost Husk', tint: [0.74, 0.94, 1.24] },
+  TUNDRA: { label: 'Frost Husk', tint: [0.82, 0.96, 1.16] },
+  // Stone: the green pulled down to meet the red and the blue, which is as
+  // close to grey as a multiply gets.
+  MOUNTAIN: { label: 'Stone Husk', tint: [0.94, 0.84, 0.90] },
+  // Deeper into its own green, and darker, because a forest at night is.
+  FOREST: { label: 'Moss Husk', tint: [0.76, 1.02, 0.68] },
+  PINE_FOREST: { label: 'Moss Husk', tint: [0.72, 0.94, 0.74] },
+  // Salt. Not the drowned — this is the one that walks the beach.
+  BEACH: { label: 'Brine Husk', tint: [0.86, 1.08, 1.02] },
+  OCEAN: { label: 'Brine Husk', tint: [0.82, 1.04, 1.04] },
+  // Underground, and it shows. Blue-grey and dim: nothing down there has ever
+  // been bleached by anything.
+  CAVE: { label: 'Pale Husk', tint: [0.78, 0.80, 0.94] },
+  // Well under 1 on every channel, because this one is lit from inside — see
+  // `glow` on the species. Without the pull-down the emissive floor and the
+  // albedo add up to a body that is brighter underwater than the husk is in
+  // open daylight, which is the opposite of a thing you nearly miss.
+  DROWNED: { label: 'Drowned', tint: [0.52, 0.86, 1.00] },
+};
+/** Scratch, so the per-spawn lookup allocates nothing. */
+const _tint = new THREE.Color();
+
+/**
  * What counts as forage for a bee. Blooms and the things that grow beside them;
  * leaves are checked separately through IS_LEAF, so a tree counts without every
  * species of leaf having to be listed here.
@@ -3644,6 +3889,29 @@ export class Mobs {
       return null;
     }
 
+    /**
+     * Which kind of husk this ground makes, or null for everything else.
+     *
+     * Asked here, off the column, rather than handed in by the caller — and
+     * that is what makes it survive a reload for free. A save records the type,
+     * the seed and the cell (see `toJSON`); it records nothing about the paint,
+     * and it does not need to, because the same column always answers the same
+     * way. The body under the paint is the seeded `variant` draw the fish note
+     * describes, which is stable for exactly the same reason.
+     *
+     * Cave-ness is read from the roof rather than from `mob.fromCave`, because
+     * that flag is set by the caller *after* spawn() returns and the materials
+     * are painted inside it. `_roofed` is the same test `_findDarkColumn`
+     * places them by and the same one `_skyLit` burns them by, so the three
+     * agree; in particular it does not count leaves, so a husk on a forest
+     * floor at midnight is a Moss Husk and not a Pale one.
+     */
+    const kind = spec.biomeTint
+      ? (spec.aquatic ? HUSK_KIND.DROWNED
+        : this._roofed(col, k) ? HUSK_KIND.CAVE
+          : (HUSK_KIND[BIOME_NAME[this.planet.colBiome[col]]] || HUSK_KIND.DEFAULT))
+      : null;
+
     // Sizes are authored as a target height in cells, and each rig has its own
     // idea of a unit, so the scale is derived from the measured rest pose.
     const scale = (spec.height / MobModels.modelHeight(url)) * sizeJitter;
@@ -3698,6 +3966,14 @@ export class Mobs {
         // on every animal on the planet. See `lit()` for the version of this
         // that renders the model flat white.
         if (m.color && spec.shade) m.color.multiplyScalar(spec.shade);
+        // ...and the same operation again for the biome husks. Same clones,
+        // same rule, same reason it is safe: a multiply into `color` with the
+        // map object passed across untouched. Placed here rather than after the
+        // `baseColor` capture below on purpose — every later read of the colour
+        // (the damage flash, the block light's `tr/tg/tb`) has to be working
+        // against the frost husk's own paint, or being hit would flash it back
+        // to an ordinary husk for a fifth of a second.
+        if (m.color && kind) m.color.multiply(_tint.setRGB(...kind.tint));
         // A self-lit mob. `emissiveMap` is already the albedo for anything that
         // has one (see above), so this only has to set how much of it survives
         // the dark; without a map the flat emissive colour carries it.
@@ -3744,6 +4020,12 @@ export class Mobs {
     const ext = modelExtents(model.root);
     const mob = {
       id: this._nextId++, type, spec, model, seed: s, variant,
+      /**
+       * What the crosshair calls it. Null for everything whose name is a
+       * property of its species rather than of where it was found; main.js
+       * reads `mob.label ?? mob.spec.label`, so only the biome husks set it.
+       */
+      label: kind ? kind.label : null,
       scale, sizeJitter,
       cell: { f, ci: i + 0.5, cj: j + 0.5, ck: k + 1.02 },
       vel: { i: 0, j: 0, k: 0 },
@@ -4225,9 +4507,26 @@ export class Mobs {
     let n = 0;
     for (const m of this.list) {
       if (!m.spec.hostile) continue;
+      // The drowned are hostile and are not husks. Without this line they are
+      // counted against the *surface* budget, because they carry no `fromCave`
+      // and `!undefined === false` — so five bodies in the middle of an ocean
+      // would hold five of the eight slots meant for the things walking towards
+      // the player's door, and a night on land would spawn three husks instead
+      // of eight. That is precisely the failure the cave/surface split was made
+      // to fix, one habitat further out, and it is worth naming twice: a
+      // hostile that cannot reach the player must never spend a budget that
+      // could have been filled by one that can. See MAX_DROWNED.
+      if (m.spec.aquatic) continue;
       if (cave !== undefined && !!m.fromCave !== cave) continue;
       n++;
     }
+    return n;
+  }
+
+  /** How many drowned are abroad, against MAX_DROWNED. */
+  _countDrowned() {
+    let n = 0;
+    for (const m of this.list) if (m.spec.nightOnly) n++;
     return n;
   }
 
@@ -4920,6 +5219,68 @@ export class Mobs {
       return { col, k };
     }
     return null;
+  }
+
+  /**
+   * ...and water deep enough for a drowned, which is not the same water.
+   *
+   * A copy of the search above with one extra test rather than a `minDepth`
+   * argument threaded through it, because the two are asked at very different
+   * rates and for very different reasons: the fish search runs several times a
+   * tick and must stay cheap, and this runs at most once. Sharing it would put
+   * a depth lookup — a scan down the whole column — inside the hot one.
+   *
+   * The extra test is the whole of the shallows rule at the spawn end. See
+   * DROWNED_DEPTH for the measurement behind the number, and `_hunt` for the
+   * other half of it, which is asked of the player instead of the ground.
+   */
+  _findDeepColumn(nearCol, playerPos) {
+    for (let tries = 0; tries < 44; tries++) {
+      const col = this._walkTo(nearCol, spawnDist(SPAWN_MIN_DIST, this.spawnFar));
+      const k = this._waterLayer(col);
+      if (k < 0) continue;
+      if (this._waterDepth(col) < DROWNED_DEPTH) continue;
+      const { f, i, j } = colParts(col);
+      cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
+      const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
+      if (d < SPAWN_MIN_DIST || d > this.spawnFar) continue;
+      return { col, k };
+    }
+    return null;
+  }
+
+  /**
+   * Take the night's drowned back, now that it is morning.
+   *
+   * Built on `_bedDown`'s rule and for its reason: the same `_release` and
+   * splice the despawn ring uses, furthest first, and never inside
+   * NIGHT_BED_DIST, because a body blinking out in front of a swimmer is a bug
+   * report and not a sunrise. No death, no drops, no sound — see the note on
+   * `burns` on the species for why this is a removal rather than a burning.
+   *
+   * DROWNED_LINGER is the backstop the distance rule needs. One that is
+   * actively chasing the player is by definition inside NIGHT_BED_DIST and
+   * would otherwise follow them into the afternoon, so every drowned carries a
+   * clock that starts on the first daylight frame and takes it wherever it is
+   * standing when it runs out.
+   *
+   * @param {object} player
+   * @param {number} dt seconds since the last tick, for the linger clock
+   */
+  _dawnCull(player, dt) {
+    let far = -1, farD = NIGHT_BED_DIST;
+    for (let n = this.list.length - 1; n >= 0; n--) {
+      const m = this.list[n];
+      if (!m.spec.nightOnly) continue;
+      m.dawnT = (m.dawnT || 0) + dt;
+      if (m.dawnT > DROWNED_LINGER) { this._release(m); this.list.splice(n, 1); continue; }
+      const d = m.pos.distanceTo(player.position);
+      if (d > farD) { farD = d; far = n; }
+    }
+    // One a tick from the far end, exactly as _bedDown takes the herd. The
+    // linger clock is what guarantees the last of them goes; this only makes
+    // sure the ones nobody is looking at go first and go quietly.
+    if (far >= 0) { this._release(this.list[far]); this.list.splice(far, 1); }
   }
 
   /**
@@ -6809,6 +7170,27 @@ export class Mobs {
     // when you get out — a better night than one spent being paddled after,
     // and it costs the player everything they could otherwise be doing with
     // that time, which is what keeps it from being a free win.
+    // ...and the drowned's own half of the same line, which is the shallows
+    // rule asked of the *player* rather than of the ground.
+    //
+    // DROWNED_DEPTH keeps them out of a beach shelf at the spawn end, and that
+    // alone is not the owner's caveat: a drowned that spawned in four layers of
+    // water can still swim to the edge of it, and a player wading knee-deep at
+    // a shore would be ambushed exactly as a swimmer in open ocean is. So the
+    // pursuit is gated on being out of your depth, which is the mirror image of
+    // the husk's rule directly below and the reason the two of them own
+    // opposite halves of the shoreline. Stand up and the thing in the deep
+    // stops coming; the water is only dangerous while it is over your head.
+    //
+    // `_playerAfloat` is `inWater && !grounded`, not `inWater`, so a ford and
+    // an ankle-deep paddle read as land here — the same distinction the note
+    // below draws for the predators, and for the same reason.
+    if (spec.nightOnly && !this._playerAfloat(player)) {
+      mob.state = 'idle';
+      mob.stateT = 0.5;
+      mob.onPath = false;
+      return true;
+    }
     if (!spec.aquatic && !spec.amphibious && this._playerAfloat(player)) {
       mob.state = 'idle';
       mob.stateT = 0.5;
@@ -8243,6 +8625,28 @@ export class Mobs {
         const spot = this._findDarkColumn(playerCol, player.position);
         if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = true; }
       }
+      // ...and the third habitat: the water, and only after dark.
+      //
+      // The husk's own rule is that deep water is a refuge from it — see the
+      // guard in `_hunt` — and that made the ocean the one place on a hostile
+      // planet nothing could reach you, at any hour. This is the answer to it,
+      // and it is deliberately the *narrowest* answer that works: night only,
+      // deep water only, and gone by morning. What is left safe is a swim in
+      // daylight, which is most swims, and the shallows at any hour, which is
+      // where a player crossing a river or working a shoreline actually is.
+      //
+      // Gated on `spawnGrace` with the other two, for the same reason: a new
+      // world's opening minutes are not where any of this belongs, and a player
+      // who starts beside an ocean after dark should not meet this before they
+      // have found the mouse.
+      if (night && !this.spawnGrace && this._countDrowned() < MAX_DROWNED) {
+        const spot = this._findDeepColumn(playerCol, player.position);
+        if (spot) this.spawn('drowned', spot.col, spot.k);
+      }
+      // And take them back when it is light. Run on the spawn tick rather than
+      // per frame because it is a population decision like every other one in
+      // this block; SPAWN_PERIOD is therefore the linger clock's unit.
+      if (!night) this._dawnCull(player, SPAWN_PERIOD);
       // The monsters. Their own clock, their own cap, and no night condition:
       // these are the things that do not care about the sun.
       //
@@ -10027,7 +10431,19 @@ export class Mobs {
       // to the same hillside on load would make him a landmark — which is the
       // opposite of the only thing he is. `fromJSON` needs no matching guard:
       // there is nothing in the file to skip.
-      mobs: this.list.filter((m) => !m.spec.phantom).map((m) => {
+      //
+      // Nor is a drowned, and that is the same argument about a different
+      // clock. It is a population that exists only between sunset and sunrise
+      // and is retired by `_dawnCull`, so the file has no honest way to hold
+      // one: a save taken at midnight and loaded at noon would restore five
+      // bodies into a daylight the spawner would never have made, and they
+      // would then linger for up to DROWNED_LINGER before the cull noticed
+      // them. Writing nothing makes that unrepresentable rather than merely
+      // short-lived, and it costs nothing to leave out — the night budget
+      // refills within one SPAWN_PERIOD of a load that lands after dark. It
+      // also means the save file cannot accumulate anything about a mechanic
+      // whose whole definition is that it does not survive the morning.
+      mobs: this.list.filter((m) => !m.spec.phantom && !m.spec.nightOnly).map((m) => {
         const d = {
           t: m.type, c: [m.cell.f, m.cell.ci, m.cell.cj, m.cell.ck], h: m.health, s: m.seed,
           b: +m.baby.toFixed(1), l: +m.love.toFixed(1), d: +m.breedCooldown.toFixed(1),

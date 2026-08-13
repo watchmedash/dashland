@@ -2588,6 +2588,31 @@ class Game {
       // else comes back out of the generator, so the generator has to be the
       // one that made it — see GEN_VERSION.
       if (data.regions.length * REGION_VOXELS !== data.blocks.length) return BAD;
+      /*
+       * And every id in that list has to name a region this planet has.
+       *
+       * The length check above passes for a save whose region *ids* are
+       * nonsense, because the payload is still one region long per id. The next
+       * thing that happens is `Planet.applyRegions`, which turns an id into an
+       * offset into the block mirror and calls `set` — an id past the end
+       * throws RangeError "offset is out of bounds", synchronously, inside
+       * `continueGame` itself.
+       *
+       * That is the one load exception this file does not already catch.
+       * `_loadFailed` covers everything thrown out of the worker's message
+       * handler and says so plainly ("That planet could not be opened. Nothing
+       * has been changed"); this one is thrown from the click handler, escapes
+       * as an unhandled rejection, and the measured result is the loading bar
+       * sitting there for ever with no message at all — the same symptom, and
+       * the same complaint, as the missing `player` above.
+       *
+       * Read with `| 0` because the list is an Int32Array in every save this
+       * build writes but is whatever the file says in one that has been damaged.
+       */
+      for (let n = 0; n < data.regions.length; n++) {
+        const rid = data.regions[n] | 0;
+        if (rid !== data.regions[n] || rid < 0 || rid >= NUM_REGIONS) return BAD;
+      }
       if ((data.gen | 0) !== GEN_VERSION) return OLD;
     } else if (data.blocks.length !== COLUMNS * D) return BAD;
     if (data.colBiome && data.colBiome.length !== COLUMNS) return BAD;

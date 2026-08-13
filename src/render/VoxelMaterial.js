@@ -178,6 +178,32 @@ export const voxelUniforms = {
   uOccR: { value: new THREE.Vector3(0, 0, -1) },
   uOccU: { value: new THREE.Vector3(0, 1, 0) },
   uOccActive: { value: 0 },
+  /**
+   * How much sea detail this quality tier pays for: 1 on high, 0 on low.
+   *
+   * It gates the two shortest waves of the swell (see swellGrad) and nothing
+   * else. The two long ones are what carry the shape at play distance and are
+   * the whole point of the term, so a phone still gets a swell rather than a
+   * sheet; what it loses is the chop on top of it, which is a metre wide and
+   * costs four transcendentals a fragment to draw.
+   */
+  uSeaDetail: { value: 1 },
+  /**
+   * Four recent positions of a body moving through water, xyz plus a strength.
+   *
+   * The bioluminescent wake. A ring buffer rather than one point, because a
+   * single glowing disc centred on the swimmer is a lamp and not a wake: what
+   * the eye is looking for is the *trail*, the light still hanging in the water
+   * a second after you passed through it. Four is the fewest that reads as a
+   * line rather than as a pair of dots at swimming speed, and each one costs a
+   * subtract and an exp in the water fragment.
+   *
+   * Strength 0 is a dead slot and contributes nothing, so the low tier simply
+   * leaves the last two at zero rather than compiling a second shader. See
+   * BioWake in game/Water.js, which owns the buffer.
+   */
+  uBioWake: { value: [new THREE.Vector4(), new THREE.Vector4(),
+    new THREE.Vector4(), new THREE.Vector4()] },
 };
 
 const COMMON_VERT_HEAD = /* glsl */`
@@ -339,6 +365,19 @@ uniform vec3 uCamPos;
 uniform float uUnderwater;
 uniform vec3 uWaterFog;
 uniform vec3 uWaterTint;
+uniform float uSeaDetail;
+uniform vec4 uBioWake[4];
+/**
+ * How much of this fragment is its own light rather than light that fell on it.
+ *
+ * The twin of gBlockLum above and read at the same place, for the same reason:
+ * NIGHT_SCOTOPIC drains the colour out of anything the night sky alone lit, and
+ * plankton are not lit by the night sky. Rod vision is what makes a moonlit
+ * field grey; a bioluminescent bloom is bright enough at the eye to be seen in
+ * colour, and draining it would have produced a pale grey wake, which is a
+ * description of foam. Zero in every material that never writes it.
+ */
+float gBioLum = 0.0;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uSkyReflect;
@@ -956,6 +995,85 @@ float caustic(vec2 p, float t) {
 }
 
 /**
+ * A liquid surface coordinate that does not know where the block edges are.
+ *
+ * This is the fix for the mosaic, and the mosaic was not a texture problem.
+ * Every scrolling sample on the water was taken at vTexUv, which the mesher
+ * writes as 0..uMax across a quad -- so the pattern restarts at every greedy
+ * quad boundary and, inside a quad, repeats exactly once per cell because one
+ * unit of uv is one cell. Both of those are hard-locked to the block grid, so
+ * whatever the water tile happens to look like was stamped out across the sea
+ * in a one-metre chequer with visible seams down the quad edges. Photographed
+ * from nine cells up it is the single loudest thing in the frame.
+ *
+ * The cure is a coordinate with no seams and no relationship to the grid: drop
+ * whichever world axis the surface most nearly faces and keep the other two.
+ * That is the same face selection the cubesphere itself makes, so it is
+ * constant over an entire cube face and continuous within one; the units are
+ * world units, so the sampling scale below can be set to a period that is not
+ * a whole number of cells and the chequer has nothing to lock onto.
+ *
+ * What it costs is a discontinuity at the twelve cube-face seams, where the
+ * dropped axis changes and the pattern jumps phase. That is a straight line
+ * across open ocean and it is the honest price of not carrying a second uv set
+ * through the mesher. It is a phase jump in a low-contrast detail texture, not
+ * a colour or a level change, and the terrain already has its own seams in the
+ * same twelve places.
+ */
+vec2 liquidUv(vec3 p) {
+  vec3 rel = p - uPlanetCenter;
+  vec3 m = abs(rel);
+  if (m.x >= m.y && m.x >= m.z) return rel.zy;
+  if (m.y >= m.z) return rel.xz;
+  return rel.xy;
+}
+
+/**
+ * The slope of a long swell, as a world-space gradient.
+ *
+ * The vertex stage already has a swell and it is deliberately tiny: 14 cm peak
+ * to peak, biased under the brim of its own cell so a wave cannot climb a beach
+ * block or z-fight a neighbour's top face. Those constraints are geometric and
+ * correct, and they also mean the displacement is invisible past about ten
+ * cells. Everything the eye actually reads about a swell at play distance --
+ * the broad light and dark bands, the sky reflection sliding along a crest, the
+ * sun path breaking up across it -- comes from the surface NORMAL, and a normal
+ * costs no geometry at all. So the shape is drawn here instead, and the vertex
+ * swell keeps doing the one job only real displacement can do, which is making
+ * the waterline move.
+ *
+ * Four plane waves, summed as a height field and differentiated analytically.
+ * They are plane waves in three dimensions rather than on a tangent plane, and
+ * that is what makes this seam-free where liquidUv is not: sin(dot(rel, k)) is
+ * defined and continuous everywhere on the planet with no basis to choose. A
+ * wave whose direction happens to point straight up at some spot contributes no
+ * tangential slope there, so the four directions are spread wide enough that
+ * no point on the sphere is quiet -- at worst one of the four drops out.
+ *
+ * The numbers are slope amplitudes, not heights, because slope is the thing
+ * being asked for: 0.055 is a face tilted 3.1 degrees. Summed worst-case they
+ * reach 0.147, about 8.4 degrees, which is a swell rather than a chop -- past
+ * roughly 0.25 the fresnel starts finding grazing angles on a flat sea and the
+ * surface fizzes with false sky.
+ *
+ * Wavelengths 13.0, 8.5, 5.5 and 3.4 cells. The two long ones run on every
+ * tier; the short pair is what the detail flag buys.
+ */
+vec3 swellGrad(vec3 rel, float t, float detail) {
+  const vec3 D1 = vec3(0.919, 0.322, 0.230);
+  const vec3 D2 = vec3(-0.253, 0.842, 0.463);
+  const vec3 D3 = vec3(0.323, -0.485, 0.808);
+  const vec3 D4 = vec3(-0.796, -0.281, 0.515);
+  vec3 g = D1 * (0.055 * cos(dot(rel, D1) * 0.483 + t * 0.85))
+         + D2 * (0.042 * cos(dot(rel, D2) * 0.739 + t * 1.15));
+  if (detail > 0.5) {
+    g += D3 * (0.030 * cos(dot(rel, D3) * 1.142 - t * 1.55))
+       + D4 * (0.020 * cos(dot(rel, D4) * 1.848 + t * 2.10));
+  }
+  return g;
+}
+
+/**
  * Signed offset of a world point from a cell centre, measured in cells.
  *
  * This is the same exact inverse of the cubesphere mapping that occFrame uses,
@@ -1307,6 +1425,15 @@ const LIQUID_MAP_FRAG = /* glsl */`
    * reads exactly like the sea again.
    */
   float wGloss = 1.0;
+  /**
+   * How much plankton this body of water has in it, already shaped by depth.
+   *
+   * Hoisted beside wGloss and for the identical reason: the glow is added after
+   * <opaque_fragment>, because it is light the water makes rather than light
+   * that fell on it, and a variable declared inside the branch below would be
+   * out of scope by then.
+   */
+  float wBio = 0.0;
 
   // Bare "> 2.5" here and a banded "> 2.5 && < 3.5" in LAVA_EMISSIVE, and the
   // difference is not an oversight. This block is inside LIQUID_MAP_FRAG, which
@@ -1333,10 +1460,25 @@ const LIQUID_MAP_FRAG = /* glsl */`
     diffuseColor.a = 1.0;
   } else {
 
+  /*
+   * Where the water samples itself. See liquidUv for why this is no longer
+   * vTexUv and what the mosaic actually was.
+   *
+   * 1.13 is not a round number on purpose. With it, the two layers below repeat
+   * every 0.708 and 1.362 world units, and neither of those divides into a cell
+   * -- so nothing in the pattern can line up with a block edge twice in the same
+   * place, which is precisely what a chequer needs to be visible. At the old
+   * 1.0-per-cell the two periods were 0.8 and 1.538 cells, whose least common
+   * multiple with the grid is four cells and twenty, and four cells is a chequer
+   * you can count. The detail stays the size it was (0.708 against 0.8), so this
+   * is the same water at the same scale with the grid taken out of it.
+   */
+  vec2 wuv = liquidUv(vWorld) * 1.13;
+
   // two layers of the surface texture scrolling against each other read as
   // moving water far better than a single animated sample
-  vec2 uvA = vTexUv * 1.25 + vec2(uTime * 0.020, uTime * 0.016);
-  vec2 uvB = vTexUv * 0.65 - vec2(uTime * 0.012, uTime * 0.025);
+  vec2 uvA = wuv * 1.25 + vec2(uTime * 0.020, uTime * 0.016);
+  vec2 uvB = wuv * 0.65 - vec2(uTime * 0.012, uTime * 0.025);
   vec3 texA = texture(uMap, vec3(uvA, vLayer)).rgb;
   vec3 texB = texture(uMap, vec3(uvB, vLayer)).rgb;
   vec3 surf = mix(texA, texB, 0.5);
@@ -1495,8 +1637,8 @@ const LIQUID_MAP_FRAG = /* glsl */`
   // Foam where the water actually touches land. Tight and bright: a hard rim
   // is what tells the eye the surface has an edge in the world rather than
   // being cut off, and it hides the geometric join with the shore.
-  float ripple = texture(uMap, vec3(vTexUv * 2.6 + vec2(uTime * 0.05, uTime * 0.02), vLayer)).r;
-  float ripple2 = texture(uMap, vec3(vTexUv * 5.1 - vec2(uTime * 0.03, uTime * 0.06), vLayer)).r;
+  float ripple = texture(uMap, vec3(wuv * 2.6 + vec2(uTime * 0.05, uTime * 0.02), vLayer)).r;
+  float ripple2 = texture(uMap, vec3(wuv * 5.1 - vec2(uTime * 0.03, uTime * 0.06), vLayer)).r;
   // Keep it to the first block of depth: pairing the shoreline term with a wide
   // depth window turned every shallow bay into a white field — the rim has to be
   // narrow in depth to stay a rim.
@@ -1516,6 +1658,84 @@ const LIQUID_MAP_FRAG = /* glsl */`
     * smoothstep(0.50, 0.92, edge * (0.42 + ripple * 0.62 + ripple2 * 0.4));
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.99, 1.0), foam);
   diffuseColor.a = clamp(max(diffuseColor.a, foam * 0.9), 0.0, 0.94);
+
+  /*
+   * ---- caustics, seen from above -------------------------------------------
+   *
+   * A wavy surface is a lens. It gathers sunlight into moving lines on whatever
+   * is under it, and those lines are most of why a shallow bed looks wet rather
+   * than merely blue. The dive view has had them for a long time (see FOG_FRAG);
+   * standing on the beach looking down had nothing, and the shallows were the
+   * flattest thing in the game because of it.
+   *
+   * Drawn on the WATER rather than on the bed, which is a compromise and worth
+   * naming. The bed is opaque terrain and has no idea there is water over it --
+   * giving it caustics means telling every land fragment on the planet how deep
+   * the water above it is, which is a mesher change and a per-vertex attribute
+   * for a term that matters over about two blocks of depth. Adding the light on
+   * the near side of the same alpha blend puts it in very nearly the right
+   * place: it lands where the bed is, it is attenuated by the same water, and it
+   * is wrong only in that it does not refract, which at these depths is
+   * centimetres.
+   *
+   * It goes into diffuseColor rather than being added at the end, and that is
+   * the whole of the day gate: caustics are focused SUNLIGHT, so they have to be
+   * multiplied by the same lighting as everything else, and at midnight there is
+   * nothing to focus. vSun keeps them out of a flooded cave, the depth window
+   * keeps them off anything the sun cannot reach the bottom of, and (1 - aLo) is
+   * the clarity lever the kind table already carries -- a tarn gets 0.80 of this
+   * and a marsh 0.22, which is right, because you cannot see the floor of a
+   * marsh and there is nothing for a caustic to land on.
+   */
+  const float CAUSTIC_GAIN = 0.50;
+  /*
+   * Gated on how steeply you are looking into the water, and that gate is not a
+   * refinement -- without it this term is haze. Drawn on the near side of the
+   * blend, a caustic added to a fragment you are seeing edge-on is light in
+   * front of a bed you cannot see anyway, and the first photograph of it was a
+   * milky wash over the shallows that took the sand texture out of them. The
+   * fresnel two hundred lines below hides the bed at exactly these angles for
+   * exactly this reason; this follows it. Both vectors are genuinely world
+   * space -- vWorldNormal is the raw attribute through modelMatrix -- so this
+   * does not swing with the camera the way a view-space normal would.
+   */
+  vec3 cvd = normalize(vWorld - uCamPos);
+  float causLook = smoothstep(0.10, 0.45, clamp(-dot(cvd, normalize(vWorldNormal)), 0.0, 1.0));
+  float causK = (1.0 - smoothstep(0.10, 0.85, wDepth)) * (1.0 - aLo) * causLook;
+  if (causK > 0.004) {
+    // 1.15 puts the bright lines about 1.9 units apart. At the 0.62 it started
+    // at they were three and a half units apart, which is not a caustic net,
+    // it is a slow brightening across the whole shallow -- the pattern has to
+    // be finer than the thing it is falling on or it reads as a light rather
+    // than as a lens.
+    diffuseColor.rgb += vec3(0.74, 0.95, 0.92)
+      * caustic(wuv * 1.15, uTime * 0.85) * causK * vSun * CAUSTIC_GAIN;
+  }
+
+  /*
+   * ---- where the plankton are ---------------------------------------------
+   *
+   * The sea and nowhere else. A pond, a marsh, a tarn and a hot spring are
+   * fresh water and would each need their own reason to glow; the ocean is the
+   * one body on this planet that has the real thing in it, and confining it
+   * there is also what keeps the effect worth walking to instead of being a
+   * property of "wet".
+   *
+   * Biased hard into the SHALLOWS, which is the taste call in this feature and
+   * the one to argue with first. A bioluminescent bay is a coastal event -- the
+   * blooms sit in warm shallow water that does not mix out to sea -- so this
+   * puts the light in a band round every island and coastline and leaves the
+   * deep ocean black. Three things follow from that and all three are wanted:
+   * the glow is where the player actually swims, the deep sea keeps its one job
+   * of being frightening at night, and there is a contrast in the frame instead
+   * of a uniformly lit planet. The alternative -- every ocean fragment at equal
+   * strength -- is recorded in the commit message.
+   *
+   * The window is in encoded depth, so 0.25..0.90 is roughly 1.8 to 6.3 blocks:
+   * full strength from the waterline out to where a swimmer stops touching the
+   * bottom, gone by the shelf edge.
+   */
+  wBio = ws == 0 ? (1.0 - smoothstep(0.25, 0.90, wDepth)) : 0.0;
   }
 `;
 
@@ -1537,14 +1757,58 @@ const LIQUID_NORMAL_FRAG = /* glsl */`
   // trusted to say which side is being looked at. Ask the view vector instead,
   // which is true whatever the winding. It is a no-op on front faces, so
   // everything seen from above renders exactly as before.
-  vec3 gN = normalize(vNormal);
+  //
+  // ---- the frame this is built in, and why it changed ----------------------
+  //
+  // gN was normalize(vNormal), which is three's own varying and is in VIEW
+  // space (normalMatrix * objectNormal). vTangent is the mesher's raw attribute
+  // and is in WORLD space -- Mesher.emit derives both the normal and the tangent
+  // from the quad's world corners, and a chunk mesh has an identity model
+  // matrix. So the Gram-Schmidt below was mixing two spaces, and the resulting
+  // basis rotated with the camera.
+  //
+  // For the normal map alone that was survivable: nT.xy is scaled to 0.85 of a
+  // subtle tile and the swing is a small change to a small perturbation, which
+  // is presumably why twelve photographed seats never convicted it. It is not
+  // survivable for the swell below, which is the biggest thing on the surface
+  // and has to be nailed to the world -- a swell whose crests rotate when you
+  // turn your head is not a swell, it is a screen-space filter.
+  //
+  // vWorldNormal is the same attribute taken through modelMatrix instead, so it
+  // is genuinely world space and lands in the same space as vTangent, uCamPos,
+  // uSunDir and vWorld -- which are the four things this normal is dotted
+  // against downstream. The view-vector sign flip is unchanged and still there
+  // for the reason its own note gives: liquid is DoubleSide, half the quads you
+  // ever see are the underside of a surface, and three's faceDirection cannot be
+  // trusted to say which side you are on because a liquid quad is wound from its
+  // own cell.
+  //
+  // This is a correction and it does move the picture. It is measured in the
+  // commit message; it is here rather than in a pass of its own because the
+  // swell cannot be added without it.
+  vec3 gN = normalize(vWorldNormal);
   gN *= dot(gN, uCamPos - vWorld) < 0.0 ? -1.0 : 1.0;
   vec3 Tv = normalize(vTangent - gN * dot(gN, vTangent));
   vec3 Bv = cross(gN, Tv);
-  vec3 nA = texture(uNormalMap, vec3(vTexUv * 1.25 + vec2(uTime * 0.020, uTime * 0.016), vLayer)).xyz * 2.0 - 1.0;
-  vec3 nB = texture(uNormalMap, vec3(vTexUv * 0.65 - vec2(uTime * 0.012, uTime * 0.025), vLayer)).xyz * 2.0 - 1.0;
+  // Water samples the world, lava keeps its own quad. Banded rather than open
+  // ended, and deliberately so even here where only 2 and 3 can arrive: this
+  // file has already had one open-ended wave test light every leaf on the
+  // planet. Lava is left exactly as it was -- it has the same grid-locked
+  // mosaic and it was not what was reported.
+  bool isWater = vWave > 1.5 && vWave < 2.5;
+  vec2 nuv = isWater ? liquidUv(vWorld) * 1.13 : vTexUv;
+  vec3 nA = texture(uNormalMap, vec3(nuv * 1.25 + vec2(uTime * 0.020, uTime * 0.016), vLayer)).xyz * 2.0 - 1.0;
+  vec3 nB = texture(uNormalMap, vec3(nuv * 0.65 - vec2(uTime * 0.012, uTime * 0.025), vLayer)).xyz * 2.0 - 1.0;
   vec3 nT = normalize(nA + nB);
   nT.xy *= 0.85;
+  if (isWater) {
+    // The swell, as a tangent-space slope. A height field's normal is
+    // normalize(n - grad h), so the gradient is subtracted from the tangential
+    // pair after the map has had its say and both perturbations ride the same
+    // reconstruction. See swellGrad.
+    vec3 gr = swellGrad(vWorld - uPlanetCenter, uTime, uSeaDetail);
+    nT.xy -= vec2(dot(gr, Tv), dot(gr, Bv));
+  }
   normal = normalize(Tv * nT.x + Bv * nT.y + gN * nT.z);
 `;
 
@@ -1633,7 +1897,12 @@ const NIGHT_SCOTOPIC = /* glsl */`
     // monochrome filter rather than as darkness, and a little green left in the
     // grass is what says the grass is still green, you simply cannot quite see
     // it.
-    float scoto = uNight * 0.82 * (1.0 - smoothstep(0.02, 0.35, gBlockLum));
+    // gBioLum joins gBlockLum in the same gate rather than getting a second
+    // one: the question the gate asks is "was this fragment lit by something
+    // other than the night sky", and a plankton bloom is such a thing. Zero in
+    // every material that never writes it, so nothing outside the water moved.
+    float scoto = uNight * 0.82
+      * (1.0 - smoothstep(0.02, 0.35, max(gBlockLum, gBioLum)));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(sLum) * vec3(0.74, 0.86, 1.18), scoto);
   }
 `;
@@ -2171,6 +2440,141 @@ function patch(material, opts = {}) {
 
           // Opacity follows the same curve: grazing water hides its bed.
           gl_FragColor.a = clamp(mix(gl_FragColor.a, 0.97, fres), 0.0, 0.97);
+
+          /*
+           * ---- bioluminescence ---------------------------------------------
+           *
+           * Plankton. Added here, after the lighting and after the reflection,
+           * because this is the one thing on the water that is not light
+           * falling on it -- it is light the water makes, and running it
+           * through the lighting would have multiplied it by a midnight, which
+           * is zero, which is the whole feature.
+           *
+           * It has to be invisible by day and it is, by construction rather
+           * than by tuning: uNight is main's night**2, which is exactly 0 at
+           * noon and does not reach a tenth until the sun is well down. Nothing
+           * is subtracted from a day frame; the term is not there.
+           *
+           * Three factors, and each one is answering a different question.
+           *
+           *   bloom    is WHERE. Three long sines on the world position,
+           *            thresholded, so roughly a third of the coastline is
+           *            alight at any time and the patches drift over hours. A
+           *            bloom that was everywhere would be a property of the sea
+           *            rather than an event in it, and the first thing a player
+           *            says about a glowing bay is that they found one.
+           *   sparkle  is WHAT IT LOOKS LIKE. caustic() is already in this
+           *            file and is already the right kind of shape -- sparse
+           *            bright filaments on a dark field -- but ONE call to it
+           *            is a lattice. Its three sines are at fixed frequencies,
+           *            so at close range it draws a regular net, and the first
+           *            frame out of this block was a neon fishing net laid over
+           *            the bay. Two calls at different scales, one of them on
+           *            the swapped axes, multiplied rather than added: the
+           *            product of two incommensurate lattices has no period a
+           *            player can see, and multiplying is also what makes it
+           *            SPARSE, since a speck needs both fields bright at once.
+           *   wake     is YOU. See below.
+           *
+           * vSun keeps it out of a roofed cave and off water with a headland
+           * over it, so a flooded cellar does not glow.
+           */
+          if (wBio > 0.002 && uNight > 0.02) {
+            const vec3 BIO_COLOR = vec3(0.24, 0.92, 0.86);
+            /*
+             * 0.16, and it was 0.62 for one photograph. Additive light on a
+             * midnight sea is being added to about 0.01 linear, so the gain is
+             * very nearly the output level: 0.62 came out as a saturated cyan
+             * sheet from the beach to the shelf edge, which is not plankton,
+             * it is a swimming pool. At 0.16 a filament peaks around 100/255
+             * against a sea at 20/255 and the black between the filaments
+             * survives, which is the whole read -- bioluminescence is bright
+             * SPECKS in dark water, and if the water stops being dark there is
+             * nothing for them to be bright against.
+             */
+            const float BIO_GAIN = 0.16;
+            vec2 buv = liquidUv(vWorld);
+            float bloom = sin(buv.x * 0.031 + uTime * 0.021)
+                        + sin(buv.y * 0.027 - uTime * 0.017)
+                        + sin((buv.x - buv.y) * 0.019 + uTime * 0.013);
+            bloom = smoothstep(0.10, 1.30, bloom);
+            float cf = sin(buv.x *  0.91 + buv.y * 0.37 + uTime * 0.31)
+                     + sin(buv.x * -0.43 + buv.y * 1.13 - uTime * 0.24)
+                     + sin(buv.x *  0.67 - buv.y * 0.79 + uTime * 0.19);
+            float cloud = smoothstep(-0.30, 1.60, cf);
+            /*
+             * Domain-warped, because caustic() on its own draws a regular dot
+             * screen -- its three sines are at fixed frequencies and
+             * photographed at the waterline it was a halftone print.
+             *
+             * The warp has to be at the SAME scale as the thing it is
+             * scrambling, which the first attempt got wrong: warping by cf was
+             * free but cf varies over six units, so inside any one patch it is
+             * a constant and a constant warp is a translation. The grid moved
+             * and stayed a grid. These two sines turn over every two and a half
+             * units, which is a couple of dots, so neighbouring dots are pushed
+             * different ways and the lattice does not survive.
+             */
+            //
+            // The whole of it is behind the tier gate, and this is where the
+            // low tier's saving in this block is: the warp is two sines and
+            // caustic is five, so a phone skips seven transcendentals per water
+            // pixel and keeps the cloud, the bloom and the wake -- which is to
+            // say it keeps the effect and loses the grain in it. It is a third
+            // of a metre across and a phone is rendering at 0.7 scale, so most
+            // of the grain was never resolvable there anyway.
+            float glit = 0.0;
+            if (uSeaDetail > 0.5) {
+              vec2 warp = vec2(sin(buv.y * 2.31 + uTime * 0.40),
+                               cos(buv.x * 2.73 - uTime * 0.33));
+              glit = caustic(buv * 7.3 + warp * 1.6 + cf * vec2(0.9, -0.6)
+                             + vec2(uTime * 0.09, -uTime * 0.07), uTime * 0.9);
+            }
+            // The glitter is a third of a metre across and is therefore under a
+            // pixel by about forty units out, where it would stop being glitter
+            // and start being a crawling moire. Faded out over 10..45 units and
+            // the cloud carries the rest, which is also what the eye does --
+            // you can see individual flashes in the water at your feet and a
+            // glow in the bay.
+            float nearK = 1.0 - smoothstep(10.0, 45.0, length(vWorld - uCamPos));
+            float sparkle = cloud * (0.80 + 0.55 * glit * nearK);
+            /*
+             * The wake, and it is the half of this that people picture when
+             * they hear the words. A dinoflagellate flashes when the water
+             * round it is sheared, so the light is not ambient -- it is
+             * something you switch on by moving. Four recent positions of the
+             * swimmer, each a soft gaussian blob about four cells across, so a
+             * stroke leaves a line that fades from behind.
+             *
+             * It ignores the bloom mask on purpose. A wake that only lit up in the
+             * patches that were already glowing would be a decoration on top of
+             * a decoration; disturbing the water is the one thing the player
+             * does that the sea answers, and it has to answer every time.
+             * wBio still gates it, so this is the sea and not a bathtub.
+             */
+            float wake = 0.0;
+            for (int i = 0; i < 4; i++) {
+              vec3 wd = vWorld - uBioWake[i].xyz;
+              wake += uBioWake[i].w * exp(-dot(wd, wd) * 0.11);
+            }
+            // The wake outweighs the bloom by roughly six to one at the centre
+            // of a stroke, and it should: the ambient field is meant to be
+            // something you notice, and the wake is meant to be something you
+            // did. Capped, because four overlapping blobs sum and a swimmer
+            // turning on the spot would otherwise stack all four on one point.
+            float bio = wBio * uNight * vSun
+                      * (sparkle * (0.30 + 0.70 * bloom) + min(wake, 1.5) * 1.6);
+            gl_FragColor.rgb += BIO_COLOR * bio * BIO_GAIN;
+            // Alpha-blended water multiplies what it draws by its own alpha, and
+            // the shallows this lives in are the least opaque water there is --
+            // at aLo 0.46 nearly half the glow was being handed to the seabed
+            // behind it. Lifting the alpha where the light is is what makes a
+            // wake read at the waterline instead of only in four blocks of
+            // water.
+            gl_FragColor.a = clamp(max(gl_FragColor.a, bio * 0.55), 0.0, 0.97);
+            // Keep it photopic. See gBioLum.
+            gBioLum = bio;
+          }
         }
       `);
     }

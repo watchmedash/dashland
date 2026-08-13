@@ -44,7 +44,7 @@ import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import * as MobModels from './game/MobModels.js';
 import { explode } from './game/Explosion.js';
 import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
-import { Water, LEVEL_MAX } from './game/Water.js';
+import { Water, BioWake, LEVEL_MAX } from './game/Water.js';
 import { Whirlpools, WHIRL_R, WHIRL_CUE, K_SEA } from './game/Whirlpool.js';
 import { Save } from './game/Save.js';
 import {
@@ -1374,9 +1374,16 @@ const DEFAULT_SETTINGS = {
  * low tier is: a nearer world you can play, against a far one you cannot.
  */
 const QUALITY = {
-  high: { ao: true, renderScale: 1, loadDist: CHUNK_LOAD_DIST, keepDist: CHUNK_KEEP_DIST },
+  high: { ao: true, sea: 1, renderScale: 1, loadDist: CHUNK_LOAD_DIST, keepDist: CHUNK_KEEP_DIST },
   low: {
     ao: false,
+    /**
+     * The two short waves of the sea's swell, and the back half of the
+     * bioluminescent wake. See uSeaDetail in VoxelMaterial: what a phone loses
+     * is the metre-scale chop, not the swell itself, and what it keeps is every
+     * part of this that reads at play distance.
+     */
+    sea: 0,
     renderScale: 0.7,
     loadDist: 96,
     keepDist: Math.round(96 * (CHUNK_KEEP_DIST / CHUNK_LOAD_DIST)),
@@ -1662,6 +1669,7 @@ class Game {
     // built long after the tier is resolved, so this is where the starting
     // value has to be handed over.
     this.particles.setQuality(this.qualityTier === 'low');
+    voxelUniforms.uSeaDetail.value = this.quality.sea;
     this.blockModels = new BlockModels(this.scene);
     this.signText = new SignText(this.scene);
     this.drops = new Drops(this.scene, this.planet, this.materials);
@@ -1820,6 +1828,8 @@ class Game {
     this.editedRegions = new Set();
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
+    /** The glowing trail a swimmer leaves. Fed below, read by the water shader. */
+    this.bioWake = new BioWake();
     /**
      * Where the sea goes down a hole. Built here with a seed of 0 and re-seeded
      * by `newGame`/`continueGame`, the same way everything else that depends on
@@ -2238,6 +2248,7 @@ class Game {
     this.quality = QUALITY[this.qualityTier];
     this.postfx?.setAO(this.quality.ao);
     this.particles?.setQuality(this.qualityTier === 'low');
+    voxelUniforms.uSeaDetail.value = this.quality.sea;
     if (this.mobs) this.mobs.loadDist = this.quality.loadDist;
     this._resize();
     if (this.state === 'playing' || this.state === 'paused' || this.state === 'spectating') {
@@ -5857,6 +5868,18 @@ class Game {
     }
     if (this.player.headInWater && Math.random() < dt * 5) {
       this.particles.bubbles(this.player.eye, this.player.up, 2);
+    }
+    // The bioluminescent wake. Ticked every frame whether or not the player is
+    // wet, because the trail has to keep fading after they climb out -- gating
+    // the whole call on `inWater` froze four glowing blobs on the surface at
+    // the point of exit. On the low tier the last two slots are held at zero,
+    // so a phone draws a shorter trail out of the same shader rather than a
+    // second one.
+    this.bioWake.update(dt, this.player.position, this.player.moveAmount,
+      this.player.inWater && !ghost, voxelUniforms.uBioWake.value);
+    if (this.qualityTier === 'low') {
+      voxelUniforms.uBioWake.value[2].w = 0;
+      voxelUniforms.uBioWake.value[3].w = 0;
     }
 
     // --- everything below here is a fact about a body ----------------------

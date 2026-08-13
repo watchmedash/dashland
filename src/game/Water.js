@@ -48,6 +48,76 @@ const DIR_J = [0, 0, 1, -1];
 /** Scratch for flowAt — it is asked every frame and answers nothing worth keeping. */
 const _flow = { i: 0, j: 0, k: 0, s: 0 };
 
+/**
+ * The trail a body drags through glowing water.
+ *
+ * This is render state and it lives here anyway, because what it describes is a
+ * fact about water rather than about a material: something moved through it, and
+ * for the next second and a half that patch of sea has been stirred. The shader
+ * reads the result out of `voxelUniforms.uBioWake` and knows nothing about who
+ * made it, so a mob or a boat could feed the same buffer later without the
+ * water shader learning a second thing.
+ *
+ * Four slots, written round. That number is set by the shader -- see uBioWake --
+ * and the trade it encodes is that four gaussians is what reads as a line at
+ * swimming speed rather than as a string of beads. Positions are world space and
+ * are copied out, not referenced: the player's own vector is mutated in place
+ * every frame and holding it would have made all four slots the same point.
+ */
+export class BioWake {
+  constructor() {
+    /** xyz plus the strength this slot was born with. */
+    this.slots = [];
+    for (let i = 0; i < 4; i++) this.slots.push({ x: 0, y: 0, z: 0, s: 0, age: 1e9 });
+    this.next = 0;
+    this.timer = 0;
+  }
+
+  clear() {
+    for (const s of this.slots) { s.s = 0; s.age = 1e9; }
+    this.timer = 0;
+  }
+
+  /**
+   * @param {number} dt seconds
+   * @param {{x:number,y:number,z:number}} pos world position of the swimmer
+   * @param {number} speed tangential speed, cells/s (`player.moveAmount`)
+   * @param {boolean} active in water and not a spectator
+   * @param {Array} out four THREE.Vector4 uniform values to write
+   */
+  update(dt, pos, speed, active, out) {
+    // 0.16 s between drops. Faster and the four slots cover a metre and the
+    // trail is a blob; slower and they are visibly separate flashes. At the
+    // 4.4 cells/s of an ordinary swim this lays one down every 0.7 cells,
+    // which against the shader's ~4-cell blob is a continuous ribbon.
+    const DROP = 0.16;
+    /** How long a stirred patch keeps flashing. */
+    const LIFE = 1.5;
+    for (const s of this.slots) s.age += dt;
+    this.timer -= dt;
+    // A swimmer treading water leaves nothing. The threshold is the same 0.8
+    // the stroke sound uses, so the wake and the splash are the same event.
+    if (active && speed > 0.8 && this.timer <= 0) {
+      this.timer = DROP;
+      const s = this.slots[this.next];
+      this.next = (this.next + 1) & 3;
+      s.x = pos.x; s.y = pos.y; s.z = pos.z;
+      // Saturating rather than linear: a sprint-swim is not four times the
+      // light of a drift, it is a little more of it.
+      s.s = Math.min(1, 0.45 + speed * 0.11);
+      s.age = 0;
+    }
+    for (let i = 0; i < 4; i++) {
+      const s = this.slots[i];
+      const t = s.age / LIFE;
+      // Squared fade, so the newest blob is much the brightest and the tail
+      // thins away instead of switching off.
+      const k = t >= 1 ? 0 : s.s * (1 - t) * (1 - t);
+      out[i].set(s.x, s.y, s.z, k);
+    }
+  }
+}
+
 export class Water {
   /**
    * @param {import('../world/Planet.js').Planet} planet

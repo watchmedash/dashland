@@ -329,10 +329,17 @@ const POSE = {
   },
 
   /**
-   * Swimming: the limbs only. The part that sells it — the body going
-   * horizontal — is a rotation of the whole model, not of any node, and lives in
-   * `_swim` below, because no amount of shoulder angle makes an upright body
-   * look like it is swimming.
+   * Swimming hard: the crawl, as the attitude the stroke swings around.
+   *
+   * The limbs only. The part that sells it — the body going horizontal — is a
+   * rotation of the whole model, not of any node, and lives in `_swim` below,
+   * because no amount of shoulder angle makes an upright body look like it is
+   * swimming.
+   *
+   * This is a *mean* pose, not a held one. The arms sit where a crawl's shoulder
+   * passes through the middle of its arc and `_stroke` sweeps them either side
+   * of it; holding this still, which is what the body did before, is a man being
+   * towed rather than a man swimming.
    */
   swim: {
     torso: [-0.10, 0, 0],
@@ -343,6 +350,39 @@ const POSE = {
     'arm-left': [-1.15, 0, -0.34],
     'leg-right': [0.30, 0, 0.12],
     'leg-left': [0.30, 0, -0.12],
+  },
+
+  /**
+   * Treading water: the same body, upright and going nowhere.
+   *
+   * Not chosen by `wantPose`, and it is not a fourth mutually exclusive pose. It
+   * is `swim`'s other end, layered over it by `1 - drive` inside the swim branch
+   * so that stopping in deep water *morphs* rather than switching. Going through
+   * the pose machine instead would fade the crawl out to a standing mannequin
+   * and the tread back in every time the player let go of W, which in a game
+   * where you cross a lake in short bursts is most of the time you spend wet.
+   *
+   * The differences from the crawl are all the differences between lying down
+   * and standing up in water:
+   *
+   *  - the torso comes back upright and the head with it. `swim`'s chin-up 0.55
+   *    exists only to counter a face-down body; at 0.22 of pitch the head has
+   *    almost nothing to counter, so holding that value here would leave someone
+   *    bobbing in place staring at the sky.
+   *  - the arms drop from over the head to shoulder height and splay right out
+   *    to 0.95, which is the scull — `_stroke` sweeps them in and out from there
+   *    rather than round in a circle.
+   *  - the legs part, one tucked and one trailing. Asymmetric for the reason
+   *    `air` is: a symmetric pose under an antiphase cycle averages back to the
+   *    middle and reads as a mannequin hanging in the water.
+   */
+  tread: {
+    torso: [0.06, 0, 0],
+    head: [0.10, 0, 0],
+    'arm-right': [-0.55, 0, 0.95],
+    'arm-left': [-0.55, 0, -0.95],
+    'leg-right': [-0.45, 0, 0.18],
+    'leg-left': [0.30, 0, -0.18],
   },
 
   /**
@@ -431,14 +471,6 @@ const POSE_RATE = 5.5;
 const DRAW_RATE = 14;
 
 /**
- * How far forward the body tips when swimming, in radians, and how fast the
- * legs kick.
- *
- * The tip scales with how hard you are actually swimming: treading water is
- * nearly upright, crawling is near flat. A fixed value makes someone bobbing in
- * place look like they are drowning face-down.
- */
-/**
  * What separates a fall from a hop: still in the air after a jump would have
  * landed, or coming down faster than a jump can.
  *
@@ -458,10 +490,114 @@ const DRAW_RATE = 14;
 const AIR_DELAY = 0.72;
 const AIR_SPEED = 9.0;
 
+/**
+ * How far forward the body tips when swimming, in radians.
+ *
+ * The tip scales with how hard you are actually swimming: treading water is
+ * nearly upright, crawling is near flat. A fixed value makes someone bobbing in
+ * place look like they are drowning face-down.
+ */
 const SWIM_PITCH_MIN = 0.22;
 const SWIM_PITCH_MAX = 1.20;
-const KICK_RATE = 3.4;
-const KICK_SWING = 0.30;
+
+/**
+ * What counts as swimming at full effort, in cells/s of tangential speed.
+ *
+ * `Player.update` multiplies the walk by 0.62 in water, so 4.4 * 0.62 = 2.73 is
+ * the fastest a body moves anywhere in this game and therefore the top of the
+ * scale. The old code divided by 4.4 — the *dry* walk — which no swimmer ever
+ * reaches, so `drive` topped out at 0.62 and the crawl never got past two thirds
+ * of its pitch. Measured against the number in Player.js's own comment rather
+ * than picked.
+ */
+const SWIM_FULL = 2.73;
+
+/**
+ * The stroke clock, in radians per second, and what it is tuned against.
+ *
+ * `main.js` fires the stroke sound and the swimmer's wake off one countdown
+ * reset to `0.72 + random * 0.35`, i.e. a mean of 0.895 s between strokes. The
+ * arms here are antiphase, so one full arm cycle is two strokes: 2 * 0.895 =
+ * 1.79 s, and 2π / 1.79 = 3.51 rad/s. That makes each arm's catch land on the
+ * audio's mean beat without either one reading the other's clock.
+ *
+ * Reading `_swimT` directly was the alternative and is worse: it is a *jittered
+ * countdown*, not a phase, so an animation slaved to it would stutter by up to
+ * a third of a second per stroke, and it only ticks above 0.8 cells/s — a body
+ * diving straight down would stop stroking entirely. A free-running phase at the
+ * same mean rate agrees with the wake where the wake exists and keeps moving
+ * where it does not.
+ */
+const STROKE_RATE = 3.51;
+
+/**
+ * How far the shoulder sweeps either side of the crawl's mean pose, in radians.
+ *
+ * A bounded sweep rather than a full windmill, and that is a decision about this
+ * rig rather than about swimming. The shoulder is the only joint an arm has —
+ * there is no elbow in the whole pack — so a continuous 360° rotation is a stiff
+ * plank going round like a propeller, which is a cartoon. 1.05 around a mean of
+ * -1.15 runs the arm from -2.20, over the head and into the catch, to -0.10,
+ * past the hip at the end of the pull, and that arc is the half of a crawl a
+ * viewer actually reads. It also blends: an amplitude can go to zero as the
+ * player stops, and a windmill has no small version — scaling its phase only
+ * slows it, leaving the arms creeping round at a crawl nobody asked for.
+ */
+const ARM_STROKE = 1.05;
+
+/**
+ * The flutter, and why it is exactly twice the arms.
+ *
+ * A crawl's legs beat faster than its arms — two to three kicks a stroke — and
+ * an integer ratio is what keeps the two from sliding against each other into a
+ * gait that never repeats. Two is the lowest that still reads as a flutter. The
+ * swing is small on purpose: the rig's leg is a single rigid node from hip to
+ * boot, so a wide kick is a scissor rather than a flutter.
+ */
+const FLUTTER_RATE = STROKE_RATE * 2;
+const FLUTTER_SWING = 0.26;
+
+/**
+ * The scull, for a body going nowhere: hands sweeping out and in, legs cycling
+ * slowly under it.
+ *
+ * Deliberately far slower than the crawl. Treading water is the thing you do to
+ * stay where you are, and running it at stroke rate makes someone stopped in
+ * deep water look like they are swimming hard on the spot.
+ */
+const SCULL_RATE = 2.2;
+const SCULL_SWING = 0.30;
+const TREAD_KICK = 0.35;
+
+/**
+ * How far the body pitches out of the horizontal for going up or down, in
+ * radians at full vertical speed, and the speed that counts as full.
+ *
+ * This is the whole of diving and surfacing. Before it, pitch came from
+ * tangential speed alone, so a player holding the dive key straight down — no
+ * horizontal movement at all — sank *feet first and upright*, which is what a
+ * drowned body does, not a diver. Positive pitch tips the head forward (see
+ * `_swim`), so a descent adds to it and a climb subtracts, and the sign falls
+ * out of that rather than being chosen.
+ *
+ * 4.5 is read off Player.js: the swim-up key adds 15/s against a 3.2/s drag and
+ * a fifth of gravity, which settles near 4.5, and the sink is hard-clamped at
+ * -5. So the scale is the range the physics can actually produce.
+ */
+const DIVE_TILT = 0.85;
+const DIVE_FULL = 4.5;
+
+/**
+ * The limits on the total, after the dive term is in.
+ *
+ * Without them a hard forward dive is 1.20 + 0.85 = 2.05 rad, which is 117° —
+ * past vertical and swimming upside down. 1.45 is 83°, as near head-down as a
+ * body gets while still being a body; -0.80 is 46° of lean back, which is what
+ * surfacing looks like and not one degree more, because a swimmer rising does
+ * not end up on their back.
+ */
+const PITCH_MIN = -0.80;
+const PITCH_MAX = 1.45;
 
 /**
  * Below this camera distance the body is not drawn.
@@ -571,7 +707,17 @@ export class PlayerCharacter {
      */
     this._drawW = 0;
     this._drawTarget = 0;
+    /**
+     * The stroke phase, in radians, and how hard the body is swimming.
+     *
+     * One clock for the arms and the legs both — the flutter is an integer
+     * multiple of it, so a single number keeps the two locked. `_drive` is
+     * smoothed rather than read straight off `moveAmount` because that figure
+     * jumps the instant a key is released, and an arm that stops mid-catch is
+     * a freeze frame; eased, the crawl winds down into the scull.
+     */
     this._kick = 0;
+    this._drive = 0;
     this._airT = 0;
     /** Resolved per instance, since the model arrives long after construction. */
     this._poseNodes = null;
@@ -1251,7 +1397,7 @@ export class PlayerCharacter {
     if (this.pose === 'crouch') {
       model.root.position.addScaledVector(player.up, -CROUCH_SINK * this._poseW);
     } else if (this.pose === 'swim') {
-      this._swim(player);
+      this._swim(player, dt);
     }
 
     // --- clips ---
@@ -1260,7 +1406,13 @@ export class PlayerCharacter {
     // gate settled on, so the gait can never disagree with the movement.
     const speed = player.moveAmount;
     let clip = CLIP.idle;
-    if (speed > 0.6) clip = player.sprinting ? CLIP.run : CLIP.walk;
+    // A swimmer does not stride. The pose overrides all six limbs once it is at
+    // full weight, so this was invisible while submerged — but the pose fades in
+    // and out over about a fifth of a second, and at the two moments it is
+    // halfway the walk underneath was showing through. That is exactly the frame
+    // of entering and leaving the water, i.e. the one everybody sees, and it read
+    // as a man marching down a beach and on into the seabed.
+    if (!swimming && speed > 0.6) clip = player.sprinting ? CLIP.run : CLIP.walk;
     MobModels.play(model, clip, 0.18);
 
     // Re-time the gait so the feet do not skate. The walk clip reads right at
@@ -1300,15 +1452,7 @@ export class PlayerCharacter {
     if (this._poseW > 0.002 && this.pose && this._poseNodes) {
       const w = this._poseW;
       for (const [node, q] of this._poseNodes[this.pose]) node.quaternion.slerp(q, w);
-      if (this.pose === 'swim') {
-        // The kick, added on top of the posed legs. Advanced only while
-        // swimming, so surfacing and diving again resumes mid-stroke rather
-        // than snapping to the phase the clock happens to be at.
-        this._kick += dt * KICK_RATE;
-        const s = Math.sin(this._kick) * KICK_SWING * w;
-        if (this._legs.left) this._legs.left.rotateX(s);
-        if (this._legs.right) this._legs.right.rotateX(-s);
-      }
+      if (this.pose === 'swim') this._strokes(dt, w);
     }
 
     if (this.swingT > 0) this.swingT = Math.max(0, this.swingT - dt);
@@ -1398,10 +1542,25 @@ export class PlayerCharacter {
    * The pitch itself scales with tangential speed, and `_poseW` scales the whole
    * thing so entering and leaving the water tips rather than snaps.
    */
-  _swim(player) {
-    const drive = THREE.MathUtils.clamp(player.moveAmount / 4.4, 0, 1);
-    const pitch = (SWIM_PITCH_MIN + (SWIM_PITCH_MAX - SWIM_PITCH_MIN) * drive) * this._poseW;
-    if (pitch < 0.002) return;
+  _swim(player, dt) {
+    // How hard this body is swimming, in one number, whichever way it is going.
+    // The larger of the two axes rather than their sum: a player crossing a lake
+    // and a player diving straight down are both swimming flat out, and adding
+    // them would make doing both at once somehow more than either.
+    const tan = THREE.MathUtils.clamp(player.moveAmount / SWIM_FULL, 0, 1);
+    const climb = THREE.MathUtils.clamp(player.vel.k / DIVE_FULL, -1, 1);
+    const target = Math.max(tan, Math.abs(climb));
+    this._drive += (target - this._drive) * Math.min(1, dt * 6);
+
+    let pitch = SWIM_PITCH_MIN + (SWIM_PITCH_MAX - SWIM_PITCH_MIN) * this._drive;
+    // Diving and surfacing. Positive pitch is head-forward, so going down adds
+    // and going up subtracts — see DIVE_TILT, where the sign is derived.
+    pitch = THREE.MathUtils.clamp(pitch - climb * DIVE_TILT, PITCH_MIN, PITCH_MAX);
+    pitch *= this._poseW;
+    // Signed now that surfacing can lean the body back, so the early-out has to
+    // test the magnitude. `pitch < 0.002` here would have skipped every frame of
+    // a rising swimmer and left them upright on the way up.
+    if (Math.abs(pitch) < 0.002) return;
 
     // About the side axis — the body's own left-right — which the orientation
     // block has already worked out and normalised for the basis.
@@ -1410,6 +1569,75 @@ export class PlayerCharacter {
 
     _pivot.copy(player.up).multiplyScalar(PLAYER_HEIGHT * 0.5);
     this.model.root.position.add(_pivot).sub(_pivot.applyQuaternion(_qp));
+  }
+
+  /**
+   * The stroke: a crawl at speed, a scull standing still, and the morph between.
+   *
+   * Layered after the pose table and before the carrying pose, on the same
+   * `rotateX`/`rotateZ` footing the old leg kick used. Rotating rather than
+   * writing the quaternion is what makes this safe to run every frame: the
+   * mixer rewrites these nodes from the clip and `_clearPose` returns the rest
+   * to identity, so each frame starts from a fresh value and nothing compounds.
+   * Assigning the quaternion here instead would fight the pose slerp above it,
+   * which is a persistent target, and the two would ratchet.
+   *
+   * Two motions, cross-faded by `_drive`, and neither is ever switched on or
+   * off. That matters more than either of them looks: the moment a player stops
+   * swimming is the moment the animation is most likely to be caught out, and a
+   * hard cut there is the thing that reads as broken. At half drive the arms are
+   * doing half a crawl and half a scull, which is a real thing a swimmer eases
+   * through.
+   *
+   * The amplitudes carry `w` as well as their own weight so that climbing out of
+   * the water winds the stroke down with the pose rather than leaving the arms
+   * beating as the body stands up.
+   *
+   * @param {number} dt seconds
+   * @param {number} w the pose weight, `_poseW`
+   */
+  _strokes(dt, w) {
+    const drive = this._drive;
+    const tread = 1 - drive;
+
+    // The tread pose laid over the crawl, not instead of it. `_poseNodes.tread`
+    // is resolved by `_instantiate` like any other table and its nodes are in
+    // `_poseAll`, so `_clearPose` already knows how to put them back.
+    if (tread > 0.002 && this._poseNodes.tread) {
+      for (const [node, q] of this._poseNodes.tread) node.quaternion.slerp(q, tread * w);
+    }
+
+    // One clock. Advanced only while the swim pose is live, so surfacing for
+    // air and diving again resumes mid-stroke rather than snapping to whatever
+    // phase a free-running timer had reached in the meantime.
+    this._kick += dt * STROKE_RATE;
+    const p = this._kick;
+    // The scull runs off the same phase at its own ratio rather than off a
+    // second accumulator, which keeps the two exactly in step through the morph
+    // — two independent clocks would beat against each other and the arms would
+    // change direction mid-sweep at whatever drive they happened to cross at.
+    const sp = p * (SCULL_RATE / STROKE_RATE);
+
+    // Arms. The crawl sweeps fore and aft in antiphase — one arm catching while
+    // the other recovers — and the scull sweeps both out and in together, which
+    // is the sideways motion that actually holds a treading body up.
+    const crawl = Math.sin(p) * ARM_STROKE * drive * w;
+    const scull = Math.sin(sp) * SCULL_SWING * tread * w;
+    const right = this.arms.right;
+    const left = this.arms.left;
+    if (right) { right.rotateX(crawl); right.rotateZ(scull); }
+    // Negated on both terms: X to put the far arm half a cycle behind, Z to
+    // mirror the splay so the hands sweep away from each other rather than both
+    // drifting to the same side.
+    if (left) { left.rotateX(-crawl); left.rotateZ(-scull); }
+
+    // Legs. The flutter and the tread cycle are both antiphase and both fold
+    // into one rotation per leg, so a leg is never rotated twice about the same
+    // axis in a frame.
+    const kick = Math.sin(p * (FLUTTER_RATE / STROKE_RATE)) * FLUTTER_SWING * drive * w
+      + Math.sin(sp) * TREAD_KICK * tread * w;
+    if (this._legs.left) this._legs.left.rotateX(kick);
+    if (this._legs.right) this._legs.right.rotateX(-kick);
   }
 
   /** Menus and the loading screen: no body anywhere near the orbit camera. */

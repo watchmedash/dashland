@@ -63,6 +63,31 @@ const RIPPLE_LIFE = 0.9;
 /** The plane's own normal, for aiming a ring along a local up. */
 const RING_N = new THREE.Vector3(0, 0, 1);
 
+/**
+ * Motes in a tornado's whirl.
+ *
+ * The largest single particle count in the game, at more than twice the rain
+ * field's 6000 — and it can afford to be, for the same reason the rain can:
+ * there is no pool, no CPU loop and no per-particle state. One draw call, one
+ * buffer that is written once at construction and never again, and a vertex
+ * shader that resolves each mote's whole life from its seed. The only thing that
+ * scales with the count is vertex invocations and fill.
+ *
+ * Measured: see the report. On the low tier `setQuality` takes 32% of them,
+ * which is where the fill stops mattering on an integrated part.
+ *
+ * 8000 rather than fewer because the funnel is *tall* — TORNADO_H 34 cells — and
+ * a count that reads as dense filling three cells of rain reads as a sparse
+ * sprinkle spread over thirty-four.
+ */
+const TORNADO_MOTES = 8000;
+/** Radius scale of the funnel. The foot is ~0.55 of this and the top ~3.1. */
+const TORNADO_R = 3.0;
+/** Height of the drawn funnel, in cells. Matches FUNNEL_H in Tornado.js. */
+const TORNADO_H = 34;
+/** The cylinder geometry's own axis, for aiming the shell along a local up. */
+const _UP_Y = new THREE.Vector3(0, 1, 0);
+
 export class Particles {
   constructor(scene, planet) {
     this.planet = planet;
@@ -168,6 +193,18 @@ export class Particles {
     this.weatherMode = 'clear';
     this.weatherIntensity = 0;
     this.submerged = false;
+
+    // --- tornado ---
+    // Built once at startup rather than on demand, and both meshes stay in the
+    // scene hidden. A tornado forms roughly once every three quarters of an
+    // hour; compiling two shaders and uploading a 96KB seed buffer on the frame
+    // one touches down is a hitch at exactly the moment the player most needs
+    // the frame rate. The cost of holding them is one hidden Points and one
+    // hidden Mesh, which three skips entirely.
+    this.funnel = this._buildFunnel(scene);
+    this.tornadoMotes = this._buildTornadoMotes(scene);
+    /** 1 on the high tier, 0.32 on low. See `setQuality`. */
+    this.tornadoScale = 1;
   }
 
   /**
@@ -911,6 +948,16 @@ export class Particles {
     // actually falling and visible.
     wu.uWaterR.value = this.weather.visible ? this._waterSurfaceRadius(camera, up) : 0;
 
+    // The funnel's two clocks. Advanced here and not in `tornado()` so the
+    // spin never depends on how often the game happens to call that — and
+    // stepped only while something is on screen, so a world that has not seen a
+    // tornado in an hour is not carrying a float that has drifted past the
+    // precision where `sin` stops being smooth.
+    if (this.tornadoMotes.visible) {
+      this.tornadoMotes.material.uniforms.uTime.value += dt;
+      this.funnel.material.uniforms.uTime.value += dt;
+    }
+
     this._rainRipples(dt, camera, up, wu.uWaterR.value);
     this._updateRipples(dt);
   }
@@ -1037,10 +1084,209 @@ export class Particles {
    * the radius together takes most of both while leaving the sea in a storm
    * looking like it is being rained on. See `QUALITY` in main.
    */
-  setQuality(low) { this.rippleScale = low ? 0.45 : 1; }
+  setQuality(low) {
+    this.rippleScale = low ? 0.45 : 1;
+    // The funnel's debris count. Same shape of argument as the rain rings: the
+    // whole whirl is one draw call whatever the count is, so what actually
+    // scales is fill and vertex work. See TORNADO_MOTES.
+    this.tornadoScale = low ? 0.32 : 1;
+  }
+
+  /**
+   * Draw a funnel standing on `pos` along `up`.
+   *
+   * Called every frame while one exists and never otherwise; `tornadoOff` hides
+   * both meshes. There is no pool and no per-particle CPU work at all — the
+   * whirl is TORNADO_MOTES points whose entire motion is a closed-form function
+   * of a per-instance seed and `uTime` in the vertex shader, which is the same
+   * discipline the rain field and the ripple rings already use and the reason
+   * the largest particle effect in the game is also one of the cheapest.
+   *
+   * @param {number} strength 0..1 spin-up envelope. Drives both opacity and how
+   *   many of the motes are drawn at all, so a funnel dying away visibly thins.
+   */
+  tornado(pos, up, strength) {
+    const u = this.tornadoMotes.material.uniforms;
+    u.uBase.value.copy(pos);
+    u.uUp.value.copy(up);
+    u.uStrength.value = strength * this.tornadoScale;
+    this.tornadoMotes.visible = strength > 0.02;
+
+    const s = this.funnel.material.uniforms;
+    s.uBase.value.copy(pos);
+    s.uUp.value.copy(up);
+    s.uStrength.value = strength;
+    // The shell is a unit cylinder scaled and aimed on the CPU, once a frame,
+    // because a mesh has to have a real transform for the depth test to work —
+    // the motes can live entirely in the vertex shader precisely because they
+    // are points with no silhouette to sort.
+    _v.copy(pos).addScaledVector(up, TORNADO_H * 0.5);
+    this.funnel.position.copy(_v);
+    this.funnel.quaternion.setFromUnitVectors(_UP_Y, up);
+    this.funnel.scale.set(1, 1, 1);
+    this.funnel.visible = strength > 0.02;
+  }
+
+  /** No funnel. */
+  tornadoOff() {
+    this.tornadoMotes.visible = false;
+    this.funnel.visible = false;
+    this.tornadoMotes.material.uniforms.uStrength.value = 0;
+  }
+
+  /**
+   * The whirl: dust, leaves and grit going round.
+   *
+   * A cone of points rather than a texture, because the funnel has to read as
+   * *rotating* from any angle and at any distance, and nothing painted on a
+   * billboard does. Each mote gets a fixed (angle, height, radius) triple from
+   * its seed and orbits at a rate that falls off with height — the base spins
+   * visibly faster than the top, which is both what a real funnel does and what
+   * makes the shape legible as a vortex rather than as a cylinder of noise.
+   *
+   * The radius profile is the funnel: narrow at the ground, flaring toward the
+   * cloud. `0.55 + 2.6 * h^1.6` against TORNADO_R, so the foot is a tight rope
+   * and the top is a wide skirt.
+   *
+   * Colour runs brown at the foot to pale grey at the top: the bottom of a
+   * tornado is soil and the top is cloud, and the gradient is most of what
+   * separates it from a column of smoke.
+   */
+  _buildTornadoMotes(scene) {
+    const N = TORNADO_MOTES;
+    const seed = new Float32Array(N * 3);
+    for (let i = 0; i < N * 3; i++) seed[i] = Math.random();
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 3));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 }, uBase: { value: new THREE.Vector3() },
+        uUp: { value: new THREE.Vector3(0, 1, 0) }, uStrength: { value: 0 },
+        uPixelRatio: { value: 1 },
+      },
+      vertexShader: /* glsl */`
+        attribute vec3 aSeed;
+        uniform float uTime; uniform vec3 uBase; uniform vec3 uUp;
+        uniform float uStrength; uniform float uPixelRatio;
+        varying float vA; varying float vH;
+        void main() {
+          vec3 ref = abs(uUp.y) > 0.9 ? vec3(1.0,0.0,0.0) : vec3(0.0,1.0,0.0);
+          vec3 t1 = normalize(cross(uUp, ref));
+          vec3 t2 = cross(uUp, t1);
+          // Height, biased low: sqrt puts more of the seed range near the foot,
+          // where the funnel is thin and needs the density to stay opaque.
+          float h = sqrt(aSeed.z);
+          vH = h;
+          float r = ${TORNADO_R.toFixed(1)} * (0.55 + 2.6 * pow(h, 1.6));
+          // Slower with height. The 1.35 floor stops the skirt looking static.
+          float rate = mix(4.6, 1.35, h);
+          float ang = aSeed.x * 6.2831853 + uTime * rate;
+          // Climb. A mote that only circled would read as a ring; the whole
+          // point of a funnel is that everything in it is also going up.
+          float climb = fract(h + uTime * 0.075);
+          float hh = climb * ${TORNADO_H.toFixed(1)};
+          vec3 p = uBase + uUp * hh
+                 + t1 * (cos(ang) * r) + t2 * (sin(ang) * r);
+          // Wobble, so the column is not a perfect lathe.
+          p += t1 * sin(uTime * 1.7 + aSeed.y * 20.0) * 0.5;
+          p += t2 * cos(uTime * 1.9 + aSeed.x * 20.0) * 0.5;
+          vA = step(aSeed.y, uStrength);
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mv;
+          // Grit at the foot is bigger than dust at the top.
+          gl_PointSize = mix(5.5, 2.6, climb) * uPixelRatio * (14.0 / max(1.0, -mv.z));
+        }
+      `,
+      fragmentShader: /* glsl */`
+        varying float vA; varying float vH;
+        void main() {
+          if (vA < 0.5) discard;
+          vec2 c = gl_PointCoord - 0.5;
+          float a = smoothstep(0.5, 0.12, length(c));
+          // Soil at the foot, cloud at the top.
+          vec3 col = mix(vec3(0.38, 0.30, 0.22), vec3(0.62, 0.62, 0.66), vH);
+          gl_FragColor = vec4(col, a * mix(0.85, 0.35, vH));
+        }
+      `,
+      transparent: true, depthWrite: false,
+    });
+    const p = new THREE.Points(geo, mat);
+    p.frustumCulled = false;
+    // Above the rain (12): a funnel seen through a downpour is in front of it.
+    p.renderOrder = 13;
+    p.visible = false;
+    scene.add(p);
+    return p;
+  }
+
+  /**
+   * The condensation shell: the pale, solid-looking cone inside the debris.
+   *
+   * The motes alone are legible at twenty cells and invisible at a hundred —
+   * points shrink with distance and a funnel a player cannot see from across a
+   * plain fails the one job it has. This is a single open-ended cone that holds
+   * its silhouette at any range, alpha-blended, with vertical streaks scrolling
+   * up it so it rotates rather than sitting there.
+   *
+   * `BackSide` and not DoubleSide, which is the one choice here worth arguing
+   * about: drawing both faces of a translucent cone doubles the fill and makes
+   * the near wall and the far wall sum to an almost opaque tube. Drawing only
+   * the inside face means what you see is the FAR wall through the near one,
+   * which is exactly what a real funnel looks like — the silhouette is crisp and
+   * the middle is where the density is.
+   */
+  _buildFunnel(scene) {
+    // Narrow at the foot, wide at the cloud. Radial segments kept low because
+    // the shape is a soft column, not a machined part.
+    const geo = new THREE.CylinderGeometry(
+      TORNADO_R * 3.1, TORNADO_R * 0.6, TORNADO_H, 18, 1, true,
+    );
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 }, uStrength: { value: 0 },
+        uBase: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3(0, 1, 0) },
+      },
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform float uTime; uniform float uStrength;
+        varying vec2 vUv;
+        void main() {
+          // Streaks round the barrel, scrolling upward and round at once. Two
+          // frequencies so the pattern does not visibly repeat as it turns.
+          float s = sin((vUv.x * 6.2831853) * 3.0 - uTime * 3.4 + vUv.y * 5.0);
+          float s2 = sin((vUv.x * 6.2831853) * 7.0 - uTime * 2.1 - vUv.y * 9.0);
+          float streak = 0.55 + 0.28 * s + 0.17 * s2;
+          // Thinner at the very top, where it should dissolve into the cloud
+          // deck rather than end in a hard rim, and at the very bottom, where
+          // the debris takes over.
+          float ends = smoothstep(0.0, 0.10, vUv.y) * smoothstep(1.0, 0.72, vUv.y);
+          vec3 col = mix(vec3(0.46, 0.42, 0.38), vec3(0.70, 0.71, 0.74), vUv.y);
+          gl_FragColor = vec4(col, streak * ends * 0.44 * uStrength);
+        }
+      `,
+      transparent: true, depthWrite: false, side: THREE.BackSide,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.frustumCulled = false;
+    m.castShadow = false;
+    m.receiveShadow = false;
+    // Under the debris motes, over the rain.
+    m.renderOrder = 12;
+    m.visible = false;
+    scene.add(m);
+    return m;
+  }
 
   setPixelRatio(r) {
     this.motes.material.uniforms.uPixelRatio.value = r;
     this.weather.material.uniforms.uPixelRatio.value = r;
+    this.tornadoMotes.material.uniforms.uPixelRatio.value = r;
   }
 }

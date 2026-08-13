@@ -1112,6 +1112,9 @@ const PLAYER_RADIUS = 0.34;
 
 const _seam = new THREE.Vector3();
 const _rel = new THREE.Vector3();
+/** The spiral direction in `shove`. Its own vector because `_rel` holds the
+ *  radial unit across the same few lines and `shove` needs both at once. */
+const _spin = new THREE.Vector3();
 
 /**
  * Neighbour lookup for _separate: a uniform hash grid over world position.
@@ -9939,6 +9942,79 @@ export class Mobs {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Throw every body near a vertical line, without hurting any of them.
+   *
+   * This is `hurt`'s knockback with the wound taken off, and it is deliberately
+   * a separate door rather than `hurt(mob, 0, pos)`. Three things in `hurt` are
+   * about being *attacked* and are all wrong for weather: it sets `hurtT`, which
+   * flashes the body red; it plays the hurt cry; and it flips wildlife to 'flee'
+   * and hostiles to 'chase' with the player as the thing they now know about. A
+   * cow picked up by a tornado has not been hit by anybody and should not come
+   * down hunting the player for it.
+   *
+   * What it keeps is the part that matters: `knockA`/`knockB`/`knockT` ride on
+   * top of steering, and `tumbling` is what suspends the walking rules so a body
+   * can be put somewhere it would never have chosen to walk. Both already exist
+   * and both are already tested by every swing in the game.
+   *
+   * Animals and monsters go through the same door and get the same treatment.
+   * Wind does not check whether a thing is hostile — and a husk being lifted out
+   * of a fight it was winning is the best thing about being caught in one.
+   *
+   * `knockMass` still applies, so this inherits the whole ladder for free: a
+   * bunny leaves, an elephant rocks and stays. A tornado that flung a mammoth
+   * about would be funnier and much worse.
+   *
+   * Cost: one pass over `this.list`, which the crowd budget caps at MAX_MOBS.
+   * Called at 6 Hz from Tornado.js, not per frame.
+   *
+   * @param {THREE.Vector3} pos    foot of the funnel
+   * @param {THREE.Vector3} up     the local up the funnel stands along
+   * @param {number} pullR         cells from the axis anything is moved at all
+   * @param {number} coreR         cells from the axis a body is lifted
+   * @param {number} strength      0..1 spin-up envelope
+   * @returns {number} bodies moved, for the harness
+   */
+  shove(pos, up, pullR, coreR, strength = 1) {
+    if (strength <= 0.05) return 0;
+    let n = 0;
+    for (const mob of this.list) {
+      if (mob.dying > 0 || mob.spec.phantom) continue;
+      _rel.copy(mob.pos).sub(pos);
+      // Distance from the AXIS, not from the foot. A funnel is a line.
+      const h = _rel.dot(up);
+      if (h < -3 || h > 40) continue;
+      _rel.addScaledVector(up, -h);
+      const d = _rel.length();
+      if (d > pullR) continue;
+      if (d > 1e-4) _rel.multiplyScalar(1 / d); else _rel.set(1, 0, 0);
+      // Round the axis with a little inward, the same spiral and the same hand
+      // of spin the player gets. `_spin` is the tangent; the sign convention has
+      // to match Tornado's or an animal and a player standing side by side would
+      // be carried opposite ways round the same funnel.
+      _spin.copy(up).cross(_rel).normalize();
+      _spin.addScaledVector(_rel, -0.45).normalize();
+      const fr = mob.frame;
+      const ra = _spin.x * fr.ea[0] + _spin.y * fr.ea[1] + _spin.z * fr.ea[2];
+      const rb = _spin.x * fr.eb[0] + _spin.y * fr.eb[1] + _spin.z * fr.eb[2];
+      const t = Math.max(0, Math.min(1, (pullR - d) / (pullR - coreR)));
+      const mass = knockMass(mob.baseHeight ? mob.baseHeight * mob.grown : mob.spec.height);
+      const push = KNOCK_HOSTILE * t * t * strength * mass;
+      if (push < 0.2) continue;
+      mob.knockA = ra * push;
+      mob.knockB = rb * push;
+      mob.knockT = KNOCK_TIME;
+      mob.tumbling = true;
+      // Off its feet inside the core, and only there. Outside it the body is
+      // dragged along the ground, which is what makes the core read as the part
+      // you must not be in.
+      if (d < coreR) mob.vel.k = Math.max(mob.vel.k, KNOCK_LIFT * 1.4 * mass * strength);
+      n++;
+    }
+    return n;
   }
 
   toJSON() {

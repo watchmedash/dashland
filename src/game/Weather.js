@@ -46,6 +46,42 @@ const STATES = {
 
 const COLD_BIOMES = new Set([BIOME.SNOW, BIOME.TUNDRA]);
 
+/**
+ * Precipitation above which a funnel can form.
+ *
+ * 0.55 sits between `rain`'s target of 0.62 and `overcast`'s 0.00, so it means
+ * "rain that has been falling long enough to have eased most of the way in" —
+ * the ease runs at dt*0.14, so a rain band clears this about six seconds after
+ * it starts and a storm well before that. It is deliberately a reading of the
+ * *eased* value rather than a test on `state`: a tornado should never form on
+ * the frame the sky changes its mind.
+ */
+const TORNADO_PRECIP = 0.55;
+/**
+ * Per second, while the test above holds.
+ *
+ * Simulated against this table (400 000 transitions): `rain` and `storm` occupy
+ * 11.45% of wall time. 0.006 a second is one roll landing per 167 seconds of wet
+ * weather, i.e. **one tornado per ~24 minutes of play** before the biome gate in
+ * Tornado.js refuses seven of the twelve biomes. For a player who moves around,
+ * that lands nearer 45 minutes. A session sees one or two.
+ *
+ * The two failure modes either side are both named in the brief and both real:
+ * at 0.02 it is one every seven minutes, which is a nuisance you build around;
+ * at 0.001 it is one every two and a half hours, which is a feature most players
+ * never meet.
+ */
+const TORNADO_RATE = 0.006;
+/**
+ * Seconds after one forms before another may.
+ *
+ * Longer than the longest storm (190s) and longer than the longest tornado
+ * (95 + 12 = 107s), so this is not a throttle on a single weather system — it is
+ * the guarantee that two cannot be in living memory of each other. Persisted, so
+ * quitting and reloading cannot reroll it.
+ */
+const TORNADO_COOLDOWN = 420;
+
 export class Weather {
   constructor() {
     this.state = 'fair';
@@ -61,6 +97,13 @@ export class Weather {
     this.type = 'rain';
     this.lightning = 0;
     this.onThunder = null;
+    /**
+     * Seconds until a funnel may form. Starts at the full cooldown so a brand
+     * new world cannot be met by one in its first storm — the first seven
+     * minutes of a save are the ones with no shelter, no bed and no tools in
+     * them.
+     */
+    this.tornadoCooldown = TORNADO_COOLDOWN;
   }
 
   _pick() {
@@ -119,7 +162,31 @@ export class Weather {
       this.lightning = 1;
       this.onThunder?.();
     }
+
+    this.tornadoCooldown = Math.max(0, this.tornadoCooldown - dt);
   }
+
+  /**
+   * Should a funnel form this frame?
+   *
+   * The odds live here and the event lives in Tornado.js, which is the split the
+   * head of that file argues for: whether a tornado exists at all is a fact
+   * about the sky, and this table is what the sky is. The siting, the physics
+   * and the biome gate are not — they need a planet, a player and a mob list,
+   * none of which this class has ever heard of.
+   *
+   * The caller re-arms the cooldown, not this method, because siting can fail —
+   * the ground 60 cells out may be ocean — and a roll that burns seven minutes
+   * of cooldown on a funnel that never appeared is a bug the player cannot see.
+   */
+  wantsTornado(dt) {
+    if (this.tornadoCooldown > 0) return false;
+    if (this.precip <= TORNADO_PRECIP) return false;
+    return Math.random() < dt * TORNADO_RATE;
+  }
+
+  /** Called once a funnel has actually been sited. */
+  armedTornado() { this.tornadoCooldown = TORNADO_COOLDOWN; }
 
   // `raining` and `snowing` used to sit here and were deleted rather than wired
   // up. Both were exported-looking predicates over `precip` and `cold` that
@@ -136,6 +203,21 @@ export class Weather {
     return 'Clear';
   }
 
-  toJSON() { return { state: this.state, timer: this.timer }; }
-  fromJSON(d) { if (d) { this.state = d.state || 'fair'; this.timer = d.timer ?? 120; } }
+  /**
+   * The tornado *cooldown* round-trips; a tornado in flight deliberately does
+   * not. See the save note at the head of Tornado.js — reloading into the middle
+   * of one is a death the player never saw coming, and reloading into the storm
+   * that then produces one is not.
+   *
+   * `?? TORNADO_COOLDOWN` rather than `?? 0` on the way back in, so an old save
+   * with no field lands on the same "not in the first seven minutes" footing a
+   * new world does rather than being eligible the instant it loads.
+   */
+  toJSON() { return { state: this.state, timer: this.timer, tornado: this.tornadoCooldown }; }
+  fromJSON(d) {
+    if (!d) return;
+    this.state = d.state || 'fair';
+    this.timer = d.timer ?? 120;
+    this.tornadoCooldown = d.tornado ?? TORNADO_COOLDOWN;
+  }
 }

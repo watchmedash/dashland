@@ -1194,6 +1194,11 @@ export const POSE = {
   aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.26, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.0022, 0.0146, -0.0105], icon: [0.18, 0.46, -0.14] },
   snowbell:     { file: 'wam/snowbell',     pack: 'wam', height: 0.26, grip: 0.3, rot: [0.02, -0.45, 0.24],  pos: [0.002, 0.011, -0.002], icon: [0.10, 0.42, -0.16] },
   lingonberry:  { file: 'wam/lingonberry',  pack: 'wam', height: 0.26, grip: 0.36, rot: [1.04, 0.66, 0.18],   pos: [0.002, -0.01, 0.01], icon: [0.16, 0.44, -0.14] },
+  // Held low and turned so the volva is in shot. The swollen sack at the foot is
+  // the field mark that says deathcap rather than mushroom, and a pose that put
+  // the cap between the eye and the base would have thrown away the one thing
+  // the item art has to say.
+  deathcap:     { file: 'wam/deathcap',     pack: 'wam', height: 0.30, grip: 0.30, rot: [-0.06, -0.50, 0.22], pos: [0, 0, 0], icon: [0.10, 0.42, -0.16] },
   fern:         { file: 'wam/fern',         pack: 'wam', height: 0.28, grip: 0.3, rot: [-0.06, -0.52, 0.26], pos: [0.002, 0.0108, -0.002], icon: [0.12, 0.48, -0.16] },
 
   // The two that are read from *above*, the sea lettuce problem: a mat seen
@@ -1494,6 +1499,7 @@ export const BY_NAME = {
   clover: 'clover',
   fern: 'fern',
   lingonberry: 'lingonberry',
+  deathcap: 'deathcap',
   // The farm. Not one of these twenty-four is ever an item in an inventory —
   // the crop breaks into produce and seed — and they are listed anyway for the
   // reason given above the thornbrush, which is the whole trap this table sets:

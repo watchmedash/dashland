@@ -123,6 +123,10 @@ ITEMS = [
     "cotton_grass", "snowbell", "alpine_aster", "marram",
     "lavender", "clover", "fern", "lingonberry",
     "cave_mushroom", "shelf_fungus", "crystal_cluster", "driftwood",
+    # The third mushroom, and the one that is a hazard rather than a harvest.
+    # Same rule as its neighbours here: skipping the name empties the forest
+    # floor of every deathcap the generator scattered.
+    "deathcap",
     # The rod. Item-only, and a tool rather than a drop — the one entry here
     # whose model carries a hanging line, which is the only thing separating its
     # icon from `stick`'s.

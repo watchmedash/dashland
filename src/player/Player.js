@@ -7,7 +7,7 @@ import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
 import { cellToWorld, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
 import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
-  CONTACT_HURT, SINK,
+  CONTACT_HURT, CONTACT_POISON, SINK,
 } from '../world/Blocks.js';
 // Imported rather than re-declared so there is exactly one "how much slower is
 // water" number in the game. Items.js owns it, Skills.js quotes it in prose
@@ -409,6 +409,13 @@ export class Player {
     this.inSpring = false;
     /** seconds still alight after leaving the lava */
     this.burning = 0;
+    /**
+     * Whether the box is against something that poisons. Written by
+     * `contactHurt` on the same scan that produces the number, read by
+     * `Game._tickPoison`. False on every frame but the ones spent standing in a
+     * deathcap.
+     */
+    this.contactPoison = false;
     this.sprinting = false;
     this.crouching = false;
     this.bob = 0;
@@ -796,6 +803,10 @@ export class Player {
    * to: nothing here is about the player except the box it reads.
    */
   contactHurt(height = this.crouching ? HEIGHT - 0.35 : HEIGHT) {
+    // Cleared up front rather than at each `return`, so the two bail-outs below
+    // cannot leave last frame's answer standing. A stale `true` here is a player
+    // being poisoned by a mushroom they have already walked away from.
+    this.contactPoison = false;
     const p = this.planet;
     const c = this.cell;
     let f = c.f, ai = c.ci, aj = c.cj;
@@ -811,6 +822,7 @@ export class Player {
     const loJ = aj - HALF_W - TOUCH, hiJ = aj + HALF_W + TOUCH;
     const loK = c.ck - TOUCH, hiK = c.ck + height + TOUCH;
     let worst = 0;
+    let poison = false;
     for (let di = -1; di <= 1; di++) {
       const cLo = baseI + di;
       if (Math.min(hi, cLo + 1) - Math.max(lo, cLo) <= 0) continue;
@@ -824,7 +836,13 @@ export class Player {
         for (let k = Math.floor(loK); k <= Math.floor(hiK); k++) {
           const bid = p.at(col, k);
           const hurt = CONTACT_HURT[bid];
-          if (hurt <= worst) continue;
+          const pois = CONTACT_POISON[bid];
+          // Two reasons to look at a cell now, and a cell is worth the box test
+          // if it can improve *either* answer. The old single test was
+          // `hurt <= worst`, which would have skipped every deathcap in the
+          // world: they carry no `hurt` at all, so a poison block could never
+          // beat a `worst` of zero and the box test would never run on one.
+          if (hurt <= worst && !(pois && !poison)) continue;
           const boxes = IS_SHAPED[bid]
             ? collisionBoxes(bid, p.facingAt(col, k))
             : FULL_BOX;
@@ -833,12 +851,20 @@ export class Player {
             if (Math.min(hi, cLo + bi1) - Math.max(lo, cLo + bi0) <= 0) continue;
             if (Math.min(hiJ, cLoJ + bj1) - Math.max(loJ, cLoJ + bj0) <= 0) continue;
             if (Math.min(hiK, k + bk1) - Math.max(loK, k + bk0) <= 0) continue;
-            worst = hurt;
+            if (hurt > worst) worst = hurt;
+            if (pois) poison = true;
             break;
           }
         }
       }
     }
+    // The second answer, written to a field rather than returned beside the
+    // first. Every caller of this — `_tickContact` and `Mobs` — wants the number
+    // and only the number, and changing the return type to a pair would have
+    // meant an allocation per body per frame for a fact that is false almost
+    // always. `contactPoison` is read by `_tickPoison` on the same frame the
+    // number is read by `_tickContact`, which is the only ordering that matters.
+    this.contactPoison = poison;
     return worst;
   }
 

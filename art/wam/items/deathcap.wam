@@ -1,0 +1,204 @@
+# Deathcap — the poisonous mushroom, and the only plant in the game whose job is
+# to be recognised rather than to be picked.
+#
+# There are already two mushrooms in the world and this one has to be a third
+# thing at a glance, in a dark wood, with a fern carpet in front of it. So the
+# brief is the inverse of `cave_mushroom.wam`'s, which was itself the inverse of
+# the glowcap's:
+#
+#  - **Tall, not squat.** The cave toadstool asserts wider than tall (1.84) and
+#    is a patch of domes at ankle height. This is the opposite: taller than wide,
+#    a single leader standing clear of a 0.58-cell fern with one companion and
+#    one button at its feet. A player has to be able to see it over the
+#    understorey it grows in, because seeing it is the entire hazard.
+#  - **Three bodies, not five.** A deathcap does not carpet. Fewer, larger,
+#    further apart.
+#  - **The volva, which nothing else in the game has.** A swollen white sack at
+#    the foot of the stalk, wider than the stem it swallows — this is the real
+#    field mark of Amanita phalloides and it is the reason the model can be told
+#    from a mushroom at ten paces even in silhouette. It is asserted below, so
+#    nobody can tidy it away.
+#  - **The ring, which the glowcap also has, kept small.** A veil skirt is
+#    mushroom vocabulary and this one earns it, but it is a thin collar rather
+#    than the glowcap's torn ruff: the volva is the mark that matters and two
+#    horizontal breaks on one stalk fight each other.
+#
+# **The palette is the warning and it is value, not hue.** A forest floor here is
+# dark green from the knee down. The stalk, the ring and the volva are a bone
+# white brighter than anything else on the ground, and the cap is a flat olive
+# that is *desaturated* against the ferns rather than louder than them — so the
+# thing that catches the eye is a pale vertical, not a coloured blob, and it
+# reads at the same distance in daylight and under a torch. Red would have been
+# the easy choice and it is the wrong one: red already means `flower_red` and
+# `firebloom`, and this planet's danger colour is orange lava.
+#
+# Layout follows the `sea_grass` rule the other clumps follow: a body that leans
+# along X is rooted a half-thickness off the axis in the same direction, so it is
+# honestly one-sided and the centreline lint has nothing to say. The one that
+# leans only in Z sits dead on X=0.
+
+model deathcap
+  height 0.30
+  style chunky
+
+palette
+  Cap   #8a9450
+  Crown #6b7639
+  Rim   #b9c088
+  Gill  #f4f1e4
+  Stem  #ece7d4
+  Ring  #f8f4e8
+  Volva #ded8c0
+
+skeleton
+  root soil at 0.0
+  # Three separate fruiting bodies off the soil root, never branched off each
+  # other — mushrooms are separate organisms. Unlike the cave patch these are
+  # deliberately NOT of one height: there is a leader, a companion at about two
+  # thirds, and a button, because a deathcap is a thing you notice one of.
+  # The leader leans in Z only and sits dead on X=0, so it is honestly symmetric
+  # about the centreline and the lint has nothing to say about the widest part
+  # in the model. Anything tilted in X carries a matching `side=` offset
+  # outward instead - the `sea_grass` rule - which is what stB does.
+  bone stA parent=soil side=0     fwd=0.06  up=0.014 dir=up tilt=0   pitch=-4  len=0.92
+  bone stB parent=soil side=0.26  fwd=-0.22 up=0.014 dir=up tilt=-9  pitch=6   len=0.54
+  bone stC parent=soil side=0     fwd=0.32  up=0.018 dir=up tilt=0   pitch=9   len=0.22
+
+parts
+  # The volvas. An egg sack the stalk grows out of: widest just above the ground,
+  # closing back in around the stem. It has to be visibly *fatter* than the shaft
+  # above it or the whole field mark is gone, which is what the assert at the
+  # bottom is protecting.
+  loft volvaA bone=stA at=0.0 dir=up len=0.20 material=Volva sides=8
+    ring 0.00 w=0.25 d=0.24
+    ring 0.30 w=0.33 d=0.32
+    ring 0.62 w=0.30 d=0.29
+    ring 1.00 w=0.18 d=0.175
+    cap start=flat end=flat
+  loft volvaB bone=stB at=0.0 dir=up len=0.16 material=Volva sides=8
+    ring 0.00 w=0.21 d=0.20
+    ring 0.30 w=0.28 d=0.27
+    ring 0.62 w=0.25 d=0.24
+    ring 1.00 w=0.155 d=0.15
+    cap start=flat end=flat
+
+  # The stalks. Slender and near-parallel — the cave toadstool's fat peg would
+  # read as the same plant in a different colour, and a deathcap's stipe is a
+  # long clean column. They start inside the volva, so the bottom rings are
+  # narrow enough to disappear into it rather than fighting its silhouette.
+  loft stemA bones=stA..stA material=Stem sides=7
+    ring 0.00 w=0.16 d=0.155
+    ring 0.10 w=0.135 d=0.13
+    ring 0.70 w=0.115 d=0.11
+    ring 1.00 w=0.125 d=0.12
+    cap start=flat end=flat
+  loft stemB bones=stB..stB material=Stem sides=7
+    ring 0.00 w=0.145 d=0.14
+    ring 0.10 w=0.12 d=0.115
+    ring 0.70 w=0.105 d=0.10
+    ring 1.00 w=0.115 d=0.11
+    cap start=flat end=flat
+  loft stemC bones=stC..stC material=Stem sides=6
+    ring 0.00 w=0.15 d=0.145
+    ring 0.14 w=0.12 d=0.115
+    ring 1.00 w=0.115 d=0.11
+    cap start=flat end=flat
+
+  # The rings. A thin collar two thirds of the way up, not a ruff: it is one
+  # horizontal note against the volva's, and the volva is the one that carries
+  # the meaning.
+  loft ringA bone=stA at=0.64 dir=up len=0.05 on=stemA material=Ring sides=8
+    ring 0.00 w=0.16 d=0.155
+    ring 0.35 w=0.27 d=0.26
+    ring 0.80 w=0.24 d=0.23
+    ring 1.00 w=0.15 d=0.145
+    cap start=flat end=flat
+  loft ringB bone=stB at=0.64 dir=up len=0.045 on=stemB material=Ring sides=8
+    ring 0.00 w=0.145 d=0.14
+    ring 0.35 w=0.24 d=0.23
+    ring 0.80 w=0.21 d=0.20
+    ring 1.00 w=0.135 d=0.13
+    cap start=flat end=flat
+
+  # The caps. Broad and shallow — about 2.1 wide for every 1 tall, between the
+  # cave toadstool's knuckle (1.33) and the glowcap's parasol (2.5). A deathcap's
+  # cap is a low convex plate that flattens with age, and the low profile is also
+  # what lets the pale stalk under it stay visible from the side.
+  #
+  # The ring at 0.00 is the gill face, a real disc set under the rim in the
+  # brightest colour in the palette. It is what the player sees looking along the
+  # ground, and it is the second half of the value contrast the whole model is
+  # built on.
+  loft capA bone=stA at=1.0 dir=up len=0.26 on=stemA material=Cap sides=9
+    ring 0.00 w=0.36 d=0.35 material=Gill
+    ring 0.10 w=0.49 d=0.48 material=Rim
+    ring 0.24 w=0.52 d=0.51 material=Cap
+    ring 0.60 w=0.47 d=0.46
+    ring 0.86 w=0.32 d=0.31 material=Crown
+    ring 1.00 w=0.13 d=0.125
+    cap start=flat end=dome
+  loft capB bone=stB at=1.0 dir=up pitch=5 len=0.21 on=stemB material=Cap sides=9
+    ring 0.00 w=0.29 d=0.28 material=Gill
+    ring 0.10 w=0.40 d=0.39 material=Rim
+    ring 0.24 w=0.43 d=0.42 material=Cap
+    ring 0.60 w=0.38 d=0.37
+    ring 0.86 w=0.26 d=0.25 material=Crown
+    ring 1.00 w=0.10 d=0.095
+    cap start=flat end=dome
+  # The button: still closed, no gill face and no ring yet. It is here so the
+  # clump has one silhouette that is not a small copy of the leader.
+  loft capC bone=stC at=1.0 dir=up len=0.17 on=stemC material=Cap sides=7
+    ring 0.00 w=0.16 d=0.155 material=Gill
+    ring 0.20 w=0.23 d=0.225 material=Cap
+    ring 0.58 w=0.25 d=0.24
+    ring 0.86 w=0.19 d=0.185 material=Crown
+    ring 1.00 w=0.09 d=0.085
+    cap start=flat end=dome
+
+checks
+  # Rooted. A mushroom hovering over the litter is the one defect a ground plant
+  # never survives, because the player looks down at it.
+  assert bottom(volvaA) < 0.02
+  assert bottom(volvaB) < 0.02
+  assert bottom(stemC) < 0.02
+  # **Taller than wide**, which is the single line that separates this from
+  # `cave_mushroom` (1.84 wide for 1 tall) and is the whole reason it clears the
+  # fern it grows in. `MODELLED_PLANTS` normalises on the Y extent, so a model
+  # that grows sideways arrives short.
+  assert height / width > 1.05
+  # **The volva, and it is the field mark.** Half again as wide as the shaft it
+  # swallows, or the model is a mushroom with a lumpy foot rather than a
+  # deathcap. This is the assert that must never be relaxed.
+  #
+  # Asserted on the leader alone, and that is a limitation of the measurement
+  # rather than a softer rule for the companion. `width(part)` is a bounding box,
+  # so a stalk that leans reports the box its lean sweeps rather than its own
+  # thickness: stB tilts 9 degrees over 0.54 and measures 0.23 wide against a
+  # true shaft of 0.115, which halves the ratio for a body whose volva is
+  # authored to exactly the same proportion. stA stands upright, so on stA the
+  # number means what it says.
+  assert width(volvaA) / width(stemA) in 1.8..2.6
+  # The volva stays at the bottom. A sack that has crept up the stalk is a ring.
+  assert top(volvaA) < 0.34 * top(capA)
+  # A low plate, not a knuckle and not a parasol.
+  assert width(capA) / height(capA) in 1.7..2.6
+  # ...and a real overhang, which is what makes the pale stalk read as a stalk.
+  assert width(capA) / width(stemA) in 3.0..5.0
+  # One leader. The companion clears half of it and no more than four fifths, so
+  # the clump has a subject; the button is plainly junior to both.
+  assert top(capB) in 0.50..0.82
+  assert top(capC) < top(capB) * 0.62
+  assert volume(capC) < volume(capA) / 4
+  # The leader is near upright and the companion is knocked off plumb, so the two
+  # do not read as a matched pair of pegs.
+  assert elevation(stA) > 80
+  assert elevation(stB) in 62..82
+  # Separate organisms: no two caps may grow through each other.
+  noclip capA vs capB,capC
+  noclip capB vs capC
+  # Budget.
+  assert parts == 10
+  assert tris < 950
+  measure aspect height / width
+  measure capplate width(capA) / height(capA)
+  measure volvaflare width(volvaA) / width(stemA)

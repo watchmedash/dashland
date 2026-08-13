@@ -219,6 +219,11 @@ function block(o) {
     // Damage a body takes per contact tick from being pressed against this
     // block. 0 for everything that is merely in the way. See CONTACT_HURT.
     hurt: o.hurt ?? 0,
+    // 1 for a block that poisons a body pressed against it rather than injuring
+    // one. Deliberately a second field beside `hurt` and not a magic value in
+    // it: they are different currencies — `hurt` is points now, this is a clock
+    // later — and one block could honestly carry both. See CONTACT_POISON.
+    poison: o.poison ?? false,
     // 1 for a block that cannot bear a solid neighbour beside it. See NEEDS_ROOM.
     needsRoom: o.needsRoom ?? false,
     // 1 for a block that breaks when the cell under it stops holding it up.
@@ -1373,6 +1378,38 @@ export const BLOCKS = [
     solid: false, sink: 1.6, hardness: 0.4, tool: 'shovel',
     particle: [0.93, 0.95, 0.98], sound: 'snow',
   }),
+
+  // --- the third hazard, and the only one that is alive ----------------------
+  //
+  // The deathcap. A pale mushroom on a forest floor, and the one block on the
+  // planet that is dangerous to *stand in* without doing you a single point of
+  // damage: it fills the lungs with spores instead. See `_tickPoison` in
+  // main.js for the clock and `CONTACT_POISON` below for the table.
+  //
+  // Appended on the end and `NOT_OBTAINABLE`, with a hand-written item at the
+  // foot of `game/Items.js`, for the reason quicksand and the gate above give
+  // at length. Nothing about it being a plant rather than a pool changes that:
+  // the item loop at the top of Items.js does not care where a block came from.
+  //
+  // R_CROSS with no tile, like every other land plant since the forage pass:
+  // the atlas is baked from a pack outside this tree, so the model in
+  // `art/wam/items/deathcap.wam` is the whole of its art, and its name has to
+  // appear in `MODELLED_CROSS` (Mesher) and `MODELLED_PLANTS` (main) or the
+  // forest floor draws nothing at all.
+  //
+  // **It is the palest thing in a forest and that is the entire warning.** A
+  // forest floor here is fern (0.75 of every column) over grass, so it is dark
+  // green from the knee down; the deathcap is a bone-white stalk with a swollen
+  // white sack at its foot under an olive cap, and it stands a third taller
+  // than the ferns around it. It is legible at range for the same reason the
+  // quicksand's mud top is: it is the one thing out there that is not the
+  // colour of the biome. The crosshair names it as well, from LOOK_RANGE.
+  block({
+    name: 'deathcap', label: 'Deathcap', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.15, needsFloor: true,
+    poison: true,
+    particle: [0.82, 0.84, 0.68], sound: 'grass',
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -1512,6 +1549,22 @@ export const DROWNS = new Uint8Array(N_BLOCKS);
  * neighbouring cell — see Player.contactHurt.
  */
 export const CONTACT_HURT = new Float32Array(N_BLOCKS);
+/**
+ * 1 for a block that poisons what touches it. One today: the deathcap.
+ *
+ * A second table beside CONTACT_HURT rather than a sentinel inside it, because
+ * the two are not the same kind of number and must be able to coexist. A cactus
+ * charges points on a cadence and the arithmetic is the whole of it; a deathcap
+ * charges nothing at all on contact and instead arms a clock that outlives the
+ * touch by ten seconds. A block that was both — a brazier of burning spores —
+ * would want a number in one and a 1 in the other, and folding them together
+ * would have made that unsayable.
+ *
+ * Read by the same box scan CONTACT_HURT is (see Player.contactHurt), which is
+ * the reason it is a dense array indexed by id: that loop runs over up to
+ * twenty-seven cells every frame and must not consult a Set.
+ */
+export const CONTACT_POISON = new Uint8Array(N_BLOCKS);
 /**
  * 1 for a block that cannot survive a solid neighbour beside it.
  *
@@ -2064,6 +2117,13 @@ grows(['mireroot'], soil(['mud', 'peat', 'clay', 'dirt', 'coarse_dirt']));
 grows(['lotus'], soil(['mud', 'clay', 'sand', 'dirt']));
 // The cave floor, on the fungi's terms — see the glowcap entry above.
 grows(['truffle'], soil(['dirt', 'coarse_dirt', 'mud', 'podzol', 'moss_block'], 'rock'));
+// The deathcap. Leaf litter, which on this planet is podzol under the pines and
+// the turf and dirt under the oaks — the same ground the fern owns, because the
+// whole design of the plant is that it stands *in* the fern carpet where a
+// player is already walking without looking down. Deliberately no rock, no sand
+// and no snow: a mushroom on scree would be visible from a mile off and would
+// never be brushed by accident, which is the one thing this block is for.
+grows(['deathcap'], soil(['podzol', 'moss_block'], 'turf'));
 
 /**
  * May `plant` root on `floor`?
@@ -2126,6 +2186,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   // above can be looked at too.
   DROWNS[i] = ((b.render === R_TORCH || b.render === R_CROSS) && !b.submerged) ? 1 : 0;
   CONTACT_HURT[i] = b.hurt;
+  CONTACT_POISON[i] = b.poison ? 1 : 0;
   NEEDS_ROOM[i] = b.needsRoom ? 1 : 0;
   NEEDS_FLOOR[i] = b.needsFloor ? 1 : 0;
   IS_SHAPED[i] = (b.render === R_SLAB || b.render === R_STAIR

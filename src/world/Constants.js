@@ -198,6 +198,38 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  * moves is a runtime edit through `_applyEdits`, indistinguishable from mining
  * a flower), and whirlpools are a pure function of seed and column evaluated on
  * the main thread, so the generator writes not one byte differently for them.
+ *
+ * ---
+ *
+ * **A third thing that did not contribute, and it is the interesting one: the
+ * deathcap.** It is a new block id the generator scatters — 1.6% of forest and
+ * 1.4% of pine-forest columns — which is word for word the argument the
+ * quicksand and the powder snow made two paragraphs above, and it is
+ * nonetheless not a bump. The difference is *what kind of cell is written*.
+ *
+ * Quicksand and powder snow replace ground. A pool is dug into a dune and a
+ * drift is sunk into a snowfield, so a version-5 save regenerating an unvisited
+ * desert gets terrain its visited desert does not have, with the discontinuity
+ * on a region boundary — you can walk to the seam and see one side is holed and
+ * the other is not. The cactus lattice that forced 4 is the same complaint
+ * again: blocks that already existed are somewhere else now.
+ *
+ * `landFloraAt` cannot do that. It writes exactly one cell, `k + 1`, the air
+ * above a surface it does not touch, and only where that surface is already the
+ * soil the plant's rule names. Every column keeps its height, its caves, its
+ * ores, its lakes and its trees. So the worst a stale save can produce is that
+ * one species of mushroom is present in the regions generated after this build
+ * and absent in the regions generated before it — which is indistinguishable
+ * from the biome noise that already decides whether any given wood has ferns in
+ * it, and is invisible to a player who has no way to know which regions were
+ * streamed on which day.
+ *
+ * Set against that, a bump refuses every planet made since be4a0b0 landed this
+ * morning. Refusing a save is the correct trade when the alternative is a
+ * broken world; it is the wrong trade when the alternative is a slightly
+ * patchier distribution of a mushroom. **The rule this records for the next
+ * flora species: a pass that only decorates the surface does not bump. A pass
+ * that moves, carves or replaces ground always does.**
  */
 export const GEN_VERSION = 5;
 

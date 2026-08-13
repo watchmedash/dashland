@@ -52,6 +52,12 @@ const NOT_OBTAINABLE = new Set([
   'quicksand',
   // Powder snow, the other half of the same family and the same trap again.
   'powder_snow',
+  // The deathcap, and the third time this trap has been walked round today. It
+  // is a plant rather than a pool and that changes nothing at all: this loop
+  // asks only whether a block is in this Set, so an appended flora block appends
+  // an item at 232 exactly as an appended hazard block does. Its `add()` is at
+  // the foot of this file, under the two hazards.
+  'deathcap',
 ]);
 
 /**
@@ -176,7 +182,25 @@ const FOOD = [
   // at all is an item that reads as broken the first time a hungry player right
   // clicks it, and 2 is low enough to say "do something else with this".
   { name: 'squash', label: 'Squash', food: 4, color: '#d98b21', shine: '#f4b962' },
-  { name: 'greenbean', label: 'Green Beans', food: 2, color: '#4f8f34', shine: '#83c063' },
+  // **The poisonous crop, and the only one.** Raw green beans carry phasin in
+  // life and the game says so: `poison: true` means eating this arms the clock
+  // in `_tickPoison` and costs four points over the next twelve seconds, on top
+  // of the two it feeds. Cooking is the whole counterplay and it already
+  // existed — every kitchen dish that takes a bean applies a fire to it, and
+  // there is now a bare smelt as well (`cooked_greenbean`, food 6, at the foot
+  // of this file), so the beans a farmer grows are worth exactly three times as
+  // much once they have been near a kiln.
+  //
+  // The label carries the warning as well as the flag. "Green Beans" was a safe
+  // food yesterday and a player with a bag of them must not discover the change
+  // by being poisoned by it: "Raw Green Beans" is the same shape as "Raw Meat"
+  // and "Raw Fish", which the player already reads as a thing to cook, and the
+  // tooltip says `Food, 2 · Poisonous` outright.
+  //
+  // It stays at 2 rather than dropping. The food ladder's rule is that cooking
+  // beats raw, and 2 → 6 keeps it; making the raw rung worthless as well as
+  // poisonous would be charging twice for one decision.
+  { name: 'greenbean', label: 'Raw Green Beans', food: 2, poison: true, color: '#4f8f34', shine: '#83c063' },
   { name: 'snowpea', label: 'Snow Peas', food: 2, color: '#7ab355', shine: '#aede8b' },
   { name: 'hops', label: 'Hops', food: 2, color: '#8fa444', shine: '#c3d47c' },
   { name: 'grape', label: 'Grapes', food: 3, color: '#5b2d78', shine: '#9563b8' },
@@ -887,7 +911,21 @@ const FISH_SPECIES = [
   { name: 'bluetang', label: 'Raw Blue Tang', water: 'salt', rarity: 0.36, color: '#2050bd', shine: '#79a6ff' },
   { name: 'betta', label: 'Raw Betta', water: 'fresh', rarity: 0.42, color: '#a6263d', shine: '#e26e88' },
   { name: 'royalgramma', label: 'Raw Royal Gramma', water: 'salt', rarity: 0.48, color: '#8a3cbd', shine: '#d2a2f0' },
-  { name: 'puffer', label: 'Raw Pufferfish', water: 'salt', rarity: 0.54, color: '#b09a58', shine: '#e4d296' },
+  // **The poisonous fish, and the only one.** It is the pufferfish because it
+  // could not honestly be anything else: a player who has never played this game
+  // still knows what a pufferfish does, so the species name is the warning and
+  // no new art, no new tier and no new item was needed to give the rod fifteen
+  // species one of which is a reason to look at what you caught.
+  //
+  // The counterplay is the one every fish already has and it is free: a kiln
+  // smelts all fifteen to `cooked_fish` at 8, and cooking clears the poison
+  // exactly as it clears the beans'. Poison is a property of the raw item, and
+  // the raw item stops existing the moment it goes in the fire.
+  //
+  // Its rarity, and therefore its food value and its price, are untouched: it is
+  // not a rarer fish for being a dangerous one, and a merchant who paid more for
+  // one would have turned the hazard into an income.
+  { name: 'puffer', label: 'Raw Pufferfish', water: 'salt', rarity: 0.54, poison: true, color: '#b09a58', shine: '#e4d296' },
   // The reef's prize. Shallow water is not a condition on it — it sits in the
   // `salt` table, so a deep cast can turn one up as well. What the abyss adds is
   // the three at the bottom of this list, which shallow water cannot produce at
@@ -909,6 +947,10 @@ for (const f of FISH_SPECIES) {
   add({
     name: f.name, label: f.label, color: f.color, shine: f.shine,
     food: fishFood(f.rarity), rarity: f.rarity, wild: true,
+    // Carried through rather than looked up later, so that everything which
+    // already reads a food item's own properties — eating, the tooltip, the
+    // trader — finds this one the same way it finds `food`.
+    ...(f.poison ? { poison: true } : {}),
   });
 }
 
@@ -1064,6 +1106,36 @@ add({ name: 'fence_gate', label: 'Fence Gate', block: ID.fence_gate, sound: 'woo
 // and lay somewhere else is worth far more than one you can only fall into.
 add({ name: 'quicksand', label: 'Quicksand', block: ID.quicksand, sound: 'sand' });
 add({ name: 'powder_snow', label: 'Powder Snow', block: ID.powder_snow, sound: 'snow' });
+
+// --- the poison -------------------------------------------------------------
+//
+// Under the two hazards, and last for the same reason they are last.
+//
+// The deathcap. **It carries no `food` at all**, and that is the design rather
+// than an omission: an item with no `food` cannot be eaten — `_interact` never
+// offers the chew — so there is no way to poison yourself by right-clicking one
+// out of curiosity. The danger is entirely in the block you walk into, which is
+// the half of it a player can *see* coming, and picking one is safe. It is
+// still worth picking: it is a placeable block, so a mushroom dug out of a wood
+// is a trap you can lay at the mouth of your own mine.
+//
+// A raw item that poisons on contact and not on eating, and a raw food that
+// poisons on eating and not on contact, are the two halves this feature is
+// deliberately split into. Nothing in the game is both.
+// `poison` is carried on the item as well as on the block, and it buys exactly
+// one thing: the tooltip says "Poisonous" over a mushroom sitting in a bag. It
+// cannot be eaten either way - `_interact` only offers the chew for an item with
+// `food` - so this is a label and not a behaviour.
+add({ name: 'deathcap', label: 'Deathcap', block: ID.deathcap, sound: 'grass', poison: true });
+
+// The counterplay to the beans, and the one new food this brings. Six, which is
+// the bottom of the simple-cooked band and level with a fried egg: a fire on a
+// vegetable is worth less than a fire on a fish (3 → 8), and the ladder's one
+// invariant — cooking beats raw — is kept at 2 → 6 with room to spare.
+add({
+  name: 'cooked_greenbean', label: 'Cooked Green Beans', food: 6, cooked: true,
+  color: '#5f9c3e', shine: '#96cd72',
+});
 
 /** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
 export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);

@@ -1025,6 +1025,77 @@ const CHILL_THAW = 2.0;
 /** Fraction of CHILL_BITE at which the shivering starts. */
 const CHILL_SHIVER = 0.55;
 
+/**
+ * The poison. See `_tickPoison`, and see `CHILL_BITE` above for the family this
+ * belongs to.
+ *
+ * **The sixth clock of this shape, and it is two halves of shapes that already
+ * exist rather than a sixth idea.** `sporeT` is `chillT` exactly — up while you
+ * are in the mushroom, down while you are not, a warning band, then it fires.
+ * `poisonT` is `burning` exactly — a dose set once, counting down, charging a
+ * point on a fixed cadence until it runs out. Nothing was invented for either,
+ * which is why the whole thing is cleared in `respawn` on three lines beside the
+ * other five.
+ *
+ * **The pricing, and it is set against the two things a player can already do.**
+ *
+ * Four points. POISON_DOSE 12 over POISON_PERIOD 3 charges at 3, 6, 9 and 12
+ * seconds, so a full dose is 4 of 20 from full health — under the tornado's 6
+ * and well under the Cinderling's 9, and that ordering is deliberate: those two
+ * are things that come to find you, and this is a thing you either walked into
+ * or put in your mouth.
+ *
+ * A second dose **refreshes and never stacks**. `poisonT` is assigned rather
+ * than added and the cadence is not restarted, so eating four pufferfish in
+ * eight seconds costs the same four points as eating one. There is no route to
+ * a large number here at all, which is the answer to "it must not be able to
+ * kill from full health".
+ *
+ * **And it cannot take the last point.** The same floor `_tickSoak` has, for a
+ * stronger reason than the hot spring's: a scald is happening to you now and you
+ * can see the pool you are sitting in, but poison is a bill for something you
+ * did twelve seconds ago. A player killed by it would be killed by an action
+ * they have already stopped taking and very possibly forgotten, with no move
+ * available that saves them - which is exactly the "no counterplay" death the
+ * brief forbids. So it takes you down to 1 and leaves you there. What it costs
+ * is real anyway: four points is a husk and a half, and it is four points you
+ * cannot eat back while it is running, because eating during it is what a
+ * player reaches for and the bar is still draining underneath.
+ *
+ * **The cure is time and there is deliberately no cure item.** Milk exists in
+ * Minecraft because Minecraft's poison can kill you and its wither will; ours
+ * cannot do either. A curative would be an inventory slot carried permanently
+ * against a four-point ceiling, a recipe, a shop line and a price - a whole
+ * economy of counterplay for a hazard whose real counterplay is one second at a
+ * kiln and reading the word "Poisonous" on a tooltip. Twelve seconds is the
+ * number instead, and twelve is chosen so that it is *survivable while it is
+ * happening*: it is shorter than a husk fight and longer than a sprint out of a
+ * patch, so it is an inconvenience you fight through rather than a state you
+ * wait out.
+ *
+ * SPORE_BITE 2.5 is the escape, measured the way CHILL_BITE was. Walking
+ * straight through a deathcap at ordinary speed puts a body in contact for
+ * about 0.4 seconds and sprinting for half that, so **brushing past one is
+ * always free** and there is no route to being poisoned by a mushroom you never
+ * stopped at. The puff at 55% of it - 1.4 seconds - is a full second before the
+ * dose and is a green cloud coming off the cap at your own feet, so the warning
+ * arrives while the only thing needed to act on it is one step.
+ */
+const POISON_DOSE = 12;
+const POISON_PERIOD = 3;
+const SPORE_BITE = 2.5;
+/** Seconds of accumulated spore shed per second out of the mushroom. */
+const SPORE_CLEAR = 2.0;
+/** Fraction of SPORE_BITE at which the cap starts smoking. */
+const SPORE_PUFF = 0.55;
+/**
+ * The colour of everything poison, as linear RGB, and it is one colour on
+ * purpose: the puff off a deathcap and the puff off a poisoned player are the
+ * same green, so a player who has met the mushroom recognises what a bad fish
+ * has done to them without being told twice.
+ */
+const SPORE_COLOR = [0.62, 0.76, 0.26];
+
 for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID[n]);
 
 /**
@@ -1121,6 +1192,11 @@ const MODELLED_PLANTS = {
   // something growing on it rather than as undergrowth.
   cactusfruit: 0.82, agave: 0.66, swampreed: 0.86, lotus: 0.30,
   stonecrop: 0.34, icecapmoss: 0.26, mireroot: 0.52, truffle: 0.22,
+  // The deathcap, and the number is doing a job the rest of this table is not:
+  // it has to stand *above* the fern (0.58) it grows in, or the thing a player
+  // is meant to see before they walk into it is hidden by the carpet it hides
+  // in. 0.72 is the tallest fungus on the planet and still under the firebloom.
+  deathcap: 0.72,
   // The farm, and the only entries here where the number carries information
   // rather than just scale: a crop's four stages are four models and the
   // heights are what makes the field *read* as growing. A row that arrives at
@@ -1848,6 +1924,10 @@ class Game {
     this._wasSink = 0;
     /** Seconds of cold in a drift, bled off slowly once out. See `_tickChill`. */
     this.chillT = 0;
+    /** Seconds of poison left to run, and seconds of spores breathed in a
+     *  deathcap. Both `_tickPoison`'s, and both cleared in `respawn`. */
+    this.poisonT = 0;
+    this.sporeT = 0;
     /**
      * The spyglass, on C: 0 is the normal view and 1 is fully narrowed.
      *
@@ -3630,6 +3710,16 @@ class Game {
     this.chillT = 0;
     this._chillT = 0;
     this._chillSaid = false;
+    // The poison, which is the sixth clock of that shape and would have done
+    // exactly the same thing again: eat a bad fish, die to the husk that was
+    // chasing you while you did it, and wake at your bed still losing a point
+    // every three seconds to a meal you no longer have. Three lines because it
+    // is two clocks and a said-it-once flag, and all three have to go: leaving
+    // `sporeT` charged would poison you 0.1 seconds after respawning.
+    this.poisonT = 0;
+    this._poisonT = 0;
+    this.sporeT = 0;
+    this._sporeSaid = false;
     this.energy = Math.max(this.energy, 0.35);
     // Wake up at your bed if you have one and it is still there. Falling back to
     // a fresh random column is only right for a player who has never slept: on a
@@ -3700,6 +3790,8 @@ class Game {
     // why. Cleared with breath for the same reason breath is cleared.
     this.soakT = 0;
     this.chillT = 0;
+    this.poisonT = 0;
+    this.sporeT = 0;
     this.ui.refresh();
     this.input.requestLock();
   }
@@ -5694,6 +5786,12 @@ class Game {
       this._wasSink = 0;
       this.chillT = 0;
       this._chillSaid = false;
+      // And the poison, for the same reason: `contactPoison` is written by
+      // `Player.update`'s box scan, which no longer runs, so a spectator who
+      // died in a patch of deathcaps would go on breathing spores for ever.
+      this.poisonT = 0;
+      this.sporeT = 0;
+      this._sporeSaid = false;
     } else if (this.player.headInWater) {
       // Nine seconds of air, stretched by the lungs branch — 27 at lungs 4.
       // The bar is still 0..1, so what the skill changes is how long it takes
@@ -5721,6 +5819,10 @@ class Game {
       this._tickSoak(dt);
       this._tickSink(dt);
       this._tickChill(dt);
+      // After `_tickContact`, which is not an ordering that matters but is the
+      // honest one: `contactHurt` is what writes `player.contactPoison`, and
+      // both of them read it on the frame it was written.
+      this._tickPoison(dt);
     }
 
     // Four times a second is plenty: a sprint covers about 2 units in that time
@@ -6245,6 +6347,93 @@ class Game {
     if (this._chillT < CHILL_PERIOD) return;
     this._chillT = 0;
     this._takeHit(1, 'Frozen', false, 'freeze');
+  }
+
+  /**
+   * The poison: a mushroom you stood in, a bean you did not cook, or a fish you
+   * did not know.
+   *
+   * Two halves and both of them are borrowed. The first is `_tickChill`'s: a
+   * clock up while the body is against a deathcap, down while it is not, a
+   * warning band, then it fires once and rearms. The second is `burning`'s: a
+   * dose that counts down and charges a point on a fixed cadence. See the
+   * POISON_* block for every number and for why the last point is safe.
+   *
+   * `kind` is 'poison', which no skill soaks. That is the same decision
+   * `_tickSoak` and `_tickChill` made and the same reason: the ceiling on this
+   * whole feature is four points, and a tolerance branch shaving four points is
+   * a tolerance branch deleting the feature. Difficulty is untouched too -
+   * `mobDamageMul` is applied at the mob callsite, so easy through extreme scale
+   * mobs and only mobs, exactly as they do for the cold and the scald.
+   */
+  _tickPoison(dt) {
+    const p = this.player;
+
+    // --- the spores, which is `_tickChill` with a mushroom instead of snow ---
+    if (p.contactPoison) {
+      this.sporeT += dt;
+      if (this.sporeT >= SPORE_BITE * SPORE_PUFF) {
+        // Once on crossing into the band, not per frame. `sink` is the soft low
+        // burst a body going into quicksand makes and it is the right one
+        // second time round: something giving way underfoot and letting go of
+        // what was inside it.
+        if (!this._sporeSaid) { this._sporeSaid = true; this.audio.sink('grass', p.position); }
+        if (Math.random() < dt * 6) this.particles.crumbs(p.eye, p.up, SPORE_COLOR);
+      }
+      if (this.sporeT >= SPORE_BITE) {
+        // Rearmed rather than left charged, so standing in a patch doses you
+        // every 2.5 seconds rather than every frame after the first.
+        this.sporeT = 0;
+        this._sporeSaid = false;
+        this.poison();
+      }
+    } else {
+      this.sporeT = Math.max(0, this.sporeT - dt * SPORE_CLEAR);
+      // Armed again only once the spores have actually cleared, not the moment
+      // the feet leave the cap: stepping out and back in must not re-fire the
+      // warning, which is the rule `_tickChill` writes down for the cold.
+      if (this.sporeT <= 0) this._sporeSaid = false;
+    }
+
+    // --- the dose, which is `burning` with a different cadence ---------------
+    if (this.poisonT <= 0) return;
+    this.poisonT = Math.max(0, this.poisonT - dt);
+    // A thin trickle of the same green off the player themselves, so the state
+    // is visible for the whole twelve seconds and not only on the four frames
+    // it charges. Three a second against the crumb emitter's two particles is
+    // six, which is nothing beside the eighty steam instances a hot spring runs.
+    if (Math.random() < dt * 3) this.particles.crumbs(p.eye, p.up, SPORE_COLOR);
+
+    this._poisonT = (this._poisonT || 0) + dt;
+    if (this._poisonT < POISON_PERIOD) return;
+    this._poisonT = 0;
+    // Never fatal. See the POISON_* block: the floor is tested rather than
+    // clamped inside `_takeHit` for the reason the scald tests it, so the flash
+    // and the hurt sound still fire on every tick above it.
+    if (p.health <= 1) return;
+    this._takeHit(1, 'Poisoned', false, 'poison');
+  }
+
+  /**
+   * Take a dose. The one door into the poison, the way `_takeHit` is the one
+   * door into damage.
+   *
+   * Both sources come through here — the mushroom above and `_tickEating` — so
+   * "a dose refreshes and never stacks" is one line in one place rather than a
+   * rule two callers are trusted to keep.
+   */
+  poison() {
+    const p = this.player;
+    if (this.spectating || p.health <= 0) return;
+    // Assigned, not added. Twelve seconds from now, however many doses landed.
+    const fresh = this.poisonT <= 0;
+    this.poisonT = POISON_DOSE;
+    // The cadence carries on across a second dose rather than restarting, so a
+    // player cannot be charged an extra point for eating twice quickly - and
+    // cannot dodge one by doing so either.
+    if (!fresh) return;
+    this._poisonT = 0;
+    this.ui.toast('Poisoned', itemIdOf('deathcap'), 2600);
   }
 
   /**
@@ -9155,6 +9344,14 @@ class Game {
     this.inventory.consumeHeld(1, heldSlot);
     this.audio.pickup();
     this.ui.toast(`Ate ${heldItem.label}`, heldSlot.item, 1400);
+    // The bill, and it arrives *after* the food has been paid out rather than
+    // instead of it. Raw green beans and a raw pufferfish still feed and still
+    // heal - a poisoned meal is a meal - and then cost four points over the next
+    // twelve seconds, which is a net loss on both and is meant to be. Cooking
+    // either one removes the flag by removing the item: `greenbean` smelts to
+    // `cooked_greenbean` and every fish smelts to `cooked_fish`, and neither
+    // output carries `poison`. See the POISON_* block.
+    if (heldItem.poison) this.poison();
   }
 
   /**

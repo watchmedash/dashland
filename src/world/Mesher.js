@@ -154,6 +154,10 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom', 'saplin
   // all - and one missing from here draws a flat card instead of the model.
   'cactusfruit', 'agave', 'stonecrop', 'icecapmoss',
   'swampreed', 'mireroot', 'lotus', 'truffle',
+  // The one plant here that is not harvest. Same footing all the same: no tile,
+  // no billboard, and a name missing from either this list or `MODELLED_PLANTS`
+  // leaves the forest floor empty where the generator put one.
+  'deathcap',
   // The farm. Wheat stays out of this set and keeps its billboard because it
   // has four authored tiles in the atlas and they read fine; these seven have no
   // tile at all, so a name missing from here draws an untextured card and a

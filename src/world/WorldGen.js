@@ -4823,12 +4823,24 @@ export class WorldGen {
         break;
       // The forest floor, and the one place a single species is allowed to own
       // the ground: a fern understorey under oaks is what a forest looks like.
+      //
+      // The deathcap is the exception to that ownership and it is deliberately
+      // a *small* one: 1.6% of forest columns, so a player crossing a wood
+      // meets one every sixty columns or so. It is filed right behind the fern
+      // rather than in front of it because it has to stand IN the understorey —
+      // a poisonous mushroom in a clearing is one nobody ever brushes, and
+      // brushing it is the whole hazard. See `_tickPoison`.
       case BIOME.FOREST:
         if (r < 0.75 * dp) id = ID.fern;
+        else if (r < 0.766 * dp) id = ID.deathcap;
         break;
+      // Under the pines it takes the podzol, which is the ground the lingonberry
+      // does not. Slightly scarcer than under the oaks: a pine floor is open and
+      // a white stalk on brown litter is far easier to see coming.
       case BIOME.PINE_FOREST:
         if (r < 0.32 * dp) id = ID.fern;
         else if (r < 0.58 * dp) id = ID.lingonberry;
+        else if (r < 0.594 * dp) id = ID.deathcap;
         break;
       // The one biome whose ground is three different blocks under one carpet,
       // so it is the one biome that picks its species by what it is standing

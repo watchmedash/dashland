@@ -652,6 +652,12 @@ export const SMELTING = [
   // 5 seconds puts it between an egg and a fish: a leaf dries faster than a
   // fillet cooks.
   { in: 'kelp', out: 'dried_kelp', count: 1, time: 5 },
+  // The one smelt in this table whose job is to *remove* something rather than
+  // to add. Raw green beans poison; four seconds on a kiln is the whole cure,
+  // and it is deliberately the cheapest cook in the game beside the crab — the
+  // counterplay to a hazard must never be a chore, or the hazard is just a tax
+  // on a crop nobody plants twice. 2 → 6 keeps the ladder's invariant.
+  { in: 'greenbean', out: 'cooked_greenbean', count: 1, time: 4 },
   /**
    * Fifteen species, one grilled fish.
    *

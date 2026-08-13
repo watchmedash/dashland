@@ -204,18 +204,50 @@ function meshBatch(ids, withProgress) {
   }
 }
 
-/** column index → {f, i, j} */
-function colParts(col) {
-  const f = (col / (F * F)) | 0;
-  const rem = col - f * F * F;
-  return { f, i: (rem / F) | 0, j: rem % F };
+/**
+ * The 21 columns `markChunkAround` reaches — itself, its four neighbours and
+ * their four neighbours — reduced to each one's chunk id with `ck` left off.
+ *
+ * A chunk id is `((f * CT + ci) * CT + cj) * CK + ck`, so everything but the
+ * last term depends on the column alone. Caching that here is what makes the
+ * neighbourhood walk cost once per *column* instead of once per cell: all three
+ * callers iterate k inside one column — the edge diff walks D layers of one
+ * column, and both light callbacks report changed cells column by column — so a
+ * single-entry memo hits on 98 of every 99 calls.
+ *
+ * The list keeps its duplicates. Two graph steps from a column reach itself and
+ * its neighbours several times over, and the caller's Set is what removes them;
+ * pruning here would only move the same work earlier.
+ */
+const _naBase = new Int32Array(21);
+let _naCol = -1;
+
+function neighborhoodBases(col) {
+  if (_naCol === col) return _naBase;
+  _naCol = col;
+  let n = 0;
+  const put = (c) => {
+    const f = (c / (F * F)) | 0;
+    const rem = c - f * F * F;
+    const ci = ((rem / F) | 0) / CHUNK_T | 0;
+    const cj = (rem % F) / CHUNK_T | 0;
+    _naBase[n++] = ((f * CT + ci) * CT + cj) * CK;
+  };
+  put(col);
+  for (let d = 0; d < 4; d++) {
+    const nb = COL_NB[col * 4 + d];
+    put(nb);
+    for (let e = 0; e < 4; e++) put(COL_NB[nb * 4 + e]);
+  }
+  return _naBase;
 }
 
-function markChunk(set, col, k) {
-  const { f, i, j } = colParts(col);
-  const ck = Math.min(CK - 1, Math.max(0, Math.floor(k / CHUNK_K)));
-  set.add(chunkIdx(f, Math.floor(i / CHUNK_T), Math.floor(j / CHUNK_T), ck));
-}
+/**
+ * Which radial chunk a layer falls in, clamped exactly as it always was:
+ * `Math.min(CK - 1, Math.max(0, Math.floor(k / CHUNK_K)))`. `k` is only ever
+ * non-negative here after the guard, so the truncating `| 0` is the floor.
+ */
+const ckOf = (k) => (k < 0 ? 0 : Math.min(CK - 1, (k / CHUNK_K) | 0));
 
 /**
  * Mark every chunk that draws anything from this cell — not just the one that
@@ -237,15 +269,22 @@ function markChunk(set, col, k) {
  *
  * Two steps through the adjacency graph rather than arithmetic on the column
  * index, which is wrong across a cube seam. The Set makes the overlap free.
+ *
+ * The three radial steps are collapsed rather than walked. `ck` is monotonic in
+ * `k`, and a chunk is CHUNK_K = 11 layers deep, so `k - 1`, `k` and `k + 1` land
+ * in the same radial chunk ten times in eleven and in two distinct ones
+ * otherwise — never three. Skipping a repeat is therefore exact, not an
+ * approximation, and it is the same set either way because the Set was already
+ * absorbing the repeats.
  */
 function markChunkAround(set, col, k) {
+  const base = neighborhoodBases(col);
+  let prev = -1;
   for (let dk = -1; dk <= 1; dk++) {
-    markChunk(set, col, k + dk);
-    for (let d = 0; d < 4; d++) {
-      const n = COL_NB[col * 4 + d];
-      markChunk(set, n, k + dk);
-      for (let e = 0; e < 4; e++) markChunk(set, COL_NB[n * 4 + e], k + dk);
-    }
+    const ck = ckOf(k + dk);
+    if (ck === prev) continue;
+    prev = ck;
+    for (let n = 0; n < 21; n++) set.add(base[n] + ck);
   }
 }
 

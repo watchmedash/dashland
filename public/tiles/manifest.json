@@ -1,8 +1,8 @@
 {
   "size": 256,
   "cols": 12,
-  "rows": 13,
-  "layers": 156,
+  "rows": 14,
+  "layers": 157,
   "ext": "webp",
   "crack": {
     "size": 64,
@@ -20,6 +20,7 @@
     "clay",
     "snow",
     "snow_side",
+    "powder_snow",
     "ice",
     "water",
     "log_oak",
@@ -166,5 +167,5 @@
     "emerald_block",
     "void_block"
   ],
-  "bakedFromPack": 134
+  "bakedFromPack": 135
 }

@@ -359,6 +359,25 @@ const MAP = {
   // After the trim the mean is 241/245/251 and the blue survives where it
   // belongs.
   snow: ['Snow', 1, { bright: 1.12, warm: [1.14, 1.03, 0.95] }],
+  // Powder snow is the same snowfall, not a different substance, so it is the
+  // same source variant with the same blue trim. What separates them is
+  // CONTRAST, not brightness, and that is forced by the numbers rather than
+  // chosen: `snow` already means 241/245/251, so there is about 5 counts of
+  // headroom before white, and "make it brighter" spends all of it clipping the
+  // highlights while the hollows stay put - which reads as a dirtier tile, not
+  // a lighter one.
+  //
+  // Flattening lifts the hollows instead. The tile's whole range comes up
+  // toward its own top end, so the block reads paler overall AND loses the
+  // wind-swirl relief, which is the right picture twice over: a drift you sink
+  // through is loose, unpacked and featureless next to snow you can stand on.
+  // `bright` still goes up a little, because after the flatten there is room
+  // for it again.
+  //
+  // It was `all: 'snow'` until now, i.e. literally the same tile, and the
+  // hazard was left resting on its crosshair label and its one-layer rim to
+  // announce itself.
+  powder_snow: ['Snow', 1, { bright: 1.14, contrast: 0.5, warm: [1.08, 1.02, 1.01] }],
 
   farmland: ['Mud', 10],
   farmland_wet: ['Mud', 10, { bright: 0.55, rough: 0.45 }],

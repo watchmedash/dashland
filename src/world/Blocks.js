@@ -109,7 +109,7 @@ export const R_GATE = 12;
 // ---------------------------------------------------------------------------
 export const TILES = [
   'stone', 'dirt', 'grass_top', 'grass_side', 'sand', 'sandstone', 'sandstone_top',
-  'gravel', 'clay', 'snow', 'snow_side', 'ice', 'water',
+  'gravel', 'clay', 'snow', 'snow_side', 'powder_snow', 'ice', 'water',
   'log_oak', 'log_oak_top', 'leaves_oak',
   'log_birch', 'log_birch_top', 'leaves_birch',
   'log_pine', 'log_pine_top', 'leaves_pine',
@@ -1361,13 +1361,15 @@ export const BLOCKS = [
   // and the legibility comes from the three things that cost nothing: the
   // crosshair names it, the drift is one layer deep at its edge so you go in to
   // the ankle before you go in to the neck, and it sits in a hollow with snow
-  // standing over it. When the atlas is next rebaked this wants a `powder_snow`
-  // tile with Minecraft's darker, looser grain, and that is the whole fix.
+  // standing over it. It now also has a tile of its own: the same snowfall
+  // flattened, so it reads paler and loses the wind-swirl relief that packed
+  // snow has. See the `powder_snow` row in `bake-textures.mjs` for why the
+  // separation is contrast rather than brightness.
   //
   // Not `gravity`, for the same reason quicksand is not: a drift is where the
   // snow already fell.
   block({
-    name: 'powder_snow', label: 'Powder Snow', all: 'snow',
+    name: 'powder_snow', label: 'Powder Snow', all: 'powder_snow',
     solid: false, sink: 1.6, hardness: 0.4, tool: 'shovel',
     particle: [0.93, 0.95, 0.98], sound: 'snow',
   }),

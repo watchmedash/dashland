@@ -14,7 +14,7 @@
 // bugs this replaced.
 
 import * as THREE from 'three';
-import { F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx } from '../world/Constants.js';
+import { F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST } from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn,
   centerDir,
@@ -707,6 +707,10 @@ const SPAWN_MIN_DIST = 20;    // world units — never pop in under the player's
  * 145 buys back the margin. It is not free: the disc grows from 38,000 square
  * units to 66,000, so the same population is spread 1.7x thinner, which is why
  * the wildlife budget goes up with it rather than after it.
+ *
+ * This is the number for a full-distance horizon and is no longer read
+ * directly: `this.despawnRadius` scales it to whatever horizon the session is
+ * actually rendering. See `loadDist`.
  */
 const DESPAWN_RADIUS = 145;
 
@@ -763,8 +767,10 @@ const NIGHT_BED_PER_TICK = 2;
 const CELL_SIZE = (R_SEA * Math.PI / 2) / F;
 const WALK_YIELD = 0.6;
 const stepsFor = (units) => Math.max(1, Math.round(units / (CELL_SIZE * WALK_YIELD)));
-/** The band a travelling spawn may land in, in world units. */
-const SPAWN_FAR = DESPAWN_RADIUS - 25;
+/* The far edge of the band a travelling spawn may land in was a const here.
+   It is `this.spawnFar` now, because it moves with the horizon — see
+   `horizonScale`. The 25 units of margin are unchanged and are what keeps a
+   spawn from landing just outside the ring that culls it. */
 /**
  * And the near edge of a *world start*'s band, which is much closer than the
  * travelling ring's: at world start there is no view to avoid materialising
@@ -3190,6 +3196,18 @@ export class Mobs {
      */
     this.camera = null;
     /**
+     * The chunk load distance of the quality tier this session is running at,
+     * in world units. Supplied from outside exactly as `camera` and `savage`
+     * are: main.js writes `mobs.loadDist = this.quality.loadDist` when the tier
+     * resolves and again in `setQuality`. Nothing here may ask for the tier
+     * itself — `qualityTier` is main's single answer to that question and a
+     * second copy of it in this file is how the two would drift apart.
+     *
+     * The default is the desktop number, so a harness (or a build where nobody
+     * has set it) runs the population this file was tuned against.
+     */
+    this.loadDist = CHUNK_LOAD_DIST;
+    /**
      * Which `character-*.glb` the player is wearing, so the stalker can wear
      * it too. Null falls back to the species' own url.
      */
@@ -3245,6 +3263,48 @@ export class Mobs {
     this.voxSuppressed = 0;     // diagnostics: calls dropped by the rate limit
     this._nextId = 1;
   }
+
+  /**
+   * The travelling disc the population lives in, as a fraction of the one
+   * DESPAWN_RADIUS and the MAX_* budgets are written against.
+   *
+   * The whole reason it is not 1 is the low quality tier: it pulls the chunk
+   * horizon in to 96 units, and DESPAWN_RADIUS is 145, so on a phone animals
+   * went on existing for about fifty units past the furthest ground — a cow in
+   * silhouette against bare sky with nothing under it. Twenty-two meshes each,
+   * on the one platform that measured as draw-call bound, drawn past the edge
+   * of the world they belong to.
+   *
+   * A ratio rather than a subtraction so the tuned relationship survives
+   * whatever the horizon becomes: at 150 this is exactly 1 and every number
+   * below is the number that shipped, which is what keeps the desktop
+   * untouched. Clamped at 1 because the budgets, not the horizon, are what
+   * makes the disc worth filling — a hypothetical longer view should not
+   * silently double the roster.
+   */
+  get horizonScale() { return Math.min(1, this.loadDist / CHUNK_LOAD_DIST); }
+
+  /** How far out a body survives, for the horizon this session is drawing. */
+  get despawnRadius() { return DESPAWN_RADIUS * this.horizonScale; }
+
+  /** The far edge of the band a travelling spawn may land in. */
+  get spawnFar() { return this.despawnRadius - 25; }
+
+  /**
+   * And the headcount that fills that disc, as a fraction of the tuned one.
+   *
+   * By AREA, because density is the thing the population comments in this file
+   * are all written in ("one animal per 1,500 units of terrain") and because
+   * keeping the headcount while shrinking the disc would be a second, unasked
+   * change: 120 bodies at 145 units is a meadow, the same 120 at 93 is a
+   * paddock. Density held, the low tier carries ~48 ambient bodies instead of
+   * ~120 and every one of them stands on ground the player can see.
+   *
+   * Hostile budgets deliberately do NOT scale. How dangerous a night is is a
+   * difficulty decision (see MAX_HOSTILE_SURFACE and `savage`), and a phone is
+   * not a difficulty.
+   */
+  get crowdScale() { return this.horizonScale * this.horizonScale; }
 
   clear() {
     for (const m of this.list) this._release(m);
@@ -3406,8 +3466,8 @@ export class Mobs {
       // of the session: 24% of it used to land inside twenty units of where
       // they woke up, and that clearing is where they then build.
       const col = this._walkTo(nearCol, playerPos
-        ? spawnDist(SPAWN_MIN_DIST, SPAWN_FAR)
-        : spawnDist(SEED_NEAR, SPAWN_FAR));
+        ? spawnDist(SPAWN_MIN_DIST, this.spawnFar)
+        : spawnDist(SEED_NEAR, this.spawnFar));
       const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
       const surf = p.at(col, k);
@@ -3423,7 +3483,7 @@ export class Mobs {
         const { f, i, j } = colParts(col);
         cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
         const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
-        if (d < SPAWN_MIN_DIST || d > DESPAWN_RADIUS - 25) continue;
+        if (d < SPAWN_MIN_DIST || d > this.spawnFar) continue;
       }
       return { col, k };
     }
@@ -4413,7 +4473,7 @@ export class Mobs {
       const { f, i, j } = colParts(col);
       cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
       const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
-      if (d < CAVE_MIN_DIST || d > DESPAWN_RADIUS - 25) continue;
+      if (d < CAVE_MIN_DIST || d > this.spawnFar) continue;
       // Light keeps them out. This is checked last because it is the most
       // expensive test and the cheap ones reject most candidates first.
       if (this._litNear(col, k + 1)) continue;
@@ -4565,7 +4625,7 @@ export class Mobs {
       const { f, i, j } = colParts(col);
       cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
       const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
-      if (d < SPAWN_MIN_DIST || d > DESPAWN_RADIUS - 30) continue;
+      if (d < SPAWN_MIN_DIST || d > this.despawnRadius - 30) continue;
       return { col, k };
     }
     return null;
@@ -4730,14 +4790,14 @@ export class Mobs {
       // Evenly over the water's AREA, on the same reasoning as the land search
       // — see spawnDist. A lake at the far edge of the ring is as much water as
       // one at the near edge and was getting a fraction of the shoals.
-      const col = this._walkTo(nearCol, spawnDist(playerPos ? SPAWN_MIN_DIST : SEED_NEAR, SPAWN_FAR));
+      const col = this._walkTo(nearCol, spawnDist(playerPos ? SPAWN_MIN_DIST : SEED_NEAR, this.spawnFar));
       const k = this._waterLayer(col);
       if (k < 0) continue;
       if (playerPos) {
         const { f, i, j } = colParts(col);
         cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
         const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
-        if (d < SPAWN_MIN_DIST || d > DESPAWN_RADIUS - 25) continue;
+        if (d < SPAWN_MIN_DIST || d > this.spawnFar) continue;
       }
       return { col, k };
     }
@@ -4883,7 +4943,7 @@ export class Mobs {
    * clearing and leave the road out of it bare. That was half of what the
    * "concentrated near spawn" report was actually seeing.
    */
-  populate(player, count = Math.round(MAX_WILDLIFE * 0.65)) {
+  populate(player, count = Math.round(MAX_WILDLIFE * 0.65 * this.crowdScale)) {
     const c = player.cell;
     const startCol = cidx(c.f, Math.floor(c.ci), Math.floor(c.cj));
     // Where the world began, so the opening clearing stays where the player
@@ -4902,14 +4962,18 @@ export class Mobs {
     // precisely when a player forms their opinion of whether the planet is
     // alive. `null` for the player position here for the same reason the land
     // pass passes it: at world start there is nothing to keep clear of yet.
+    // Both budgets carry `crowdScale` for the same reason the land count in the
+    // signature does: a smaller disc is a smaller world to fill.
     let wet = 0, air = 0;
-    for (let n = 0; n < 6 && wet < MAX_AQUATIC * 0.65; n++) {
-      const got = this._spawnShoal(startCol, null, MAX_AQUATIC - wet);
+    const wetCap = Math.round(MAX_AQUATIC * this.crowdScale);
+    const airCap = Math.round(MAX_FLYING * this.crowdScale);
+    for (let n = 0; n < 6 && wet < wetCap * 0.65; n++) {
+      const got = this._spawnShoal(startCol, null, wetCap - wet);
       if (!got) break;
       wet += got;
     }
-    for (let n = 0; n < 6 && air < MAX_FLYING * 0.65; n++) {
-      const got = this._spawnDrift(startCol, null, MAX_FLYING - air);
+    for (let n = 0; n < 6 && air < airCap * 0.65; n++) {
+      const got = this._spawnDrift(startCol, null, airCap - air);
       if (!got) break;
       air += got;
     }
@@ -7880,8 +7944,15 @@ export class Mobs {
       // place. Fish keep theirs: they are under the surface, a player only
       // meets them by going looking, and thinning a shoal nobody can see costs
       // the night nothing and costs a swim its point.
-      const wildCap = night ? Math.round(MAX_WILDLIFE * NIGHT_WILDLIFE) : MAX_WILDLIFE;
-      const airCap = night ? Math.round(MAX_FLYING * NIGHT_WILDLIFE) : MAX_FLYING;
+      //
+      // `crowdScale` is the other multiplier on all three, and it is here for
+      // the same reason the night one is: the budgets are a density over the
+      // disc the population lives in, and the low tier's disc is 41% of the
+      // one these numbers were counted against. Without it a phone would hold
+      // the full meadow inside two thirds of the ground.
+      const wildCap = Math.round((night ? MAX_WILDLIFE * NIGHT_WILDLIFE : MAX_WILDLIFE) * this.crowdScale);
+      const airCap = Math.round((night ? MAX_FLYING * NIGHT_WILDLIFE : MAX_FLYING) * this.crowdScale);
+      const wetCap = Math.round(MAX_AQUATIC * this.crowdScale);
       let wild = have.land;
       for (let n = 0; n < SPAWN_PER_TICK && wild < wildCap; n++) {
         const spot = this._findSpawnColumn(playerCol, player.position);
@@ -7896,8 +7967,8 @@ export class Mobs {
       // one fish every other tick could not fill eighteen slots inside the
       // time a player spends near any one body of water.
       let wet = have.water;
-      for (let n = 0; n < 2 && wet < MAX_AQUATIC; n++) {
-        const room = Math.min(FISH_PER_TICK - (wet - have.water), MAX_AQUATIC - wet);
+      for (let n = 0; n < 2 && wet < wetCap; n++) {
+        const room = Math.min(FISH_PER_TICK - (wet - have.water), wetCap - wet);
         const got = this._spawnShoal(playerCol, player.position, room);
         if (!got) break;       // no water in reach this tick
         wet += got;
@@ -8021,7 +8092,7 @@ export class Mobs {
       const c = mob.cell, spec = mob.spec, fr = mob.frame;
 
       const dist = mob.pos.distanceTo(player.position);
-      if (dist > DESPAWN_RADIUS) {
+      if (dist > this.despawnRadius) {
         if (spec.trader) this._retireMerchant(mob, n);
         else { this._release(mob); this.list.splice(n, 1); }
         continue;

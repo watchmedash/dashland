@@ -122,7 +122,7 @@
 // explosion would be the single most confusing thing this mechanic could do.
 
 import * as THREE from 'three';
-import { BLOCKS, ID } from '../world/Blocks.js';
+import { BLOCKS, ID, IS_DOOR } from '../world/Blocks.js';
 import { computeDrops } from './Items.js';
 import { colParts, patchColumn } from '../world/Sphere.js';
 import { D } from '../world/Constants.js';
@@ -208,6 +208,41 @@ export function explode(game, pos, cause = null) {
           }
         }
       }
+    }
+  }
+
+  // A door is one object in two cells, and the crater counted each cell as a
+  // whole door. Two consequences, both wrong in the same direction: the two
+  // halves sit at different distances from the epicentre, so a blast could
+  // reach one and not the other and leave half a door hanging in a wall with
+  // nothing in the game that will ever condemn it — a door is not
+  // `NEEDS_FLOOR`. And when it reached both, each rolled `DROP_CHANCE`
+  // separately and each called `computeDrops` on a `door`, so one door could
+  // pay out two.
+  //
+  // Complete every door the crater touched, and let only its foot pay. This
+  // runs before `_applyEdits` because `_doorHalves` reads the live planet, and
+  // the cells it adds are not in `spoil`, so completing a door never pays for
+  // the half that was out of range.
+  if (edits.length) {
+    const cell = (col, k) => col * D + k;
+    const have = new Set(edits.map((e) => cell(e.col, e.k)));
+    for (const e of [...edits]) {
+      if (!IS_DOOR[planet.at(e.col, e.k)]) continue;
+      for (const kk of game._doorHalves(e.col, e.k) || []) {
+        if (have.has(cell(e.col, kk))) continue;
+        have.add(cell(e.col, kk));
+        edits.push({ col: e.col, k: kk, id: 0 });
+      }
+    }
+    const paid = new Set();
+    for (let n = spoil.length - 1; n >= 0; n--) {
+      const s = spoil[n];
+      if (!IS_DOOR[s.id]) continue;
+      const halves = game._doorHalves(s.col, s.k);
+      const foot = cell(s.col, halves ? halves[0] : s.k);
+      if (paid.has(foot)) spoil.splice(n, 1);
+      else paid.add(foot);
     }
   }
 

@@ -1,5 +1,10 @@
-// Fully procedural audio — no asset files. Noise-shaped impacts for footsteps
-// and block interaction, a layered ambient bed, and a slow generative pad.
+// Almost entirely procedural audio. Noise-shaped impacts for footsteps and
+// block interaction, a layered ambient bed, and a slow generative pad.
+//
+// Three recorded files are the exception — a rain loop, a surf loop and a
+// thunder crack, loaded by Samples.js and detailed there. They are additions to
+// the graph and never a dependency of it: every one of them has a synthesised
+// implementation that runs until the download lands and forever if it does not.
 //
 // Buses
 // -----
@@ -36,6 +41,7 @@
 // local up, not world +Y.
 
 import { Ambience } from './Ambience.js';
+import { Samples } from './Samples.js';
 
 // `step` is a per-material trim applied ONLY to footsteps, and only two
 // materials have one.
@@ -448,6 +454,9 @@ const VOICE_CAP = {
 export class Audio {
   constructor() {
     this.ctx = null;
+    // Set by `_startSamples`. Null until then, and every call site tests it,
+    // so the engine is fully functional without a single asset file.
+    this.samples = null;
     // Written only by `setVolumes`: a master volume of zero is off, not quiet.
     this.enabled = true;
     this.masterVolume = 0.7;
@@ -540,6 +549,35 @@ export class Audio {
     this.noiseBuf = this._noise(2.5);
     this._startAmbience();
     this._startMusic();
+    this._startSamples();
+  }
+
+  /**
+   * Kick off the recorded-sound downloads. Fire and forget, on purpose.
+   *
+   * Nothing here is awaited and nothing downstream waits on it. World
+   * generation is already 8.5-11s and is the thing players complain about;
+   * audio must not add a byte to that critical path. Every consumer of a sample
+   * keeps its synthesised implementation and tests for the buffer at play time,
+   * so the game is fully audible from the first frame and simply gets better a
+   * second or two later. If the fetch never completes — offline, 404, a browser
+   * with no Ogg Opus decoder — it never gets better, and nothing else changes.
+   *
+   * Note this runs on a context that is almost always 'suspended' at this point,
+   * because `start()` is called before the gesture that resumes it.
+   * `decodeAudioData` does not care: it is a pure decode with no dependency on
+   * the context clock. `_live()` is what gates playback, and it already did.
+   */
+  _startSamples() {
+    this.samples = new Samples(this.ctx);
+    this.samples.loadAll().then(() => {
+      // Hand the two bed buffers over as they land. `adopt` rides the noise bed
+      // down and the recording up through the ambience's normal level ramp, so
+      // this can happen at any moment, including mid-storm, without a click.
+      if (!this.ambience) return;
+      this.ambience.adopt('rain', this.samples.get('rain'));
+      this.ambience.adopt('surf', this.samples.get('surf'));
+    });
   }
 
   // --- voice budget ----------------------------------------------------------
@@ -2814,6 +2852,47 @@ export class Audio {
 
     // --- crack: bright transient, only when the strike is close --------------
     const crackT = t + (1 - near) * (0.05 + Math.random() * 0.35);
+
+    // A recorded crack if one has loaded. This is the one part of thunder that
+    // synthesis genuinely cannot reach: the leading edge of a real strike is a
+    // shockwave tearing, not a filtered noise burst, and no envelope on
+    // `noiseBuf` produces its granular rip. The rumble and the sub above are
+    // NOT replaced and never were candidates — they are already different every
+    // time, because the swell loop re-rolls its own count and depths per call,
+    // and a single recording of a tail would be the one part of a storm a
+    // player hears often enough to learn.
+    //
+    // Four things move per play, which is what stops twenty strikes in one
+    // storm reading as one sample twenty times:
+    //   rate    0.80-1.22, so pitch and length move together the way they do
+    //           with the size of the bolt rather than independently
+    //   cutoff  distance IS a low-pass; an overhead strike keeps its 12kHz rip
+    //           and a far one arrives as a 900Hz thump
+    //   offset  a far strike starts late into the file, past the leading edge
+    //           that miles of air would have eaten anyway
+    //   level   inherits `amp`, so it stays under the same ceiling as before
+    if (this.samples && this.samples.has('thunderCrack')) {
+      const buf = this.samples.get('thunderCrack');
+      const rate = 0.80 + Math.random() * 0.42;
+      const skip = (1 - near) * (0.10 + Math.random() * 0.16);
+      const cs2 = this.ctx.createBufferSource();
+      cs2.buffer = buf;
+      cs2.playbackRate.value = rate;
+      const lp3 = this.ctx.createBiquadFilter();
+      lp3.type = 'lowpass';
+      lp3.frequency.value = 900 + near * near * 11000;
+      lp3.Q.value = 0.4;
+      const cg2 = this.ctx.createGain();
+      // The file peaks at -1.5 dBFS by construction, so this gain is the whole
+      // level story and 0.62 keeps a full-strength overhead strike inside the
+      // headroom the synthesised crack used to sit in.
+      cg2.gain.value = amp * 0.62 * (0.35 + near * 0.65);
+      cs2.connect(lp3).connect(cg2).connect(out);
+      cs2.start(crackT, Math.min(skip, Math.max(0, buf.duration - 0.2)));
+      cs2.stop(crackT + buf.duration / rate + 0.05);
+      return;
+    }
+
     const cd = 0.10 + Math.random() * 0.16;
     const cs = this.ctx.createBufferSource();
     cs.buffer = this.noiseBuf;

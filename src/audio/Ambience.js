@@ -1,5 +1,6 @@
-// Ambient beds and sparse generative detail. Everything is synthesised from a
-// single shared pink-noise buffer plus oscillators; there are no asset files.
+// Ambient beds and sparse generative detail. Almost everything is synthesised
+// from a single shared pink-noise buffer plus oscillators; two beds, rain and
+// surf, additionally have a recorded version they switch to if one loads.
 //
 // Two mechanisms
 // --------------
@@ -15,6 +16,22 @@
 // be cheap on the frames where nothing has changed: a gain is only re-armed
 // when its target has moved more than a hair, so standing still schedules no
 // automation events at all.
+//
+// Recorded beds
+// -------------
+// Rain and surf are the two beds where a recording beats synthesis by enough to
+// be worth the bytes: both run continuously for minutes at a time, neither has
+// a per-play parameter that synthesis was buying us, and both are made of dense
+// fine detail (individual drops, gravel dragging back down a beach) that a
+// band-passed noise source cannot produce at any setting. The noise versions
+// are still built, still wired, and still the only thing that plays until a
+// buffer actually arrives — `adopt()` rides one down as it rides the other up,
+// so a failed download is a silent no-op rather than a missing sound.
+//
+// Every recorded bed is TWO sources of the same buffer at slightly different
+// playback rates. One source of a 6s loop announces its period within a minute;
+// two at rates 6% apart drift against each other and the pair does not repeat
+// for the better part of an hour, for the cost of one extra node.
 
 // Indices match BIOME_NAMES in the HUD.
 // bird/cricket/cicada are population densities, windF/windQ colour the wind for
@@ -81,6 +98,10 @@ export class Ambience {
     this.noise = noise;
     this.budget = budget || (() => true);
     this.beds = {};
+    // Which beds a recording has taken over. Until a name goes true here the
+    // noise version is the only thing that plays, which is also what happens
+    // for the whole session if the download fails.
+    this._sampled = { rain: false, surf: false };
     // world-anchored panners the placed beds hang off, keyed by feature
     this.places = {};
     this.stats = { oneShots: 0, dropped: 0, rearms: 0 };
@@ -170,6 +191,87 @@ export class Ambience {
     this.beds[name] = bed;
     this._armed[name] = 0;
     return bed;
+  }
+
+  /**
+   * A looping bed read from a decoded recording instead of the noise buffer.
+   *
+   * `dur` is the loop length the file was authored to, in seconds, and it is
+   * written into `loopEnd` rather than left at the default. That is not
+   * belt-and-braces: the files are Ogg Opus, Opus always carries encoder
+   * padding, and a decoder that leaves a few milliseconds of it on the END of
+   * the buffer would put a short gap into the wrap once per cycle — a tick
+   * every six seconds on the rain. Naming the loop point explicitly cuts any
+   * trailing padding off instead. (Head pre-skip is carried in the Ogg ID
+   * header and is the part every decoder does handle.)
+   *
+   * Two sources, rates `rate` and `rate * spread`, each started at its own
+   * random offset so they are decorrelated from the first sample.
+   */
+  _sampleBed(name, buf, dur, { rate = 1, spread = 0.94, into = null } = {}) {
+    const ctx = this.ctx;
+    const level = ctx.createGain();
+    level.gain.value = 0;
+    const srcs = [];
+    // Incommensurate drift rates, one per copy. See the note below.
+    const LFO = [0.037, 0.0431];
+    for (let i = 0; i < 2; i++) {
+      const s = ctx.createBufferSource();
+      s.buffer = buf;
+      s.loop = true;
+      s.loopStart = 0;
+      s.loopEnd = Math.min(dur, buf.duration);
+      // A hair of per-session detune on top, so two players (or two sessions)
+      // are not listening to the identical beat pattern between the two copies.
+      s.playbackRate.value = rate * (i ? spread : 1) * (0.99 + Math.random() * 0.02);
+
+      // A very slow drift on each copy's speed, and the reason it is here is
+      // measured rather than decorative. Two fixed-rate copies still leave the
+      // faster one exactly periodic, and an autocorrelation of the bed's
+      // envelope found that period: the surf pair peaked at 0.65 on a 0.33
+      // noise floor, i.e. the loop was still detectable. Drifting each copy by
+      // a fraction of a percent at two frequencies with no common multiple
+      // means neither ever returns to the same phase, and the peak drops into
+      // the floor. It is far too slow and too small to hear as pitch on a bed
+      // made of rain or gravel.
+      if (s.detune) {
+        const lfo = ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = LFO[i];
+        const d = ctx.createGain();
+        d.gain.value = 22;                      // cents
+        lfo.connect(d).connect(s.detune);
+        lfo.start(Math.random() * 10);
+      }
+      s.connect(level);
+      s.start(0, Math.random() * s.loopEnd);
+      srcs.push(s);
+    }
+    level.connect(into || this.out);
+    // Shaped like a `_bed` so `_arm` can drive it without caring which it is.
+    this.beds[name] = { src: srcs[0], srcs, f: null, level, am: null };
+    this._armed[name] = 0;
+    return this.beds[name];
+  }
+
+  /**
+   * Take a decoded buffer into service. Called whenever the loader finishes,
+   * which is at an arbitrary time after start and may be never.
+   *
+   * Only flips a flag and builds nodes; the actual handover is done by `set()`
+   * on the next frame, through the same `_arm` ride every other level change
+   * uses, so the noise bed fades out over its usual 0.55s time constant as the
+   * recording fades in. There is no moment of silence and no click.
+   */
+  adopt(name, buf) {
+    if (!buf || !this.ctx || this._sampled[name]) return false;
+    if (name === 'rain') {
+      this._sampleBed('rainSmp', buf, 6.0, { rate: 1, spread: 0.94 });
+    } else if (name === 'surf') {
+      this._sampleBed('surfSmp', buf, 12.0, { rate: 1, spread: 0.96 });
+    } else return false;
+    this._sampled[name] = true;
+    return true;
   }
 
   _build() {
@@ -298,10 +400,20 @@ export class Ambience {
     const w = st.wind * air.air;
     this._arm('wind', w * 0.046 * (0.35 + 0.65 * out));
     this._arm('windHi', w * 0.016 * out * st.openness);
-    this._arm('surf', st.surf * 0.055 * out);
+    // Recorded or synthesised, never both: `sm` is 1 once a buffer is in
+    // service and the two halves of each pair are exact complements, so the
+    // handover conserves the bed's level rather than briefly doubling it.
+    const smR = this._sampled.rain ? 1 : 0;
+    const smS = this._sampled.surf ? 1 : 0;
+    this._arm('surf', st.surf * 0.055 * out * (1 - smS));
     this._arm('water', st.water * 0.040 * out);
-    this._arm('rainHiss', st.rain * 0.055 * out);
-    this._arm('rainBody', Math.max(0, st.rain - 0.35) * 0.075 * out);
+    this._arm('rainHiss', st.rain * 0.055 * out * (1 - smR));
+    this._arm('rainBody', Math.max(0, st.rain - 0.35) * 0.075 * out * (1 - smR));
+    // Levels chosen to land the recording at the same weighted loudness the
+    // pair of noise beds hit at rain 1.0, measured offline; see the commit.
+    // Halved for the two decorrelated copies, which sum ~3 dB hotter than one.
+    if (smR) this._arm('rainSmp', st.rain * 0.120 * out);
+    if (smS) this._arm('surfSmp', st.surf * 0.057 * out);
     this._arm('cave', st.cave * 0.080 * (1 - st.underwater));
     this._arm('sub', st.underwater * 0.10);
     // Insects need warmth, dark (or heat), dry air and open sky.

@@ -406,14 +406,47 @@ seals a room with nothing shipping on top of it. It should be built for the
 workbench, by whoever ships the workbench, which is the deliberate way the
 Survival Kit note already asked for.
 
-## Sound — no third-party audio
+## Sound — three recorded files, everything else synthesised
 
-Every sound in the game is synthesised at runtime from oscillators and one
-generated noise buffer. There is no audio file in the repository of any format,
-no `decodeAudioData`, no media fetch, and no `<audio>` element — audited, not
-assumed. So there is nothing here to licence and nothing to attribute.
+134 of the game's 137 sounds are synthesised at runtime from oscillators and one
+generated noise buffer. There is no `<audio>` element anywhere.
 
-### Sampled SFX — SURVEYED AND NOT IMPORTED
+The exceptions are three files in `public/audio/`, listed in the next section.
+They are the only audio assets in the repository, the only use of
+`decodeAudioData`, and the only media fetch. Everything else on this page that
+says the game has no audio files predates them and has been corrected in place.
+
+### Recorded ambience and thunder — Sonniss GDC 2026 bundle, IMPORTED
+
+Three files, 148,870 bytes of Ogg Opus total, cut from two publishers' source
+recordings in the **Sonniss.com GDC 2026 Game Audio Bundle**.
+
+| shipped file | bytes | source recording | publisher |
+|---|---|---|---|
+| `public/audio/rain_loop.ogg` | 45,010 | `STORM_StormAmbience13_InMotionAudio_BackGardenStorm.wav` | **InMotionAudio** (Back Garden Storm) |
+| `public/audio/surf_loop.ogg` | 85,553 | `WATRWave_Soft Waves Cliffs_JSE_RCoN_Stereo.wav` | **Just Sound Effects** (Rocky Coast of Norway) |
+| `public/audio/thunder_crack.ogg` | 18,307 | `STORM_Texas Rain Thunder Initial Crash Boom Storm 01 Clap Lightning_ESM_CPS.wav` | **Epic Stock Media** (Public Spaces: Storms, Lakes, Parks and Rural Nature Exteriors) |
+
+All three are heavily edited rather than lifted: trimmed out of takes of 132 to
+243 seconds, converted to mono, high-passed, level-matched, and in the rain and
+surf cases crossfaded into seamless loops. The bundle's licence permits this
+explicitly. None of them is shipped as it came.
+
+**The licence, read on Sonniss's own terms page rather than from a summary.**
+Commercial use in a paid game is permitted, which covers the Steam, Microsoft
+Store and mobile targets. The grant is perpetual, irrevocable, worldwide and
+royalty-free, across unlimited projects. **Attribution is not required** — this
+table exists so the next person knows what is safe, not because it is owed.
+Modification is expressly allowed. What is prohibited: reselling the sounds as
+sound effects, claiming to have recorded them, and **using them to train any
+AI/ML system**. Keep the licence PDF that ships inside the bundle zips; Sonniss
+reissues the terms each year and the 2026 text is the one that governs these
+files.
+
+The source wavs and the bundle zips are **not** in this repository and must not
+be committed — they live outside it and total 6.45 GiB.
+
+### Sampled SFX — SURVEYED AND MOSTLY NOT IMPORTED
 
 A survey was run because the game had never had one and "look online for
 commercially free sound" is a reasonable request. Nothing was downloaded and
@@ -453,10 +486,11 @@ warning about chunk size. The three packs are 2.6 MB of OGG, which nearly
 triples the download before a single sample is decoded into memory, on a mobile
 target that is already a release blocker.
 
-So the verdict is **hybrid in principle, and not yet worth starting**: if
-samples are ever brought in, the place for them is a small number of rare,
-character-carrying one-shots — a boss roar, a level-up sting — and never the
-footstep, the dig or the block break.
+So the verdict is **hybrid**: the place for a sample is a small number of rare
+or continuous, character-carrying sounds, and never the footstep, the dig or the
+block break. That verdict is what the three Sonniss files above were chosen
+against, and it still rules the Kenney packs out — they cover footsteps, mining
+and UI, which is the half that stays synthesised.
 
 Other sources, checked and recorded so they are not re-checked:
 
@@ -469,11 +503,13 @@ Other sources, checked and recorded so they are not re-checked:
     submissions offer GPL only, which for a closed commercial build is
     unusable. Filter by URL, never by eye.
   * **Sonniss GDC Game Audio Bundle** — royalty-free rather than CC0, and the
-    best fit for the water, animal and bow categories Kenney does not have. The
-    agreement grants *"a worldwide, non-exclusive, royalty-free license"* for
-    *"personal and commercial projects without attribution"* and bars only
-    selling the effects as they come. Keep the licence PDF of the specific
-    year's bundle, because the terms are reissued annually.
+    best fit for the water, animal and bow categories Kenney does not have.
+    **Three files from the 2026 bundle are now in the game**; see the section
+    above for the licence terms and the full list. Worth knowing before mining
+    it again: it is a promotional sampler, not a library — 347 wavs across 323
+    publishers, about one file each, averaging 22 MB, so it is broad, shallow,
+    and made of long pristine takes rather than game-ready one-shots. It
+    contains exactly **one** footstep recording.
   * **Pixabay** — permissive text, but it explicitly disclaims any warranty
     that consents or licences were obtained for uploaded content and makes the
     user indemnify it. For a paid store release that is the wrong end of the
@@ -497,11 +533,12 @@ another product, free or paid.
 It is recorded here rather than left unmentioned because it is the largest and
 most convenient pile of exactly-right-sounding game audio on that disk, it sits
 in the same folder as ten packs that *are* CC0, and a future session looking for
-a footstep will find it first. Nothing from it has been imported — audited,
-not assumed: there is no audio file of any format in this repository. Nothing
-from it may be, including as a placeholder, including "just to hear what it
-would sound like in place", because a placeholder is how a shipped asset gets
-made.
+a footstep will find it first. Nothing from it has been imported — audited, not
+assumed: `public/audio/` holds exactly three files and all three are accounted
+for above, from Sonniss. Nothing from this dump may be added, including as a
+placeholder, including "just to hear what it would sound like in place", because
+a placeholder is how a shipped asset gets made. It was not used as a tonal
+reference by ear either.
 
 ## Engine
 

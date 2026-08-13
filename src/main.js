@@ -2253,6 +2253,28 @@ class Game {
     // reset is what stops a planet you quit from lending its difficulty to the
     // next one, on the paths that set neither (`abandonNewGame`).
     this._setDifficulty(DEFAULT_DIFFICULTY);
+    /*
+     * A new planet starts in the morning, and it had to be said out loud here.
+     *
+     * `dayT` was written in exactly two places: the constructor, once per page
+     * load, and `continueGame`, from the save. Nothing reset it between worlds -
+     * so the clock a new planet opened on was whatever time the LAST one
+     * happened to be at. Play world A until dusk, quit to the menu, start a
+     * brand new world B, and B begins in the dark, with no bed, no torchlight
+     * placed, and the monsters that come with a night.
+     *
+     * It is the same shape as the `editedRegions` leak above: state that
+     * belongs to one planet, left lying where the next one picks it up. The
+     * difference is that this one is visible in the first second of play, which
+     * is presumably why it was reported as "sometimes you spawn at night"
+     * rather than as a bug about the menu.
+     *
+     * 8/24 is the constructor's own value and the intended one: an hour after
+     * dawn, with a full day in front of you to find shelter before the first
+     * night. Kept as the single literal it already was rather than a named
+     * constant, because the constructor is the only other reader.
+     */
+    this.dayT = 8 / 24;
     // A new world is not somebody else's ending. All three of these belong to
     // the planet being torn down, and a spectator flag left set would open the
     // next one with no hotbar and nothing able to see the player.

@@ -4052,8 +4052,31 @@ class Game {
   _dropUnsupported(edits) {
     let doomed = null;
     for (const e of edits) {
-      if (!NEEDS_FLOOR[this.planet.at(e.col, e.k + 1)]) continue;
-      if (supports(this.planet.at(e.col, e.k), this.planet.facingAt(e.col, e.k))) continue;
+      const over = this.planet.at(e.col, e.k + 1);
+      if (!NEEDS_FLOOR[over]) continue;
+      const floor = this.planet.at(e.col, e.k);
+      // Two different questions, and this pass only ever asked the first.
+      //
+      // `supports` is structural: is there a floor at all, and is it the right
+      // shape to stand on. `growsOn` is botanical: is it the right *kind* of
+      // floor for this particular plant. The second was checked when a player
+      // planted (`_place`) and when the generator scattered, and nowhere in
+      // between - so nothing re-asked it when the floor itself changed under a
+      // plant that was already standing.
+      //
+      // Reported as: "the moment snow block disappeared and replaced the icecap
+      // moss stayed on the replacement block". Icecap moss takes `snow`,
+      // `gravel` and `stone` and is refused by `dirt` and `grass`, so a drift
+      // is somewhere it may legitimately root - and summer turning that drift
+      // into the dirt underneath it left the moss standing on ground its own
+      // rule forbids. Any block swapped under any plant did the same; the thaw
+      // is only the one nobody had to do by hand.
+      //
+      // Asked of cross plants alone. `growsOn` answers true for everything with
+      // no soil set, so the guard is not needed for correctness, but a rule
+      // about what grows where has no business being consulted about a torch.
+      const rooted = RENDER_TYPE[over] !== R_CROSS || growsOn(over, floor);
+      if (rooted && supports(floor, this.planet.facingAt(e.col, e.k))) continue;
       // The floor is gone, so the whole run resting on it goes: the second
       // segment is held up by nothing but the first. The run ends at the first
       // block that is not NEEDS_FLOOR, which is a block with its own rules about

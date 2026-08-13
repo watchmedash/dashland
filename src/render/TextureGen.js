@@ -581,9 +581,39 @@ G.moss_stone = (s) => moss(s, {
 // A mossy variant has to be legible as mossy from across a room, and the way to
 // keep it apart from moss_stone is the pale palette and the small patch scale,
 // not starving it of coverage.
+//
+// That raise fixed the sign and not the reading. At 0.48 the tile bakes to
+// 131.9,129,105: green is finally ahead of red, but only by three counts, and
+// the measure that matters for "is this green" is green-excess, g - (r+b)/2.
+// On the baked sheet that is 10.6 here against 27.6 for `moss_stone`, 26.4 for
+// `moss_block` and 30.4 for `grass_top`, with the bare `stone_brick` under it
+// at -6. So the block was carrying a third of the greenness of every other
+// green thing in the game and read as a dirty brick rather than a mossy one —
+// which is the half of the playtest's "also mossy stone" that is a defect
+// rather than taste.
+//
+// Coverage does NOT go up again, and that is the point. The reason this block
+// is not moss_stone is that a cut face sheds and holds small dry colonies,
+// which is `cells: 8` and a coverage well under the rubble's 0.62; taking it up
+// a third time would leave the pair separated by nothing but their base rock.
+// What moves is the palette, which is where the fault actually was: the old
+// pair had green-excess 30 (dark) and 43 (lite) against moss_stone's 36 and 61,
+// so the "paler, greyer, more lichen than moss" character had been written as
+// *less green* when it wanted to be *lighter*. Green up and red down at held
+// luminance — the lite swatch goes 131.8 -> 133.3 and the dark 69.1 -> 67.8,
+// while their green-excess goes 43 -> 68 and 30 -> 42 — so the palette keeps
+// the pale, dry look that tells it apart from the rubble and stops being grey.
+//
+// The swatches now carry MORE green-excess than moss_stone's 61 and 36, and the
+// finished tile still carries less: 18.2 against 27.6, measured on the baked
+// sheet. That is the right way round for these two. What makes this one the
+// paler block is that it is lichen scattered on a light cut stone — half the
+// patch width, three quarters of the coverage, over a base twenty-eight counts
+// of luminance brighter than cobblestone — not moss that has had the green
+// taken out of it.
 G.mossy_stone_brick = (s) => moss(s, {
   seed: 1913, coverage: 0.48, cells: 8,
-  dark: [58, 80, 42], lite: [122, 146, 84],
+  dark: [48, 84, 36], lite: [108, 158, 72],
 });
 
 // --- detail composited over a tile's OWN pack material ---------------------

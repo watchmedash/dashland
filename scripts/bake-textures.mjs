@@ -558,7 +558,57 @@ const MAP = {
   planks_grey: ['Wood Planks', 9],
 
   // --- earth ----------------------------------------------------------------
-  coarse_dirt: ['Mud', 8],
+  // Mud/8 is not soil at all: it is a bed of pale grey cobbles, each about a
+  // fifth of a face, lying in a thin brown matrix. Measured it comes out at
+  // 112,96,75 — r-b of 38, the least warm of every earth tile in the folder
+  // except peat, against dirt's 70, dried_mud's 70 and podzol's 59 — because
+  // most of the tile's area is stone rather than earth. That is the playtest
+  // report in one number, and because the block declares `all:` it wore the
+  // stone field on its sides too, so a tundra terrace read as a boulder wall.
+  // Censused on seed 4242 it was 50% of the tundra floor (85 of 169 surface
+  // columns), i.e. the commonest thing a player walks on in that biome.
+  //
+  // Mud/10 is the last unspent variant in the folder and it is the one that was
+  // wanted: a warm brown crust of small plates with dark grit pebbles set into
+  // it. The grit is what makes it read as COARSE dirt rather than as dirt, and
+  // it is the one lever plain `dirt` (Mud/6, a soft clod swirl with no grit in
+  // it at all) cannot pull.
+  //
+  // `repeat` is deliberately absent, which is the opposite of what `dirt` and
+  // `podzol_top` needed. Those two take repeat 2 because one copy of their
+  // variant puts two or three clods a third of a face across on a block, which
+  // is a boulder. Mud/10's plates are already a sixth of a tile, so one copy is
+  // forty-odd of them on a face — soil, not boulders — and halving them again
+  // was tried and rejected: at repeat 2 the grit pebbles shrink below what
+  // survives the mip and the block goes back to being a flat brown wall, which
+  // loses the whole reason for picking this variant.
+  //
+  // `bright` is set from the block's own declaration. coarse_dirt declares a
+  // break particle of [0.42, 0.34, 0.24] = 107,87,61, luminance 91.6, and raw
+  // Mud/10 is 147,103,62 at luminance 111.3; 0.82 lands the tile at
+  // 120,84,51 — luminance 90.9, within a count of what the block has been
+  // claiming. r-b lands at 69 rather than the particle's 46, and that is right
+  // rather than a miss: the particle is the greyest earth declaration in the
+  // file, while `dirt` bakes at 70 and `podzol_top` at 59, so 69 puts coarse
+  // dirt in its own family instead of back beside the gravel.
+  //
+  // Told apart from the three blocks it has to be told apart from, measured on
+  // the baked sheet: from `dirt` by 19 counts of luminance and by the grit
+  // (they meet all over savanna, WorldGen's SAVANNA row picks between exactly
+  // these two); from `gravel` by 56 counts of r-b, 69 against 13, and gravel is
+  // the block it is picked against in the tundra and mountain rows; from
+  // `cobblestone` by 25 counts of luminance and by being a crust rather than a
+  // bed of set stones. Against the rest of the folder it sits 28 under
+  // `dried_mud`, whose plates are twice the size, and 12 over `podzol_top`,
+  // which it never meets — podzol is pine forest.
+  //
+  // No exposure or contrast trick was going to save Mud/8, and none was tried
+  // twice: the complaint is the picture, not the palette. Contrast was tried on
+  // Mud/10 to widen its std-dev from 14.2 toward dirt's 20, and rejected at
+  // 1.2/1.35/1.5 — because contrast runs before `warm`/`bright` and pivots on
+  // luminance, it drags r-b from 69 to 83/93/103 and the soil turns fluorescent
+  // orange, the same failure the `red_sand` note records.
+  coarse_dirt: ['Mud', 10, { bright: 0.82 }],
   mud: ['Mud', 4, { bright: 0.7 }],
   dried_mud: ['Mud', 7],
   peat: ['Mud', 2, { bright: 0.55 }],
@@ -624,6 +674,60 @@ const MAP = {
   // without it the darkening flattens the very detail that says "rock" rather
   // than "more sand".
   red_sandstone: ['Desert', 4, { bright: 0.80, contrast: 1.1, warm: [1.12, 0.78, 0.60] }],
+  // `tint` here is not a colour choice, it is headroom: the option desaturates
+  // a tile so the RUNTIME biome tint has somewhere to work. moss_block should
+  // not have a runtime biome tint, and once it loses one this 0.6 is a lever
+  // with nothing on the other end of it — it was simply throwing away 60% of
+  // the tile's own green for a multiply that no longer happens.
+  //
+  // Why it should lose the tint. The block is tinted `moss` in Blocks.js, which
+  // is `foliage` pushed warm and dark, and `tintOf` takes the colour off
+  // `colBiome[col]` — the biome of the SURFACE column. moss_block is almost
+  // never a surface block: it is a vein generated from band(124) down (see
+  // MINERALS in WorldGen.js), plus seabed and lake banks. So a moss vein forty
+  // blocks underground is painted by whatever biome happens to be overhead,
+  // and a cave has no biome.
+  //
+  // Measured, seed 4242, the same block placed on a cleared pad in four biomes
+  // with the sun pinned at dayT 0.30, each normalised by an untinted
+  // `moss_stone` wall shot at the same site in the same light so scene exposure
+  // divides out — moss_block / moss_stone, per channel:
+  //     plains         0.62, 0.95, 0.53
+  //     highlands      0.80, 0.81, 0.57
+  //     pine forest    0.68, 0.80, 0.57
+  //     snowfield      0.64, 0.84, 0.79
+  // i.e. one block, and its blue swings 49% between the ends of that list. In
+  // pixels its green-excess (g - (r+b)/2) runs 20.9 in pine forest, 27.7 in
+  // highlands, 28.8 in snow and 47.5 in plains: a dull olive at one end and a
+  // saturated leaf green at the other, on a block that generates underground.
+  // A 1-in-13 column census of the same seed finds the vein under eight
+  // different surface biomes, and moss_stone sitting directly against it.
+  //
+  // This is the case Blocks.js already argues for `moss_stone` and
+  // `mossy_stone_brick` over the `moss_stone` definition ("the biome tint
+  // multiplies every fragment of a block"), and it applies harder here, because
+  // those two at least stand where you can see the sky.
+  //
+  // ** ROUTING REQUEST, not done here: drop `tint: 'moss'` from moss_block in
+  // src/world/Blocks.js. That is the fix; this line is only the thing that has
+  // to follow it. **
+  //
+  // 0.6 STAYS until it does, and that is deliberate rather than lazy. Tried
+  // 0.3 first, on the reasoning below, and measured it in-world with the tint
+  // still in place: on the same pad in plains it took the block from a
+  // green-excess of 47.6 to 55.7, because the exposure the tile gains is
+  // multiplied by the biome tint rather than replacing it. Taking the
+  // desaturation out ahead of the tint makes the block MORE seasonal, not less,
+  // so the two changes are one change and this half waits.
+  //
+  // When the tint goes, 0.3 is the value, and it is set from the block's own
+  // break particle: [0.3, 0.46, 0.24] = 77,117,61, a green-excess of 48. Raw
+  // Swamp/4 is 108,149,59 at green-excess 66, 0.6 bakes it to 26, and 0.3 lands
+  // it at 116,144,81 — green-excess 46, within two counts of what the block
+  // declares — with luminance untouched at 129, since `tint` pivots on it.
+  // Leaving 0.6 in place after the tint goes is not a defect either, just a
+  // paler moss: the tile then sits at green-excess 26 against `moss_stone`'s
+  // 28, so the two greens agree and moss_block is simply the lighter of them.
   moss_block: ['Swamp', 4, { tint: 0.6 }],
 
   // --- ice ------------------------------------------------------------------

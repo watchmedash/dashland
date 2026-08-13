@@ -84,8 +84,36 @@ function restoreFacing(pairs) {
   facing = new Map();
   if (!pairs || !pairs.length) return;
   for (const [idx, v] of pairs) facing.set(idx, v & 7);
-  for (let i = 0; i < blocks.length; i++) {
-    if (IS_DIRECTIONAL[blocks[i]] && !facing.has(i)) facing.set(i, FACING_DEFAULT);
+  /**
+   * The backfill walks the regions the save actually restored, not the whole
+   * planet.
+   *
+   * It used to be `for (let i = 0; i < blocks.length; i++)` — all 127 885 824
+   * voxels, on every load — and the scan was the smaller half of the cost.
+   * `blocks` is freshly allocated a few lines up in the same handler, so
+   * everything outside a restored region is a zero byte that no page has been
+   * written to yet; reading all of it is what drags the entire 122 MB array into
+   * residency. Measured on this machine, touching one page of every 4 KB of an
+   * array that size costs 129 MB of working set, and none of it is memory the
+   * session goes on to use.
+   *
+   * Restricting it to `hasDecor` is exact rather than a heuristic. Both restore
+   * paths set that flag over precisely the regions they wrote — `restoreRegions`
+   * per region, and the pre-streaming whole-planet path with `hasDecor.fill(1)`
+   * — and air is not a directional block, so every cell this now skips would
+   * have failed `IS_DIRECTIONAL` anyway. The map comes out with the same entries.
+   */
+  const rcols = new Int32Array(REGION_COLS);
+  for (let rid = 0; rid < NUM_REGIONS; rid++) {
+    if (!hasDecor[rid]) continue;
+    regionColumns(rid, rcols);
+    for (let c = 0; c < REGION_COLS; c++) {
+      const base = rcols[c] * D;
+      for (let k = 0; k < D; k++) {
+        const i = base + k;
+        if (IS_DIRECTIONAL[blocks[i]] && !facing.has(i)) facing.set(i, FACING_DEFAULT);
+      }
+    }
   }
 }
 

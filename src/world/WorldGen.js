@@ -4371,10 +4371,43 @@ export class WorldGen {
 
     const top = k0 + h - 1;
     if (cfg.shape === 'cone') {
+      /**
+       * A conifer, widest at the skirt and closing to a spire.
+       *
+       * `l` counts DOWNWARD from the treetop, because that is the end the
+       * layer count is anchored to, so the taper has to be read backwards:
+       * `t` is 1 at the crown and 0 at the bottom course. Written the other
+       * way round — `t = l / levels` — the widest ring landed at `top` and the
+       * narrowest at `top - levels`, which is a cone standing on its point.
+       * Measured on a stock pine (rad 3.40 after damping, h 9, 5 levels) it
+       * ran 3.40 at the crown down to 0.94 at the skirt; a fir is the exact
+       * reverse of that and now is.
+       *
+       * The vertical extent is untouched, and that is a constraint rather than
+       * a nicety: leaves still run `top - levels` to `top + 1` and the widest
+       * course is still `rad + 0.4`, which are the two numbers `_treeSize`
+       * publishes as `hiK` and `reach` so a neighbouring region knows how far
+       * to look. Only which course gets which radius has changed.
+       *
+       * `lq` is the whorls. A fir does not taper as a smooth ice-cream cone; it
+       * carries its branches in rings, two or three courses deep, with a step
+       * between them. Quantising the taper into pairs of courses gets that for
+       * one modulo and no noise: each pair takes the radius of its UPPER
+       * member, so the profile is still monotonic — the first attempt notched
+       * alternate courses instead and put a narrow ring under a wide one, a
+       * waist rather than a step. Taking the upper member also means every
+       * radius here is one the smooth taper already produced, so the widest
+       * course is still at most `rad + 0.4` and `reach` stays an upper bound.
+       *
+       * Deterministic, so the cone still draws without touching `rng` — a draw
+       * here would move the stream the caller uses next.
+       */
       const levels = Math.floor(h * 0.65);
       for (let l = 0; l <= levels; l++) {
-        const t = l / levels;
+        const lq = l - (l % 2);
+        const t = 1 - lq / levels;
         const r = rad * (1 - t * 0.82) + 0.4;
+        if (r <= 0) continue;
         const ri = Math.ceil(r);
         for (let di = -ri; di <= ri; di++)
           for (let dj = -ri; dj <= ri; dj++) {

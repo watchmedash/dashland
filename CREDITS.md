@@ -352,6 +352,60 @@ block reading **L 85.2** — half its brightness, accepted, and right. A topper
 model sitting well off its block's luminance is normal here. The bed fails on
 footprint and on hue, not on exposure.
 
+## Dungeon Pack (1.1) by **Kay Lousberg** — supplied, NOT USED, one held open
+
+[kaylousberg.com](https://www.kaylousberg.com) — **CC0**, stated in the pack's
+own `License.txt` and so **read off disk**. Banners, barrels, crates, walls and
+furnishings in glTF, FBX and OBJ over one shared `dungeon_texture.png`.
+
+**The barrel is a good model and this game has nowhere to put it.** That is the
+whole verdict, and it is about block ids rather than about art.
+
+`barrel_small` measures **1.0014 x 1.0177 x 1.0014** — a unit cube in extent,
+which is the one property this game most wants from a block model and the same
+property that got the wooden crate taken all the way to a render. 207 triangles,
+one mesh, one primitive, no stacked LODs. Stood in a real cell at full height it
+sits inside its footprint and looks like it belongs there.
+
+**It is not shipped because there is no block for it to be and it cannot afford
+to become one.** `N_BLOCKS` is 252 against a ceiling of 256 — a voxel is one
+byte, and the load-time guard added in `d995e17` exists to say so — which leaves
+**four ids in the game, ever.** A barrel that only looks like a barrel is
+decoration, and decoration is not what the last four ids are for. The game's one
+storage block is `crate`, and a barrel does nothing a crate does not already do,
+so this would be spending an irreplaceable id on a second appearance of a block
+that already has a good hand-painted tile.
+
+Replacing the crate's *appearance* instead costs no id and was measured, not
+assumed. The supplied barrel is **flatter than the wood family it would join**:
+`barrel_small` means **saturation 0.404** at the source, against the `crate`
+tile's **0.607**, `planks` at 0.585 and `bench_side` at 0.591. It is brighter
+rather than darker, unlike the wooden crate, but it is the same third-flatter
+gap, and a crate is a block players stack and wall with, so that is paid on every
+copy.
+
+**Held open, deliberately.** If a barrel is ever wanted as a block that *does*
+something — a composter, a liquid store, something that ages what is put in it —
+this is the model for it: the fit is right, the triangle budget is right, the
+licence is clean, and the import is a `PACKS` entry and a `POSE` line. The
+question to settle first is what it does, not what it looks like.
+
+### On the workbench, and on building the render class
+
+The `workbench.glb` recommendation recorded under the Survival Kit above still
+stands, and the frame shot for the barrel adds a number to it. The `bench` cube
+reads **L 43.3 at saturation 0.794** beside a `crate` cube at L 39.3 and a
+`kitchen` cube at L 85.2; the picture is what matters, and in it the bench is
+banded wood that reads as a stack of logs and says nothing about crafting.
+
+The new render class it needs — the mesher stopping short of the cube, and the
+block stopping culling its neighbours' faces — was **not built here.** Both
+candidates that would have shared it, the barrel and the bed, were turned down on
+their own merits, so building it now would land a change to how a solid block
+seals a room with nothing shipping on top of it. It should be built for the
+workbench, by whoever ships the workbench, which is the deliberate way the
+Survival Kit note already asked for.
+
 ## Sound — no third-party audio
 
 Every sound in the game is synthesised at runtime from oscillators and one

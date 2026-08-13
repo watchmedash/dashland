@@ -263,6 +263,7 @@ class CrossLightBuf {
 
 class Buf {
   constructor(stride) { this.data = new Float32Array(2048 * stride); this.len = 0; }
+  reset() { this.len = 0; }
   need(n) {
     if (this.len + n <= this.data.length) return;
     let cap = this.data.length || 1024;
@@ -277,6 +278,7 @@ class Buf {
 
 class IBuf {
   constructor() { this.data = new Uint32Array(4096); this.len = 0; }
+  reset() { this.len = 0; }
   quad(v) {
     if (this.len + 6 > this.data.length) {
       const d = new Uint32Array(this.data.length * 2); d.set(this.data); this.data = d;
@@ -297,6 +299,11 @@ class Group {
     this.qsz = new Buf(2);
     this.idxb = new IBuf(); this.verts = 0;
   }
+  reset() {
+    this.pos.reset(); this.nrm.reset(); this.tan.reset(); this.uv.reset();
+    this.aux.reset(); this.blk.reset(); this.tint.reset(); this.qsz.reset();
+    this.idxb.reset(); this.verts = 0;
+  }
   get empty() { return this.verts === 0; }
   serialize() {
     return {
@@ -306,6 +313,37 @@ class Group {
     };
   }
 }
+
+/**
+ * The four groups, allocated once and reused by every `meshChunk` call.
+ *
+ * A `Group` is eight `Buf`s and an `IBuf`, and a fresh one costs 2048 entries
+ * per stride however small the chunk turns out to be: 23 floats of stride plus
+ * the index buffer is about 205 KB, and `meshChunk` was building four of them —
+ * 820 KB — on entry and dropping all four on exit. A first load meshes ~3 150
+ * chunks, so that is roughly 2.6 GB allocated, zeroed by the VM and handed
+ * straight back to the collector. Measured in the worker's own profile it was
+ * 438 ms in the `Buf` constructor and 217 ms in the garbage collector, against
+ * 7.5 s of total worker CPU.
+ *
+ * Three of the four are usually the wasteful ones: a chunk of solid rock emits
+ * nothing at all into the cutout, transparent and liquid groups, and
+ * `serialize` is never even called on them — `groups.map` ships `null` for an
+ * empty group — so their 615 KB was allocated purely to be thrown away.
+ *
+ * Reuse is safe here because nothing a group holds outlives the call. `out()`
+ * is `data.slice(0, len)`, a copy, so every array that leaves in the payload is
+ * already the mesher's own fresh allocation and none of them alias the pool.
+ * The one thing to keep true is that `meshChunk` must not overlap itself: it is
+ * a straight-line synchronous function in a single-threaded worker with no
+ * await in it, and the only caller is `meshAndPost`, which posts and returns.
+ *
+ * The pool keeps whatever high-water mark the biggest chunk needed and does not
+ * shrink, which is the point — after the first few chunks `need` never grows
+ * again and the steady state is zero allocation per mesh. A chunk is 16x16x11
+ * cells, so the ceiling is bounded by geometry rather than by session length.
+ */
+const _pool = [];
 
 // --- helpers ----------------------------------------------------------------
 
@@ -458,8 +496,11 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
   // One Group per draw group, from GROUP_COUNT rather than from four literal
   // constructors: the count was already declared next to the group ids and a
   // fifth group added there would otherwise silently index past the end here.
-  const groups = [];
-  for (let g = 0; g < GROUP_COUNT; g++) groups.push(new Group());
+  // Reused rather than rebuilt; see `_pool`.
+  const groups = _pool;
+  for (let g = 0; g < GROUP_COUNT; g++) {
+    if (groups[g]) groups[g].reset(); else groups[g] = new Group();
+  }
   const crossLight = new CrossLightBuf();
   const i0 = ci * CHUNK_T, j0 = cj * CHUNK_T, k0 = ck * CHUNK_K;
   const i1 = Math.min(F, i0 + CHUNK_T), j1 = Math.min(F, j0 + CHUNK_T), k1 = Math.min(D, k0 + CHUNK_K);

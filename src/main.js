@@ -58,6 +58,7 @@ import {
 } from './game/Items.js';
 import { Arrows } from './game/Arrows.js';
 import { Skills, ON_DEATH } from './game/Skills.js';
+import { Achievements } from './game/Achievements.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
@@ -1618,6 +1619,15 @@ class Game {
      * its answer rather than a constant from the moment the world opens.
      */
     this.skills = new Skills();
+    /**
+     * What you have done, as opposed to what you have become.
+     *
+     * Made once and never replaced. The record is the *player's*, not the
+     * planet's — it lives in localStorage beside the settings rather than in the
+     * world payload — so a new planet inherits it and `_newWorld` below only
+     * rebases the counters. See the head of `Achievements.js`.
+     */
+    this.achievements = new Achievements();
     /** Seconds until the next `skills.observe`. See `_tickSkills`. */
     this._skillTimer = 0;
 
@@ -1690,6 +1700,9 @@ class Game {
       // the hostile test lives in one place rather than at each of the two
       // death paths where it could drift apart.
       this.skills.xpKill(mob.spec, mob.baby > 0);
+      // Counted for the record only. `xpForKill` still decides what a kill is
+      // worth, and this pays nothing.
+      this.stats.kills = (this.stats.kills ?? 0) + 1;
     };
     // `dig('stone', pos)` stood here, which meant an arrow into a tree sounded
     // like a pickaxe. `pos` is the last position OUTSIDE the block that stopped
@@ -2568,6 +2581,11 @@ class Game {
     this.inventory.onChange = () => this.ui.refresh();
     this.stats = { mined: 0, placed: 0, crafted: 0 };
     this.playtime = 0;
+    // The marks survive the planet; only the baseline the deltas are measured
+    // from is thrown away. Without this the first scan on a fresh world would
+    // read `mined` falling from thousands to zero, or a load would read it
+    // jumping to thousands, and neither is a thing the player just did.
+    this.achievements.rebase();
     // A new person, not just a new planet. `fromJSON(null)` is the module's own
     // "nothing spent, nothing marked, nothing converted" — the same state a
     // fresh `Skills` is in — and going through it rather than through `reset()`
@@ -3254,6 +3272,9 @@ class Game {
       this.seasons.fromJSON(save.season);
       this._pushSeason();
       this.stats = { ...this.stats, ...(save.stats || {}) };
+      // Same reason as in `_newWorld`: the counters that follow belong to this
+      // planet, and the lifetime totals must not swallow them whole.
+      this.achievements.rebase();
       // After `stats`, `playtime` and the inventory, and it has to be: the tree
       // counts the first two and converts the armour in the third. See the
       // ordering note on `_loadSkills`. `player.health` was assigned from the
@@ -3456,6 +3477,10 @@ class Game {
     this._skillTimer -= dt;
     if (this._skillTimer > 0) return;
     this._skillTimer = 1;
+    // On the same timer and for the same reason it is on one: walking forty
+    // slots and six counters once a second is free, and once a frame is not.
+    // Before the early return below, which only concerns the skill tree.
+    this.achievements.scan(this, 1);
     if (!this.skills.observe(this.stats, this.playtime)) return;
     // Earning a point is the only progression event in the game and it was
     // announced by a toast and nothing else. `levelUp` is the only fanfare
@@ -5063,6 +5088,10 @@ class Game {
     // Footsteps, embers and bubbles have their own methods and are untouched.
     this.audio.break_(b.sound, center);
     this.stats.mined++;
+    // The seam, not the drop. A deep coal seam and an ordinary one both give
+    // coal, so the eighteen ores would collapse to twelve if this counted what
+    // came out. See `ORE_BLOCKS`.
+    this.achievements.mined(hit.id);
     // `this.skills.xpMine(b)` stood here and paid by ore tier. Mining pays no xp
     // at all now: the ladder is fed by kills alone, and the counter above is the
     // only record breaking a block leaves. See the head of `Skills.js`.
@@ -9098,7 +9127,10 @@ class Game {
         // per-species table, so anything added later prices itself. Hostiles
         // only: a cow is worth beef and hide and no xp whatever, and neither is
         // a calf of anything. See `xpForKill`.
-        if (killed) this.skills.xpKill(mobHit.mob.spec, mobHit.mob.baby > 0);
+        if (killed) {
+          this.skills.xpKill(mobHit.mob.spec, mobHit.mob.baby > 0);
+          this.stats.kills = (this.stats.kills ?? 0) + 1;
+        }
         if (held?.tool) this.inventory.damageHeld(1, this.inventory.held());
       }
       // Right-click offers whatever you're holding. Feeding is how a herd

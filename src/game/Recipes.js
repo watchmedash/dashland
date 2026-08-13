@@ -12,10 +12,20 @@ const RAW = [
   // the 1:1 conversions here are a convenience rather than a gate — spawning in
   // a pine forest has not locked anyone out of a workbench since the families
   // landed.
+  //
+  // `exact` is what stops that convenience eating its own tail. These two are
+  // the only recipes in the file whose output shares a family with its
+  // ingredient, so a widened match reads them backwards: `accepts` is true
+  // across the whole family in both directions, and one oak board on the grid
+  // therefore matched "birch board in" and crafted into one oak board — a
+  // button that does nothing but consume. Worse for the two dyed boards, which
+  // are an oak board plus coal or gravel: laying one on the grid turned it back
+  // into a plain plank and kept the coal. This flag narrows the match back to
+  // `===` for these two rows and nothing else.
   { out: 'planks_birch', count: 4, in: ['log_birch'] },
   { out: 'planks_pine', count: 4, in: ['log_pine'] },
-  { out: 'oak_planks', count: 1, in: ['planks_birch'] },
-  { out: 'oak_planks', count: 1, in: ['planks_pine'] },
+  { out: 'oak_planks', count: 1, in: ['planks_birch'], exact: true },
+  { out: 'oak_planks', count: 1, in: ['planks_pine'], exact: true },
   { out: 'planks_dark', count: 1, in: ['oak_planks', 'coal'] },
   { out: 'planks_grey', count: 1, in: ['oak_planks', 'gravel'] },
   { out: 'stick', count: 4, shape: ['P', 'P'], key: { P: 'oak_planks' } },
@@ -545,6 +555,11 @@ export function accepts(want, got) {
   return !!set && set.has(got);
 }
 
+/** The same question, asked on behalf of a recipe that may want it narrowed. */
+function acceptsFor(recipe, want, got) {
+  return recipe.exact ? want === got : accepts(want, got);
+}
+
 /** Every id that can stand in for this one, itself included. */
 export function familyOf(id) {
   const set = FAMILY.get(id);
@@ -552,7 +567,8 @@ export function familyOf(id) {
 }
 
 /** How many of a family the inventory holds. */
-function countFamily(inventory, id) {
+function countFamily(inventory, id, exact = false) {
+  if (exact) return inventory.count(id);
   let n = 0;
   for (const m of familyOf(id)) n += inventory.count(m);
   return n;
@@ -560,9 +576,9 @@ function countFamily(inventory, id) {
 
 /** Take `count` from a family, spending the odd species before the canonical
  *  one so a player's mixed timber is used up rather than accumulating. */
-function removeFamily(inventory, id, count) {
+function removeFamily(inventory, id, count, exact = false) {
   let left = count;
-  const members = familyOf(id).sort((a, b) => (a === id ? 1 : 0) - (b === id ? 1 : 0));
+  const members = exact ? [id] : familyOf(id).sort((a, b) => (a === id ? 1 : 0) - (b === id ? 1 : 0));
   for (const m of members) {
     if (left <= 0) break;
     const have = inventory.count(m);
@@ -577,6 +593,9 @@ function removeFamily(inventory, id, count) {
 export const RECIPES = RAW.map((r) => {
   const rec = {
     out: itemIdOf(r.out), count: r.count, table: !!r.table, undo: !!r.undo,
+    // Ingredients match by `===` rather than by family. See the plank
+    // conversions at the top of RAW, which are the only rows that want it.
+    exact: !!r.exact,
     // Which bench this is made at. `null` is the player's own 2x2 and the
     // workbench; `'kitchen'` is the cooking station and nothing else. See
     // `findRecipe`, where the test is equality rather than a subset — a recipe
@@ -714,7 +733,7 @@ export function findRecipe(grid, w, h, hasTable, station = null) {
       const pool = [...present];
       let all = true;
       for (const wid of r.ingredients) {
-        const at = pool.findIndex((got) => accepts(wid, got));
+        const at = pool.findIndex((got) => acceptsFor(r, wid, got));
         if (at < 0) { all = false; break; }
         pool.splice(at, 1);
       }
@@ -730,7 +749,7 @@ export function findRecipe(grid, w, h, hasTable, station = null) {
           for (let x = 0; x < w && ok; x++) {
             const gy = y - oy, gx = x - ox;
             const want = (gy >= 0 && gy < r.h && gx >= 0 && gx < r.w) ? r.grid[gy * r.w + gx] : 0;
-            if (!accepts(want, ids[y * w + x])) ok = false;
+            if (!acceptsFor(r, want, ids[y * w + x])) ok = false;
           }
         }
         if (ok) return r;
@@ -1052,7 +1071,7 @@ export function availableRecipes(inventory, hasTable, station = null) {
     if (r.station !== station) continue;
     if (r.table && !hasTable) continue;
     const cost = recipeCost(r);
-    if (cost.every((c) => countFamily(inventory, c.item) >= c.count)) out.push({ recipe: r, cost });
+    if (cost.every((c) => countFamily(inventory, c.item, r.exact) >= c.count)) out.push({ recipe: r, cost });
   }
   // de-duplicate by output: several recipes make planks, show one entry
   const seen = new Set();
@@ -1071,12 +1090,12 @@ export function craftFromInventory(inventory, recipe, times = 1) {
   let made = 0;
   for (let n = 0; n < times; n++) {
     const cost = recipeCost(recipe);
-    if (!cost.every((c) => countFamily(inventory, c.item) >= c.count)) break;
+    if (!cost.every((c) => countFamily(inventory, c.item, recipe.exact) >= c.count)) break;
     // Room for the whole yield, not for one of it. `hasRoom` is true when a
     // single partial stack exists, so a four-plank recipe with one space left
     // consumed the log and threw three planks away.
     if (!inventory.roomFor(recipe.out, recipe.count)) break;
-    for (const c of cost) removeFamily(inventory, c.item, c.count);
+    for (const c of cost) removeFamily(inventory, c.item, c.count, recipe.exact);
     inventory.add(recipe.out, recipe.count);
     made++;
   }

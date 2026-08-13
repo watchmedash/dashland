@@ -807,6 +807,14 @@ export function kitchenNutrition(id) {
  * that function is passed in rather than imported: `Trade.js` already imports
  * this module for `RECIPES` and `recipeCost`, and importing it back would close
  * a cycle around two tables that are both built at module scope.
+ *
+ * **`valueOf` is not what the merchant pays, and the coin gate has to be read
+ * against what he pays.** `valueOf` floors at one coin — `Math.max(1, ...)` —
+ * while `sellPriceOf` is allowed to be zero, because it is capped down the
+ * crafting graph to what an item's ingredients fetch. Anything in that gap is
+ * an ingredient the counter refuses that the gate still counts as a coin, and
+ * that is free money: see `kitchenFallback`, which is why the merchant's own
+ * price is passed in beside the worth.
  */
 const IMPROVISED_GATES = [
   { name: 'scrap_bowl', needFood: 2, needValue: 2 },
@@ -832,11 +840,23 @@ export const IMPROVISED_LADDER = IMPROVISED_GATES.map((g) => ({ ...g, out: itemI
  * the first is a bug the player will report and the second is the exploit this
  * whole file is written to avoid.
  *
+ * **An ingredient the merchant will not buy is worth nothing to the coin
+ * gate.** Without that line the ladder mints coins out of firewood: a stick is
+ * a kitchen ingredient (see `PANTRY` — skewers and candy need one), and
+ * `valueOf` calls it a coin because a coin is the floor, but `sellPriceOf`
+ * calls it zero because it is a quarter of a plank which is a quarter of a log.
+ * Two sticks therefore cleared `scrap_bowl`'s two-coin gate while fetching
+ * nothing across the counter, and the bowl fetches one. One log is four planks
+ * is eight sticks is four bowls is four coins, and trees grow back. It is the
+ * only ingredient in the registry the merchant refuses, so this line moves
+ * exactly one thing and closes the only hole in the guarantee above.
+ *
  * @param {number[]} ids one item id per filled slot, duplicates included
  * @param {(id:number)=>number} valueOf `Trade.valueOf`
+ * @param {(id:number)=>number} sellPriceOf `Trade.sellPriceOf`, what he pays
  * @returns {{out:number, count:number, kind:'improvised'}|null}
  */
-export function kitchenFallback(ids, valueOf) {
+export function kitchenFallback(ids, valueOf, sellPriceOf) {
   const kept = ids.filter((id) => id && isKitchenIngredient(id));
   if (kept.length !== ids.filter(Boolean).length) return null;   // something inedible is in there
   if (kept.length < 2) return null;
@@ -844,7 +864,7 @@ export function kitchenFallback(ids, valueOf) {
   let food = 0, value = 0;
   for (const id of kept) {
     food += kitchenNutrition(id);
-    value += valueOf(id);
+    if (sellPriceOf(id) > 0) value += valueOf(id);
   }
   let best = null;
   for (const rung of IMPROVISED_LADDER) {

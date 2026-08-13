@@ -2148,7 +2148,9 @@ export class UI {
     const rec = findRecipe(grid, size, size, size === 3, this._station());
     if (rec) return rec;
     if (this._station() !== 'kitchen') return null;
-    return kitchenFallback(grid.map((s) => (s && s.count > 0 ? s.item : 0)).filter(Boolean), valueOf);
+    return kitchenFallback(
+      grid.map((s) => (s && s.count > 0 ? s.item : 0)).filter(Boolean), valueOf, sellPriceOf,
+    );
   }
 
   _refreshCraftOutput() {

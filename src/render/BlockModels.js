@@ -69,7 +69,7 @@ import * as THREE from 'three';
 import { worldModel } from './ItemModels.js';
 import { applyInstancedSway } from './VoxelMaterial.js';
 import { ITEMS } from '../game/Items.js';
-import { BLOCKS, R_CROSS } from '../world/Blocks.js';
+import { BLOCKS, R_CROSS, setPlantBox } from '../world/Blocks.js';
 import { crossLightRGB } from '../world/Mesher.js';
 
 /**
@@ -154,6 +154,31 @@ export class BlockModels {
       // the thing is planted rather than stood on the ground. See the note
       // there for what that cost.
       k.foot = bb.min.y * k.scale;
+      // Tell the picker how big this plant actually is.
+      //
+      // The crosshair used to be given the whole cell for a modelled plant,
+      // which is 8x the footprint of a clover and claims the empty air above
+      // and around every one of them. Nowhere else in the game knows the
+      // answer: the height comes from `MODELLED_PLANTS` in main.js and the
+      // width from the `.gltf`, and those two only meet here, in the three
+      // lines above that scale the model to stand in its cell. Published from
+      // the same `bb` and the same `k.scale` that place it, so the shape the
+      // picker uses cannot drift from the shape that is drawn — re-author a
+      // model or move its height and this follows with no second edit.
+      //
+      // Radius over the footprint DIAGONAL and not its wider side, because
+      // every instance is spun to its own yaw (`t.spin`) and the diagonal is
+      // the only radius that contains the model at all of them. The inscribed
+      // one was measured too: it takes a crimson bloom's claim from 1.85x its
+      // drawn area to 1.33x, but 5% of the flower you can see stops being
+      // pickable with it, and an unpickable flower is a worse bug than a fat
+      // one. No `foot` term, because the placement below stands the model on
+      // the cell floor (`-0.5 - k.foot`), so it occupies 0 to `k.height`.
+      if (k.sway) {
+        const bid = ITEMS[itemId]?.block;
+        const dx = bb.max.x - bb.min.x, dz = bb.max.z - bb.min.z;
+        if (bid) setPlantBox(bid, 0.5 * Math.hypot(dx, dz) * k.scale, k.height);
+      }
       k.material = this._skin(k, bb);
     };
     const m = worldModel(itemId, take);

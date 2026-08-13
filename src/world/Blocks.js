@@ -1890,6 +1890,134 @@ for (let i = 0; i < N_BLOCKS; i++) {
   TINT_ID[i] = b.tint ? TINTS[b.tint] : 0;
 }
 
+// --- what a plant is shaped like, for the picker ----------------------------
+//
+// `blockBoxes` below describes every shaped block's silhouette by hand, and
+// every R_CROSS plant falls through it to the default full cube. That default
+// is what the crosshair used to be given, and it is a bad likeness of a plant:
+// a tuft of grass fills 17.6% of its tile and stops two thirds of the way up
+// the cell, and a modelled clover is a third of a cell tall and a third across.
+// A picker working off the full cell claims the empty air above and beside the
+// plant, so a plant in the foreground takes the crosshair off whatever is
+// behind it. That was reported from the field.
+//
+// A plant cannot be described by hand here the way a fence can, because neither
+// of its two shapes is authored in this file. So this is a registry rather than
+// a table: the two subsystems that already know each shape exactly hand it over
+// once, at load, and `Planet.raycast` reads it every frame.
+//
+//   billboards (tall grass, wheat)  their tile's own alpha, from `TileAtlas`
+//   modelled plants (the rest)      their model's own bounding box, from
+//                                   `render/BlockModels`
+//
+// Both live here rather than in either of those files so that `world/Planet`
+// can read them without importing anything out of `render/`, and both are
+// *optional*: until the atlas has decoded and the models have loaded, every
+// lookup returns null and the picker falls back to its old shape. A plant is
+// never unpickable because its art has not arrived yet.
+
+/** Resolution of one billboard's silhouette mask. One byte per texel. */
+export const PLANT_MASK_N = 32;
+
+/** How many texels the silhouette is grown by, to cover the wind. See below. */
+const PLANT_MASK_GROW = 2;
+
+const PLANT_MASK = new Array(N_BLOCKS).fill(null);
+const PLANT_BOX = new Array(N_BLOCKS).fill(null);
+
+/** A cross plant's billboard silhouette, or null. Row 0 is the TOP of the cell. */
+export function plantMask(id) { return PLANT_MASK[id]; }
+
+/**
+ * A modelled plant's bounding cylinder, or null.
+ * `{ r2, top }` — squared radius from the cell's middle, and how far up the
+ * cell the model reaches, both in cells.
+ */
+export function plantBox(id) { return PLANT_BOX[id]; }
+
+/**
+ * Publish one modelled plant's real size. Called by `render/BlockModels` the
+ * moment a kind's `.gltf` lands, with the numbers it measured to place it.
+ *
+ * A cylinder and not a box because these models are spun to a random yaw per
+ * instance (`t.spin`), so no axis-aligned box in cell space describes one: the
+ * radius is over the model's own footprint diagonal, which is the one figure
+ * that is true at every yaw.
+ */
+export function setPlantBox(id, radius, height) {
+  if (!id || id >= N_BLOCKS || RENDER_TYPE[id] !== R_CROSS) return;
+  PLANT_BOX[id] = { r2: radius * radius, top: height };
+}
+
+/**
+ * Build the billboard silhouettes from the decoded albedo atlas. Called once by
+ * `loadTileAtlas`, off the same per-layer bytes it is about to upload.
+ *
+ * `cutoff` is the shader's own alphaTest, so a texel counts as plant here
+ * exactly when it is drawn there. The mask is then grown by `PLANT_MASK_GROW`
+ * texels on every side, because the billboard is displaced by the wind in the
+ * vertex shader and the picker marches the *unswayed* cell: the tips of a blade
+ * of grass sit a little outside their own tile, and a picker matching the tile
+ * exactly refuses them. Measured against the drawn silhouette of a ripe wheat
+ * at two and three cells, growing by one texel left 85.7% and 78.0% of its lit
+ * pixels pickable where the old full-cell shape managed 89.2% and 88.4%; two
+ * texels, 0.06 of a cell, puts both back. It is the one term here that is
+ * deliberately generous, and it is generous in the direction that keeps a plant
+ * easy to harvest.
+ *
+ * @param {Uint8Array} albedo per-layer RGBA bytes, `size * size * 4` each
+ */
+export function setPlantMasks(albedo, size, layers, cutoff = 107) {
+  const N = PLANT_MASK_N;
+  const per = size * size * 4;
+  const step = size / N;
+  for (let id = 1; id < N_BLOCKS; id++) {
+    if (RENDER_TYPE[id] !== R_CROSS || PLANT_MASK[id]) continue;
+    const layer = TILE_SIDE[id];
+    if (layer >= layers) continue;
+    const off = layer * per;
+    const raw = new Uint8Array(N * N);
+    let set = 0;
+    // A mask texel is opaque if ANY of the atlas texels under it is. Taking the
+    // mean instead would erode a blade of grass a texel wide down to nothing at
+    // this resolution, and an eroded plant is one you cannot pick.
+    for (let y = 0; y < N; y++) {
+      const y0 = (y * step) | 0, y1 = Math.max(y0 + 1, ((y + 1) * step) | 0);
+      for (let x = 0; x < N; x++) {
+        const x0 = (x * step) | 0, x1 = Math.max(x0 + 1, ((x + 1) * step) | 0);
+        let hit = 0;
+        for (let v = y0; v < y1 && !hit; v++) {
+          for (let u = x0; u < x1; u++) {
+            if (albedo[off + (v * size + u) * 4 + 3] > cutoff) { hit = 1; break; }
+          }
+        }
+        raw[y * N + x] = hit;
+        set += hit;
+      }
+    }
+    // A tile that is entirely transparent, or entirely opaque, tells us nothing
+    // the old shape did not: leave it null so the picker keeps its fallback.
+    // The 60-odd modelled plants land here — most carry no tile at all.
+    if (set === 0 || set === N * N) continue;
+    const grown = new Uint8Array(N * N);
+    const G = PLANT_MASK_GROW;
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (!raw[y * N + x]) continue;
+        for (let dy = -G; dy <= G; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= N) continue;
+          for (let dx = -G; dx <= G; dx++) {
+            const xx = x + dx;
+            if (xx >= 0 && xx < N) grown[yy * N + xx] = 1;
+          }
+        }
+      }
+    }
+    PLANT_MASK[id] = grown;
+  }
+}
+
 /**
  * The solid boxes a block occupies inside its own cell, as [i0,j0,k0,i1,j1,k1]
  * in 0..1 cell coordinates. One box for anything ordinary, two for a stair.

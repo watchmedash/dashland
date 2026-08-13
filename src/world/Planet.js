@@ -9,6 +9,7 @@ import {
 import { worldToCell, centerDir } from './Sphere.js';
 import {
   IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
+  plantMask, plantBox, PLANT_MASK_N,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID } from './Mesher.js';
 
@@ -62,19 +63,90 @@ function discardArray() { this.array = null; }
  * samples deep at the worst (perpendicular) incidence, so a plant is never
  * missed; a grazing ray only spends longer inside.
  *
- * What it gets wrong: the plant is 0.15 cells fatter than it looks in every
- * direction, so the crosshair grabs it from a hair outside its silhouette; and
- * the *texture* is ignored, so the transparent gaps within a flower's own quad
- * — the space either side of the stem — still count as the flower. Matching
- * those would mean sampling the atlas per ray step, which is far past what a
- * per-frame label is worth. Both errors are in the forgiving direction: they
- * make a plant slightly easier to hit, never harder.
+ * This is only the *slab*, though, and a slab is not a plant. Two things used
+ * to be wrong with stopping here, and both were reported from the field —
+ * "those transparent parts is blocking the crosshair", from a player trying to
+ * name something behind a tuft of grass:
+ *
+ *  - The *texture* was ignored, so the transparent gaps within a plant's own
+ *    quad counted as the plant. Measured on the baked atlas, `tall_grass` fills
+ *    17.6% of its tile and reaches only two thirds of the way up it, so the
+ *    picker was claiming most of a cell of empty sky for every tuft. The gaps
+ *    are the whole complaint, and they are now read straight off the tile's
+ *    alpha — see `setPlantMasks`. This comment used to argue that sampling the
+ *    atlas per step was "far past what a per-frame label is worth"; that
+ *    judgement was made without measuring either side of it. It is one byte
+ *    read off a 1 KB array per step.
+ *
+ *  - Two thirds of the plants on this planet are not billboards at all. The
+ *    flowers, the sixteen land flora, the reef and the six modelled crops are
+ *    drawn as WAM model instances and the mesher emits no quad for them, so the
+ *    plus prism above was never even the right *family* of shape for them: a
+ *    clover is a third of a cell tall and a third across, and the whole cell is
+ *    eight times its footprint. Those take a cylinder measured off the model
+ *    itself instead — see `plantBox`.
+ *
+ * Both shapes are optional. Before the atlas has decoded and the models have
+ * loaded there is nothing to consult, and the plus prism below is what a plant
+ * gets; it is forgiving rather than tight, which is the right way round for a
+ * fallback.
+ *
+ * The half-thickness came down with the texture test, from 0.15 to 0.10. It is
+ * now only depth — how far either side of a zero-thickness quad a sample still
+ * counts — because the silhouette is the mask's job, and 0.10 is still 4.2
+ * samples deep at the worst incidence.
+ *
+ * What this is worth, measured. Casting one ray per screen pixel over an 80x45
+ * grid from standing height, the share of the whole screen that named a plant
+ * rather than what was behind it: meadow 21.8% -> 11.2%, plains 33.9% -> 21.8%,
+ * tundra 10.7% -> 3.8%, savanna 6.8% -> 5.2%. Against the plant's own drawn
+ * silhouette, one plant on cleared ground and the frame diffed against the same
+ * frame with the cell set to air, the picker claimed 2.1x the pixels a tuft of
+ * grass covers and 8.4x a clover's; it now claims 1.4x and 2.4x. Aimed at the
+ * plant instead of past it, every plant tested is still picked and broken from
+ * one, two and three cells away, over a two-degree cone of aim error.
  */
-const CROSS_HALF = 0.15;
+const CROSS_HALF = 0.10;
 
-/** Is this sample point within a cross plant's quads? See `CROSS_HALF`. */
-function insideCross(c, i, j) {
-  return Math.abs(c.ci - i - 0.5) <= CROSS_HALF || Math.abs(c.cj - j - 0.5) <= CROSS_HALF;
+/**
+ * How wide `emitCross` actually builds a quad, in cells. Slightly over one, so
+ * a row of plants has no gap in it; the mask is stretched over the same span or
+ * the silhouette would be read a texel out at the edges.
+ */
+const CROSS_SPAN = 1.04;
+
+/** Where along a quad's width, 0..1 of the way across the mask, a sample sits. */
+function maskCol(u, n) {
+  const x = ((u / CROSS_SPAN + 0.5) * n) | 0;
+  return x < 0 ? 0 : (x >= n ? n - 1 : x);
+}
+
+/** Is this sample point inside the plant that is drawn here? See `CROSS_HALF`. */
+function insideCross(id, c, i, j) {
+  const di = c.ci - i - 0.5, dj = c.cj - j - 0.5;
+  const dk = c.ck - Math.floor(c.ck);
+
+  // A modelled plant: its own bounding cylinder, standing on the cell floor.
+  const box = plantBox(id);
+  if (box) return dk <= box.top && di * di + dj * dj <= box.r2;
+
+  const near_i = Math.abs(di) <= CROSS_HALF;   // near the quad that spans j
+  const near_j = Math.abs(dj) <= CROSS_HALF;   // near the quad that spans i
+  if (!near_i && !near_j) return false;
+
+  const mask = plantMask(id);
+  if (!mask) return true;
+  const N = PLANT_MASK_N;
+  // `emitCross` gives the quad's bottom edge v = 1 and its top edge v = 0, and
+  // the atlas is uploaded unflipped, so row 0 of the tile is the top of the
+  // cell. That is the row a grass tile is empty in.
+  let row = ((1 - dk) * N) | 0;
+  if (row < 0) row = 0; else if (row >= N) row = N - 1;
+  // The quad spanning i is the one standing at the middle of j, so it is the
+  // one a sample near `dj = 0` is on, and `di` is the distance along it.
+  if (near_j && mask[row * N + maskCol(di, N)]) return true;
+  if (near_i && mask[row * N + maskCol(dj, N)]) return true;
+  return false;
 }
 
 export class Planet {
@@ -407,7 +479,7 @@ export class Planet {
 
       if (id === 0) continue;
       if (RENDER_TYPE[id] === R_LIQUID && !hitLiquid) continue;
-      if (curCross && !insideCross(c, i, j)) continue;
+      if (curCross && !insideCross(id, c, i, j)) continue;
 
       const point = new THREE.Vector3(x, y, z);
       const normal = new THREE.Vector3();

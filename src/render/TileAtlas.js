@@ -1,6 +1,8 @@
 // Load the pre-baked tile atlases and slice them into texture-array payloads.
 // Replaces ~10s of runtime procedural synthesis with three image decodes.
 
+import { setPlantMasks } from '../world/Blocks.js';
+
 const BASE = 'tiles';
 
 async function loadImage(url, opts) {
@@ -227,6 +229,12 @@ export async function loadTileAtlas(onProgress = () => {}) {
   // it is the per-texel biome-tint mask on the two fringe tiles (see FRINGE in
   // scripts/bake-textures.mjs), which wants its own soft mip edge and must not
   // be dilated. The crack strip is never far enough away for its mips to matter.
+  // Before the dilate, because the dilate's whole job is to put colour under
+  // transparent texels and the mask is a question about alpha alone. Alpha is
+  // not touched either way; taking it first keeps that independent of the
+  // order these two ever end up in.
+  setPlantMasks(albedo, size, layers);
+
   const t0 = performance.now();
   const dilated = dilateLayers(albedo, size, layers);
   if (import.meta.env?.DEV) {

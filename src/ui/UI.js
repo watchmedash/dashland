@@ -2402,12 +2402,22 @@ export class UI {
     const go = document.createElement('button');
     go.className = 'errand-go';
     go.textContent = 'Hand over';
+    // The refusal has to say something. `fulfilRequest` checks there is room
+    // for the whole reward before it takes the goods — which is right, and is
+    // what stops an errand eating sixteen planks and paying nothing — but the
+    // button was rendered ready either way, so a player with a full pack
+    // pressed Hand over and got no sound, no message and no change. A control
+    // that is offered and then does nothing is worse than one that is not
+    // offered. Two words, on the counter's own toast line.
     go.addEventListener('click', () => {
       if (fulfilRequest(g.inventory, req, this.shop?.purse)) {
         g.audio.pickup();
         g.ui.toast(`Paid ${req.reward} coins`, COIN_ITEM, 2600);
         g.inventory.changed();
         this.refresh();
+      } else {
+        g.audio.deny();
+        this.toast('No room', COIN_ITEM, 2200);
       }
     });
     el.appendChild(go);

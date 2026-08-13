@@ -986,7 +986,25 @@ function dishFor(rung, fam) {
  * nothing across the counter, and the bowl fetches one. One log is four planks
  * is eight sticks is four bowls is four coins, and trees grow back. It is the
  * only ingredient in the registry the merchant refuses, so this line moves
- * exactly one thing and closes the only hole in the guarantee above.
+ * exactly one thing.
+ *
+ * **It did not close the hole; refusing outright is only the extreme case of
+ * paying under the odds.** The coin gate reads `valueOf` and the counter pays
+ * `sellPriceOf`, and those two disagree by more than the sell rate wherever the
+ * cap in `buildSellPrices` has bitten — an item held down to what its own
+ * ingredients fetch. Candy is the worst of the four: `valueOf` says six coins,
+ * the merchant pays two, because it is half a honeycomb and half a stick and
+ * the stick is worth nothing. Eight of them beside a glowcap therefore cleared
+ * the fifty-coin gate on a pile the counter valued at seventeen, and came back
+ * a Sugar Feast, which he buys for twenty-three. Six coins a bake, out of bees
+ * that come back.
+ *
+ * So the guarantee is now *checked* rather than argued: a rung is only awarded
+ * if what the merchant pays for the dish is at most what he would have paid for
+ * the pile. It is the same sentence the rung table has always claimed — you can
+ * never sell it for more than the parts — asked of the price he actually quotes
+ * instead of inferred from the price the item is worth. On two hundred thousand
+ * random piles it demotes nothing; it exists for the four.
  *
  * @param {number[]} ids one item id per filled slot, duplicates included
  * @param {(id:number)=>number} valueOf `Trade.valueOf`
@@ -1006,15 +1024,15 @@ export function kitchenFallback(ids, valueOf, sellPriceOf) {
   if (kept.length !== ids.filter(Boolean).length) return null;   // something inedible is in there
   if (kept.length < 2) return null;
 
-  let food = 0, value = 0;
+  let food = 0, value = 0, paid = 0;
   for (const id of kept) {
     food += kitchenNutrition(id);
-    if (sellPriceOf(id) > 0) value += valueOf(id);
+    if (sellPriceOf(id) > 0) { value += valueOf(id); paid += sellPriceOf(id); }
   }
   let best = null;
   for (const rung of IMPROVISED_LADDER) {
     if (!rung.out) continue;
-    if (food >= rung.needFood && value >= rung.needValue) best = rung;
+    if (food >= rung.needFood && value >= rung.needValue && sellPriceOf(rung.out) <= paid) best = rung;
   }
   return best ? { out: dishFor(best, pileFamily(kept)), count: 1, kind: 'improvised' } : null;
 }

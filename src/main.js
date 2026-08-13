@@ -1562,6 +1562,11 @@ class Game {
     // constructor body reaches Mobs, and is never replaced afterwards — only
     // its fov and aspect are rewritten.
     this.mobs.camera = this.camera;
+    // Same shape, same reason: Mobs sizes its despawn radius and its crowd
+    // budgets off how far this session actually streams, and `qualityTier` is
+    // the one answer to that question. Written from here rather than read from
+    // there so there is never a second copy of the tier to drift.
+    this.mobs.loadDist = this.quality.loadDist;
     this.drops.onBurn = (pos) => {
       _burnUp.copy(pos).normalize();
       this.particles.embers(pos, _burnUp, 5, 0.7);
@@ -2021,6 +2026,7 @@ class Game {
     this.qualityTier = qualityTier(this.settings);
     this.quality = QUALITY[this.qualityTier];
     this.postfx?.setAO(this.quality.ao);
+    if (this.mobs) this.mobs.loadDist = this.quality.loadDist;
     this._resize();
     if (this.state === 'playing' || this.state === 'paused' || this.state === 'spectating') {
       this._streamTimer = 0;

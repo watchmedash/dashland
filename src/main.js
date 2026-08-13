@@ -2223,6 +2223,27 @@ class Game {
     this._occ = null;
     this.liveChunks.clear();
     this.crossLight.clear();
+    /*
+     * Which regions the player has BUILT in, and it is a fact about one planet.
+     *
+     * It was not on this list and it had to be, because `_saveBlocks` stores
+     * exactly the regions that are both live and in this set — so a set carried
+     * over from the last world puts regions the player has never touched into
+     * the new world's save, at 24.75 KB each, for ever: `continueGame` seeds the
+     * set back from `data.regions` on load, which is right and necessary, and
+     * which also means anything that gets in here once never leaves.
+     *
+     * Measured, both worlds on seed 4242 so their live regions share ids: build
+     * in 100 regions of world A, quit to the menu, start a brand new world B and
+     * let it write once — B stored 100 regions and 2 475 KB of pure generator
+     * output, on a planet nobody had put a single block on. A world that should
+     * have been 25 KB was 2.4 MB, and re-opening it would have kept it that way.
+     *
+     * Nothing needs the old value: every way into a world sets this again
+     * afterwards — `continueGame` from the save, and a new planet from an empty
+     * set, which is what this now is.
+     */
+    this.editedRegions.clear();
     // A new world has not failed to save yet. Carrying the count over would
     // leave the chip up on a planet that has never been written, which is both
     // wrong and the fastest way to teach a player to ignore it.

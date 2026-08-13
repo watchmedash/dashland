@@ -42,6 +42,9 @@ const NOT_OBTAINABLE = new Set([
   // safe) and the *item* id is appended (bags, crates and shop stock are safe).
   // Anything modelled on this machine should do the same.
   'kitchen',
+  // The fence gate, for exactly the same reason and by exactly the same
+  // machine. Its `add()` is at the foot of this file, under the dishes.
+  'fence_gate',
 ]);
 
 /**
@@ -1032,6 +1035,16 @@ const DISHES = [
   { name: 'grand_gateau', label: 'Grand Gateau', food: 15, treat: true, stack: 8, color: '#f0e2d2', shine: '#f8b4c4' },
 ];
 for (const d of DISHES) add(d);
+
+// --- the fence gate ---------------------------------------------------------
+//
+// Last, and it has to be last: everything above this line is frozen, because
+// every id above this line is in somebody's save. The block-item loop at the
+// top of this file would have made this item at 232 and pushed the coin, the
+// ingots, the tools, the armour, the bow, the buckets and the fifteen fish up
+// by one, so `fence_gate` is in `NOT_OBTAINABLE` up there and arrives here
+// instead. See the long note beside the kitchen, which is the same trap.
+add({ name: 'fence_gate', label: 'Fence Gate', block: ID.fence_gate, sound: 'wood' });
 
 /** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
 export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);

@@ -46,6 +46,13 @@ const RAW = [
   // Cheap on purpose. A paddock is thirty of these and nobody fences anything
   // that costs a plank a post.
   { out: 'fence', count: 3, table: true, shape: ['PSP', 'PSP'], key: { P: 'planks', S: 'stick' } },
+  // The gate is the fence pattern turned inside out — sticks on the outside,
+  // planks down the middle — which is Minecraft's, and the mirror is doing real
+  // work here rather than being a homage: the two are the only 2x3 wood-and-
+  // stick recipes in the table, and a player who has made a fence can guess
+  // this one. One per craft against the fence's three, because a run needs
+  // thirty posts and a paddock needs one way in.
+  { out: 'fence_gate', count: 1, table: true, shape: ['SPS', 'SPS'], key: { P: 'planks', S: 'stick' } },
   { out: 'kiln', count: 1, table: true, shape: ['CCC', 'C C', 'CCC'], key: { C: 'cobblestone' } },
   { out: 'torch', count: 4, shape: ['C', 'S'], key: { C: 'coal', S: 'stick' } },
   { out: 'torch', count: 4, shape: ['C', 'S'], key: { C: 'charcoal', S: 'stick' } },

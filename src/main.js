@@ -55,7 +55,7 @@ import { Skills, ON_DEATH } from './game/Skills.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
-  IS_STAIR, IS_LADDER, IS_DOOR, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
+  IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
 } from './world/Blocks.js';
 import {
@@ -4513,16 +4513,21 @@ class Game {
   }
 
   /**
-   * The two cells of the door you clicked, whichever half that was.
-   * @returns {number[]|null} [lowK, highK]
+   * The cells of the swinging thing you clicked: two for a door, one for a
+   * gate. A gate is one cell tall, so it is its own only half — which is the
+   * whole of the difference and is why the swing below is shared rather than
+   * copied.
+   * @returns {number[]|null} the k values, low first
    */
   _doorHalves(col, k) {
-    if (!IS_DOOR[this.planet.at(col, k)]) return null;
+    const id = this.planet.at(col, k);
+    if (IS_GATE[id]) return [k];
+    if (!IS_DOOR[id]) return null;
     const below = IS_DOOR[this.planet.at(col, k - 1)];
     return below ? [k - 1, k] : [k, k + 1];
   }
 
-  /** Swing a door, both halves together, and refuse if you are standing in it. */
+  /** Swing a door or a gate, and refuse if you are standing in it. */
   _toggleDoor(col, k) {
     const halves = this._doorHalves(col, k);
     if (!halves) return;
@@ -8672,7 +8677,7 @@ class Game {
         return;
       }
       if (hit.id === ID.bed) { this._useBed(hit.col, hit.k); return; }
-      if (IS_DOOR[hit.id]) { this._toggleDoor(hit.col, hit.k); return; }
+      if (IS_DOOR[hit.id] || IS_GATE[hit.id]) { this._toggleDoor(hit.col, hit.k); return; }
       if (IS_SIGN[hit.id]) { this._writeSign(hit.col, hit.k); return; }
       // --- till soil with a shovel ---
       //

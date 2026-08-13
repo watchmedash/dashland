@@ -87,6 +87,22 @@ export const R_FENCE = 10;
  * three bits the side-table gives every block.
  */
 export const R_TORCH = 11;
+/**
+ * A gate in a fence line: a leaf of two stiles and two rails that swings out of
+ * the way, standing on nothing, with a gap underneath the way Minecraft's does.
+ *
+ * Its byte is a door's byte and means the same thing — bits 0-1 the axis you
+ * walk through, bit 2 open — because it is the same object seen from the fence
+ * rather than from the wall, and giving it a second encoding for the same two
+ * facts would be two things to keep in step. A fence reaches out to one either
+ * way, so a run with a gate in it is one fence.
+ *
+ * What it does NOT share with a door is the collision, and that is the whole of
+ * why it is its own render type. A door is a leaf you bump into and an open one
+ * is a leaf you squeeze past; a gate is a line you may not cross, and an open
+ * gate is a hole in that line. See `collisionBoxes`.
+ */
+export const R_GATE = 12;
 
 // ---------------------------------------------------------------------------
 // Tiles — index in this array is the texture-array layer.
@@ -1242,6 +1258,29 @@ export const BLOCKS = [
   // Directional for the same reason the kiln is: `front` is the fire door, and
   // a cooker whose door faced a wall would read as a plain brick block.
   block({ name: 'kitchen', label: 'Kitchen', top: 'hearth', side: 'brick', front: 'kiln_front', bottom: 'brick', hardness: 2.4, tool: 'pick', tier: 0, drop: 'kitchen', particle: [0.62, 0.34, 0.26], sound: 'stone' }),
+
+  // --- the fence gate --------------------------------------------------------
+  //
+  // "there are also no fence gate I think". There was not, and a pen you have
+  // to break a rail out of to get into is not a pen. Appended here, on the end,
+  // for the reason every note above this one gives: an id is what a saved chunk
+  // stores. Its ITEM is added by hand at the foot of `game/Items.js` and the
+  // name is in `NOT_OBTAINABLE` there, because the block-item loop runs at the
+  // TOP of that file and an item made by it lands in the middle of the array.
+  //
+  // It carries no new tile either. `fence` is the right one and not a
+  // compromise: it is uniform vertical grain authored to be cropped to a
+  // fraction of a cell, which is exactly what the stiles and rails ask for, and
+  // a gate that did not match the fence it is set into would be the fault.
+  //
+  // Directional so the placement path writes `_facingToward` into the byte,
+  // which is the axis you walk through — the same byte a door carries, read the
+  // same way.
+  block({
+    name: 'fence_gate', label: 'Fence Gate', render: R_GATE, all: 'fence',
+    directional: true, opaque: false, hardness: 2.0, tool: 'axe',
+    particle: [0.58, 0.42, 0.25], sound: 'wood', fuel: 5,
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
@@ -1309,6 +1348,7 @@ export const IS_LADDER = new Uint8Array(N_BLOCKS);
 export const IS_DOOR = new Uint8Array(N_BLOCKS);
 export const IS_SIGN = new Uint8Array(N_BLOCKS);
 export const IS_FENCE = new Uint8Array(N_BLOCKS);
+export const IS_GATE = new Uint8Array(N_BLOCKS);
 export const IS_TORCH = new Uint8Array(N_BLOCKS);
 /**
  * 1 for anything that cannot be placed into a cell that already holds liquid.
@@ -1583,6 +1623,15 @@ export const FENCE_RAIL = 0.16;
  */
 export const FENCE_HEIGHT = 1.0;
 export const FENCE_BLOCK_H = 1.5;
+/**
+ * How far off the ground a gate's leaf starts.
+ *
+ * Minecraft's is 5/16 and this is 0.30, which is the same gap read to two
+ * places. It is not a detail: the gap under the leaf is the only thing that
+ * tells a shut gate from a fence panel from across a field, and a gate you
+ * cannot pick out of its own fence is a gate you will walk into.
+ */
+export const GATE_LOW = 0.30;
 /** The two rail heights, as the bottom of each. */
 // Spaced for a one-block post: Minecraft's rails sit at 6/16 and 12/16, and
 // the pair used to be [0.42, 0.96], which on a 1.0 post would have put the
@@ -1606,6 +1655,14 @@ const RAIL_K = [0.36, 0.72];
  * appear and vanish with the door.
  */
 export const fenceJoins = (id) => IS_FENCE[id] === 1
+  // A gate, always, and unlike a door it does NOT drop out when it swings. A
+  // gate is part of the fence line whichever way it is standing — that is what
+  // makes a run with a gate in it read as one fence rather than as two fences
+  // with a thing between them — and its stiles are at the cell walls where the
+  // neighbour's rails arrive, so the joint is real timber to real timber in
+  // both states. A door is excluded because a rail into a swinging leaf would
+  // appear and vanish with the door; a gate's does not move.
+  || IS_GATE[id] === 1
   || (crowds(id) && !IS_DOOR[id]);
 
 /**
@@ -1939,6 +1996,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_DOOR[i] = b.render === R_DOOR ? 1 : 0;
   IS_SIGN[i] = b.render === R_SIGN ? 1 : 0;
   IS_FENCE[i] = b.render === R_FENCE ? 1 : 0;
+  IS_GATE[i] = b.render === R_GATE ? 1 : 0;
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
   IS_SUBMERGED[i] = b.submerged ? 1 : 0;
   STACKS[i] = b.stacks ? 1 : 0;
@@ -1954,7 +2012,8 @@ for (let i = 0; i < N_BLOCKS; i++) {
   NEEDS_FLOOR[i] = b.needsFloor ? 1 : 0;
   IS_SHAPED[i] = (b.render === R_SLAB || b.render === R_STAIR
     || b.render === R_LADDER || b.render === R_DOOR || b.render === R_SIGN
-    || b.render === R_FENCE || b.render === R_TORCH) ? 1 : 0;
+    || b.render === R_FENCE || b.render === R_TORCH
+    || b.render === R_GATE) ? 1 : 0;
   TINT_ID[i] = b.tint ? TINTS[b.tint] : 0;
 }
 
@@ -2164,6 +2223,31 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     }
     return out;
   }
+  if (IS_GATE[id]) {
+    // One leaf of two stiles and two rails, standing on nothing: the gap under
+    // it is what tells a gate from a fence panel at a glance, and it is
+    // Minecraft's gap. The rails are at the fence's own two rail heights and
+    // the stiles stop at the fence's own height, so a gate dropped into a run
+    // lines up with the timber either side of it rather than nearly lining up.
+    const axis = byte & 3, open = (byte >> 2) & 1;
+    // Shut, the leaf lies across the way you walk, down the middle of the cell.
+    // Open, it lies along the way you walk, against the low side wall — the
+    // same "flat against the side wall" pose a door takes, and for the same
+    // reason: there is no hinge bit to store and no swing to animate, so the
+    // two poses are two shapes rather than two ends of a rotation.
+    const vc = open ? FENCE_RAIL / 2 : 0.5;
+    const v0 = vc - FENCE_RAIL / 2, v1 = vc + FENCE_RAIL / 2;
+    // `u` runs along the leaf and `v` across its thickness; which of those is i
+    // and which is j is the axis, flipped by the swing.
+    const uIsI = axis < 2 ? !!open : !open;
+    const put = (u0, u1, k0, k1) => (uIsI
+      ? out.push([u0, v0, k0, u1, v1, k1])
+      : out.push([v0, u0, k0, v1, u1, k1]));
+    put(0, FENCE_RAIL, GATE_LOW, FENCE_HEIGHT);            // hinge stile
+    put(1 - FENCE_RAIL, 1, GATE_LOW, FENCE_HEIGHT);        // latch stile
+    for (let n = 0; n < 2; n++) put(0, 1, RAIL_K[n], RAIL_K[n] + FENCE_RAIL);
+    return out;
+  }
   if (IS_SIGN[id]) {
     // A board across the top of the cell and a post under it, both thin along
     // the direction you read from.
@@ -2296,6 +2380,21 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
  */
 export function collisionBoxes(id, byte = 0) {
   if (IS_FENCE[id]) return [[0, 0, 0, 1, 1, FENCE_BLOCK_H]];
+  // A gate is a fence with a state, and it takes the fence's answer twice over.
+  //
+  // Shut, it is the same line you cannot cross, to the same 1.5 — and it has to
+  // be the fence's number rather than the leaf's own boxes for the fence's own
+  // reason: the rails are 0.16 thick, collision is a discrete overlap test, and
+  // a sprinting body moves further than that between frames. A gate that let a
+  // sprint through would be the one hole in every pen on the planet, which is
+  // worse than a fence with no gate at all.
+  //
+  // Open, it is nothing. Not a thin leaf against the wall — nothing, so you
+  // walk through the gateway without touching it. That is the difference
+  // between this and a door, where the leaf is a thing in a room and you squeeze
+  // past it. Nobody has ever wanted to bump into an open gate, and the empty
+  // list also stops you standing on one: the ground scan reads these boxes too.
+  if (IS_GATE[id]) return ((byte >> 2) & 1) ? [] : [[0, 0, 0, 1, 1, FENCE_BLOCK_H]];
   return blockBoxes(id, byte);
 }
 

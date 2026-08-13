@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
 import { cellToWorld, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
 import {
-  RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, ID, collisionBoxes, isPassable,
+  RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
   CONTACT_HURT,
 } from '../world/Blocks.js';
 // Imported rather than re-declared so there is exactly one "how much slower is
@@ -655,7 +655,12 @@ export class Player {
           if (!IS_SOLID[bid]) continue;
           // The extra layer below is only ever about fences: everything else
           // ends at its own ceiling and was already answered for by cell k0.
-          if (k < k0 && !IS_FENCE[bid]) continue;
+          // A shut gate is a fence — `collisionBoxes` gives it the same 1.5 —
+          // so it needs the same extra layer, or the half cell of fence that
+          // stands proud of its own cell would be there along a run and missing
+          // at the gate, which is a sprint-height gap in the one place a pen
+          // has a doorway.
+          if (k < k0 && !IS_FENCE[bid] && !IS_GATE[bid]) continue;
           // You climb a ladder and you walk through an open door; neither is
           // something to bump into. They keep their boxes so the mesher and the
           // mob ground scan still see a surface there.

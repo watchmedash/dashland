@@ -315,6 +315,43 @@ currency is ever given denominations, this pack has the art for it ready and its
 licence is clean. That is a change to the economy, not to a model, and it is not
 made here.
 
+## Furniture Bits (1.0) by **Kay Lousberg** — supplied, INSPECTED AND NOT USED
+
+[kaylousberg.com](https://www.kaylousberg.com) — **CC0**, stated in the pack's
+own `License.txt` and so **read off disk**. Four beds — `bed_single_A/B`,
+`bed_double_A/B` — plus chairs, cabinets, rugs and lamps over one
+`furniturebits_texture.png`.
+
+This was supplied to reopen the bedroll question above, on the correct
+understanding that the `bed` is a **single full cube** and not two cells. The
+correction is right, and it makes the case **worse** rather than better: a
+single cell is exactly what these models cannot occupy.
+
+**`bed_single_A` is 1.6 x 1 x 3.** Stood in the world at full cell height, which
+is how the `kitchen` block's pot stands, it is **three cells long and 1.6 wide** —
+it does not sit in its cell, it lies across its neighbours. Shot that way it
+overlapped the bed beside it and the two read as one blue slab. The only other
+fitting is to scale the longest axis down to one cell, and that gives
+**0.53 x 0.33 x 1.0**: half a cell wide and a third of a cell tall, a mat lying
+on the top face of a solid cube the player still walks on. That is the bedroll
+verdict again, arrived at from the opposite direction and by measurement rather
+than by analogy. `bed_double_A` is 3.1 x 1 x 3 and worse on both counts.
+
+**It is also the wrong colour, which is independent of the fitting.** These beds
+are cold blue-grey — `bed_single_A` means **144,158,177 at hue 215**, `_B` means
+149,151,163 — and the game's bed is red: the `bed_top` tile means 187,108,101 and
+`bed_side` 161,73,65, both at hue 5. In one frame under one sun the model read
+**L 95.0, rgb 45,104,159** directly above a cube reading **L 41.6, rgb
+106,24,26**. Those are not the same object in two materials, they are two
+objects.
+
+For once the brightness gap is *not* part of the argument, and that is worth
+recording because it nearly was. Shot in the same frame as a control, the
+Kenney pot this game already ships on the `kitchen` block reads **L 40.8** on a
+block reading **L 85.2** — half its brightness, accepted, and right. A topper
+model sitting well off its block's luminance is normal here. The bed fails on
+footprint and on hue, not on exposure.
+
 ## Sound — no third-party audio
 
 Every sound in the game is synthesised at runtime from oscillators and one

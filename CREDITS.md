@@ -230,6 +230,56 @@ Nothing from it is imported yet. Per model, measured:
     are not part of this task and were only glanced at, but the hearth is the
     obvious home for one of them if that block is ever revisited.
 
+## Resource Bits (1.0) by **Kay Lousberg** — supplied, INSPECTED AND NOT USED
+
+[kaylousberg.com](https://www.kaylousberg.com) — **CC0**, stated in the pack's
+own `License.txt` ("free to use in personal, educational and commercial
+projects"), so like the Survival Kit and unlike the crate and the doors this one
+is **read off disk**. 66 models in glTF, FBX and OBJ over one shared
+`resource_bits_texture.png`. It ships copper, iron, gold **and silver** in both
+nugget and bar form, so the note this was inspected against — that the pack has
+no silver — is wrong; the set is complete.
+
+It converts for nothing. Every file is one mesh, one primitive, with the atlas
+as a sibling — no stacked LODs of the kind that made the wooden crate expensive
+— and a `PACKS` entry plus a `POSE` line is the whole of the import. So this is
+not a rejection on cost.
+
+**It is turned down because the pack cannot supply a *set*, measured on the
+game's own hotbar icons rather than on the source art.** The four raw ores were
+re-authored this morning precisely because they had collapsed into each other,
+and the KayKit nuggets re-introduce that collapse in the same place:
+
+| icon | current (WAM) | supplied (KayKit) |
+| --- | --- | --- |
+| `raw_iron`   | 107,84,64 &nbsp; sat 0.371 &nbsp; **hue 28** | 59,70,77 &nbsp; sat 0.271 &nbsp; **hue 203** |
+| `raw_silver` | 110,111,114 &nbsp; sat 0.095 &nbsp; **hue 216** | 78,96,104 &nbsp; sat 0.282 &nbsp; **hue 199** |
+
+KayKit's iron and silver are **one hue at two brightnesses** — four degrees
+apart, with saturations that match to a hundredth — which is a milder form of
+the exact failure `f24b795` measured and removed. Ours are 188 degrees apart: a
+warm brown lump and a neutral white one, told apart at a glance in a hotbar. On
+a contact sheet of all nine icons the supplied iron and silver nuggets are the
+same object twice; ours are not.
+
+Two smaller costs point the same way. Every supplied icon measured **darker**
+than the one it would replace — `raw_iron` L 68.2 against 87.7, `raw_silver`
+92.5 against 111.3, `iron_ingot` 81.3 against 94.9 — and the nuggets are faceted
+solid metal with no rock on them at all, so they read as cut gems rather than as
+something broken out of a seam. The stone patch on ours is deliberate and is the
+whole of what `f24b795` argued for.
+
+**One observation is worth keeping, because it is a real one.** The `*_Bar`
+models are better *shaped* than ours: a proper cast trapezoid, 108 triangles,
+0.4 x 0.25 x 0.8, against our flat slab. That is not a reason to import them.
+Adopting the bars alone would split the metal family across two authoring
+systems and two shading models — ours are `flat: true` faceted vertex colour
+with no atlas, these are smooth and textured — and put both in the same hotbar
+row, while the raw ores would have to stay ours anyway on the separation above.
+If the ingots should be chunkier, the cheap and coherent fix is to re-loft the
+WAM ingot as a trapezoid in `art/wam/items/*_ingot.wam`, which is our own
+toolchain and a small edit, not a new pack and a new 26 KB atlas for four items.
+
 ## Sound — no third-party audio
 
 Every sound in the game is synthesised at runtime from oscillators and one

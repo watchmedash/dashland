@@ -801,11 +801,31 @@ button.ghost:active:not(:disabled) {
 .slot-open .slot-who.empty { color: var(--ink-faint); font-weight: 600; }
 .slot-open .slot-when { grid-column: 2; font-size: var(--fs-sm); font-weight: 500; color: var(--ink-soft); }
 .slot-open .slot-ago {
-  grid-column: 3; grid-row: 1 / span 2; align-self: center;
+  grid-column: 3; grid-row: 1; align-self: center;
   min-width: 0; overflow: hidden; text-overflow: ellipsis;
   text-align: right;
   font: 600 var(--fs-xs) var(--mono); color: var(--ink-soft); opacity: .75; white-space: nowrap;
 }
+/* The difficulty, under the age and hard against the same edge. It is one
+   word, so it goes in the column that already holds one word rather than into
+   the day-and-playtime line, which would be a third comma. Set as a plate like
+   the slot number opposite it, because it is furniture the world was built
+   with rather than something that happened on it. */
+.slot-open .slot-diff {
+  grid-column: 3; grid-row: 2; justify-self: end; align-self: center;
+  padding: 3px 6px; border-radius: var(--r-sm);
+  font: 700 var(--fs-2xs)/1 var(--mono); letter-spacing: var(--ls-cap);
+  text-transform: uppercase; white-space: nowrap;
+  color: var(--ink-soft); background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+}
+/* Only one of the four is a different game. On Extreme a death ends the run,
+   which is the single fact that decides which planet you open, so it is the
+   one row allowed to raise its voice. Easy, Normal and Hard are a number the
+   animals use, and they stay quiet. */
+.slot-open .slot-diff.extreme {
+  color: #8c2a19; background: rgba(207, 70, 48, .16);
+}
+
 /* An empty slot is a hole in the tray, not a card in it. */
 .panel .slot-row:not(.filled) .slot-open {
   background: rgba(122, 94, 54, .05); box-shadow: var(--sunk);
@@ -2675,10 +2695,19 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
      its own contents should not be holding a third of the row open, so below
      this the age drops under the day and both are legible. The row grows by
      one line; ten of them still fit a phone with the list scrolling, which is
-     what the tray was always going to do at this size. */
-  .panel .slot-open { grid-template-columns: 68px minmax(0, 1fr); }
+     what the tray was always going to do at this size.
+
+     The difficulty rides on that third line beside the age, and only there.
+     It is one short word that never wraps, so it costs the row no height, but
+     it does cost width: parked on the first line it took 60px off the name and
+     the day, and "Day 14, 2h 0…" is the exact failure this block exists to
+     undo. The age is the one line with room to spare, so the two of them share
+     it, one against each edge. */
+  .panel .slot-open { grid-template-columns: 68px minmax(0, 1fr) auto; }
   .slot-open b { grid-row: 1 / span 3; }
+  .slot-open .slot-who, .slot-open .slot-when { grid-column: 2 / span 2; }
   .slot-open .slot-ago { grid-column: 2; grid-row: 3; text-align: left; }
+  .slot-open .slot-diff { grid-column: 3; grid-row: 3; }
 }
 
 @media (max-width: 540px) {

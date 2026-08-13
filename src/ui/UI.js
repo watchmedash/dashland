@@ -18,6 +18,7 @@ import { Save } from '../game/Save.js';
 import { BIOME_COLORS, R_SEA, F, cidx } from '../world/Constants.js';
 import { patchColumn } from '../world/Sphere.js';
 import { compassFrame } from '../render/Sky.js';
+import { normalizeDifficulty, EXTREME } from '../game/NewGame.js';
 
 const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands'];
 
@@ -103,6 +104,20 @@ export const DIFFICULTIES = [
   { key: 'extreme', label: 'Extreme' },
 ];
 export const DEFAULT_DIFFICULTY = 'normal';
+
+/**
+ * The word for a saved world's difficulty, for a slot row.
+ *
+ * `normalizeDifficulty` is the game side's rule and it is the one that matters
+ * here: a planet written before difficulty existed has no field at all, and it
+ * was played under the ladder as written, so "Normal" is the honest word for it
+ * rather than a blank or an apology. Anything unrecognised lands in the same
+ * place for the same reason.
+ */
+export function difficultyLabel(key) {
+  const want = normalizeDifficulty(key);
+  return DIFFICULTIES.find((d) => d.key === want).label;
+}
 
 /**
  * What dying costs, as two buttons in a segmented bar.
@@ -1064,12 +1079,13 @@ export class UI {
   /**
    * Draw the ten rows.
    *
-   * Each filled one carries the four things that make a planet recognisable at
+   * Each filled one carries the five things that make a planet recognisable at
    * a glance and nothing else: who lives on it, what day it is there, how long
-   * has been spent on it, and when it was last written. Character, day and
-   * saved-when were asked for by name; playtime is in the same breath because
-   * `savedAt` alone cannot tell a world you played for an evening from one you
-   * looked at once, and the summary has carried it since before slots existed.
+   * has been spent on it, when it was last written, and what it is played on.
+   * Character, day, saved-when and difficulty were asked for by name; playtime
+   * is in the same breath because `savedAt` alone cannot tell a world you played
+   * for an evening from one you looked at once, and the summary has carried it
+   * since before slots existed.
    */
   _paintSlots() {
     const list = this.el.slotList;
@@ -1096,7 +1112,14 @@ export class UI {
           // that ellipsised - on a 1920px monitor, not only on a phone. What
           // the column holds is already obvious from the two lines beside it,
           // and a label repeated on every row is not a label.
-          + `<span class="slot-ago">${agoText(meta.savedAt)}</span>`;
+          + `<span class="slot-ago">${agoText(meta.savedAt)}</span>`
+          // Difficulty is chosen once, at creation, and there is nowhere else in
+          // the game to read it back off a world you are not standing in. It
+          // matters most at exactly this moment, choosing between planets:
+          // Extreme is the one where a death is the whole run, so it is the one
+          // row that gets colour. The other three say their word and stop.
+          + `<span class="slot-diff${normalizeDifficulty(meta.difficulty) === EXTREME ? ' extreme' : ''}">`
+          + `${difficultyLabel(meta.difficulty)}</span>`;
       } else {
         open.innerHTML = `<b>${num}</b><span class="slot-who empty">Empty</span>`;
       }

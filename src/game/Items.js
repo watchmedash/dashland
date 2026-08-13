@@ -1137,8 +1137,94 @@ add({
   color: '#5f9c3e', shine: '#96cd72',
 });
 
+/**
+ * The improvised dishes again, this time crossed with what dominates the pile.
+ *
+ * The owner, on being told the kitchen has fifty-three dishes: *"53? that's
+ * quite few, remember cooking slots are 9 and all ingredients/edible are
+ * cookable"*. He is right and the number is worse than he thinks — 117
+ * ingredients across two to nine slots is 16,466,440,817,632 distinct fillings,
+ * and the five rungs above answered every one of them with one of five bowls.
+ * `fish + fish` and a truffle beside a goblin shark came back as the same
+ * nondescript dish.
+ *
+ * No table closes a gap that size, so the dish is **composed** instead: the
+ * rung says how much of a meal it is, and the family of whatever dominates the
+ * pile says what it *is*. `dishFor` in Recipes.js crosses the two.
+ *
+ * **Every one of these is its rung wearing a different name.** `food`, `stack`
+ * and `cooked` are copied off `IMPROVISED[rung]` rather than chosen here, and
+ * Trade.js copies the rung's price the same way, which is what makes this
+ * change cost nothing to argue about: the anti-exploit guarantee written over
+ * `IMPROVISED` above is a statement about two numbers per rung, and these carry
+ * the same two numbers. A Fish Stew is a Hearty Bowl that says what is in it.
+ *
+ * Eight families and four rungs, and the bottom rung is deliberately not here:
+ * a pile that only clears `scrap_bowl` is two coins of odds and ends, which is
+ * scraps by definition and has no character to name. That is 32 items for 37
+ * outcomes rather than 45 for 45, and the eight it drops are the eight nobody
+ * would have read.
+ *
+ * `improvised` names the rung each one copies. Trade.js reads it twice: once to
+ * price the dish, and once to keep all thirty-two off the merchant's shelf —
+ * the larder stocks anything with `food`, and a shopkeeper selling you the
+ * thing that means *leftovers* is a shelf with thirty-two more slots of noise
+ * on it. The original five stay stocked exactly as they are today.
+ */
+const FAMILY_DISHES = {
+  fish:   { color: '#6f9bb5', shine: '#a9cfe0', rungs: [
+    ['fish_broth', 'Fish Broth'], ['fish_stew', 'Fish Stew'],
+    ['fish_board', 'Fish Board'], ['angler_feast', 'Angler Feast'],
+  ] },
+  meat:   { color: '#9c5334', shine: '#cf8a63', rungs: [
+    ['meat_hash', 'Meat Hash'], ['meat_stew', 'Meat Stew'],
+    ['meat_roast', 'Meat Roast'], ['hunter_feast', 'Hunter Feast'],
+  ] },
+  reef:   { color: '#4f8f80', shine: '#92c6b8', rungs: [
+    ['reef_broth', 'Reef Broth'], ['reef_pot', 'Reef Pot'],
+    ['reef_plate', 'Reef Plate'], ['tide_banquet', 'Tide Banquet'],
+  ] },
+  fruit:  { color: '#c0453f', shine: '#e88b78', rungs: [
+    ['fruit_bowl', 'Fruit Bowl'], ['fruit_compote', 'Fruit Compote'],
+    ['fruit_platter', 'Fruit Platter'], ['orchard_feast', 'Orchard Feast'],
+  ] },
+  veg:    { color: '#6f9440', shine: '#a9c87a', rungs: [
+    ['garden_bowl', 'Garden Bowl'], ['garden_stew', 'Garden Stew'],
+    ['garden_plate', 'Garden Plate'], ['garden_feast', 'Garden Feast'],
+  ] },
+  fungus: { color: '#a08356', shine: '#cdb388', rungs: [
+    ['spore_bowl', 'Spore Bowl'], ['cap_stew', 'Cap Stew'],
+    ['cap_plate', 'Cap Plate'], ['forest_feast', 'Forest Feast'],
+  ] },
+  grain:  { color: '#c2a05e', shine: '#e6cd9a', rungs: [
+    ['grain_mash', 'Grain Mash'], ['grain_porridge', 'Grain Porridge'],
+    ['grain_plate', 'Grain Plate'], ['harvest_board', 'Harvest Board'],
+  ] },
+  sweet:  { color: '#d07aa0', shine: '#f2b6cd', rungs: [
+    ['sugar_bowl', 'Sugar Bowl'], ['sweet_pudding', 'Sweet Pudding'],
+    ['sweet_platter', 'Sweet Platter'], ['sugar_feast', 'Sugar Feast'],
+  ] },
+};
+for (const fam of Object.values(FAMILY_DISHES)) {
+  fam.rungs.forEach(([name, label], i) => {
+    const rung = IMPROVISED[i + 1];
+    add({
+      name, label, food: rung.food, stack: rung.stack, cooked: rung.cooked,
+      color: fam.color, shine: fam.shine, improvised: rung.name,
+    });
+  });
+}
+
 /** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
 export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);
+
+/**
+ * Family name to its four dish item names, `mixed_bowl`'s rung first.
+ * `Recipes.js` crosses it with the ladder; `Trade.js` prices it off the rung.
+ */
+export const FAMILY_DISH_NAMES = Object.fromEntries(
+  Object.entries(FAMILY_DISHES).map(([fam, d]) => [fam, d.rungs.map(([n]) => n)]),
+);
 
 /** The species, sorted by rarity. Trade.js reads it for prices, main.js for the catch. */
 export const FISH = FISH_SPECIES;

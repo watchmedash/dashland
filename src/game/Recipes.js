@@ -1,7 +1,7 @@
 // Crafting + smelting recipes. Shaped recipes use a character grid; shapeless
 // ones just need the right multiset of ingredients.
 
-import { itemIdOf, FISH_ITEMS, ITEMS } from './Items.js';
+import { itemIdOf, FISH_ITEMS, ITEMS, FAMILY_DISH_NAMES } from './Items.js';
 
 /** @type {Array<{out:string,count:number,shape?:string[],key?:object,in?:string[],table?:boolean}>} */
 const RAW = [
@@ -826,6 +826,143 @@ const IMPROVISED_GATES = [
 export const IMPROVISED_LADDER = IMPROVISED_GATES.map((g) => ({ ...g, out: itemIdOf(g.name) }));
 
 /**
+ * The eight families, and the ingredients that seed them.
+ *
+ * The rung says how much of a meal the pile is. This says what it *is*, and it
+ * is the half the owner was missing: five outcomes answered sixteen trillion
+ * fillings, so `fish + fish` and a truffle beside a goblin shark were the same
+ * nondescript bowl. Crossed with the ladder it is thirty-seven, and every one
+ * of them says something true about what went in.
+ *
+ * **Only the raws are listed, and three of the eight are not listed at all.**
+ * The fifteen species come off `FISH_ITEMS`, the sweets come off `treat`, and
+ * every one of the fifty-nine dishes the kitchen already makes is resolved by
+ * walking its own recipe — see `kitchenFamilyOf`. So this table is the ingredients
+ * with nothing behind them to read, and a new crop is a line here rather than
+ * an audit of a hundred and seventeen names.
+ *
+ * **Two ingredients are deliberately in no family.** A stick and a lump of ice
+ * are in the pantry because a skewer and an ice cream need them, and neither is
+ * a thing a dish can be *about*: counting them would let nine sticks name the
+ * dish. They still feed the ladder's arithmetic, they just never win it.
+ */
+const BASE_FAMILY = {
+  reef: ['kelp', 'dried_kelp', 'sea_lettuce', 'sea_grape', 'crab_meat', 'cooked_crab_meat'],
+  // Animal produce rather than flesh, which is why the egg and the cheese are
+  // here: the question a family answers is what the dish tastes of, and an
+  // omelette is not a salad.
+  meat: ['meat', 'cooked_meat', 'poultry', 'cooked_poultry', 'egg', 'cooked_egg', 'cheese'],
+  fruit: ['apple', 'berries', 'cherry', 'grape', 'watermelon', 'cactusfruit', 'lingonberry', 'tomato'],
+  veg: [
+    'carrot', 'corn', 'squash', 'greenbean', 'cooked_greenbean', 'snowpea', 'hops',
+    'pumpkin', 'roast', 'mireroot', 'stonecrop', 'icecapmoss', 'swampreed', 'lotus', 'agave',
+  ],
+  fungus: ['mushroom', 'cave_mushroom', 'truffle'],
+  grain: ['wheat', 'bread'],
+  sweet: ['honeycomb'],
+};
+
+/** name -> family, for the raws, the fifteen species, the sweets and the 32. */
+const FAMILY_OF_NAME = new Map();
+for (const [fam, names] of Object.entries(BASE_FAMILY)) {
+  for (const n of names) FAMILY_OF_NAME.set(n, fam);
+}
+for (const n of FISH_ITEMS) FAMILY_OF_NAME.set(n, 'fish');
+FAMILY_OF_NAME.set('fish', 'fish');
+FAMILY_OF_NAME.set('cooked_fish', 'fish');
+for (const [fam, names] of Object.entries(FAMILY_DISH_NAMES)) {
+  for (const n of names) FAMILY_OF_NAME.set(n, fam);
+}
+
+const _family = new Map();
+const _familyBusy = new Set();
+
+/**
+ * Which family an ingredient belongs to, or null for the two that belong to
+ * none and for anything the walk cannot decide.
+ *
+ * A dish is resolved by **walking the recipe that makes it**, weighted by the
+ * same nourishment the ladder counts, so a Sushi Plate is fish because two of
+ * the three things in it are, and a Reef Chowder is reef because the kelp and
+ * the crab outweigh the fish. That is fifty-nine dishes classified by the table
+ * that already exists rather than by a second table beside it that could drift
+ * from it — a dish whose recipe is retuned reclassifies itself.
+ *
+ * Memoised, and guarded against a cycle: the recipe graph has none today, and a
+ * recipe that ever eats its own output would otherwise recurse forever here
+ * rather than in the place that broke it.
+ */
+export function kitchenFamilyOf(id) {
+  if (!id) return null;
+  if (_family.has(id)) return _family.get(id);
+  const name = ITEMS[id]?.name;
+  const flat = FAMILY_OF_NAME.get(name);
+  if (flat) { _family.set(id, flat); return flat; }
+  if (ITEMS[id]?.treat) { _family.set(id, 'sweet'); return 'sweet'; }
+  if (_familyBusy.has(id)) return null;
+  _familyBusy.add(id);
+  let out = null;
+  const rec = RECIPES.find((r) => r.out === id);
+  if (rec) {
+    const w = new Map();
+    for (const c of recipeCost(rec)) {
+      const fam = kitchenFamilyOf(c.item);
+      if (fam) w.set(fam, (w.get(fam) || 0) + kitchenNutrition(c.item) * c.count);
+    }
+    out = dominant(w);
+  }
+  _familyBusy.delete(id);
+  _family.set(id, out);
+  return out;
+}
+
+/**
+ * The winner of a weighing, or null if nothing clearly won.
+ *
+ * Two conditions, and the second is what stops the name being a lie. The top
+ * family has to be **alone at the top** — a pile that is half fish and half
+ * meat is neither — and it has to hold **two fifths of everything that was
+ * classified**, so one fish in a nine-slot spread of vegetables, fruit, grain
+ * and sweets does not make the dish about the fish. A pile that fails either is
+ * a medley and comes back on the five unnamed rungs, which is the honest answer
+ * for it and is why those five are still worth having.
+ */
+function dominant(weights) {
+  let top = null, topW = 0, second = 0, total = 0;
+  for (const [fam, n] of weights) {
+    total += n;
+    if (n > topW) { second = topW; top = fam; topW = n; }
+    else if (n > second) second = n;
+  }
+  if (!top || topW === second) return null;
+  return topW >= 0.4 * total ? top : null;
+}
+
+/** What the pile is about, weighted by nourishment. Null for a medley. */
+export function pileFamily(ids) {
+  const w = new Map();
+  for (const id of ids) {
+    const fam = kitchenFamilyOf(id);
+    if (fam) w.set(fam, (w.get(fam) || 0) + kitchenNutrition(id));
+  }
+  return dominant(w);
+}
+
+/**
+ * The rung crossed with the family: the item the cooker actually hands back.
+ *
+ * The bottom rung has no family dish and is not meant to: two coins of odds and
+ * ends is scraps whatever it is made of, and naming eight kinds of scrap would
+ * have cost eight item ids to say nothing. Everything else falls back to its
+ * plain rung, so an id that ever went missing costs a name and never a meal.
+ */
+function dishFor(rung, fam) {
+  const i = IMPROVISED_LADDER.indexOf(rung);
+  const named = fam && i >= 1 ? itemIdOf(FAMILY_DISH_NAMES[fam]?.[i - 1]) : 0;
+  return named || rung.out;
+}
+
+/**
  * What the cooker makes of a set of ingredients that matches no named recipe.
  *
  * The owner's rule: *"everything ingredients should have a result … fish with
@@ -853,6 +990,14 @@ export const IMPROVISED_LADDER = IMPROVISED_GATES.map((g) => ({ ...g, out: itemI
  *
  * @param {number[]} ids one item id per filled slot, duplicates included
  * @param {(id:number)=>number} valueOf `Trade.valueOf`
+ * **The rung is not the dish.** The two gates below pick how much of a meal the
+ * pile is worth being; `dishFor` then crosses that with `pileFamily` to pick
+ * what it is *called*, and the thirty-two family dishes carry their rung's own
+ * food value, stack and price. Nothing in the arithmetic below can see the
+ * family and nothing about the family can move a number, which is deliberate:
+ * the guarantee above is a claim about two columns of the rung table, and
+ * renaming the output cannot touch either one.
+ *
  * @param {(id:number)=>number} sellPriceOf `Trade.sellPriceOf`, what he pays
  * @returns {{out:number, count:number, kind:'improvised'}|null}
  */
@@ -871,7 +1016,7 @@ export function kitchenFallback(ids, valueOf, sellPriceOf) {
     if (!rung.out) continue;
     if (food >= rung.needFood && value >= rung.needValue) best = rung;
   }
-  return best ? { out: best.out, count: 1, kind: 'improvised' } : null;
+  return best ? { out: dishFor(best, pileFamily(kept)), count: 1, kind: 'improvised' } : null;
 }
 
 /** Ingredient multiset a recipe consumes, as [{item, count}]. */

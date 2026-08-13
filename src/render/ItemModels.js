@@ -886,6 +886,49 @@ export const POSE = {
   reef_banquet:     food('steamer', 0.28, false),
   grand_gateau:     food('cake-birthday', 0.28, false),
 
+  // --- the composed dishes --------------------------------------------------
+  //
+  // Eight families over four rungs, and every one of them is a model the kit
+  // already has and several of them are models a named dish already uses. That
+  // is the same reuse the catalogue above makes six times over — a broth bowl
+  // is a broth bowl — and it is load-bearing here rather than convenient: these
+  // thirty-two are named on the spot for a pile that matched nothing, so the
+  // one thing they must not do is look scarcer than the dishes worth finding.
+  // The family is carried by the name and by the icon tint; the rung is carried
+  // by the vessel, which climbs bowl to pot to plate to board across each row.
+  fish_broth:       food('bowl-soup', 0.28, true),
+  fish_stew:        food('pot-stew', 0.28, false),
+  fish_board:       food('plate-deep', 0.28, true),
+  angler_feast:     food('maki-roe', 0.28, true),
+  meat_hash:        food('plate-sauerkraut', 0.28, true),
+  meat_stew:        food('pan-stew', 0.28, true),
+  meat_roast:       food('whole-ham', 0.28, false),
+  hunter_feast:     food('turkey', 0.28, false),
+  reef_broth:       food('bowl-broth', 0.28, true),
+  reef_pot:         food('pot', 0.28, false),
+  reef_plate:       food('plate-dinner', 0.28, true),
+  tide_banquet:     food('steamer', 0.28, false),
+  fruit_bowl:       food('bowl', 0.28, false),
+  fruit_compote:    food('honey', 0.28, false),
+  fruit_platter:    food('plate-deep', 0.28, true),
+  orchard_feast:    food('plate-rectangle', 0.28, true),
+  garden_bowl:      food('salad', 0.28, true),
+  garden_stew:      food('pan-stew', 0.28, true),
+  garden_plate:     food('plate-dinner', 0.28, true),
+  garden_feast:     food('plate-rectangle', 0.28, true),
+  spore_bowl:       food('bowl-cereal', 0.28, true),
+  cap_stew:         food('pot-stew', 0.28, false),
+  cap_plate:        food('dim-sum', 0.28, true),
+  forest_feast:     food('steamer', 0.28, false),
+  grain_mash:       food('bowl-cereal', 0.28, true),
+  grain_porridge:   food('bowl-broth', 0.28, true),
+  grain_plate:      food('pancakes', 0.28, true),
+  harvest_board:    food('plate-rectangle', 0.28, true),
+  sugar_bowl:       food('ice-cream-cup', 0.28, false),
+  sweet_pudding:    food('pudding', 0.28, false),
+  sweet_platter:    food('donut-sprinkles', 0.28, false),
+  sugar_feast:      food('cake-birthday', 0.28, false),
+
   // --- the fish -------------------------------------------------------------
   //
   // Fifteen species, and `height` is the only thing that varies: it is what the
@@ -1648,6 +1691,40 @@ export const BY_NAME = {
   harvest_feast:    'harvest_feast',
   reef_banquet:     'reef_banquet',
   grand_gateau:     'grand_gateau',
+  // The thirty-two composed dishes. Identity again, for the reason the line
+  // above says: this table is also the list of what has a model.
+  fish_broth:       'fish_broth',
+  fish_stew:        'fish_stew',
+  fish_board:       'fish_board',
+  angler_feast:     'angler_feast',
+  meat_hash:        'meat_hash',
+  meat_stew:        'meat_stew',
+  meat_roast:       'meat_roast',
+  hunter_feast:     'hunter_feast',
+  reef_broth:       'reef_broth',
+  reef_pot:         'reef_pot',
+  reef_plate:       'reef_plate',
+  tide_banquet:     'tide_banquet',
+  fruit_bowl:       'fruit_bowl',
+  fruit_compote:    'fruit_compote',
+  fruit_platter:    'fruit_platter',
+  orchard_feast:    'orchard_feast',
+  garden_bowl:      'garden_bowl',
+  garden_stew:      'garden_stew',
+  garden_plate:     'garden_plate',
+  garden_feast:     'garden_feast',
+  spore_bowl:       'spore_bowl',
+  cap_stew:         'cap_stew',
+  cap_plate:        'cap_plate',
+  forest_feast:     'forest_feast',
+  grain_mash:       'grain_mash',
+  grain_porridge:   'grain_porridge',
+  grain_plate:      'grain_plate',
+  harvest_board:    'harvest_board',
+  sugar_bowl:       'sugar_bowl',
+  sweet_pudding:    'sweet_pudding',
+  sweet_platter:    'sweet_platter',
+  sugar_feast:      'sugar_feast',
   // The fifteen species. Identity again, and the map is what makes them models
   // rather than sprites in all three places at once: the fist, the icon grid and
   // the ground drop. `fish` above stays the food kit's fillet — see the note on

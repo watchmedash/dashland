@@ -296,6 +296,20 @@ const OVERRIDE = {
 };
 
 /**
+ * The thirty-two family dishes, each priced at the rung it is a renaming of.
+ *
+ * Copied rather than typed for the reason the numbers above are typed at all:
+ * each of those five is set strictly under the coin gate its rung is awarded
+ * at, and that inequality is the whole guarantee on the coin side. A Fish Stew
+ * is a Hearty Bowl that says what is in it, so it is ten coins because a Hearty
+ * Bowl is ten coins, and moving one moves all nine of them together.
+ */
+for (let id = 1; id < N_ITEMS; id++) {
+  const rung = ITEMS[id]?.improvised;
+  if (rung) OVERRIDE[ITEMS[id].name] = OVERRIDE[rung];
+}
+
+/**
  * The fifteen fish species, priced off their rarity and nothing else.
  *
  * The owner: *"remember the rarity of fish? that means each fish items should
@@ -660,7 +674,12 @@ function larderPool() {
     // grow without this file being edited, and it is right for anything a
     // kitchen makes; it is wrong for fifteen raw fish, which would be half the
     // pool and would put the one thing a rod exists to produce on a shelf.
-    if (!def || WARE_IDS.has(id) || !def.food || def.tool || def.wild) continue;
+    // `improvised` is the thirty-two composed dishes, and they are refused for
+    // the same reason `wild` is: admitting by `food` is right for anything a
+    // kitchen makes on purpose, and wrong for a name the kitchen invents on the
+    // spot for a pile of leftovers. Thirty-two of them would be a third of this
+    // pool. The original five rungs carry no flag and stay on the shelf.
+    if (!def || WARE_IDS.has(id) || !def.food || def.tool || def.wild || def.improvised) continue;
     // Rich food in smaller lots, so a merchant is never a canteen — and sweets
     // in smaller lots still, because the whole point of the treat band is that
     // it is dear. A line of five lollipops in every third pack would make the

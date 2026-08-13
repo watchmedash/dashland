@@ -2626,7 +2626,40 @@ export class UI {
     el.firstElementChild.style.transform = `rotate(${ang}rad)`;
   }
 
-  toast(text, iconItem = 0, ms = 2000) {
+  /**
+   * The same line, said to a device with no keys.
+   *
+   * A key name in player-facing text is a lie on a phone, and this is the layer
+   * that can tell: `<kbd>` is rendered here, the touch flag is on `input`, and
+   * the game code that writes the text has no business asking which platform is
+   * reading it. So the strings stay written for the keyboard, in one voice, and
+   * the translation happens once, at the door.
+   *
+   * Two rules, and no more, because a general dictionary of key names would
+   * quietly rewrite text nobody had checked:
+   *
+   *   - `<kbd>` runs come out. "<kbd>RMB</kbd> Trade" is "Trade" on a phone,
+   *     where there is one button that could possibly mean it.
+   *   - "Press K" becomes the gesture that actually opens Growth. The skill
+   *     toasts are the reason this exists: they fire on every level, they are
+   *     the only thing that ever sends a player to that screen, and on a phone
+   *     they named a key that does not exist to open a screen that could not be
+   *     reached. See `_tapHoldBtn` for the door they now point at.
+   *
+   * Both are exact matches against text this repo owns. If a string changes
+   * shape the worst case is that the keyboard wording survives to the phone,
+   * which is where it started.
+   */
+  _keyless(text) {
+    if (!this.game.input?.touch || !text) return text;
+    return String(text)
+      .replace(/<kbd>[^<]*<\/kbd>\s*\+?\s*/g, '')
+      .replace(/Press K(?: to spend (?:it|them))?\.?/g, 'Hold the bag.')
+      .trim();
+  }
+
+  toast(rawText, iconItem = 0, ms = 2000) {
+    const text = this._keyless(rawText);
     // merge repeats of the same pickup instead of stacking a wall of toasts
     const existing = [...this.el.toasts.children].find((c) => c.dataset.key === text);
     if (existing) {
@@ -2667,7 +2700,8 @@ export class UI {
     d.dataset.kill = setTimeout(() => d.remove(), 340);
   }
 
-  setHint(text) {
+  setHint(raw) {
+    const text = this._keyless(raw);
     if (!text) { this.el.hint.classList.add('hidden'); return; }
     this.el.hint.innerHTML = text;
     this.el.hint.classList.remove('hidden');

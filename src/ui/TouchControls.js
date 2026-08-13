@@ -289,7 +289,8 @@ export class TouchControls {
     // Escape and E go through `justPressed` for one frame, which is how the
     // keyboard delivers them, so the same handler in main.js opens the same
     // screen with the same swallow-the-key logic.
-    this._tapBtn(this.buttons.bag, 'KeyE');
+    // The bag taps to the inventory and holds to Growth. See `_tapHoldBtn`.
+    this._tapHoldBtn(this.buttons.bag, 'KeyE', 'KeyK');
     this._tapBtn(this.buttons.pause, 'Escape');
     this._toggleBtn(this.buttons.sneak);
 
@@ -410,6 +411,69 @@ export class TouchControls {
   /** A key, held. Space has to be a hold: it is also swim-up and climb. */
   _keyBtn(el, code) {
     this._pressBtn(el, () => this.input.hold(code, false), () => this.input.hold(code, true));
+  }
+
+  /**
+   * A button with a second screen behind a hold of it. The bag, and Growth.
+   *
+   * The skill tree was unreachable on a phone. It is on `K`, `K` is the only
+   * way in, and a thumb has no keyboard — while the game went on raising a
+   * toast telling the player to press it every time they earned a point. Two
+   * defects in one: the toast named a key that does not exist, and behind the
+   * lie there was genuinely no door.
+   *
+   * A sixth thumb button is what this is instead of, for the reason written out
+   * over `_wireHotbar`: the right hand already has four and two of them are
+   * pressed constantly. This is the same answer drop got — put the second
+   * meaning on a hold of the control the first meaning already lives on. Growth
+   * belongs on the bag rather than anywhere else because the two screens are
+   * the same question ("what have I got"), because both are things you open
+   * between fights rather than during one, and because a hold is exactly right
+   * for the rarer of a pair.
+   *
+   * DROP_DELAY, not a number of its own: one hold length across the whole layer
+   * is what makes a hold feel like a gesture rather than a per-button quirk.
+   *
+   * The cost is that the bag now opens on release rather than on press. That is
+   * the unavoidable half of the trade — a screen opened on press cannot then be
+   * taken back if the thumb stays down — and at a tap of well under 150ms it is
+   * not perceptible. The `on` class going on at press is what keeps the button
+   * feeling immediate while that plays out.
+   */
+  _tapHoldBtn(el, tapCode, holdCode) {
+    let timer = null, held = false;
+    el.addEventListener('pointerdown', (e) => {
+      clearTimeout(timer);
+      held = false;
+      el.classList.add('on');
+      timer = setTimeout(() => {
+        held = true;
+        // The same short pulse the drop hold uses, and the only signal that the
+        // hold has been taken: the screen it opens arrives a frame later and
+        // says the rest.
+        navigator.vibrate?.(12);
+        this.input.tap(holdCode);
+        el.classList.remove('on');
+      }, DROP_DELAY);
+      e.preventDefault();
+    });
+    const up = () => {
+      clearTimeout(timer);
+      timer = null;
+      el.classList.remove('on');
+      if (!held) this.input.tap(tapCode);
+      held = false;
+    };
+    el.addEventListener('pointerup', up);
+    // Not `up`: a cancelled gesture is one the player did not finish, and
+    // opening the inventory because iOS took the touch away is worse than
+    // opening nothing.
+    el.addEventListener('pointercancel', () => {
+      clearTimeout(timer);
+      timer = null;
+      held = false;
+      el.classList.remove('on');
+    });
   }
 
   /** A button that fires a key for one frame. */

@@ -37,6 +37,26 @@
 
 import { Ambience } from './Ambience.js';
 
+// `step` is a per-material trim applied ONLY to footsteps, and only two
+// materials have one.
+//
+// The other four verbs on this table (dig, break, place, arrow impact) are
+// single events where the material is the news, and their spread across the
+// nine rows is deliberate. A footstep is not: it is the same action on nine
+// surfaces, several times a second, for the whole game, and its loudness
+// carries no information at all. Measured 400Hz-weighted (A) RMS of one step,
+// dry: stone -55.8, soil -56.0, grass -55.0, sand -54.1, snow -54.6,
+// wood -56.5, water -52.5 — a 2.4dB spread across the seven, which is parity —
+// and then glass at -44.5 and metal at -44.3, ELEVEN dB above all of them.
+// Ice is glass and a frozen lake is a floor you cross in winter; iron and gold
+// blocks and lanterns are metal and people build with them. Walking onto one
+// was a step change in volume with nothing behind it.
+//
+// The cause is that `_burst` gives every material one gain and these two rows
+// answer it loudest: `hi` at 9000/6000 puts the band where the ear is most
+// sensitive, `tone` at 0.55/0.62 hangs the largest tuned body in the table
+// under it, and `decay` at 0.16/0.28 rings it for two to three times as long.
+// All of that is right for breaking a pane of glass. None of it is a boot.
 const MATERIAL_TUNING = {
   stone: { lo: 480, hi: 2400, decay: 0.10, tone: 0.20, noise: 1.0, body: 150 },
   soil: { lo: 200, hi: 1100, decay: 0.13, tone: 0.10, noise: 1.0, body: 95 },
@@ -44,8 +64,8 @@ const MATERIAL_TUNING = {
   sand: { lo: 1400, hi: 7000, decay: 0.11, tone: 0.02, noise: 1.0, body: 0 },
   snow: { lo: 600, hi: 3600, decay: 0.13, tone: 0.04, noise: 1.0, body: 0 },
   wood: { lo: 300, hi: 1900, decay: 0.11, tone: 0.42, noise: 0.7, body: 220 },
-  glass: { lo: 1800, hi: 9000, decay: 0.16, tone: 0.55, noise: 0.5, body: 1400 },
-  metal: { lo: 900, hi: 6000, decay: 0.28, tone: 0.62, noise: 0.4, body: 620 },
+  glass: { lo: 1800, hi: 9000, decay: 0.16, tone: 0.55, noise: 0.5, body: 1400, step: 0.30 },
+  metal: { lo: 900, hi: 6000, decay: 0.28, tone: 0.62, noise: 0.4, body: 620, step: 0.29 },
   water: { lo: 300, hi: 2600, decay: 0.22, tone: 0.10, noise: 1.0, body: 0 },
 };
 
@@ -443,7 +463,35 @@ export class Audio {
     const comp = this.ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 22; comp.ratio.value = 5;
     comp.attack.value = 0.004; comp.release.value = 0.22;
-    this.master.connect(this.muffle).connect(comp).connect(this.ctx.destination);
+
+    // The ceiling, and it is new because the mix did not have one.
+    //
+    // The compressor above is a mix tool, not a limiter: -14 dB at 5:1 with a
+    // 4ms attack shapes the average and lets transients straight past. Measured
+    // at the destination through the shipped chain at the DEFAULT master of
+    // 0.7, four husks winding up together peaked at +2.07 dBFS with 2718
+    // samples hard against full scale — and four is not a pathological number,
+    // it is exactly what VOICE_CAP.mob 28 over VOICE_COST.mob 7 permits, with
+    // `attack` allowed to outbid the budget on top of that. One husk plus a
+    // critical hit reaches -0.00 dBFS with the slider at 100. Thunder at its
+    // loudest roll reaches -0.48.
+    //
+    // A waveshaper rather than a lower threshold or a higher ratio, because
+    // nothing that is not already clipping may be touched: the curve is the
+    // exact identity below 0.6 and joins its knee with a matching first
+    // derivative, so the entire normal mix passes through unchanged and only
+    // what would have clipped is bent. The 0.25 in front and the ±4 domain the
+    // curve is built over are what let it catch a signal up to +12 dBFS —
+    // a WaveShaper clamps its input to ±1 before the lookup, so without the
+    // scaling everything over full scale would land on the last table entry and
+    // be hard-clipped after all, which is the defect rather than the fix.
+    // 4x oversampled, or the bend aliases at exactly the moments it is working.
+    const trim = this.ctx.createGain(); trim.gain.value = 0.25;
+    const ceil = this.ctx.createWaveShaper();
+    ceil.curve = this._ceilingCurve(4);
+    ceil.oversample = '4x';
+    this.master.connect(this.muffle).connect(comp).connect(trim).connect(ceil)
+      .connect(this.ctx.destination);
 
     this.sfxBus = this.ctx.createGain(); this.sfxBus.gain.value = 1;
     this.sfxBus.connect(this.master);
@@ -599,11 +647,65 @@ export class Audio {
       Math.max(50, life * 1000 + 400));
   }
 
+  /**
+   * The soft ceiling's transfer curve, over an input domain of ±`k`.
+   *
+   * Identity for |x| <= 0.6, then `0.6 + 0.4*tanh((|x|-0.6)/0.4)`, which is
+   * continuous in value AND in slope at the join (the derivative of the tanh
+   * branch is sech²(0) = 1 there) and asymptotes to exactly 1. Sampling is
+   * linear in the input, and the identity half of a linear ramp survives the
+   * WaveShaper's own linear interpolation exactly, so below the knee this node
+   * is a wire.
+   */
+  _ceilingCurve(k = 4, n = 8192) {
+    const c = new Float32Array(n);
+    const T = 0.6;
+    for (let i = 0; i < n; i++) {
+      const x = ((i / (n - 1)) * 2 - 1) * k;
+      const a = Math.abs(x);
+      c[i] = a <= T ? x : Math.sign(x) * (T + (1 - T) * Math.tanh((a - T) / (1 - T)));
+    }
+    return c;
+  }
+
+  /**
+   * The shared pink-noise buffer. Every bed, every footstep, every roar's
+   * breath and the whole of thunder is this one buffer read at a different
+   * rate, so anything wrong with it is wrong with two thirds of the game.
+   *
+   * The trailing highpass is the fix for something that was: measured, the raw
+   * Kellett generator below produced a buffer with a DC offset of -0.0301,
+   * which is only 21.9 dB under its own RMS, and a 0.1s running mean wandering
+   * between -0.228 and +0.199 — a sub-10Hz random walk as large as the signal
+   * itself. Nothing can reproduce it. Everything pays for it: it put the
+   * buffer's peak sample at +3.9 dBFS, so every gain constant in this file was
+   * calibrated against a crest factor inflated by content no speaker will move;
+   * it left the cave bed running at a DC offset 27.7 dB under its own level and
+   * the submerged bed at 21.0 dB, which is a headphone driver held off centre
+   * for as long as the player is underground; and because every noise voice
+   * starts at `Math.random() * 2` seconds into the buffer, each one inherited a
+   * different arbitrary offset from that walk.
+   *
+   * Two one-pole highpasses at 18Hz, which is below anything the pink tilt is
+   * for and above the walk. Run twice over the buffer so the filter state is
+   * already settled on the second pass — the buffer loops, and a first-sample
+   * transient in a looping source is a thump every 2.5 seconds. Then the total
+   * RMS is restored to what it was.
+   *
+   * Restoring RMS rather than leaving it is why the darkest voices come UP:
+   * re-measured, 141 of 144 sounds moved by under 1.5dB, and the exceptions
+   * are `break:soil` +4.0, `dig:soil` +3.4 and `dig:snow` +1.8 — the three most
+   * low-passed noise voices in the game, which had been spending part of their
+   * gain on rumble no speaker would move. That is a correction and not a
+   * regression: it lands break:soil at -46.2 against break:stone's -46.7,
+   * where it had been sitting 4.5dB under it for no reason anyone chose.
+   */
   _noise(seconds) {
     const n = Math.floor(this.ctx.sampleRate * seconds);
     const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
     const d = buf.getChannelData(0);
     let b0 = 0, b1 = 0, b2 = 0;
+    let e0 = 0;
     for (let i = 0; i < n; i++) {
       const w = Math.random() * 2 - 1;
       // gently pinkened noise reads warmer than pure white
@@ -611,7 +713,26 @@ export class Audio {
       b1 = 0.96300 * b1 + w * 0.2965164;
       b2 = 0.57000 * b2 + w * 1.0526913;
       d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.22;
+      e0 += d[i] * d[i];
     }
+    const a = 1 / (1 + (2 * Math.PI * 18) / this.ctx.sampleRate);
+    for (let stage = 0; stage < 2; stage++) {
+      // Lap 0 is a warm-up that throws its output away, so the state entering
+      // lap 1 is the state a looping source is actually in at the seam.
+      let y = 0, xp = d[n - 1];
+      for (let lap = 0; lap < 2; lap++) {
+        for (let i = 0; i < n; i++) {
+          const x = d[i];
+          y = a * (y + x - xp);
+          xp = x;
+          if (lap) d[i] = y;
+        }
+      }
+    }
+    let e1 = 0;
+    for (let i = 0; i < n; i++) e1 += d[i] * d[i];
+    const g = e1 > 0 ? Math.sqrt(e0 / e1) : 1;
+    for (let i = 0; i < n; i++) d[i] *= g;
     return buf;
   }
 
@@ -681,7 +802,12 @@ export class Audio {
     const cfg = MATERIAL_TUNING[mat] || MATERIAL_TUNING.stone;
     if (mat === 'water') return this._waterStep(pos);
     const pitch = 0.85 + Math.random() * 0.25;
-    if (!this._burst(mat, { gain: 0.20, pitch, dur: 0.9, pos, cat: 'step' })) return;
+    // Both layers take the trim, not just the burst: the scuff below carries a
+    // fixed level of its own through `cfg.hi`, which for glass is a 6.3kHz
+    // sweep, so trimming only the impact would have left the brightest half of
+    // the offending step at full volume.
+    const trim = cfg.step ?? 1;
+    if (!this._burst(mat, { gain: 0.20 * trim, pitch, dur: 0.9, pos, cat: 'step' })) return;
     const soft = mat === 'sand' || mat === 'snow' || mat === 'grass' || mat === 'soil';
     const t = this.ctx.currentTime + 0.012 + Math.random() * 0.02;
     const d = (soft ? 0.11 : 0.05) * (0.8 + Math.random() * 0.5);
@@ -696,7 +822,7 @@ export class Audio {
     bp.Q.value = 0.5;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.075 * (soft ? 1.25 : 0.8), t + 0.012);
+    g.gain.linearRampToValueAtTime(0.075 * (soft ? 1.25 : 0.8) * trim, t + 0.012);
     g.gain.exponentialRampToValueAtTime(0.0004, t + d);
     src.connect(bp).connect(g).connect(out);
     src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
@@ -2421,6 +2547,21 @@ export class Audio {
 
     const tick = () => {
       if (!this.ctx) return;
+      // A hidden tab suspends the context (main.js does this on
+      // visibilitychange) and the context clock stops with it — but this timer
+      // is wall-clock and does not. Measured: thirty seconds behind a hidden
+      // tab scheduled fourteen oscillators, every one of them at the same
+      // frozen `currentTime` of 4.34, because that is what `currentTime` reads
+      // while suspended. They are not spread over the next three minutes of
+      // pad; they are all in the past by the time the player comes back, so
+      // they all sound at once, with their attack ramps already elapsed. Five
+      // minutes away is about a hundred and forty voices detonating together on
+      // a bus meant to carry six.
+      //
+      // Re-armed rather than returned from, or the pad never plays again after
+      // the first alt-tab. One second is a beat of silence at the top of a
+      // 12-second chord and cannot be heard.
+      if (this.ctx.state !== 'running') { this._musicTimer = setTimeout(tick, 1000); return; }
       const root = roots[chordIndex % roots.length];
       chordIndex++;
       const dur = 11 + Math.random() * 5;

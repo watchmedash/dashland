@@ -358,6 +358,17 @@ export class Ambience {
   _tick() {
     this._timer = null;
     if (!this.ctx || this.ctx.state === 'closed') return;
+    // Suspended is not closed. A hidden tab suspends the context and freezes
+    // its clock, but this is a wall-clock timer and keeps running: every bird,
+    // drip and gust scheduled from here while away is scheduled at the same
+    // frozen `currentTime`, and they all sound together the instant the player
+    // comes back. Measured with the music tick alongside it, sixty seconds
+    // hidden queued thirty-seven voices at ONE timestamp.
+    //
+    // Re-armed on the way out, not returned from — dropping the timer here
+    // would end the ambience for the rest of the session the first time the
+    // player looked at another tab.
+    if (this.ctx.state !== 'running') { this._timer = setTimeout(this._tick, 1000); return; }
     const st = this._state;
     const air = BIOME_AIR[st.biome | 0] || DEFAULT_AIR;
     const night = nightness(st.time);

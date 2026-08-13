@@ -526,7 +526,8 @@ const LOG_IDS = {
 };
 
 /**
- * Quicksand pools: how big, how rare, and how deep.
+ * Sink patches — quicksand in a desert, powder snow in a snowfield: how big,
+ * how rare, and how deep.
  *
  * Not on a lattice, unlike the springs, the lakes and the fallen logs, and the
  * difference is what the feature IS. Those three are objects — a pool, a tarn,
@@ -545,29 +546,37 @@ const LOG_IDS = {
  * finding out what it was.
  *
  * QS_RIM is the whole of the legibility argument, and it is worth more than the
- * colour. A pool is TWO layers deep in the middle and ONE at the edge, so the
- * first thing that happens to anybody walking into one is that they go in up to
- * the knee, in a patch of ground that is visibly not the colour of the desert,
- * and stop. Standing in the shallow ring is not a trap: one layer of quicksand
- * bottoms out with the feet on solid sand and the whole body in the clear.
- * Everything that follows is then a choice the player made with the evidence in
- * front of them, which is the difference between a hazard and an ambush.
+ * colour — which matters most for the snow, where there is no colour to have.
+ * A patch is deep in the middle and exactly ONE layer at the edge, so the first
+ * thing that happens to anybody walking into one is that they go in to the
+ * ankle and stop, with solid ground under the boot and the whole body clear.
+ * Everything after that is a choice the player made with the evidence in front
+ * of them, which is the difference between a hazard and an ambush.
+ *
+ * The two members differ only in how deep the middle is, and that is the whole
+ * of what makes them feel unalike. A quicksand pool is two layers, so the eye
+ * goes under and the escape is a shuffle. A snow drift is three, so you fall
+ * in — it is a fall, that is the point of the block — and the escape is longer
+ * than the shiver takes to start.
  */
 const QS_FREQ = 34;
 const QS_THR = 0.40;
 const QS_RIM = 0.06;
+const SINK_DEPTH_SAND = 2;
+const SINK_DEPTH_SNOW = 3;
 /**
- * Rock that must stand under a pool before a cave may open, in blocks.
+ * Rock that must stand under a patch before a cave may open, in blocks.
  *
- * The ordinary skin is 2.2, which is exactly wrong here by about a cell. A
- * two-layer pool occupies depths 0..2, so its floor is the cell centred at
- * depth 2.5 — and 2.5 is past 2.2, so the carve is allowed to take it. The
- * result is not a cosmetic seam: it is a pool of quicksand with the roof of a
- * cavern for a bottom, and a body that sinks through it arrives in the dark at
- * whatever speed the drop is worth. This is the pool depth plus the ordinary
- * skin, so the floor is solid and so is the cell under it.
+ * The ordinary skin is 2.2, which is wrong here by up to two cells. A
+ * three-layer drift occupies depths 0..3, so its floor is the cell centred at
+ * depth 3.5 — well past 2.2, so the carve is allowed to take it. The result is
+ * not a cosmetic seam: it is a drift with a cavern roof for a bottom, and a
+ * body that sinks through one arrives in the dark at whatever speed the drop is
+ * worth. This is the deepest patch plus the ordinary skin, and since the carve
+ * tests `depth >= skin` it makes the floor and the cell under it solid by
+ * construction rather than by a check afterwards.
  */
-const QS_CAVE_CLEAR = 4.4;
+const QS_CAVE_CLEAR = SINK_DEPTH_SNOW + 2.2;
 
 /** Shared scratch for the per-column passes — they are called a million times. */
 const _fillDir = [0, 0, 0];
@@ -1956,7 +1965,23 @@ export class WorldGen {
   // --- per-column voxel work -------------------------------------------------
 
   /**
-   * How many layers of quicksand this column wears, or 0.
+   * The sink block this column's ground is made of, or 0 — the desert's
+   * quicksand or the snowfield's powder snow.
+   *
+   * The biome picks it and nothing else does, which is why it is a lookup and
+   * not a parameter: a patch of soft ground is the ground it is in, gone soft.
+   * `sinkDepthOf` below asks the same question by asking whether this is 0, so
+   * the two can never disagree about where a patch is allowed to be.
+   */
+  sinkIdOf(col) {
+    const bi = this.colBiome[col];
+    if (bi === BIOME.DESERT) return ID.quicksand;
+    if (bi === BIOME.SNOW) return ID.powder_snow;
+    return 0;
+  }
+
+  /**
+   * How many layers of sink block this column wears, or 0.
    *
    * Its own method rather than four lines inside `fillColumn`, because the cave
    * carve has to ask the same question — see QS_CAVE_CLEAR — and the two
@@ -1970,13 +1995,19 @@ export class WorldGen {
    *
    * The site tests, and what each one is keeping out:
    *
-   *   - **desert only.** Quicksand is saturated sand and it has to read as the
-   *     ground it is in; the desert is the one biome where a dark wet patch is
-   *     both plausible and unmistakably not what is round it. Beach was in this
-   *     clause first and came out again because it is provably dead: a beach
-   *     column that clears the waterline test below does not exist on any of
-   *     the three seeds measured, and a clause that never fires is a claim
-   *     about the planet that is not true.
+   *   - **desert or snowfield, and nothing else** — see `sinkIdOf`. Quicksand
+   *     is saturated sand and the desert is the one biome where a dark wet
+   *     patch is both plausible and unmistakably not what is round it. Powder
+   *     snow is loose snow and `BIOME.SNOW` is the one biome whose surface is
+   *     snow in every column, which matters more here than it does for the
+   *     sand: a drift wears the same tile as the field it sits in, so a drift
+   *     on tundra gravel would be a white square on brown ground and one on a
+   *     mountainside would be a white square on stone. Tundra was in this
+   *     clause and came out for exactly that; its snow is a noise field over
+   *     bare soil, so more than half of it is not white. Beach came out for a
+   *     different reason: no beach column clears the waterline test below on
+   *     any of the three seeds measured, and a clause that never fires is a
+   *     claim about the planet that is not true.
    *   - **not in a canyon.** The gorge floor already has a palette of its own
    *     and it is the one place a player has no way to walk round anything.
    *   - **not a lake bed or bank.** A lake's containment is an argument about
@@ -1992,13 +2023,15 @@ export class WorldGen {
    *     stone anyway, and sand does not pool on a dune face.
    */
   sinkDepthOf(col, dir) {
-    if (this.colBiome[col] !== BIOME.DESERT) return 0;
+    const id = this.sinkIdOf(col);
+    if (!id) return 0;
     if (this.canyonMask[col] || this.lakeKind[col] || this.submerged[col]) return 0;
     if (this.colSlope[col] > 0.9) return 0;
     if (this.colHeight[col] < R_SEA + 1.6) return 0;
     const q = this.nDetail.fbm3(dir[0] * QS_FREQ, dir[1] * QS_FREQ, dir[2] * QS_FREQ, 3, 2, 0.5);
     if (q <= QS_THR) return 0;
-    return q > QS_THR + QS_RIM ? 2 : 1;
+    if (q <= QS_THR + QS_RIM) return 1;
+    return id === ID.powder_snow ? SINK_DEPTH_SNOW : SINK_DEPTH_SAND;
   }
 
   /**
@@ -2240,6 +2273,7 @@ export class WorldGen {
      * floor that column was always going to have.
      */
     const sinkD = this.sinkDepthOf(col, dir);
+    const sinkId = sinkD ? this.sinkIdOf(col) : 0;
 
     for (let k = 0; k < D; k++) {
       const r = R_MIN + k + 0.5;
@@ -2258,7 +2292,7 @@ export class WorldGen {
         id = ((r <= R_SEA && submerged[col]) || r <= lakeSurf[col]) ? ID.water : ID.air;
       } else {
         const depth = h - r;
-        if (depth < sinkD) id = ID.quicksand;
+        if (depth < sinkD) id = sinkId;
         else if (depth < 1.0) id = top;
         else if (depth < 4.0) id = sub;
         else id = this.stratum(r, dir[0], dir[1], dir[2]);
@@ -2285,9 +2319,9 @@ export class WorldGen {
       // genuinely reach the floor to open; it does so where a passage runs
       // close underneath, which is a handful of openings per canyon rather
       // than a sieve.
-      // A quicksand pool needs more rock under it than a skin. See
-      // QS_CAVE_CLEAR: the ordinary 2.2 leaves the pool's own floor cell
-      // carveable, and a pool with a cavern under it is a hole, not a hazard.
+      // A sink patch needs more rock under it than a skin. See QS_CAVE_CLEAR:
+      // the ordinary 2.2 leaves the patch's own floor cell carveable, and a
+      // pool with a cavern under it is a hole, not a hazard.
       const skin = canyonMask[col] ? 1.0
         : (this.sinkDepthOf(col, dir) ? QS_CAVE_CLEAR : 2.2);
       /**

@@ -986,6 +986,44 @@ const SPECTATE_FAST = 30;
 /** How often a body pressed against a hurting block is charged. See _tickContact. */
 const CONTACT_PERIOD = 0.5;
 
+/**
+ * The cold, in a drift of powder snow. See `_tickChill`.
+ *
+ * The fourth clock of this shape and deliberately the same shape as the other
+ * three — `burning` counts down, `soakT`/`_scaldT` count up to a threshold and
+ * then a period, `_starve` counts up to a period. This is the scald's shape
+ * exactly: a clock that accumulates while you are in it, bleeds off while you
+ * are not, and charges a point on a fixed cadence past a threshold. Nothing new
+ * was invented for it, which is the whole reason it can be described in a line
+ * and cleared in `respawn` beside the others.
+ *
+ * **The numbers are set against the escape, which was measured first.** Getting
+ * out of a three-deep drift with nothing in hand takes about six seconds from
+ * the floor, of which most is floating back up to the layer a jump works from.
+ * CHILL_BITE at 8 means a player who responds correctly the moment they land
+ * takes no damage at all and still sees the warning, and a player who responds
+ * two seconds late takes a point.
+ *
+ * CHILL_SHIVER puts the first visible sign at 4.4 seconds, less than the escape
+ * takes — so the cue always arrives before the damage does and always arrives
+ * while there is still time to act on it.
+ *
+ * **It can kill, and the hot spring cannot.** That difference is the argument
+ * for both. `_tickSoak` floors health at 1 because a pool looks like a rest
+ * spot and a player will genuinely walk away from the keyboard in one. Nobody
+ * idles in a drift: you cannot stand still in one without sinking, the block is
+ * actively holding you, and the exit is available on every frame. From full
+ * health the run is 8 + 19 * 1.2 = 30.8 seconds of unbroken burial, with a
+ * white screen, a shiver and a hurt sound for the last twenty-three of them.
+ * Nobody reaches the end of that by accident.
+ */
+const CHILL_BITE = 8;
+const CHILL_PERIOD = 1.2;
+/** Seconds of accumulated cold shed per second out of the snow. */
+const CHILL_THAW = 2.0;
+/** Fraction of CHILL_BITE at which the shivering starts. */
+const CHILL_SHIVER = 0.55;
+
 for (const n of ['torch', 'lantern', 'kiln_lit']) if (ID[n]) FLAME_BLOCKS.add(ID[n]);
 
 /**
@@ -1797,6 +1835,8 @@ class Game {
     this._buriedColor = [0, 0, 0];
     /** The sink block the feet were in last frame, for the edge. */
     this._wasSink = 0;
+    /** Seconds of cold in a drift, bled off slowly once out. See `_tickChill`. */
+    this.chillT = 0;
     /**
      * The spyglass, on C: 0 is the normal view and 1 is fully narrowed.
      *
@@ -3567,6 +3607,13 @@ class Game {
     this._scaldT = 0;
     this.soakT = 0;
     this._starve = 0;
+    // The cold, which is the fourth clock of that shape and would have done
+    // exactly the same thing: freeze to death in a drift and you would wake at
+    // your bed still taking a point every 1.2 seconds from snow you were
+    // nowhere near.
+    this.chillT = 0;
+    this._chillT = 0;
+    this._chillSaid = false;
     this.energy = Math.max(this.energy, 0.35);
     // Wake up at your bed if you have one and it is still there. Falling back to
     // a fresh random column is only right for a player who has never slept: on a
@@ -3636,6 +3683,7 @@ class Game {
     // burned you on contact, with no warmth first and nothing on screen to say
     // why. Cleared with breath for the same reason breath is cleared.
     this.soakT = 0;
+    this.chillT = 0;
     this.ui.refresh();
     this.input.requestLock();
   }
@@ -5624,6 +5672,8 @@ class Game {
       // sand for ever.
       this._buried = 0;
       this._wasSink = 0;
+      this.chillT = 0;
+      this._chillSaid = false;
     } else if (this.player.headInWater) {
       // Nine seconds of air, stretched by the lungs branch — 27 at lungs 4.
       // The bar is still 0..1, so what the skill changes is how long it takes
@@ -5650,6 +5700,7 @@ class Game {
       this._tickContact(dt);
       this._tickSoak(dt);
       this._tickSink(dt);
+      this._tickChill(dt);
     }
 
     // Four times a second is plenty: a sprint covers about 2 units in that time
@@ -5982,8 +6033,10 @@ class Game {
       }
       this.particles.embers(p.eye, p.up, 3, 1.1);
     } else if (p.burning > 0) {
-      // Water puts you out at once; otherwise it burns down on its own.
-      if (p.inWater) p.burning = 0;
+      // Water puts you out at once; otherwise it burns down on its own. So
+      // does a drift of powder snow — the same fact from the other end of the
+      // thermometer, and Minecraft's rule for the same block.
+      if (p.inWater || p.inSink === ID.powder_snow) p.burning = 0;
       else {
         p.burning = Math.max(0, p.burning - dt);
         this._burnTimer = (this._burnTimer || 0) + dt;
@@ -6039,6 +6092,55 @@ class Game {
     // colour off `inSink` alone would flicker it to grey on those frames.
     if (id) this._buriedColor = BLOCKS[id].particle;
     this._buried += ((p.headInSink ? 0.9 : 0) - this._buried) * Math.min(1, 9 * dt);
+  }
+
+  /**
+   * The cold, and it is the only thing powder snow does that quicksand does
+   * not.
+   *
+   * Built to the hot spring's shape on purpose rather than as a fourth idea:
+   * a clock up while you are in it, a clock down while you are not, a warning
+   * band, then a point on a fixed cadence. See the CHILL_* block for the
+   * pricing and for why this one is allowed to kill when the scald is not.
+   *
+   * `kind` is 'freeze', which no skill soaks — deliberately, and for the reason
+   * `_tickSoak` gives about heat: a tolerance branch shaving this to nothing is
+   * the one route by which a late-game player could live in a drift, and the
+   * ceiling on the whole block is that you cannot stay. Difficulty is untouched
+   * for the same reason every other environmental source is: `mobDamageMul` is
+   * applied at the mob callsite, so easy through extreme scale mobs and only
+   * mobs.
+   *
+   * The warning is breath in cold air, which is the same emitter the hot spring
+   * uses for steam and is put on the player rather than out on the snow for the
+   * same reason it is there: the news is about your body, not about the
+   * weather. It arrives at 4.4 seconds, comfortably inside the six an unequipped
+   * escape from the floor of a drift takes, so it is never the case that the
+   * cue and the damage arrive together.
+   */
+  _tickChill(dt) {
+    const p = this.player;
+    if (p.inSink !== ID.powder_snow) {
+      this.chillT = Math.max(0, this.chillT - dt * CHILL_THAW);
+      this._chillT = 0;
+      // Armed again only once the cold has actually gone, not the moment the
+      // feet leave the drift: hopping out and back in must not re-fire it.
+      if (this.chillT <= 0) this._chillSaid = false;
+      return;
+    }
+    this.chillT += dt;
+    if (this.chillT < CHILL_BITE * CHILL_SHIVER) return;
+    // Once, on crossing into the warning band, not per frame. `Audio.ice` is
+    // the freezing half of a sound the game already has and it is the right
+    // one: this is water in your clothes going hard.
+    if (!this._chillSaid) { this._chillSaid = true; this.audio.ice(true, p.position); }
+    if (Math.random() < dt * 5) this.particles.steam(p.eye, p.up, 0.3, 0.5);
+    if (this.chillT < CHILL_BITE) return;
+
+    this._chillT = (this._chillT || 0) + dt;
+    if (this._chillT < CHILL_PERIOD) return;
+    this._chillT = 0;
+    this._takeHit(1, 'Frozen', false, 'freeze');
   }
 
   /**

@@ -50,6 +50,8 @@ const NOT_OBTAINABLE = new Set([
   // one, which changes nothing here: the loop below does not care where a block
   // comes from, only that an item made by it lands at 232.
   'quicksand',
+  // Powder snow, the other half of the same family and the same trap again.
+  'powder_snow',
 ]);
 
 /**
@@ -1061,6 +1063,7 @@ add({ name: 'fence_gate', label: 'Fence Gate', block: ID.fence_gate, sound: 'woo
 // and placed like any other block, which is deliberate: a trap you can dig out
 // and lay somewhere else is worth far more than one you can only fall into.
 add({ name: 'quicksand', label: 'Quicksand', block: ID.quicksand, sound: 'sand' });
+add({ name: 'powder_snow', label: 'Powder Snow', block: ID.powder_snow, sound: 'snow' });
 
 /** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
 export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);

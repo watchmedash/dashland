@@ -1334,6 +1334,35 @@ export const BLOCKS = [
     solid: false, sink: 0.9, hardness: 0.5, tool: 'shovel',
     particle: [0.56, 0.47, 0.33], sound: 'sand',
   }),
+
+  // The second member of the family, and the one that has a clock on it.
+  //
+  // Same physics as the pool above, from the same `sink` field, with two
+  // numbers changed and one thing added. It sinks at 1.6 rather than 0.9,
+  // because falling into a drift is a fall and it should feel like one — the
+  // top layer goes past in two thirds of a second against quicksand's one and
+  // a bit, so the window to jump straight back out is real but short. And the
+  // Game hangs a cold clock off it: see `_tickChill`, which is the only reason
+  // this is a second block rather than a second pool.
+  //
+  // **It is white on every face and it does not look like snow at close
+  // range.** That is a debt, and it is a debt to the texture pipeline rather
+  // than a decision: every name in TILES is a layer of a baked array driven
+  // from a pack outside this tree, so one new tile means rebuilding and
+  // committing three atlases. `snow` is the honest stand-in — a drift IS snow —
+  // and the legibility comes from the three things that cost nothing: the
+  // crosshair names it, the drift is one layer deep at its edge so you go in to
+  // the ankle before you go in to the neck, and it sits in a hollow with snow
+  // standing over it. When the atlas is next rebaked this wants a `powder_snow`
+  // tile with Minecraft's darker, looser grain, and that is the whole fix.
+  //
+  // Not `gravity`, for the same reason quicksand is not: a drift is where the
+  // snow already fell.
+  block({
+    name: 'powder_snow', label: 'Powder Snow', all: 'snow',
+    solid: false, sink: 1.6, hardness: 0.4, tool: 'shovel',
+    particle: [0.93, 0.95, 0.98], sound: 'snow',
+  }),
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));

@@ -46,6 +46,16 @@ export const SAMPLES = {
   // 6.0s seamless loops. Replace the `cricket` and `cicada` noise beds.
   crickets: 'crickets_loop.ogg',
   cicada: 'cicada_loop.ogg',
+
+  // Monster voices, layered ON TOP of the synthesised ones. Each is played at a
+  // different rate per species, so one buffer is several animals; see
+  // MOB_SAMPLE in Audio.js for which species reads which and at what rate.
+  shriekBug: 'shriek_bug.ogg',
+  wailGhost: 'wail_ghost.ogg',
+  gurgleDeep: 'gurgle_deep.ogg',
+  exhaleHusk: 'exhale_husk.ogg',
+  // Swapped in for the layer above when the voice is a hurt or a death.
+  yellPain: 'yell_pain.ogg',
 };
 
 /**
@@ -60,6 +70,7 @@ export const SAMPLES = {
  */
 export const LOAD_ORDER = [
   'rain', 'surf', 'fire', 'thunderCrack',
+  'shriekBug', 'wailGhost', 'gurgleDeep', 'exhaleHusk', 'yellPain',
   'crickets', 'cicada',
 ];
 

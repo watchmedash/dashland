@@ -414,6 +414,86 @@ const MOB_VOICE = {
   // happens at all.
 };
 
+/**
+ * A recorded throat, LAYERED over the synthesised voice of a hostile. Not a
+ * replacement for it, and the distinction is the whole design.
+ *
+ * ### Why layer and not swap
+ *
+ * `MOB_VOICE` above is a measured table. Every gain in it was set against a
+ * 400 Hz-weighted render, the whole roster is spread across thirteen
+ * instruments so a mixed group never blurs, and the argument for refusing to
+ * lift the groans is written out at the top of it. Swapping a recording in
+ * throws all of that away and re-opens an argument that was already settled by
+ * measurement. Layering keeps the synth's pitch, length, envelope and level
+ * exactly as they are and adds the one thing synthesis cannot make: the grain
+ * of an actual larynx, the noise a real animal's breath carries either side of
+ * the note. Same reasoning as the thunder crack, which kept its procedural
+ * rumble and swapped only the transient.
+ *
+ * ### Why the rate column is the important one
+ *
+ * Six recordings cover fifteen species, and `rate` is what makes that not a
+ * lie. The same werewolf growl at 0.62 is a cyclops and at 1.05 is a demon —
+ * playback rate moves pitch, formant and length together, which is exactly how
+ * body size actually differs. The rates below are deliberately spread far
+ * enough apart that no two species sharing a buffer land within a fourth of
+ * each other, for the same reason `rough[1]` is spread across the roars.
+ *
+ * `hurt` swaps the buffer entirely for the hurt and death modes. A monster
+ * pitching its idle growl up is what the synth already does; a monster
+ * *screaming* is a different sound, and the deaths are the moments the player
+ * is most likely to be listening.
+ *
+ * `gain` multiplies the species' own `MOB_VOICE.gain`, so this table can never
+ * change the relative balance of the roster — only how much recorded grain
+ * sits inside a voice whose level is still set where it was measured.
+ */
+const MOB_SAMPLE = {
+  // --- the four roars are NOT here, and that is the measurement -------------
+  //
+  // yeti, cyclops, demon and dragon were the first four written into this
+  // table and they came back out of it. `roar` is already the densest
+  // instrument in the game — a chopped larynx through a formant pair with a
+  // breath bed and a sub under it — and it fills 60 Hz to 8 kHz with no gap for
+  // a recording to sit in. Rendered against each other through the shipped
+  // chain: a werewolf growl under a yeti at the level this table was first
+  // written to moved every octave band by under 0.7 dB, which is inaudible.
+  // Raised until it was audible — 3.3 to 7.3 dB across 500 Hz to 8 kHz — it
+  // cost 4.2 dB of the species' 400 Hz-weighted level, and that number is not
+  // ours to spend: the whole roster above was set on that meter. The dragon is
+  // worse still and the arithmetic is the same in both directions: at a layer
+  // gain of twelve it STILL moved no band by more than 1.6 dB, because a dragon
+  // is the loudest voice in the game and there is nothing left to add to it.
+  //
+  // So the roars are a synthesis win, plainly, and the two recordings cut for
+  // them are not in the build. What is below is the other case: species whose
+  // instrument leaves a hole exactly where a throat lives.
+
+  // --- the wet ones ---------------------------------------------------------
+  cthulhu: { name: 'gurgleDeep', rate: 0.72, gain: 0.66, hurt: 'yellPain' },
+
+  // --- chitter and shriek: one insectoid tremble across five --------------
+  // 0.62 to 2.00 is a factor of three and more than an octave and a half, which
+  // is the spread between a bat and a mushroom the size of a shed.
+  greendemon: { name: 'shriekBug', rate: 1.15, gain: 0.52, hurt: 'yellPain' },
+  cactus_monster: { name: 'shriekBug', rate: 0.85, gain: 0.50 },
+  mushroom_monster: { name: 'shriekBug', rate: 0.62, gain: 0.50 },
+  alien: { name: 'shriekBug', rate: 1.45, gain: 0.44 },
+  alien_tall: { name: 'shriekBug', rate: 1.25, gain: 0.46 },
+  bat: { name: 'shriekBug', rate: 2.00, gain: 0.34 },
+
+  // --- the two that are meant to be wrong ----------------------------------
+  // A death whistle is an instrument with no natural voice in it at all, which
+  // is the point for the two species that are not alive.
+  ghost: { name: 'wailGhost', rate: 1.00, gain: 0.40 },
+  skull: { name: 'wailGhost', rate: 0.72, gain: 0.44 },
+
+  // The husk keeps the sub-100 Hz groan that makes it the highest peak in the
+  // game and gains a breath on top of it. Lowest gain on the table: this one is
+  // meant to be felt before it is heard and a recorded exhale is all treble.
+  husk: { name: 'exhaleHusk', rate: 0.70, gain: 0.30, hurt: 'yellPain' },
+};
 
 // idle / attack / hurt / death are the same instrument played differently.
 //
@@ -2733,11 +2813,70 @@ export class Audio {
       this._noiseHit(out, t, { gain: gain * 0.10, lo: 180, hi: 700, q: 0.7, dur: dur * 0.8, at: 0.12 });
     }
 
+    this._voiceLayer(type, kind, out, t, mode, dur, gain);
+
     if (mode.thump > 0) this.mobHit(pos, mode.thump);
     this.stats.mobCalls++;
     return true;
   }
 
+  /**
+   * The recorded half of a hostile's voice. Silent, and costs nothing, for
+   * every species not in `MOB_SAMPLE` and for the whole session if the file
+   * never arrives.
+   *
+   * ### Repetition
+   *
+   * A hostile calls every 6-14 s of its own clock behind a 0.8-1.8 s world-wide
+   * one, and there are at most three alive, so a player in a bad cave hears
+   * this every couple of seconds for minutes. That is well inside the range
+   * where one buffer played the same way twice is audible as a sample, so four
+   * things move per play and none of them is level alone:
+   *
+   *   rate    the species' own `rate`, times the mode's pitch, times 0.88-1.16.
+   *           Length tracks pitch because it is one control, which is what
+   *           keeps a re-pitched growl sounding like a bigger animal instead of
+   *           like a tape running slow.
+   *   offset  0-90 ms into the file, so the attack transient is never the same
+   *           two plays running. Capped well short of the buffer so a short
+   *           exhale cannot be skipped past entirely.
+   *   cutoff  2.6-9 kHz. A throat is not a fixed filter and neither is the air
+   *           between it and you.
+   *   level   0.82-1.18 on top of the species gain.
+   *
+   * ### Why it is enveloped rather than played out
+   *
+   * The buffers run 0.42 to 2.1 s and a voice runs whatever `dur` says, so a
+   * bat's 0.3 s chitter would otherwise trail two seconds of insect after it.
+   * The layer is given the synth voice's own envelope: 12 ms on, then down to
+   * silence by `dur`. It ends when the voice ends because it IS the voice.
+   */
+  _voiceLayer(type, kind, out, t, mode, dur, gain) {
+    const smp = MOB_SAMPLE[type];
+    if (!smp || !this.samples) return;
+    const name = ((kind === 'hurt' || kind === 'death') && smp.hurt) || smp.name;
+    const buf = this.samples.get(name);
+    if (!buf) return;
+
+    const rate = smp.rate * mode.pitch * (0.88 + Math.random() * 0.28);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2600 + Math.random() * 6400;
+    lp.Q.value = 0.5;
+    const g = this.ctx.createGain();
+    const lvl = gain * smp.gain * (0.82 + Math.random() * 0.36);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(lvl, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + dur);
+    src.connect(lp).connect(g).connect(out);
+    // `Math.min` and not a modulo: a 0.42 s exhale offset by 90 ms is still
+    // most of an exhale, and one offset past its own end is nothing at all.
+    src.start(t, Math.min(Math.random() * 0.09, Math.max(0, buf.duration - 0.15)));
+    src.stop(t + dur + 0.05);
+  }
 
   /**
    * Soft flesh impact — a damp low thump under a short muffled slap. Nothing

@@ -439,6 +439,19 @@ Fire and the two insect beds:
 | `crickets_loop.ogg` | 47,554 | `AMBSubn_Ambience, Forest Crickets, Birds, Connecticut 02_344 Audio_East Coast America.wav` | **344 Audio** (East Coast America Vol. 1) |
 | `cicada_loop.ogg` | 47,998 | `AMBTrop_Loop Ambience Jungle Night Humid Birds Bug Chirps 01_ESM_SNLS.wav` | **Epic Stock Media** (Synthesized Nature Loops and Sounds) |
 
+Monster voices. Four throats across ten hostile species, plus one that is
+swapped in for a hurt or a death. Two more were cut and then dropped again after
+measurement: a werewolf growl and a large-herbivore roar, for the yeti, cyclops,
+demon and dragon, which turned out to be a synthesis win. See `MOB_SAMPLE` in
+`src/audio/Audio.js` for the numbers.
+
+| shipped file | bytes | source recording | publisher |
+|---|---|---|---|
+| `shriek_bug.ogg` | 16,324 | `CREAInsc_Insectoid Creature Tremble Attack Long 1_SNDBTS_VB-SE.wav` | **SoundBits** (Vox Bestiae: Source Elements) |
+| `wail_ghost.ogg` | 14,746 | `CREAEthr_Aztec Death Whistle Distortion_02_IMA_Death Whistle Samples.wav` | **InMotionAudio** (The Death Whistle) |
+| `gurgle_deep.ogg` | 10,607 | `CREAAqua_Aquatic Creature Gurgling 2_SNDBTS_VB-SE.wav` | **SoundBits** (Vox Bestiae: Source Elements) |
+| `exhale_husk.ogg` | 4,775 | `CREAHmn_Violent Humanoid Creature Exhale Short 4_SNDBTS_VB-SE.wav` | **SoundBits** (Vox Bestiae: Source Elements) |
+| `yell_pain.ogg` | 12,232 | `CREAMnstr_Designed Sea Beast Creature Pain Intense Yell Long 04_ESM_HC4.wav` | **Epic Stock Media** (Humanoid Creatures Vol 4) |
 
 
 Every one of them is heavily edited rather than lifted: trimmed out of takes of

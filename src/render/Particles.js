@@ -705,9 +705,9 @@ export class Particles {
    * the cell that hit rather than to the sample point — a half-unit error puts
    * the cut visibly under the surface.
    */
-  _waterSurfaceRadius(camera, up) {
+  _waterSurfaceRadius({ position }, up) {
     for (let d = 15; d >= -15; d -= 0.5) {
-      _probe.copy(camera.position).addScaledVector(up, d);
+      _probe.copy(position).addScaledVector(up, d);
       if (!this.planet.isLiquidWorld(_probe.x, _probe.y, _probe.z)) continue;
       const a = this.planet.cellAt(_probe.x, _probe.y, _probe.z);
       return a ? R_MIN + a.k + 1 : 0;
@@ -889,6 +889,35 @@ export class Particles {
       // 0.45-0.85 is the point where the sea reads as stippled rather than as
       // occasionally marked.
       this.ripple(_probe, _v, 0.45 + Math.random() * 0.40, 0.75 + Math.random() * 0.25);
+    }
+  }
+
+  /**
+   * The wake a swimmer leaves, one stroke at a time.
+   *
+   * Placed on the water's own surface rather than at the swimmer, because the
+   * body is mostly under it: a ring at `pos` would be drawn a metre down inside
+   * the water, seen through the tint, and read as a smudge on the bed. The
+   * probe is the same one the rain uses, so a stroke and a raindrop agree about
+   * where the surface is.
+   *
+   * Returns quietly if the column has no water in reach, which is what happens
+   * for the frame or two after the swimmer has climbed out but is still being
+   * called; there is nothing to ripple and nothing to report.
+   *
+   * A pair of rings offset a little apart, rather than one centred: a stroke is
+   * two arms, and a single concentric ring on top of the swimmer reads as the
+   * player emitting a halo instead of pushing water past themselves.
+   */
+  swimWake(pos, up, forward, strength = 1) {
+    const r = this._waterSurfaceRadius({ position: pos }, up);
+    if (r <= 0) return;
+    for (const side of [1, -1]) {
+      _probe.copy(pos)
+        .addScaledVector(forward, -0.25)
+        .addScaledVector(_t1.copy(forward).cross(up).normalize(), side * 0.42)
+        .setLength(r);
+      this.ripple(_probe, _t2.copy(_probe).normalize(), 0.75 + 0.35 * strength, 0.5 * strength);
     }
   }
 

@@ -5454,6 +5454,10 @@ class Game {
       if (this._swimT <= 0 && this.player.moveAmount > 0.8) {
         this._swimT = 0.72 + Math.random() * 0.35;
         this.audio.swim();
+        // The stroke you can hear is now also a stroke you can see. Same timer,
+        // so the wake and the sound are the same event rather than two rates
+        // that drift apart.
+        this.particles.swimWake(this.player.position, this.player.up, this.player.forward);
       }
     }
     if (this.player.headInWater && Math.random() < dt * 5) {

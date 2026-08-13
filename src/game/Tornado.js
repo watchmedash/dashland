@@ -304,6 +304,7 @@ const _c = new THREE.Vector3();
 const _rad = new THREE.Vector3();
 const _tan = new THREE.Vector3();
 const _dir = new THREE.Vector3();
+const _foot = new THREE.Vector3();
 const _parts = { f: 0, i: 0, j: 0 };
 
 /**
@@ -391,6 +392,24 @@ export class Tornado {
    *
    * Bounded at 12, which is taller than any canopy the generator makes and stops
    * this becoming a scan down the whole column over a deep bank of vines.
+   *
+   * **It seats the radius and leaves the bearing alone**, and that is the whole
+   * of the travel bug. This used to copy `centerOf(col, k)` straight over
+   * `this.pos`, i.e. round the foot to the middle of its own cell on every
+   * frame it ran — and it runs every frame, out of `_travel`. A frame's walk at
+   * SPEED 3.2 is 3.2/60 = 0.053 cells, which never leaves the column it started
+   * in, so `cellAt` handed back the same column and this then threw the step
+   * away. The funnel could only ever move on a frame long enough to cross half
+   * a cell in one go, which is about 6fps.
+   *
+   * Measured on the shipped code before this, seed 4242, a funnel sited in
+   * plains and watched from a standing start: **45.4 seconds at full strength,
+   * 0.00 cells of track, one column visited**, against the 145 those seconds
+   * are worth. Everything the head of this file says about a funnel that
+   * crosses the landscape — the wandering track, the stripped wood you can see
+   * happened, "walking away from a tornado works" because it travels at 3.2
+   * against a walk of 4.4 — was describing something that stood still and
+   * chewed a four-cell disc for a minute and a half.
    */
   _seat() {
     const planet = this.game.planet;
@@ -401,11 +420,15 @@ export class Tornado {
       k--;
     }
     if (k >= 0) this.k = k + 1;
-    planet.centerOf(this.col, this.k, this.pos);
-    this.up.copy(this.pos).normalize();
+    planet.centerOf(this.col, this.k, _foot);
     // Half a cell down, so the visible funnel meets the ground rather than
     // hovering over it.
-    this.pos.addScaledVector(this.up, -0.5);
+    const r = _foot.length() - 0.5;
+    // The first seat has no bearing to keep: the constructor hands us a column
+    // and nothing else.
+    if (this.pos.lengthSq() < 1e-6) this.pos.copy(_foot);
+    this.up.copy(this.pos).normalize();
+    this.pos.copy(this.up).multiplyScalar(r);
   }
 
   /**
@@ -476,8 +499,13 @@ export class Tornado {
     _rad.copy(_tan).cross(this.up).normalize();
     _dir.copy(_tan).multiplyScalar(Math.cos(this._bearing))
       .addScaledVector(_rad, Math.sin(this._bearing));
-    _a.copy(this.pos).addScaledVector(_dir, SPEED * dt * this.strength);
-    const at = planet.cellAt(_a.x, _a.y, _a.z);
+    // Advance the foot itself, not a scratch point beside it. A frame's step is
+    // a twentieth of a cell and has to be able to accumulate across frames until
+    // it is worth a column; stepping a copy and asking which column it landed in
+    // asks the same question sixty times and gets the same answer. `_seat` keeps
+    // the bearing this builds up — see the note there.
+    this.pos.addScaledVector(_dir, SPEED * dt * this.strength);
+    const at = planet.cellAt(this.pos.x, this.pos.y, this.pos.z);
     if (at) this.col = at.col;
     this._seat();
   }

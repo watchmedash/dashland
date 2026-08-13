@@ -418,7 +418,27 @@ G.coal_ore = (s) => ore(s, [px([34, 34, 38]), px([70, 70, 76])], 0, 501, 0.72);
 // does not sprinkle the tile with noise; it gives every nugget a shadow side and
 // a lit side, which is what a lump of metal in rock looks like and what no
 // single mid-tone can imitate.
-G.iron_ore = (s) => ore(s, [px([104, 66, 40]), px([210, 160, 112])], 0.45, 511, 0.5);
+//
+// The paragraphs above name the copper collision and then do not fix it. Every
+// number that pass moved was a VALUE — the spread between the ends, the light
+// end above stone, the dark end below it — and value is orthogonal to hue, so
+// the palette came out of the rewrite sitting on exactly the same hue angle it
+// went in on. Measured through the fleck cores of the baked sheet: iron 27,
+// copper 28, and the deep pair 27 and 28 as well. The two ores separated only
+// by saturation, 0.45 against 0.75, which is a difference the eye reads as "the
+// same orange, in shadow" on a cave wall rather than as two minerals.
+//
+// So the hue moves this time, and it moves toward RED rather than toward the
+// block's blue-grey. Cool was the other candidate and it is the worse one:
+// silver's flecks already own the cool end at hue 226, and an iron sitting
+// there would separate from silver by luminance alone (119 against 182), which
+// is one channel of difference again and is the failure this comment has now
+// recorded twice. Red is empty — copper is at 28, gold at 42, and stone's own
+// warmth is hue 10 at saturation 0.03, which is no colour at all. It is also
+// what iron ore is: hematite and limonite are red-brown rocks, and the grey is
+// the metal you get out of them, which is what iron_block and the ingot are
+// already made of. An ore that does not match its ingot is how ore works.
+G.iron_ore = (s) => ore(s, [px([104, 58, 48]), px([216, 152, 132])], 0.45, 511, 0.5);
 // Gold and sulfur were the same tile at a glance. Both are yellow minerals in
 // pale grey rock and their flecks measured 201,171,104 and 185,171,87 — sixteen
 // counts apart in red and nothing else, which is not a difference you can see
@@ -478,7 +498,7 @@ const ORE_MINERALS = {
   // with depth is a copper vein you have to learn twice, so the two share one
   // palette again.
   deep_copper_ore: [[204, 92, 16], [255, 156, 48], 0.55, 631, 0.48],
-  deep_iron_ore: [[104, 66, 40], [210, 160, 112], 0.45, 641, 0.5],
+  deep_iron_ore: [[104, 58, 48], [216, 152, 132], 0.45, 641, 0.5],
   deep_silver_ore: [[136, 142, 152], [222, 228, 238], 0.7, 651, 0.3],
   deep_gold_ore: [[206, 146, 24], [255, 208, 86], 0.8, 661, 0.32],
   deep_crystal_ore: [[94, 178, 226], [190, 240, 255], 0.1, 671, 0.14],

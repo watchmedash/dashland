@@ -646,7 +646,27 @@ const MAP = {
   // same coin pile lit, so the metal is the whole surface; `warm` takes it from
   // gold to copper and leaves it a hue apart from gold_block's ingots.
   copper_block: ['Pile of Gold', 3, { warm: [0.95, 0.70, 0.85] }],
-  silver_block: ['Metal Plates', 7, { bright: 1.12 }],
+  // Metal Plates 6 and 7 are the same blue-grey painted twice — 127,146,159 at
+  // hue 203 against 90,101,110 at hue 208 — so iron and silver were one block
+  // with the exposure changed, and `bright: 1.12` was not enough to change even
+  // that: baked, silver measured L 110.6 against iron's 143.5. Silver is the
+  // whitest metal there is and it was the DARKER of the two, under a copper
+  // block at 128.5, so the whole ladder ran backwards.
+  //
+  // Variant 4 is the one neutral plate in the folder, 113,112,113 at saturation
+  // 0.01, and it is a different surface as well as a different colour: scale
+  // armour rather than 6's riveted lattice, so the two no longer share a
+  // pattern either. Exposed to L 174 it sits above iron and copper where silver
+  // belongs, and it carries no hue at all, which is the cleanest separation
+  // from iron available — iron keeps the blue-grey, silver is simply white.
+  //
+  // `contrast` below 1 is the price of the exposure: the plate's specular
+  // streaks clip at 255 once it is this bright, and narrowing its own range
+  // first takes the clipped fraction from 7.9% to 3.8% while leaving std-dev
+  // 37.5 against iron's 35.8, so the plates keep as much relief as iron's do.
+  // Rejected: keeping variant 7 and pushing `bright` to 1.85, which reaches the
+  // same luminance and leaves silver a lit copy of the iron block.
+  silver_block: ['Metal Plates', 4, { bright: 1.55, contrast: 0.7 }],
   // Nothing in the pack is a block of coal. Cobble Stone 3 at a fifth of the
   // exposure cobblestone takes from the same source: the shape is right and the
   // value is four stops away from anything it could be mistaken for.

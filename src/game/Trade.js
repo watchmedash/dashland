@@ -741,7 +741,7 @@ const REQUESTS = [
   ['charcoal', 6, 14],
   ['stone_brick', 12, 24],
   ['glass', 8, 16],
-  ['planks', 16, 32],
+  ['oak_planks', 16, 32],
 ];
 
 /**

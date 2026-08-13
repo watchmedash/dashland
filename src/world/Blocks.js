@@ -274,7 +274,7 @@ const MASONRY = [
   // The one row the tier column exists for. See above.
   ['slate', 'Slate', 'slate', 3.0, 'pick', 1],
   ['tuff', 'Tuff', 'tuff', 2.0, 'pick', 0],
-  ['planks', 'Oak', 'planks', 2.0, 'axe', 0],
+  ['oak_planks', 'Oak', 'planks', 2.0, 'axe', 0],
   ['planks_birch', 'Birch', 'planks_birch', 2.0, 'axe', 0],
   ['planks_pine', 'Pine', 'planks_pine', 2.0, 'axe', 0],
   ['mossy_stone_brick', 'Mossy Brick', 'mossy_stone_brick', 2.4, 'pick', 0],
@@ -338,7 +338,14 @@ export const BLOCKS = [
   block({ name: 'log_pine', label: 'Pine Log', top: 'log_pine_top', side: 'log_pine', bottom: 'log_pine_top', axis: true, hardness: 2.0, tool: 'axe', particle: [0.3, 0.22, 0.14], sound: 'wood', fuel: 6 }),
   block({ name: 'leaves_pine', label: 'Pine Needles', render: R_GLASS, all: 'leaves_pine', opaque: false, hardness: 0.25, tint: 'foliage_dark', drop: null, dropCount: 0, particle: [0.16, 0.32, 0.18], sound: 'grass' }),
 
-  block({ name: 'planks', label: 'Planks', all: 'planks', hardness: 2.0, tool: 'axe', particle: [0.62, 0.46, 0.28], sound: 'wood', fuel: 4 }),
+  // **`oak_planks`, wearing the tile `planks`, and the mismatch is deliberate.**
+  // A block name and a tile name are different namespaces: the tile is a layer
+  // of a baked texture array, its order in `TILES` above IS the layer order, and
+  // the bake that produced it lives outside this tree. Renaming the block costs
+  // nothing; renaming the tile would mean rebuilding three atlases and would
+  // also have to chase `bench`, `bed`, `crate`, `door`, `sign` and `fence`,
+  // every one of which composites over this same tile.
+  block({ name: 'oak_planks', label: 'Oak Planks', all: 'planks', hardness: 2.0, tool: 'axe', particle: [0.62, 0.46, 0.28], sound: 'wood', fuel: 4 }),
   block({ name: 'cobblestone', label: 'Cobblestone', all: 'cobblestone', hardness: 2.4, tool: 'pick', particle: [0.44, 0.44, 0.46], sound: 'stone' }),
   block({ name: 'stone_brick', label: 'Stone Bricks', all: 'stone_brick', hardness: 2.4, tool: 'pick', particle: [0.5, 0.5, 0.52], sound: 'stone' }),
   block({ name: 'brick', label: 'Bricks', all: 'brick', hardness: 2.4, tool: 'pick', particle: [0.6, 0.3, 0.24], sound: 'stone' }),
@@ -597,9 +604,10 @@ export const BLOCKS = [
   block({ name: 'shingle_rose', label: 'Rose Shingles', all: 'shingle_rose', hardness: 1.6, tool: 'pick', particle: [0.8, 0.55, 0.55], sound: 'stone' }),
 
   // --- timber --------------------------------------------------------------
-  // One plank per species. The tool and bench recipes stay on oak `planks`, so
-  // birch and pine planks each carry a 1:1 recipe back to it — a player who
-  // spawns in a pine forest must never be locked out of a pickaxe.
+  // One plank per species, and every one of them says which tree it came off,
+  // including the oak — see `oak_planks` above. They are interchangeable
+  // everywhere by `FAMILY_NAMES` in `game/Recipes.js`; the 1:1 recipes back to
+  // oak are a convenience left in place, not the route.
   block({ name: 'planks_birch', label: 'Birch Planks', all: 'planks_birch', hardness: 2.0, tool: 'axe', particle: [0.82, 0.72, 0.54], sound: 'wood', fuel: 4 }),
   block({ name: 'planks_pine', label: 'Pine Planks', all: 'planks_pine', hardness: 2.0, tool: 'axe', particle: [0.44, 0.34, 0.24], sound: 'wood', fuel: 4 }),
   block({ name: 'planks_dark', label: 'Charred Planks', all: 'planks_dark', hardness: 2.0, tool: 'axe', particle: [0.32, 0.24, 0.18], sound: 'wood', fuel: 4 }),

@@ -6,23 +6,24 @@ import { itemIdOf, FISH_ITEMS, ITEMS } from './Items.js';
 /** @type {Array<{out:string,count:number,shape?:string[],key?:object,in?:string[],table?:boolean}>} */
 const RAW = [
   // --- wood chain ---
-  { out: 'planks', count: 4, in: ['log_oak'] },
-  // Birch and pine now break down into their own boards. The tool, bench and
-  // crate recipes still name oak `planks`, so each species carries a 1:1 recipe
-  // back to it — without that, spawning in a pine forest would lock the player
-  // out of a workbench, which is the whole game.
+  { out: 'oak_planks', count: 4, in: ['log_oak'] },
+  // Birch and pine break down into their own boards. Every recipe below names
+  // `oak_planks`, and FAMILY_NAMES makes that name accept any of the five, so
+  // the 1:1 conversions here are a convenience rather than a gate — spawning in
+  // a pine forest has not locked anyone out of a workbench since the families
+  // landed.
   { out: 'planks_birch', count: 4, in: ['log_birch'] },
   { out: 'planks_pine', count: 4, in: ['log_pine'] },
-  { out: 'planks', count: 1, in: ['planks_birch'] },
-  { out: 'planks', count: 1, in: ['planks_pine'] },
-  { out: 'planks_dark', count: 1, in: ['planks', 'coal'] },
-  { out: 'planks_grey', count: 1, in: ['planks', 'gravel'] },
-  { out: 'stick', count: 4, shape: ['P', 'P'], key: { P: 'planks' } },
-  { out: 'bench', count: 1, shape: ['PP', 'PP'], key: { P: 'planks' } },
-  { out: 'crate', count: 1, table: true, shape: ['PPP', 'P P', 'PPP'], key: { P: 'planks' } },
+  { out: 'oak_planks', count: 1, in: ['planks_birch'] },
+  { out: 'oak_planks', count: 1, in: ['planks_pine'] },
+  { out: 'planks_dark', count: 1, in: ['oak_planks', 'coal'] },
+  { out: 'planks_grey', count: 1, in: ['oak_planks', 'gravel'] },
+  { out: 'stick', count: 4, shape: ['P', 'P'], key: { P: 'oak_planks' } },
+  { out: 'bench', count: 1, shape: ['PP', 'PP'], key: { P: 'oak_planks' } },
+  { out: 'crate', count: 1, table: true, shape: ['PPP', 'P P', 'PPP'], key: { P: 'oak_planks' } },
   // Hide stands in for wool — the planet has no sheep to shear, and the animals
   // already give you the soft material this needs.
-  { out: 'bed', count: 1, table: true, shape: ['HHH', 'PPP'], key: { H: 'hide', P: 'planks' } },
+  { out: 'bed', count: 1, table: true, shape: ['HHH', 'PPP'], key: { H: 'hide', P: 'oak_planks' } },
   // A sponge mattress, and the sea sponge's only recipe anywhere.
   //
   // Of the eleven reef blocks the sponge was the awkward one: it is the
@@ -36,23 +37,23 @@ const RAW = [
   // Deliberately the expensive way round — three sponges are a good deal more
   // than three hides — so the bed keeps its price and this is a route, not a
   // discount.
-  { out: 'bed', count: 1, table: true, shape: ['SSS', 'PPP'], key: { S: 'sea_sponge', P: 'planks' } },
+  { out: 'bed', count: 1, table: true, shape: ['SSS', 'PPP'], key: { S: 'sea_sponge', P: 'oak_planks' } },
   { out: 'ladder', count: 3, table: true, shape: ['S S', 'SSS', 'S S'], key: { S: 'stick' } },
-  { out: 'door', count: 1, table: true, shape: ['PP', 'PP', 'PP'], key: { P: 'planks' } },
+  { out: 'door', count: 1, table: true, shape: ['PP', 'PP', 'PP'], key: { P: 'oak_planks' } },
   // Hide again for the line — the planet has no flax and no spiders, and a
   // leather cord is the honest answer with what the animals actually give you.
   { out: 'fishing_rod', count: 1, table: true, shape: ['  S', ' SH', 'S H'], key: { S: 'stick', H: 'hide' } },
-  { out: 'sign', count: 3, table: true, shape: ['PPP', 'PPP', ' S '], key: { P: 'planks', S: 'stick' } },
+  { out: 'sign', count: 3, table: true, shape: ['PPP', 'PPP', ' S '], key: { P: 'oak_planks', S: 'stick' } },
   // Cheap on purpose. A paddock is thirty of these and nobody fences anything
   // that costs a plank a post.
-  { out: 'fence', count: 3, table: true, shape: ['PSP', 'PSP'], key: { P: 'planks', S: 'stick' } },
+  { out: 'fence', count: 3, table: true, shape: ['PSP', 'PSP'], key: { P: 'oak_planks', S: 'stick' } },
   // The gate is the fence pattern turned inside out — sticks on the outside,
   // planks down the middle — which is Minecraft's, and the mirror is doing real
   // work here rather than being a homage: the two are the only 2x3 wood-and-
   // stick recipes in the table, and a player who has made a fence can guess
   // this one. One per craft against the fence's three, because a run needs
   // thirty posts and a paddock needs one way in.
-  { out: 'fence_gate', count: 1, table: true, shape: ['SPS', 'SPS'], key: { P: 'planks', S: 'stick' } },
+  { out: 'fence_gate', count: 1, table: true, shape: ['SPS', 'SPS'], key: { P: 'oak_planks', S: 'stick' } },
   { out: 'kiln', count: 1, table: true, shape: ['CCC', 'C C', 'CCC'], key: { C: 'cobblestone' } },
   { out: 'torch', count: 4, shape: ['C', 'S'], key: { C: 'coal', S: 'stick' } },
   { out: 'torch', count: 4, shape: ['C', 'S'], key: { C: 'charcoal', S: 'stick' } },
@@ -66,7 +67,7 @@ const RAW = [
   ...[
     'stone', 'cobblestone', 'stone_brick', 'sandstone', 'red_sandstone', 'brick',
     'limestone', 'marble', 'granite', 'andesite', 'slate', 'tuff',
-    'planks', 'planks_birch', 'planks_pine', 'mossy_stone_brick', 'snow_brick', 'packed_ice',
+    'oak_planks', 'planks_birch', 'planks_pine', 'mossy_stone_brick', 'snow_brick', 'packed_ice',
   ].flatMap((base) => [
     { out: `slab_${base}`, count: 6, table: true, shape: ['BBB'], key: { B: base } },
     // `undo` marks the two recipes that only put a mis-click back. They are not
@@ -455,10 +456,10 @@ const RAW = [
   // It is a bench recipe (`table`) because a 3x2 pattern cannot fit anywhere
   // else, and that is fine: the bench is free and universal, and it is what the
   // kiln already costs.
-  { out: 'kitchen', count: 1, table: true, shape: ['PPP', 'CCC'], key: { P: 'planks', C: 'cobblestone' } },
+  { out: 'kitchen', count: 1, table: true, shape: ['PPP', 'CCC'], key: { P: 'oak_planks', C: 'cobblestone' } },
 
   // --- tools ---
-  ...['wood:planks', 'stone:cobblestone', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder'].flatMap((spec) => {
+  ...['wood:oak_planks', 'stone:cobblestone', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder'].flatMap((spec) => {
     const [tier, mat] = spec.split(':');
     return [
       { out: `${tier}_pick`, count: 1, table: true, shape: ['MMM', ' S ', ' S '], key: { M: mat, S: 'stick' } },
@@ -515,12 +516,17 @@ const RAW = [
  * could be a bench or a bed, which is a tax on having more than one tree.
  *
  * The canonical id stays what the recipe names, so the crafting panel still
- * says "Planks" and `recipeCost` still reports one line rather than five. Only
- * the *match* widens. `familyOf` is the inverse and is what lets counting and
+ * says one thing and `recipeCost` still reports one line rather than five. Only
+ * the *match* widens. That canonical id is `oak_planks` and it used to be
+ * `planks`, which is why the question above was asked at all: the recipes named
+ * a thing called Planks and the player had a thing called Birch Planks, so the
+ * catalogue read as though one of the five were the real one and the other four
+ * were substitutes for it. Naming the oak board oak does not change a single
+ * match — it says out loud what the family already did. `familyOf` is the inverse and is what lets counting and
  * consumption look across the whole family.
  */
 const FAMILY_NAMES = [
-  ['planks', 'planks_birch', 'planks_pine', 'planks_dark', 'planks_grey'],
+  ['oak_planks', 'planks_birch', 'planks_pine', 'planks_dark', 'planks_grey'],
 ];
 
 const FAMILY = new Map();      // canonical id -> Set of accepted ids
@@ -669,7 +675,7 @@ export const SMELTING = [
 
 export const FUEL = {};
 for (const [name, ticks] of Object.entries({
-  coal: 60, charcoal: 60, planks: 12, stick: 4, log_oak: 12, log_birch: 12, log_pine: 12,
+  coal: 60, charcoal: 60, oak_planks: 12, stick: 4, log_oak: 12, log_birch: 12, log_pine: 12,
   crate: 12, bench: 12, sapling: 3, torch: 4,
   planks_birch: 12, planks_pine: 12, planks_dark: 12, planks_grey: 12,
   // Nine coal in one slot burns for nine coal's worth. A block of coal is a

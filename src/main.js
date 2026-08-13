@@ -5043,7 +5043,7 @@ class Game {
     const deep = below > 8;
     const mid = below > 2;
 
-    const COMMON = ['bread', 'coal', 'stick', 'planks', 'torch', 'seeds', 'apple', 'hide', 'flint'];
+    const COMMON = ['bread', 'coal', 'stick', 'oak_planks', 'torch', 'seeds', 'apple', 'hide', 'flint'];
     const GOOD = ['iron_ingot', 'copper_ingot', 'gold_ingot', 'amethyst', 'bucket', 'coin'];
     const RICH = ['crystal', 'emerald', 'ruby', 'sapphire', 'void_shard', 'glowstone', 'coin'];
 

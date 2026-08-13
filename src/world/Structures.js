@@ -221,7 +221,7 @@ function palette(biome, rng) {
  * stone, the gems need iron and `void_block` needs an astral pick. So a legend
  * cache is genuinely a thing you come back for.
  */
-const LOOT_COMMON = ['coal_block', 'copper_block', 'iron_block', 'clay', 'planks'];
+const LOOT_COMMON = ['coal_block', 'copper_block', 'iron_block', 'clay', 'oak_planks'];
 const LOOT_GOOD = ['iron_block', 'silver_block', 'gold_block', 'amethyst_block', 'copper_block'];
 const LOOT_RARE = ['gold_block', 'emerald_block', 'ruby_block', 'sapphire_block', 'crystal_block'];
 const LOOT_LEGEND = ['void_block', 'emerald_block', 'ruby_block', 'sapphire_block', 'crystal_block'];

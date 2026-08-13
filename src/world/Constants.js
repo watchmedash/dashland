@@ -173,8 +173,33 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  *
  * Bumping refuses an older save rather than damaging it: `_saveFitsWorld`
  * returns OLD and the file is left untouched on disk.
+ *
+ * ---
+ *
+ * **5, on 2026-08-13.** Three changes to what the generator writes, landed the
+ * same day, and each one is independently sufficient.
+ *
+ * The pine cone was standing on its point. `stampTree` read its taper from the
+ * wrong end - `t` was 0 at the treetop while `l` counts downward - so the
+ * widest ring landed at the crown and the narrowest at the skirt. Measured over
+ * 1,500 pines on seed 4242, mean leaves at `top` went 50.8 to 12.1 and at
+ * `top - 4` went 21.7 to 36.0, and a tree now carries about 20% fewer leaf
+ * cells. Every conifer on the planet is a different shape.
+ *
+ * Quicksand and powder snow are two new block ids the generator scatters:
+ * 3.8-4.6% of desert columns and 5.5-5.9% of snowfield columns across three
+ * seeds. An old save opened on this build would have hazards in the regions it
+ * has never visited and none in the regions it has, with the seam on a region
+ * boundary - which is exactly the failure this stamp exists to prevent, and it
+ * is the same argument the cactus lattice made for 4.
+ *
+ * Two things that did NOT contribute, recorded so the next reader does not go
+ * looking for them: the tornado writes nothing into worldgen (every block it
+ * moves is a runtime edit through `_applyEdits`, indistinguishable from mining
+ * a flower), and whirlpools are a pure function of seed and column evaluated on
+ * the main thread, so the generator writes not one byte differently for them.
  */
-export const GEN_VERSION = 4;
+export const GEN_VERSION = 5;
 
 // All five keep their distance from R_MIN, so the crust reads the same from
 // below: core three layers up, mantle eight. What changed is the room above

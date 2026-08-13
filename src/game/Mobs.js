@@ -407,10 +407,25 @@ const MAX_HOSTILE_CAVE = 4;
  *   night  34 land, 18 water,  7 air,  8 husks, 5 drowned, 3 monsters, 1 trader =  76
  *   night, savage                     14 husks, 5 drowned                       =  82
  *
- * The peak roster is still the day's 124 of 134, untouched, because a drowned
- * cannot exist in daylight — it is spawned only while `night` and retired by
- * `_dawnCull`. Night goes 71 -> 76, and savage night 77 -> 82, both still more
- * than fifty under the ceiling.
+ * The peak roster is still the day's, untouched, because a drowned cannot exist
+ * in daylight — it is spawned only while `night` and retired by `_dawnCull`.
+ * Night goes 71 -> 76, and savage night 77 -> 82, both still more than fifty
+ * under the ceiling.
+ *
+ * Both lines re-measured on the shipped code, seed 4242, the spawner left to
+ * fill and then the clock wound over:
+ *
+ *   night  34 land, 18 water,  7 air, 8 surface husks, 4 cave husks,
+ *          5 drowned, 3 monsters, no trader                          =  79
+ *   day    84 land, 18 water, 18 air, 0 surface husks, 4 cave husks,
+ *          0 drowned, 3 monsters, no trader                          = 127
+ *
+ * ...and the day line is worth reading twice, because it is three over the 124
+ * the lines above quote. The difference is the four cave husks, which those
+ * lines list separately and which are on the day line as much as the night one
+ * — they spawn at any hour. With a trader as well the true daytime ceiling is
+ * 128 of 134, six of headroom rather than ten. Nothing here spends any of it:
+ * every body this change adds is on the night side.
  *
  * The one moment the two halves overlap is sunrise, and the drowned are the
  * population that clears it *fastest*: `_dawnCull` starts retiring them on the
@@ -7209,18 +7224,41 @@ export class Mobs {
     // rule asked of the *player* rather than of the ground.
     //
     // DROWNED_DEPTH keeps them out of a beach shelf at the spawn end, and that
-    // alone is not the owner's caveat: a drowned that spawned in four layers of
-    // water can still swim to the edge of it, and a player wading knee-deep at
-    // a shore would be ambushed exactly as a swimmer in open ocean is. So the
-    // pursuit is gated on being out of your depth, which is the mirror image of
-    // the husk's rule directly below and the reason the two of them own
-    // opposite halves of the shoreline. Stand up and the thing in the deep
-    // stops coming; the water is only dangerous while it is over your head.
+    // alone is not the owner's caveat: a drowned that spawned in deep water can
+    // still swim to the edge of it, and a player wading knee-deep at a shore
+    // would then be ambushed exactly as a swimmer in open ocean is. So the
+    // pursuit is gated too, on the same number, and the two of them own
+    // opposite halves of the shoreline: a husk gives up at the water's edge and
+    // this gives up at the shallow end.
     //
-    // `_playerAfloat` is `inWater && !grounded`, not `inWater`, so a ford and
-    // an ankle-deep paddle read as land here — the same distinction the note
-    // below draws for the predators, and for the same reason.
-    if (spec.nightOnly && !this._playerAfloat(player)) {
+    // Two ways to be out of your depth, because each of them alone has a hole
+    // in it and both holes were measured.
+    //
+    // `_playerAfloat` — `inWater && !grounded`, the test every predator below
+    // uses — is the obvious gate, and a player who stops swimming sinks:
+    // standing on the seabed under ten layers of ocean is `grounded`, so the
+    // whole mechanic switched itself off for anyone who held still. Measured, a
+    // swimmer dropped into ten layers read afloat at the start of a forty
+    // second run and grounded by the end of it, with the drowned that had
+    // acquired them standing off at 8.6 cells.
+    //
+    // The water's own depth is the obvious repair and has the opposite hole:
+    // `_waterDepth` walks down for the first solid cell and answers 0 when it
+    // finds none, which is indistinguishable from dry land. Measured on a
+    // swimmer in open ocean, `inWater` true and the column reading 0 — so a
+    // depth-only gate switches off in exactly the deepest water there is.
+    //
+    // The union of the two has neither. A swimmer is always fair game because
+    // they are not grounded; a diver standing on the bed is fair game because
+    // the column over them is deep; and a wader is neither, which is the whole
+    // of the owner's caveat. `inWater` gates both terms, so a player on a
+    // pillar or a jetty over deep water is out of this: the column is deep and
+    // they are not in it.
+    if (spec.nightOnly
+      && !(player.inWater
+        && (!player.grounded
+          || this._waterDepth(this._colOf(player.cell.f, player.cell.ci, player.cell.cj))
+             >= DROWNED_DEPTH))) {
       mob.state = 'idle';
       mob.stateT = 0.5;
       mob.onPath = false;
@@ -9270,7 +9308,40 @@ export class Mobs {
       if (swimming) {
         // gentle rise and fall on its own clock, and it never leaves the water
         const ceilK = this._waterTop(bodyCol, feetK);
-        const want = Math.sin(mob.idleT * 0.6 + mob.seed) * 0.45;
+        /**
+         * ...unless it is coming for you, in which case it goes where you are.
+         *
+         * Everything else about a chase is horizontal — `mob.want` is a
+         * heading, `_walkStep` moves in the tangent plane — and for the whole
+         * of this file's life that was enough, because everything that chased
+         * the player walked on ground the player was also standing on. A
+         * swimmer is the first hunter with a third axis, and without this line
+         * it does not have it: the only thing setting a swimmer's `vel.k` was
+         * the sine below, a wander with an amplitude of 0.45 and no idea the
+         * player exists.
+         *
+         * Measured before this: one drowned placed six columns from a swimmer
+         * in ten layers of open water, forty seconds. It acquired, it closed the
+         * horizontal gap to nothing, and it sat 7.8 cells directly ABOVE the
+         * player for the rest of the run, drifting up and down on the sine,
+         * against a reach of 1.25. Zero blows landed. The distance in that
+         * number is almost entirely vertical.
+         *
+         * The shape is the flier's, deliberately: chase the *gap* and clamp the
+         * rate, so it eases in and out rather than snapping to a dive. The
+         * clamp is 1.6 against the flier's 2.2 — a body under water should not
+         * be the faster of the two.
+         *
+         * Narrowed to a hostile on the player. A shark or a piranha can also be
+         * handed a target (by `hurt`, when you swing at one) and giving them
+         * this would change a fight that is years old; that they cannot follow
+         * you up or down is a real limitation and it is not this change's to
+         * fix. `_swimBlocked` still owns the answer either way, so nothing here
+         * can dive into rock.
+         */
+        const want = (spec.hostile && mob.target === 'player')
+          ? clamp((player.cell.ck - c.ck) * 2.0, -1.6, 1.6)
+          : Math.sin(mob.idleT * 0.6 + mob.seed) * 0.45;
         mob.vel.k += (want - mob.vel.k) * Math.min(1, dt * 3);
         if (c.ck > ceilK - 0.6) mob.vel.k = Math.min(mob.vel.k, -0.2);
       } else if (wading) {

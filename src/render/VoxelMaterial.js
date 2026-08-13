@@ -137,6 +137,12 @@ export const voxelUniforms = {
   // SEASON_FRAG.
   uSeasonColor: { value: new THREE.Vector3(1, 1, 1) },
   uSeasonStrength: { value: 0 },
+  /**
+   * How much snow is lying on the canopy, 0..1. See LEAF_SNOW_FRAG. Driven from
+   * `Seasons.cold` in `Game._pushSeason`, so it is 0 in three seasons out of
+   * four and this whole term is a dead branch outside winter.
+   */
+  uSnowCap: { value: 0 },
   // The only light in the world that moves — whatever the player is holding.
   uHandLightPos: { value: new THREE.Vector3() },
   uHandLightColor: { value: new THREE.Vector3() },
@@ -185,6 +191,19 @@ varying vec3 vTint;
 varying vec2 vTexUv;
 varying vec3 vWorld;
 varying float vWave;
+/*
+ * The face's normal in WORLD space.
+ *
+ * vNormal, which three declares for us, is in VIEW space - it is
+ * normalMatrix * objectNormal - so it answers "which way is this face pointing
+ * relative to the camera" and cannot answer "is this face pointing at the sky".
+ * LEAF_SNOW_FRAG needs the second question and only the second, so it carries
+ * its own normal rather than reinterpreting that one.
+ *
+ * Through modelMatrix for the same reason vWorld is: chunk meshes have an
+ * identity transform, but a dropped block carries a real one.
+ */
+varying vec3 vWorldNormal;
 uniform float uTime;
 uniform float uWind;
 uniform vec3 uPlanetCenter;
@@ -200,6 +219,13 @@ const COMMON_VERT_BODY = /* glsl */`
   vQuadSize = quadSize;
   vTangent = atangent;
   vWave = floor(aux.w);
+  // The raw attribute, NOT objectNormal. This block is also compiled into the
+  // shadow pass's MeshDepthMaterial, and three's depth vertex shader only
+  // includes <beginnormal_vertex> under USE_DISPLACEMENTMAP - so objectNormal
+  // is undeclared there and the depth program failed to link, which took the
+  // shadows out of the whole scene. The plain attribute is declared
+  // unconditionally in three's vertex prefix for every non-raw material.
+  vWorldNormal = normalize(mat3(modelMatrix) * normal);
 
   float wType = floor(aux.w);
   float wAmt = fract(aux.w);
@@ -316,6 +342,7 @@ uniform vec3 uSkyZenith;
 uniform float uTime;
 uniform vec3 uSeasonColor;
 uniform float uSeasonStrength;
+uniform float uSnowCap;
 uniform vec3 uHandLightPos;
 uniform vec3 uHandLightColor;
 uniform float uHandLightRadius;
@@ -804,6 +831,8 @@ varying vec2 vQuadSize;
 varying vec3 vWorld;
 varying vec3 vTangent;
 varying float vWave;
+/* World-space face normal. See the declaration in COMMON_VERT_HEAD. */
+varying vec3 vWorldNormal;
 vec3 armSample;
 /**
  * How much of the block's biome tint this texel takes, 1 by default.
@@ -1055,6 +1084,90 @@ const SEASON_FRAG = /* glsl */`
   diffuseColor.rgb = mix(seasonBase, rehued, living);
 `;
 
+/**
+ * Snow lying on a canopy.
+ *
+ * ---- why this is a shader term and not snow ----------------------------------
+ *
+ * The seasonal ground pass never sees a leaf and structurally cannot. Its
+ * candidate finder, `Game._seasonGroundK`, looks in a seven-cell window around
+ * the terrain height field, which is what makes it cheap and what gives it the
+ * "is this cell under the sky" test for free; a canopy sits five to twelve cells
+ * above the top of that window. Worse, a trunk fills the top of the window, so a
+ * tree column is refused outright. Measured in a pine wood on seed 4242, over
+ * the pass's own 20-column radius: 581 of 1 681 columns refused, 973 columns
+ * holding a tree, 4 754 leaf cells and 675 log cells, and after 94 seconds of
+ * deep winter the ground under them was 44.9% white and the number of snow
+ * blocks anywhere in a canopy was **zero**. Not a budget symptom: the undo table
+ * stood at 696 of its 4 000 entries, nowhere near the cap.
+ *
+ * Putting real snow up there is the expensive answer and it is expensive in the
+ * one place this feature cannot afford to be. Every block the season writes
+ * costs an entry in `seasonSnow`, and one neighbourhood holds ~973 tree columns
+ * against ~1 100 open ground columns — capping the canopies would roughly double
+ * the fill of a table whose own comment says "measure before raising it", and a
+ * player who winters across two neighbourhoods would hit the cap and stop
+ * getting ground snow at all. A second, snow-capped leaf tile is the other
+ * answer and it needs a new block id, which an existing save refuses to open.
+ *
+ * A colour costs nothing and reaches every leaf in the world at once.
+ *
+ * ---- why the season's own hue could not already do it -----------------------
+ *
+ * Seasons.js records the wall it hit: `uSeasonColor` is divided by its own
+ * luminance before it is used, precisely so re-hueing a surface never changes
+ * how bright it is, and therefore "winter can never *lighten* anything. A dark
+ * leaf in winter is a dark cold leaf." That is true and stays true — this runs
+ * *after* the re-hue and does not touch it. Winter still decides what colour the
+ * needle is; this decides how much of the needle you can still see.
+ *
+ * ---- the shape of it --------------------------------------------------------
+ *
+ * Snow lies on what faces the sky, so the weight is the squared cosine between
+ * the face's world normal and local up. A voxel canopy is drawn "fast leaves"
+ * style, leaf-against-leaf faces culled, so the only up-facing quads that exist
+ * are the top of the outermost shell — which is exactly where a real snowfall
+ * would be, for free.
+ *
+ * The 0.30 floor on every other face is not laziness. Without it a canopy seen
+ * from the ground - which is how a player sees nearly every canopy - is
+ * unchanged, because you are looking at side faces; the tree only reads as snowy
+ * from above. A wash over the sides is rime rather than snowfall and it is what
+ * makes the wood read cold at eye level. 0.18 was tried first and photographed:
+ * against a settled snowfield the near canopy was still the dark blue-grey that
+ * the report was about, because the strongest side face in the frame was
+ * carrying 15% white and the average one 8%.
+ *
+ * And the per-cell hash is what stops it reading as a filter. One flat white
+ * multiplier over a whole wood is the mistake the season table already made
+ * once and wrote down; a stand-sized clump plus a per-block jitter gives some
+ * blocks a load and others almost none, which is what a canopy after snow
+ * actually looks like. Same two-scale construction as SEASON_FRAG's hue jitter,
+ * different constants, for the reason that one gives.
+ *
+ * `vWave` is BANDED rather than tested open-ended. The wave ids are cross 1,
+ * water 2, lava 3, leaves 4, and an open `> 2.5` here is the exact bug that once
+ * made every leaf on the planet emissive.
+ */
+const LEAF_SNOW_FRAG = /* glsl */`
+  if (uSnowCap > 0.002 && vWave > 3.5 && vWave < 4.5) {
+    vec3 upW = normalize(vWorld - uPlanetCenter);
+    vec3 wn = normalize(vWorldNormal);
+    float sky = clamp(dot(wn, upW), 0.0, 1.0);
+    vec3 snowCell = floor(vWorld - wn * 0.5) + 0.5;
+    float nCoarse = fract(sin(dot(floor(snowCell * 0.2), vec3(27.331, 59.117, 13.907))) * 24571.3319);
+    float nFine = fract(sin(dot(snowCell, vec3(45.229, 83.311, 19.673))) * 11923.7717);
+    float drift = clamp(0.55 + (nCoarse - 0.5) * 1.5 + (nFine - 0.5) * 0.6, 0.0, 1.0);
+    // 0.85 is a ceiling, not a taste setting. At 1.0 the most loaded blocks
+    // reach the snow block's own albedo exactly and stop being leaves at all:
+    // the near canopy photographed as a white boulder with holes in it. A
+    // seventh of the needle left showing is what keeps the silhouette reading
+    // as a tree under snow rather than as snow in the shape of a tree.
+    float lay = uSnowCap * drift * (0.30 + 0.70 * sky * sky) * 0.85;
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.93, 0.98), clamp(lay, 0.0, 1.0));
+  }
+`;
+
 const MAP_FRAG = /* glsl */`
   vec4 texel = texture(uMap, vec3(vTexUv, vLayer));
   diffuseColor *= texel;
@@ -1090,6 +1203,7 @@ const CUTOUT_MAP_FRAG = /* glsl */`
   vec3 seasonCell = floor(vWorld - normalize(vNormal) * 0.5) + 0.5;
   float seasonVary = 1.0;
 ${SEASON_FRAG}
+${LEAF_SNOW_FRAG}
 
   float vh = fract(sin(dot(seasonCell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
   diffuseColor.rgb *= 0.93 + vh * 0.14;

@@ -6485,6 +6485,29 @@ class Game {
     const s = this.seasons;
     voxelUniforms.uSeasonColor.value.set(s.color[0], s.color[1], s.color[2]);
     voxelUniforms.uSeasonStrength.value = s.strength;
+    /**
+     * Snow on the canopy, which `LEAF_SNOW_FRAG` draws and `_tickSeasonSnow`
+     * structurally cannot reach — see that comment for the measurement and for
+     * why this is a colour rather than a block.
+     *
+     * It rides `cold` over the same window the ground pass runs in, and that is
+     * the whole of the agreement between them: the wood whitens while the
+     * ground beneath it is freezing and is gone by the time the ground has
+     * thawed. FREEZE_AT is where the ground pass starts laying snow and THAW_AT
+     * is where it starts taking it off, so a canopy is never white over ground
+     * that is being uncovered, and never bare over ground that is being covered.
+     *
+     * Deliberately NOT altitude-gated, and it was the first thing tried. The
+     * ground pass asks whether a column's own altitude is over the snowline; a
+     * shader knows only the *leaf's* altitude, which is five to twelve blocks
+     * higher than the ground it grew from, so a sea-level wood in high summer
+     * has canopy cells above the summer line of 9 and the whole forest would
+     * come out white in July. The season is the one signal that means the same
+     * thing at both heights.
+     */
+    const chill = s.cold;
+    voxelUniforms.uSnowCap.value = Math.max(0,
+      Math.min(1, (chill - THAW_AT) / (FREEZE_AT - THAW_AT)));
   }
 
   /** Nourishment drains with effort and slowly heals you while it lasts. */

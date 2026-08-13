@@ -571,7 +571,7 @@ const TREAD_KICK = 0.35;
 
 /**
  * How far the body pitches out of the horizontal for going up or down, in
- * radians at full vertical speed, and the speed that counts as full.
+ * radians at full vertical speed.
  *
  * This is the whole of diving and surfacing. Before it, pitch came from
  * tangential speed alone, so a player holding the dive key straight down — no
@@ -579,13 +579,37 @@ const TREAD_KICK = 0.35;
  * drowned body does, not a diver. Positive pitch tips the head forward (see
  * `_swim`), so a descent adds to it and a climb subtracts, and the sign falls
  * out of that rather than being chosen.
- *
- * 4.5 is read off Player.js: the swim-up key adds 15/s against a 3.2/s drag and
- * a fifth of gravity, which settles near 4.5, and the sink is hard-clamped at
- * -5. So the scale is the range the physics can actually produce.
  */
 const DIVE_TILT = 0.85;
-const DIVE_FULL = 4.5;
+
+/**
+ * The three vertical speeds a swimmer can actually reach, measured rather than
+ * derived, and the reason there is a deadband between them.
+ *
+ * Taken in 14 cells of open ocean on seed 4242, body mid-water and ungrounded,
+ * median of a run of frames once each state had settled:
+ *
+ *   nothing held   -1.58 cells/s     (terminal passive sink)
+ *   Space          +2.60
+ *   ControlLeft    -3.95
+ *
+ * The algebra in Player.js predicts -1.79 / +2.90 / -4.60 for those three; the
+ * measured values are a consistent 0.88 of that, which is what a drag applied
+ * once per discrete frame does to a continuous terminal. Using the predicted
+ * numbers would have mis-scaled every one of them in the same direction.
+ *
+ * SINK_FREE is the deadband and it is the whole point. **A body that is merely
+ * floating is not diving.** Scaling the tilt straight off `vel.k` — which is
+ * what the first draft did, against a single 4.5 — gave a player drifting in
+ * place a climb of -0.35 and so 0.30 radians, seventeen degrees, of head-down
+ * tilt that they had not asked for and could not switch off: you cannot stop
+ * sinking in this game, only swim up. Treading water would have been performed
+ * permanently nose-down. Below SINK_FREE the tilt is exactly zero, and only the
+ * speed a *held key* buys beyond it counts.
+ */
+const SINK_FREE = 1.58;
+const SINK_FULL = 3.95;
+const RISE_FULL = 2.60;
 
 /**
  * The limits on the total, after the dive term is in.
@@ -1548,7 +1572,14 @@ export class PlayerCharacter {
     // and a player diving straight down are both swimming flat out, and adding
     // them would make doing both at once somehow more than either.
     const tan = THREE.MathUtils.clamp(player.moveAmount / SWIM_FULL, 0, 1);
-    const climb = THREE.MathUtils.clamp(player.vel.k / DIVE_FULL, -1, 1);
+    // Signed, and zero through the deadband — see SINK_FREE. Up and down get
+    // their own scales because the physics is not symmetric: the swim-up key
+    // buys 2.60 and the dive key 3.95, so one number would have made rising
+    // read as weaker than sinking when both are the player leaning on a key.
+    const vk = player.vel.k;
+    const climb = vk > 0 ? Math.min(vk / RISE_FULL, 1)
+      : vk < -SINK_FREE ? -Math.min((-vk - SINK_FREE) / (SINK_FULL - SINK_FREE), 1)
+        : 0;
     const target = Math.max(tan, Math.abs(climb));
     this._drive += (target - this._drive) * Math.min(1, dt * 6);
 

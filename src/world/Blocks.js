@@ -1417,6 +1417,37 @@ export const ID = BLOCK_ID;
 
 // Fast lookup tables the mesher/lighting hot loops read (typed arrays > objects).
 export const N_BLOCKS = BLOCKS.length;
+
+/*
+ * **There are 256 block ids and no more, and this is the only thing that says
+ * so.**
+ *
+ * A voxel is one byte. `Planet.blocks` and the worker's authority copy are both
+ * `Uint8Array(NUM_VOXELS)` - 128 million cells apiece, which is why they are
+ * bytes and will stay bytes - and `Lighting` keeps four more arrays the same
+ * shape. So id 256 does not fail, it *wraps to 0*, and 0 is air: the 257th
+ * block in this table would place, save, load and mesh as nothing at all,
+ * everywhere, for ever, with no error anywhere in the chain.
+ *
+ * Six blocks were appended today (kitchen, fence gate, quicksand, powder snow,
+ * deathcap, and the watermelon crop stages before them) and the table went from
+ * 246 to 252. At that rate the wall is a few days of work away, and nothing was
+ * watching for it - it was found by an agent counting its own additions rather
+ * than by anything in the code.
+ *
+ * A load-time throw rather than a warning, because the failure it replaces is
+ * silent and total. If you are reading this because it fired: the fix is not to
+ * delete a block, it is to widen the voxel arrays to `Uint16Array` and pay the
+ * 128 MB per array, or to fold rarely-varying blocks into a per-cell byte the
+ * way facings and slabs already are.
+ */
+if (N_BLOCKS > 256) {
+  throw new RangeError(
+    `${N_BLOCKS} block ids: a voxel is one byte, so 256 is the ceiling and ` +
+    `id 256 would wrap to air. See the note over N_BLOCKS in Blocks.js.`,
+  );
+}
+
 export const IS_OPAQUE = new Uint8Array(N_BLOCKS);
 export const IS_SOLID = new Uint8Array(N_BLOCKS);
 /** Foliage cubes. The mesher culls leaf-against-leaf faces, "fast leaves" style. */

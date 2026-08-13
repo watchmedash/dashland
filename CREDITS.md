@@ -97,6 +97,54 @@ stake — the mechanic is entirely ours and lives in `game/Explosion.js` and the
 fuse machinery in `game/Mobs.js`, so a replacement body is a one-line change to
 `SPECIES.cinderling.urls` and nothing else.
 
+## Doors and fences — supplied, INSPECTED AND NOT USED
+
+Two packs were supplied for the door, fence gate and ladder work and neither was
+imported. They are recorded here rather than left unmentioned, because the terms
+below are the owner's word and not something read off disk, and because a pack
+that was looked at and rejected should be findable later.
+
+  * **Doors** — six FBX door leaves plus an 8x8 `Texture.png`, from
+    `model/Doors`. The owner states **CC0**. **No licence file of any kind is in
+    the folder**; the terms are recorded as stated by the owner.
+  * **Low Poly Fences** — seven FBX picket-fence sections plus a `.blend`, from
+    `model/LowPoly_Fences`. The owner states **CC-BY, author Zbynekdev**. Again
+    **no licence file is in the folder**, and again the terms are as stated.
+
+**If either pack is ever imported, the fence one carries an obligation that
+nothing else in this repository does.** Every other pack listed above is CC0 and
+costs nothing but a mention; CC-BY *requires* attribution in any shipped build,
+which for a game on Steam, the Microsoft Store and mobile means an in-game
+credits screen or an equivalent the player can actually reach — this file is not
+in the build. There is no such screen today. It is not built here because
+nothing has been imported and building one for art that is not used would be
+inventing a requirement.
+
+Why neither was used, measured with Blender rather than guessed:
+
+  * **The doors are structurally close and stylistically wrong.** Each is a bare
+    leaf with no frame, 2.000 x 0.800 m — exactly two cells tall by 0.8 wide,
+    which is a near-perfect fit — but the pivot is at the centre of the mesh
+    rather than on a hinge edge, and the geometry is 1460-1940 triangles for
+    something the voxel path draws in twelve. They are smooth architectural
+    doors with millimetre-scale panel moulding and a turned handle, which is the
+    detail frequency that turns to mush beside hand-painted metre cubes. The
+    referenced `TextureLowPoly.png` is not in the pack at all and the shipped
+    8x8 PNG is a three-colour palette swatch, so there is no art to match
+    against either — the previews render magenta.
+  * **The fences do not fit the system at all.** They are whole picket-fence
+    sections 1.194 m long with no centre post and one joint tab on one end, so
+    they tile in a straight line and nothing else; a voxel fence is a centre post
+    with rails reaching to the cell walls precisely so that four neighbours can
+    join in any direction, and a corner or a T-junction would break every one of
+    these visibly. They are also 0.050 m through — a twentieth of a cell, a sheet
+    of paper at this scale. **None of the seven is a gate.**
+
+So the door, the fence gate and the ladder are all procedural geometry in
+`blockBoxes`, which is where every other fitting in the game already lives.
+Using the six door variants as the per-wood door family is a separate question
+and is deliberately left open.
+
 ## Sound — no third-party audio
 
 Every sound in the game is synthesised at runtime from oscillators and one

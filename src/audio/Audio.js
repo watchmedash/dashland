@@ -2306,6 +2306,14 @@ export class Audio {
     g.gain.exponentialRampToValueAtTime(0.0004, t + d);
     src.connect(bp).connect(g).connect(this.sfxBus);
     src.start(t, Math.random() * 2); src.stop(t + d + 0.03);
+    // The air the synth has none of. Every other layered one-shot in here is
+    // the recording adding TEXTURE over a synthesised body; this one is the
+    // other way round, and the spectrum is why. The swept bandpass above peaks
+    // at 1 kHz and carries nothing below 500 - it is the hiss a blade makes,
+    // with no arm behind it - while a real swing is a mass of air being moved
+    // and lives at 125 to 250 Hz. So here the synth owns the texture and the
+    // recording owns the weight.
+    this._shot('swingAir', this.sfxBus, t, { gain: 0.030, rate: [0.85, 1.30] });
   }
 
   /**

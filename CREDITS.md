@@ -406,21 +406,21 @@ seals a room with nothing shipping on top of it. It should be built for the
 workbench, by whoever ships the workbench, which is the deliberate way the
 Survival Kit note already asked for.
 
-## Sound — seventeen recorded files, everything else synthesised
+## Sound — sixteen recorded files, everything else synthesised
 
 The engine is still a synthesiser. Every sound in the game is built at runtime
-from oscillators and one generated noise buffer, and fifteen of them
+from oscillators and one generated noise buffer, and sixteen of them
 additionally have a recording layered into or substituted for part of that.
 There is no `<audio>` element anywhere.
 
-The fifteen files are in `public/audio/`, listed in the next section. They are
+The sixteen files are in `public/audio/`, listed in the next section. They are
 the only audio assets in the repository, the only use of `decodeAudioData`, and
 the only media fetch. Everything else on this page that says the game has no
 audio files predates them and has been corrected in place.
 
 ### Recorded ambience, fire, voices and impacts — Sonniss GDC 2026 bundle, IMPORTED
 
-Fifteen files, 369,210 bytes of Ogg Opus total, cut from six publishers'
+Sixteen files, 371,084 bytes of Ogg Opus total, cut from seven publishers'
 source recordings in the **Sonniss.com GDC 2026 Game Audio Bundle**.
 
 Weather, taken first:
@@ -453,10 +453,14 @@ demon and dragon, which turned out to be a synthesis win. See `MOB_SAMPLE` in
 | `exhale_husk.ogg` | 4,775 | `CREAHmn_Violent Humanoid Creature Exhale Short 4_SNDBTS_VB-SE.wav` | **SoundBits** (Vox Bestiae: Source Elements) |
 | `yell_pain.ogg` | 12,232 | `CREAMnstr_Designed Sea Beast Creature Pain Intense Yell Long 04_ESM_HC4.wav` | **Epic Stock Media** (Humanoid Creatures Vol 4) |
 
-Impacts, all four layered over the synthesised version rather than replacing it:
+Impacts, all layered over the synthesised version rather than replacing it.
+`swing_air.ogg` is the one that goes under a **miss** rather than over a hit: the
+synthesised whoosh peaks at 1 kHz and has nothing below 500 Hz, and a real swing
+is a mass of air moving at 125 to 250 Hz.
 
 | shipped file | bytes | source recording | publisher |
 |---|---|---|---|
+| `swing_air.ogg` | 1,874 | `SWSH_SWING IMPACTS Quick Heavy Weapon Swing To Thud Impact Var 01_DDUMAIS_MWP2.wav` | **David Dumais Audio** (Melee Weapons Sound Effects Pack 2) |
 | `hit_flesh.ogg` | 5,378 | `GORESplt_Gore Designed Transient Heavy Impact Smash 01_ESM_HALG.wav` | **Epic Stock Media** (Halloween Game) |
 | `punch.ogg` | 4,359 | `FGHTImpt_Combat Punch Impact Light Hit Delay Crunchy Vintage Quick Smack 05_ESM_AG.wav` | **Epic Stock Media** (Anime Game) |
 | `arrow_hit.ogg` | 8,117 | `Arrow Hit Rattle.wav` | **Cinematic Sound Design** (Cartoon Bloopers) |
@@ -470,7 +474,7 @@ whose decode holds every octave band within 25 dB of the loudest to inside
 0.5 dB, keeps the envelope correlated to 0.95 (0.99 for a transient) and moves
 the crest factor by under 0.5 dB. That lands them between 40 and 64 kbps.
 
-Two of the fifteen do more than one job, which is why the list is shorter than
+Two of the sixteen do more than one job, which is why the list is shorter than
 the number of sounds it makes. `fire_loop.ogg` is both fire beds: the torch one
 is it high-passed at 240 Hz, the lava one is the same buffer at playback rate
 0.48 through a 640 Hz low-pass. `shriek_bug.ogg` is six species at rates from

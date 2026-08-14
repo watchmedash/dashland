@@ -57,7 +57,10 @@ export const SAMPLES = {
   // Swapped in for the layer above when the voice is a hurt or a death.
   yellPain: 'yell_pain.ogg',
 
-  // Impacts, all layered rather than substituted.
+  // Impacts, all layered rather than substituted. `swingAir` is the odd one:
+  // it layers under a MISS rather than over a hit, and it is the only recording
+  // in here that supplies the body while the synth supplies the texture.
+  swingAir: 'swing_air.ogg',
   hitFlesh: 'hit_flesh.ogg',
   punch: 'punch.ogg',
   arrowHit: 'arrow_hit.ogg',
@@ -77,7 +80,7 @@ export const SAMPLES = {
 export const LOAD_ORDER = [
   'rain', 'surf', 'fire', 'thunderCrack',
   'shriekBug', 'wailGhost', 'gurgleDeep', 'exhaleHusk', 'yellPain',
-  'hitFlesh', 'punch', 'arrowHit', 'blastCrack',
+  'swingAir', 'hitFlesh', 'punch', 'arrowHit', 'blastCrack',
   'crickets', 'cicada',
 ];
 

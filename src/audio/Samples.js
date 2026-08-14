@@ -43,6 +43,11 @@ export const SAMPLES = {
   // both placed fire beds — the lava one is this same buffer at rate 0.48
   // through a lowpass, which is why there is no second file for it.
   fire: 'fire_loop.ogg',
+  // 6.0s seamless loop. Replaces NOTHING, for the same reason `fire` does not:
+  // the game has forests, pine forests and a canopy that carries snow, and no
+  // leaf in it has ever made a sound. Gated on wind and on a per-biome leaf
+  // density, so a desert and a snowfield still get nothing.
+  foliage: 'foliage_loop.ogg',
   // 6.0s seamless loops. Replace the `cricket` and `cicada` noise beds.
   crickets: 'crickets_loop.ogg',
   cicada: 'cicada_loop.ogg',
@@ -81,7 +86,7 @@ export const LOAD_ORDER = [
   'rain', 'surf', 'fire', 'thunderCrack',
   'shriekBug', 'wailGhost', 'gurgleDeep', 'exhaleHusk', 'yellPain',
   'swingAir', 'hitFlesh', 'punch', 'arrowHit', 'blastCrack',
-  'crickets', 'cicada',
+  'foliage', 'crickets', 'cicada',
 ];
 
 export class Samples {

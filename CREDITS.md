@@ -406,21 +406,21 @@ seals a room with nothing shipping on top of it. It should be built for the
 workbench, by whoever ships the workbench, which is the deliberate way the
 Survival Kit note already asked for.
 
-## Sound — sixteen recorded files, everything else synthesised
+## Sound — seventeen recorded files, everything else synthesised
 
 The engine is still a synthesiser. Every sound in the game is built at runtime
-from oscillators and one generated noise buffer, and sixteen of them
+from oscillators and one generated noise buffer, and seventeen of them
 additionally have a recording layered into or substituted for part of that.
 There is no `<audio>` element anywhere.
 
-The sixteen files are in `public/audio/`, listed in the next section. They are
+The seventeen files are in `public/audio/`, listed in the next section. They are
 the only audio assets in the repository, the only use of `decodeAudioData`, and
 the only media fetch. Everything else on this page that says the game has no
 audio files predates them and has been corrected in place.
 
 ### Recorded ambience, fire, voices and impacts — Sonniss GDC 2026 bundle, IMPORTED
 
-Sixteen files, 371,084 bytes of Ogg Opus total, cut from seven publishers'
+Seventeen files, 413,238 bytes of Ogg Opus total, cut from seven publishers'
 source recordings in the **Sonniss.com GDC 2026 Game Audio Bundle**.
 
 Weather, taken first:
@@ -431,10 +431,14 @@ Weather, taken first:
 | `surf_loop.ogg` | 85,553 | `WATRWave_Soft Waves Cliffs_JSE_RCoN_Stereo.wav` | **Just Sound Effects** (Rocky Coast of Norway) |
 | `thunder_crack.ogg` | 18,307 | `STORM_Texas Rain Thunder Initial Crash Boom Storm 01 Clap Lightning_ESM_CPS.wav` | **Epic Stock Media** (Public Spaces: Storms, Lakes, Parks and Rural Nature Exteriors) |
 
-Fire and the two insect beds:
+Fire, foliage and the two insect beds. `foliage_loop.ogg` is the second file
+here that replaces silence rather than a synthesised stand-in — the game has
+woodland, taiga and a canopy that carries snow, and no leaf in it had ever made
+a sound:
 
 | shipped file | bytes | source recording | publisher |
 |---|---|---|---|
+| `foliage_loop.ogg` | 42,154 | `AMBPark_Berlin City Humboldthain Park Strong Wind On Trees Foliage Traffic Wash 03_ESM_CPS.wav` | **Epic Stock Media** (Public Spaces: Storms, Lakes, Parks and Rural Nature Exteriors) |
 | `fire_loop.ogg` | 40,815 | `FIRECrkl_Fire Crackling, Popping, Witch's Cauldron_344 Audio_Haunting Ambiences Vol 5.wav` | **344 Audio** (Haunting Ambiences Vol. 5) |
 | `crickets_loop.ogg` | 47,554 | `AMBSubn_Ambience, Forest Crickets, Birds, Connecticut 02_344 Audio_East Coast America.wav` | **344 Audio** (East Coast America Vol. 1) |
 | `cicada_loop.ogg` | 47,998 | `AMBTrop_Loop Ambience Jungle Night Humid Birds Bug Chirps 01_ESM_SNLS.wav` | **Epic Stock Media** (Synthesized Nature Loops and Sounds) |
@@ -474,7 +478,7 @@ whose decode holds every octave band within 25 dB of the loudest to inside
 0.5 dB, keeps the envelope correlated to 0.95 (0.99 for a transient) and moves
 the crest factor by under 0.5 dB. That lands them between 40 and 64 kbps.
 
-Two of the sixteen do more than one job, which is why the list is shorter than
+Two of the seventeen do more than one job, which is why the list is shorter than
 the number of sounds it makes. `fire_loop.ogg` is both fire beds: the torch one
 is it high-passed at 240 Hz, the lava one is the same buffer at playback rate
 0.48 through a 640 Hz low-pass. `shriek_bug.ogg` is six species at rates from

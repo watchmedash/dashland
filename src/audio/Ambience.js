@@ -1,6 +1,8 @@
 // Ambient beds and sparse generative detail. Almost everything is synthesised
-// from a single shared pink-noise buffer plus oscillators; two beds, rain and
-// surf, additionally have a recorded version they switch to if one loads.
+// from a single shared pink-noise buffer plus oscillators; five beds - rain,
+// surf, crickets, cicadas and the two fire ones - additionally have a recorded
+// version they switch to if one loads, and the foliage bed is a recording or
+// nothing at all.
 //
 // Two mechanisms
 // --------------
@@ -38,19 +40,28 @@
 // the terrain (open ground hisses low and wide, trees whistle higher and
 // narrower), surf is how much ocean is within earshot by default, and `air` is
 // a per-biome trim so a snowfield genuinely reads emptier than a meadow.
+//
+// `leaf` is how much foliage the wind has to move, and it is the one column
+// here that is a shape rather than a population: it multiplies the wind level
+// rather than a call rate, so a still day in a forest rustles no more than a
+// still day in a desert. Woodland is the reference at 1.00 because the
+// recording is a broadleaf canopy in a gale. Taiga is 0.75 and not 1.00
+// because a pine needle hisses where a leaf claps, which is a quieter and
+// narrower sound out of the same wind; the snowfield and the three deserts are
+// zero, because there is nothing up there to move.
 const BIOME_AIR = [
-  { bird: 0.15, cricket: 0.00, cicada: 0.00, windF: 340, windQ: 0.55, surf: 1.00, air: 1.00 }, // Ocean
-  { bird: 0.35, cricket: 0.12, cicada: 0.00, windF: 380, windQ: 0.60, surf: 0.85, air: 1.00 }, // Shore
-  { bird: 0.70, cricket: 0.80, cicada: 0.15, windF: 520, windQ: 0.70, surf: 0.00, air: 1.00 }, // Plains
-  { bird: 1.00, cricket: 0.70, cicada: 0.25, windF: 640, windQ: 1.15, surf: 0.00, air: 0.85 }, // Woodland
-  { bird: 0.50, cricket: 0.22, cicada: 0.00, windF: 720, windQ: 1.35, surf: 0.00, air: 0.90 }, // Taiga
-  { bird: 0.08, cricket: 0.50, cicada: 0.95, windF: 430, windQ: 0.50, surf: 0.00, air: 1.05 }, // Desert
-  { bird: 0.50, cricket: 0.90, cicada: 0.70, windF: 480, windQ: 0.60, surf: 0.00, air: 1.00 }, // Savanna
-  { bird: 0.20, cricket: 0.00, cicada: 0.00, windF: 380, windQ: 0.50, surf: 0.00, air: 1.05 }, // Tundra
-  { bird: 0.05, cricket: 0.00, cicada: 0.00, windF: 300, windQ: 0.45, surf: 0.00, air: 1.10 }, // Snowfield
-  { bird: 0.25, cricket: 0.08, cicada: 0.00, windF: 560, windQ: 0.50, surf: 0.00, air: 1.15 }, // Highlands
-  { bird: 0.90, cricket: 1.00, cicada: 0.30, windF: 540, windQ: 0.75, surf: 0.00, air: 1.00 }, // Meadow
-  { bird: 0.10, cricket: 0.35, cicada: 0.80, windF: 400, windQ: 0.50, surf: 0.00, air: 1.05 }, // Badlands
+  { bird: 0.15, cricket: 0.00, cicada: 0.00, leaf: 0.00, windF: 340, windQ: 0.55, surf: 1.00, air: 1.00 }, // Ocean
+  { bird: 0.35, cricket: 0.12, cicada: 0.00, leaf: 0.12, windF: 380, windQ: 0.60, surf: 0.85, air: 1.00 }, // Shore
+  { bird: 0.70, cricket: 0.80, cicada: 0.15, leaf: 0.30, windF: 520, windQ: 0.70, surf: 0.00, air: 1.00 }, // Plains
+  { bird: 1.00, cricket: 0.70, cicada: 0.25, leaf: 1.00, windF: 640, windQ: 1.15, surf: 0.00, air: 0.85 }, // Woodland
+  { bird: 0.50, cricket: 0.22, cicada: 0.00, leaf: 0.75, windF: 720, windQ: 1.35, surf: 0.00, air: 0.90 }, // Taiga
+  { bird: 0.08, cricket: 0.50, cicada: 0.95, leaf: 0.00, windF: 430, windQ: 0.50, surf: 0.00, air: 1.05 }, // Desert
+  { bird: 0.50, cricket: 0.90, cicada: 0.70, leaf: 0.35, windF: 480, windQ: 0.60, surf: 0.00, air: 1.00 }, // Savanna
+  { bird: 0.20, cricket: 0.00, cicada: 0.00, leaf: 0.05, windF: 380, windQ: 0.50, surf: 0.00, air: 1.05 }, // Tundra
+  { bird: 0.05, cricket: 0.00, cicada: 0.00, leaf: 0.00, windF: 300, windQ: 0.45, surf: 0.00, air: 1.10 }, // Snowfield
+  { bird: 0.25, cricket: 0.08, cicada: 0.00, leaf: 0.10, windF: 560, windQ: 0.50, surf: 0.00, air: 1.15 }, // Highlands
+  { bird: 0.90, cricket: 1.00, cicada: 0.30, leaf: 0.30, windF: 540, windQ: 0.75, surf: 0.00, air: 1.00 }, // Meadow
+  { bird: 0.10, cricket: 0.35, cicada: 0.80, leaf: 0.00, windF: 400, windQ: 0.50, surf: 0.00, air: 1.05 }, // Badlands
 ];
 const DEFAULT_AIR = BIOME_AIR[2];
 
@@ -101,7 +112,10 @@ export class Ambience {
     // Which beds a recording has taken over. Until a name goes true here the
     // noise version is the only thing that plays, which is also what happens
     // for the whole session if the download fails.
-    this._sampled = { rain: false, surf: false, fire: false, crickets: false, cicada: false };
+    this._sampled = {
+      rain: false, surf: false, fire: false, foliage: false,
+      crickets: false, cicada: false,
+    };
     // world-anchored panners the placed beds hang off, keyed by feature
     this.places = {};
     this.stats = { oneShots: 0, dropped: 0, rearms: 0 };
@@ -284,6 +298,15 @@ export class Ambience {
       this._sampleBed('rainSmp', buf, 6.0, { rate: 1, spread: 0.94 });
     } else if (name === 'surf') {
       this._sampleBed('surfSmp', buf, 12.0, { rate: 1, spread: 0.96 });
+    } else if (name === 'foliage') {
+      // Around the player rather than placed, like the wind it rides: the
+      // canopy is not a landmark you walk towards, it is the tree you are
+      // already standing under and the forty behind it. `spread` is wider than
+      // the other beds' because this one is the least steady material of the
+      // set — a gust in a canopy is a long swell, and two copies six percent
+      // apart would beat against each other at a rate close enough to that
+      // swell to read as one gust wobbling rather than two trees.
+      this._sampleBed('foliageSmp', buf, 6.0, { rate: 1, spread: 0.91 });
     } else if (name === 'crickets') {
       this._sampleBed('cricketSmp', buf, 6.0, { rate: 1, spread: 0.94 });
     } else if (name === 'cicada') {
@@ -442,6 +465,12 @@ export class Ambience {
     const w = st.wind * air.air;
     this._arm('wind', w * 0.046 * (0.35 + 0.65 * out));
     this._arm('windHi', w * 0.016 * out * st.openness);
+    // Foliage. Driven by the wind rather than added to it: leaves are silent in
+    // still air, and this is the one bed in here whose level is a consequence of
+    // another bed's. Guarded on the flag rather than faded from a synthesised
+    // stand-in, because like the fire there is no stand-in — before this the
+    // canopy made no sound at all.
+    if (this._sampled.foliage) this._arm('foliageSmp', w * air.leaf * 0.026 * out);
     // Recorded or synthesised, never both: `sm` is 1 once a buffer is in
     // service and the two halves of each pair are exact complements, so the
     // handover conserves the bed's level rather than briefly doubling it.

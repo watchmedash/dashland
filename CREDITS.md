@@ -485,6 +485,34 @@ is it high-passed at 240 Hz, the lava one is the same buffer at playback rate
 0.62 to 2.00. The bundle's licence permits this explicitly. None of them is
 shipped as it came.
 
+**What a third pass over the bundle refused, so it is not looked at a fourth
+time.** Each of these was extracted, cut and measured against the thing already
+in the game, and each lost. The numbers are in the commits.
+
+  * **`24 Campfire, Dropping Fresh Pine Branches…`** (Ivo Vicic, 69 MB) — a
+    resin pop for the fire bed to throw off, against a synthesised one. Twelve
+    plays a side, level-matched: the synthesis repeats less (mean consecutive
+    cross-correlation 0.09 against 0.22) and is brighter at 4 and 8 kHz, and the
+    band curves are otherwise identical. Synthesis shipped; the file is gone.
+  * **`AMBSwmp_Meadow Pipits…`** (Just Sound Effects, 50 MB) — a daytime grass
+    and insect hum. Its quietest window is genuinely bird-free (+3.3 dB peak
+    over its own median in the 2.5-7 kHz band, against +23.5 at the worst of the
+    take), so that was never the problem. There is simply no high-pass at which
+    it is not already in the game: at 400 Hz it lies on the wind bed, and at
+    900 Hz its band curve correlates **0.96** with `foliage_loop.ogg` across
+    500 Hz to 8 kHz. It is the bed this pass already shipped.
+  * **`WEAPSwrd_Sword Slide Cuts…`** (344 Audio) — peaks at 4 kHz, which is the
+    band the synthesised whoosh already owns. The hole in a swing was the
+    bottom, and `swing_air.ogg` fills it.
+  * **`METLImpt_METAL SWING HIT…`** (David Dumais Audio) — the same 125-250 Hz
+    curve `swing_air.ogg` already has, with a metallic body impact on the end
+    that this game has nothing to hit.
+  * **`WEAPBlnt_Spear And Stick Impact…`** (344 Audio) — peaks at 1-2 kHz, on
+    top of `arrow_hit.ogg`, which is the recording `impact()` already plays.
+  * **`WEAPArmr_Metal Shield Spin On Floor…`** (344 Audio) — 36 seconds of a
+    buckler spinning down. There is no shield in this game and nothing that
+    spins.
+
 **The licence, read on Sonniss's own terms page rather than from a summary.**
 Commercial use in a paid game is permitted, which covers the Steam, Microsoft
 Store and mobile targets. The grant is perpetual, irrevocable, worldwide and

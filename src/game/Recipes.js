@@ -13,19 +13,17 @@ const RAW = [
   // a pine forest has not locked anyone out of a workbench since the families
   // landed.
   //
-  // `exact` is what stops that convenience eating its own tail. These two are
-  // the only recipes in the file whose output shares a family with its
-  // ingredient, so a widened match reads them backwards: `accepts` is true
-  // across the whole family in both directions, and one oak board on the grid
-  // therefore matched "birch board in" and crafted into one oak board — a
-  // button that does nothing but consume. Worse for the two dyed boards, which
-  // are an oak board plus coal or gravel: laying one on the grid turned it back
-  // into a plain plank and kept the coal. This flag narrows the match back to
-  // `===` for these two rows and nothing else.
+  // These four rows name a board on *both* sides, and that is what `exact`
+  // exists for — see `speciesTyped` below, which works the flag out from the
+  // output rather than trusting anyone to remember it here. A widened match
+  // reads a two-sided row backwards, because a family is a set and membership
+  // has no direction: one oak board matched "birch board in" and crafted into
+  // one oak board, and a charred board matched "oak board in" and crafted back
+  // into a charred board while keeping the coal.
   { out: 'planks_birch', count: 4, in: ['log_birch'] },
   { out: 'planks_pine', count: 4, in: ['log_pine'] },
-  { out: 'oak_planks', count: 1, in: ['planks_birch'], exact: true },
-  { out: 'oak_planks', count: 1, in: ['planks_pine'], exact: true },
+  { out: 'oak_planks', count: 1, in: ['planks_birch'] },
+  { out: 'oak_planks', count: 1, in: ['planks_pine'] },
   { out: 'planks_dark', count: 1, in: ['oak_planks', 'coal'] },
   { out: 'planks_grey', count: 1, in: ['oak_planks', 'gravel'] },
   { out: 'stick', count: 4, shape: ['P', 'P'], key: { P: 'oak_planks' } },
@@ -74,6 +72,10 @@ const RAW = [
   // Slabs: three across the bench gives six halves, so cutting is exactly break
   // even by volume and the two-back-to-one recipe returns the whole block. Both
   // directions have to exist or a mis-click costs the material permanently.
+  //
+  // The three plank bases are species-typed by their names alone — a Birch Slab
+  // is birch — so `speciesTyped` narrows their match and three oak boards no
+  // longer cut a birch slab. Nothing here needs a flag; see that function.
   ...[
     'stone', 'cobblestone', 'stone_brick', 'sandstone', 'red_sandstone', 'brick',
     'limestone', 'marble', 'granite', 'andesite', 'slate', 'tuff',
@@ -590,12 +592,34 @@ function removeFamily(inventory, id, count, exact = false) {
   return count - left;
 }
 
+/**
+ * Does this recipe's output name a species the families cover?
+ *
+ * A family says five boards are interchangeable *timber*, and that is true of
+ * every recipe that wants timber: a bench, a door, a stick, a fence. It is not
+ * true of a recipe that hands back a board, or a half of one, or a step cut
+ * from one — those name the species in the thing they produce, so a slot that
+ * widened would be turning one wood into another for free. The owner:
+ * *"plank recipe is showing on craftable even though no more ingredients to
+ * make one"* — four oak boards listed Birch Slab and Pine Slab as craftable,
+ * and crafting one really did spend the oak.
+ *
+ * The test is the output's own name, because the name is where the species is
+ * declared: `planks_birch` is a member outright and `slab_planks_birch` is
+ * built as `slab_${base}` from one. Reading it off the output rather than
+ * flagging rows by hand is the point — the hand-written list was written once
+ * and was already missing four of the ten rows that needed it.
+ */
+function speciesTyped(name) {
+  return FAMILY_NAMES.some((fam) => fam.some((n) => name === n || name.endsWith(`_${n}`)));
+}
+
 export const RECIPES = RAW.map((r) => {
   const rec = {
     out: itemIdOf(r.out), count: r.count, table: !!r.table, undo: !!r.undo,
-    // Ingredients match by `===` rather than by family. See the plank
-    // conversions at the top of RAW, which are the only rows that want it.
-    exact: !!r.exact,
+    // Ingredients match by `===` rather than by family, because this recipe's
+    // output names a wood species. See `speciesTyped`.
+    exact: !!r.exact || speciesTyped(r.out),
     // Which bench this is made at. `null` is the player's own 2x2 and the
     // workbench; `'kitchen'` is the cooking station and nothing else. See
     // `findRecipe`, where the test is equality rather than a subset — a recipe

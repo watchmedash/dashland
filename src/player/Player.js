@@ -7,7 +7,7 @@ import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
 import { cellToWorld, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
 import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
-  CONTACT_HURT, CONTACT_POISON, SINK,
+  CONTACT_HURT, CONTACT_POISON, SINK, SINK_BUOYANT,
 } from '../world/Blocks.js';
 // Imported rather than re-declared so there is exactly one "how much slower is
 // water" number in the game. Items.js owns it, Skills.js quotes it in prose
@@ -129,7 +129,10 @@ const FLOW_PUSH = 11;
  */
 const SINK_MOVE = 0.32;
 /**
- * Cells per second you rise while you hold still in a sink block.
+ * Cells per second you rise while you hold still in a *buoyant* sink block.
+ *
+ * Quicksand only. A drift of powder snow has no such rate and that is the point
+ * of SINK_BUOYANT: holding still in snow does nothing at all.
  *
  * Deliberately slower than any block's `sink` rate. That asymmetry IS the
  * hazard: at quicksand's 0.9 down against 0.55 up, a second of struggling costs
@@ -153,6 +156,26 @@ const SINK_RISE = 0.55;
  * that is learning how to get out. 9/s settles in about a third of a second.
  */
 const SINK_RATE_LERP = 9;
+/**
+ * Cells per second you haul yourself up the side of a *non-buoyant* sink block
+ * — a drift of powder snow — while your steering is pressed into something you
+ * cannot walk through.
+ *
+ * Powder snow only. It is the escape, because in a drift there is no other one:
+ * you sink whatever you do, so the exit cannot be a rate that beats the sink,
+ * it has to be a place. The place is the side of the hole.
+ *
+ * 1.6 on purpose, which is the block's own sink rate exactly. A drift takes you
+ * down at 1.6 and gives you back at 1.6 once you have hold of an edge, so the
+ * whole cost of falling in is the walk to the wall — and a player who reaches
+ * one immediately loses only the depth they fell. Faster and the drift is a
+ * dip; slower and reaching the wall stops feeling like the answer, because you
+ * would still be watching the white screen for seconds after solving it.
+ *
+ * There is no equipment in this and nothing to aim: it is the wish direction
+ * against the collision the body is already doing. See `_pressingWall`.
+ */
+const SINK_CLIMB = 1.6;
 
 /**
  * Camera modes, in the order the cycle key walks them.
@@ -568,6 +591,38 @@ export class Player {
       }
     }
     return found;
+  }
+
+  /**
+   * Is the steering you asked for aimed at something the body cannot walk into?
+   *
+   * The grip test for the powder snow climb, and it is deliberately not a
+   * second copy of `_touchingLadder`. A ladder is a specific block you have to
+   * be against; the side of a drift is *whatever the hole is cut into* — the
+   * snowfield beside it, the rim's own two solid layers, the mountainside it
+   * drifted against — and the only thing they have in common is that the
+   * collision solver already refuses to let you through them. So ask the solver
+   * rather than the block table, and the climb works against every one of them
+   * without naming any.
+   *
+   * Asked with the wish velocity (wi, wj) rather than the actual velocity, for
+   * the reason the ladder gives: pressing into a wall is exactly the case where
+   * collision has already zeroed the velocity you would be reading.
+   *
+   * The probe is 0.35 cells ahead of the box, a shade over HALF_W. Generous on
+   * purpose and generous in the same way LADDER_GRIP is: a body pinned against
+   * a wall at 1.41 cells/s wanders a little, and losing the climb for a frame
+   * because a nudge took you a hundredth of a cell off the face would read as
+   * the drift letting go of you at random. It cannot produce a false grip in
+   * open snow — 0.35 is less than half a cell, so there is nothing to catch on
+   * inside a drift's own interior.
+   */
+  _pressingWall(height, wi, wj) {
+    const n = Math.hypot(wi, wj);
+    if (n < 1e-3) return false;
+    const c = this.cell;
+    const s = 0.35 / n;
+    return this._blocked(c.ci + wi * s, c.cj + wj * s, c.ck, height);
   }
 
   /**
@@ -1085,7 +1140,10 @@ export class Player {
      * 0.9 cells/s crosses that layer in a little over a second, so falling into
      * a pool gives you a second to get back out of it and no more — react and
      * you were only ever knee deep, dither and you have to float back up before
-     * you can leave. Nothing about it needs explaining and it does not need
+     * you can leave. A drift is faster (1.6, so two thirds of a second) and it
+     * is also the only chance the drift gives you, because there is no floating
+     * back up in snow: miss the window and you are going to the bottom and
+     * climbing out. Nothing about it needs explaining and it does not need
      * aiming; it is simply that you cannot kick off from something you are
      * already under.
      */
@@ -1235,8 +1293,16 @@ export class Player {
       this.vel.k = Math.max(this.vel.k, -5);
     } else if (this.inSink) {
       /*
-       * The whole of the hazard, and it is one sentence: **struggle and you go
-       * down, hold still and you come up.**
+       * Two hazards out of one field, and they are deliberate opposites. Which
+       * one this cell is comes from SINK_BUOYANT, not from a block id.
+       *
+       *   - **Quicksand — struggle and you go down, hold still and you come
+       *     up.** Unchanged, and everything below about the jump, the rim and
+       *     the shuffle is about the pool.
+       *   - **Powder snow — you go down whatever you do.** A drift has no
+       *     buoyancy to hold still for. You sink at 1.6 until the floor of the
+       *     drift stops you, head under, and the way out is to wade to the side
+       *     of the hole and climb it. See SINK_CLIMB.
        *
        * Gravity is not applied at all here, and that is the load-bearing line
        * rather than an optimisation. A body accelerating under gravity through
@@ -1262,16 +1328,45 @@ export class Player {
        * two-deep pool: ten shuffle cycles over sixty seconds and the body never
        * once left. A hazard with no exit is not a hazard.
        *
-       * There is still no climb and nothing to aim. The impulse is the ordinary
-       * 8.4, which clears 1.36 cells against this planet's gravity — more than
-       * the one cell a pool's lip ever stands proud of the surface you are
-       * floating at.
+       * The impulse is the ordinary 8.4, which clears 1.36 cells against this
+       * planet's gravity — more than the one cell a lip ever stands proud of
+       * the surface you are floating at. It is the same jump in both blocks and
+       * it means the same thing in both: **at the top of either, Space gets you
+       * out.** That matters more than it looks. Space is the only input the two
+       * hazards share, and it had to be given one meaning across them or the
+       * pool and the drift would be teaching opposite reflexes with the same
+       * key. It is not the drift's escape — the climb below is — and it is
+       * never a way *down* in the drift, so nothing a snowed-in player does
+       * with it can cost them anything.
+       *
+       * **The drift's escape is the climb, and it is one condition: your
+       * steering is pressed into something you cannot walk through.** It reuses
+       * the collision the body is already doing (`_pressingWall`), so it is not
+       * a new input, not a new key and not something to aim — it is what a
+       * player does anyway. Buried at the bottom of a drift, you hold a
+       * direction; within about three cells in any direction that direction
+       * ends in the wall of the hole; and holding it there hauls you up the
+       * wall at SINK_CLIMB. Reaching the drift's one-layer rim, the neighbour
+       * stops being a wall and you simply walk out over it.
+       *
+       * The obvious alternative was to let Space climb, and it is the one thing
+       * that must not: Space deep in quicksand counts as struggling and drives
+       * you under. One key that lifts you in snow and sinks you in sand is
+       * worse than either hazard on its own.
        */
+      const buoyant = SINK_BUOYANT[this.inSink] === 1;
       if (this.sinkTop && input.down('Space')) {
         this.vel.k = 8.4;
-      } else {
+      } else if (buoyant) {
         const struggling = moving || input.down('Space');
         const target = struggling ? -this.sinkRate : SINK_RISE;
+        this.vel.k += (target - this.vel.k) * Math.min(1, SINK_RATE_LERP * dt);
+      } else {
+        // Snow. Down at the block's rate unless you have hold of a side, and
+        // there is no third case: holding still is the same as anything else
+        // that is not a wall, which is what "it swallows you" has to mean.
+        const climbing = moving && this._pressingWall(height, wi, wj);
+        const target = climbing ? SINK_CLIMB : -this.sinkRate;
         this.vel.k += (target - this.vel.k) * Math.min(1, SINK_RATE_LERP * dt);
       }
     } else {

@@ -276,6 +276,11 @@ function block(o) {
     // Cells per second a body sinks through this block, or 0 for the 249
     // blocks that are either a floor or thin air. See SINK.
     sink: o.sink ?? 0,
+    // 1 for a sink block a still body floats back up through. Only meaningful
+    // where `sink` is set, and it is what splits the family in two: a
+    // suspension holds you up when you stop fighting it, loose snow does not.
+    // See SINK_BUOYANT.
+    buoyant: o.buoyant ?? false,
   };
 }
 
@@ -1345,13 +1350,18 @@ export const BLOCKS = [
   // "can we add more hazard places, we have lava but what about quicksand".
   //
   // The first member of a family of two (powder snow is the other), and the
-  // family is a single field: `sink`. Everything in the block table until now
-  // was either something a body stands on or something it walks through, and
-  // this is the third thing — a cell you fall INTO and then have to get out
-  // of. `solid: false` is what makes the collision loop skip it, exactly as it
-  // skips a flower, and `sink` is what stops that being a hole in the world.
-  // See SINK for the whole rule and `Player.update` for the four lines that
+  // family is two fields: `sink` and `buoyant`. Everything in the block table
+  // until now was either something a body stands on or something it walks
+  // through, and this is the third thing — a cell you fall INTO and then have
+  // to get out of. `solid: false` is what makes the collision loop skip it,
+  // exactly as it skips a flower, `sink` is what stops that being a hole in the
+  // world, and `buoyant` says which way the escape runs. See SINK and
+  // SINK_BUOYANT for the whole rule and `Player.update` for the lines that
   // implement it.
+  //
+  // This one is buoyant, and that is the pool's whole character: it is a
+  // suspension, so a still body rises in it and the thing that drowns you is
+  // panic. The drift below is the opposite and says why.
   //
   // Appended on the end and `NOT_OBTAINABLE` with a hand-written item at the
   // foot of `game/Items.js`, for the reason the gate above gives at length: the
@@ -1386,19 +1396,30 @@ export const BLOCKS = [
   // there underneath when the plank is broken.
   block({
     name: 'quicksand', label: 'Quicksand', top: 'mud', side: 'sand', bottom: 'sand',
-    solid: false, sink: 0.9, hardness: 0.5, tool: 'shovel',
+    solid: false, sink: 0.9, buoyant: true, hardness: 0.5, tool: 'shovel',
     particle: [0.56, 0.47, 0.33], sound: 'sand',
   }),
 
   // The second member of the family, and the one that has a clock on it.
   //
-  // Same physics as the pool above, from the same `sink` field, with two
-  // numbers changed and one thing added. It sinks at 1.6 rather than 0.9,
-  // because falling into a drift is a fall and it should feel like one — the
-  // top layer goes past in two thirds of a second against quicksand's one and
-  // a bit, so the window to jump straight back out is real but short. And the
-  // Game hangs a cold clock off it: see `_tickChill`, which is the only reason
-  // this is a second block rather than a second pool.
+  // The same `sink` field as the pool above and the same third-kind-of-cell
+  // physics, but **not** the same hazard, and the difference is one flag. It
+  // sinks at 1.6 rather than 0.9, because falling into a drift is a fall and it
+  // should feel like one — the top layer goes past in two thirds of a second
+  // against quicksand's one and a bit, so the window to jump straight back out
+  // is real but short. And the Game hangs a cold clock off it: see
+  // `_tickChill`, which is the only reason this is a second block rather than a
+  // second pool.
+  //
+  // **`buoyant` is deliberately absent, and that is the whole of what makes a
+  // drift a drift.** Quicksand is a saturated suspension and a body that stops
+  // struggling in one genuinely rises; snow is loose powder with air in it and
+  // a body in a drift goes to the bottom and stays there. Standing still used
+  // to float you out of a drift, which read as the snow refusing to take you,
+  // and it made the one block whose whole idea is "the ground gave way" the
+  // safest of the three hazards to stand in. Now it swallows you: you go under,
+  // and you leave by wading to the side of the drift and climbing it. See
+  // SINK_BUOYANT and the `inSink` branch of `Player.update`.
   //
   // **It is white on every face and it does not look like snow at close
   // range.** That is a debt, and it is a debt to the texture pipeline rather
@@ -1792,13 +1813,38 @@ export const HAS_GRAVITY = new Uint8Array(N_BLOCKS);
  * the two as one family is the difference between a player learning one rule
  * and learning two.
  *
- * The rest of the rule — that struggling drives you down and holding still
- * floats you up, that you leave over the rim rather than straight up, that a
+ * The rest of the rule — what a struggle costs, what gets you back out, that a
  * fall into one is not a fall — is not here, for the same reason the cactus's
  * cadence is not in CONTACT_HURT: the block owns the number, the body owns what
- * to do about it. See `Player.update`.
+ * to do about it. See `Player.update`, and see SINK_BUOYANT for the one bit
+ * that decides *which* of the two rules a given sink block plays by.
  */
 export const SINK = new Float32Array(N_BLOCKS);
+/**
+ * 1 for a sink block that holds a still body up. Only read where SINK > 0.
+ *
+ * **One bit, two hazards, and they are opposites on purpose.**
+ *
+ *   - Buoyant (quicksand): struggle and you go down, hold still and you come
+ *     up. A suspension is denser than you are, so stopping is what saves you
+ *     and thrashing is what costs you. The escape is patience.
+ *   - Not buoyant (powder snow): you go down whatever you do, until the floor
+ *     of the drift stops you, and nothing you can hold still will lift you.
+ *     Loose snow has air in it and a body in it is simply heavier than it is.
+ *     The escape is work — wade to the side and climb it.
+ *
+ * The flag exists because the family was built with one rule and the rule was
+ * only ever right for one member. A drift that floated you out on its own was
+ * a trapdoor that catches you: it looked like a fall and behaved like a
+ * hammock. Splitting it here rather than by block id keeps the physics one
+ * branch and keeps the claim in the block table, where the next soft block can
+ * say which of the two it is and get the right body for free.
+ *
+ * Nothing else about the two changed. Both are the third kind of cell, both
+ * take their speed from SINK, both are left over the rim rather than straight
+ * up, and gravity is applied to neither.
+ */
+export const SINK_BUOYANT = new Uint8Array(N_BLOCKS);
 export const TINT_ID = new Uint8Array(N_BLOCKS); // 0 none, 1 grass, 2 foliage, 3 foliage_dark, 4 moss
 
 // ---------------------------------------------------------------------------
@@ -2279,6 +2325,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_REPLACEABLE[i] = b.render === R_CROSS ? 1 : 0;
   HAS_GRAVITY[i] = b.gravity ? 1 : 0;
   SINK[i] = b.sink;
+  SINK_BUOYANT[i] = b.buoyant ? 1 : 0;
   // Reef life is exempt: `DROWNS` means "the water would destroy this", and
   // water is the only place a coral or a kelp stalk can be. The opposite rule —
   // these may only be placed *in* water — lives in `main.js`, where the cell

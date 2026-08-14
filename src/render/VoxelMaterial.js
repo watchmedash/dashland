@@ -132,7 +132,33 @@ export const voxelUniforms = {
    * direction the surface actually points. See the note in `Sky.update`.
    */
   uSkyHorizon: { value: new THREE.Color(0.30, 0.53, 0.86) },
+  /**
+   * The horizon 180 degrees from the sun — see SKY_KEYS' `opp` in Sky.js, which
+   * is where both of these are written from.
+   *
+   * Only the aerial term reads it, and it has to: that term exists to fade the
+   * far rim of the planet into the sky immediately behind it, and once the dome
+   * stopped painting one colour all the way round, "the sky behind it" stopped
+   * having one answer. Left on uSkyHorizon alone, the hills on the *cold* side
+   * of a sunset would have gone on dissolving into orange while the sky over
+   * them went blue-grey — a seam along the horizon exactly where this term is
+   * meant to hide one.
+   *
+   * Equal to uSkyHorizon at every sun elevation outside the twilight band, and
+   * mix(x, x, t) is exactly x, so outside that band this term is the identity
+   * and no daylit or night fragment changes value. Confirmed on screen as far
+   * as the harness can: five daylight frames before and after differ by a mean
+   * of 0.90/255, against 0.97/255 for two runs of the *same* build (the world
+   * animates, so nothing here is reproducible to the bit).
+   */
+  uSkyHorizonOpp: { value: new THREE.Color(0.30, 0.53, 0.86) },
   uSkyZenith: { value: new THREE.Color(0.02, 0.12, 0.58) },
+  /**
+   * SUN_SIDE from Sky.js — the one window all three surfaces blend on. Written
+   * once by `Sky`'s constructor; the literal here is only what the value is
+   * before a Sky exists, and it must not be tuned in this file.
+   */
+  uSunSide: { value: new THREE.Vector2(-0.8, 0.8) },
   // The turning year, applied to the biome tint a vertex already carries. See
   // SEASON_FRAG.
   uSeasonColor: { value: new THREE.Vector3(1, 1, 1) },
@@ -382,6 +408,8 @@ uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uSkyReflect;
 uniform vec3 uSkyHorizon;
+uniform vec3 uSkyHorizonOpp;
+uniform vec2 uSunSide;
 uniform vec3 uSkyZenith;
 uniform float uTime;
 uniform vec3 uSeasonColor;
@@ -2272,7 +2300,12 @@ const FOG_FRAG = /* glsl */`
 
   // Aerial perspective. See AERIAL_GAIN for why this is not the fog it replaces.
   vec3 aerialDir = dist > 1e-4 ? (vWorld - uCamPos) / dist : vec3(0.0, 1.0, 0.0);
-  vec3 haze = mix(uFogColor, uSkyHorizon, AERIAL_HORIZON_MIX);
+  // Which horizon is behind this fragment. Anything far enough away for this
+  // term to bite is near the rim, so the view direction to it IS its bearing to
+  // within a few degrees and no tangent-plane projection is needed here.
+  vec3 skyHor = mix(uSkyHorizonOpp, uSkyHorizon,
+                    smoothstep(uSunSide.x, uSunSide.y, dot(aerialDir, uSunDir)));
+  vec3 haze = mix(uFogColor, skyHor, AERIAL_HORIZON_MIX);
   haze = mix(haze, uSunColor,
              AERIAL_SUN_GAIN * pow(max(dot(aerialDir, uSunDir), 0.0), AERIAL_SUN_POW));
   float aerialD = uFogDensity * AERIAL_GAIN;

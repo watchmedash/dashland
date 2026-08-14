@@ -90,6 +90,8 @@ export const MOON_FILL = new THREE.Color(0.22, 0.32, 0.80);
 
 // Only used at the axis itself, where any direction is as good as any other.
 const _refX = new THREE.Vector3(1, 0, 0);
+/** The sun's bearing in the tangent plane — rebuilt every frame in `update`. */
+const _sunAz = new THREE.Vector3();
 const _east = new THREE.Vector3();
 const _north = new THREE.Vector3();
 const _zenith = new THREE.Vector3();
@@ -233,17 +235,61 @@ export function solarDirection(up, dayFraction, out) {
 // thing to check first, if this is ever reported again, is the SAMPLING — the
 // ramp occupies about 0.07 of a day at each end, and any sweep coarser than
 // about 0.01 can jump clean over it.
+//
+// --- the horizon has a DIRECTION, and `opp` is the other end of it -----------
+//
+// `hor` is the horizon toward the sun. `opp` is the horizon 180 degrees from
+// it, and the dome mixes between them across the ring (see uSunAz in DOME_FRAG).
+//
+// Before this pair existed there was one horizon colour painted right around
+// the sky, which is the whole of "a sunset you can't turn away from". Measured
+// on the shipped build from a summit at 18:00, seed 4242, clear, facing the sun
+// and facing exactly away, mean colour of the same strip of sky:
+//
+//   facing the sun   224/150/133   R-B  +91
+//   facing away      198/124/130   R-B  +69     — 76% as warm as the sunset
+//
+// i.e. the east at sunset was three quarters of a sunset in its own right. The
+// only thing that distinguished the two halves was the mie halo and
+// `horizonGlow`, both of which are *additions* on top of a base that had no
+// opinion about which way you were looking.
+//
+// What `opp` is imitating is the earth's shadow: opposite a setting sun the
+// real sky is a dim blue-grey band, cooler AND darker than the zenith over it.
+// It is one colour rather than the two-band shadow-plus-Belt-of-Venus, because
+// on a planet whose horizon dips 0.11 radians there is not enough sky below the
+// tangent plane to draw two bands in and have either read.
+//
+// **`opp` is identical to `hor` at every key from e = 0.20 upward and from
+// e = -0.26 down.** That is deliberate and it is the safety property: above 11
+// degrees of sun the mix is between two equal colours, so every daylit hour is
+// arithmetically untouched, and below -15 the night has no direction to have.
+// The whole of this lives in the twilight band, which on this planet's real-time
+// clock is 17:10 to 19:04 — the hour and fifty minutes the owner asked about.
 export const SKY_KEYS = [
-  // elevation, zenith, horizon, sun, fog, ambient, sunIntensity
-  { e: -1.00, zen: 0x03050f, hor: 0x070a18, sun: 0x0a0e1e, fog: 0x070a16, amb: 0x0a1024, si: 0.00 },
-  { e: -0.26, zen: 0x06091c, hor: 0x141a34, sun: 0x1c2140, fog: 0x11162c, amb: 0x121a34, si: 0.02 },
-  { e: -0.10, zen: 0x1a2350, hor: 0x60406a, sun: 0xb05a48, fog: 0x453050, amb: 0x2a2c48, si: 0.10 },
-  { e: -0.02, zen: 0x2c4278, hor: 0xd8764a, sun: 0xff9a4a, fog: 0x8a6a64, amb: 0x4a4258, si: 0.45 },
-  { e: 0.06, zen: 0x3f68a8, hor: 0xf2a468, sun: 0xffc27a, fog: 0xbb9a84, amb: 0x6a6270, si: 0.95 },
-  { e: 0.20, zen: 0x3d78c8, hor: 0xa8c2e6, sun: 0xfff0d0, fog: 0xc3d3e8, amb: 0x8fa4c0, si: 1.30 },
-  { e: 0.55, zen: 0x2f6fd0, hor: 0x9dc4ee, sun: 0xfffaf0, fog: 0xc8dcf2, amb: 0x9db6d4, si: 1.55 },
-  { e: 1.00, zen: 0x2662c8, hor: 0x96c0ee, sun: 0xffffff, fog: 0xc4d9f2, amb: 0xa2bada, si: 1.62 },
+  // elevation, zenith, horizon, opposite horizon, sun, fog, ambient, sunIntensity
+  { e: -1.00, zen: 0x03050f, hor: 0x070a18, opp: 0x070a18, sun: 0x0a0e1e, fog: 0x070a16, amb: 0x0a1024, si: 0.00 },
+  { e: -0.26, zen: 0x06091c, hor: 0x141a34, opp: 0x141a34, sun: 0x1c2140, fog: 0x11162c, amb: 0x121a34, si: 0.02 },
+  { e: -0.10, zen: 0x1a2350, hor: 0x60406a, opp: 0x3b3a63, sun: 0xb05a48, fog: 0x453050, amb: 0x2a2c48, si: 0.10 },
+  { e: -0.02, zen: 0x2c4278, hor: 0xd8764a, opp: 0x7b7ba6, sun: 0xff9a4a, fog: 0x8a6a64, amb: 0x4a4258, si: 0.45 },
+  { e: 0.06, zen: 0x3f68a8, hor: 0xf2a468, opp: 0x9fa8cc, sun: 0xffc27a, fog: 0xbb9a84, amb: 0x6a6270, si: 0.95 },
+  { e: 0.20, zen: 0x3d78c8, hor: 0xa8c2e6, opp: 0xa8c2e6, sun: 0xfff0d0, fog: 0xc3d3e8, amb: 0x8fa4c0, si: 1.30 },
+  { e: 0.55, zen: 0x2f6fd0, hor: 0x9dc4ee, opp: 0x9dc4ee, sun: 0xfffaf0, fog: 0xc8dcf2, amb: 0x9db6d4, si: 1.55 },
+  { e: 1.00, zen: 0x2662c8, hor: 0x96c0ee, opp: 0x96c0ee, sun: 0xffffff, fog: 0xc4d9f2, amb: 0xa2bada, si: 1.62 },
 ];
+
+/**
+ * How the sky swings from the sunward horizon to the opposite one, as the
+ * cosine of the angle between where you are looking and where the sun is,
+ * measured around the horizon.
+ *
+ * Used by three surfaces that have to agree — the dome, the cloud deck's fill,
+ * and the terrain's aerial perspective — so it is one constant and not three.
+ * At +-0.8 rather than +-1.0 so that the warm half is a broad wash you turn
+ * *through* rather than a spotlight on one bearing: looking 90 degrees off the
+ * sun still puts you exactly half way between the two colours.
+ */
+export const SUN_SIDE = [-0.8, 0.8];
 
 export function lerpKeys(e) {
   let a = SKY_KEYS[0], b = SKY_KEYS[SKY_KEYS.length - 1];
@@ -255,6 +301,7 @@ export function lerpKeys(e) {
   return {
     zenith: mix(a.zen, b.zen),
     horizon: mix(a.hor, b.hor),
+    horizonOpp: mix(a.opp, b.opp),
     sun: mix(a.sun, b.sun),
     fog: mix(a.fog, b.fog),
     ambient: mix(a.amb, b.amb),
@@ -276,11 +323,17 @@ precision highp float;
 varying vec3 vDir;
 uniform vec3 uZenith;
 uniform vec3 uHorizon;
+uniform vec3 uHorizonOpp;
 uniform vec3 uSunColor;
 uniform vec3 uSunDir;
+// The sun's bearing: uSunDir flattened into the tangent plane and normalised.
+// Built on the CPU because it is the same for every fragment, and it cannot
+// degenerate — SOLAR_TILT keeps the sun at least sin(0.36) off the zenith.
+uniform vec3 uSunAz;
 uniform vec3 uUp;
 uniform float uNight;
 uniform float uTime;
+uniform vec2 uSunSide;
 
 // cheap hash noise for band dithering
 float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
@@ -290,9 +343,19 @@ void main() {
   float h = dot(d, uUp);
   float t = clamp(h * 0.5 + 0.5, 0.0, 1.0);
 
+  // Which way round the horizon you are looking, as a cosine: +1 straight at
+  // the sun's bearing, -1 straight away from it. The vertical component is
+  // taken out first, so this is a *bearing* and not "how close to the sun" —
+  // the difference matters directly overhead, where the two answers disagree
+  // completely and only the bearing keeps the zenith from flickering as the
+  // camera tips through vertical.
+  vec3 dH = d - uUp * h;
+  float az = dot(dH, uSunAz) / max(length(dH), 1e-4);
+  vec3 hor = mix(uHorizonOpp, uHorizon, smoothstep(uSunSide.x, uSunSide.y, az));
+
   // gradient with a tightened horizon band
   float g = pow(clamp(h, 0.0, 1.0), 0.42);
-  vec3 col = mix(uHorizon, uZenith, g);
+  vec3 col = mix(hor, uZenith, g);
 
   // How far *below* the tangent plane the sky still reaches.
   //
@@ -356,8 +419,10 @@ uniform float uOpacity;
 // The light falling on the deck, as radiance rather than as a swatch. See
 // CLOUD_ALBEDO below for why these three exist at all.
 uniform vec3 uSunLight;   // sun colour * sun intensity, unattenuated by weather
-uniform vec3 uSkyLight;   // the sky's own fill on a cloud
+uniform vec3 uSkyLight;   // the sky's own fill on a cloud, on the sun's side
+uniform vec3 uSkyLightOpp;// ...and on the far side, where the sky is cold
 uniform vec3 uMoonLight;  // what is left of it after dark
+uniform vec2 uSunSide;
 
 vec3 hash3(vec3 p) {
   p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
@@ -468,7 +533,17 @@ void main() {
   // ...and the sky fill is what is left, plus the moon so a night deck is a dim
   // silhouette rather than a hole. Both are trimmed under a thick deck for the
   // same reason.
-  illum += (uSkyLight * 0.55 + uMoonLight) * mix(1.0, 0.26, thick);
+  //
+  // The fill has a side to it, for the same reason the dome does and by the
+  // same constant. Without this the dome would go cold in the east while the
+  // clouds hanging in front of it stayed sunset-salmon, which is a worse
+  // picture than the uniform one it replaces. dir is the patch's direction
+  // from the planet's centre, and the visible deck spans a 53 degree cap around
+  // the player's up, so at a sunset — sun perpendicular to that up — this term
+  // genuinely runs the whole -0.8..0.8 the window is cut for.
+  float side = dot(normalize(uSunDir), dir);
+  vec3 skyFill = mix(uSkyLightOpp, uSkyLight, smoothstep(uSunSide.x, uSunSide.y, side));
+  illum += (skyFill * 0.55 + uMoonLight) * mix(1.0, 0.26, thick);
   // A consequence worth stating rather than papering over: an OVERCAST midnight
   // now measures luma 0.1 in the sky — the deck is thick, the moon is above it
   // and the stars are behind it, so there is nothing left. That is the right
@@ -507,11 +582,14 @@ export class Sky {
     this.domeUniforms = {
       uZenith: { value: new THREE.Color(0x2662c8) },
       uHorizon: { value: new THREE.Color(0x96c0ee) },
+      uHorizonOpp: { value: new THREE.Color(0x96c0ee) },
       uSunColor: { value: new THREE.Color(0xffffff) },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uSunAz: { value: new THREE.Vector3(1, 0, 0) },
       uUp: { value: new THREE.Vector3(0, 1, 0) },
       uNight: { value: 0 },
       uTime: { value: 0 },
+      uSunSide: { value: new THREE.Vector2(SUN_SIDE[0], SUN_SIDE[1]) },
     };
     const domeGeo = new THREE.SphereGeometry(1, 48, 32);
     const domeMat = new THREE.ShaderMaterial({
@@ -552,7 +630,9 @@ export class Sky {
       uOpacity: { value: 0.88 },
       uSunLight: { value: new THREE.Color(1, 1, 1) },
       uSkyLight: { value: new THREE.Color(0, 0, 0) },
+      uSkyLightOpp: { value: new THREE.Color(0, 0, 0) },
       uMoonLight: { value: new THREE.Color(0, 0, 0) },
+      uSunSide: { value: new THREE.Vector2(SUN_SIDE[0], SUN_SIDE[1]) },
     };
     const cloudMat = new THREE.ShaderMaterial({
       uniforms: this.cloudUniforms,
@@ -613,6 +693,12 @@ export class Sky {
     // the brightest thing on screen.
     this.entityFill = new THREE.HemisphereLight(0xbcd6f5, 0x6a5a44, 1.0);
     scene.add(this.entityFill);
+
+    // One window, three surfaces. The voxel material cannot import this — Sky
+    // imports IT, and a cycle between the two would be a worse problem than a
+    // duplicated pair of floats — so the value is pushed rather than pulled,
+    // once, from the side that owns it.
+    voxelUniforms.uSunSide.value.set(SUN_SIDE[0], SUN_SIDE[1]);
   }
 
   _buildStars() {
@@ -817,13 +903,41 @@ export class Sky {
     const night = THREE.MathUtils.clamp(-elev * 3.2 + 0.35, 0, 1);
     this.night = night;
 
+    /**
+     * How much of the star field is out — deliberately NOT `night`.
+     *
+     * `night` carries a +0.35 offset, so it is already 0.35 with the sun six
+     * degrees ABOVE the horizon and 0.16 at the top of the golden hour. Every
+     * other thing that reads it wants that shoulder: the terrain fill, the moon
+     * and the entity light all need to have started moving before the sun is
+     * actually gone, or dusk arrives as a step. The stars are the one consumer
+     * for which the shoulder is simply wrong, and it showed — the 17:45 frame
+     * of the shipped build has specks of white in a gold sky.
+     *
+     * Zero at and above the horizon, full by -0.22 (about 13 degrees down,
+     * which is the end of nautical twilight). So the first star now appears
+     * after sunset and the field fills in over the following forty minutes,
+     * instead of being three-quarters out before the sun has set.
+     *
+     * `night` itself is untouched, so nothing about how dark the world gets
+     * moves by so much as a bit.
+     */
+    const starlight = THREE.MathUtils.clamp(-elev * 4.5, 0, 1);
+    this.starlight = starlight;
+
     // dome
     this.domeUniforms.uZenith.value.copy(p.zenith);
     this.domeUniforms.uHorizon.value.copy(p.horizon);
+    this.domeUniforms.uHorizonOpp.value.copy(p.horizonOpp);
     this.domeUniforms.uSunColor.value.copy(p.sun);
     this.domeUniforms.uSunDir.value.copy(this.sunDir);
+    // The sun's bearing, which is what the horizon's two colours are mixed on.
+    _sunAz.copy(this.sunDir).addScaledVector(playerUp, -elev);
+    if (_sunAz.lengthSq() < 1e-8) _sunAz.set(1, 0, 0); else _sunAz.normalize();
+    this.domeUniforms.uSunAz.value.copy(_sunAz);
     this.domeUniforms.uUp.value.copy(playerUp);
-    this.domeUniforms.uNight.value = night;
+    // The milky way rides the stars, not the night: it is a band of stars.
+    this.domeUniforms.uNight.value = starlight;
 
     // The dome's own two colours, handed to the voxel material unmodified.
     //
@@ -841,17 +955,18 @@ export class Sky {
     // everything main writes, so the two never race — main runs after this every
     // frame and touches a disjoint set.
     voxelUniforms.uSkyHorizon.value.copy(p.horizon);
+    voxelUniforms.uSkyHorizonOpp.value.copy(p.horizonOpp);
     voxelUniforms.uSkyZenith.value.copy(p.zenith);
 
     this.dome.position.copy(camera.position);
     this.dome.scale.setScalar(1);
 
     // stars
-    this.stars.material.uniforms.uOpacity.value = night;
+    this.stars.material.uniforms.uOpacity.value = starlight;
     this.stars.material.uniforms.uTime.value += dt;
     this.stars.position.copy(camera.position);
     this.stars.rotation.y += dt * 0.0016;
-    this.stars.visible = night > 0.01;
+    this.stars.visible = starlight > 0.01;
 
     // Sun & moon discs.
     //
@@ -898,6 +1013,10 @@ export class Sky {
     // across the dawn/dusk band where the palette pulls them apart. That is
     // deliberate: the ramp was checked and passed, and this must not restyle it.
     this.cloudUniforms.uSkyLight.value.copy(p.ambient).lerp(p.horizon, 0.50);
+    // The same construction against the other horizon, so a cloud in the east
+    // at sunset is lit by the east. Identical to the line above at every hour
+    // outside the twilight band, because `opp` is `hor` there.
+    this.cloudUniforms.uSkyLightOpp.value.copy(p.ambient).lerp(p.horizonOpp, 0.50);
     // Enough moon to keep a night deck as a readable silhouette against the
     // stars and no more. The palette's night ambient alone is ~0.003 linear,
     // which is black on screen — correct for a moonless sky and wrong for this

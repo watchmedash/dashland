@@ -1000,15 +1000,18 @@ const CONTACT_PERIOD = 0.5;
  * and cleared in `respawn` beside the others.
  *
  * **The numbers are set against the escape, which was measured first.** Getting
- * out of a three-deep drift with nothing in hand takes about six seconds from
- * the floor, of which most is floating back up to the layer a jump works from.
- * CHILL_BITE at 8 means a player who responds correctly the moment they land
- * takes no damage at all and still sees the warning, and a player who responds
- * two seconds late takes a point.
+ * out of a three-deep drift with nothing in hand is a wade to the side of the
+ * hole and a climb up it, measured at 1.3 to 2.6 seconds of burial from the
+ * drift floor. CHILL_BITE at 8 means a player who responds at all takes no
+ * damage, and it is the ceiling on dithering rather than a toll on the escape.
+ * (It was six seconds when the drift floated a still body back to the surface,
+ * and most of that six was the float. Snow stopped being buoyant; see
+ * SINK_BUOYANT. The clock did not need retuning, because the escape got
+ * shorter and this number is a ceiling.)
  *
- * CHILL_SHIVER puts the first visible sign at 4.4 seconds, less than the escape
- * takes — so the cue always arrives before the damage does and always arrives
- * while there is still time to act on it.
+ * CHILL_SHIVER puts the first visible sign at 4.4 seconds — after the escape
+ * would have finished, so a player who acts never sees it, and the player who
+ * does see it still has 3.6 seconds of warning before the first point.
  *
  * **It can kill, and the hot spring cannot.** That difference is the argument
  * for both. `_tickSoak` floors health at 1 because a pool looks like a rest

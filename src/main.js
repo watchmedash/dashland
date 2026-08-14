@@ -1400,9 +1400,21 @@ const DEFAULT_SETTINGS = {
  * only ~20% (AERIAL_GAIN's curve reaches 0.38 at the desktop load distance), so
  * a far ridge on a clear noon does not fade out, it stops. That is the trade the
  * low tier is: a nearer world you can play, against a far one you cannot.
+ *
+ * ---
+ *
+ * `buriedDist` is a second horizon, for chunks that are under the ground rather
+ * than on it, and unlike the one above it costs no picture at all. See
+ * `_streamChunks` and `Planet.chunkBuried` for what it is and how far it was
+ * measured to be safe; the short version is that the surface horizon is 150
+ * units because that is how far you can see across a planet, and underground
+ * you cannot see 22.
  */
+const BURIED_LOAD_DIST = 64;
+
 const QUALITY = {
-  high: { ao: true, sea: 1, renderScale: 1, loadDist: CHUNK_LOAD_DIST, keepDist: CHUNK_KEEP_DIST },
+  high: { ao: true, sea: 1, renderScale: 1, loadDist: CHUNK_LOAD_DIST, keepDist: CHUNK_KEEP_DIST,
+    buriedDist: BURIED_LOAD_DIST },
   low: {
     ao: false,
     /**
@@ -1415,6 +1427,12 @@ const QUALITY = {
     renderScale: 0.7,
     loadDist: 96,
     keepDist: Math.round(96 * (CHUNK_KEEP_DIST / CHUNK_LOAD_DIST)),
+    /**
+     * Scaled with the surface horizon, for the same reason `keepDist` is: one
+     * ratio to keep rather than a second guessed number. 41 is still nearly
+     * twice the longest sight line ever measured underground.
+     */
+    buriedDist: Math.round(BURIED_LOAD_DIST * (96 / CHUNK_LOAD_DIST)),
   },
 };
 
@@ -3146,6 +3164,60 @@ class Game {
    * distance are requested, chunks past its keep distance are freed; the gap
    * between the two is hysteresis so standing on a boundary doesn't rebuild the
    * same chunk forever. On `high` those are CHUNK_LOAD_DIST / CHUNK_KEEP_DIST.
+   *
+   * **Buried chunks get their own, much shorter horizon**, and it is the single
+   * largest thing this game does about memory. The surface distance is 150 units
+   * because that is how far a player can see across a planet; below the ground
+   * there is no horizon, there is rock, and rock is opaque. A chunk under the
+   * ground of its own footprint (see `Planet.chunkBuried`) is therefore cut at
+   * `quality.buriedDist` instead — 64 units on `high`, 41 on `low`.
+   *
+   * How far you can actually see underground, measured rather than assumed, on
+   * seeds 4242, 91733 and 7. From 4 500 buried air cells, 24 rays each, 108 000
+   * casts in all: median 1.4 units to the first solid, p99 8.8, and the single
+   * longest sight line onto buried geometry anywhere in the three worlds was
+   * **21.9 units**. Not one ray in 108 000 reached 32. From the other side —
+   * 105 288 rays cast from 4 387 *surface* standing positions, the cave mouths
+   * and ravine lips where you would expect to see down into the dark — only 17
+   * rays landed on buried geometry at all, and the farthest was 11.8 units. So
+   * 64 is about three times the worst case ever observed, and the reason it is
+   * 64 rather than 32 is margin, not measurement.
+   *
+   * What it is worth, measured in one process on seed 4242 with the baseline
+   * arm taken either side of the changed one, because a single before/after on
+   * this game has been read as anything at all before now. Medians of the two
+   * baselines against the changed arm, which came out bit-identical both times:
+   *
+   *              high                     low
+   *   meshes     3 129 -> 2 639  -16%     1 299 -> 1 102  -15%
+   *   geometry   377.5 -> 304.2 MB -19%   159.3 -> 130.0 MB -18%
+   *   of which CPU copies that never drain
+   *              243.7 -> 190.4 MB -22%    77.5 ->  59.9 MB -23%
+   *   draw calls   992 ->   850   -14%       538 ->   468   -13%
+   *   triangles  999 k -> 880 k   -12%     692 k -> 632 k    -9%
+   *
+   * Draw calls and triangles are exact integers off `renderer.info` and mean
+   * what they say; the frame *times* from the same runs do not, because the
+   * headless GPU is a software rasteriser. The geometry figures are byte counts
+   * walked off the attributes rather than anything `performance.memory` said.
+   *
+   * Nothing on screen changes, and that is measured too, not asserted. With the
+   * frame loop stopped so that not one tick of the swell or the day clock
+   * separates the two arms, the same 32 views — every 45 degrees of yaw at four
+   * pitches — were read back off the colour buffer with the leash off and then
+   * on. Six runs across both tiers, two seeds and both a surface and a cave
+   * viewpoint, evicting 184 to 541 meshes each time: **zero pixels differed**,
+   * against a control that shot the same view twice and also differed by zero.
+   *
+   * The one case this does get wrong, stated plainly: `colHeight` is the
+   * *worldgen* surface, so a player who hand-digs a dead-straight tunnel more
+   * than 81 units long (the buried keep distance) and then walks back to look
+   * down it will find the far end unbuilt. Nothing is lost — the blocks are
+   * still in the mirror, the tunnel is still there, and walking back down it
+   * builds it again — and eighty-one blocks of perfectly straight digging is not
+   * a thing that happens by accident. It is a visual edge, not a correctness
+   * one: `dropChunk` frees meshes and nothing else, so physics, raycasting and
+   * every scan over blocks read the same world whatever the streamer decides.
    * @param {boolean} initial first batch — the loading screen waits on it
    */
   _streamChunks(initial = false) {
@@ -3164,8 +3236,14 @@ class Game {
     // against a player who cannot exceed about ten.
     const load = this.quality.loadDist * this.quality.loadDist;
     const keep = this.quality.keepDist * this.quality.keepDist;
+    // The buried pair keeps the surface pair's hysteresis ratio rather than
+    // inventing a second one, so a chunk on either boundary thrashes the same
+    // amount — which is to say, not at all.
+    const bLoad = this.quality.buriedDist * this.quality.buriedDist;
+    const bKeep = bLoad * (keep / load);
     const add = [], drop = [];
     const live = this.liveChunks;
+    const planet = this.planet;
     for (let id = 0; id < NUM_CHUNKS; id++) {
       const o = id * 3;
       const dx = CHUNK_CENTER[o] - eye.x;
@@ -3173,8 +3251,14 @@ class Game {
       const dz = CHUNK_CENTER[o + 2] - eye.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       const has = live.has(id);
-      if (!has && d2 <= load) { if (canAdd) { add.push(id); live.add(id); } }
-      else if (has && d2 > keep) { drop.push(id); live.delete(id); }
+      // The cheap test first: `chunkBuried` is two loads and a compare, but the
+      // distance test rejects the overwhelming majority of 45 414 chunks before
+      // it and there is no reason to pay even that for them.
+      if (!has) {
+        if (d2 <= load && canAdd && (d2 <= bLoad || !planet.chunkBuried(id))) { add.push(id); live.add(id); }
+      } else if (d2 > keep || (d2 > bKeep && planet.chunkBuried(id))) {
+        drop.push(id); live.delete(id);
+      }
     }
     if (drop.length) {
       for (const id of drop) { this.planet.dropChunk(id); this.crossLight.delete(id); }

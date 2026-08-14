@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import {
-  F, D, R_MIN, COLUMNS, NUM_VOXELS, cidx, chunkIdx, CHUNK_T,
+  F, D, R_MIN, COLUMNS, NUM_VOXELS, cidx, chunkIdx, CHUNK_T, CHUNK_K, CK,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, regionOfCol, regionColumns,
 } from './Constants.js';
 import { worldToCell, centerDir } from './Sphere.js';
@@ -211,6 +211,53 @@ export class Planet {
   setGlobals(colBiome, colHeight) {
     this.colBiome = colBiome;
     this.colHeight = colHeight;
+    this._buildFootprintFloor();
+  }
+
+  /**
+   * The lowest worldgen ground radius under each chunk footprint, so the
+   * streamer can tell a buried chunk from one on the skin of the planet.
+   *
+   * A chunk footprint is exactly a region's footprint — `chunkIdx` is
+   * `regionIdx * CK + ck` — so this is one float per region, 5 046 of them,
+   * built once from a height field that arrives complete before any voxel does.
+   * Taking the *minimum* over the 256 columns rather than the mean is the safe
+   * direction: a footprint that straddles a canyon rim reports the canyon floor,
+   * so the wall the player can see across the gorge is never called buried.
+   *
+   * `colHeight` is the terrain surface before caves are carved and before
+   * anything is stamped on top of it. Both of those errors point the same, safe
+   * way. Trees, ruins and player builds stand *above* it, so they only make this
+   * an underestimate of where the real surface is, which classifies fewer chunks
+   * as buried. Caves cut *below* it, and cave walls are precisely the geometry
+   * this is here to find.
+   */
+  _buildFootprintFloor() {
+    const floor = this._footFloor || (this._footFloor = new Float32Array(NUM_REGIONS));
+    const h = this.colHeight;
+    const tmp = new Int32Array(REGION_COLS);
+    for (let rid = 0; rid < NUM_REGIONS; rid++) {
+      regionColumns(rid, tmp);
+      let lo = Infinity;
+      for (let n = 0; n < REGION_COLS; n++) { const v = h[tmp[n]]; if (v < lo) lo = v; }
+      floor[rid] = lo;
+    }
+  }
+
+  /**
+   * Is this chunk entirely under the ground of its own footprint?
+   *
+   * "Entirely" means its top face, `R_MIN + (ck + 1) * CHUNK_K`, is still a
+   * whole chunk's depth below the lowest column in it — so there is always at
+   * least one fully built chunk of geometry between the lowest worldgen ground
+   * over a footprint and the first chunk this will call buried. The streamer
+   * gives these a much shorter leash; see `_streamChunks`.
+   */
+  chunkBuried(id) {
+    const floor = this._footFloor;
+    if (!floor) return false;
+    const ck = id % CK;
+    return R_MIN + (ck + 1) * CHUNK_K < floor[(id - ck) / CK] - CHUNK_K;
   }
 
   /**

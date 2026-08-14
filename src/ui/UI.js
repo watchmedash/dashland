@@ -495,6 +495,22 @@ export class UI {
     this._slotMode = 'continue';
     this._slotKey = (e) => { if (e.key === 'Escape') { this.closeSlots(); e.preventDefault(); e.stopPropagation(); } };
 
+    /**
+     * Every slot element on screen, and how to reach the stack behind it.
+     *
+     * A drag has to be finished by the slot the pointer is *over*, and that slot
+     * is not the one the browser reports: touch captures the pointer to the
+     * element the finger went down on, so the release always arrives back at the
+     * source. So the drop is worked out from the release coordinates and this
+     * map, rather than from the event's target. Weak, because the screens are
+     * rebuilt on every open and the old cells must be free to go.
+     */
+    this._wired = new WeakMap();
+    /** The slot a drag started from, while the pointer is still down. */
+    this._drag = null;
+    window.addEventListener('pointerup', (e) => this._endDrag(e));
+    window.addEventListener('pointercancel', () => { this._drag = null; });
+
     this._buildNavigation();
     this._bind();
     this._buildSlots();
@@ -906,7 +922,10 @@ export class UI {
     bind('set-minimap', 'change', (e) => { s.minimap = e.target.checked; g.persistSettings(); });
     bind('set-compass', 'change', (e) => { s.compass = e.target.checked; g.persistSettings(); });
 
-    window.addEventListener('mousemove', (e) => {
+    // `pointermove`, so the carried stack follows a thumb as well as a mouse.
+    // A finger raises no mouse events while it is down, so the ghost used to sit
+    // wherever the last mouse had left it and a drag showed nothing moving.
+    window.addEventListener('pointermove', (e) => {
       this._cursorXY = { x: e.clientX, y: e.clientY };
       if (!this.el.cursor.classList.contains('hidden')) {
         this.el.cursor.style.left = `${e.clientX}px`;
@@ -1744,9 +1763,20 @@ export class UI {
     for (let i = 0; i < HOTBAR; i++) mk(this.el.invHot, i);
   }
 
+  /**
+   * Wire a slot, and make it both ends of a drag.
+   *
+   * `pointerdown` rather than `mousedown`, which is the whole of what makes the
+   * drag work with a thumb: a finger that moves before it lifts raises no mouse
+   * events at all, so a touch drag was invisible to this method. Nothing listens
+   * for the compatibility mouse events any more, so a tap does one thing rather
+   * than two.
+   */
   _wireSlot(el, getSlot, opts = {}) {
-    el.addEventListener('mousedown', (e) => {
+    this._wired.set(el, { getSlot, opts });
+    el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      const carried = !this.game.inventory.cursor.empty;
       if (opts.output) this._takeOutput(e.button === 2 || e.shiftKey);
       // Shift-click moves a whole stack between the hotbar and storage without
       // picking it up — the standard way players bulk-move items.
@@ -1755,10 +1785,42 @@ export class UI {
       else if (e.shiftKey && opts.container
                && this.game.inventory.cursor.empty) this._shiftTake(getSlot());
       else this._slotClick(getSlot(), e.button === 2, opts.accepts);
+      // A press that filled an empty hand is the start of a possible drag. A
+      // press that put something down is not, or letting go over the next slot
+      // would pick it straight back up.
+      this._drag = (!carried && !this.game.inventory.cursor.empty)
+        ? { el, right: e.button === 2 } : null;
     });
     el.addEventListener('mouseenter', () => this._showTooltip(getSlot()));
     el.addEventListener('mouseleave', () => this._hideTooltip());
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /**
+   * Finish a drag: whatever the press picked up lands in the slot under the
+   * release.
+   *
+   * The owner: *"there's also no way to put things in left hand from the
+   * inventory and so the only way to do it is the F key"*. There was — a click
+   * to pick up and a second click on the off hand to put down — but a drag is
+   * what a player reaches for, and a drag ended with the stack still stuck to
+   * the cursor and the off hand looking as though it had refused it. Every slot
+   * on every screen is both ends of this, because the off hand is not a special
+   * case of anything; it is simply the slot you cannot reach any other way
+   * without a keyboard, which is what made it the one that got reported.
+   *
+   * Releasing on the same slot, on no slot, or on the output cell all leave the
+   * stack on the cursor, which is the click behaviour these already had.
+   */
+  _endDrag(e) {
+    const from = this._drag;
+    this._drag = null;
+    if (!from || this.game.inventory.cursor.empty) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.islot');
+    if (!el || el === from.el) return;
+    const w = this._wired.get(el);
+    if (!w || w.opts.output) return;
+    this._slotClick(w.getSlot(), from.right, w.opts.accepts);
   }
 
   _slotClick(slot, right, accepts) {

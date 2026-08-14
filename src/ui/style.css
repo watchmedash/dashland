@@ -2400,6 +2400,11 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
   box-shadow: var(--pocket);
   display: grid; place-items: center; cursor: pointer;
   transition: background var(--t-fast) ease, box-shadow var(--t-fast) ease;
+  /* A stack is dragged from one pocket to another, and on a phone the browser
+     reads that first drag as a scroll of the sheet behind it and swallows the
+     pointer. Only the cells say no; the sheet still scrolls everywhere else. */
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
 }
 /* Hover lights the inside of the pocket rather than lifting it. A hole does not
    come out of the wood; a lamp goes over it. */

@@ -225,6 +225,30 @@ const MOB_VOICE = {
     // as though heard through water even in the air.
     kind: 'gurgle', base: 74, dur: 1.55, gain: 0.6, urgent: true,
   },
+  drowned: {
+    // The same instrument as the cthulhu and a different animal on it. This row
+    // was missing outright: a drowned is a night-only hunter that a player meets
+    // while swimming, with 2 damage a bite and an aggro range of 34, and it had
+    // no entry here at all, so it closed and killed in silence. That is the
+    // fairness argument the whole table was written for, and this is the one
+    // species it had been failing to make.
+    //
+    // 118 against the cthulhu's 74 is most of an octave up, which is the
+    // difference between a drowned man and a thing the size of a building, and
+    // 0.95 against 1.55 is the same distance again in length. `urgent` because
+    // it hunts.
+    //
+    // 0.43 is a measurement and not arithmetic. Rendered eight plays through
+    // the shipped chain beside four species used as anchors in the same batch,
+    // it lands 3.6 dB under the cthulhu, which puts it at about -35.6 on the
+    // weighted meter this table is written to: a shade under the husk (-34.6),
+    // a shade over the skull, and 2.2 dB clear of the bat, which is the
+    // quietest hostile on the roster. That is the right place for it. It is
+    // heard through water, from a body usually below the player rather than
+    // beside them, and it does not get to be as loud as a dragon on a hillside
+    // — but it is a hostile, and every hostile is above every fish.
+    kind: 'gurgle', base: 118, dur: 0.95, gain: 0.43, urgent: true,
+  },
   greendemon: {
     // Rhythm carries this one, not pitch: six clipped grains in half a second,
     // high and falling. The only monster that reads as fast rather than heavy.
@@ -471,7 +495,12 @@ const MOB_SAMPLE = {
   // instrument leaves a hole exactly where a throat lives.
 
   // --- the wet ones ---------------------------------------------------------
+  // 0.72 and 1.10 is a factor of 1.53, comfortably past the fourth this table's
+  // spread rule asks for, and it is the right way round: the same aquatic
+  // gurgle slowed is a thing the size of a building and sped up is a man who
+  // drowned.
   cthulhu: { name: 'gurgleDeep', rate: 0.72, gain: 0.66, hurt: 'yellPain' },
+  drowned: { name: 'gurgleDeep', rate: 1.10, gain: 0.58, hurt: 'yellPain' },
 
   // --- chitter and shriek: one insectoid tremble across five --------------
   // 0.62 to 2.00 is a factor of three and more than an octave and a half, which

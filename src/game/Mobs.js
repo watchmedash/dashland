@@ -1426,6 +1426,81 @@ const FLYER_CLIPS = {
  */
 const HOSTILE_HP = 1.5;
 
+/**
+ * How much tougher a thing that hunts you gets as the world ages.
+ *
+ * ---- which clock, and why it is not the planet's -------------------------
+ *
+ * The ask was "1% every 10 days, so that at least the game gets tougher the
+ * longer someone plays", and the second half of that sentence is the half that
+ * decides the first. There are two day counts available and they are the same
+ * count at very different scales:
+ *
+ *   `seasons.day`  advances at `dt / 86400` and only while the game is ticking,
+ *                  so a planet day is twenty-four HOURS OF PLAY. It is also the
+ *                  number the save slot prints as "Day 14".
+ *   `playtime`     the same seconds, unscaled.
+ *
+ * `dayMinutes` would shorten the first one, and it is 0 by default and has no
+ * control anywhere in the settings UI — see the note by the row in main.js —
+ * so in every build a player can actually get, one planet day is one full day
+ * of playing. Taken literally, "1% every 10 days" is +1% after two hundred and
+ * forty hours: a feature nobody in the game's life ever meets. Binding it to a
+ * clock that a hidden setting can move by 72x would be worse still, because
+ * then how hard the world is would be a consequence of a graphics-menu number.
+ *
+ * So the unit is an HOUR OF PLAY. One sitting, one "day". The owner's shape is
+ * kept exactly — one per cent, compounding, every ten of them — and it is the
+ * unit that carries what was actually asked for, which is that a long career
+ * meets a harder world than a short one.
+ *
+ * ---- derived, never stored -----------------------------------------------
+ *
+ * Nothing here is written to a save and nothing accumulates. `playtime` is
+ * already saved and already restored, so the multiplier is recomputed from it
+ * and cannot drift, double-apply on a reload, or be inflated by saving in a
+ * loop. A body's health is set once at spawn and the save carries its CURRENT
+ * health, which is correct by construction: the age it was born into has not
+ * changed by the time the file is read back.
+ *
+ * ---- the cap, which is not optional --------------------------------------
+ *
+ * 1.01 compounding has no ceiling. At a thousand hours it is 2.7x, at two
+ * thousand 7.3x, and a husk with a hundred and fifty health is not a harder
+ * game, it is a chore with a health bar. HARDEN_MAX stops it at +50%, reached
+ * at about four hundred and ten hours, and 1.5 is chosen rather than guessed:
+ * it is exactly HOSTILE_HP, so a fully aged husk stands to a fresh husk in the
+ * same relation a husk stands to an animal. One whole step of the one scale
+ * this file already has, and no more.
+ *
+ * What it buys, measured against the sword ladder: a husk runs 6/5/4/3/2 hits
+ * new and 8/7/5/4/3 at the cap. One extra swing at the top tier, two or three
+ * at the bottom. That is the honest size of it.
+ */
+const HARDEN_STEP = 0.01;
+/** Seconds of play per step. Ten "days", a day being an hour at the keyboard. */
+const HARDEN_PERIOD = 10 * 3600;
+/** The ceiling, and see above for why there has to be one. */
+const HARDEN_MAX = 1.5;
+
+/**
+ * The world's toughness multiplier at `playtime` seconds of play.
+ *
+ * Stepped rather than continuous: the owner said "every 10 days", and a bar
+ * that creeps by a thousandth every frame is a bar nobody can ever notice
+ * moving. It lands on a round number, stays there for ten hours, and moves.
+ *
+ * Exported because a curve is the kind of thing that should be checkable
+ * without a browser, and because nothing else in this file is arithmetic a
+ * reader has to take on trust.
+ *
+ * @param {number} playtime seconds the world has been played for
+ */
+export function worldHardening(playtime) {
+  if (!(playtime > 0)) return 1;
+  return Math.min(HARDEN_MAX, (1 + HARDEN_STEP) ** Math.floor(playtime / HARDEN_PERIOD));
+}
+
 const monster = (file, o) => ({
   ...pet(file, { ...o, diet: 'carnivore', hp: Math.round(o.hp * HOSTILE_HP) }),
   urls: [MON(file)],
@@ -3516,6 +3591,16 @@ export class Mobs {
     this.list = [];
     this.spawnTimer = 4;
     /**
+     * Seconds this world has been played for, pushed in by main every tick.
+     *
+     * Read by `_hardening` and by nothing else. A plain field rather than an
+     * argument to `update` because it follows `savage` and `loadDist`: a fact
+     * about the world that main owns and this file only consults. Zero is the
+     * right answer for a world that has not started and for any harness that
+     * never sets it, which is a fresh planet's multiplier of exactly 1.
+     */
+    this.playtime = 0;
+    /**
      * World position of the spawn point, or null if this world was loaded
      * rather than created. Set by populate(); read by _nearHome.
      */
@@ -3889,6 +3974,33 @@ export class Mobs {
     return null;
   }
 
+  /**
+   * The health a body is born with, which is its species' health on a young
+   * world and a little more on an old one.
+   *
+   * Only what hunts you. `hostile` is the husk family — all thirteen biome
+   * variants and the drowned are one spec wearing thirteen names, so they scale
+   * as one and cannot be re-tuned apart by accident — and `monster` is the
+   * fourteen-strong roster built by `monster()`. Everything else is left alone
+   * by construction rather than by a list: the animals, the stalker (whose
+   * health is a formality anyway) and the merchant all miss both flags, so a
+   * cow is a cow on day one and on day five hundred.
+   *
+   * Health only. Difficulty is applied to DAMAGE at the callsite in main and
+   * never touches this number, so the two compose by addition of effects rather
+   * than by multiplication: an aged world on Extreme is a longer fight against
+   * the same swing, not a swing that has been scaled twice.
+   *
+   * Never below the species number — `Math.max` rather than trusting the round
+   * — so the first steps, where 1% of a small bar rounds to nothing, can only
+   * be a no-op and never a discount.
+   */
+  _spawnHealth(spec) {
+    if (!spec.hostile && !spec.monster) return spec.health;
+    const mul = worldHardening(this.playtime);
+    return Math.max(spec.health, Math.round(spec.health * mul));
+  }
+
   spawn(type, col, k, seed) {
     const spec = SPECIES[type];
     if (!spec || this.list.length >= MAX_MOBS) return null;
@@ -4086,7 +4198,7 @@ export class Mobs {
       want: 0,
       state: 'idle',
       stateT: spec.idleMin + rng() * (spec.idleMax - spec.idleMin),
-      health: spec.health,
+      health: this._spawnHealth(spec),
       grounded: false,
       stride: rng() * TAU,      // walk-cycle phase, advanced by distance
       idleT: rng() * 100,       // personal clock for bob / sway

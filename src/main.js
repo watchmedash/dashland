@@ -6213,6 +6213,11 @@ class Game {
       this._safeTick('core', () => this._tickCore(dt));
       this._safeTick('skills', () => this._tickSkills(dt));
     }
+    // How old this world is, in seconds played. Mobs derives the hostile health
+    // multiplier from it at spawn — see `worldHardening` — so it has to be
+    // current before the spawner inside `update` runs, and it is pushed rather
+    // than stored anywhere else so there is only ever one copy of the number.
+    this.mobs.playtime = this.playtime;
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
     // After the animals have moved, so a shot lands where the body is drawn
     // this frame rather than where it was drawn last one. The mob list is handed

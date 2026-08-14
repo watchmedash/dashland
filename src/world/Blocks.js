@@ -103,6 +103,41 @@ export const R_TORCH = 11;
  * gate is a hole in that line. See `collisionBoxes`.
  */
 export const R_GATE = 12;
+/**
+ * A block that fills its cell for every purpose except the picture: solid,
+ * opaque, mined and placed like a cube, and **drawn as a model** by
+ * `render/BlockModels.js` instead of by the mesher.
+ *
+ * This is the class for the things that are furniture rather than masonry. A
+ * workbench is not a cube and never was — as a cube it is banded wood that
+ * reads as a stack of logs, and there is no tile that turns six flat faces into
+ * a bench with legs, a top and tools lying on it.
+ *
+ * ### The two halves, and why they must move together
+ *
+ * The mesher emits nothing at all for one of these, exactly as it emits nothing
+ * for a `MODELLED_CROSS` plant. That much on its own is a hole: `faceVisible`
+ * culls a face whose neighbour is opaque, so a bench set against a wall would
+ * have the wall's face culled behind it and the daylight would come through the
+ * gap between its legs. So a block in this class also stops *culling* its
+ * neighbours — see `SEALS_FACES` — and the wall keeps its face.
+ *
+ * ### What deliberately does NOT change
+ *
+ * `opaque` stays **true**, and that is the load-bearing decision here. `opaque`
+ * is what `SKY_ATTEN` and `ATTEN` in `world/Lighting.js` are built from, and
+ * `SKY_ATTEN` is the single authority on whether a cell is under the sky. A
+ * modelled block therefore seals a room for light *exactly* as its cube did:
+ * same skylight column, same block-light propagation, same moving-light shadow
+ * volume, same collision box. The only thing this class changes is which
+ * triangles are drawn, and the only place `opaque` is stepped around is the one
+ * face-culling test that would otherwise open a hole.
+ *
+ * That split is why the class is safe to reuse. The next modelled block needs
+ * one line here, one name in the mesher's `MODELLED_BLOCK` list, one entry in
+ * `MODELLED_BLOCKS` in main.js and a `POSE` — and nothing at all in the light.
+ */
+export const R_MODEL = 13;
 
 // ---------------------------------------------------------------------------
 // Tiles — index in this array is the texture-array layer.
@@ -182,7 +217,10 @@ function block(o) {
     label: o.label ?? o.name,
     render: o.render ?? R_CUBE,
     solid: o.solid ?? (((o.render ?? R_CUBE) !== R_AIR) && ((o.render ?? R_CUBE) !== R_CROSS) && ((o.render ?? R_CUBE) !== R_LIQUID)),
-    opaque: o.opaque ?? ((o.render ?? R_CUBE) === R_CUBE),
+    // R_MODEL is opaque on purpose and it is not a slip: it fills its cell for
+    // the light exactly as a cube does, and only the picture is different. See
+    // the long note over R_MODEL.
+    opaque: o.opaque ?? (((o.render ?? R_CUBE) === R_CUBE) || ((o.render ?? R_CUBE) === R_MODEL)),
     top: T(o.top ?? o.all),
     side: T(o.side ?? o.all),
     bottom: T(o.bottom ?? o.side ?? o.all),
@@ -504,7 +542,11 @@ export const BLOCKS = [
   block({ name: 'lantern', label: 'Lantern', all: 'lantern', hardness: 0.6, light: 14, lightColor: [1.0, 0.78, 0.45], particle: [1, 0.8, 0.45], sound: 'metal' }),
   block({ name: 'crate', label: 'Crate', top: 'crate', side: 'crate', hardness: 2.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
 
-  block({ name: 'bench', label: 'Workbench', top: 'bench_top', side: 'bench_side', bottom: 'planks', hardness: 2.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
+  // The workbench, and the first block in the game that is a model rather than
+  // a cube. See R_MODEL for what that costs and what it deliberately leaves
+  // alone; the tiles below are kept and still used, by the mining particles and
+  // by anything that asks a block for a colour.
+  block({ name: 'bench', label: 'Workbench', render: R_MODEL, top: 'bench_top', side: 'bench_side', bottom: 'planks', hardness: 2.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
   block({ name: 'kiln', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', particle: [0.45, 0.44, 0.46], sound: 'stone' }),
   block({ name: 'kiln_lit', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front_lit', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', light: 12, lightColor: [1.0, 0.62, 0.28], particle: [0.9, 0.5, 0.2], sound: 'stone' }),
   // Not `directional`: that flag drives the generic "face the player" placement
@@ -1510,6 +1552,30 @@ export const IS_SIGN = new Uint8Array(N_BLOCKS);
 export const IS_FENCE = new Uint8Array(N_BLOCKS);
 export const IS_GATE = new Uint8Array(N_BLOCKS);
 export const IS_TORCH = new Uint8Array(N_BLOCKS);
+/** 1 for a block the mesher skips and `BlockModels` draws. See R_MODEL. */
+export const IS_MODEL = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for a block whose own geometry hides the face of the neighbour behind it.
+ *
+ * **This is `IS_OPAQUE` minus the modelled blocks, and the two must not be
+ * confused.** `IS_OPAQUE` answers "does light stop here", which is what
+ * `SKY_ATTEN` and `ATTEN` are built from and what decides whether a cell is
+ * under the sky. This one answers the much narrower question the mesher asks
+ * when it decides whether to bother drawing a face: "is there something solid
+ * drawn in the next cell that would cover it up?"
+ *
+ * For 251 of 252 blocks the two answers are the same. They part company for
+ * exactly one reason, and it is the reason `R_MODEL` exists: a modelled block
+ * emits no triangles of its own, so nothing is drawn there to cover anything,
+ * and a wall that culled its face against one would show daylight between the
+ * bench's legs. Nothing about the light changes with it — the cell is still
+ * opaque, still seals the sky, still blocks a torch.
+ *
+ * Also used for the mesher's ambient occlusion, and for the same reason: a
+ * bench is not a cube, so a full cube's worth of contact shadow around it would
+ * be a shadow cast by geometry that is not there.
+ */
+export const SEALS_FACES = new Uint8Array(N_BLOCKS);
 /**
  * 1 for anything that cannot be placed into a cell that already holds liquid.
  *
@@ -2206,6 +2272,8 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_FENCE[i] = b.render === R_FENCE ? 1 : 0;
   IS_GATE[i] = b.render === R_GATE ? 1 : 0;
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
+  IS_MODEL[i] = b.render === R_MODEL ? 1 : 0;
+  SEALS_FACES[i] = (b.opaque && b.render !== R_MODEL) ? 1 : 0;
   IS_SUBMERGED[i] = b.submerged ? 1 : 0;
   STACKS[i] = b.stacks ? 1 : 0;
   IS_REPLACEABLE[i] = b.render === R_CROSS ? 1 : 0;

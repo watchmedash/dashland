@@ -9,7 +9,8 @@ import {
 import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn } from './Sphere.js';
 import {
   BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
-  TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
+  TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, R_MODEL, SEALS_FACES,
+  IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
   IS_SUBMERGED,
   FACING_DEFAULT, sideTile, capTile, axisOf, blockBoxes, IS_FENCE, fenceLinks,
   TILES, TILE_INDEX,
@@ -221,6 +222,11 @@ const AO_CURVE = [0.36, 0.60, 0.80, 1.0];
 // then j then k ascending and the address is that same odometer. The main
 // thread binary-searches it and relies on that; if this loop is ever reordered,
 // sort here.
+// Modelled *blocks* (`R_MODEL`) ride the same buffer, for the same reason and
+// with the same word. The only difference is where the sample is taken: a
+// flower's own cell holds light and a workbench's cell is opaque and holds
+// none, so a modelled block samples its brightest neighbour instead. See the
+// `R_MODEL` branch in the mesh loop.
 export const CROSS_LIGHT_ADDR_SHIFT = 16;
 
 /**
@@ -389,7 +395,11 @@ for (const t of ['dirt']) UNTINTED_LAYER[TILE_INDEX[t]] = 1;
 
 function faceVisible(a, b) {
   if (a === 0) return false;
-  if (IS_OPAQUE[b]) return false;
+  // `SEALS_FACES` and not `IS_OPAQUE`, and the difference is one class of block:
+  // a modelled one is opaque to the light and draws no triangles, so there is
+  // nothing there to hide this face behind. Cull against it and a workbench set
+  // against a wall shows daylight through the wall between its legs.
+  if (SEALS_FACES[b]) return false;
   const ga = GROUP[a];
   // "Fast leaves": a face between two leaf blocks is never seen, only its own
   // dark interior, so a canopy used to read as a stack of hollow crates. Culling
@@ -508,7 +518,11 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
 
   // sample a voxel's block id through the adjacency graph
   const at = (col, k) => (k < 0 || k >= D ? 0 : blocks[col * D + k]);
-  const opaqueAt = (col, k) => (k < 0 || k >= D ? 0 : IS_OPAQUE[blocks[col * D + k]]);
+  // Ambient occlusion, and only ambient occlusion: does the cell next door have
+  // geometry in it that would shade this corner? `SEALS_FACES` rather than
+  // `IS_OPAQUE` because a modelled block has no geometry to shade with — see the
+  // note over `SEALS_FACES` in Blocks.js.
+  const sealsAt = (col, k) => (k < 0 || k >= D ? 0 : SEALS_FACES[blocks[col * D + k]]);
 
   /** Smooth light at a corner shared by up to 4 open cells. */
   const cornerLight = (cols, ks, outv) => {
@@ -861,6 +875,41 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
         // still comes from the voxel: it lights, it collides, it is mined and
         // saved exactly as before, and only the picture changes.
         if (rt === R_TORCH) continue;
+        /**
+         * A modelled block: no geometry at all, and its light kept for the
+         * model that will stand here. See `R_MODEL` in Blocks.js.
+         *
+         * The sample is the **brightest of the six neighbours**, not the cell
+         * itself, and that is forced rather than chosen. A modelled block is
+         * opaque, so the light solver never propagates into its cell and every
+         * channel there reads 0 — sample it and every workbench on the planet is
+         * a black bench. A flower has no such problem because a flower's cell is
+         * air, which is why `emitCross` above can simply read `vi`.
+         *
+         * Brightest rather than an average because the question this answers is
+         * "is there a torch on this bench", and a bench with a torch on one side
+         * and rock on the other five is lit. An average would divide that light
+         * by six and read as unlit.
+         */
+        if (rt === R_MODEL) {
+          let ms = 0, mr = 0, mg = 0, mb = 0;
+          for (let n = 0; n < 6; n++) {
+            const nc = n === 0 ? nPi : n === 1 ? nMi : n === 2 ? nPj : n === 3 ? nMj : col;
+            const nk = n === 4 ? k + 1 : n === 5 ? k - 1 : k;
+            if (nk < 0 || nk >= D) continue;
+            const vn = nc * D + nk;
+            if (IS_OPAQUE[blocks[vn]]) continue;
+            if (sun[vn] > ms) ms = sun[vn];
+            if (lr[vn] > mr) mr = lr[vn];
+            if (lg[vn] > mg) mg = lg[vn];
+            if (lb[vn] > mb) mb = lb[vn];
+          }
+          crossLight.push(
+            (((i - i0) * CHUNK_T + (j - j0)) * CHUNK_K + (k - k0)) << CROSS_LIGHT_ADDR_SHIFT
+            | (ms & 15) << 12 | (mb & 15) << 8 | (mg & 15) << 4 | (mr & 15),
+          );
+          continue;
+        }
         if (IS_SHAPED[id]) {
           const byte = (facing?.get(col * D + k) ?? 0) & 7;
           // A fence has no stored orientation: its shape is its neighbours, and
@@ -880,11 +929,11 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           // is — a stair in the open stays bright, one set into a wall picks up
           // the same contact shadow its neighbours have.
           let walled = 0;
-          if (IS_OPAQUE[at(nPi, k)]) walled++;
-          if (IS_OPAQUE[at(nMi, k)]) walled++;
-          if (IS_OPAQUE[at(nPj, k)]) walled++;
-          if (IS_OPAQUE[at(nMj, k)]) walled++;
-          if (IS_OPAQUE[at(col, k - 1)]) walled++;
+          if (SEALS_FACES[at(nPi, k)]) walled++;
+          if (SEALS_FACES[at(nMi, k)]) walled++;
+          if (SEALS_FACES[at(nPj, k)]) walled++;
+          if (SEALS_FACES[at(nMj, k)]) walled++;
+          if (SEALS_FACES[at(col, k - 1)]) walled++;
           const shade = Math.max(0, 3 - (walled >> 1));
           cornerLight([col, col, col, col], [k, k, k, k], lv);
           for (let c = 0; c < 4; c++) {
@@ -926,12 +975,12 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             }
             // A face flush with the cell wall can still be hidden by a solid
             // neighbour, exactly as a full cube's would be.
-            if (bi1 === 1 && IS_OPAQUE[at(nPi, k)]) skip.pi = 1;
-            if (bi0 === 0 && IS_OPAQUE[at(nMi, k)]) skip.mi = 1;
-            if (bj1 === 1 && IS_OPAQUE[at(nPj, k)]) skip.pj = 1;
-            if (bj0 === 0 && IS_OPAQUE[at(nMj, k)]) skip.mj = 1;
-            if (bk1 === 1 && IS_OPAQUE[at(col, k + 1)]) skip.up = 1;
-            if (bk0 === 0 && IS_OPAQUE[at(col, k - 1)]) skip.dn = 1;
+            if (bi1 === 1 && SEALS_FACES[at(nPi, k)]) skip.pi = 1;
+            if (bi0 === 0 && SEALS_FACES[at(nMi, k)]) skip.mi = 1;
+            if (bj1 === 1 && SEALS_FACES[at(nPj, k)]) skip.pj = 1;
+            if (bj0 === 0 && SEALS_FACES[at(nMj, k)]) skip.mj = 1;
+            if (bk1 === 1 && SEALS_FACES[at(col, k + 1)]) skip.up = 1;
+            if (bk0 === 0 && SEALS_FACES[at(col, k - 1)]) skip.dn = 1;
             emitBox(grp, id, biomeId, f, i, j, k,
               [bi0, bj0, bk0], [bi1, bj1, bk1], -1, skip, boxes[b][6]);
           }
@@ -990,7 +1039,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             [col, nPi, nPj, nPiPj], [col, nMi, nPj, nMiPj],
           ];
           for (let c = 0; c < 4; c++) {
-            const s1 = opaqueAt(cols[c][1], kk), s2 = opaqueAt(cols[c][2], kk), sc = opaqueAt(cols[c][3], kk);
+            const s1 = sealsAt(cols[c][1], kk), s2 = sealsAt(cols[c][2], kk), sc = sealsAt(cols[c][3], kk);
             aoData[c] = ao(s1, s2, sc);
             cornerLight(cols[c], [kk, kk, kk, kk], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
@@ -1037,7 +1086,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           // one beneath it, which would read as unlit.
           const below = (IS_SLAB[id] && slabUp) ? k : k - 1;
           for (let c = 0; c < 4; c++) {
-            const s1 = opaqueAt(cols[c][1], below), s2 = opaqueAt(cols[c][2], below), sc = opaqueAt(cols[c][3], below);
+            const s1 = sealsAt(cols[c][1], below), s2 = sealsAt(cols[c][2], below), sc = sealsAt(cols[c][3], below);
             aoData[c] = ao(s1, s2, sc);
             cornerLight(cols[c], [below, below, below, below], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
@@ -1057,7 +1106,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           const nb = nPi;
           const nbPj = COL_NB[nb * 4 + 2], nbMj = COL_NB[nb * 4 + 3];
           const setC = (c, colSide, kSide) => {
-            const s1 = opaqueAt(colSide, k), s2 = opaqueAt(nb, kSide), sc = opaqueAt(colSide, kSide);
+            const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
@@ -1076,7 +1125,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           const nb = nMi;
           const nbPj = COL_NB[nb * 4 + 2], nbMj = COL_NB[nb * 4 + 3];
           const setC = (c, colSide, kSide) => {
-            const s1 = opaqueAt(colSide, k), s2 = opaqueAt(nb, kSide), sc = opaqueAt(colSide, kSide);
+            const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
@@ -1096,7 +1145,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           const nb = nPj;
           const nbPi = COL_NB[nb * 4 + 0], nbMi = COL_NB[nb * 4 + 1];
           const setC = (c, colSide, kSide) => {
-            const s1 = opaqueAt(colSide, k), s2 = opaqueAt(nb, kSide), sc = opaqueAt(colSide, kSide);
+            const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
@@ -1115,7 +1164,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           const nb = nMj;
           const nbPi = COL_NB[nb * 4 + 0], nbMi = COL_NB[nb * 4 + 1];
           const setC = (c, colSide, kSide) => {
-            const s1 = opaqueAt(colSide, k), s2 = opaqueAt(nb, kSide), sc = opaqueAt(colSide, kSide);
+            const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];

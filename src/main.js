@@ -1255,6 +1255,33 @@ const MODELLED_TOPPERS = { kitchen: 0.55 };
 const TOPPER_KIND = [];
 for (const n of Object.keys(MODELLED_TOPPERS)) if (ID[n]) TOPPER_KIND[ID[n]] = n;
 
+/**
+ * Blocks that ARE a model: `R_MODEL` in Blocks.js, drawn here and nowhere else.
+ *
+ * The third of the three lists and the only one about a *solid* block. A
+ * modelled cross is a plant standing in an empty cell; a topper is an ornament
+ * on a cube the mesher still draws; this is a full, solid, opaque cell whose
+ * cube the mesher deliberately does not emit. A name here without an `R_MODEL`
+ * in Blocks.js is a block drawn twice, and an `R_MODEL` without a name here is
+ * an invisible block you can still walk into — the two go together exactly as
+ * `MODELLED_CROSS` and `MODELLED_PLANTS` do.
+ *
+ * The number is a bounding-box height in cells, same as the other two lists,
+ * and for a modelled block it is not a taste decision: the pack normalises the
+ * model's longest axis to one, so this height is *also* what decides how wide
+ * the thing arrives. The workbench measures 0.3257 x 0.2866 x 0.2957, so 0.880
+ * is the height at which its widest axis is exactly one cell. Anything larger
+ * grows through the wall beside it.
+ *
+ * Collision is untouched and stays the full cube it has always been. A bench is
+ * something you stand on and build against, and shrinking its box to the
+ * model's 0.88 would be a gameplay change nobody asked for; the cost is that
+ * standing on one puts you 0.12 of a cell over the top, which is 12 cm.
+ */
+const MODELLED_BLOCKS = { bench: 0.880 };
+const MODEL_KIND = [];
+for (const n of Object.keys(MODELLED_BLOCKS)) if (ID[n]) MODEL_KIND[ID[n]] = n;
+
 const FLOWER_NAMES = Object.keys(MODELLED_PLANTS);
 const FLOWER_KIND = [];
 for (const n of FLOWER_NAMES) if (ID[n]) FLOWER_KIND[ID[n]] = n;
@@ -8228,6 +8255,14 @@ class Game {
     bm.prime('torch', itemIdOf('torch'), { height: 0.95, lean: true });
     for (const n of FLOWER_NAMES) bm.prime(n, itemIdOf(n), { height: MODELLED_PLANTS[n] });
     for (const n in MODELLED_TOPPERS) bm.prime(n, itemIdOf(n), { height: MODELLED_TOPPERS[n] });
+    // `lit` and `shadow`, and neither is true of anything else primed here. A
+    // modelled block is a solid cube's worth of object standing where a cube
+    // used to stand: it has to answer a torch (see `applyInstancedBlockLight`)
+    // and it has to put a shadow on the ground, or it is the one thing in a
+    // sunlit clearing with nothing under it.
+    for (const n in MODELLED_BLOCKS) {
+      bm.prime(n, itemIdOf(n), { height: MODELLED_BLOCKS[n], lit: true, shadow: true });
+    }
 
     const c = this.player.cell;
     const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
@@ -8235,6 +8270,7 @@ class Game {
     const lists = this._modelLists || (this._modelLists = { torch: [] });
     for (const n of FLOWER_NAMES) lists[n] = lists[n] || [];
     for (const n in MODELLED_TOPPERS) lists[n] = lists[n] || [];
+    for (const n in MODELLED_BLOCKS) lists[n] = lists[n] || [];
 
     if (this._tmCol !== baseCol || this._tmK !== ck || this._tmSeq !== this.editSeq) {
       this._tmCol = baseCol; this._tmK = ck; this._tmSeq = this.editSeq;
@@ -8267,11 +8303,22 @@ class Game {
             const nearK = dk >= -7 && dk <= 7;
             const flower = nearK ? FLOWER_KIND[id] : 0;
             const topper = nearK ? TOPPER_KIND[id] : 0;
-            if (!flower && !topper && !(torchable && IS_TORCH[id])) continue;
+            const modelled = nearK ? MODEL_KIND[id] : 0;
+            if (!flower && !topper && !modelled && !(torchable && IS_TORCH[id])) continue;
             const p = colParts(col);
             tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
             const pos = this.planet.centerOf(col, k, new THREE.Vector3());
             const up = new THREE.Vector3(_frame.up[0], _frame.up[1], _frame.up[2]);
+
+            if (modelled) {
+              // Its own cell, and no spin. A flower is scenery and a grid of
+              // identical stamps is the one way a model can look worse than the
+              // billboard it replaced; a workbench is furniture, and furniture
+              // turned to a random angle in a room the player squared off is
+              // the same fault the other way round.
+              lists[modelled].push({ pos, up, out: null, d2, col, k, light: -1 });
+              continue;
+            }
 
             if (topper) {
               // The cell above, which is where a pot on a stove is. No spin:

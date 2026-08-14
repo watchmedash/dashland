@@ -2857,6 +2857,9 @@ export function createMappedNormalMaterial(src) {
  * @param {number} hiY  geometry-space Y of the head — full movement
  */
 export function applyInstancedSway(material, loY, hiY) {
+  // The block light is its own patch and is applied first, because it is wanted
+  // by things that do not sway. See `applyInstancedBlockLight`.
+  applyInstancedBlockLight(material);
   const prevCompile = material.onBeforeCompile;
   const prevKey = material.customProgramCacheKey;
   material.onBeforeCompile = (shader, renderer) => {
@@ -2870,7 +2873,6 @@ export function applyInstancedSway(material, loY, hiY) {
     shader.uniforms.uPlanetCenter = voxelUniforms.uPlanetCenter;
     shader.uniforms.uSwayLo = { value: loY };
     shader.uniforms.uSwayHi = { value: hiY };
-    shader.uniforms.uBlockIntensity = voxelUniforms.uBlockIntensity;
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', /* glsl */`
@@ -2880,22 +2882,6 @@ export function applyInstancedSway(material, loY, hiY) {
         uniform vec3 uPlanetCenter;
         uniform float uSwayLo;
         uniform float uSwayHi;
-        varying vec3 vInstBlock;
-        #ifdef USE_INSTANCING
-        attribute vec3 aBlockLight;
-        #endif
-      `)
-      // Behind the same guard as the sway, and for a second reason as well as
-      // the first: a non-instanced draw has no such attribute, and an undeclared
-      // one reads as an unspecified default rather than failing loudly. Zero is
-      // what we want there, so it is written explicitly.
-      .replace('#include <begin_vertex>', /* glsl */`
-        #include <begin_vertex>
-        #ifdef USE_INSTANCING
-        vInstBlock = aBlockLight;
-        #else
-        vInstBlock = vec3(0.0);
-        #endif
       `)
       // Guarded, because a material with no instancing has no `instanceMatrix`
       // and this would not compile at all — cheaper to keep the guard than to
@@ -2923,6 +2909,65 @@ export function applyInstancedSway(material, loY, hiY) {
           vec3 dW = (tang * (sway * 0.13) - up * (abs(sway) * 0.02)) * (w * uWind);
           transformed += (dW * rot) / sqrt(s2);
         }
+        #endif
+      `);
+  };
+  material.customProgramCacheKey = () => 'sway|' + prevKey.call(material);
+  material.needsUpdate = true;
+  return material;
+}
+
+/**
+ * Per-instance coloured block light, on an `InstancedMesh`'s own material.
+ *
+ * This used to be the second half of `applyInstancedSway` and it was written
+ * down there as a happy coincidence: only a swaying kind takes a cloned
+ * material, so only a swaying kind could safely declare the attribute, and a
+ * torch — which does not sway — wants no block light anyway because it is the
+ * thing filling its own cell with light.
+ *
+ * **The coincidence stopped holding the day a solid block became a model.** A
+ * workbench does not sway and is not an emitter; it is a box you stack in a
+ * cave, and a box in a cave lit by scene ambient alone is the exact objection
+ * that turned down the supplied crate (see CREDITS.md). So the light is its own
+ * patch now, applicable on its own, and `applyInstancedSway` calls it.
+ *
+ * Everything the old note said about the term still holds and is worth
+ * repeating, because it is what makes a missing sample safe: it is **added**,
+ * never multiplied, so an instance whose chunk has not arrived writes zero and
+ * renders exactly as it did before this existed. There is no value of
+ * `aBlockLight` that can darken an instance.
+ *
+ * `uBlockIntensity` is the terrain's own live uniform, not a copy, so a model
+ * and the block under it answer a torch by the same amount for ever. The AO
+ * factor the terrain applies is dropped: a model has no per-vertex AO.
+ *
+ * @param {THREE.Material} material patched in place; clone first if it is shared
+ */
+export function applyInstancedBlockLight(material) {
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prevCompile.call(material, shader, renderer);
+    shader.uniforms.uBlockIntensity = voxelUniforms.uBlockIntensity;
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        varying vec3 vInstBlock;
+        #ifdef USE_INSTANCING
+        attribute vec3 aBlockLight;
+        #endif
+      `)
+      // Guarded, and for two reasons: a non-instanced draw has no such
+      // attribute, and an undeclared one reads as an unspecified default rather
+      // than failing loudly. Zero is what we want there, so it is written.
+      .replace('#include <begin_vertex>', /* glsl */`
+        #include <begin_vertex>
+        #ifdef USE_INSTANCING
+        vInstBlock = aBlockLight;
+        #else
+        vInstBlock = vec3(0.0);
         #endif
       `);
 
@@ -2960,7 +3005,7 @@ export function applyInstancedSway(material, loY, hiY) {
         reflectedLight.indirectDiffuse += instRad;
       `);
   };
-  material.customProgramCacheKey = () => 'sway|' + prevKey.call(material);
+  material.customProgramCacheKey = () => 'ilight|' + prevKey.call(material);
   material.needsUpdate = true;
   return material;
 }

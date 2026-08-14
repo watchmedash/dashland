@@ -67,7 +67,7 @@
 
 import * as THREE from 'three';
 import { worldModel } from './ItemModels.js';
-import { applyInstancedSway } from './VoxelMaterial.js';
+import { applyInstancedSway, applyInstancedBlockLight } from './VoxelMaterial.js';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, R_CROSS, setPlantBox } from '../world/Blocks.js';
 import { crossLightRGB } from '../world/Mesher.js';
@@ -118,15 +118,17 @@ export class BlockModels {
    *
    * @param {string} key      what `sync` will call this kind
    * @param {number} itemId   the item whose model to borrow
-   * @param {{height:number, lean?:boolean}} opts `height` is how tall the thing
-   *   stands as a fraction of a cell; `lean` marks kinds that can be bracketed
-   *   to a wall and want the tilt that goes with it.
+   * @param {{height:number, lean?:boolean, lit?:boolean, shadow?:boolean}} opts
+   *   `height` is how tall the thing stands as a fraction of a cell; `lean`
+   *   marks kinds that can be bracketed to a wall and want the tilt that goes
+   *   with it; `lit` asks for per-instance block light on a kind that does not
+   *   sway; `shadow` lets the kind cast into the sun's shadow map.
    */
   prime(key, itemId, opts) {
     let k = this.kinds.get(key);
     if (!k) {
       k = {
-        height: opts.height, lean: !!opts.lean,
+        height: opts.height, lean: !!opts.lean, shadow: !!opts.shadow,
         // Which kinds sway is read off the block, not passed in: a kind that is
         // a cross block is a plant, and plants are exactly what the mesher's
         // wave table already marks as swaying (`WAVE[i] = 1` for `R_CROSS`).
@@ -137,6 +139,12 @@ export class BlockModels {
         template: null, material: null,
         mesh: null, cap: 0, scale: 1, asked: false,
       };
+      // Every swaying kind is lit, because the sway patch carries the light
+      // patch with it and a plant beside a torch has always wanted it. A kind
+      // that does not sway has to ask, and `lit` is the whole of the difference
+      // between a torch (an emitter, which must not sample its own cell) and a
+      // workbench (a box in a cave, which must). See `_skin`.
+      k.lit = k.sway || !!opts.lit;
       this.kinds.set(key, k);
     }
     if (k.template || k.asked) return;
@@ -307,8 +315,10 @@ export class BlockModels {
    * Draw calls are untouched either way: still one per kind.
    */
   _skin(k, bb) {
-    if (!k.sway) return k.template.material;
-    const clone = (m) => applyInstancedSway(m.clone(), bb.min.y, bb.max.y);
+    if (!k.sway && !k.lit) return k.template.material;
+    const clone = (m) => (k.sway
+      ? applyInstancedSway(m.clone(), bb.min.y, bb.max.y)
+      : applyInstancedBlockLight(m.clone()));
     // A tinted pack model carries two materials, one per draw group. Flowers
     // are single-material WAM art and take the first branch, but a modelled
     // plant out of a split pack would silently lose its sway without this.
@@ -336,28 +346,32 @@ export class BlockModels {
     const mesh = new THREE.InstancedMesh(k.template.geometry, k.material, cap);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
-    // Per-instance block light, for the kinds whose material we are allowed to
-    // patch — which is exactly the swaying ones, and that is not a coincidence
-    // worth papering over.
+    // Per-instance block light, for the kinds that asked for it — every swaying
+    // one, plus any other kind primed with `lit`.
     //
-    // `_skin` hands a non-swaying kind its template's *shared* material back
-    // untouched, because that is the same material the torch in your hand and
-    // the torch in the toolbar draw with. The shader that reads this attribute
-    // therefore cannot go there either, so a torch gets no block light — and
-    // that turns out to be the right picture anyway. A torch is an emitter, so
-    // its own cell reads 15/15/15 or near it, and a torch lit by its own light
+    // It used to be "exactly the swaying ones", on the grounds that a
+    // non-swaying kind keeps its pack's *shared* material and the shader that
+    // reads this attribute cannot go there. That premise is intact and the
+    // conclusion no longer follows: `_skin` clones for a lit kind too, and pays
+    // the same one-material-per-kind the flowers pay. What was really being
+    // said is that the only non-swaying kind at the time was the torch — and a
+    // torch still gets no block light, deliberately, because it is an emitter.
+    // Its own cell reads 15/15/15 or near it, and a torch lit by its own light
     // is a white lozenge with the flame texture washed clean off it. The one
-    // thing in the world that should *not* sample its own cell is the thing
-    // that filled that cell. (A neighbouring cell would be defensible, but a
-    // wall torch's neighbours are a wall on one side and air on three, so
-    // there is no single honest one to pick, and the torch model already
-    // carries its own glow.)
+    // thing in the world that should not sample its own cell is the thing that
+    // filled that cell.
+    //
+    // A modelled block is the opposite case in every respect: it is not an
+    // emitter, its own cell is opaque and holds no light at all (the mesher
+    // samples its brightest neighbour instead), and it is a box you stack in a
+    // cave. Unlit, it is the exact objection that turned down the supplied
+    // crate. So it asks, and gets it.
     //
     // The attribute lives on the geometry, which is the template's and is
     // shared with the held and dropped copies of the same model. That is safe:
     // a program that does not declare `aBlockLight` never binds it, and only
-    // the cloned swaying material declares it.
-    if (k.sway) {
+    // the cloned material declares it.
+    if (k.lit) {
       const attr = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
       attr.setUsage(THREE.DynamicDrawUsage);
       mesh.geometry.setAttribute('aBlockLight', attr);
@@ -385,7 +399,16 @@ export class BlockModels {
     // three tests a light's layers against the camera, not per object. The full
     // story is in `Sky.js`, above `entityFill`.)
     mesh.receiveShadow = true;
-    mesh.castShadow = false;
+    // Casting is off for the flora, and the reason is above: a flower is about
+    // ten texels on a 2048 map spanning ~92 cells, so its cast shadow is a grey
+    // smudge and two hundred and fifty of them is a second pass for that smudge.
+    //
+    // A modelled *block* is the case that changes the arithmetic, and it opts
+    // in. It is a whole cell across — twenty-odd texels, a real shadow — and it
+    // replaces a cube that was casting one out of the terrain mesh. Off, a
+    // workbench in the open is a bench with no shadow standing beside blocks
+    // that all have one, which is more conspicuous than any smudge.
+    mesh.castShadow = !!k.shadow;
     // One bounding sphere for instances spread over forty cells is a sphere
     // containing the player, so culling it can only ever be wrong — and three.js
     // computes that sphere from the matrices as they were when it last looked.

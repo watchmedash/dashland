@@ -183,7 +183,7 @@ block item's icon and held model are drawn from the same atlas cube that gets
 placed, so a modelled crate there would put a dark photographic box in your fist
 and a bright painted one on the ground.
 
-## Survival Kit (2.0) by **Kenney** — supplied, INSPECTED, one recommended
+## Survival Kit (2.0) by **Kenney** — supplied, INSPECTED, one SHIPPED
 
 [kenney.nl](https://www.kenney.nl) — **CC0**, stated in the pack's own
 `License.txt`, so unlike the crate and the doors this one is verified on disk.
@@ -191,25 +191,34 @@ and a bright painted one on the ground.
 shape as the Food Kit already credited above and would load through the existing
 `PACKS` entry pattern with no new machinery.
 
-Nothing from it is imported yet. Per model, measured:
+One model is imported: `public/models/survival/workbench.glb`, with the pack's
+`colormap.png` and a copy of its `License.txt` beside it. It loads through a
+`survival` entry in `PACKS` that is the Food Kit's entry with a different atlas.
+Per model, measured:
 
-  * **`workbench.glb` — recommended, and the only thing here that beats its
-    cube.** 236 triangles, 0.326 x 0.287 x 0.296, so it is nearly cubic in mass:
-    a solid top over short legs that fills its cell's footprint rather than
-    perching in it. Injected into a real world cell it read **L 87.1,
-    saturation 0.54**, which sits between the game's own blocks (crate cube L
-    51.9) and its plank floor (L 112.9) — it belongs to this palette, which is
-    unsurprising, because the Kenney pot standing on the kitchen block is out of
-    the sibling Food Kit. The `bench` cube it would replace is banded wood that
-    reads as a stack of logs and says nothing about crafting.
-    **It is not shipped because it cannot be, cheaply.** A workbench is
-    `R_CUBE`, and drawing a model in its cell means the mesher must stop emitting
-    that cube *and* the block must stop culling its neighbours' faces, or a
-    bench set against a wall shows daylight through the wall between its legs.
-    That is a new render class in `world/Blocks.js`, an entry in
-    `world/Mesher.js`, a scan in `main.js` and a `POSE` plus name-map pair in
-    `render/ItemModels.js` — five files, and a change to how the game's
-    most-placed station seals a room. Worth doing deliberately, not in passing.
+  * **`workbench.glb` — SHIPPED, and the only thing here that beats its cube.**
+    236 triangles over three meshes — the bench, a hammer and a sheet of paper,
+    which are props on it and not the stacked LODs the wooden crate hid, so the
+    merge in `loadGeometry` is exactly what is wanted. 0.3257 x 0.2866 x 0.2957,
+    so it is nearly cubic in mass: a solid top over short legs that fills its
+    cell's footprint rather than perching in it. Injected into a real world cell
+    it read **L 87.1, saturation 0.54**, which sits between the game's own blocks
+    (crate cube L 51.9) and its plank floor (L 112.9) — it belongs to this
+    palette, which is unsurprising, because the Kenney pot standing on the
+    kitchen block is out of the sibling Food Kit. The `bench` cube it replaces
+    was banded wood that read as a stack of logs and said nothing about crafting.
+    It is the block, not an ornament on one: `R_MODEL` in `world/Blocks.js`, so
+    the same geometry is the fist, the icon, the ground drop and the placed
+    block. The pack's `fitMax` normalises the longest axis, so the 0.880 height
+    in `MODELLED_BLOCKS` is what lands it exactly one cell wide including the
+    hammer handle.
+    **The block-light objection recorded against the crate below does not apply
+    to it**, because the machinery it named was built rather than worked around:
+    `applyInstancedBlockLight` is now its own patch, so a `BlockModels` kind that
+    does not sway can still carry per-instance block light. Measured beside a
+    torch at night, the model reads **L 97.2** against the lit stone floor's
+    **L 92.9**, and two cells further out in the dark **L 10.3** against 7.7. It
+    answers a flame by the amount the terrain does.
   * **`bedroll.glb` — turned down.** 0.310 x 0.125 x 0.608: a mat twice as long
     as it is wide and an eighth as tall. The `bed` is a **single** full cube
     (`world/Blocks.js`, one `block({ name: 'bed' ... })`; `bed_top` and

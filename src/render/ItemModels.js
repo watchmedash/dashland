@@ -71,6 +71,17 @@ const PACKS = {
   // `ext` because the pack ships as GLB, like the food kit and unlike the
   // .gltf + .bin packs above.
   fish:    { atlas: null, tint: false, bakeColor: true, ext: 'glb' },
+  // Kenney's Survival Kit 2.0, CC0 and verified on disk in the pack's own
+  // `License.txt` (a copy of which ships beside the model). Same shape as the
+  // Food Kit above and for the same reason — GLB with the atlas as a sibling,
+  // named by relative URI, so `survival/Textures/colormap.png` has to keep that
+  // exact path — but it is a *different* colormap and not the food kit's, so it
+  // is a second pack rather than a second `file` prefix.
+  //
+  // `fitMax` because this pack is furniture: a workbench is 0.326 x 0.287 x
+  // 0.296, wider than it is tall, and fitting its *height* to one would arrive
+  // 1.14 cells across and grow through the wall beside it. See `bench` in POSE.
+  survival: { atlas: 'survival/Textures/colormap.png', tint: false, nearest: true, ext: 'glb', fitMax: true },
 };
 const BLANK =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII=';
@@ -800,6 +811,33 @@ export const POSE = {
    * models are the state machine and this is where they go.
    */
   kitchen:     food('pot', 0.24, true, { pos: [0.014, 0.088, -0.041] }),
+  /**
+   * The workbench, and the one pose here that is also the block itself.
+   *
+   * Every other block-backed item in this table either has no model (and is
+   * drawn as its atlas cube, in the hand, in the icon and on the ground) or has
+   * one that is an ornament standing on a cube, which is the kitchen above. The
+   * bench is neither: it is `R_MODEL`, so this geometry *is* the block, and the
+   * fist, the icon, the ground drop and the placed block are all the same
+   * object for the first time. That is the whole reason the render class was
+   * worth building — the crate was turned down partly because adopting a model
+   * for the placed block alone would have put a different box in your hand from
+   * the one that lands.
+   *
+   * The pack's `fitMax` normalises the longest axis, which here is X at 0.3257
+   * against a height of 0.2866, so the model arrives 0.880 tall in its own
+   * units. `MODELLED_BLOCKS` in main.js asks for exactly that height, which is
+   * what lands it one cell wide and not 1.14 — including the hammer handle,
+   * which is the piece that overhangs furthest.
+   *
+   * Tilted forward like the flat foods rather than stood on edge: side-on a
+   * workbench is a plank on four legs, and the hammer, the saw marks and the
+   * sheet of paper that say "this is where you make things" are all on the top.
+   */
+  bench: {
+    file: 'survival/workbench', pack: 'survival', height: 0.30, grip: 0.5,
+    rot: [0.62, -0.52, 0.10], pos: [0.02, 0.115, -0.053], icon: [0.88, 0.58, 0],
+  },
   pizza:       food('pizza', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
   burger:      food('burger-cheese', 0.26, false, { pos: [0.02, 0.13, -0.06] }),
 
@@ -1639,6 +1677,12 @@ export const BY_NAME = {
   cake: 'cake',
   stew: 'stew',
   kitchen: 'kitchen',
+  // The workbench, and the only entry in this table that is also what gets
+  // placed. The lantern's note at the head of this map still stands for a block
+  // whose whole shape is its cube; the bench is `R_MODEL`, so there is no cube
+  // to prefer — the same geometry is the fist, the icon, the ground drop and
+  // the block in the world.
+  bench: 'bench',
   pizza: 'pizza',
   burger: 'burger',
   cookie: 'cookie',

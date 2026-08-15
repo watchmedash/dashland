@@ -77,6 +77,7 @@ import {
   patchColumn, normalizeCell, FACE_N, FACE_R, FACE_U,
 } from './world/Sphere.js';
 import { CROSS_LIGHT_ADDR_SHIFT } from './world/Mesher.js';
+import { EntityLightField } from './world/EntityLight.js';
 import { makeRng } from './util/Noise.js';
 
 /**
@@ -7666,6 +7667,28 @@ class Game {
   /**
    * Block light reaching an *entity*, in the units its emissive wants.
    *
+   * ### Read this first: there are two answers in here, and the second is a
+   * fallback
+   *
+   * The answer that ships is the local light field — a flood fill over the
+   * volume around the player, in the same units and by the same tables as the
+   * world worker's, so an animal and the ground it is standing on are lit out
+   * of fields that agree. See `EntityLight.js` for what it is, what it costs
+   * and the measurements that made it necessary.
+   *
+   * Everything below the field's early return is the probe that was here
+   * before: a walk over the emitters within eight columns of the *player*, with
+   * a shadow ray per emitter. It is kept, unchanged, for the case the field
+   * cannot answer — no volume yet, or a body standing outside the box. Failing
+   * to it rather than to black is the whole contract, and the rest of this note
+   * is about it rather than about the field.
+   *
+   * What the field fixed, in one line: an animal two cells from a torch, in a
+   * sealed room, with the player seventeen columns down it, rendered at 36/255
+   * against a floor at 120 — the same 35 it rendered at seventeen cells from
+   * the torch on a floor at 3.8. It could not see a torch the player was not
+   * beside, and it could not bend around a corner.
+   *
    * ### Why entities needed one at all
    *
    * Every light in this world except the one in your hand is baked into the
@@ -7782,16 +7805,30 @@ class Game {
    */
   _entityLight(pos, out) {
     out.r = 0; out.g = 0; out.b = 0;
-    // Cached; this is what keeps the emitter list in step with the world.
-    this._handLight();
-    const emitters = this._emitters;
-    if (!emitters.length) return out;
     // The gain the terrain applies to its own block light, read live off the
     // uniform rather than copied — a torch-lit mob and the torch-lit dirt under
     // it answer by the same amount and can never drift apart. RECIPROCAL_PI
     // because the terrain's term carries the same Lambert factor; without it a
     // lit mob would come out pi times brighter than the ground it stands on.
     const gain = voxelUniforms.uBlockIntensity.value / Math.PI;
+
+    // The field, if it covers this point. It answers in the terrain's own
+    // `blockLight` units — level over fifteen, per channel — so the only thing
+    // between it and a mob's emissive is the same gain the terrain applies.
+    const field = this._entityField();
+    if (field) {
+      const l = this._worldToOccCell(pos, _occLocal);
+      if (field.sample(l.x, l.y, l.z, out, occupancyData)) {
+        out.r *= gain; out.g *= gain; out.b *= gain;
+        return out;
+      }
+    }
+
+    // --- fallback: the player-centred emitter probe -------------------------
+    // Cached; this is what keeps the emitter list in step with the world.
+    this._handLight();
+    const emitters = this._emitters;
+    if (!emitters.length) return out;
 
     // --- who is in range at all, brightest first ---
     const ord = this._emitOrder || (this._emitOrder = new Int32Array(MAX_ENTITY_EMITTERS));
@@ -7849,6 +7886,49 @@ class Game {
       if (eb > out.b) out.b = eb;
     }
     return out;
+  }
+
+  /**
+   * The local block light field, flooded if it has gone stale, or null if there
+   * is no volume to flood.
+   *
+   * Lazy on purpose, and lazy at exactly one grain: the flood runs on the first
+   * sample taken after the volume moved or a block changed, and not at all on a
+   * frame where nothing samples it. A planet with no mobs in view, no drops on
+   * the ground and the body hidden in first person pays for the volume (which
+   * the shader wants anyway) and nothing else.
+   *
+   * `_lfDirty` is set by the only two things that can change the answer:
+   * `_rebuildOcclusion`, which moves the box, and `_patchOcclusion`, which
+   * carries an edit into it. A streamed region arriving at
+   * `planet.applyRegions` is missed, exactly as the occupancy volume misses it
+   * and for the same reason — that terrain is a long way from the player and
+   * the box is recentred before they reach it.
+   *
+   * Measured on the shipped volume, 48x48x32, seed 4242, headless d3d11:
+   *
+   *   nothing burning nearby        0.077 ms
+   *   one torch                     0.080 ms
+   *   nine torches, a lit room      0.183 ms
+   *   121 glowstone, a lit cavern   0.349 ms
+   *
+   * It fires on a recentre — about every 0.6 s at a run, since the volume moves
+   * only when the player drifts OCC_HYST cells out of the middle — and on an
+   * edit, so a mining session pays it a few times a second and a walk pays it
+   * twice. The sample itself is 0.13 us, so a full spawn cap of 130 animals
+   * plus a floor of drops costs about 0.02 ms a frame between them. The probe
+   * this replaces cost 0.093 ms a frame for the animals alone.
+   */
+  _entityField() {
+    const o = this._occ;
+    if (!o || !o.ready || !this._occIds) return null;
+    const f = this._lightField
+      || (this._lightField = new EntityLightField(OCC_NI, OCC_NJ, OCC_NK));
+    if (this._lfDirty) {
+      this._lfDirty = false;
+      f.build(this._occIds, occupancyData);
+    }
+    return f;
   }
 
   /**
@@ -8683,9 +8763,20 @@ class Game {
     const u = voxelUniforms;
     const blocks = this.planet.blocks;
     const flames = u.uHandLightRadius.value > 0.01 || u.uDropLightRadius.value > 0.01;
-    // `_emitters` is refilled by the hand-light scan, which has already run this
-    // frame (the view model asks for it), so this reads the current world.
-    if (!blocks || (!flames && this._emitters.length === 0)) {
+    // It used to skip out here unless a flame was lit or the hand-light scan
+    // had found an emitter within eight columns of the player. Both of those
+    // are the wrong question now that the volume also carries the entity light
+    // field: that field's whole purpose is to see a torch the player is *not*
+    // standing next to, and the old gate meant the volume — and therefore the
+    // field — did not exist at all until the player walked within eight columns
+    // of one. An animal at the far end of a lit gallery would have been dark
+    // for exactly the same reason as before, through a different door.
+    //
+    // What that costs is a rebuild the player may not use: 0.40 ms, and only
+    // when they drift OCC_HYST cells out of the middle, which at a run is about
+    // once every 0.6 s. The flood itself is still not paid for here — see
+    // `_entityField`, which runs it only when something asks.
+    if (!blocks) {
       u.uOccActive.value = 0;
       return;
     }
@@ -8750,14 +8841,25 @@ class Game {
     // for the same reason: a flame should shine through a canopy.
     const blocks = this.planet.blocks;
     const data = occupancyData;
+    // The same cells, kept as block ids rather than as one opacity bit, for the
+    // entity light field to flood over. It rides this loop because this loop is
+    // already reading every id in the volume to decide the bit; a second sweep
+    // for the same bytes would be 73 728 reads for nothing. See EntityLight.js.
+    const ids = this._occIds || (this._occIds = new Uint8Array(OCC_NI * OCC_NJ * OCC_NK));
     const plane = OCC_NI * OCC_NJ;
     let idx = 0;
     for (let kk = 0; kk < OCC_NK; kk++) {
       const k = ok + kk;
       // Below layer 0 is the unbreakable core and above the shell is sky.
-      if (k < 0) { data.fill(255, idx, idx + plane); idx += plane; continue; }
-      if (k >= D) { data.fill(0, idx, idx + plane); idx += plane; continue; }
-      for (let n = 0; n < plane; n++) data[idx++] = IS_OPAQUE[blocks[cols[n] * D + k]] ? 255 : 0;
+      // Neither has a block id; the occupancy byte is what the flood reads for
+      // solidity, so leaving these as air is correct rather than lax.
+      if (k < 0) { data.fill(255, idx, idx + plane); ids.fill(0, idx, idx + plane); idx += plane; continue; }
+      if (k >= D) { data.fill(0, idx, idx + plane); ids.fill(0, idx, idx + plane); idx += plane; continue; }
+      for (let n = 0; n < plane; n++) {
+        const id = blocks[cols[n] * D + k];
+        ids[idx] = id;
+        data[idx++] = IS_OPAQUE[id] ? 255 : 0;
+      }
     }
 
     // --- commit ---
@@ -8765,6 +8867,11 @@ class Game {
     // what tells `_entityLight`'s cache that every shadow answer it is holding
     // was computed against a volume that has since moved.
     o.f = f; o.i = oi; o.j = oj; o.k = ok; o.gen++; o.ready = true;
+    // The light field is not flooded here. It is flooded on demand, at most
+    // once a frame, by the first entity that asks — see `_entityField`. A
+    // recentre that lands on a frame where nothing is going to sample the field
+    // (no mobs, no drops, the body off screen) should not pay for one.
+    this._lfDirty = true;
     occupancyTexture.needsUpdate = true;
     const u = voxelUniforms;
     u.uOccN.value.fromArray(FACE_N[f]);
@@ -8828,6 +8935,7 @@ class Game {
       return;
     }
     const cols = o.cols;
+    const ids = this._occIds;
     const plane = OCC_NI * OCC_NJ;
     let touched = false;
     for (const e of edits) {
@@ -8836,10 +8944,18 @@ class Game {
       const solid = IS_OPAQUE[e.id] ? 255 : 0;
       const base = kk * plane;
       for (let n = 0; n < plane; n++) {
-        if (cols[n] === e.col) { occupancyData[base + n] = solid; touched = true; }
+        if (cols[n] === e.col) {
+          occupancyData[base + n] = solid;
+          // The id as well as the bit, or planting a torch would change what
+          // the volume thinks is solid and not what it thinks is alight, and
+          // the entity field would flood a room with no torch in it.
+          if (ids) ids[base + n] = e.id;
+          touched = true;
+        }
       }
     }
     if (!touched) return;
+    this._lfDirty = true;
     occupancyTexture.needsUpdate = true;
     // Every cached entity shadow answer was computed against the old contents.
     // `_handLight` would drop them anyway on the editSeq change, but the volume

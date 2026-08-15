@@ -13,18 +13,31 @@ import {
 export const FACE_N = [
   [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
 ];
+// A x B must equal N on every face. Three of them used to be left-handed, which
+// flips the winding of every quad the mesher emits (so half the planet renders
+// back-faces and is invisible), mirrors the frame the camera is built from, and
+// mirrors the axes physics and mob seating read. One sign per face fixes all of
+// it, so the signs below are not cosmetic.
 export const FACE_R = [
-  [0, 1, 0], [0, 1, 0], [1, 0, 0], [1, 0, 0], [1, 0, 0], [1, 0, 0],
+  [0, 1, 0], [0, 1, 0], [1, 0, 0], [1, 0, 0], [1, 0, 0], [-1, 0, 0],
 ];
 export const FACE_U = [
-  [0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 0, 1], [0, 1, 0], [0, 1, 0],
+  [0, 0, 1], [0, 0, -1], [0, 0, -1], [0, 0, 1], [0, 1, 0], [0, 1, 0],
 ];
 
 /** Which world axis each face's normal / A / B lies on, and its sign. */
 const AX_N = [0, 0, 1, 1, 2, 2];
 const SG_N = [1, -1, 1, -1, 1, -1];
 const AX_A = [1, 1, 0, 0, 0, 0];
+const SG_A = [1, 1, 1, 1, 1, -1];
 const AX_B = [2, 2, 2, 2, 1, 1];
+const SG_B = [1, -1, -1, 1, 1, 1];
+
+/** In-face coordinate -> world coordinate on that axis, and back. */
+const aOut = (f, ci) => (SG_A[f] > 0 ? ci - PLANET_R : PLANET_R - ci);
+const bOut = (f, cj) => (SG_B[f] > 0 ? cj - PLANET_R : PLANET_R - cj);
+const aIn = (f, w) => (SG_A[f] > 0 ? w + PLANET_R : PLANET_R - w);
+const bIn = (f, w) => (SG_B[f] > 0 ? w + PLANET_R : PLANET_R - w);
 
 export const gridToAxis = (g) => (g / F) * 2 - 1;
 export const axisToGrid = (a) => ((a + 1) * 0.5) * F;
@@ -93,8 +106,8 @@ export function cornerPos(f, i, j, k, out = [0, 0, 0]) {
   const m = R_MIN + k;
   out[0] = out[1] = out[2] = 0;
   out[AX_N[f]] = SG_N[f] * m;
-  out[AX_A[f]] = i - PLANET_R;
-  out[AX_B[f]] = j - PLANET_R;
+  out[AX_A[f]] = aOut(f, i);
+  out[AX_B[f]] = bOut(f, j);
   return out;
 }
 
@@ -103,9 +116,31 @@ export function cellCenterPos(f, i, j, k, out = [0, 0, 0]) {
   const m = R_MIN + k + 0.5;
   out[0] = out[1] = out[2] = 0;
   out[AX_N[f]] = SG_N[f] * m;
-  out[AX_A[f]] = i - PLANET_R + 0.5;
-  out[AX_B[f]] = j - PLANET_R + 0.5;
+  out[AX_A[f]] = aOut(f, i + 0.5);
+  out[AX_B[f]] = bOut(f, j + 0.5);
   return out;
+}
+
+
+/**
+ * Vertex position of a cell corner, with fractional i/j allowed.
+ *
+ * The mesher used to build every vertex as `direction * radius`, which is
+ * sphere arithmetic: it put the drawn geometry on a sphere while the voxels sat
+ * on a cube, so what you saw was never where the blocks were. You could punch
+ * through what you could see and collide with what you could not.
+ */
+export function cubeCorner(f, ci, cj, k, out = [0, 0, 0]) {
+  out[0] = out[1] = out[2] = 0;
+  out[AX_N[f]] = SG_N[f] * (R_MIN + k);
+  out[AX_A[f]] = aOut(f, ci);
+  out[AX_B[f]] = bOut(f, cj);
+  return out;
+}
+
+/** Cell centre, for anything planted in the middle of a cell. */
+export function cubeCenter(f, i, j, k, out = [0, 0, 0]) {
+  return cellCenterPos(f, i, j, k, out);
 }
 
 // --- folding a point onto the cube -------------------------------------------
@@ -126,8 +161,8 @@ function foldPoint(x, y, z, out = _fp) {
   }
   out.f = f;
   out.ck = SG_N[f] * p[AX_N[f]] - R_MIN;
-  out.ci = p[AX_A[f]] + PLANET_R;
-  out.cj = p[AX_B[f]] + PLANET_R;
+  out.ci = aIn(f, p[AX_A[f]]);
+  out.cj = bIn(f, p[AX_B[f]]);
   return out;
 }
 
@@ -141,8 +176,8 @@ export function patchColumn(f, i, j, di, dj) {
   if (ni >= 0 && ni < F && nj >= 0 && nj < F) return cidx(f, ni, nj);
   const p = [0, 0, 0];
   p[AX_N[f]] = SG_N[f] * PLANET_R;
-  p[AX_A[f]] = ni - PLANET_R + 0.5;
-  p[AX_B[f]] = nj - PLANET_R + 0.5;
+  p[AX_A[f]] = aOut(f, ni + 0.5);
+  p[AX_B[f]] = bOut(f, nj + 0.5);
   const r = foldPoint(p[0], p[1], p[2]);
   const gi = Math.min(F - 1, Math.max(0, Math.floor(r.ci)));
   const gj = Math.min(F - 1, Math.max(0, Math.floor(r.cj)));
@@ -195,8 +230,8 @@ export function worldToCell(x, y, z, out = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 }) 
 export function cellToWorld(f, ci, cj, ck, out = [0, 0, 0]) {
   out[0] = out[1] = out[2] = 0;
   out[AX_N[f]] = SG_N[f] * (R_MIN + ck);
-  out[AX_A[f]] = ci - PLANET_R;
-  out[AX_B[f]] = cj - PLANET_R;
+  out[AX_A[f]] = aOut(f, ci);
+  out[AX_B[f]] = bOut(f, cj);
   return out;
 }
 
@@ -233,8 +268,8 @@ export function normalizeCell(c) {
   const p = _np;
   p[0] = p[1] = p[2] = 0;
   p[AX_N[c.f]] = SG_N[c.f] * PLANET_R;
-  p[AX_A[c.f]] = c.ci - PLANET_R;
-  p[AX_B[c.f]] = c.cj - PLANET_R;
+  p[AX_A[c.f]] = aOut(c.f, c.ci);
+  p[AX_B[c.f]] = bOut(c.f, c.cj);
   const r = foldPoint(p[0], p[1], p[2], _fp);
   const height = c.ck;
   c.f = r.f;
@@ -273,8 +308,8 @@ export const COL_STEP = new Int32Array(COLUMNS);
     for (let i = 0; i < F; i++) {
       for (let j = 0; j < F; j++) {
         c[an] = sg > 0 ? R_MIN : -R_MIN - 1;
-        c[aa] = i - PLANET_R;
-        c[ab] = j - PLANET_R;
+        c[aa] = Math.floor(aOut(f, i + 0.5));
+        c[ab] = Math.floor(bOut(f, j + 0.5));
         const col = cidx(f, i, j);
         COL_BASE[col] = (c[0] + ARR_R) * STRIDE[0]
           + (c[1] + ARR_R) * STRIDE[1] + (c[2] + ARR_R);
@@ -300,9 +335,9 @@ export const COL_EDGE = new Int32Array(COLUMNS);
 (function buildEdge() {
   for (let f = 0; f < FACES; f++) {
     for (let i = 0; i < F; i++) {
-      const u = i - PLANET_R, du = Math.max(u, -1 - u);
+      const u = Math.floor(aOut(f, i + 0.5)), du = Math.max(u, -1 - u);
       for (let j = 0; j < F; j++) {
-        const v = j - PLANET_R, dv = Math.max(v, -1 - v);
+        const v = Math.floor(bOut(f, j + 0.5)), dv = Math.max(v, -1 - v);
         COL_EDGE[cidx(f, i, j)] = du > dv ? du : dv;
       }
     }

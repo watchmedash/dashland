@@ -6,7 +6,10 @@
 import {
   F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME, BIOME_COLORS,
 } from './Constants.js';
-import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn, cellIndex } from './Sphere.js';
+import {
+  CORNER_DIR, CENTER_DIR, COL_NB, stepColumn, cellIndex, cubeCorner, cubeCenter,
+  FACE_N, FACE_R, FACE_U,
+} from './Sphere.js';
 import {
   BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
   TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, R_MODEL, SEALS_FACES,
@@ -434,57 +437,24 @@ function faceVisible(a, b) {
 }
 
 const _c0 = [0, 0, 0], _c1 = [0, 0, 0], _c2 = [0, 0, 0], _c3 = [0, 0, 0];
+const _cc = [0, 0, 0];
 const _n = [0, 0, 0], _t = [0, 0, 0];
 
 function cornerAt(f, i, j, k, out) {
-  const o = ((f * (F + 1) + i) * (F + 1) + j) * 3;
-  const r = R_MIN + k;
-  out[0] = CORNER_DIR[o] * r; out[1] = CORNER_DIR[o + 1] * r; out[2] = CORNER_DIR[o + 2] * r;
-  return out;
+  return cubeCorner(f, i, j, k, out);
 }
 
 /**
  * As cornerAt, but `i` and `j` may fall between grid corners.
  *
- * CORNER_DIR is a table indexed by whole corner, so handing cornerAt a
- * fractional i or j computes a fractional array offset and reads nonsense —
- * which surfaces as NaN vertex positions and a geometry with no bounding
- * sphere, not as an exception. Shaped blocks need points inside a cell, so
- * those are interpolated between the four surrounding corners and renormalised:
- * a blend of unit vectors is not itself a unit vector, and skipping that would
- * pull the mid-face slightly toward the planet's centre.
- *
- * The two neighbours are clamped to the last corner of the face, and that is
- * not a nicety. The fast path above needs *both* fractions to be zero, so a box
- * face flush with the far wall of the very last cell — i whole at F, j inside
- * the cell — came through here with i0 = F and read the row past the end of the
- * table. Its weight is zero, but `undefined * 0` is NaN, not nothing, and one
- * NaN vertex takes the whole chunk's bounding sphere with it: the geometry
- * stops being culled and Three prints a warning with no hint of where it came
- * from. It cost a fence line laid across a cube seam to find. Any block with a
- * face at the cell wall and a fractional edge across it can do this — a door
- * standing in the last column has been able to since the day doors were added.
+ * On a cube this is exact rather than approximate: a face is a plane, so a
+ * point between four corners is a plain linear blend of the in-face
+ * coordinates. The old version blended four unit direction vectors and
+ * renormalised, because on a sphere a blend of unit vectors is not itself one.
+ * There is nothing to renormalise here, and nothing to pull toward the centre.
  */
 function cornerLerp(f, i, j, k, out) {
-  const i0 = Math.floor(i), j0 = Math.floor(j);
-  const fi = i - i0, fj = j - j0;
-  if (fi === 0 && fj === 0) return cornerAt(f, i0, j0, k, out);
-  const S = F + 1;
-  const ip = i0 < F ? i0 + 1 : i0, jp = j0 < F ? j0 + 1 : j0;
-  const row0 = (f * S + i0) * S, row1 = (f * S + ip) * S;
-  const o00 = (row0 + j0) * 3, o10 = (row1 + j0) * 3;
-  const o01 = (row0 + jp) * 3, o11 = (row1 + jp) * 3;
-  const w00 = (1 - fi) * (1 - fj), w10 = fi * (1 - fj);
-  const w01 = (1 - fi) * fj, w11 = fi * fj;
-  let x = CORNER_DIR[o00] * w00 + CORNER_DIR[o10] * w10 + CORNER_DIR[o01] * w01 + CORNER_DIR[o11] * w11;
-  let y = CORNER_DIR[o00 + 1] * w00 + CORNER_DIR[o10 + 1] * w10
-        + CORNER_DIR[o01 + 1] * w01 + CORNER_DIR[o11 + 1] * w11;
-  let z = CORNER_DIR[o00 + 2] * w00 + CORNER_DIR[o10 + 2] * w10
-        + CORNER_DIR[o01 + 2] * w01 + CORNER_DIR[o11 + 2] * w11;
-  const inv = 1 / (Math.hypot(x, y, z) || 1);
-  const r = (R_MIN + k) * inv;
-  out[0] = x * r; out[1] = y * r; out[2] = z * r;
-  return out;
+  return cubeCorner(f, i, j, k, out);
 }
 
 /**
@@ -1191,20 +1161,14 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
 // --- cross plants -----------------------------------------------------------
 
 function emitCross(g, f, i, j, k, col, id, biomeId, light) {
-  const o = ((f * F + i) * F + j) * 3;
-  const r = R_MIN + k + 0.5;
-  const upx = CENTER_DIR[o], upy = CENTER_DIR[o + 1], upz = CENTER_DIR[o + 2];
-  const cx = upx * r, cy = upy * r, cz = upz * r;
-
-  // tangent basis from neighbouring corner directions so plants align with the grid
-  const oa = ((f * (F + 1) + i + 1) * (F + 1) + j) * 3;
-  const ob = ((f * (F + 1) + i) * (F + 1) + j) * 3;
-  let t1x = CORNER_DIR[oa] - CORNER_DIR[ob];
-  let t1y = CORNER_DIR[oa + 1] - CORNER_DIR[ob + 1];
-  let t1z = CORNER_DIR[oa + 2] - CORNER_DIR[ob + 2];
-  const l1 = Math.hypot(t1x, t1y, t1z) || 1;
-  t1x /= l1; t1y /= l1; t1z /= l1;
-  const t2x = upy * t1z - upz * t1y, t2y = upz * t1x - upx * t1z, t2z = upx * t1y - upy * t1x;
+  // On a cube the frame is the face's own, constant across the face, and the
+  // centre is a position rather than a direction times a radius.
+  const N = FACE_N[f], A = FACE_R[f], B = FACE_U[f];
+  cubeCenter(f, i, j, k, _cc);
+  const cx = _cc[0], cy = _cc[1], cz = _cc[2];
+  const upx = N[0], upy = N[1], upz = N[2];
+  const t1x = A[0], t1y = A[1], t1z = A[2];
+  const t2x = B[0], t2y = B[1], t2z = B[2];
 
   const vi = col * D + k;
   const sl = light.sun[vi] / 15;

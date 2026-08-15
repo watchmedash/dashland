@@ -7,8 +7,8 @@ import {
   F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME, BIOME_COLORS,
 } from './Constants.js';
 import {
-  CORNER_DIR, CENTER_DIR, COL_NB, stepColumn, cellIndex, cubeCorner, cubeCenter,
-  FACE_N, FACE_R, FACE_U,
+  CORNER_DIR, CENTER_DIR, COL_NB, stepColumn, cellIndex, cellWrite, cubeCorner, cubeCenter,
+  FACE_N, FACE_R, FACE_U, STEP_A, STEP_B,
 } from './Sphere.js';
 import {
   BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
@@ -488,6 +488,15 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
 
   // sample a voxel's block id through the adjacency graph
   const at = (col, k) => (k < 0 || k >= D ? 0 : blocks[cellIndex(col, k)]);
+  // ...and the physically adjacent block, one stride away in the flat array.
+  // Correct across a cube seam, where the neighbouring COLUMN at the same k is
+  // a different cell entirely because the two faces measure k along different
+  // normals. Culling against that column is what opened holes in the terrain.
+  const stepA = STEP_A[f], stepB = STEP_B[f];
+  const rel = (col, k, d) => {
+    const x = cellIndex(col, k);
+    return x < 0 ? 0 : (blocks[x + d] || 0);
+  };
   // Ambient occlusion, and only ambient occlusion: does the cell next door have
   // geometry in it that would shade this corner? `SEALS_FACES` rather than
   // `IS_OPAQUE` because a modelled block has no geometry to shade with — see the
@@ -790,6 +799,9 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       for (let k = k0; k < k1; k++) {
         const id = blocks[cellIndex(col, k)];
         if (id === 0) continue;
+        // Near an edge two faces address the same cells. If both mesh them the
+        // quads land on top of each other and flicker. Only the owner draws.
+        if (cellWrite(col, k) < 0) continue;
         const rt = RENDER_TYPE[id];
         if (rt === R_CROSS) {
           if (!MODELLED_CROSS[id]) emitCross(groups[GROUP_CUTOUT], f, i, j, k, col, id, biomeId, light);
@@ -821,8 +833,8 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           let d = 0;
           while (d < 20 && RENDER_TYPE[at(col, k - d)] === R_LIQUID) d++;
           liquidDepth = Math.min(1, d / 7);
-          liquidShore = (IS_OPAQUE[at(nPi, k)] || IS_OPAQUE[at(nMi, k)]
-            || IS_OPAQUE[at(nPj, k)] || IS_OPAQUE[at(nMj, k)]) ? 1 : 0;
+          liquidShore = (IS_OPAQUE[rel(col, k, stepA)] || IS_OPAQUE[rel(col, k, -stepA)]
+            || IS_OPAQUE[rel(col, k, stepB)] || IS_OPAQUE[rel(col, k, -stepB)]) ? 1 : 0;
           // Per column, not per cell, so every quad of one body of water agrees
           // and there is no seam down the middle of a lake. Lava takes it too
           // and ignores it: the shader branches on the wave id long before it
@@ -885,7 +897,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           // A fence has no stored orientation: its shape is its neighbours, and
           // those are already resolved for this column.
           const links = IS_FENCE[id]
-            ? fenceLinks(at(nPi, k), at(nMi, k), at(nPj, k), at(nMj, k))
+            ? fenceLinks(rel(col, k, stepA), rel(col, k, -stepA), rel(col, k, stepB), rel(col, k, -stepB))
             : 0;
           const boxes = blockBoxes(id, byte, links);
           // Light comes from the cell: a shaped block sits in open air by
@@ -899,10 +911,10 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           // is — a stair in the open stays bright, one set into a wall picks up
           // the same contact shadow its neighbours have.
           let walled = 0;
-          if (SEALS_FACES[at(nPi, k)]) walled++;
-          if (SEALS_FACES[at(nMi, k)]) walled++;
-          if (SEALS_FACES[at(nPj, k)]) walled++;
-          if (SEALS_FACES[at(nMj, k)]) walled++;
+          if (SEALS_FACES[rel(col, k, stepA)]) walled++;
+          if (SEALS_FACES[rel(col, k, -stepA)]) walled++;
+          if (SEALS_FACES[rel(col, k, stepB)]) walled++;
+          if (SEALS_FACES[rel(col, k, -stepB)]) walled++;
           if (SEALS_FACES[at(col, k - 1)]) walled++;
           const shade = Math.max(0, 3 - (walled >> 1));
           cornerLight([col, col, col, col], [k, k, k, k], lv);
@@ -945,10 +957,10 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             }
             // A face flush with the cell wall can still be hidden by a solid
             // neighbour, exactly as a full cube's would be.
-            if (bi1 === 1 && SEALS_FACES[at(nPi, k)]) skip.pi = 1;
-            if (bi0 === 0 && SEALS_FACES[at(nMi, k)]) skip.mi = 1;
-            if (bj1 === 1 && SEALS_FACES[at(nPj, k)]) skip.pj = 1;
-            if (bj0 === 0 && SEALS_FACES[at(nMj, k)]) skip.mj = 1;
+            if (bi1 === 1 && SEALS_FACES[rel(col, k, stepA)]) skip.pi = 1;
+            if (bi0 === 0 && SEALS_FACES[rel(col, k, -stepA)]) skip.mi = 1;
+            if (bj1 === 1 && SEALS_FACES[rel(col, k, stepB)]) skip.pj = 1;
+            if (bj0 === 0 && SEALS_FACES[rel(col, k, -stepB)]) skip.mj = 1;
             if (bk1 === 1 && SEALS_FACES[at(col, k + 1)]) skip.up = 1;
             if (bk0 === 0 && SEALS_FACES[at(col, k - 1)]) skip.dn = 1;
             emitBox(grp, id, biomeId, f, i, j, k,
@@ -1072,7 +1084,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
 
         // ---- tangential faces ----
         // +i: corners vary in j (u) and k (v)
-        if (faceVisible(id, at(nPi, k))) {
+        if (faceVisible(id, rel(col, k, stepA))) {
           const nb = nPi;
           const nbPj = COL_NB[nb * 4 + 2], nbMj = COL_NB[nb * 4 + 3];
           const setC = (c, colSide, kSide) => {
@@ -1091,7 +1103,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             cornerAt(f, i + 1, j, k + cornerTop[1], _c3), 1, 1, grainRot(id, dirF, 0));
         }
         // -i
-        if (faceVisible(id, at(nMi, k))) {
+        if (faceVisible(id, rel(col, k, -stepA))) {
           const nb = nMi;
           const nbPj = COL_NB[nb * 4 + 2], nbMj = COL_NB[nb * 4 + 3];
           const setC = (c, colSide, kSide) => {
@@ -1111,7 +1123,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
         }
         // +j — corners ordered so UV.u stays tangential and UV.v runs along +k,
         // matching the other side faces (otherwise the texture is rotated 90°).
-        if (faceVisible(id, at(nPj, k))) {
+        if (faceVisible(id, rel(col, k, stepB))) {
           const nb = nPj;
           const nbPi = COL_NB[nb * 4 + 0], nbMi = COL_NB[nb * 4 + 1];
           const setC = (c, colSide, kSide) => {
@@ -1130,7 +1142,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c3), 1, 1, grainRot(id, dirF, 2));
         }
         // -j
-        if (faceVisible(id, at(nMj, k))) {
+        if (faceVisible(id, rel(col, k, -stepB))) {
           const nb = nMj;
           const nbPi = COL_NB[nb * 4 + 0], nbMi = COL_NB[nb * 4 + 1];
           const setC = (c, colSide, kSide) => {

@@ -1296,6 +1296,8 @@ export const DECOR_MARGIN = 6;
 const _dtf = { f: 0, a: 0, b: 0 };
 /** Blocks over which terrain fades out at a face border. See height(). */
 const BORDER_FADE = 8;
+/** How far above the waterline a face border sits, so edges are never sea. */
+const BORDER_LIFT = 2.5;
 const _dtc = { f: 0, i: 0, j: 0, col: 0 };
 
 /** World direction → the column containing it. */
@@ -1407,7 +1409,11 @@ export class WorldGen {
     dirToFace(dx, dy, dz, _dtf);
     const border = Math.min(1 - Math.abs(_dtf.a), 1 - Math.abs(_dtf.b)) * PLANET_R;
     if (border < BORDER_FADE) {
-      h = lerp(R_SEA - 0.4, h, clamp(border / BORDER_FADE, 0, 1));
+      // Above the waterline, not below it. Fading to R_SEA - 0.4 put the shell
+      // a shade under sea level all the way round every face, so all twelve
+      // edges came out as strips of ocean - which is both wrong and, on a cube,
+      // genuinely disorienting to walk along. A low dry ridge instead.
+      h = lerp(R_SEA + BORDER_LIFT, h, clamp(border / BORDER_FADE, 0, 1));
     }
     return clamp(h, R_MIN + 6, R_TERRAIN_MAX);
   }

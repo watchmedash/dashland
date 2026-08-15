@@ -319,6 +319,26 @@ export const COL_STEP = new Int32Array(COLUMNS);
   }
 })();
 
+/**
+ * Flat-index delta for stepping one block along a face's A / B axis.
+ *
+ * Storage is Cartesian, so the physically adjacent block is always one stride
+ * away whatever face it belongs to. Stepping to `(neighbourColumn, same k)`
+ * instead is only correct in the middle of a face: across a seam the two
+ * columns measure k along different normals, so the same k is a different cell
+ * entirely, and a mesher culling against it opens holes in the terrain.
+ */
+export const STEP_A = new Int32Array(FACES);
+export const STEP_B = new Int32Array(FACES);
+
+(function buildSteps() {
+  const stride = [SIDE * SIDE, SIDE, 1];
+  for (let f = 0; f < FACES; f++) {
+    STEP_A[f] = SG_A[f] * stride[AX_A[f]];
+    STEP_B[f] = SG_B[f] * stride[AX_B[f]];
+  }
+})();
+
 /** Flat array index for a cell, or -1 when out of the layer range. */
 export function cellIndex(col, k) {
   if (k < 0 || k >= D) return -1;

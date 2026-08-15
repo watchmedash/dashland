@@ -3,12 +3,12 @@
 
 import { Noise, makeRng, hash3, clamp, lerp, smoothstep } from '../util/Noise.js';
 import {
-  F, D, FACES, R_MIN, R_MAX, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX,
+  F, D, FACES, R_MIN, R_MAX, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX, PLANET_R,
   R_SEABED_MIN, R_CANYON_MIN,
   COLUMNS, NUM_VOXELS, CHUNK_T, vidx, cidx, BIOME, regionOfCol,
 } from './Constants.js';
 import {
-  centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid, cellIndex,
+  centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid, cellIndex, cellWrite,
 } from './Sphere.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
 // Imported and deliberately never called. The structure pass is switched off —
@@ -1294,6 +1294,8 @@ export const DECOR_MARGIN = 6;
 
 // Scratch for dirToColumn — this is called a million times in the canyon walk.
 const _dtf = { f: 0, a: 0, b: 0 };
+/** Blocks over which terrain fades out at a face border. See height(). */
+const BORDER_FADE = 8;
 const _dtc = { f: 0, i: 0, j: 0, col: 0 };
 
 /** World direction → the column containing it. */
@@ -1390,10 +1392,23 @@ export class WorldGen {
     let h = R_SURFACE;
     h += continent * 12.0;
     h += Math.min(0, continent) * 5.0;              // carve real ocean basins
-    h += land * peaks * 46.0 * (0.35 + mask * 0.65);
+    // 46 -> 34: the roof came down with the cube (R_TERRAIN_MAX 261 over a
+    // waterline of 208), and the sum has to clear it without the clamp biting,
+    // because a clamp that bites is a plateau where a peak should be. At the
+    // extreme this is now R_SURFACE + 12 + 34 + 3 = 257.9 against 261.
+    h += land * peaks * 34.0 * (0.35 + mask * 0.65);
     h += land * hills * 3.0;
     h += detail * 0.18;
     if (h < R_SEA + 1.2 && h > R_SEA - 3) h = lerp(h, R_SEA - 0.4, 0.4);
+    // Fade to the bare shell at a face border. Two faces' terrain rises along
+    // two different normals and the same corner cells belong to both, so
+    // without this every cube edge is two mountain ranges growing through each
+    // other. Flat there means the seam is a clean 90 degree corner instead.
+    dirToFace(dx, dy, dz, _dtf);
+    const border = Math.min(1 - Math.abs(_dtf.a), 1 - Math.abs(_dtf.b)) * PLANET_R;
+    if (border < BORDER_FADE) {
+      h = lerp(R_SEA - 0.4, h, clamp(border / BORDER_FADE, 0, 1));
+    }
     return clamp(h, R_MIN + 6, R_TERRAIN_MAX);
   }
 
@@ -2048,7 +2063,7 @@ export class WorldGen {
     const h = colHeight[col];
     const bi = colBiome[col];
     const rocky = colSlope[col] > 1.35;
-    const base = col * D;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
     this._dirOf(col, dir);
 
     // Surface material varies within a biome, not just between biomes: the
@@ -2297,7 +2312,7 @@ export class WorldGen {
         else if (depth < 4.0) id = sub;
         else id = this.stratum(r, dir[0], dir[1], dir[2]);
       }
-      blocks[base + k] = id;
+      blocks[cellWrite(col, k)] = id;
     }
   }
 
@@ -2306,7 +2321,7 @@ export class WorldGen {
     const nc = this.nCave;
     const canyonMask = this.canyonMask;
     const h = this.colHeight[col];
-    const base = col * D;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
     const dir = _fillDir;
     this._dirOf(col, dir);
     {
@@ -2371,7 +2386,7 @@ export class WorldGen {
       }
       const kWet1 = Math.floor(R_SEA - R_MIN - 0.5);
       for (let k = 0; k < D; k++) {
-        if (!CARVEABLE[blocks[base + k]]) continue;
+        if (!CARVEABLE[blocks[cellIndex(col, k)]]) continue;
         if (k >= kWet0 && k <= kWet1) continue;
         const r = R_MIN + k + 0.5;
         if (r < R_MANTLE + 1.5 || r > ceil) continue;
@@ -2435,7 +2450,7 @@ export class WorldGen {
             && Math.abs(nc.simplex3(px * q - 31.2, py * q + 7.7, pz * q)) < 0.143;
         }
         if (open) {
-          blocks[base + k] = (r < R_MANTLE + 4 && cav > 0.7) ? ID.lava : ID.air;
+          blocks[cellWrite(col, k)] = (r < R_MANTLE + 4 && cav > 0.7) ? ID.lava : ID.air;
         }
       }
     }
@@ -2543,11 +2558,11 @@ export class WorldGen {
     if (a[oOwn + 1] > a[oOwn + 2] && a[oA + 1] > a[oA + 2] && a[oB + 1] > a[oB + 2]
       && a[oC + 1] > a[oC + 2] && a[oD + 1] > a[oD + 2]) return;
 
-    const base = col * D;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
     const dir = this._dirOf(col, _aqDir);
     for (let k = AQ_K0; k <= AQ_K1; k++) {
       const mine = this._aquiferAt(col, k);
-      if (mine === 2) { blocks[base + k] = ID.air; continue; }
+      if (mine === 2) { blocks[cellWrite(col, k)] = ID.air; continue; }
       if (mine === 1) {
         /**
          * Water goes in only where no neighbour's air pocket is at this layer,
@@ -2586,7 +2601,7 @@ export class WorldGen {
          */
         const dry = this._aquiferAt(nb0, k) === 2 || this._aquiferAt(nb1, k) === 2
           || this._aquiferAt(nb2, k) === 2 || this._aquiferAt(nb3, k) === 2;
-        blocks[base + k] = dry
+        blocks[cellWrite(col, k)] = dry
           ? this.stratum(R_MIN + k + 0.5, dir[0], dir[1], dir[2]) : ID.water;
         continue;
       }
@@ -2594,9 +2609,9 @@ export class WorldGen {
         || this._aquiferAt(nb0, k) || this._aquiferAt(nb1, k)
         || this._aquiferAt(nb2, k) || this._aquiferAt(nb3, k);
       if (!touching) continue;
-      const cur = blocks[base + k];
+      const cur = blocks[cellIndex(col, k)];
       if (cur === ID.air || cur === ID.water || cur === ID.lava) {
-        blocks[base + k] = this.stratum(R_MIN + k + 0.5, dir[0], dir[1], dir[2]);
+        blocks[cellWrite(col, k)] = this.stratum(R_MIN + k + 0.5, dir[0], dir[1], dir[2]);
       }
     }
   }
@@ -2604,11 +2619,11 @@ export class WorldGen {
   /** Ore veins, for one already-carved column. See ORE_BY_LAYER. */
   oreColumn(blocks, col) {
     const no = this.nOre;
-    const base = col * D;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
     const dir = _fillDir;
     this._dirOf(col, dir);
     for (let k = 0; k < D; k++) {
-      if (!ORE_HOST[blocks[base + k]]) continue;
+      if (!ORE_HOST[blocks[cellIndex(col, k)]]) continue;
       const bucket = ORE_BY_LAYER[k];
       if (bucket.length === 0) continue;
       const r = R_MIN + k + 0.5;
@@ -2622,7 +2637,7 @@ export class WorldGen {
         // octave whenever the first already rules the threshold out, which is
         // most of the time.
         const n = veinNoise(no, px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, o.thr);
-        if (n > o.thr) { blocks[base + k] = o.id; break; }
+        if (n > o.thr) { blocks[cellWrite(col, k)] = o.id; break; }
       }
     }
   }
@@ -3407,14 +3422,14 @@ export class WorldGen {
     const parts = { f: site.f, i: site.i, j: site.j };
 
     const groundK = (col) => {
-      const base = col * D;
+      // base folded into cellIndex/cellWrite: storage is not slab-packed
       for (let k = D - 1; k >= 0; k--) {
-        const b = blocks[base + k];
+        const b = blocks[cellIndex(col, k)];
         if (b !== ID.air && b !== ID.water) return k;
       }
       return -1;
     };
-    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[cellIndex(col, k)] = id; };
+    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[cellWrite(col, k)] = id; };
     const get = (col, k) => (k >= 0 && k < D ? blocks[cellIndex(col, k)] : ID.stone);
 
     {
@@ -3561,9 +3576,9 @@ export class WorldGen {
 
   /** Highest solid layer in a column, or -1. */
   surfaceK(blocks, col) {
-    const base = col * D;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
     for (let k = D - 1; k >= 0; k--) {
-      const b = blocks[base + k];
+      const b = blocks[cellIndex(col, k)];
       if (b !== ID.air && b !== ID.water) return k;
     }
     return -1;
@@ -3711,27 +3726,27 @@ export class WorldGen {
         // region will write the same value into when its turn comes.
         if (d <= SPRING_RI) this.colWaterStyle[c] = WATER_SPRING;
         if (regionOfCol(c) !== rid) continue;
-        const b = c * D;
+        // base folded into cellIndex/cellWrite: storage is not slab-packed
         if (d <= SPRING_RI) {
           // The bath. Two deep in the middle, one on the shelf around it, and
           // the water surface at kb-1 either way — which is what keeps the
           // enclosure argument above intact: there is exactly one water layer
           // that reaches the rim, and its neighbours are rim or more water.
           const deep = d <= SPRING_RD;
-          blocks[b + kb - 3] = ID.tuff;
-          blocks[b + kb - 2] = deep ? ID.water : ID.tuff;
-          blocks[b + kb - 1] = ID.water;
+          blocks[cellWrite(c, kb - 3)] = ID.tuff;
+          blocks[cellWrite(c, kb - 2)] = deep ? ID.water : ID.tuff;
+          blocks[cellWrite(c, kb - 1)] = ID.water;
         } else {
-          blocks[b + kb - 3] = ID.tuff;
-          blocks[b + kb - 2] = ID.tuff;
-          blocks[b + kb - 1] = ID.tuff;
-          blocks[b + kb] = crust;
+          blocks[cellWrite(c, kb - 3)] = ID.tuff;
+          blocks[cellWrite(c, kb - 2)] = ID.tuff;
+          blocks[cellWrite(c, kb - 1)] = ID.tuff;
+          blocks[cellWrite(c, kb)] = crust;
         }
         // Clear the headroom either way. On the rim this is what levels a
         // one-layer step into the terrace; over the water it is what stops a
         // drift of snow sitting on top of the pool.
         for (let k = kb + (d <= SPRING_RI ? 0 : 1); k <= kb + 2 && k < D; k++) {
-          blocks[b + k] = ID.air;
+          blocks[cellWrite(c, k)] = ID.air;
         }
       }
     }
@@ -3843,7 +3858,7 @@ export class WorldGen {
     const site = this._fallSite(col);
     if (!site) return;
     const { kW, kTop } = site;
-    const b = col * D;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
 
     // What the cliff is made of, so the lip is not a grey patch on red rock.
     // Read off terrain rather than chosen, and terrain is region-independent —
@@ -3859,21 +3874,21 @@ export class WorldGen {
     // sea or the lake. Unconditional: these cells are air by construction — the
     // ground of this column is under the waterline — and writing them anyway is
     // what makes the result independent of which pass ran first.
-    for (let k = kW + 1; k <= kTop; k++) blocks[b + k] = ID.water;
+    for (let k = kW + 1; k <= kTop; k++) blocks[cellWrite(col, k)] = ID.water;
     // The lip: a roof over the head and four shut sides at its own layer. This
     // is the part that is written rather than tested. A source cell with one
     // open side spreads six columns every tick it is woken, so "there was rock
     // there anyway" is not good enough — a cave, an ore vein or a later change
     // to the carve would all be silent ways to lose it.
-    blocks[b + kTop + 1] = rock;
+    blocks[cellWrite(col, kTop + 1)] = rock;
     for (let d = 0; d < 4; d++) {
       const n = colNeighbor(col, d);
-      const nb = n * D;
-      blocks[nb + kTop] = rock;
+      // base folded into cellIndex/cellWrite: storage is not slab-packed
+      blocks[cellWrite(n, kTop)] = rock;
       // Second layer only where the column is open, so the lip reads as a shelf
       // of rock rather than as one floating tile. Where the neighbour is
       // already cliff this would be replacing its own stone with its own stone.
-      if (this.groundKOf(n) < kTop) blocks[nb + kTop + 1] = rock;
+      if (this.groundKOf(n) < kTop) blocks[cellWrite(n, kTop + 1)] = rock;
     }
     // Foam and speed at the fall itself, and at the patch of the pool it lands
     // in — the style is per column, so the cell where it hits reads aerated,
@@ -4196,7 +4211,7 @@ export class WorldGen {
           const id = mossy && rng() < 0.5 ? ID.moss_stone : ID.stone;
           if (rid >= 0 && regionOfCol(c) !== rid) continue;
           if (blocks[cellIndex(c, kk)] !== ID.air) continue;
-          blocks[cellIndex(c, kk)] = id;
+          blocks[cellWrite(c, kk)] = id;
         }
       }
     }
@@ -4347,7 +4362,7 @@ export class WorldGen {
         ? patchColumn(plan.f, plan.ci, plan.cj, d, 0)
         : patchColumn(plan.f, plan.ci, plan.cj, 0, d);
       if (rid >= 0 && regionOfCol(c) !== rid) continue;
-      blocks[cellIndex(c, plan.k + 1)] = plan.id;
+      blocks[cellWrite(c, plan.k + 1)] = plan.id;
     }
   }
 
@@ -4425,7 +4440,7 @@ export class WorldGen {
       if (k < 0 || k >= D) return;
       if (rid >= 0 && regionOfCol(c) !== rid) return;
       const cur = blocks[cellIndex(c, k)];
-      if (cur === ID.air || force) blocks[cellIndex(c, k)] = id;
+      if (cur === ID.air || force) blocks[cellWrite(c, k)] = id;
     };
     // A canopy is three or four columns across, which is wide enough to care
     // which way is which. Walking the grid answers in the destination face's
@@ -4613,9 +4628,9 @@ export class WorldGen {
     if (this.inLakeBed(col)) return;
     const k = this.surfaceK(blocks, col);
     if (k < 0 || k >= D - 2) return;
-    const base = col * D;
-    const surf = blocks[base + k];
-    if (blocks[base + k + 1] !== ID.air) return;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
+    const surf = blocks[cellIndex(col, k)];
+    if (blocks[cellIndex(col, k + 1)] !== ID.air) return;
 
     const n = this.nBiome;
     const dir = _fillDir;
@@ -4628,12 +4643,12 @@ export class WorldGen {
       const dens = n.fbm3(dir[0] * 9, dir[1] * 9, dir[2] * 9, 3, 2, 0.5) * 0.5 + 0.5;
       const p = 0.12 + dens * 0.55;
       const h = rng();
-      if (h < p * 0.72) blocks[base + k + 1] = ID.tall_grass;
+      if (h < p * 0.72) blocks[cellWrite(col, k + 1)] = ID.tall_grass;
       else if (h < p * 0.82) {
         const c = rng();
-        blocks[base + k + 1] = c < 0.34 ? ID.flower_red : c < 0.67 ? ID.flower_gold : ID.flower_blue;
+        blocks[cellWrite(col, k + 1)] = c < 0.34 ? ID.flower_red : c < 0.67 ? ID.flower_gold : ID.flower_blue;
       } else if (h < p * 0.84 && (bi === BIOME.FOREST || bi === BIOME.MEADOW)) {
-        blocks[base + k + 1] = ID.pumpkin;
+        blocks[cellWrite(col, k + 1)] = ID.pumpkin;
       }
     } else if (inCanyon && (surf === ID.coarse_dirt || surf === ID.gravel || surf === ID.red_sand)) {
       // The other half of the canyon rule. Taking the trees away and leaving
@@ -4659,13 +4674,13 @@ export class WorldGen {
       // by biome, and `_floraSoilOk` still has the final word.
       const h = rng();
       if (surf === ID.coarse_dirt) {
-        if (h < 0.11) blocks[base + k + 1] = ID.tall_grass;
+        if (h < 0.11) blocks[cellWrite(col, k + 1)] = ID.tall_grass;
         else if (h < 0.125) {
-          blocks[base + k + 1] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
+          blocks[cellWrite(col, k + 1)] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
         }
       } else if (h < 0.085) {
         const scrub = CANYON_SCRUB[bi];
-        if (scrub && this._floraSoilOk(scrub, surf)) blocks[base + k + 1] = scrub;
+        if (scrub && this._floraSoilOk(scrub, surf)) blocks[cellWrite(col, k + 1)] = scrub;
       }
     }
 
@@ -4683,10 +4698,10 @@ export class WorldGen {
     // purpose: drawing at the same rate as before keeps every mushroom that was
     // already correct exactly where it was, and only removes the bad ones.
     for (let kk = 2; kk < k - 2; kk++) {
-      if (blocks[base + kk] === ID.air && CARVEABLE[blocks[base + kk - 1]]
-        && rng() < 0.006 && blocks[base + kk + 1] === ID.air
-        && growsOn(ID.mushroom, blocks[base + kk - 1])) {
-        blocks[base + kk] = ID.mushroom;
+      if (blocks[cellIndex(col, kk)] === ID.air && CARVEABLE[blocks[cellIndex(col, kk - 1)]]
+        && rng() < 0.006 && blocks[cellIndex(col, kk + 1)] === ID.air
+        && growsOn(ID.mushroom, blocks[cellIndex(col, kk - 1)])) {
+        blocks[cellWrite(col, kk)] = ID.mushroom;
       }
     }
   }
@@ -4752,8 +4767,8 @@ export class WorldGen {
 
     const k = this.groundKOf(col);
     if (k < 1 || k >= D - 2) return;
-    const base = col * D;
-    if (blocks[base + k + 1] !== ID.air) return;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
+    if (blocks[cellIndex(col, k + 1)] !== ID.air) return;
     // ...and a ceiling on it is as good as no room at all. A boulder is a
     // hemisphere sat on the ground, so a column one step below its centre gets
     // the overhang rather than the rock: `k + 1` comes out air and `k + 2` is
@@ -4767,8 +4782,8 @@ export class WorldGen {
     // region's whole margin before this pass runs over its columns, and no
     // other region ever writes into ours — so what is found is the finished
     // answer and it is the same from either side of a boundary.
-    if (IS_OPAQUE[blocks[base + k + 2]]) return;
-    const surf = blocks[base + k];
+    if (IS_OPAQUE[blocks[cellIndex(col, k + 2)]]) return;
+    const surf = blocks[cellIndex(col, k)];
     const bi = this.colBiome[col];
 
     const dir = _landDir;
@@ -4809,7 +4824,7 @@ export class WorldGen {
       // root, so it went to the tundra below, where the ground is coarse dirt.
       if (r < 0.38 * dp) id = ID.swampreed;
       else if (r < 0.50 * dp) id = ID.lotus;
-      if (id && this._floraSoilOk(id, surf)) blocks[base + k + 1] = id;
+      if (id && this._floraSoilOk(id, surf)) blocks[cellWrite(col, k + 1)] = id;
       return;
     }
     switch (bi) {
@@ -4940,7 +4955,7 @@ export class WorldGen {
     // ground says whether it may. A mountain shoulder that has weathered to
     // bare stone grows no aster, and the roll is spent either way, so the
     // column's stream does not depend on what it is standing on.
-    if (id && this._floraSoilOk(id, surf)) blocks[base + k + 1] = id;
+    if (id && this._floraSoilOk(id, surf)) blocks[cellWrite(col, k + 1)] = id;
   }
 
   /**
@@ -4971,7 +4986,7 @@ export class WorldGen {
     // mantle starts at the bottom of the array, so ten is the point below which
     // there is no cave to be in.
     if (kTop < 10) return;
-    const base = col * D;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
 
     const dir = _landDir;
     this._dirOf(col, dir);
@@ -4988,9 +5003,9 @@ export class WorldGen {
     // has come out wrong.
     const kMax = Math.min(kTop - 3, D - 3);
     for (let k = 2; k <= kMax; k++) {
-      if (blocks[base + k] !== ID.air) continue;
-      if (blocks[base + k + 1] !== ID.air) continue;
-      const floor = blocks[base + k - 1];
+      if (blocks[cellIndex(col, k)] !== ID.air) continue;
+      if (blocks[cellIndex(col, k + 1)] !== ID.air) continue;
+      const floor = blocks[cellIndex(col, k - 1)];
       // CARVEABLE says "this is rock a passage could have been cut through",
       // which is what keeps these out of the air gaps inside a structure or
       // under a fallen log. The soil test per species is checked below, once
@@ -5021,7 +5036,7 @@ export class WorldGen {
       else if (r < pMush + pShelf) id = ID.shelf_fungus;
       else if (r < pMush + pShelf + pTruffle) id = ID.truffle;
       else if (r < pMush + pShelf + pTruffle + pCrystal) id = ID.crystal_cluster;
-      if (id && growsOn(id, floor)) blocks[base + k] = id;
+      if (id && growsOn(id, floor)) blocks[cellWrite(col, k)] = id;
     }
   }
 
@@ -5109,14 +5124,14 @@ export class WorldGen {
         if (this.colSlope[c] > 1.4) continue;
         const k = this.groundKOf(c);
         if (k < 1 || k >= D - 2) continue;
-        const b = c * D;
-        const surf = blocks[b + k];
+        // base folded into cellIndex/cellWrite: storage is not slab-packed
+        const surf = blocks[cellIndex(c, k)];
         if (!this._floraSoilOk(site.id, surf)) continue;
-        if (!STAND_CLEARS[blocks[b + k + 1]]) continue;
+        if (!STAND_CLEARS[blocks[cellIndex(c, k + 1)]]) continue;
         // Headroom, for the reason spelled out in `landFloraAt`: the cell above
         // the ground can be clear under a boulder's overhang and still be a
         // sealed gap.
-        if (IS_OPAQUE[blocks[b + k + 2]]) continue;
+        if (IS_OPAQUE[blocks[cellIndex(c, k + 2)]]) continue;
 
         const w = 1 - d / site.rad;
         // The reef's smoothstep, and here for the same measured reason: a plain
@@ -5132,7 +5147,7 @@ export class WorldGen {
         // minimum radius both raised, it is the patch you can pick out from the
         // other side of a valley, which is the only reason the pass exists.
         if (this.colRng(c, 0x2f85)() < site.rich * STAND_FILL * smoothstep(0, 0.20, w)) {
-          blocks[b + k + 1] = site.id;
+          blocks[cellWrite(c, k + 1)] = site.id;
         }
       }
     }
@@ -5189,7 +5204,7 @@ export class WorldGen {
     const k = floorK + 1;
     if (k >= topK) return false;
     if (blocks[cellIndex(col, k)] !== ID.water) return false;
-    blocks[cellIndex(col, k)] = id;
+    blocks[cellWrite(col, k)] = id;
     return true;
   }
 
@@ -5207,9 +5222,9 @@ export class WorldGen {
   _kelpAt(blocks, col, n, floorK, topK) {
     const base = floorK + 1;
     if (n < KELP_MIN || base + n - 1 >= topK) return 0;
-    const b = col * D;
-    for (let s = 0; s < n; s++) if (blocks[b + base + s] !== ID.water) return 0;
-    for (let s = 0; s < n; s++) blocks[b + base + s] = ID.kelp;
+    // base folded into cellIndex/cellWrite: storage is not slab-packed
+    for (let s = 0; s < n; s++) if (blocks[cellIndex(col, base + s)] !== ID.water) return 0;
+    for (let s = 0; s < n; s++) blocks[cellWrite(col, base + s)] = ID.kelp;
     return n;
   }
 

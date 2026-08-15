@@ -21,7 +21,7 @@ import {
   F, D, R_MIN, COLUMNS, cidx, BIOME,
 } from './Constants.js';
 import {
-  colParts, centerDir, patchColumn, cellIndex,
+  colParts, centerDir, patchColumn, cellIndex, cellWrite,
 } from './Sphere.js';
 import { ID } from './Blocks.js';
 
@@ -112,7 +112,7 @@ class Site {
   set(di, dj, k, id) {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return;
-    this.blocks[cellIndex(c, k)] = id;
+    this.blocks[cellWrite(c, k)] = id;
   }
 
   /** Write only where the cell is currently empty — for props over rubble. */
@@ -120,7 +120,7 @@ class Site {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return;
     const cur = this.blocks[cellIndex(c, k)];
-    if (cur === ID.air || cur === ID.water) this.blocks[cellIndex(c, k)] = id;
+    if (cur === ID.air || cur === ID.water) this.blocks[cellWrite(c, k)] = id;
   }
 
   /** Clear a vertical run to air. Inclusive of both ends. */

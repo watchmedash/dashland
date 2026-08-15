@@ -267,6 +267,44 @@ export function cellIndex(col, k) {
 }
 
 /**
+ * How far this column is from the middle of its face, in blocks, on whichever
+ * of the two in-face axes is further out. A cell is this face's own only while
+ * its normal coordinate beats that.
+ */
+export const COL_EDGE = new Int32Array(COLUMNS);
+
+(function buildEdge() {
+  for (let f = 0; f < FACES; f++) {
+    for (let i = 0; i < F; i++) {
+      const u = i - PLANET_R, du = Math.max(u, -1 - u);
+      for (let j = 0; j < F; j++) {
+        const v = j - PLANET_R, dv = Math.max(v, -1 - v);
+        COL_EDGE[cidx(f, i, j)] = du > dv ? du : dv;
+      }
+    }
+  }
+})();
+
+/**
+ * Index for a WRITE, or -1 when this column does not own the cell.
+ *
+ * Near a cube edge two faces address the same cells, and a generator that
+ * ignores that erases its neighbour: each face lays air above its own surface,
+ * and past the edge that air is inside the next face's mountain. Ownership goes
+ * to whichever face the cell is actually nearest, which is the same rule the
+ * Chebyshev depth uses. A -1 write into a typed array is a no-op, so callers do
+ * not have to test.
+ *
+ * Reads deliberately do NOT go through this: a mesher looking across a seam
+ * wants the true contents of the cell, whoever wrote them.
+ */
+export function cellWrite(col, k) {
+  if (k < 0 || k >= D) return -1;
+  if (R_MIN + k <= COL_EDGE[col]) return -1;
+  return COL_BASE[col] + k * COL_STEP[col];
+}
+
+/**
  * The inverse. Aliased cells decode to the Chebyshev-nearest face, which is not
  * necessarily the column they were written through, so this round-trips the
  * cell but not always the column.

@@ -375,6 +375,10 @@ export class Player {
     this.knockI = 0; this.knockJ = 0; this.knockT = 0;
     this.position = new THREE.Vector3();
     this.up = new THREE.Vector3(0, 1, 0);
+    // Physics up snaps 90 degrees at a cube edge; the camera must not. This
+    // chases it so the horizon rolls over a fraction of a second instead.
+    this.viewUp = new THREE.Vector3(0, 1, 0);
+    this._frameF = -1;
     this.forward = new THREE.Vector3(0, 0, -1);
     this.frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
 
@@ -531,7 +535,11 @@ export class Player {
     // difference: enough to kill you again on arrival and spill the inventory
     // you had just come back for.
     this.fallStart = null;
+    this._frameF = -1;
     this._sync();
+    // Arrive upright. Without this the roll above plays out from wherever the
+    // camera was, which on a respawn across the planet is a long cinematic.
+    this.viewUp.copy(this.up);
     const ref = Math.abs(this.up.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
     this.forward.copy(ref).sub(_a.copy(this.up).multiplyScalar(ref.dot(this.up))).normalize();
     this.pitch = -0.08;
@@ -709,7 +717,25 @@ export class Player {
     const c = this.cell;
     cellToWorld(c.f, c.ci, c.cj, c.ck, _p);
     this.position.set(_p[0], _p[1], _p[2]);
-    tangentFrame(c.f, c.ci, c.cj, c.ck, this.frame);
+    // Walking over a cube edge swaps which world axes i and j mean. Velocity is
+    // held in that frame, so without this the momentum you had is reinterpreted
+    // in the new face's axes: a jump at an edge comes back to where it started.
+    // Carried through world space, which is the only frame both faces agree in.
+    const changed = c.f !== this._frameF;
+    if (changed && this._frameF >= 0) {
+      const o = this.frame;
+      const vx = o.ea[0] * this.vel.i + o.eb[0] * this.vel.j + o.up[0] * this.vel.k;
+      const vy = o.ea[1] * this.vel.i + o.eb[1] * this.vel.j + o.up[1] * this.vel.k;
+      const vz = o.ea[2] * this.vel.i + o.eb[2] * this.vel.j + o.up[2] * this.vel.k;
+      tangentFrame(c.f, c.ci, c.cj, c.ck, this.frame);
+      const n = this.frame;
+      this.vel.i = vx * n.ea[0] + vy * n.ea[1] + vz * n.ea[2];
+      this.vel.j = vx * n.eb[0] + vy * n.eb[1] + vz * n.eb[2];
+      this.vel.k = vx * n.up[0] + vy * n.up[1] + vz * n.up[2];
+    } else {
+      tangentFrame(c.f, c.ci, c.cj, c.ck, this.frame);
+    }
+    this._frameF = c.f;
     const nu = _a.set(this.frame.up[0], this.frame.up[1], this.frame.up[2]);
     if (this.up.lengthSq() > 0.5) {
       _q.setFromUnitVectors(this.up, nu);
@@ -1707,6 +1733,15 @@ export class Player {
     const targetEye = this.crouching ? CROUCH_EYE : EYE;
     this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, 12 * dt);
 
+    // Roll the view-up toward the physics up. The antipodal nudge is not
+    // optional: lerping straight at the opposite vector stays collinear and
+    // normalize pins it back, which leaves a player who arrived on the far side
+    // of the planet rendered upside down for good.
+    if (this.viewUp.dot(this.up) < -0.9) {
+      this.viewUp.addScaledVector(_c.set(this.frame.eb[0], this.frame.eb[1], this.frame.eb[2]), 0.25).normalize();
+    }
+    this.viewUp.lerp(this.up, 1 - Math.exp(-6 * dt)).normalize();
+
     const right = _c.copy(this.forward).cross(this.up).normalize();
     this.lookDir.copy(this.forward).multiplyScalar(Math.cos(this.pitch))
       .addScaledVector(this.up, Math.sin(this.pitch)).normalize();
@@ -1806,7 +1841,7 @@ export class Player {
       _aim.copy(this.eye).addScaledVector(this.lookDir, back ? THIRD_DIST : -THIRD_DIST);
     }
     camera.position.copy(camPos);
-    _m.lookAt(camPos, _aim, this.up);
+    _m.lookAt(camPos, _aim, this.viewUp);
     camera.quaternion.setFromRotationMatrix(_m);
     if (b > 0.001) camera.rotateZ(Math.cos(this.bob) * 0.011 * b);
   }

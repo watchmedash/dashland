@@ -271,18 +271,62 @@ export function normalizeCell(c) {
   p[AX_A[c.f]] = aOut(c.f, c.ci);
   p[AX_B[c.f]] = bOut(c.f, c.cj);
   const r = foldPoint(p[0], p[1], p[2], _fp);
-  const height = c.ck;
-  c.f = r.f;
-  // Clamped, because a point sitting exactly on the edge folds to exactly F and
-  // F is one past the last column. An epsilon in, not a whole cell.
-  c.ci = r.ci <= 0 ? 0 : (r.ci >= F ? F - 1e-4 : r.ci);
-  c.cj = r.cj <= 0 ? 0 : (r.cj >= F ? F - 1e-4 : r.cj);
-  // Height above the shell is carried across the edge rather than recomputed
-  // from a point that was flattened onto it.
-  c.ck = height;
+  const g = r.f;
+  // Re-measure against the new face from where the mover ACTUALLY is, not from
+  // the flattened probe and not by carrying the old height across.
+  //
+  // Carrying it was wrong in the way that matters: height on the old face is a
+  // distance along the old normal, and on the new face the same number is a
+  // distance along an axis at right angles to it. Falling off an edge therefore
+  // arrived on the neighbour flung a long way out along the wrong axis - the
+  // owner fell past an edge and ended up submerged in the next face's sea with
+  // the surface standing on its side, "like I am in a pool but sideways".
+  const t = cellToWorld(c.f, c.ci, c.cj, c.ck, _tp);
+  const ci = aIn(g, t[AX_A[g]]);
+  const cj = bIn(g, t[AX_B[g]]);
+
+  // High above an edge there is nowhere to go. That point is past the corner,
+  // outside BOTH faces' footprints, and (column, layer) has no way to say so -
+  // a face only spans its own square. Handing it over anyway is what threw the
+  // mover a long way out along the new face's tangent.
+  //
+  // So the edge is a soft wall while you are above the shell and open ground
+  // once you are down on it. Terrain is faded flat and dry for the last few
+  // columns of every face, so a walk across a seam happens at exactly the
+  // height where this is exact, and that is the case that has to be perfect.
+  if (c.ck > SEA_K + EDGE_SLACK) {
+    c.ci = c.ci <= 0 ? 0 : (c.ci >= F ? F - 1e-4 : c.ci);
+    c.cj = c.cj <= 0 ? 0 : (c.cj >= F ? F - 1e-4 : c.cj);
+    return c;
+  }
+
+  c.f = g;
+  c.ci = ci <= 0 ? 0 : (ci >= F ? F - 1e-4 : ci);
+  c.cj = cj <= 0 ? 0 : (cj >= F ? F - 1e-4 : cj);
+  c.ck = SG_N[g] * t[AX_N[g]] - R_MIN;
   return c;
 }
 const _np = [0, 0, 0];
+const _tp = [0, 0, 0];
+
+/**
+ * The layer the shell surface sits on, and how far above it a seam may still be
+ * crossed.
+ *
+ * Height on the old face becomes *tangential* distance on the new one, so a
+ * crossing lands (ck - SEA_K) columns outside the neighbour's square and has to
+ * be nudged back in. That nudge is the whole budget: 5 keeps it to five blocks
+ * at the very worst and covers the border ridge, which stands a couple of
+ * blocks proud of the waterline, plus the height of a jump taken from it.
+ *
+ * Above that the edge is simply a wall. There is nothing dishonest about
+ * refusing: a point high over a corner is outside BOTH faces' squares and
+ * (column, layer) has no way to say where it is, so the alternative is not a
+ * better answer, it is being flung a long way out along the wrong axis - which
+ * is what put the owner in the next face's sea with the surface on its side.
+ */
+const SEA_K = 33;
+const EDGE_SLACK = 5;
 
 /** A cell is one unit across everywhere on a cube. */
 export const cellArc = () => 1;

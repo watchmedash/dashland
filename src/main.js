@@ -3963,7 +3963,13 @@ class Game {
     this._poisonT = 0;
     this.sporeT = 0;
     this._sporeSaid = false;
-    this.energy = Math.max(this.energy, 0.35);
+    // Full, like the health bar beside it. It used to be floored at 0.35,
+    // which meant you came back whole but starving and the first thing a death
+    // cost you was a meal you had to go and find. The owner: "dying retains
+    // hunger which is stupid, we regain full hp but not hunger?" - and there is
+    // no argument for the asymmetry. Death is already expensive: it drops your
+    // inventory where you fell and puts it a walk away.
+    this.energy = 1;
     // Wake up at your bed if you have one and it is still there. Falling back to
     // a fresh random column is only right for a player who has never slept: on a
     // planet of 259,584 columns, being scattered at random after every death

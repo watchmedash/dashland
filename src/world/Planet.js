@@ -6,7 +6,9 @@ import {
   F, D, R_MIN, COLUMNS, CELLS, cidx, chunkIdx, CHUNK_T, CHUNK_K, CK,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, regionOfCol, regionColumns,
 } from './Constants.js';
-import { worldToCell, centerDir, cellIndex, COL_BASE, COL_STEP } from './Sphere.js';
+import {
+  worldToCell, centerDir, cellCenterPos, cellIndex, COL_BASE, COL_STEP, FACE_N,
+} from './Sphere.js';
 import {
   IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N,
@@ -452,13 +454,21 @@ export class Planet {
   // trust the two lines around it. `surfaceK` takes a column and everyone who
   // wants ground already has one.
 
-  /** Cell centre in world space. */
+  /**
+   * Cell centre in world space.
+   *
+   * A position, not a direction times a radius. The old form was cubesphere
+   * arithmetic and it survived the conversion: it put the centre of every cell
+   * on a sphere inscribed in the cube, up to 17 units from the cell it names.
+   * This is what the selection box is drawn from, so a block highlighted here
+   * and the block a ray actually hit were two different places, and mining
+   * looked like it did nothing.
+   */
   centerOf(col, k, out = new THREE.Vector3()) {
     const f = (col / (F * F)) | 0;
     const rem = col - f * F * F;
-    centerDir(f, (rem / F) | 0, rem % F, _p);
-    const r = R_MIN + k + 0.5;
-    return out.set(_p[0] * r, _p[1] * r, _p[2] * r);
+    cellCenterPos(f, (rem / F) | 0, rem % F, k, _p);
+    return out.set(_p[0], _p[1], _p[2]);
   }
 
   // --- chunk meshes ---------------------------------------------------------
@@ -587,7 +597,9 @@ export class Planet {
       if (prevCol >= 0) {
         this.centerOf(prevCol, prevK, normal).sub(this.centerOf(col, k, new THREE.Vector3())).normalize();
       } else {
-        normal.copy(point).normalize();
+        // The face's own outward normal. `point.normalize()` was the radial
+        // answer and is only right on a sphere.
+        normal.fromArray(FACE_N[c.f]);
       }
       return { col, k, prevCol, prevK, id, dist: t, point, normal };
     }

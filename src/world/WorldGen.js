@@ -1301,6 +1301,8 @@ const BORDER_FADE = 8;
 const BORDER_LIFT = 2.5;
 /** Columns of bare ground kept at a face border, so no canopy spans a seam. */
 const TREE_EDGE_MARGIN = 6;
+/** How far inside a face the player must wake up. */
+const SPAWN_EDGE_MARGIN = 40;
 const _dtc = { f: 0, i: 0, j: 0, col: 0 };
 
 /** World direction → the column containing it. */
@@ -1887,6 +1889,12 @@ export class WorldGen {
       const col = (rng() * COLUMNS) | 0;
       const bi = this.colBiome[col];
       if (bi === BIOME.OCEAN || bi === BIOME.BEACH) continue;
+      // Not on the rim of the world either. This scores by flatness, and the
+      // border band is flat by construction - the height fade levels it so the
+      // twelve edges meet cleanly - so it was the most attractive ground on the
+      // planet and the early break took it almost every time. Measured before
+      // this line: a spawn one column from the edge.
+      if (colBorderDist(col) < SPAWN_EDGE_MARGIN) continue;
       // Not in a gorge and not on its rim: waking up fourteen blocks down a
       // slot canyon is a memorable start and a miserable one.
       if (this.canyonNear[col] < CANYON_NEAR_MAX) continue;

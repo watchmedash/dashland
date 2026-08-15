@@ -9,6 +9,7 @@ import {
 } from './Constants.js';
 import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid, cellIndex, cellWrite,
+  colBorderDist,
 } from './Sphere.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
 // Imported and deliberately never called. The structure pass is switched off —
@@ -1298,6 +1299,8 @@ const _dtf = { f: 0, a: 0, b: 0 };
 const BORDER_FADE = 8;
 /** How far above the waterline a face border sits, so edges are never sea. */
 const BORDER_LIFT = 2.5;
+/** Columns of bare ground kept at a face border, so no canopy spans a seam. */
+const TREE_EDGE_MARGIN = 6;
 const _dtc = { f: 0, i: 0, j: 0, col: 0 };
 
 /** World direction → the column containing it. */
@@ -3936,6 +3939,13 @@ export class WorldGen {
    */
   _treeKind(blocks, col, noCrowdCheck = false) {
     const bi = this.colBiome[col];
+    // Nothing takes root within reach of a face border. A canopy is up to four
+    // columns across and it is stamped in the face's own (i, j), so a trunk
+    // near the seam threw half its leaves onto the neighbouring face, where
+    // they came out lying on their side against a different gravity. Cheaper
+    // and better looking to keep the last few columns bare, and it sits inside
+    // the band the height fade already flattens.
+    if (colBorderDist(col) < TREE_EDGE_MARGIN) return null;
     if (this.colSlope[col] > 1.5) return null;
     if (this.inLakeBed(col)) return null;
     // Nothing takes root in a hot spring. Asked of the terrain rather than of

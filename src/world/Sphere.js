@@ -365,6 +365,12 @@ export const COL_EDGE = new Int32Array(COLUMNS);
 })();
 
 /**
+ * How many columns this one is from the nearest face border. 0 is the last
+ * column on the face.
+ */
+export const colBorderDist = (col) => PLANET_R - 1 - COL_EDGE[col];
+
+/**
  * Index for a WRITE, or -1 when this column does not own the cell.
  *
  * Near a cube edge two faces address the same cells, and a generator that

@@ -350,6 +350,16 @@ const FLIER_PER_TICK = 6;
 // arrive in numbers or it stops being a threat at all. More of them, each one
 // individually escapable, is a night you can walk home through if you keep
 // moving — and cannot stand still in.
+/**
+ * How far inside its own face a mob is held, in columns.
+ *
+ * The owner's rule: only the player crosses a seam, not an animal, not a husk,
+ * not a monster. Three rather than zero so the turn happens on open ground -
+ * clamping hard against the last column leaves a body jittering on the
+ * boundary every frame the steering pushes it outward.
+ */
+const FACE_BOUND = 3;
+
 const MAX_HOSTILE_SURFACE = 8;
 /**
  * ...and what the dark is worth on a savage world.
@@ -1300,7 +1310,6 @@ const _axis = new THREE.Vector3();
 /** Player collision radius, matching HALF_W in Player.js. */
 const PLAYER_RADIUS = 0.34;
 
-const _seam = new THREE.Vector3();
 const _rel = new THREE.Vector3();
 /** The spiral direction in `shove`. Its own vector because `_rel` holds the
  *  radial unit across the same few lines and `shove` needs both at once. */
@@ -10258,22 +10267,24 @@ export class Mobs {
         if (spike > 0 && this._damage(mob, spike)) continue;
       }
 
-      // Carry the heading through a cube seam in world space, exactly as the
-      // player does with its velocity — otherwise the tangent basis flips and
-      // the animal whips round on the spot.
-      if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) {
-        _seam.set(
-          fr.ea[0] * ch + fr.eb[0] * sh,
-          fr.ea[1] * ch + fr.eb[1] * sh,
-          fr.ea[2] * ch + fr.eb[2] * sh,
-        );
-        normalizeCell(c);
-        this._sync(mob);
-        const na = _seam.x * fr.ea[0] + _seam.y * fr.ea[1] + _seam.z * fr.ea[2];
-        const nb = _seam.x * fr.eb[0] + _seam.y * fr.eb[1] + _seam.z * fr.eb[2];
-        const nh = Math.atan2(nb, na);
+      // Nothing but the player crosses a seam. The face an animal spawned on
+      // is the face it lives on: it is turned back at the border rather than
+      // folded onto the neighbour.
+      //
+      // Held a little short of the last column, not at it, so the turn happens
+      // on open ground and an animal pressed against the edge by a chase still
+      // has somewhere to stand. It reads as a coastline rather than a wall
+      // because the terrain is already flat and treeless out here.
+      if (c.ci < FACE_BOUND || c.ci > F - FACE_BOUND
+        || c.cj < FACE_BOUND || c.cj > F - FACE_BOUND) {
+        c.ci = Math.min(F - FACE_BOUND, Math.max(FACE_BOUND, c.ci));
+        c.cj = Math.min(F - FACE_BOUND, Math.max(FACE_BOUND, c.cj));
+        // Point it back at the middle of its own face and let the ordinary
+        // steering take over from there.
+        const nh = Math.atan2(F * 0.5 - c.cj, F * 0.5 - c.ci);
         mob.want = wrapAngle(mob.want + wrapAngle(nh - mob.heading));
         mob.heading = nh;
+        this._sync(mob);
       } else {
         this._sync(mob);
       }

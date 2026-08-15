@@ -352,13 +352,39 @@ export function cellIndex(col, k) {
  */
 export const COL_EDGE = new Int32Array(COLUMNS);
 
+/**
+ * The same two extents, split by how the tie against them must be broken.
+ *
+ * Ownership used to be one test - the normal coordinate strictly greater than
+ * both tangents - and that leaves the cells where two coordinates are EQUAL
+ * owned by nobody. Equal coordinates is the definition of a cube edge, so every
+ * one of the twelve edges had a diagonal sheet of cells that no face would
+ * write, running from the surface down into the rock. Above water it was hidden
+ * inside solid ground; below it, the two seas met through the gap. Measured,
+ * 660 cells in 200 000 had no owner at all.
+ *
+ * `foldPoint` already breaks these ties, and the rule is simply first-wins over
+ * the axis order, so the lower axis index takes it. Mirroring that here is what
+ * makes owner and reader agree: a face must beat a lower-numbered axis outright
+ * but only needs to match a higher-numbered one.
+ */
+export const COL_EDGE_STRICT = new Int32Array(COLUMNS);
+export const COL_EDGE_LOOSE = new Int32Array(COLUMNS);
+
 (function buildEdge() {
   for (let f = 0; f < FACES; f++) {
+    const an = AX_N[f], aa = AX_A[f], ab = AX_B[f];
     for (let i = 0; i < F; i++) {
       const u = Math.floor(aOut(f, i + 0.5)), du = Math.max(u, -1 - u);
       for (let j = 0; j < F; j++) {
         const v = Math.floor(bOut(f, j + 0.5)), dv = Math.max(v, -1 - v);
-        COL_EDGE[cidx(f, i, j)] = du > dv ? du : dv;
+        const col = cidx(f, i, j);
+        COL_EDGE[col] = du > dv ? du : dv;
+        let strict = -1, loose = -1;
+        if (aa < an) { if (du > strict) strict = du; } else if (du > loose) loose = du;
+        if (ab < an) { if (dv > strict) strict = dv; } else if (dv > loose) loose = dv;
+        COL_EDGE_STRICT[col] = strict;
+        COL_EDGE_LOOSE[col] = loose;
       }
     }
   }
@@ -385,7 +411,9 @@ export const colBorderDist = (col) => PLANET_R - 1 - COL_EDGE[col];
  */
 export function cellWrite(col, k) {
   if (k < 0 || k >= D) return -1;
-  if (R_MIN + k <= COL_EDGE[col]) return -1;
+  const vn = R_MIN + k;
+  if (vn <= COL_EDGE_STRICT[col]) return -1;
+  if (vn < COL_EDGE_LOOSE[col]) return -1;
   return COL_BASE[col] + k * COL_STEP[col];
 }
 

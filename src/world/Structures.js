@@ -21,7 +21,7 @@ import {
   F, D, R_MIN, COLUMNS, cidx, BIOME,
 } from './Constants.js';
 import {
-  colParts, centerDir, patchColumn,
+  colParts, centerDir, patchColumn, cellIndex,
 } from './Sphere.js';
 import { ID } from './Blocks.js';
 
@@ -106,21 +106,21 @@ class Site {
   get(di, dj, k) {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return ID.stone;
-    return this.blocks[c * D + k];
+    return this.blocks[cellIndex(c, k)];
   }
 
   set(di, dj, k, id) {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return;
-    this.blocks[c * D + k] = id;
+    this.blocks[cellIndex(c, k)] = id;
   }
 
   /** Write only where the cell is currently empty — for props over rubble. */
   setIfAir(di, dj, k, id) {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return;
-    const cur = this.blocks[c * D + k];
-    if (cur === ID.air || cur === ID.water) this.blocks[c * D + k] = id;
+    const cur = this.blocks[cellIndex(c, k)];
+    if (cur === ID.air || cur === ID.water) this.blocks[cellIndex(c, k)] = id;
   }
 
   /** Clear a vertical run to air. Inclusive of both ends. */

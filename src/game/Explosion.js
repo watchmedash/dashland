@@ -124,7 +124,7 @@
 import * as THREE from 'three';
 import { BLOCKS, ID, IS_DOOR } from '../world/Blocks.js';
 import { computeDrops } from './Items.js';
-import { colParts, patchColumn } from '../world/Sphere.js';
+import { colParts, patchColumn, cellIndex } from '../world/Sphere.js';
 import { D } from '../world/Constants.js';
 
 /** Cells out to which anything can be destroyed at all. */
@@ -225,7 +225,7 @@ export function explode(game, pos, cause = null) {
   // the cells it adds are not in `spoil`, so completing a door never pays for
   // the half that was out of range.
   if (edits.length) {
-    const cell = (col, k) => col * D + k;
+    const cell = (col, k) => cellIndex(col, k);
     const have = new Set(edits.map((e) => cell(e.col, e.k)));
     for (const e of [...edits]) {
       if (!IS_DOOR[planet.at(e.col, e.k)]) continue;

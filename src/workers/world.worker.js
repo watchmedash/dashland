@@ -15,9 +15,9 @@ import { LightField, MAX_LIGHT } from '../world/Lighting.js';
 import { meshChunk } from '../world/Mesher.js';
 import {
   F, D, CHUNK_T, CHUNK_K, CT, CK, NUM_REGIONS, REGION_COLS,
-  REGION_VOXELS, COLUMNS, NUM_VOXELS, chunkIdx, regionOfCol, regionColumns,
+  REGION_VOXELS, COLUMNS, CELLS, chunkIdx, regionOfCol, regionColumns,
 } from '../world/Constants.js';
-import { COL_NB } from '../world/Sphere.js';
+import { COL_NB, COL_BASE, COL_STEP, cellIndex } from '../world/Sphere.js';
 import {
   IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, IS_FENCE, RENDER_TYPE, R_LIQUID, FACING_DEFAULT,
 } from '../world/Blocks.js';
@@ -108,9 +108,9 @@ function restoreFacing(pairs) {
     if (!hasDecor[rid]) continue;
     regionColumns(rid, rcols);
     for (let c = 0; c < REGION_COLS; c++) {
-      const base = rcols[c] * D;
+      const base = COL_BASE[rcols[c]], step = COL_STEP[rcols[c]];
       for (let k = 0; k < D; k++) {
-        const i = base + k;
+        const i = base + k * step;
         if (IS_DIRECTIONAL[blocks[i]] && !facing.has(i)) facing.set(i, FACING_DEFAULT);
       }
     }
@@ -511,8 +511,8 @@ function ensureRegions(rids, onProgress) {
     const edge = perimeter(cols, 2);
     const edgeWas = new Uint8Array(edge.length * D);
     for (let n = 0; n < edge.length; n++) {
-      const base = edge[n] * D;
-      edgeWas.set(blocks.subarray(base, base + D), n * D);
+      const base = COL_BASE[edge[n]], step = COL_STEP[edge[n]], o = n * D;
+      for (let k = 0; k < D; k++) edgeWas[o + k] = blocks[base + k * step];
     }
 
     // Terrain for the region and for everything a canopy could reach in from.
@@ -557,9 +557,9 @@ function ensureRegions(rids, onProgress) {
     // What a chunk already on screen can now see of this batch. See `edge` and
     // the snapshot above.
     for (let n = 0; n < edge.length; n++) {
-      const base = edge[n] * D, o = n * D;
+      const base = COL_BASE[edge[n]], step = COL_STEP[edge[n]], o = n * D;
       for (let k = 0; k < D; k++) {
-        if (edgeWas[o + k] !== blocks[base + k]) markChunkAround(dirty, edge[n], k);
+        if (edgeWas[o + k] !== blocks[base + k * step]) markChunkAround(dirty, edge[n], k);
       }
     }
   }
@@ -632,12 +632,12 @@ function postRegions(fresh) {
   for (let n = 0; n < fresh.length; n++) {
     regionColumns(fresh[n], tmp);
     let o = n * REGION_VOXELS;
-    // Sixteen contiguous runs, not 256 — columns of one region that share an
-    // `i` are consecutive in the block array, so a row of the tile is one copy.
-    for (let row = 0; row < CHUNK_T; row++) {
-      const base = tmp[row * CHUNK_T] * D;
-      data.set(blocks.subarray(base, base + CHUNK_T * D), o);
-      o += CHUNK_T * D;
+    // The wire format stays (column, layer) packed; storage does not, so this
+    // is a gather.
+    for (let c = 0; c < REGION_COLS; c++) {
+      const base = COL_BASE[tmp[c]], step = COL_STEP[tmp[c]];
+      for (let k = 0; k < D; k++) data[o + k] = blocks[base + k * step];
+      o += D;
     }
   }
   self.postMessage({ type: 'regions', ids, data }, [ids.buffer, data.buffer]);
@@ -650,10 +650,10 @@ function restoreRegions(ids, data) {
     const rid = ids[n];
     regionColumns(rid, tmp);
     let o = n * REGION_VOXELS;
-    for (let row = 0; row < CHUNK_T; row++) {
-      const base = tmp[row * CHUNK_T] * D;
-      blocks.set(data.subarray(o, o + CHUNK_T * D), base);
-      o += CHUNK_T * D;
+    for (let c = 0; c < REGION_COLS; c++) {
+      const base = COL_BASE[tmp[c]], step = COL_STEP[tmp[c]];
+      for (let k = 0; k < D; k++) blocks[base + k * step] = data[o + k];
+      o += D;
     }
     hasTerrain[rid] = 1;
     hasDecor[rid] = 1;
@@ -666,7 +666,7 @@ self.onmessage = (e) => {
 
   if (msg.type === 'init' || msg.type === 'load') {
     gen = new WorldGen(msg.seed);
-    blocks = new Uint8Array(NUM_VOXELS);
+    blocks = new Uint8Array(CELLS);
     hasTerrain.fill(0); hasDecor.fill(0); hasLight.fill(0); colLive.fill(0);
     resident.clear();
     meshHash.clear();
@@ -769,7 +769,7 @@ self.onmessage = (e) => {
     const dirty = new Set();
     const seeds = [];
     for (const ed of msg.edits) {
-      const idx = ed.col * D + ed.k;
+      const idx = cellIndex(ed.col, ed.k);
       blocks[idx] = ed.id;
       // The main thread resolves the facing and sends it explicitly; a
       // non-directional block clears the entry so it cannot go stale.

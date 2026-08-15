@@ -6,7 +6,7 @@
 // crop broken by any means simply drops out of the set on its next tick.
 
 import { D } from '../world/Constants.js';
-import { colNeighbor } from '../world/Sphere.js';
+import { colNeighbor, cellIndex } from '../world/Sphere.js';
 import { ID, IS_REPLACEABLE, RENDER_TYPE, R_LIQUID } from '../world/Blocks.js';
 
 /**
@@ -84,7 +84,7 @@ export class Farming {
 
   clear() { this.crops.clear(); }
 
-  key(col, k) { return col * D + k; }
+  key(col, k) { return cellIndex(col, k); }
 
   // --- player actions -------------------------------------------------------
 

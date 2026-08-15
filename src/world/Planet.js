@@ -3,10 +3,10 @@
 
 import * as THREE from 'three';
 import {
-  F, D, R_MIN, COLUMNS, NUM_VOXELS, cidx, chunkIdx, CHUNK_T, CHUNK_K, CK,
+  F, D, R_MIN, COLUMNS, CELLS, cidx, chunkIdx, CHUNK_T, CHUNK_K, CK,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, regionOfCol, regionColumns,
 } from './Constants.js';
-import { worldToCell, centerDir } from './Sphere.js';
+import { worldToCell, centerDir, cellIndex, COL_BASE, COL_STEP } from './Sphere.js';
 import {
   IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N,
@@ -151,7 +151,7 @@ function insideCross(id, c, i, j) {
 
 export class Planet {
   constructor(materials) {
-    this.blocks = new Uint8Array(NUM_VOXELS);
+    this.blocks = new Uint8Array(CELLS);
     this.colBiome = new Uint8Array(COLUMNS);
     /**
      * Sparse side-table for directional blocks: cell index (`col * D + k`, the
@@ -307,11 +307,14 @@ export class Planet {
     for (let n = 0; n < ids.length; n++) {
       const rid = ids[n];
       regionColumns(rid, tmp);
+      // The wire format is still (column, layer) packed; storage is not, so
+      // this is a scatter rather than a contiguous set.
       let o = n * REGION_VOXELS;
-      for (let row = 0; row < CHUNK_T; row++) {
-        const base = tmp[row * CHUNK_T] * D;
-        this.blocks.set(data.subarray(o, o + CHUNK_T * D), base);
-        o += CHUNK_T * D;
+      for (let c = 0; c < REGION_COLS; c++) {
+        const col = tmp[c];
+        const base = COL_BASE[col], step = COL_STEP[col];
+        for (let k = 0; k < D; k++) this.blocks[base + k * step] = data[o + k];
+        o += D;
       }
       this.live[rid] = 1;
       this._written[rid] = 1;
@@ -337,7 +340,7 @@ export class Planet {
    * untouched water — and collision reads this on the hot path, so it must not
    * hand back undefined.
    */
-  facingAt(col, k) { return this.facing.get(col * D + k) ?? 0; }
+  facingAt(col, k) { return this.facing.get(cellIndex(col, k)) ?? 0; }
 
   /**
    * Keep the side-table in step with an edit. Directional blocks keep (or take)
@@ -346,7 +349,7 @@ export class Planet {
    * @returns {number} the facing now stored, or -1 if the cell has none
    */
   applyFacing(col, k, id, want) {
-    const idx = col * D + k;
+    const idx = cellIndex(col, k);
     // Logs store an axis here rather than a horizontal facing, water stores its
     // flow level, and a shaped block stores its orientation. Same table,
     // different meaning per block — a cell is never two of those things at once.
@@ -372,17 +375,17 @@ export class Planet {
 
   // --- voxel access ---------------------------------------------------------
 
-  at(col, k) { return (k < 0 || k >= D) ? 0 : this.blocks[col * D + k]; }
+  at(col, k) { return (k < 0 || k >= D) ? 0 : this.blocks[COL_BASE[col] + k * COL_STEP[col]]; }
   // The second of the two writers, so it carries the `_written` mark too. An
   // edit almost always lands in a region `applyRegions` has already marked; the
   // mark is here so `resetWorld` stays correct without having to assume that.
   setAt(col, k, id) {
     if (k < 0 || k >= D) return;
-    this.blocks[col * D + k] = id;
+    this.blocks[COL_BASE[col] + k * COL_STEP[col]] = id;
     this._written[regionOfCol(col)] = 1;
   }
-  solidAt(col, k) { return (k < 0 || k >= D) ? false : IS_SOLID[this.blocks[col * D + k]] === 1; }
-  liquidAt(col, k) { return (k < 0 || k >= D) ? false : RENDER_TYPE[this.blocks[col * D + k]] === R_LIQUID; }
+  solidAt(col, k) { return (k < 0 || k >= D) ? false : IS_SOLID[this.blocks[COL_BASE[col] + k * COL_STEP[col]]] === 1; }
+  liquidAt(col, k) { return (k < 0 || k >= D) ? false : RENDER_TYPE[this.blocks[COL_BASE[col] + k * COL_STEP[col]]] === R_LIQUID; }
 
   /** Continuous cell coordinates for a world point. */
   cellOf(x, y, z, out = _cell) { return worldToCell(x, y, z, out); }
@@ -399,17 +402,17 @@ export class Planet {
 
   blockAtWorld(x, y, z) {
     const a = this.cellAt(x, y, z);
-    return a ? this.blocks[a.col * D + a.k] : 0;
+    return a ? this.at(a.col, a.k) : 0;
   }
 
   isSolidWorld(x, y, z) {
     const a = this.cellAt(x, y, z);
-    return a ? IS_SOLID[this.blocks[a.col * D + a.k]] === 1 : false;
+    return a ? this.solidAt(a.col, a.k) : false;
   }
 
   isLiquidWorld(x, y, z) {
     const a = this.cellAt(x, y, z);
-    return a ? RENDER_TYPE[this.blocks[a.col * D + a.k]] === R_LIQUID : false;
+    return a ? this.liquidAt(a.col, a.k) : false;
   }
 
   // `upAt(pos)` and `radiusAt(pos)` lived here and were deleted: on a planet
@@ -433,9 +436,9 @@ export class Planet {
    * rather than the soil.
    */
   surfaceK(col) {
-    const base = col * D;
+    const base = COL_BASE[col], step = COL_STEP[col];
     for (let k = D - 1; k >= 0; k--) {
-      const b = this.blocks[base + k];
+      const b = this.blocks[base + k * step];
       if (b !== 0 && RENDER_TYPE[b] !== R_LIQUID) return k;
     }
     return -1;
@@ -563,7 +566,7 @@ export class Planet {
       const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
       const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
       const col = cidx(c.f, i, j);
-      const id = this.blocks[col * D + k];
+      const id = this.at(col, k);
       if (col === curCol && k === curK) {
         // Every other block fills its cell, so entering it once is enough to
         // decide. A cross plant does not, so keep sampling it — the test below

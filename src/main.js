@@ -75,7 +75,10 @@ import {
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
   patchColumn, normalizeCell, FACE_N, FACE_R, FACE_U,
+  cellIndex, cellDecode, COL_BASE, COL_STEP,
 } from './world/Sphere.js';
+
+const _kd = { col: 0, k: 0 };
 import { CROSS_LIGHT_ADDR_SHIFT } from './world/Mesher.js';
 import { EntityLightField } from './world/EntityLight.js';
 import { makeRng } from './util/Noise.js';
@@ -3328,9 +3331,9 @@ class Game {
     const sources = this.water.sources;
     for (let n = 0; n < REGION_COLS; n++) {
       const col = cols[n];
-      const base = col * D;
+      const base = COL_BASE[col], step = COL_STEP[col];
       for (let k = 0; k < D; k++) {
-        const i = base + k;
+        const i = base + k * step;
         if (RENDER_TYPE[blocks[i]] !== R_LIQUID || level.has(i)) continue;
         if (this._isFallingCell(col, k)) level.set(i, LEVEL_MAX);
         else sources.add(i);
@@ -3381,15 +3384,16 @@ class Game {
    */
   _isFallingCell(col, k) {
     if (k < 1 || k + 1 >= D) return false;
-    const base = col * D + k;
-    if (RENDER_TYPE[this.planet.blocks[base + 1]] !== R_LIQUID) return false;
-    if (RENDER_TYPE[this.planet.blocks[base - 1]] !== R_LIQUID) return false;
+    const step = COL_STEP[col];
+    const base = COL_BASE[col] + k * step;
+    if (RENDER_TYPE[this.planet.blocks[base + step]] !== R_LIQUID) return false;
+    if (RENDER_TYPE[this.planet.blocks[base - step]] !== R_LIQUID) return false;
     const rid = regionOfCol(col);
     let open = 0;
     for (let d = 0; d < 4; d++) {
       const nb = colNeighbor(col, d);
       if (nb < 0 || regionOfCol(nb) !== rid) continue;
-      const id = this.planet.blocks[nb * D + k];
+      const id = this.planet.at(nb, k);
       if (RENDER_TYPE[id] === R_LIQUID) return false;
       if (id === 0) open++;
     }
@@ -4186,10 +4190,10 @@ class Game {
     for (let n = 0; n < live.length; n++) {
       regionColumns(live[n], tmp);
       let o = n * REGION_VOXELS;
-      for (let row = 0; row < CHUNK_T; row++) {
-        const base = tmp[row * CHUNK_T] * D;
-        blocks.set(this.planet.blocks.subarray(base, base + CHUNK_T * D), o);
-        o += CHUNK_T * D;
+      for (let c = 0; c < REGION_COLS; c++) {
+        const base = COL_BASE[tmp[c]], step = COL_STEP[tmp[c]];
+        for (let k = 0; k < D; k++) blocks[o + k] = this.planet.blocks[base + k * step];
+        o += D;
       }
     }
     return { regions, blocks };
@@ -4505,7 +4509,7 @@ class Game {
           : stepColumn(e.col, CORNER_STEPS[d - 4][0], CORNER_STEPS[d - 4][1]);
         if (nb < 0) continue;
         if (!NEEDS_ROOM[this.planet.at(nb, e.k)]) continue;
-        const key = nb * D + e.k;
+        const key = cellIndex(nb, e.k);
         if (!doomed) doomed = new Map();
         doomed.set(key, { col: nb, k: e.k, id: this.planet.at(nb, e.k) });
       }
@@ -4614,7 +4618,7 @@ class Game {
       // what holds it up (today: none).
       for (let k = e.k + 1; k < D && NEEDS_FLOOR[this.planet.at(e.col, k)]; k++) {
         if (!doomed) doomed = new Map();
-        doomed.set(e.col * D + k, { col: e.col, k, id: this.planet.at(e.col, k) });
+        doomed.set(cellIndex(e.col, k), { col: e.col, k, id: this.planet.at(e.col, k) });
       }
     }
     if (!doomed) return;
@@ -4662,7 +4666,7 @@ class Game {
       const soil = this.planet.at(e.col, k);
       if (soil !== ID.farmland && soil !== ID.farmland_wet) continue;
       if (!reverts) reverts = new Map();
-      reverts.set(e.col * D + k, { col: e.col, k, id: ID.dirt });
+      reverts.set(cellIndex(e.col, k), { col: e.col, k, id: ID.dirt });
     }
     if (reverts) this._applyEdits([...reverts.values()]);
   }
@@ -4683,7 +4687,7 @@ class Game {
       // (the kiln ⇄ lit-kiln swap) inherits whatever the cell already had.
       const fac = this.planet.applyFacing(e.col, e.k, e.id, e.facing);
       if (fac >= 0) e.facing = fac; else delete e.facing;
-      if (e.id === ID.hearth) this.hearths.add(e.col * D + e.k);
+      if (e.id === ID.hearth) this.hearths.add(cellIndex(e.col, e.k));
     }
     this.worldWorker.postMessage({ type: 'edit', edits, id: ++this.editSeq });
     // The shadow volume is a copy of what is opaque around the player, and this
@@ -4728,8 +4732,8 @@ class Game {
    */
   _seedGravity(edits) {
     for (const e of edits) {
-      if (HAS_GRAVITY[this.planet.at(e.col, e.k + 1)]) this.falling.add(e.col * D + e.k + 1);
-      if (HAS_GRAVITY[e.id]) this.falling.add(e.col * D + e.k);
+      if (HAS_GRAVITY[this.planet.at(e.col, e.k + 1)]) this.falling.add(cellIndex(e.col, e.k + 1));
+      if (HAS_GRAVITY[e.id]) this.falling.add(cellIndex(e.col, e.k));
     }
   }
 
@@ -4816,8 +4820,8 @@ class Game {
     for (const key of this.falling) {
       if (budget-- <= 0) break;
       this.falling.delete(key);
-      const k = key % D;
-      const col = (key - k) / D;
+      cellDecode(key, _kd);
+      const col = _kd.col, k = _kd.k;
       const id = this.planet.at(col, k);
       // The queue is a list of suspicions, not of facts: the cell may have been
       // mined, replaced or already settled by an earlier entry in this very
@@ -4951,7 +4955,7 @@ class Game {
    * screen, and restores the lock on the way out.
    */
   _writeSign(col, k) {
-    const key = col * D + k;
+    const key = cellIndex(col, k);
     const el = document.getElementById('sign-write');
     const input = document.getElementById('sign-line');
     if (!el || !input) return;
@@ -5172,7 +5176,7 @@ class Game {
    * @param {THREE.Vector3} center where to put what comes out
    */
   _emptyContainer(col, k, id, center) {
-    const key = col * D + k;
+    const key = cellIndex(col, k);
     const kiln = this.kilns.get(key);
     if (kiln) {
       for (const s of [kiln.input, kiln.fuel, kiln.output]) {
@@ -5478,7 +5482,7 @@ class Game {
     // marker for "worldgen put this here", so a crate you set down yourself
     // would otherwise fill itself with treasure the first time you opened it.
     if (id === ID.crate) {
-      const key = col * D + k;
+      const key = cellIndex(col, k);
       if (!this.crates.has(key)) {
         this.crates.set(key, {
           slots: Array.from({ length: CRATE_SLOTS }, () => new Slot()), col, k,
@@ -5565,7 +5569,7 @@ class Game {
    * worker, which has no way to reach this map.
    */
   _crateAt(col, k) {
-    const key = col * D + k;
+    const key = cellIndex(col, k);
     let c = this.crates.get(key);
     if (!c) {
       c = { slots: Array.from({ length: CRATE_SLOTS }, () => new Slot()), col, k };
@@ -5617,7 +5621,7 @@ class Game {
   }
 
   _kilnAt(col, k) {
-    const key = col * D + k;
+    const key = cellIndex(col, k);
     let s = this.kilns.get(key);
     if (!s) {
       s = {
@@ -6981,7 +6985,8 @@ class Game {
   _refreshWards() {
     const out = [];
     for (const key of [...this.hearths]) {
-      const k = key % D, col = (key - k) / D;
+      cellDecode(key, _kd);
+      const col = _kd.col, k = _kd.k;
       if (this.planet.at(col, k) !== ID.hearth) { this.hearths.delete(key); continue; }
       out.push(this.planet.centerOf(col, k, new THREE.Vector3()));
     }
@@ -7109,7 +7114,7 @@ class Game {
       const col = stepColumn(base, di, dj);
       const k = this._openWaterK(col);
       if (k < 0) continue;
-      const key = col * D + k;
+      const key = cellIndex(col, k);
       if (this.frozen.has(key)) continue;
       // Only standing water freezes. A spring has no level entry; anything with
       // one is a flow, and a running stream icing over is both wrong and the
@@ -7158,7 +7163,8 @@ class Game {
     for (const key of this.frozen) {
       if (edits.length >= FREEZE_BATCH) break;
       this.frozen.delete(key);
-      const k = key % D, col = (key - k) / D;
+      cellDecode(key, _kd);
+      const col = _kd.col, k = _kd.k;
       // Mined out, built over, or already melted by other means — winter has no
       // claim on it any more either way.
       if (this.planet.at(col, k) !== ID.ice) continue;
@@ -7326,7 +7332,7 @@ class Game {
       const buries = !isSnow && !IS_SEASON_GROUND[cur] && IS_REPLACEABLE[cur]
         && IS_SEASON_GROUND[this.planet.at(col, k - 1)];
       if (!isSnow && !buries && !IS_SEASON_GROUND[cur]) continue;
-      const key = col * D + k;
+      const key = cellIndex(col, k);
       if (seen.has(key)) continue;
       seen.add(key);
       const was = this.seasonSnow.get(key);
@@ -8340,9 +8346,9 @@ class Game {
       let i = 0;
       for (const key of lv.keys()) {
         if (i++ !== n) continue;
-        const k = key % D;
-        const col = (key - k) / D;
-        const pp = colParts(col);
+        cellDecode(key, _kd);
+        const k = _kd.k;
+        const pp = colParts(_kd.col);
         _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, k, _steamAt));
         if (_v1.distanceToSquared(this.player.position) > 900) break;
         tangentFrame(pp.f, pp.i + 0.5, pp.j + 0.5, k, _frame);
@@ -8395,8 +8401,9 @@ class Game {
     // player spill lands in this same map.
     let fd = Infinity, n = 0;
     for (const key of this.water.level.keys()) {
-      const k = key % D;
-      const pp = colParts((key - k) / D);
+      cellDecode(key, _kd);
+      const k = _kd.k;
+      const pp = colParts(_kd.col);
       _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, k, _steamAt));
       const d = _v1.distanceToSquared(P);
       if (d > 56 * 56) continue;
@@ -8504,7 +8511,8 @@ class Game {
     const list = [];
     for (const [key, text] of this.signs) {
       if (!text) continue;
-      const col = Math.floor(key / D), k = key - col * D;
+      cellDecode(key, _kd);
+      const col = _kd.col, k = _kd.k;
       if (!IS_SIGN[this.planet.at(col, k)]) continue;
       const pos = this.planet.centerOf(col, k, new THREE.Vector3());
       if (pos.distanceToSquared(this.player.position) > RANGE * RANGE) continue;
@@ -8742,7 +8750,7 @@ class Game {
     const hp = u.uHandLightPos.value;
     if (this.planet.blocks) {
       const a = this.planet.cellAt(hp.x, hp.y, hp.z);
-      if (a && IS_OPAQUE[this.planet.blocks[a.col * D + a.k]]) hp.copy(this.player.eye);
+      if (a && IS_OPAQUE[this.planet.at(a.col, a.k)]) hp.copy(this.player.eye);
     }
   }
 
@@ -8952,7 +8960,7 @@ class Game {
       if (k < 0) { data.fill(255, idx, idx + plane); ids.fill(0, idx, idx + plane); idx += plane; continue; }
       if (k >= D) { data.fill(0, idx, idx + plane); ids.fill(0, idx, idx + plane); idx += plane; continue; }
       for (let n = 0; n < plane; n++) {
-        const id = blocks[cols[n] * D + k];
+        const id = blocks[COL_BASE[cols[n]] + k * COL_STEP[cols[n]]];
         ids[idx] = id;
         data[idx++] = IS_OPAQUE[id] ? 255 : 0;
       }
@@ -9666,7 +9674,7 @@ class Game {
     if (hit && IS_SIGN[hit.id]) {
       // Reading is looking: no key to press and nothing to open, so a row of
       // signs can be read by sweeping across them.
-      const text = this.signs.get(hit.col * D + hit.k);
+      const text = this.signs.get(cellIndex(hit.col, hit.k));
       // The hint is one line, so the board's own line breaks become spaces
       // rather than vanishing into a run-on: "WEST GATE\nkeep out" reads as
       // "WEST GATE keep out" and not as "WEST GATEkeep out".
@@ -9692,7 +9700,7 @@ class Game {
     // about which hand is mining — see `_breakBlock` for why it is the main one.
     const heldDef = ITEMS[this.inventory.held().item];
     if (input.buttons[0] && hit && input.locked) {
-      const key = hit.col * D + hit.k;
+      const key = cellIndex(hit.col, hit.k);
       if (m.key !== key) { m.key = key; m.progress = 0; }
       // The hands branch is a multiplier on the finished timer rather than a
       // term inside `miningTime`: that function is shared with the worker's

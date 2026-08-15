@@ -6,7 +6,7 @@
 import {
   F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME, BIOME_COLORS,
 } from './Constants.js';
-import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn } from './Sphere.js';
+import { CORNER_DIR, CENTER_DIR, COL_NB, stepColumn, cellIndex } from './Sphere.js';
 import {
   BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
   TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, R_MODEL, SEALS_FACES,
@@ -517,12 +517,12 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
   const { sun, r: lr, g: lg, b: lb } = light;
 
   // sample a voxel's block id through the adjacency graph
-  const at = (col, k) => (k < 0 || k >= D ? 0 : blocks[col * D + k]);
+  const at = (col, k) => (k < 0 || k >= D ? 0 : blocks[cellIndex(col, k)]);
   // Ambient occlusion, and only ambient occlusion: does the cell next door have
   // geometry in it that would shade this corner? `SEALS_FACES` rather than
   // `IS_OPAQUE` because a modelled block has no geometry to shade with — see the
   // note over `SEALS_FACES` in Blocks.js.
-  const sealsAt = (col, k) => (k < 0 || k >= D ? 0 : SEALS_FACES[blocks[col * D + k]]);
+  const sealsAt = (col, k) => (k < 0 || k >= D ? 0 : SEALS_FACES[blocks[cellIndex(col, k)]]);
 
   /** Smooth light at a corner shared by up to 4 open cells. */
   const cornerLight = (cols, ks, outv) => {
@@ -531,7 +531,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       const c = cols[q], k = ks[q];
       if (k < 0 || k >= D) { s += 15; n++; continue; }
       const vi = c * D + k;
-      if (IS_OPAQUE[blocks[vi]]) continue;
+      if (IS_OPAQUE[blocks[cellIndex(c, k)]]) continue;
       s += sun[vi]; r += lr[vi]; g += lg[vi]; b += lb[vi]; n++;
     }
     if (!n) n = 1;
@@ -608,7 +608,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
    * Level 0 means "unmarked" — worldgen's oceans and lakes — which are sources.
    */
   const liquidTop = (c, k) => {
-    const lvl = facing?.get(c * D + k) ?? 0;
+    const lvl = facing?.get(cellIndex(c, k)) ?? 0;
     if (lvl === 0 || lvl === LEVEL_SOURCE) return 1;
     // Minecraft's ramp: the tail of a flow is a film, not a half block. A ramp
     // that only reached about a third of a block at the far edge still read as
@@ -818,7 +818,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       const nMiPj = COL_NB[nMi * 4 + 2], nMiMj = COL_NB[nMi * 4 + 3];
 
       for (let k = k0; k < k1; k++) {
-        const id = blocks[col * D + k];
+        const id = blocks[cellIndex(col, k)];
         if (id === 0) continue;
         const rt = RENDER_TYPE[id];
         if (rt === R_CROSS) {
@@ -843,8 +843,8 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
         // facing for a kiln, an axis for a log. -1 for the overwhelming
         // majority of cells, so no Map lookup at all.
         const dirF = IS_DIRECTIONAL[id]
-          ? (facing?.get(col * D + k) ?? FACING_DEFAULT)
-          : (IS_AXIS[id] ? (facing?.get(col * D + k) ?? 0) : -1);
+          ? (facing?.get(cellIndex(col, k)) ?? FACING_DEFAULT)
+          : (IS_AXIS[id] ? (facing?.get(cellIndex(col, k)) ?? 0) : -1);
 
         // water depth + shoreline, handed to the liquid shader via `tint`
         if (rt === R_LIQUID) {
@@ -898,7 +898,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             const nk = n === 4 ? k + 1 : n === 5 ? k - 1 : k;
             if (nk < 0 || nk >= D) continue;
             const vn = nc * D + nk;
-            if (IS_OPAQUE[blocks[vn]]) continue;
+            if (IS_OPAQUE[blocks[cellIndex(nc, nk)]]) continue;
             if (sun[vn] > ms) ms = sun[vn];
             if (lr[vn] > mr) mr = lr[vn];
             if (lg[vn] > mg) mg = lg[vn];
@@ -911,7 +911,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
           continue;
         }
         if (IS_SHAPED[id]) {
-          const byte = (facing?.get(col * D + k) ?? 0) & 7;
+          const byte = (facing?.get(cellIndex(col, k)) ?? 0) & 7;
           // A fence has no stored orientation: its shape is its neighbours, and
           // those are already resolved for this column.
           const links = IS_FENCE[id]

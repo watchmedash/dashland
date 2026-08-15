@@ -8,7 +8,7 @@ import {
   COLUMNS, NUM_VOXELS, CHUNK_T, vidx, cidx, BIOME, regionOfCol,
 } from './Constants.js';
 import {
-  centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid,
+  centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid, cellIndex,
 } from './Sphere.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
 // Imported and deliberately never called. The structure pass is switched off —
@@ -3414,8 +3414,8 @@ export class WorldGen {
       }
       return -1;
     };
-    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[col * D + k] = id; };
-    const get = (col, k) => (k >= 0 && k < D ? blocks[col * D + k] : ID.stone);
+    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[cellIndex(col, k)] = id; };
+    const get = (col, k) => (k >= 0 && k < D ? blocks[cellIndex(col, k)] : ID.stone);
 
     {
       const kBase = site.kBase;
@@ -3851,7 +3851,7 @@ export class WorldGen {
     let rock = ID.stone;
     for (let d = 0; d < 4; d++) {
       const n = colNeighbor(col, d);
-      const id = blocks[n * D + kTop];
+      const id = blocks[cellIndex(n, kTop)];
       if (IS_OPAQUE[id] && id !== ID.core) { rock = id; break; }
     }
 
@@ -3937,7 +3937,7 @@ export class WorldGen {
      * approach and not from the other.
      *
      * The height field cannot disagree with itself. Nothing decoration places
-     * ever sits at or below the ground layer, so `blocks[col * D + k]` is still
+     * ever sits at or below the ground layer, so `blocks[cellIndex(col, k)]` is still
      * the real surface block, and the volcano — the one pass that does move the
      * ground — is always stamped before any of this runs.
      */
@@ -3945,7 +3945,7 @@ export class WorldGen {
     // need some headroom, but the land surface sits around k=40 of 66 — this
     // bound has to be generous or it rejects the entire planet
     if (k < 0 || k > D - 7) return null;
-    const surf = blocks[col * D + k];
+    const surf = blocks[cellIndex(col, k)];
     // Nothing grows out of a flooded cell.
     //
     // `stampTree` writes with `set()`, which skips a cell that is not air — so
@@ -3978,7 +3978,7 @@ export class WorldGen {
     // sand shore one cell under the water line that used to grow a cactus
     // standing on the sea — while leaving the answer a pure function of the
     // ground.
-    const above = blocks[col * D + k + 1];
+    const above = blocks[cellIndex(col, k + 1)];
     if (above === ID.water || above === ID.lava) return null;
     const rng = this.colRng(col, 0x7a11);
 
@@ -4155,7 +4155,7 @@ export class WorldGen {
     // Same reason as `treeAt`: the ground, not whatever is standing on it.
     const k = this.groundKOf(col);
     if (k < 0 || k > D - 5) return null;
-    const surf = blocks[col * D + k];
+    const surf = blocks[cellIndex(col, k)];
     if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) return null;
     // A boulder is scenery, and a gorge floor already has rock lying about it.
     if (this.canyonNear[col] === 0) return null;
@@ -4195,8 +4195,8 @@ export class WorldGen {
            */
           const id = mossy && rng() < 0.5 ? ID.moss_stone : ID.stone;
           if (rid >= 0 && regionOfCol(c) !== rid) continue;
-          if (blocks[c * D + kk] !== ID.air) continue;
-          blocks[c * D + kk] = id;
+          if (blocks[cellIndex(c, kk)] !== ID.air) continue;
+          blocks[cellIndex(c, kk)] = id;
         }
       }
     }
@@ -4315,13 +4315,13 @@ export class WorldGen {
     if (this.inLakeBed(c)) return false;
     if (this._springNear(c) >= 0) return false;
     if (this.groundKOf(c) !== k) return false;
-    if (!LOG_FLOOR[blocks[c * D + k]]) return false;
+    if (!LOG_FLOOR[blocks[cellIndex(c, k)]]) return false;
     // Liquid specifically, not "is it air" — for exactly the reason spelled out
     // at length in `_treeKind`. Terrain puts air or water in the cell above the
     // ground and nothing else; decoration puts trees and boulders there, and
     // asking about those would be asking whether the region next door has been
     // decorated yet.
-    const above = blocks[c * D + k + 1];
+    const above = blocks[cellIndex(c, k + 1)];
     if (above === ID.water || above === ID.lava) return false;
     // Nothing lies through a standing trunk, and nothing lies through a
     // boulder — which is up to two columns across, hence the sweep.
@@ -4347,7 +4347,7 @@ export class WorldGen {
         ? patchColumn(plan.f, plan.ci, plan.cj, d, 0)
         : patchColumn(plan.f, plan.ci, plan.cj, 0, d);
       if (rid >= 0 && regionOfCol(c) !== rid) continue;
-      blocks[c * D + plan.k + 1] = plan.id;
+      blocks[cellIndex(c, plan.k + 1)] = plan.id;
     }
   }
 
@@ -4424,8 +4424,8 @@ export class WorldGen {
     const set = (c, k, id, force = false) => {
       if (k < 0 || k >= D) return;
       if (rid >= 0 && regionOfCol(c) !== rid) return;
-      const cur = blocks[c * D + k];
-      if (cur === ID.air || force) blocks[c * D + k] = id;
+      const cur = blocks[cellIndex(c, k)];
+      if (cur === ID.air || force) blocks[cellIndex(c, k)] = id;
     };
     // A canopy is three or four columns across, which is wide enough to care
     // which way is which. Walking the grid answers in the destination face's
@@ -5178,7 +5178,7 @@ export class WorldGen {
   _reefFloorK(blocks, col) {
     const k = this.groundKOf(col);
     if (k < 1 || k > D - 3) return -1;
-    return supports(blocks[col * D + k]) ? k : -1;
+    return supports(blocks[cellIndex(col, k)]) ? k : -1;
   }
 
   /**
@@ -5188,8 +5188,8 @@ export class WorldGen {
   _propAt(blocks, col, id, floorK, topK) {
     const k = floorK + 1;
     if (k >= topK) return false;
-    if (blocks[col * D + k] !== ID.water) return false;
-    blocks[col * D + k] = id;
+    if (blocks[cellIndex(col, k)] !== ID.water) return false;
+    blocks[cellIndex(col, k)] = id;
     return true;
   }
 

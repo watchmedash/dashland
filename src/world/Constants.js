@@ -22,7 +22,9 @@
 // and 32 layers of crust between the mantle and the waterline instead of 22, so
 // an ocean trench and a canyon can both exist without meeting in the middle.
 export const FACES = 6;
-export const F = 464;                // cells per face axis
+// Cube planet. F is 2*PLANET_R so a face column maps 1:1 onto a block, and is
+// a multiple of CHUNK_T. See Cube.js.
+export const F = 416;                // cells per face axis
 /*
  * 66 -> 99. Mountains, which the planet did not have room for.
  *
@@ -43,12 +45,22 @@ export const F = 464;                // cells per face axis
  * authority), and the light field is four more — sun, r, g, b. At 66 that was
  * about 510 MB; at 99 it is about 770.
  */
-export const D = 99;                 // radial layers
-export const R_MIN = 250;            // radius of layer 0
-export const R_MAX = R_MIN + D;      // 316
+// Cube: k is depth along a face normal, not a radius. R_MIN is the normal
+// coordinate of layer 0 and every offset from it is unchanged, so all the
+// k-space arithmetic downstream still reads the same.
+export const D = 88;                 // layers along the face normal
+export const R_MIN = 175;            // normal coordinate of layer 0
+export const R_MAX = R_MIN + D;      // 263
 
-export const COLUMNS = FACES * F * F;        // 1 291 776
-export const NUM_VOXELS = COLUMNS * D;       // 127 885 824
+/** Half-size of the planet: the sea-level face plane sits here. */
+export const PLANET_R = 208;
+/** Half-size of the storage array. Must cover R_MAX. */
+export const ARR_R = 264;
+export const SIDE = ARR_R * 2;               // 528
+export const CELLS = SIDE * SIDE * SIDE;     // 147 197 952
+
+export const COLUMNS = FACES * F * F;        // 1 038 336
+export const NUM_VOXELS = COLUMNS * D;       // 91 373 568
 
 export const CHUNK_T = 16;           // cells per chunk along i and j
 export const CHUNK_K = 11;           // layers per chunk
@@ -231,14 +243,14 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  * flora species: a pass that only decorates the surface does not bump. A pass
  * that moves, carves or replaces ground always does.**
  */
-export const GEN_VERSION = 5;
+export const GEN_VERSION = 6;
 
 // All five keep their distance from R_MIN, so the crust reads the same from
 // below: core three layers up, mantle eight. What changed is the room above
 // them — sea level sits 40 layers over layer 0 instead of 30, and the terrain
 // ceiling 24 over the waterline instead of 12.
-export const R_CORE = 253;           // unbreakable core shell
-export const R_MANTLE = 258;
+export const R_CORE = 178;           // unbreakable core shell
+export const R_MANTLE = 183;
 /*
  * The waterline drops eight layers as well, and that part is free.
  *
@@ -249,14 +261,14 @@ export const R_MANTLE = 258;
  * the ore live — that band goes from 32 layers to 24, and taking twelve would
  * have left twenty, which starts to squeeze the deep ore against the mantle.
  */
-export const R_SEA = 282;            // ocean surface radius
-export const R_SURFACE = 282.9;      // mean land radius
+export const R_SEA = 208;            // ocean surface radius
+export const R_SURFACE = 208.9;      // mean land radius
 /*
  * Two below R_MAX (349), because a clamp that bites is a plateau where a peak
  * should be. Against the new waterline this is 65 blocks of relief where there
  * were 24.
  */
-export const R_TERRAIN_MAX = 347;
+export const R_TERRAIN_MAX = 261;
 
 /**
  * How far down the two subtractive surface passes are allowed to reach.
@@ -277,8 +289,8 @@ export const R_TERRAIN_MAX = 347;
  * pre-mantle band where the rock starts glowing: a gorge whose floor was cut
  * into magma stone would read as a rift, not as a canyon.
  */
-export const R_SEABED_MIN = 265;
-export const R_CANYON_MIN = 266;
+export const R_SEABED_MIN = 190;
+export const R_CANYON_MIN = 191;
 
 export const GRAVITY = 26;
 

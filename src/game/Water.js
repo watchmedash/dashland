@@ -27,7 +27,9 @@
 // because the ways it fails are silent.
 
 import { D } from '../world/Constants.js';
-import { colNeighbor } from '../world/Sphere.js';
+import { colNeighbor, cellIndex, cellDecode } from '../world/Sphere.js';
+
+const _kd = { col: 0, k: 0 };
 import { ID, RENDER_TYPE, R_LIQUID, DROWNS } from '../world/Blocks.js';
 
 /**
@@ -156,7 +158,7 @@ export class Water {
 
   clear() { this.level.clear(); this.sources.clear(); this.active.clear(); this._quenched.clear(); }
 
-  key(col, k) { return col * D + k; }
+  key(col, k) { return cellIndex(col, k); }
 
   /** Level of the water at a cell, or -1 if there is none. */
   levelAt(col, k) {
@@ -363,8 +365,8 @@ export class Water {
     const edits = [];
     this._quenched.clear();
     for (const key of todo) {
-      const k = key % D;
-      const col = (key - k) / D;
+      cellDecode(key, _kd);
+      const col = _kd.col, k = _kd.k;
       const here = this.levelAt(col, k);
 
       // Not liquid any more: drop the stale bookkeeping and move on.

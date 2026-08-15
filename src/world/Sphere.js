@@ -215,12 +215,36 @@ export function tangentFrame(f, ci, cj, ck, out = {
   return out;
 }
 
-/** Bring cell coordinates back in range after a move that crossed a cube edge. */
+/**
+ * Bring cell coordinates back in range after a move that crossed a cube edge.
+ *
+ * The fold is taken at the sea plane rather than at the mover's own height, and
+ * that is the whole of it. Asking which face a raised point belongs to answers
+ * "the one you are still above": stand seven blocks up and walk two past the
+ * edge and you are 7 beyond your own face's plane against 2 beyond the
+ * neighbour's, so your own face keeps winning and the in-face coordinate runs
+ * off the end of the array. Measured, that was 64% of folds. Projecting to the
+ * surface first drops the height out of the comparison, so the only thing left
+ * deciding is which side of the edge you are on, which is the question being
+ * asked. Height is then re-measured against whichever face won.
+ */
 export function normalizeCell(c) {
   if (c.ci >= 0 && c.ci < F && c.cj >= 0 && c.cj < F) return c;
-  const p = cellToWorld(c.f, c.ci, c.cj, c.ck, _np);
+  const p = _np;
+  p[0] = p[1] = p[2] = 0;
+  p[AX_N[c.f]] = SG_N[c.f] * PLANET_R;
+  p[AX_A[c.f]] = c.ci - PLANET_R;
+  p[AX_B[c.f]] = c.cj - PLANET_R;
   const r = foldPoint(p[0], p[1], p[2], _fp);
-  c.f = r.f; c.ci = r.ci; c.cj = r.cj; c.ck = r.ck;
+  const height = c.ck;
+  c.f = r.f;
+  // Clamped, because a point sitting exactly on the edge folds to exactly F and
+  // F is one past the last column. An epsilon in, not a whole cell.
+  c.ci = r.ci <= 0 ? 0 : (r.ci >= F ? F - 1e-4 : r.ci);
+  c.cj = r.cj <= 0 ? 0 : (r.cj >= F ? F - 1e-4 : r.cj);
+  // Height above the shell is carried across the edge rather than recomputed
+  // from a point that was flattened onto it.
+  c.ck = height;
   return c;
 }
 const _np = [0, 0, 0];

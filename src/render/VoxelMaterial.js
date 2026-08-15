@@ -2075,14 +2075,49 @@ const LIGHTS_END = /* glsl */`
   // With no torch in the world — which is most of the daylight hours of most
   // frames — uOccActive is 0, this whole block folds away and the shader is
   // bit-identical to what it was.
+  //
+  // ---- the space this normal is in, and why it is not the shaded one -------
+  //
+  // These two lights are the only things in the shader that dot a normal
+  // against a WORLD position, so they are the only ones that care which space
+  // the normal is in, and until now they were handed the wrong one. NORMAL_FRAG
+  // builds the shaded normal on top of normalize(vNormal), which is three's own
+  // varying and is normalMatrix * objectNormal - VIEW space. It answers "which
+  // way is this face pointing relative to the camera". flameLight asks "is this
+  // face turned toward the flame", and dotting a view-space normal with a
+  // world-space direction to the flame answers neither.
+  //
+  // What that looked like, measured: one pillar face, one flame, the player not
+  // moving at all, four camera positions. A planted torch reads 112 / 94 / 86 /
+  // 73 on it, a 1.5x spread that is just the grazing angle and the normal map.
+  // The same torch carried in the fist reads 69 / 59 / 11 / 3. Twenty to one,
+  // from turning the camera. The wall the player is walking toward went black
+  // when they looked at it from the wrong side, which is a large part of "I
+  // wanted held torch to be as bright when placed" - it is not only dimmer, it
+  // is dimmer as a function of where you are looking.
+  //
+  // vWorldNormal is the same face normal taken through modelMatrix, so it lands
+  // in the same space as vWorld, uHandLightPos and uCamPos. The view-vector sign
+  // flip is the one LIQUID_NORMAL_FRAG already uses and is here for the same
+  // reason: a double-sided cutout quad (leaves, plant crosses) is wound from its
+  // own cell, so half the ones you ever see are backsides, and an unflipped
+  // normal puts the flame out on them. It is a no-op on the single-sided
+  // geometry that is most of the world.
+  //
+  // The normal map is deliberately not carried over. It was never doing
+  // anything defensible here - a per-texel perturbation in the wrong space is
+  // noise, not detail - and the flat face normal is what the grid's own block
+  // light effectively uses, which is the whole point of this pass.
+  vec3 flameN = normalize(vWorldNormal);
+  flameN *= dot(flameN, uCamPos - vWorld) < 0.0 ? -1.0 : 1.0;
   vec3 occFragCell = vec3(0.0);
   if (uOccActive > 0.5) {
     vec3 nb;
-    occFrame(vWorld, normal * OCC_BIAS, occFragCell, nb);
+    occFrame(vWorld, flameN * OCC_BIAS, occFragCell, nb);
     occFragCell += nb;
   }
-  vec3 moving = flameLight(uHandLightPos, uHandLightColor, uHandLightRadius, normal, vWorld, occFragCell)
-              + flameLight(uDropLightPos, uDropLightColor, uDropLightRadius, normal, vWorld, occFragCell);
+  vec3 moving = flameLight(uHandLightPos, uHandLightColor, uHandLightRadius, flameN, vWorld, occFragCell)
+              + flameLight(uDropLightPos, uDropLightColor, uDropLightRadius, flameN, vWorld, occFragCell);
 
   // All block light, grid and flames together, with a highlight shoulder on the
   // pair. See BLOCK_KNEE. The AO weighting stays on the grid term only and off

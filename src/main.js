@@ -1822,6 +1822,11 @@ class Game {
     // to ask (it already walks the herd once a frame) and the world owns the
     // answer.
     this.mobs.blockLightAt = (pos, out) => this._entityLight(pos, out);
+    // The same field, for the things lying on the floor. A dropped pickaxe in a
+    // torch-lit gallery was as dark as one in an unlit one, which is the second
+    // half of the same report; see `Drops._applyLight` for the three different
+    // doors a drop takes light through.
+    this.drops.blockLightAt = (pos, out) => this._entityLight(pos, out);
     // The stalker is the one mob whose behaviour is a question about what is on
     // screen, so it needs the thing that decides that. Handed over the same way
     // the light probe above is: a reference rather than a parameter, because

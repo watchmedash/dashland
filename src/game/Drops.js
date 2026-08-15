@@ -19,6 +19,10 @@ for (const t of ['dirt']) UNTINTED_LAYER[TILE_INDEX[t]] = 1;
 const WHITE_TINT = [1, 1, 1];
 import { ITEMS } from './Items.js';
 import { hasModel, worldModel } from '../render/ItemModels.js';
+// The terrain's own live block-light gain, so a dropped cobble and the cobble
+// wall behind it answer by the same number. Read through the uniform rather
+// than copied for the reason `_entityLight` gives: a copy can drift.
+import { voxelUniforms } from '../render/VoxelMaterial.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -30,6 +34,8 @@ const _hover = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _flow = new THREE.Vector3();
 const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
+const _lit = new THREE.Vector3();
+const _bl = { r: 0, g: 0, b: 0 };
 
 const MAX = 260;
 const PICKUP_RADIUS = 1.85;      // start drifting toward the player
@@ -71,6 +77,38 @@ export class Drops {
     this.spriteCache = new Map();
     /** Last value handed to setSkyLevel; 1 is "as the texture was authored". */
     this._skyLevel = 1;
+    /**
+     * Bumped whenever the sky level moves, so a drop that is already showing
+     * the right block light still re-applies. The change guard below keys on
+     * both, or a card would hold dawn's brightness through to dusk.
+     */
+    this._skyGen = 0;
+    /**
+     * Where a dropped thing is, in the world's own block light. Supplied by
+     * main exactly as `Mobs.blockLightAt` is, and for the same reason — the
+     * field lives on that thread and this module has no business knowing how it
+     * is computed. Null is a legal value and means "no block light at all",
+     * which is the picture this class drew before any of it existed.
+     * @type {null | ((pos: THREE.Vector3, out: {r:number,g:number,b:number}) => {r:number,g:number,b:number})}
+     */
+    this.blockLightAt = null;
+    /**
+     * Spare per-drop geometries, keyed by the shared one they were cut from.
+     *
+     * A block drop is drawn with the voxel material, which takes its light out
+     * of a per-vertex `blockLight` attribute, so a drop that wants its own
+     * light needs its own attribute and therefore its own geometry — the
+     * cached one in `getBlockGeo` is shared by every drop of that block and by
+     * the copy in your fist. Everything except that one attribute is shared
+     * with it, so a private geometry is a few hundred bytes and one small
+     * vertex buffer.
+     *
+     * They are pooled rather than disposed because they cannot be disposed:
+     * `geometry.dispose()` frees the buffers of every attribute it holds, and
+     * all but one of these are the shared original's. A mining session
+     * otherwise leaks one small buffer per block picked up.
+     */
+    this._geoPool = new Map();
     this.iconFactory = null;
     /**
      * The flow simulation, if there is one. Optional: drops predate it and a
@@ -97,17 +135,24 @@ export class Drops {
    * no normal to shade. One `Color.setScalar` per *item type* that has ever been
    * dropped, not per drop, because the materials are cached and shared.
    *
-   * Deliberately not routed through the block light the mobs get: a drop is
-   * 0.46 of a cell and spins, and the machinery would cost a probe per drop per
-   * frame against 260 of them for a few pixels. The consequence is honest and
-   * visible — a stack of sticks lying beside a torch stays as dark as the field
-   * — and is written down here rather than fixed.
+   * It used to say here that block light was deliberately skipped, on the
+   * grounds that a drop is 0.46 of a cell and the machinery would cost a probe
+   * per drop per frame against 260 of them. The premise was right about the old
+   * machinery — a march per emitter per drop — and is not right about the field
+   * that replaced it: a sample is one trilinear read, 0.13 us, so a floor
+   * covered in litter is under 0.04 ms between the lot of them. See
+   * `_applyLight`, and `EntityLight.js` for what it is sampling.
+   *
+   * What is left here is the sky half, unchanged. The cached material is still
+   * painted, because it is the template every drop's own copy is cut from and
+   * because the held and planted forms still use it directly.
    *
    * @param {number} level 1 leaves the card exactly as it renders today
    */
   setSkyLevel(level) {
     if (this._skyLevel === level) return;
     this._skyLevel = level;
+    this._skyGen++;
     for (const mat of this.spriteCache.values()) mat.color.setScalar(level);
   }
 
@@ -222,6 +267,7 @@ export class Drops {
       if (victim < 0) victim = 0;
       const old = this.list.splice(victim, 1)[0];
       this.group.remove(old.mesh);
+      this._releaseLight(old);
     }
     mesh.layers.enable(1);
     this.group.add(mesh);
@@ -236,6 +282,10 @@ export class Drops {
       age: 0, spin: Math.random() * 6.28, collected: false, grounded: false, magnet: 0,
     };
     this.list.push(drop);
+    // Its own materials and its own light attribute, so two stacks of the same
+    // stone lying at opposite ends of a gallery are not one object wearing one
+    // brightness. See `_attachLight`.
+    this._attachLight(drop);
     if (!mesh.userData.modelled) this._upgrade(drop);
   }
 
@@ -259,8 +309,184 @@ export class Drops {
       model.layers.enable(1);
       this.group.remove(drop.mesh);
       this.group.add(model);
+      // The card's private materials and geometry go back before the model's
+      // are cut, or trading up would leak one of each per drop that ever stood
+      // in for a model still in flight.
+      this._releaseLight(drop);
       drop.mesh = model;
+      this._attachLight(drop);
     });
+  }
+
+  /**
+   * Give a drop the private materials and geometry it needs to be lit on its
+   * own, and record where to write the answer.
+   *
+   * Three kinds of thing come out of `_mesh` and each takes light by a
+   * different door, which is why this is a traversal and not a line:
+   *
+   *  - A **block** is the voxel material with a per-vertex `blockLight`
+   *    attribute, exactly as a wall of the same block is, and that attribute
+   *    lives on a geometry cached per block id. It gets a private copy that
+   *    shares every other attribute with the original, so the light is the only
+   *    thing that is not shared.
+   *  - A **card** is a MeshBasicMaterial, unlit by construction, so there is no
+   *    light to raise and the albedo is raised instead. Same trick
+   *    `setSkyLevel` already plays, one drop at a time.
+   *  - A **model** is MeshStandardMaterial and takes the scene's lights, so it
+   *    takes block light as emissive, exactly as a mob does.
+   *
+   * A model's materials are shared with the template every copy is cloned
+   * from, so they have to be cloned here or lighting one dropped torch would
+   * light every torch in the world, held and planted included.
+   * `Material.clone` does not carry `onBeforeCompile` or
+   * `customProgramCacheKey`, and two of the item models depend on both (see
+   * the glow shaders in `ItemModels.js`), so those are carried across by hand.
+   * Whatever emissive the material was authored with is kept as a floor rather
+   * than overwritten, for the reason `Mobs` spells out at length: `emissive` is
+   * one slot, and the second thing to assume it owns it puts out the first.
+   */
+  _attachLight(drop) {
+    const parts = [];
+    const seen = new Map();
+    // One material per slot, and a mesh may legitimately have several: an item
+    // model built from a multi-material geometry hands back an array here, and
+    // calling `clone` on the array is what turned this into a thrown exception
+    // inside `requestMesh`'s promise — which that function's catch reads as "the
+    // model file is missing", marks the key as permanently failed, and drops
+    // every copy of that item in the game back to sprite art. A crash in here
+    // must not be able to delete a model, so the shape is handled rather than
+    // assumed.
+    const own = (src) => {
+      let m = seen.get(src);
+      if (m) return m;
+      m = src.clone();
+      m.onBeforeCompile = src.onBeforeCompile;
+      m.customProgramCacheKey = src.customProgramCacheKey;
+      seen.set(src, m);
+      if (m.isMeshBasicMaterial) parts.push({ card: m });
+      else parts.push({ lit: m, base: m.emissive ? m.emissive.clone() : null });
+      return m;
+    };
+    drop.mesh.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const shared = this.materials
+        && (o.material === this.materials.opaque || o.material === this.materials.cutout);
+      if (shared) {
+        const g = this._takeGeo(o.geometry);
+        if (!g) return;
+        o.geometry = g;
+        const attr = g.getAttribute('blockLight');
+        if (attr) parts.push({ attr });
+        return;
+      }
+      if (Array.isArray(o.material)) o.material = o.material.map(own);
+      else if (typeof o.material.clone === 'function') o.material = own(o.material);
+    });
+    drop.lit = parts;
+    // -1 is "nothing has been written yet", which no quantised key can be, so
+    // the first update always paints.
+    drop.litKey = -1;
+  }
+
+  /** Hand a drop's private geometries back to the pool. Materials are let go. */
+  _releaseLight(drop) {
+    if (!drop || !drop.lit) return;
+    for (const p of drop.lit) {
+      if (!p.attr) continue;
+      const g = p.attr.__geo;
+      if (!g) continue;
+      const free = this._geoPool.get(g.userData.litSrc);
+      if (free) free.push(g);
+    }
+    drop.lit = null;
+  }
+
+  /**
+   * A geometry that is the given one in every respect but its block light.
+   *
+   * Attributes are handed over by reference, which is not a shortcut: two
+   * geometries sharing a BufferAttribute share one buffer on the card, so the
+   * whole cost of a private copy is the one small float array below.
+   */
+  _takeGeo(src) {
+    if (!src || !src.getAttribute || !src.getAttribute('blockLight')) return null;
+    let free = this._geoPool.get(src);
+    if (!free) { free = []; this._geoPool.set(src, free); }
+    const spare = free.pop();
+    if (spare) return spare;
+    const g = new THREE.BufferGeometry();
+    if (src.index) g.setIndex(src.index);
+    for (const name of Object.keys(src.attributes)) {
+      if (name === 'blockLight') continue;
+      g.setAttribute(name, src.attributes[name]);
+    }
+    const n = src.getAttribute('blockLight').count;
+    const attr = new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3);
+    attr.setUsage(THREE.DynamicDrawUsage);
+    // The back reference is what lets `_releaseLight` find the geometry from
+    // the attribute it recorded, without a second field on every part.
+    attr.__geo = g;
+    g.setAttribute('blockLight', attr);
+    g.userData.litSrc = src;
+    // Computed from the shared attributes, which are the same ones, so this is
+    // the original's sphere and not a fresh guess at it.
+    g.boundingSphere = src.boundingSphere;
+    g.boundingBox = src.boundingBox;
+    return g;
+  }
+
+  /**
+   * Paint this frame's light onto one drop.
+   *
+   * Quantised to sixty-fourths and guarded on the result, so a stack lying
+   * still in an unlit corner costs one comparison and a spinning one beside a
+   * torch repaints only when it has actually crossed a step. The guard matters:
+   * a card is a `Color.setRGB` and a block is a whole vertex buffer re-upload,
+   * and there can be 260 of them.
+   */
+  _applyLight(d) {
+    if (!d.lit) return;
+    let r = 0, g = 0, b = 0;
+    if (this.blockLightAt) {
+      // A little above the middle of the item, which hovers over the ground:
+      // sampling at the drop's own position puts it in the cell the floor
+      // occupies whenever the bob is at its low point.
+      // Its own scratch and nothing else's: `update` is holding the local up in
+      // `_v` while this runs, and borrowing it here flung the drop a fifth of a
+      // planet radius the last time that vector was shared.
+      _lit.copy(d.pos).sub(this.center).normalize().multiplyScalar(0.25).add(d.pos);
+      const l = this.blockLightAt(_lit, _bl);
+      r = l.r; g = l.g; b = l.b;
+    }
+    const key = ((Math.min(255, r * 64) | 0) << 16) | ((Math.min(255, g * 64) | 0) << 8)
+      | (Math.min(255, b * 64) | 0) | (this._skyGen % 64) * 0x1000000;
+    if (d.litKey === key) return;
+    d.litKey = key;
+    // Back into the terrain's own units for the vertex attribute: the shader
+    // multiplies by the same gain this was multiplied by on the way out, so a
+    // dropped cobble ends up carrying exactly the level the wall behind it
+    // carries.
+    const gain = voxelUniforms.uBlockIntensity.value / Math.PI;
+    const inv = gain > 1e-6 ? 1 / gain : 0;
+    const sky = this._skyLevel;
+    for (const p of d.lit) {
+      if (p.attr) {
+        const a = p.attr.array;
+        for (let i = 0; i < a.length; i += 3) { a[i] = r * inv; a[i + 1] = g * inv; a[i + 2] = b * inv; }
+        p.attr.needsUpdate = true;
+      } else if (p.card) {
+        // Added to the sky term rather than replacing it, and for the same
+        // reason `BlockModels` gives: the neutral value of an added term is
+        // zero, so a missing answer draws the card exactly as it was drawn
+        // before any of this existed. A multiplied one would draw it black.
+        p.card.color.setRGB(sky + r, sky + g, sky + b);
+      } else if (p.lit) {
+        const e = p.base;
+        p.lit.emissive.setRGB(
+          e ? Math.max(e.r, r) : r, e ? Math.max(e.g, g) : g, e ? Math.max(e.b, b) : b);
+      }
+    }
   }
 
   /**
@@ -327,6 +553,7 @@ export class Drops {
             d.count -= taken;
             if (d.count <= 0) {
               this.group.remove(d.mesh);
+              this._releaseLight(d);
               this.list.splice(i, 1);
               continue;
             }
@@ -364,6 +591,7 @@ export class Drops {
           d.burn -= dt;
           if (d.burn <= 0) {
             this.group.remove(d.mesh);
+            this._releaseLight(d);
             this.list.splice(i, 1);
             continue;
           }
@@ -400,6 +628,10 @@ export class Drops {
           if (d.pos.distanceTo(player.position) < PICKUP_RADIUS) d.magnet = 0.01;
         }
       }
+
+      // What the torch three cells away is doing to it. After the movement, so
+      // it is sampled where the thing has actually ended up this frame.
+      this._applyLight(d);
 
       // Render transform: hover + spin around the local up.
       // `up` aliases _v, so build the position in its own temp — writing to _v
@@ -440,12 +672,14 @@ export class Drops {
       d.mesh.matrixAutoUpdate = false;
       d.mesh.matrixWorldNeedsUpdate = true;
 
-      if (!d.keep && d.age > 300) { this.group.remove(d.mesh); this.list.splice(i, 1); }
+      if (!d.keep && d.age > 300) {
+        this.group.remove(d.mesh); this._releaseLight(d); this.list.splice(i, 1);
+      }
     }
   }
 
   clear() {
-    for (const d of this.list) this.group.remove(d.mesh);
+    for (const d of this.list) { this.group.remove(d.mesh); this._releaseLight(d); }
     this.list.length = 0;
   }
 

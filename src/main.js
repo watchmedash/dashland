@@ -861,6 +861,14 @@ const OCC_VIS_SLOTS = 1024;
 /** Scratch for the volume's recentring test; not shared, it is read every frame. */
 const _occCell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
 const _occLocal = new THREE.Vector3();
+/**
+ * A second one, for the moving flames' own cell coordinates.
+ *
+ * It cannot share `_occLocal`: `_movingLight` is holding the *entity's* cell
+ * coordinates in that one while it converts the flame's, and reusing it put the
+ * ray's two ends at the same point, which reports every flame as unoccluded.
+ */
+const _occFlame = new THREE.Vector3();
 
 /**
  * How long a new planet keeps the husks off, in seconds.
@@ -7825,6 +7833,8 @@ class Game {
       const l = this._worldToOccCell(pos, _occLocal);
       if (field.sample(l.x, l.y, l.z, out, occupancyData)) {
         out.r *= gain; out.g *= gain; out.b *= gain;
+        // ...and the two flames that are not in the grid at all.
+        this._movingLight(pos, l, out);
         return out;
       }
     }
@@ -7889,6 +7899,87 @@ class Game {
       if (er > out.r) out.r = er;
       if (eg > out.g) out.g = eg;
       if (eb > out.b) out.b = eb;
+    }
+    return out;
+  }
+
+  /**
+   * The torch in your fist, and the one lying on the floor, on a body.
+   *
+   * ### Why they are here and not in the field
+   *
+   * Everything else that lights an entity comes out of `EntityLight`, which is
+   * a flood over a grid: it is rebuilt when the player drifts three cells or a
+   * block changes, and it holds fifteen discrete levels. A carried flame moves
+   * every frame and sits between cells, so it cannot go into that grid without
+   * reflooding it sixty times a second. It is an extra term at the sample site
+   * instead, which is exactly what the shader does with the same two lights on
+   * the terrain side: the grid and the flames are added there too.
+   *
+   * ### The units, which are the whole job
+   *
+   * The shader's moving term is `lcol * wrap * fall`, added to the grid's
+   * `vBlock * uBlockIntensity`, and the pair is multiplied by RECIPROCAL_PI.
+   * `_entityLight` hands back the grid half already scaled by
+   * `uBlockIntensity / PI`, so the matching moving half is `lcol * fall / PI` —
+   * the same uniform, the same linear falloff, the same divisor. Nothing here
+   * is a tuned constant; move the flame's gain or reach and this follows on its
+   * own, which is the property that keeps a torch-lit cow and the torch-lit
+   * floor under it from drifting apart.
+   *
+   * `wrap` is deliberately dropped. It is the shader's lambert term and a body
+   * has no single normal to take one against — the emissive it ends up in is
+   * flat over the whole model, exactly as the grid term is.
+   *
+   * ### Max, not sum, and that is a call
+   *
+   * The terrain *adds* the flames to the grid and then rolls the pair off
+   * through BLOCK_KNEE. There is no such shoulder on a body, and the rest of
+   * this probe has always combined lights with a max — "two torches in a room
+   * are not twice the lamp" — so a max is what a body gets. The visible
+   * consequence is that walking into an already torch-lit room carrying a torch
+   * does not brighten the animals in it further. The alternative is to add and
+   * clamp, and it would need a shoulder of its own to avoid blowing a white cow
+   * out at arm's length.
+   *
+   * ### Walls
+   *
+   * Marched, through the same occupancy volume and the same `_occMarch` as
+   * everything else, so a carried torch does not light a deer through the wall
+   * you are standing against. Not cached, and it cannot be: the cache in
+   * `_entityOcc` is keyed on the emitter list, which changes only when the
+   * world does, and this light moves with your head. One march per body per
+   * frame while a flame is lit, which is the cost the old probe paid for every
+   * emitter in range.
+   */
+  _movingLight(pos, l, out) {
+    const u = voxelUniforms;
+    let ctx = null;
+    for (let i = 0; i < 2; i++) {
+      const rad = i ? u.uDropLightRadius.value : u.uHandLightRadius.value;
+      if (rad <= 0.01) continue;
+      const lp = i ? u.uDropLightPos.value : u.uHandLightPos.value;
+      const d = pos.distanceTo(lp);
+      if (d >= rad) continue;
+      const col = i ? u.uDropLightColor.value : u.uHandLightColor.value;
+      const fall = (1 - d / rad) / Math.PI;
+      const r = col.x * fall, g = col.y * fall, b = col.z * fall;
+      // Nothing to add on any channel, so nothing to march for either.
+      if (r <= out.r && g <= out.g && b <= out.b) continue;
+      if (!ctx) {
+        ctx = this._flameCtx || (this._flameCtx = { slot: 0, cx: 0, cy: 0, cz: 0 });
+        // The centre of the cell the body stands in, which is where every other
+        // entity ray starts, so a flame and a planted torch cast the same
+        // shadow off the same point. See `_entityOcc` for why it is quantised.
+        ctx.cx = Math.floor(l.x) + 0.5;
+        ctx.cy = Math.floor(l.y) + 0.5;
+        ctx.cz = Math.floor(l.z) + 0.5;
+      }
+      const fc = this._worldToOccCell(lp, _occFlame);
+      if (!this._occMarch(ctx, fc.x, fc.y, fc.z, rad)) continue;
+      if (r > out.r) out.r = r;
+      if (g > out.g) out.g = g;
+      if (b > out.b) out.b = b;
     }
     return out;
   }

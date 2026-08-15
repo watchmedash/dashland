@@ -298,7 +298,31 @@ export const GRAVITY = 26;
 export const BIOME = {
   OCEAN: 0, BEACH: 1, PLAINS: 2, FOREST: 3, PINE_FOREST: 4,
   DESERT: 5, SAVANNA: 6, TUNDRA: 7, SNOW: 8, MOUNTAIN: 9, MEADOW: 10, BADLANDS: 11,
+  CINDER: 12,
 };
+
+/**
+ * What each face of the cube is for.
+ *
+ * A face is the natural unit for this: it is a flat, bounded, self-contained
+ * world with its own gravity, and the seams already stop weather, trees and
+ * wildlife crossing. So instead of scattering every biome over all six sides,
+ * two of them are given a job. The owner: "dedicate snowfield/pole only to a
+ * single face ... and one face like nether for basalt, lava etc."
+ *
+ *   +Y  the cap: snow and tundra, and nothing else grows there
+ *   -Y  the cinderlands: basalt, ash and lava where the sea would be
+ *   the four sides  the ordinary world, and the only place you spawn
+ *
+ * Ice above, fire below, temperate around the middle.
+ */
+export const FACE_NORMAL = 0;
+export const FACE_POLAR = 1;
+export const FACE_CINDER = 2;
+/** Indexed by face: +X, -X, +Y, -Y, +Z, -Z. */
+export const FACE_ROLE = [
+  FACE_NORMAL, FACE_NORMAL, FACE_POLAR, FACE_CINDER, FACE_NORMAL, FACE_NORMAL,
+];
 
 /** grass tint, foliage tint, water tint */
 export const BIOME_COLORS = [
@@ -328,4 +352,9 @@ export const BIOME_COLORS = [
   { grass: [0.48, 0.62, 0.44], foliage: [0.38, 0.54, 0.36], water: [0.24, 0.52, 0.68] },
   { grass: [0.62, 0.84, 0.46], foliage: [0.50, 0.76, 0.38], water: [0.22, 0.54, 0.72] },
   { grass: [0.76, 0.60, 0.36], foliage: [0.66, 0.54, 0.30], water: [0.30, 0.50, 0.56] },
+  // Cinderlands. The grass and foliage rows exist only because the tint is
+  // applied by index and nothing green grows here; they are dark so that
+  // anything carried in and planted reads as out of place rather than lush.
+  // The water row is what a lava sea takes.
+  { grass: [0.34, 0.24, 0.22], foliage: [0.30, 0.20, 0.18], water: [0.90, 0.34, 0.10] },
 ];

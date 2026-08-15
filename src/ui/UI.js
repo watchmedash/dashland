@@ -20,7 +20,7 @@ import { patchColumn } from '../world/Sphere.js';
 import { compassFrame } from '../render/Sky.js';
 import { normalizeDifficulty, EXTREME } from '../game/NewGame.js';
 
-const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands'];
+const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands', 'Cinderlands'];
 
 /**
  * Who the fifteen are, if `Character.js` has not said yet.

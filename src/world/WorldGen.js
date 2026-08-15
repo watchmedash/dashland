@@ -6,6 +6,7 @@ import {
   F, D, FACES, R_MIN, R_MAX, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX, PLANET_R,
   R_SEABED_MIN, R_CANYON_MIN,
   COLUMNS, NUM_VOXELS, CHUNK_T, vidx, cidx, BIOME, regionOfCol,
+  FACE_ROLE, FACE_NORMAL, FACE_POLAR, FACE_CINDER,
 } from './Constants.js';
 import {
   centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid, cellIndex, cellWrite,
@@ -1479,12 +1480,21 @@ export class WorldGen {
    * claims the top tenth of the planet, which is why forest used to be rarer
    * than desert. Temperature is much wider, roughly -0.4 to 1.0.
    */
-  biomeAt(h, temp, hum) {
+  biomeAt(h, temp, hum, role = FACE_NORMAL) {
+    // The cinderlands are the whole face, sea bed and all: the low ground is
+    // not ocean, it is where the lava sits. See `fillColumn`.
+    if (role === FACE_CINDER) return BIOME.CINDER;
     if (h < R_SEA - 0.6) return BIOME.OCEAN;
+    // The cap. Snow above the waterline, tundra only where the ground is low
+    // and dry, so there is somewhere on it that is not a snowfield.
+    if (role === FACE_POLAR) return hum < 0.34 && h < R_SURFACE ? BIOME.TUNDRA : BIOME.SNOW;
     // Alpine ground is settled by height before climate: a peak is a peak at any
     // latitude, and a cold one wears a snow cap rather than turning into tundra.
-    if (h > R_SURFACE + 3.8) return temp < -0.05 ? BIOME.SNOW : BIOME.MOUNTAIN;
-    if (temp < -0.26) return BIOME.SNOW;
+    // No snow anywhere but the cap. A cold peak wears bare rock and a cold
+    // lowland is tundra; both used to turn white, which is what put snowfields
+    // on every face. Carried snow still lies wherever it is put.
+    if (h > R_SURFACE + 3.8) return BIOME.MOUNTAIN;
+    if (temp < -0.26) return BIOME.TUNDRA;
     if (temp < -0.02) return BIOME.TUNDRA;
     // Hot and dry, driest first. Badlands used to sit *after* desert and savanna
     // with a range that was a strict subset of theirs, so it was unreachable in
@@ -1570,7 +1580,7 @@ export class WorldGen {
           centerDir(f, i, j, dir);
           const h = colHeight[col];
           const { temp, hum } = this.climate(dir[0], dir[1], dir[2], h);
-          colBiome[col] = this.biomeAt(h, temp, hum);
+          colBiome[col] = this.biomeAt(h, temp, hum, FACE_ROLE[f]);
         }
       }
     }
@@ -1721,7 +1731,13 @@ export class WorldGen {
       const queue = new Int32Array(COLUMNS);
       let qn = 0;
       for (let col = 0; col < COLUMNS; col++) {
-        if (colBiome[col] === BIOME.OCEAN) { submerged[col] = 1; queue[qn++] = col; }
+        // The cinderlands have no ocean biome - the whole face is CINDER - so
+        // their basins are seeded by height instead, and what fills them is
+        // lava. See the liquid pick in `fillColumn`.
+        if (colBiome[col] === BIOME.OCEAN
+          || (colBiome[col] === BIOME.CINDER && colHeight[col] < R_SEA - 0.6)) {
+          submerged[col] = 1; queue[qn++] = col;
+        }
       }
       // The cutoff is R_SEA - 0.5, not R_SEA, and the half block matters. The
       // topmost cell the fill can put water in has its centre at 129.5, so a
@@ -1889,6 +1905,9 @@ export class WorldGen {
       const col = (rng() * COLUMNS) | 0;
       const bi = this.colBiome[col];
       if (bi === BIOME.OCEAN || bi === BIOME.BEACH) continue;
+      // You wake up in the ordinary world. The cap and the cinderlands are
+      // places to travel to, not to be dropped into with nothing.
+      if (FACE_ROLE[(col / (F * F)) | 0] !== FACE_NORMAL) continue;
       // Not on the rim of the world either. This scores by flatness, and the
       // border band is flat by construction - the height fade levels it so the
       // twelve edges meet cleanly - so it was the most attractive ground on the
@@ -2079,6 +2098,7 @@ export class WorldGen {
     const dir = _fillDir;
     const h = colHeight[col];
     const bi = colBiome[col];
+    const polar = FACE_ROLE[(col / (F * F)) | 0] === FACE_POLAR;
     const rocky = colSlope[col] > 1.35;
     // base folded into cellIndex/cellWrite: storage is not slab-packed
     this._dirOf(col, dir);
@@ -2173,6 +2193,12 @@ export class WorldGen {
       // sandstone, which made it indistinguishable from a desert cliff.
       case BIOME.BADLANDS: top = patch > 0 ? ID.red_sand : ID.red_sandstone; sub = ID.red_sandstone; break;
       case BIOME.SNOW: top = ID.snow; sub = patch < -0.2 ? ID.packed_ice : ID.dirt; break;
+      // Bare volcanic rock, mottled so it is not one flat grey. Ash where the
+      // ground is loose, magma stone in the hollows where the heat is closest.
+      case BIOME.CINDER:
+        top = patch > 0.22 ? ID.ash_stone : (patch < -0.24 ? ID.magma_stone : ID.basalt);
+        sub = patch < -0.10 ? ID.magma_stone : ID.basalt;
+        break;
       case BIOME.MOUNTAIN: top = rocky ? ID.stone : ID.grass; sub = ID.stone; break;
       case BIOME.PINE_FOREST: top = patch > 0.08 ? ID.podzol : ID.grass; sub = ID.dirt; break;
       case BIOME.SAVANNA: top = ID.grass; sub = patch > -0.05 ? ID.coarse_dirt : ID.dirt; break;
@@ -2321,7 +2347,13 @@ export class WorldGen {
         // flood fill could reach, and a lake, which is everything below its own
         // surface. `lakeSurf` is 0 off a lake, so the second test costs one
         // compare per cell and cannot fire by accident.
-        id = ((r <= R_SEA && submerged[col]) || r <= lakeSurf[col]) ? ID.water : ID.air;
+        // What fills a basin: lava in the cinderlands, and on the cap a sheet
+        // of ice over the sea rather than open water, because a pole whose
+        // ocean is liquid is just a cold coast.
+        id = ((r <= R_SEA && submerged[col]) || r <= lakeSurf[col])
+          ? (bi === BIOME.CINDER ? ID.lava
+            : (polar && r > R_SEA - 1.6 ? ID.ice : ID.water))
+          : ID.air;
       } else {
         const depth = h - r;
         if (depth < sinkD) id = sinkId;
@@ -3954,6 +3986,8 @@ export class WorldGen {
     // and better looking to keep the last few columns bare, and it sits inside
     // the band the height fade already flattens.
     if (colBorderDist(col) < TREE_EDGE_MARGIN) return null;
+    // Nothing takes root in the cinderlands.
+    if (bi === BIOME.CINDER) return null;
     if (this.colSlope[col] > 1.5) return null;
     if (this.inLakeBed(col)) return null;
     // Nothing takes root in a hot spring. Asked of the terrain rather than of

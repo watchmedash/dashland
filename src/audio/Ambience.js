@@ -62,6 +62,9 @@ const BIOME_AIR = [
   { bird: 0.25, cricket: 0.08, cicada: 0.00, leaf: 0.10, windF: 560, windQ: 0.50, surf: 0.00, air: 1.15 }, // Highlands
   { bird: 0.90, cricket: 1.00, cicada: 0.30, leaf: 0.30, windF: 540, windQ: 0.75, surf: 0.00, air: 1.00 }, // Meadow
   { bird: 0.10, cricket: 0.35, cicada: 0.80, leaf: 0.00, windF: 400, windQ: 0.50, surf: 0.00, air: 1.05 }, // Badlands
+  // Cinderlands: nothing alive to hear. A low, dry draught over bare rock, and
+  // the lava's own voice comes from the blocks rather than from here.
+  { bird: 0.00, cricket: 0.00, cicada: 0.00, leaf: 0.00, windF: 190, windQ: 0.35, surf: 0.00, air: 1.20 }, // Cinderlands
 ];
 const DEFAULT_AIR = BIOME_AIR[2];
 

@@ -332,9 +332,14 @@ const COMMON_VERT_BODY = /* glsl */`
     // like — the block it fills is never quite full.
     const float WATER_SWELL = 0.067;
     const float WATER_SINK = 0.09;
-    float h = sin(uTime * 1.05 + wp.x * 0.62 + wp.z * 0.48) * 0.5
-            + sin(uTime * 1.63 - wp.z * 0.71 + wp.y * 0.39) * 0.35
-            + sin(uTime * 2.31 + wp.x * 0.29 - wp.y * 0.55) * 0.2;
+    // One world axis per wave, for the reason swellGrad gives: a term mixing
+    // two axes runs diagonally across whichever flat face you are standing on,
+    // and the axis matching a face's normal falls out to a gentle bob rather
+    // than a crest. This keeps the displacement and the shaded normal agreeing
+    // about which way the sea is running.
+    float h = sin(uTime * 1.05 + wp.x * 0.62) * 0.5
+            + sin(uTime * 1.63 - wp.z * 0.71) * 0.35
+            + sin(uTime * 2.31 + wp.y * 0.29) * 0.2;
     transformed += up * (h * WATER_SWELL - WATER_SINK) * wAmt;
   } else if (wType > 2.5 && wType < 3.5) {
     // lava: a slow, heavy swell.
@@ -1064,31 +1069,42 @@ vec2 liquidUv(vec3 p) {
  *
  * Four plane waves, summed as a height field and differentiated analytically.
  * They are plane waves in three dimensions rather than on a tangent plane, and
- * that is what makes this seam-free where liquidUv is not: sin(dot(rel, k)) is
- * defined and continuous everywhere on the planet with no basis to choose. A
- * wave whose direction happens to point straight up at some spot contributes no
- * tangential slope there, so the four directions are spread wide enough that
- * no point on the sphere is quiet -- at worst one of the four drops out.
+ * that is what keeps this seam-free where liquidUv is not: cos(dot(rel, k)) is
+ * defined and continuous everywhere on the planet with no basis to choose.
+ *
+ * The directions are the three WORLD AXES, and on a cube that is the whole
+ * point. They used to be arbitrary unit vectors, spread wide so that no point
+ * on a sphere was quiet, and on a sphere nothing gave that away. On a cube each
+ * face is flat and gridded, so an arbitrary direction projects onto it at an
+ * arbitrary angle and the swell ran visibly askew across square shorelines and
+ * square blocks -- reported simply as the ripples being diagonal.
+ *
+ * Axis-aligned fixes it without giving up the seam-free property, because the
+ * axis that matches a face's normal contributes no tangential slope there and
+ * silently drops out. Every face therefore gets exactly the two in-face
+ * directions it should have, aligned to its own grid, and the two faces either
+ * side of a seam agree along it because both are reading the same world axes.
  *
  * The numbers are slope amplitudes, not heights, because slope is the thing
- * being asked for: 0.055 is a face tilted 3.1 degrees. Summed worst-case they
- * reach 0.147, about 8.4 degrees, which is a swell rather than a chop -- past
- * roughly 0.25 the fresnel starts finding grazing angles on a flat sea and the
- * surface fizzes with false sky.
+ * being asked for. Two of the three run on any given face, so the worst case is
+ * 2 * (0.048 + 0.026) = 0.148, about 8.4 degrees -- unchanged from the 0.147
+ * the four spread directions summed to, which is a swell rather than a chop.
+ * Past roughly 0.25 the fresnel starts finding grazing angles on a flat sea and
+ * the surface fizzes with false sky.
  *
- * Wavelengths 13.0, 8.5, 5.5 and 3.4 cells. The two long ones run on every
- * tier; the short pair is what the detail flag buys.
+ * The long triple runs on every tier; the short one is what the detail flag
+ * buys. Wavelengths differ per axis so the two live on a face never beat
+ * against each other into a standing grid.
  */
 vec3 swellGrad(vec3 rel, float t, float detail) {
-  const vec3 D1 = vec3(0.919, 0.322, 0.230);
-  const vec3 D2 = vec3(-0.253, 0.842, 0.463);
-  const vec3 D3 = vec3(0.323, -0.485, 0.808);
-  const vec3 D4 = vec3(-0.796, -0.281, 0.515);
-  vec3 g = D1 * (0.055 * cos(dot(rel, D1) * 0.483 + t * 0.85))
-         + D2 * (0.042 * cos(dot(rel, D2) * 0.739 + t * 1.15));
+  vec3 g = vec3(0.0);
+  g.x += 0.048 * cos(rel.x * 0.483 + t * 0.85);
+  g.y += 0.048 * cos(rel.y * 0.527 + t * 1.02);
+  g.z += 0.048 * cos(rel.z * 0.611 + t * 1.15);
   if (detail > 0.5) {
-    g += D3 * (0.030 * cos(dot(rel, D3) * 1.142 - t * 1.55))
-       + D4 * (0.020 * cos(dot(rel, D4) * 1.848 + t * 2.10));
+    g.x += 0.026 * cos(rel.x * 1.142 - t * 1.55);
+    g.y += 0.026 * cos(rel.y * 1.371 + t * 1.83);
+    g.z += 0.026 * cos(rel.z * 1.848 + t * 2.10);
   }
   return g;
 }

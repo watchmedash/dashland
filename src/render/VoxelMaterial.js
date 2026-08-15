@@ -694,18 +694,10 @@ const int OCC_MAX_STEPS = 14;
  */
 void occFrame(vec3 wp, vec3 woff, out vec3 cell, out vec3 dcell) {
   vec3 rel = wp - uPlanetCenter;
-  float r = length(rel);
-  vec3 d = rel / r;
-  float n = dot(d, uOccN);
-  float a = dot(d, uOccR);
-  float b = dot(d, uOccU);
-  cell = vec3(OCC_ANG * atan(a, n) + uOccOrg.x,
-              OCC_ANG * atan(b, n) + uOccOrg.y,
-              r + uOccOrg.z);
-  vec3 ep = woff - d * dot(d, woff);
-  dcell = vec3(OCC_ANG * dot(ep, n * uOccR - a * uOccN) / (r * (n * n + a * a)),
-               OCC_ANG * dot(ep, n * uOccU - b * uOccN) / (r * (n * n + b * b)),
-               dot(d, woff));
+  cell = vec3(dot(rel, uOccR) + uOccOrg.x,
+              dot(rel, uOccU) + uOccOrg.y,
+              dot(rel, uOccN) + uOccOrg.z);
+  dcell = vec3(dot(woff, uOccR), dot(woff, uOccU), dot(woff, uOccN));
 }
 
 /**
@@ -1104,23 +1096,15 @@ vec3 swellGrad(vec3 rel, float t, float detail) {
 /**
  * Signed offset of a world point from a cell centre, measured in cells.
  *
- * This is the same exact inverse of the cubesphere mapping that occFrame uses,
- * with one difference: the face basis is not a uniform, it is derived from the
- * cell centre itself, so it needs nothing from the CPU beyond the centre that
- * uBreakPos already carries. The mapping is
+ * On a cube this is three dot products. The face basis is derived from the cell
+ * centre itself, so it needs nothing from the CPU beyond the centre uBreakPos
+ * already carries, and a cell is exactly one unit on every axis, so the
+ * components come out in cells with no scaling at all.
  *
- *     ci = (2F/PI) * atan(dot(d, R), dot(d, N))
- *
- * for that face's own N and R, and it is exact rather than a local tangent
- * approximation. Both points are measured in the *break cell's* frame, which
- * stays valid past a cube seam because the extended face coordinates are what
- * patchColumn uses on the CPU as well. Only the difference of the two angles is
- * ever formed, so nothing depends on the F/2 offset and there is no
- * cancellation against a coordinate that runs to 464.
- *
- * The ratios are scale invariant, so neither vector is normalised. The radial
- * component is a plain difference of lengths, because one cell is exactly one
- * unit radially everywhere.
+ * It used to be atan ratios and a difference of lengths - the exact inverse of
+ * the cubesphere mapping. That measured an angle where the cube wants a
+ * distance, so the window the crack is drawn into sat off the cell and the
+ * break texture came out clipped against its own edge.
  *
  * A cell's own geometry lands in [-0.5, 0.5] on every axis, exactly. Every
  * corner of a quad is a grid corner or a grid corner scaled radially, and every
@@ -1130,7 +1114,6 @@ vec3 swellGrad(vec3 rel, float t, float detail) {
  * the edge it shares with its neighbour.
  */
 vec3 cellOffset(vec3 p, vec3 cen) {
-  vec3 rel = p - uPlanetCenter;
   vec3 c = cen - uPlanetCenter;
   vec3 m = abs(c);
   vec3 N, R, U;
@@ -1147,11 +1130,8 @@ vec3 cellOffset(vec3 p, vec3 cen) {
     R = vec3(N.z, 0.0, 0.0);
     U = vec3(0.0, 1.0, 0.0);
   }
-  float nc = dot(c, N), nr = dot(c, R), nu = dot(c, U);
-  float pn = dot(rel, N), pr = dot(rel, R), pu = dot(rel, U);
-  return vec3(OCC_ANG * (atan(pr, pn) - atan(nr, nc)),
-              OCC_ANG * (atan(pu, pn) - atan(nu, nc)),
-              length(rel) - length(c));
+  vec3 d = p - cen;
+  return vec3(dot(d, R), dot(d, U), dot(d, N));
 }
 `;
 

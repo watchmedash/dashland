@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
-import { tangentFrame } from '../world/Sphere.js';
+import { tangentFrame, worldToCell, FACE_N } from '../world/Sphere.js';
 import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX } from '../world/Blocks.js';
 
 /**
@@ -34,6 +34,20 @@ const _hover = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _flow = new THREE.Vector3();
 const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
+const _upCell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
+
+/**
+ * Which way is up for a dropped thing.
+ *
+ * The radial direction, `pos - planetCentre`, is only up on a sphere. On a cube
+ * it leans away from the face normal by however far round the face you are -
+ * nothing at the middle, forty-five degrees at an edge - so a dropped item fell
+ * visibly sideways, worst at the seams. Gravity is the face's own normal.
+ */
+function upAt(pos, out) {
+  const c = worldToCell(pos.x, pos.y, pos.z, _upCell);
+  return out.fromArray(FACE_N[c.f]);
+}
 const _lit = new THREE.Vector3();
 const _bl = { r: 0, g: 0, b: 0 };
 
@@ -272,7 +286,7 @@ export class Drops {
     mesh.layers.enable(1);
     this.group.add(mesh);
     const pos = new THREE.Vector3(x, y, z);
-    const up = _v.copy(pos).sub(this.center).normalize();
+    const up = upAt(pos, _v);
     const vel = new THREE.Vector3(
       (Math.random() - 0.5) * 1.7, (Math.random() - 0.5) * 1.7, (Math.random() - 0.5) * 1.7,
     ).addScaledVector(up, 2.1 + Math.random());
@@ -455,7 +469,7 @@ export class Drops {
       // Its own scratch and nothing else's: `update` is holding the local up in
       // `_v` while this runs, and borrowing it here flung the drop a fifth of a
       // planet radius the last time that vector was shared.
-      _lit.copy(d.pos).sub(this.center).normalize().multiplyScalar(0.25).add(d.pos);
+      _lit.copy(upAt(d.pos, _lit)).multiplyScalar(0.25).add(d.pos);
       const l = this.blockLightAt(_lit, _bl);
       r = l.r; g = l.g; b = l.b;
     }
@@ -539,7 +553,7 @@ export class Drops {
       d.age += dt;
       d.spin += dt * 1.7;
 
-      const up = _v.copy(d.pos).sub(this.center).normalize();
+      const up = upAt(d.pos, _v);
 
       if (d.magnet > 0) {
         // drifting into the player

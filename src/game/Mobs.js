@@ -846,6 +846,93 @@ const NIGHT_BED_DIST = 62;
 const NIGHT_BED_PER_TICK = 2;
 
 /**
+ * The dusk swap, and the one rule it is not allowed to break.
+ *
+ * "just make sure I don't see those transformations" is a requirement, not a
+ * polish note, so it is written as a predicate (`_unseenSwap`) with two terms
+ * that fail in different ways, and a body has to clear both:
+ *
+ *   - further off than NIGHT_BED_DIST. Deliberately the number `_bedDown`
+ *     already refuses to retire an animal inside, rather than a second distance
+ *     of my own. There is one rule on this planet about changing the population
+ *     where the player is standing, and it should stay one rule. It also has a
+ *     second effect worth having: 62 is well outside the husk's 34-cell aggro
+ *     ring, so nothing ever turns into a husk that is already close enough to
+ *     come straight for you.
+ *   - outside the frame, or behind something. That is `_inView`, the stalker's
+ *     own test, which takes the *camera* rather than the player (in third
+ *     person they are several units apart and it is the camera that saw the
+ *     frame) and finishes with a line-of-sight walk, so an animal that stepped
+ *     behind a rock counts as unseen — correctly. It is last frame's camera,
+ *     which is not a lag to fix: last frame's camera is the view that was
+ *     actually rendered.
+ *
+ * TURN_MARGIN is the slack on that frame test and is the whole answer to "a
+ * player who spins round must not catch a body mid-swap". The precedent is
+ * STALKER_MARGIN and the reasoning is the same one inverted: there, a hair of
+ * slack stops a stalker being culled by the player's own footsteps; here, a lot
+ * of slack is what stops a mouse flick arriving at a body between the frame the
+ * test ran on and the frame it is drawn in. 1.6 is 60% of a screen either side,
+ * so a body has to cross from well over fifty degrees off-axis to on-screen
+ * inside one frame — about 16ms at 60fps — before the margin is worth anything.
+ * Nothing a hand can do to a mouse covers that.
+ *
+ * Measured against a camera being flicked at 0.30 radians a frame, which is
+ * about 1,030 degrees a second, or three full turns: every swap the run made
+ * was instrumented, and the body that arrived was then asked once a frame for
+ * half a second whether the camera could see it, at margin 1.0 — the exact edge
+ * of the screen, no slack at all.
+ *
+ *   swaps          46
+ *   visible on the swap frame                                 0
+ *   visible within two frames                                 0
+ *   visible at all within thirty frames                       0
+ *   inside the frustum within thirty frames, terrain ignored 46 (earliest: 1)
+ *
+ * The last line is the one worth reading, because it says the frustum test on
+ * its own would have been caught out on the very next frame, forty-six times
+ * out of forty-six. What actually refuses is the distance term, and for a
+ * reason that is a property of this world rather than of this code: the eye is
+ * about 1.7 above a sphere with a sea-level radius of 290, so the horizon over
+ * open ground is sqrt(2 * 290 * 1.7) ~= 31 units. NIGHT_BED_DIST is twice that.
+ * A body standing on the ground sixty-two units off is below the curve of the
+ * planet from where you are standing, and `_inView`'s line-of-sight walk is
+ * what notices. Over sixty seconds of spinning on flat ground, no mob at or
+ * beyond sixty-two units was ever visible at all. The frustum term is still
+ * carried, because a player on a ridge looking down is not standing on flat
+ * ground, and neither term is trusted alone.
+ *
+ * The rates are two numbers rather than one because the two ends of the night
+ * are not under the same pressure. Dusk has all the time it wants: the sun goes
+ * down over minutes and a herd that turns three at a time reads as a world
+ * going quiet. Dawn does not, because `burns` sets fire to a husk the sky can
+ * see once daylight passes 0.06 while night ends at 0.02 — so a converted husk
+ * has one window to become a cow again before it becomes a corpse. A rate at
+ * that end paces nothing the player can see, since the reversion is invisible
+ * by construction; all it decides is how many animals the sun gets to delete.
+ * So dawn takes everything it is allowed to take on the first tick of daylight,
+ * and the number is simply "a whole night's herd".
+ *
+ * Measured on the cruellest sunrise this game can be made to produce — the
+ * clock wound from full night to full noon in one step, so the two thresholds
+ * above arrive together and there is no dawn at all. At eight a tick, sixteen
+ * of thirty made it back and fourteen burned. At a whole herd a tick, sixteen
+ * of twenty-four made it back and eight burned, and those eight were the ones
+ * the sight rule refused rather than ones the rate could not reach. That is the
+ * honest backstop rather than a bug: a husk chasing you at sunrise is inside
+ * NIGHT_BED_DIST by definition and was never going to be allowed to change
+ * shape in front of you, so it burns, and its animal does not come back.
+ *
+ * It costs no frame either. Across that same jump, worst frame 117.7ms with the
+ * reversion running and 177.7ms with it stubbed out — the sunrise is expensive
+ * whatever happens (a husk that is not reverted burns, dies and drops, and the
+ * herd then refills from nothing), and reverting is the cheaper half of it.
+ */
+const TURN_PER_TICK = 3;
+const TURN_BACK_PER_TICK = 34;
+const TURN_MARGIN = 1.6;
+
+/**
  * The two numbers that turn "how far away, in world units" into "how many
  * steps of _walkOut", which is the only way a spawn search can travel.
  *
@@ -4274,6 +4361,25 @@ export class Mobs {
       slideT: 0, slideDir: 1,   // which way it is currently going round a wall
       huntCooldown: 0,
       fromCave: false,     // which spawn budget it belongs to
+      /**
+       * What this husk was before dusk, and will be again at dawn: `{t, s}`,
+       * the species name and the spawn seed. Null on everything else, and on
+       * any husk the spawner made out of the dark rather than out of an animal.
+       *
+       * The seed is the half that makes the morning feel like the same world
+       * rather than a reshuffle. `spawn` draws the model variant and the size
+       * jitter from it, so a body handed the same species and the same seed
+       * comes back as the same individual — the same one of the four cow
+       * models, the same 7% under average. Without it the herd would be
+       * replaced every night by a herd of the same size, which is a different
+       * and much worse thing.
+       *
+       * Declared here rather than assigned only where it is used, for the
+       * reason `fuseT` gives two fields down: a field that exists on one
+       * species is a field the shared update loop has to guard on every frame
+       * for every body on the planet.
+       */
+      revert: null,
       swingT: 0,           // hostiles: cooldown left before the next blow
       lungeT: 0,           // seconds left of the pounce pop — see _lunge
       // Seconds left of the fuse, 0 when not armed. Zero on every species,
@@ -4625,6 +4731,165 @@ export class Mobs {
   }
 
   /**
+   * May this body change into something else where it is standing?
+   *
+   * The whole of "I don't see those transformations", in one predicate, and it
+   * is deliberately built out of parts that already exist: NIGHT_BED_DIST is
+   * the distance `_bedDown` will not remove an animal inside, and `_inView` is
+   * the stalker's own sighting test. See TURN_MARGIN for why both terms are
+   * needed and why the slack on the second one is as wide as it is.
+   */
+  _unseenSwap(mob, dist) {
+    if (dist < NIGHT_BED_DIST) return false;
+    return !this._inView(mob, TURN_MARGIN);
+  }
+
+  /**
+   * Take one body off the planet and put another in the exact spot it stood.
+   *
+   * A despawn and a spawn rather than a retargeting of the live body, and that
+   * is a decision worth writing down because the other way looks tidier. A mob
+   * here is not a spec and a position: it is a GLB instance, a mixer with clips
+   * cached against that root, a set of cloned materials it owns, a skeleton and
+   * a per-species scale derived from the *rig's* measured rest height. Changing
+   * species in place means unpicking and rebuilding every one of those, i.e.
+   * writing a second `spawn` that has to be kept in step with the first — and
+   * the file already has both halves of the swap sitting there working:
+   * `_release` plus a splice is the removal the despawn ring, `_bedDown` and
+   * `_dawnCull` all use, and `spawn(type, col, k, seed)` is the arrival.
+   *
+   * What the tidier version would have bought is position and herd structure,
+   * and neither survives the night anyway: a husk walks for hours before dawn,
+   * so where its animal stood at sunset is not where the animal comes back. The
+   * continuity that matters is the individual, and that is carried by the seed.
+   *
+   * Placed by the `fromJSON` idiom — `spawn` seats a body at `k + 1.02`, so the
+   * layer to hand it is `floor(ck) - 1` and the fractional cell is copied over
+   * afterwards. That is exactly how a loaded save puts an animal back where it
+   * was standing, which is the same problem.
+   *
+   * @returns {object|null} the new body, or null if the model was not loaded
+   */
+  _swapBody(mob, type, seed, revert) {
+    const idx = this.list.indexOf(mob);
+    if (idx < 0) return null;
+    const c = mob.cell;
+    const col = this._colOf(c.f, c.ci, c.cj);
+    const k = Math.floor(c.ck) - 1;
+    const ci = c.ci, cj = c.cj, ck = c.ck, heading = mob.heading;
+    // Off the list first, so the arrival can never be refused by MAX_MOBS: the
+    // swap is one body for one body and must not be able to fail halfway.
+    this._release(mob);
+    this.list.splice(idx, 1);
+    const next = this.spawn(type, col, k, seed);
+    if (!next) return null;
+    next.cell.ci = ci; next.cell.cj = cj; next.cell.ck = ck;
+    // Facing the way the old body faced. A swap that also spun the body on the
+    // spot would be visible from further off than the swap itself is.
+    next.heading = heading;
+    next.want = heading;
+    // Never a cave husk. `_countHostile` keys the two budgets entirely off this
+    // flag, and everything that turns came off the surface.
+    next.fromCave = false;
+    next.revert = revert || null;
+    this._sync(next);
+    next.prevPos.copy(next.pos);
+    next.progAt.copy(next.pos);
+    this._animate(next, 0);
+    return next;
+  }
+
+  /** How many husks abroad are wearing an animal's slot. See `wildCap`. */
+  _turnedCount() {
+    let n = 0;
+    for (const m of this.list) if (m.revert) n++;
+    return n;
+  }
+
+  /**
+   * Nightfall: turn the herd into what the herd is at night.
+   *
+   * Land animals only, and that is the one place this falls short of "all
+   * animals" as asked. A husk is a walker: it has no swim state and no flight,
+   * and `_stepTo` will not put one anywhere its feet cannot go. Converting a
+   * bee at altitude drops a body out of the sky, and a fish's husk already
+   * exists and is a different species with its own night budget and its own
+   * spawn search — see `drowned` and MAX_DROWNED. So the water and the air keep
+   * their own night populations and the ground is what changes hands, which is
+   * also the only part of it the player is standing in.
+   *
+   * The exemption list below is `_bedDown`'s, for `_bedDown`'s reasons: a calf,
+   * a fleeing animal or one a predator is mid-chase on is either the player's
+   * own work or the middle of something they are watching. `_warded` is the one
+   * addition, and it is the husk spawner's own rule — a hearth is ground
+   * nothing hostile may *appear* on, and a cow turning into a husk inside the
+   * firelight is an appearance however it is spelled.
+   *
+   * There is no cap of its own on this and there should not be. What bounds it
+   * is the herd: every conversion takes a body out of the land budget and puts
+   * it back as a husk holding that same slot, so the most that can ever be
+   * abroad is the night's own land budget and the ordinary husk cap is neither
+   * consulted nor spent. See the `_turnedCount` subtraction at `wildCap` and
+   * the skip in `_countHostile`.
+   *
+   * @returns {number} how many actually turned
+   */
+  _nightTurn(player) {
+    const want = TURN_PER_TICK;
+    // Collected first and swapped after, because `_swapBody` splices the list
+    // this loop is walking.
+    const taken = [];
+    for (const m of this.list) {
+      if (taken.length >= want) break;
+      const s = m.spec;
+      if (s.hostile || s.monster || s.trader || s.phantom) continue;
+      if (s.aquatic || s.flies) continue;
+      if (m.dying > 0 || m.baby > 0) continue;
+      if (m.state === 'flee' || m.state === 'chase' || m.target) continue;
+      if (!this._unseenSwap(m, m.pos.distanceTo(player.position))) continue;
+      if (this._warded(this._colOf(m.cell.f, m.cell.ci, m.cell.cj), Math.floor(m.cell.ck) - 1)) continue;
+      taken.push(m);
+    }
+    let n = 0;
+    for (const m of taken) {
+      // A fresh husk seed, and the animal's own kept for the morning. The husk
+      // is a body the night made and does not have to be the same husk twice.
+      if (this._swapBody(m, 'husk', undefined, { t: m.type, s: m.seed })) n++;
+    }
+    return n;
+  }
+
+  /**
+   * ...and the morning, which is the same thing run backwards.
+   *
+   * Same species, same seed, so what walks out of the dawn is the individual
+   * that walked into the dusk and not a replacement of the same size. A husk
+   * that was never an animal has no `revert` and is left to the sun.
+   *
+   * What happens to one that was killed in the night is nothing, and that is
+   * the right answer rather than an omission: a cow that was eaten does not
+   * come back, and the daytime herd re-grows through the ordinary top-up
+   * against MAX_WILDLIFE like every other loss. It re-grows during the *night*
+   * as well — killing a converted husk frees the animal slot it was holding, so
+   * `wildCap` rises by one, the land top-up places an animal, and by the next
+   * tick or two that animal has turned too. The night's pressure therefore does
+   * not fall as you clear it, which is the correct reading of "there should be
+   * more" and is a property of the arithmetic rather than a rule of its own.
+   */
+  _dawnRevert(player) {
+    const taken = [];
+    for (const m of this.list) {
+      if (taken.length >= TURN_BACK_PER_TICK) break;
+      if (!m.revert || m.dying > 0) continue;
+      if (!this._unseenSwap(m, m.pos.distanceTo(player.position))) continue;
+      taken.push(m);
+    }
+    let n = 0;
+    for (const m of taken) if (this._swapBody(m, m.revert.t, m.revert.s, null)) n++;
+    return n;
+  }
+
+  /**
    * Spawn whatever belongs on this ground, if anything does.
    *
    * The shoreline test lives here rather than in the biome tables because it is
@@ -4679,6 +4944,15 @@ export class Mobs {
       // hostile that cannot reach the player must never spend a budget that
       // could have been filled by one that can. See MAX_DROWNED.
       if (m.spec.aquatic) continue;
+      // ...and neither are the ones the herd turned into. A converted husk is
+      // an animal wearing a husk for the night: it is already paid for out of
+      // the land budget (see the `_turnedCount` subtraction at `wildCap`) and
+      // counting it here as well would spend the slot twice, once as an animal
+      // and once as a hostile. It would also close the surface budget outright
+      // — thirty-odd of them against a cap of eight — so no husk would ever be
+      // spawned out of the dark again, which is the one thing this mechanic was
+      // explicitly not meant to change.
+      if (m.revert) continue;
       if (cave !== undefined && !!m.fromCave !== cave) continue;
       n++;
     }
@@ -8738,7 +9012,26 @@ export class Mobs {
       // disc the population lives in, and the low tier's disc is 41% of the
       // one these numbers were counted against. Without it a phone would hold
       // the full meadow inside two thirds of the ground.
-      const wildCap = Math.round((night ? MAX_WILDLIFE * NIGHT_WILDLIFE : MAX_WILDLIFE) * this.crowdScale);
+      //
+      // ...minus the animals that are currently walking around as husks. A
+      // converted husk holds its animal's slot, and that subtraction is what
+      // makes the night swap an exchange rather than a doubling: without it the
+      // top-up would cheerfully refill the herd behind the conversion, the
+      // conversion would turn the refill, and the night would end up carrying
+      // a full night herd of husks *and* a full night herd of animals, for a
+      // mechanic that is supposed to be the same bodies wearing something else.
+      //
+      // It is also the only thing bounding how many may turn, and that is the
+      // right place for the bound: the herd's own night budget decides how much
+      // of the world is husks after dark, and the husk spawner's cap is left
+      // alone to mean what it has always meant.
+      //
+      // Applied by day as well as by night, which costs nothing — by daylight
+      // `_dawnRevert` has emptied it — and means there is one rule here rather
+      // than one rule and an exception.
+      const turned = this._turnedCount();
+      const wildCap = Math.max(0, Math.round(
+        (night ? MAX_WILDLIFE * NIGHT_WILDLIFE : MAX_WILDLIFE) * this.crowdScale) - turned);
       const airCap = Math.round((night ? MAX_FLYING * NIGHT_WILDLIFE : MAX_FLYING) * this.crowdScale);
       const wetCap = Math.round(MAX_AQUATIC * this.crowdScale);
       let wild = have.land;
@@ -8782,6 +9075,21 @@ export class Mobs {
       // read (player, landSurplus) with `airSurplus` undefined, `air` came out
       // 0, and every flier over the night budget was paid for by retiring land
       // animals. A signed sum also let an empty sky raise the land ceiling.
+      //
+      // The conversion runs first, and the ordering is load-bearing. It takes
+      // land animals off the herd's count without them leaving the planet, so
+      // `wild` has to come down by what it turned before the surplus is handed
+      // to `_bedDown` — otherwise the same animal is paid for twice, once as a
+      // husk and again as a body sent to bed. `wildCap` catches up on the next
+      // tick, when `_turnedCount` sees them.
+      //
+      // What is left after the turn is a genuine surplus and still has to go:
+      // eighty-four animals cannot all become husks against a cap of
+      // thirty-four, so the night still only holds a night's worth of bodies.
+      // Thirty-four of the herd turn and the rest bed down, which is the dusk
+      // this file always had with its last thirty-four changed.
+      const surfaceCap = this.savage ? MAX_HOSTILE_SAVAGE : MAX_HOSTILE_SURFACE;
+      if (night && !this.spawnGrace) wild -= this._nightTurn(player);
       if (night) this._bedDown(player, wild - wildCap, air - airCap);
       // Husks come out of the dark: after sunset in the open, and at any hour
       // underground. That is what makes a cave dangerous rather than just dim,
@@ -8801,7 +9109,12 @@ export class Mobs {
       // hostiles already up, against someone with an empty inventory who has
       // not yet found the mouse. Night is meant to be the pressure that makes
       // torches and walls matter, not a loading screen you die on.
-      const surfaceCap = this.savage ? MAX_HOSTILE_SAVAGE : MAX_HOSTILE_SURFACE;
+      // This path is untouched by the night swap and deliberately so: an
+      // ordinary husk is spawned out of the dark, is counted against this
+      // budget, and stays a husk in the morning until the sun finds it. The
+      // converted ones are a separate population on a separate budget (the
+      // herd's own — see `wildCap`) and are skipped by `_countHostile`, so
+      // neither can crowd the other out. Eight is still eight.
       if (night && !this.spawnGrace && this._countHostile(false) < surfaceCap) {
         const spot = this._findSpawnColumn(playerCol, player.position);
         if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = false; }
@@ -8832,6 +9145,12 @@ export class Mobs {
       // per frame because it is a population decision like every other one in
       // this block; SPAWN_PERIOD is therefore the linger clock's unit.
       if (!night) this._dawnCull(player, SPAWN_PERIOD);
+      // ...and give the herd back. Not gated on `spawnGrace`: the grace stops
+      // the dark taking an interest in a new world, and a husk becoming a cow
+      // again is the opposite of that. It would also strand any body that
+      // turned before the grace was raised, which quitting to the menu mid-
+      // grace can do.
+      if (!night) this._dawnRevert(player);
       // The monsters. Their own clock, their own cap, and no night condition:
       // these are the things that do not care about the sun.
       //
@@ -10703,6 +11022,15 @@ export class Mobs {
         // compounded every session. The split budgets exist precisely to stop a
         // dungeon the player has never entered from eating the night.
         if (m.fromCave) d.cv = 1;
+        // ...and what it was before dusk, if it was anything. A save taken at
+        // midnight and loaded at midnight must come back to the same morning:
+        // without this every converted husk on the planet loads as an ordinary
+        // one, the herd it was made of is gone for good, and the daytime
+        // population has to be rebuilt from scratch by the top-up. It is also
+        // what keeps the slot arithmetic honest across a reload — `wildCap`
+        // subtracts `_turnedCount`, and a load that forgot them would let the
+        // herd refill behind husks that are still holding its slots.
+        if (m.revert) d.rv = [m.revert.t, m.revert.s];
         // A trader's stock and remaining life are state, not decoration.
         // Re-rolling them on load would make quit-and-reload the cheapest way
         // to shop: reload until the wares are the ones you wanted, and buy the
@@ -10742,6 +11070,11 @@ export class Mobs {
         // Absent in older saves, where false is the right answer: those worlds
         // had no split budget to be counted against.
         mob.fromCave = !!d.cv;
+        // Guarded on the species still existing, exactly as the loop above
+        // guards `d.t`: a husk carrying the name of a mob that has since been
+        // removed from the table would revert into nothing at first light and
+        // take its own body with it.
+        if (d.rv && SPECIES[d.rv[0]]) mob.revert = { t: d.rv[0], s: d.rv[1] };
         if (mob.spec.trader) {
           if (d.st) mob.stock = d.st.map(([item, count]) => ({ item, count }));
           if (d.lf !== undefined) mob.life = d.lf;

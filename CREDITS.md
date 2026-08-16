@@ -24,6 +24,37 @@ drawn because the pack has no conifer texture at all.
 [kenney.nl](https://www.kenney.nl) — **CC0**. Every animal, the husk, the
 merchant and the fifteen player characters. Pig and hog are deliberately unused.
 
+## Monsters — Cute Animated Monsters Pack by **Quaternius**
+
+[patreon.com/quaternius](https://www.patreon.com/quaternius) — **CC0 1.0**. Every
+daylight monster in the game: the yeti, cyclops, demon, imp, skull, both aliens,
+the prickler, the sporeling, the ghost, the bat, cthulhu and the dragon, and now
+the stinger, squawker, nipper, frostbeak, gorehorn, tusker, maulder and
+timberjaw. **All 21 models in the pack are used**, in
+`public/models/monsters/` as `monster-<name>.glb`.
+
+The pack ships glTF with the texture embedded and each model on one of two rigs —
+walkers carrying Idle and Walk, fliers carrying only Flying — which is why
+`MONSTER_CLIPS` and `FLYER_CLIPS` in `src/game/Mobs.js` are two maps rather than
+one. Each GLB is a headless Blender import and re-export of the pack's own glTF
+and nothing else: no retopology, no repaint, no atlas change.
+
+Eight of them share a model name with an animal this game already has from the
+Kenney pack above, so the hostile versions carry names of their own. That is a
+naming decision rather than an art one and it is recorded in `SPECIES`.
+
+## Monsters — Ultimate Platformer Pack by **Quaternius** — supplied, NOT YET IMPORTED
+
+[patreon.com/quaternius](https://www.patreon.com/quaternius) — **CC0 1.0**,
+stated verbatim in the pack's own `License.txt` and so **read off disk**. Big,
+blob and flying monster sets over one shared `Atlas_Monsters.png`, in
+`model/Ultimate monsters`.
+
+**Nothing from it is in this repository yet.** It is recorded here ahead of the
+import because the terms are settled and the same author's pack above is already
+the whole monster roster, so the two belong together on this page. When models
+land, list them here.
+
 ## Food — Food Kit by **Kenney**
 
 [kenney.nl](https://www.kenney.nl) — **CC0**. 29 models: the foraged, cooked and

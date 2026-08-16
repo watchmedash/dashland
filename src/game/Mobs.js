@@ -14,7 +14,9 @@
 // bugs this replaced.
 
 import * as THREE from 'three';
-import { F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST } from '../world/Constants.js';
+import {
+  F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST, FACE_ROLE, FACE_NORMAL,
+} from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn, walkColumns,
   centerDir,
@@ -398,12 +400,36 @@ const MAX_HOSTILE_SAVAGE = 14;
 /**
  * How many monsters may be abroad at once, and how often one is tried.
  *
- * The cap is the thing that makes them rare in the sense that matters: not
- * how often you see one, but how many can be on you at a time. Three across
- * the whole planet means meeting one is an event and meeting two is bad luck.
- * The roll is per spawn tick, the same tick the wildlife top-up runs on.
+ * 3 -> 8, at the owner's call: "max monsters is 3? we have a huge planet like
+ * wtf ... that's why I asked to transform animals to husks at night because I
+ * barely see any of them".
+ *
+ * The old number was not "3 on the planet" - bodies only exist inside the
+ * despawn ring, so it was 3 within 145 units of you - but that is still a
+ * whole neighbourhood holding three, and the note that used to be here argued
+ * for it on the grounds that meeting one should be an event. It made meeting
+ * one an event you could miss entirely for hours.
+ *
+ * 8 is what the DAY line can pay for, which is the line to check before
+ * raising anything: day is 84 land + 18 water + 18 air + 1 trader + monsters
+ * against MAX_MOBS 134, so 121 + 8 = 129 and there is still headroom. Night is
+ * nowhere near it either way.
+ *
+ * The cap is still the thing that decides how many can be ON you at once,
+ * which is the part that matters for whether a fight is survivable; what
+ * changes is that the world is no longer empty between them.
  */
-const MAX_MONSTERS = 3;
+const MAX_MONSTERS = 8;
+/**
+ * The same, on the two faces whose whole point is what lives there.
+ *
+ * The cinderlands are supposed to be hostile ground you go to on purpose, so
+ * the population is the feature rather than the cost. Still under the day line:
+ * 121 + 16 = 137 would be over, but the dedicated faces carry almost no
+ * wildlife - the cinderlands carry none at all - so the roster there is far
+ * short of the ordinary world's.
+ */
+const MAX_MONSTERS_HOSTILE_FACE = 16;
 
 /**
  * How many magma slimes of any size may be abroad at once.
@@ -414,7 +440,15 @@ const MAX_MONSTERS = 3;
  * fought at the same time and a third will not compound on top of them.
  */
 const SLIME_CAP = 12;
-const MONSTER_CHANCE = 0.05;
+
+/**
+ * How often a monster spawn is tried, per spawn tick.
+ *
+ * 0.05 -> 0.16 alongside the cap. Raising the ceiling alone would have left the
+ * world just as empty for just as long and then filled up hours later; the roll
+ * is what decides how quickly the population you allow actually arrives.
+ */
+const MONSTER_CHANCE = 0.16;
 const MAX_HOSTILE_CAVE = 4;
 /**
  * ...and the third husk budget: the ones in the water.
@@ -1607,6 +1641,20 @@ export function worldHardening(playtime) {
   return Math.min(HARDEN_MAX, (1 + HARDEN_STEP) ** Math.floor(playtime / HARDEN_PERIOD));
 }
 
+/**
+ * A monster whose body is a box rather than a file. See MobModels.registerCube.
+ *
+ * Everything else about it - the budget, the targeting, the drops, the fuse -
+ * is an ordinary monster, so this only swaps where the mesh comes from.
+ */
+const SLIME_URL = 'builtin:cube-slime';
+// Registered at module load, so `isReady` is true before the first spawn tick
+// and a slime can never be refused for a body that has no file to wait for.
+MobModels.registerCube(SLIME_URL, { color: 0xffffff, opacity: 0.88 });
+const slimeSpec = (o) => ({
+  ...monster('cinderling', o), urls: [SLIME_URL], clips: {},
+});
+
 const monster = (file, o) => ({
   ...pet(file, { ...o, diet: 'carnivore', hp: Math.round(o.hp * HOSTILE_HP) }),
   urls: [MON(file)],
@@ -2423,9 +2471,14 @@ const SPECIES = {
    * behaviour the mob is built to teach.
    */
   cinderling: monster('cinderling', {
-    label: 'Cinderling', h: 1.3, hp: 10, spd: 1.05, shy: 0, turn: 3.4, accel: 7.0,
+    label: 'Cinderling', h: 1.3, hp: 10, spd: 1.15, shy: 0, turn: 3.4, accel: 7.0,
     dmg: 0, reach: 1.6, swing: 1.0, aggro: 12,
     blast: 1.5,
+    // It has wings, so it uses them. `flyAnim: false` keeps the walker clips -
+    // the pack's flying rig is a different skeleton and this model is not on it,
+    // the same arrangement the ghost already uses. The hover sits well inside
+    // the reach, or it would hold station permanently outside its own range.
+    flies: true, flyAnim: false, hover: 1.1,
     // The model is untextured — five flat baseColour materials and no map at
     // all, unlike every other monster in the pack — so `spec.glow` here is a
     // flat emissive over the whole body rather than `emissive * emissiveMap`.
@@ -2449,25 +2502,29 @@ const SPECIES = {
    * kind that actually dies. The payout is on the small tier alone, which is
    * what stops a big one being farmed for triple drops.
    *
-   * Art is the pack's mushroom body, which is the only blob in it, tinted
-   * molten. A dedicated model is worth doing later; the shape reads as a slime
-   * at the sizes these are drawn at.
+   * The body is a box, built in code rather than borrowed. A slime is a cube;
+   * dressing the pack's mushroom in orange made a mushroom in orange. See
+   * `MobModels.registerCube`.
+   *
+   * It bounces for free: a cube prototype carries no clips, `_animate` derives
+   * `noClips` from having no actions, and that path already hops the body and
+   * squashes it volume-preservingly on landing. Which is exactly a slime.
    */
-  magma_slime: monster('mushroom', {
+  magma_slime: slimeSpec({
     label: 'Magma Slime', h: 1.6, hp: 18, spd: 0.85, shy: 0, turn: 2.4, accel: 5.0,
     dmg: 5, reach: 1.5, swing: 1.4, aggro: 13,
     tint: [1.00, 0.42, 0.14], glow: 0.16,
     splitsInto: 'magma_slime_mid',
     drops: [],
   }),
-  magma_slime_mid: monster('mushroom', {
+  magma_slime_mid: slimeSpec({
     label: 'Magma Slime', h: 1.05, hp: 10, spd: 1.05, shy: 0, turn: 3.2, accel: 6.5,
     dmg: 3, reach: 1.2, swing: 1.2, aggro: 12,
     tint: [1.00, 0.50, 0.18], glow: 0.14,
     splitsInto: 'magma_slime_small',
     drops: [],
   }),
-  magma_slime_small: monster('mushroom', {
+  magma_slime_small: slimeSpec({
     label: 'Magma Slime', h: 0.65, hp: 5, spd: 1.25, shy: 0, turn: 4.0, accel: 8.0,
     dmg: 2, reach: 1.0, swing: 1.0, aggro: 11,
     tint: [1.00, 0.58, 0.24], glow: 0.12, slime: true,
@@ -2486,6 +2543,7 @@ const SPECIES = {
     label: 'Emberling', h: 0.95, hp: 7, spd: 1.5, shy: 0, turn: 4.4, accel: 9.5,
     dmg: 0, reach: 1.4, swing: 1.0, aggro: 15,
     blast: 1.0,
+    flies: true, flyAnim: false, hover: 0.9,
     tint: [1.00, 0.62, 0.22], glow: 0.14,
     drops: [['sulfur', 1, 1], ['cinder', 1, 1]],
   }),
@@ -4721,6 +4779,23 @@ export class Mobs {
    * desert. A biome absent from the table spawns nothing, which is how the
    * meadow stays safe.
    */
+  /**
+   * How many monsters may be abroad, which depends on where you are standing.
+   *
+   * Three on the ordinary world, and that number has a long argument behind it:
+   * a monster is meant to be something you meet on an expedition rather than
+   * something waiting outside the door. The dedicated faces ARE the expedition,
+   * and at three the owner could cross the whole cinderlands without meeting
+   * the creature it was built around: "I never met a cinderling".
+   *
+   * So the cap is per-face rather than global. The four ordinary faces are
+   * untouched; the cap and the cinderlands carry enough to feel inhabited.
+   */
+  _monsterCap(col) {
+    return FACE_ROLE[(col / (F * F)) | 0] === FACE_NORMAL
+      ? MAX_MONSTERS : MAX_MONSTERS_HOSTILE_FACE;
+  }
+
   _spawnMonster(col, k) {
     const list = MONSTER_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]];
     if (!list || !list.length) return false;
@@ -9314,7 +9389,7 @@ export class Mobs {
       // four while you are dealing with the first. `spawnGrace` covers them for
       // the same reason it covers husks — a new world's opening minutes are not
       // where this belongs.
-      if (!this.spawnGrace && this._countMonsters() < MAX_MONSTERS
+      if (!this.spawnGrace && this._countMonsters() < this._monsterCap(playerCol)
           && Math.random() < MONSTER_CHANCE) {
         const spot = this._findSpawnColumn(playerCol, player.position);
         if (spot) this._spawnMonster(spot.col, spot.k);

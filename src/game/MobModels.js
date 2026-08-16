@@ -26,6 +26,42 @@ const protos = new Map();
 /** True once `url` is loaded and `instantiate` will succeed. */
 export const isReady = (url) => protos.has(url);
 
+/**
+ * A species whose body is a box, registered as a prototype like any other.
+ *
+ * A slime is a cube. Borrowing the pack's mushroom for one was a bad call - it
+ * is a mushroom, and no tint makes it not be. This costs one geometry and one
+ * material for the whole species, needs no file, and goes through exactly the
+ * same instantiate/scale/tint path as a loaded model, so nothing downstream has
+ * to know the difference.
+ *
+ * No clips, which `play` already tolerates: it looks up the action by name and
+ * returns when there is none. The bounce is done in `Mobs._animate` by scaling
+ * the root, which is the right place for it anyway - a squash that answers to
+ * the body's own vertical speed cannot be a baked clip.
+ *
+ * `height` is 1 so the spawn scale, `spec.height / modelHeight`, comes out as
+ * the authored height in cells directly.
+ */
+export function registerCube(url, { color = 0xffffff, opacity = 0.86 } = {}) {
+  if (protos.has(url)) return;
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  // Origin at the foot, like every rig in the packs, so the seating code and
+  // the scale-from-height both mean what they say.
+  geo.translate(0, 0.5, 0);
+  const mat = new THREE.MeshStandardMaterial({
+    color, roughness: 0.35, metalness: 0.0,
+    transparent: opacity < 1, opacity,
+    emissive: new THREE.Color(color), emissiveIntensity: 0.0,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  const scene = new THREE.Group();
+  scene.add(mesh);
+  protos.set(url, { scene, clips: [], height: 1, footOffset: 0, skinned: false });
+}
+
 const unlitFixed = new WeakMap();
 
 /**

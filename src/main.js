@@ -70,7 +70,7 @@ import {
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns, regionOfCol,
-  BIOME,
+  BIOME, FACE_ROLE, FACE_CINDER,
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
@@ -881,6 +881,15 @@ const _occFlame = new THREE.Vector3();
  * _beginGrace.
  */
 const NEW_WORLD_GRACE = 180;
+
+/**
+ * The hour the cinderlands are permanently held at.
+ *
+ * 0.02 rather than 0, so the sky keeps the deep blue a real night has instead
+ * of going flat black - the lava is the light source down there and it wants
+ * something to read against.
+ */
+const CINDER_HOUR = 0.02;
 /**
  * Torches handed to a player whose brand new planet opens in the dark.
  *
@@ -3567,6 +3576,23 @@ class Game {
    * planet-wide part of the choice has already been made from the height field
    * by `WorldGen.pickSpawn`.
    */
+  /**
+   * The hour the sky should be drawn at, which is not the same everywhere.
+   *
+   * The cinderlands never see the sun. It is a face of basalt and lava lit from
+   * below, and a bright blue noon over it undid the whole idea of the place -
+   * the owner: "can we make it permanent night at magma face". Held a little
+   * past midnight rather than exactly on it, so the sky still has the faint
+   * colour a night carries rather than being flat black.
+   *
+   * The cap is deliberately NOT given the same treatment. Eternal day there was
+   * tempting and is wrong: the polar face is where the long crossings happen and
+   * taking the night away takes the danger with it.
+   */
+  skyTimeOfDay() {
+    return FACE_ROLE[this.player.cell.f] === FACE_CINDER ? CINDER_HOUR : this.timeOfDay();
+  }
+
   _spawnPlayer() {
     const p = this.planet;
     // The player's current column, which is always one that has been built:
@@ -3584,10 +3610,20 @@ class Game {
         ((Math.random() * (REACH * 2 + 1)) | 0) - REACH,
         ((Math.random() * (REACH * 2 + 1)) | 0) - REACH);
       if (!p.liveCol(col)) continue;
+      // Never wake up on a different face from the one you died on. A search
+      // radius of forty columns crosses a seam near an edge, and being killed
+      // on the cinderlands only to reappear in a meadow is the planet deciding
+      // your expedition is over. The owner asked for this outright.
+      if (((col / (F * F)) | 0) !== c.f) continue;
       const k = p.surfaceK(col);
       if (k < 6 || k >= D - 6) continue;
       const b = p.at(col, k);
-      let score = b === ID.grass ? 3 : b === ID.sand ? 1.4 : 0;
+      // Ground worth standing on, and the two dedicated faces have none of the
+      // old list: the cap is ice and snow, the cinderlands are basalt and ash.
+      // Scored below grass, because they are somewhere you are visiting.
+      let score = b === ID.grass ? 3 : b === ID.sand ? 1.4
+        : (b === ID.snow || b === ID.ice || b === ID.packed_ice) ? 2.2
+          : (b === ID.basalt || b === ID.ash_stone || b === ID.magma_stone) ? 2.0 : 0;
       if (!score) continue;
       if (R_MIN + k + 1 < R_SEA + 1) continue;
       // headroom
@@ -3607,7 +3643,7 @@ class Game {
     if (best < 0) { best = hint; bestK = Math.max(0, p.surfaceK(hint)); }
     this.player.spawnAtColumn(best, bestK);
     this.player.health = this.player.maxHealth;
-    this.sky.setSolarTime(this.player.up, this.timeOfDay());
+    this.sky.setSolarTime(this.player.up, this.skyTimeOfDay());
     this.player.updateCamera(this.camera, 1 / 60, this.settings.fov);
   }
 
@@ -5873,7 +5909,7 @@ class Game {
     this.character.update(dt, this.player, this.viewMode !== VIEW_FIRST && !this.spectating
       && this._pausedFrom !== 'spectating',
       this.inventory.held().item, this.inventory.offhand.item);
-    this.sky.setSolarTime(this.player.up, this.timeOfDay());
+    this.sky.setSolarTime(this.player.up, this.skyTimeOfDay());
     this.sky.update(dt, this.camera, this.player.up, this.player.position);
     this._updateSharedUniforms();
   }
@@ -6387,7 +6423,7 @@ class Game {
     this._safeTick('steam', () => this._tickSteam(dt));
     this._safeTick('blockModels', () => this._syncBlockModels());
     this._safeTick('signText', () => this._syncSignText());
-    this.sky.setSolarTime(this.player.up, this.timeOfDay());
+    this.sky.setSolarTime(this.player.up, this.skyTimeOfDay());
     // `shelter` doubles as the entity fill's occlusion — animals cannot read
     // the voxel light, so a roof over the player is the best signal the sky has
     // that the thing it is lighting is indoors.

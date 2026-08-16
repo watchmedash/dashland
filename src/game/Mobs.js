@@ -15,7 +15,7 @@
 
 import * as THREE from 'three';
 import {
-  F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST, FACE_ROLE, FACE_NORMAL,
+  F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST, FACE_ROLE, FACE_NORMAL, FACE_CINDER,
 } from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn, walkColumns,
@@ -9215,6 +9215,10 @@ export class Mobs {
     // Is the sun up where the player is standing? On a planet this is local,
     // not global — the far side is in night at the same moment.
     this.daylight = sky ? sky.sunDir.dot(player.up) : 1;
+    // The cinderlands are permanent night, and everything that keys off the
+    // hour has to agree with the sky about that: husks spawn, monsters prowl,
+    // and nothing there burns at dawn because dawn does not come.
+    if (FACE_ROLE[player.cell.f] === FACE_CINDER) this.daylight = -1;
     const night = this.daylight < 0.02;
 
     // The night stalk's two clocks, ticked once for the planet rather than once

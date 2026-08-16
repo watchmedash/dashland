@@ -280,6 +280,8 @@ export function explode(game, pos, cause = null) {
   }
 
   hurtPlayer(game, pos, cause);
+  // ...and everything else standing in it. See `blastMobs`.
+  blastMobs(game, pos, cause);
 
   const up = _d.copy(pos).normalize();
   game.particles?.blast(pos, up, 1);
@@ -314,6 +316,42 @@ export function hurtPlayer(game, pos, cause = null) {
   // `false` is the guard: see the note at the head of this file.
   game._takeHit(dmg * game.mobDamageMul, cause || 'Blast', false, 'blow');
   return dmg;
+}
+
+/**
+ * The same blast, against everything else standing in it.
+ *
+ * A charge that levels the ground and hurts exactly one creature in the world
+ * is a trap aimed at the player rather than an explosion, and it made a
+ * cinderling chasing you through a herd read as a scripted event. It now
+ * catches whatever is in range - including other cinderlings, which is what
+ * makes a group of them a chain rather than three separate problems.
+ *
+ * Same falloff and the same sight-line rule as the player takes, so a body
+ * behind a wall is spared for the reason a player behind one is. Difficulty is
+ * NOT applied: `mobDamageMul` is how hard the world hits the PLAYER, and
+ * scaling mob-on-mob damage with it would make a hard world's monsters kill
+ * each other faster, which is the opposite of what the setting means.
+ *
+ * The one exempted is the bomber itself. It is already gone - `_detonate` has
+ * pushed it onto the vanish list - and hitting it here would run a death, and
+ * therefore its drops, a second time.
+ */
+function blastMobs(game, pos, cause) {
+  const mobs = game.mobs;
+  if (!mobs || !mobs.list) return 0;
+  let hit = 0;
+  for (const m of [...mobs.list]) {
+    if (m === cause || m.released) continue;
+    const d = m.pos.distanceTo(pos);
+    if (d >= HURT_R) continue;
+    let dmg = PEAK_DAMAGE * (1 - (d / HURT_R) ** 2);
+    if (!clearLine(game.planet, pos, m.pos)) dmg *= SHIELDED;
+    dmg = Math.max(1, Math.round(dmg));
+    mobs._damage(m, dmg);
+    hit++;
+  }
+  return hit;
 }
 
 /**

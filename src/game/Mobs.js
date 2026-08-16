@@ -5947,11 +5947,33 @@ export class Mobs {
    * @param {object} player
    * @param {number} dt seconds since the last tick, for the linger clock
    */
+  /**
+   * How much daylight reaches THIS body, which is not always what reaches the
+   * player.
+   *
+   * `daylight` is one number taken from the sun against the player's own up,
+   * and that is right for almost everything - the far side of a planet is in
+   * night at the same moment, and the player is only ever standing in one
+   * place. It is wrong for the cinderlands, which are held at midnight
+   * permanently: with the player on an ordinary face at noon, the single global
+   * number said "day" and every husk that had crossed into the ring from the
+   * lava face caught fire. The owner: "magma face should remain night even
+   * while we are on other faces or else the husks will die".
+   *
+   * So the burn and the dawn cull ask per body. Everything else can keep using
+   * the player's, because everything else is about what the player can see.
+   */
+  _dayFor(mob) {
+    return FACE_ROLE[mob.cell.f] === FACE_CINDER ? -1 : this.daylight;
+  }
+
   _dawnCull(player, dt) {
     let far = -1, farD = NIGHT_BED_DIST;
     for (let n = this.list.length - 1; n >= 0; n--) {
       const m = this.list[n];
       if (!m.spec.nightOnly) continue;
+      // Dawn does not reach the cinderlands. See `_dayFor`.
+      if (this._dayFor(m) < 0.02) continue;
       m.dawnT = (m.dawnT || 0) + dt;
       if (m.dawnT > DROWNED_LINGER) { this._release(m); this.list.splice(n, 1); continue; }
       const d = m.pos.distanceTo(player.position);
@@ -9536,7 +9558,7 @@ export class Mobs {
       }
 
       // --- daylight burns the undead ---
-      if (spec.burns && this.daylight > 0.06 && this._skyLit(mob)) {
+      if (spec.burns && this._dayFor(mob) > 0.06 && this._skyLit(mob)) {
         mob.burnT += dt;
         if (mob.burnT > 0.35 && this.onBurn) this.onBurn(mob);
         if (mob.burnT > BURN_SECONDS) {

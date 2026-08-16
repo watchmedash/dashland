@@ -3264,6 +3264,17 @@ const PREY_REST_MAX = 70;
  * is a runt of one species taking a giant of another after both have rolled
  * their size jitter and the hunter's prey has eaten its way up GROW_MAX.
  */
+/**
+ * A boss's pause after a kill, against a carnivore's 34 to 70 seconds.
+ *
+ * The rest exists for a different reason here, so it is a different number. An
+ * animal's is hunger: it has eaten and does not need to hunt again for a
+ * minute. A boss is not eating, and something that clears a whole valley in one
+ * unbroken chain reads as a script running rather than as a creature, so the
+ * pause is only long enough that a player watching sees separate fights.
+ */
+const BOSS_REST = 2;
+
 const PREY_SIZE = 1.5;
 
 // --- the other half of predation: prey that can see it coming ----------------
@@ -5107,6 +5118,7 @@ export class Mobs {
       kills: 0,
       grown: 1,            // permanent size gained from kills, 1..GROW_MAX
       taken: false,        // eaten this frame, awaiting collection
+      spoils: false,       // ...and whether that collection pays out. See _stalk.
       released: false,     // detached from the world; never chase one of these
       dying: 0,            // seconds left of the death animation
       target: null,        // 'player' once a hostile has noticed you
@@ -5246,6 +5258,26 @@ export class Mobs {
   }
 
   /**
+   * May anything hostile still be made on this ground?
+   *
+   * No, once a boss has stood on this face, and no again forever after — see
+   * `hostileShut`, which the endgame owns. The rule is deliberately about the
+   * *column being spawned into* rather than about where the player is standing:
+   * a search started from a player on one face can walk over a seam, and the
+   * face that has been shut is the face the monsters must stop appearing on.
+   *
+   * Only what is hostile. Animals go on spawning normally, which is the whole
+   * of "so the face never becomes a dead rock" - the cap and the cinderlands
+   * are meant to be quieter after the endgame, not empty. What is already
+   * standing is left alone too: a husk on a shut face lives until something
+   * kills it, and is then gone for good, because this refuses the replacement
+   * rather than the body.
+   */
+  _hostileHere(col) {
+    return !(this.hostileShut && this.hostileShut.has((col / (F * F)) | 0));
+  }
+
+  /**
    * ...and the same question asked of one species rather than of the roster.
    *
    * A `cap` on a spec is a promise about how many of that creature may be alive
@@ -5289,6 +5321,7 @@ export class Mobs {
   }
 
   _spawnMonster(col, k) {
+    if (!this._hostileHere(col)) return false;
     const list = MONSTER_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]];
     if (!list || !list.length) return false;
     // Never in the opening clearing. A monster is the one thing that should
@@ -5565,7 +5598,12 @@ export class Mobs {
       if (m.dying > 0 || m.baby > 0) continue;
       if (m.state === 'flee' || m.state === 'chase' || m.target) continue;
       if (!this._unseenSwap(m, m.pos.distanceTo(player.position))) continue;
-      if (this._warded(this._colOf(m.cell.f, m.cell.ci, m.cell.cj), Math.floor(m.cell.ck) - 1)) continue;
+      const col = this._colOf(m.cell.f, m.cell.ci, m.cell.cj);
+      if (this._warded(col, Math.floor(m.cell.ck) - 1)) continue;
+      // A shut face makes no husks either, and this is the door that would have
+      // been forgotten: it is not a spawn search, it is the herd turning where
+      // it stands. See `_hostileHere`.
+      if (!this._hostileHere(col)) continue;
       taken.push(m);
     }
     let n = 0;
@@ -8986,9 +9024,43 @@ export class Mobs {
    * One pass over the whole list, which is bounded by MAX_MOBS and only run
    * every PREY_PERIOD per hungry carnivore — see the notes on those constants.
    */
+  /**
+   * Is this something a boss will go for?
+   *
+   * The one place in this game where a mob is hostile to another mob, and it is
+   * deliberately a *predicate about bosses* rather than a general faction
+   * system. Nothing else on the planet fights anything except its prey list,
+   * and adding one would relitigate the whole ecology; this reuses the hunting
+   * machinery that already exists and answers one extra question at the door.
+   *
+   * The owner's four rules, in the order they are asked:
+   *
+   *   never each other  sixteen of them, and a face where two met would be
+   *                     fifteen. This is the rule the whole thing turns on.
+   *   not the merchant, not the stalker  neither is an animal or a monster. The
+   *                     stalker is refused by `_findPrey` on `phantom` as well;
+   *                     he is named here because that guard is about a story and
+   *                     this one is about a rule.
+   *   not fish          `aquatic` is this file's own handle for "lives in the
+   *                     water", so it covers the fifteen species, the shark and
+   *                     the piranha in one test.
+   *   except the Deepmaw  the single exception, carried on the spec as
+   *                     `bossEatsFish` and true of exactly one row.
+   *
+   * Everything else - every animal, every husk, every monster - is fair game,
+   * which is what "aggressive to other mobs" was asked for.
+   */
+  _bossPrey(boss, o) {
+    const s = o.spec;
+    if (s.boss || s.trader || s.phantom) return false;
+    if (s.aquatic) return !!boss.spec.bossEatsFish;
+    return true;
+  }
+
   _findPrey(mob) {
     const preyOn = mob.spec.preyOn;
-    if (!preyOn) return null;
+    const isBoss = !!mob.spec.boss;
+    if (!preyOn && !isBoss) return null;
     let best = null, bestD = PREY_RANGE * PREY_RANGE;
     const ceiling = mob.spec.height * mob.grown * PREY_SIZE;
     for (const o of this.list) {
@@ -8999,10 +9071,18 @@ export class Mobs {
       // padding across a valley towards a figure on a ridge is a story the
       // player would read as the two of them being in it together.
       if (o.spec.phantom) continue;
-      if (!preyOn.has(o.type)) continue;
+      if (isBoss) {
+        if (!this._bossPrey(mob, o)) continue;
+      } else if (!preyOn.has(o.type)) continue;
       // A calf of a listed species is still on the list; the checks below are
       // about what this individual can actually manage and reach.
-      if (o.spec.height * o.grown > ceiling) continue;
+      //
+      // Not asked of a boss. The ceiling is PREY_SIZE times the hunter's own
+      // height and it exists to stop a lion picking something it cannot pull
+      // down; a boss is three to four cells tall and can pull down anything on
+      // the planet, so the test could only ever be true - and asking it anyway
+      // would quietly exempt the one thing a boss most obviously should reach.
+      if (!isBoss && o.spec.height * o.grown > ceiling) continue;
       // Water is a wall to a land animal, so a fox that picks a fish spends the
       // whole PREY_GIVE_UP window padding along the shoreline looking stupid.
       // Cheaper to never choose it than to detect the failure afterwards. A
@@ -9489,7 +9569,12 @@ export class Mobs {
 
   _stalk(mob, dt) {
     const spec = mob.spec;
-    if (!spec.preyOn) return false;
+    // A boss has no prey list and hunts anyway. `_findPrey` answers the "what"
+    // through `_bossPrey`; everything from here down - the closing run, the
+    // reach test, the bite, the give-up window - is the same code a lion uses,
+    // which is the point of routing it through here rather than writing a
+    // second chase.
+    if (!spec.preyOn && !spec.boss) return false;
     if (spec.diet !== 'carnivore' && spec.diet !== 'omnivore') return false;
     // (The bite cooldown and the hunger clock are ticked in update() now, with
     // the rest of this body's clocks. They were ticked here, which meant they
@@ -9613,6 +9698,12 @@ export class Mobs {
     }
 
     prey.taken = true;
+    // "Anything a boss kills dies normally." A predator EATS what it catches
+    // and leaves nothing, which is why the drain below passes an empty drop
+    // list - a rabbit bursting into hide and meat would make every fox a free
+    // larder. A boss is not eating; it is killing everything in front of it,
+    // and a corpse it walked away from should leave what a corpse leaves.
+    prey.spoils = !!spec.boss;
     this._kills.push(prey);
     mob.prey = null;
     // Nothing drops. It ate the animal — a rabbit bursting into hide and meat
@@ -9632,6 +9723,13 @@ export class Mobs {
   /** A kill: grow a little, and be full for a while. */
   _feed(mob) {
     mob.kills++;
+    // A boss neither eats nor grows. Its drawn height is the number its health,
+    // damage, reach and swing were all derived from, so a boss that ate its way
+    // to GROW_MAX would be a boss whose stats no longer describe it - and one
+    // that pays double loot for having cleared the face first. The short rest
+    // is the only part of a meal it keeps, and only so that clearing a valley
+    // is a sequence of fights rather than one unbroken chain.
+    if (mob.spec.boss) { mob.hungerT = BOSS_REST; return; }
     this._setGrowth(mob, mob.grown + GROW_PER_KILL);
     mob.hungerT = PREY_REST_MIN + Math.random() * (PREY_REST_MAX - PREY_REST_MIN);
   }
@@ -9996,11 +10094,15 @@ export class Mobs {
       // neither can crowd the other out. Eight is still eight.
       if (night && !this.spawnGrace && this._countHostile(false) < surfaceCap) {
         const spot = this._findSpawnColumn(playerCol, player.position);
-        if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = false; }
+        if (spot && this._hostileHere(spot.col)) {
+          const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = false;
+        }
       }
       if (!this.spawnGrace && this._countHostile(true) < MAX_HOSTILE_CAVE) {
         const spot = this._findDarkColumn(playerCol, player.position);
-        if (spot) { const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = true; }
+        if (spot && this._hostileHere(spot.col)) {
+          const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = true;
+        }
       }
       // ...and the third habitat: the water, and only after dark.
       //
@@ -10018,7 +10120,7 @@ export class Mobs {
       // have found the mouse.
       if (night && !this.spawnGrace && this._countDrowned() < MAX_DROWNED) {
         const spot = this._findDeepColumn(playerCol, player.position);
-        if (spot) this.spawn('drowned', spot.col, spot.k);
+        if (spot && this._hostileHere(spot.col)) this.spawn('drowned', spot.col, spot.k);
       }
       // And take them back when it is light. Run on the spawn tick rather than
       // per frame because it is a population decision like every other one in
@@ -11231,7 +11333,9 @@ export class Mobs {
     // Anything eaten this frame is removed here, outside the walk over the list
     // — see the note in _stalk on why a kill cannot splice from inside it.
     if (this._kills.length) {
-      for (const prey of this._kills) if (!prey.released) this._die(prey, []);
+      for (const prey of this._kills) {
+        if (!prey.released) this._die(prey, prey.spoils ? prey.spec.drops : []);
+      }
       this._kills.length = 0;
     }
 

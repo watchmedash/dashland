@@ -600,8 +600,14 @@ export class Planet {
       if (RENDER_TYPE[id] === R_LIQUID && !hitLiquid) continue;
       if (curCross && !insideCross(id, c, i, j)) continue;
       // Another face's block: no hit, and nothing behind it either, or you
-      // could mine straight through the border.
-      if (gate >= 0 && c.f !== gate) return null;
+      // could mine straight through the border. `opts.blocked` is filled in for
+      // callers that want to say so — near a cube edge the rock under your feet
+      // passes to the neighbour a block or two down, and silence there reads as
+      // a broken pickaxe rather than the border it is.
+      if (gate >= 0 && c.f !== gate) {
+        if (opts.blocked) { opts.blocked.col = col; opts.blocked.k = k; opts.blocked.hit = true; }
+        return null;
+      }
 
       const point = new THREE.Vector3(x, y, z);
       const normal = new THREE.Vector3();

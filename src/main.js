@@ -2181,8 +2181,15 @@ class Game {
     this._hlCorners = Array.from({ length: 8 }, () => [0, 0, 0]);
   }
 
-  /** Draw the wireframe of a curved cell. */
-  _showHighlight(col, k) {
+  /**
+   * Draw the wireframe of a curved cell.
+   *
+   * `foreign` outlines a block owned by a neighbouring face: visible, named,
+   * and inert. It gets its own colour because the alternative is no outline at
+   * all, and an unmarked block that eats every swing is indistinguishable from
+   * a bug.
+   */
+  _showHighlight(col, k, foreign = false) {
     const { f, i, j } = colParts(col);
     const c = this._hlCorners;
     cornerPos(f, i, j, k, c[0]);
@@ -2203,6 +2210,9 @@ class Game {
       arr[e * 3] = p[0] * s; arr[e * 3 + 1] = p[1] * s; arr[e * 3 + 2] = p[2] * s;
     }
     this.highlight.geometry.attributes.position.needsUpdate = true;
+    const m = this.highlight.material;
+    m.color.setHex(foreign ? 0x8fc4d6 : 0x08080d);
+    m.opacity = foreign ? 0.26 : 0.38;
     this.highlight.visible = true;
   }
 
@@ -9565,9 +9575,11 @@ class Game {
     // Gated to the face the player is standing on: everything downstream of
     // this one cast - mining, placing, tilling, planting, the highlight box -
     // inherits "another face's blocks are scenery" from here.
+    const blocked = this._faceBlocked ||= { col: -1, k: -1, hit: false };
+    blocked.hit = false;
     const hit = this.planet.raycast(
       this.player.eye, this.player.lookDir, this.player.reach,
-      { face: this.player.cell.f },
+      { face: this.player.cell.f, blocked },
     );
     // Handed to `_tickBow`, which runs before this method and needs the same
     // answer to decide whether a shovel in the main hand has talked the offhand
@@ -9765,7 +9777,10 @@ class Game {
       this._showHighlight(hit.col, hit.k);
       this.ui.setCrosshairActive(true);
     } else {
-      this.highlight.visible = false;
+      // Outlined but not offered: the crosshair stays inactive, because nothing
+      // here can be acted on.
+      if (blocked.hit) this._showHighlight(blocked.col, blocked.k, true);
+      else this.highlight.visible = false;
       this.ui.setCrosshairActive(false);
       // Swung at nothing. Sound only, and no cooldown of its own: `clicked` is
       // edge-triggered so this is one whoosh per press, and the voice budget's

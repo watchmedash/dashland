@@ -2642,7 +2642,13 @@ const SPECIES = {
     rage: [1.30, 0.16, 0.14],
     // One on an ordinary face, fifty on the polar one. See `_underTypeCap`.
     cap: 1, capPolar: 50,
-    drops: [['hide', 1, 2]],
+    // The carrot is one per kill and is meant to stay one per kill: `_die`
+    // multiplies by `boon` and `bulk`, and at 0.98 tall the hare's bulk floors
+    // at 0.6, so `1, 1` rounds to exactly one every time and nothing about it
+    // is a roll. No fourth element for the same reason - that is the odds of
+    // the line appearing at all, and a collectible you are asked to gather
+    // sixty-four of must not be a coin flip.
+    drops: [['hide', 1, 2], ['coin', 2, 5], ['gold_carrot', 1, 1]],
   }),
 
   // --- and the ones with wings ---

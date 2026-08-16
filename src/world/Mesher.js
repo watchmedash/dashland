@@ -4,7 +4,7 @@
 // the column axis, which is perfectly straight, so merging introduces no error.
 
 import {
-  F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME, BIOME_COLORS,
+  F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME, BIOME_COLORS, FACE_ROLE, FACE_POLAR,
 } from './Constants.js';
 import {
   CORNER_DIR, CENTER_DIR, COL_NB, stepColumn, cellIndex, cellWrite, cubeCorner, cubeCenter,
@@ -738,7 +738,14 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
     // keep it under snow in July as well as in December. See WAVE_LEAVES_COLD.
     // `biomeId` is the column's, already resolved for the tint on the line
     // above, so this costs one integer compare on the quads of one block class.
-    const wave = (WAVE[id] === WAVE_LEAVES && biomeId === BIOME.SNOW)
+    // ...or standing anywhere on the cap, whatever the column under it says.
+    // Two thirds of that face is frozen SEA, which is BIOME.OCEAN, so a stand
+    // of pines with some trunks over snow and some over ice had its canopy
+    // split between the two waves - neighbouring leaf blocks shaded as if they
+    // were in different climates, which is what reads as the canopy glitching.
+    // The face is the honest test there: the cap is white by construction.
+    const wave = (WAVE[id] === WAVE_LEAVES
+      && (biomeId === BIOME.SNOW || FACE_ROLE[f] === FACE_POLAR))
       ? WAVE_LEAVES_COLD : WAVE[id];
     const uv = [[0, 0], [uMax, 0], [uMax, vMax], [0, vMax]];
     const pts = [p0, p1, p2, p3];

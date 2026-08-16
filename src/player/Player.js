@@ -843,12 +843,25 @@ export class Player {
     // A move can leave the face before normalizeCell runs. Re-anchor rather
     // than bailing out: returning "not solid" for an off-face address opened a
     // hole in the collision every time the player crossed a cube edge.
-    let f = this.cell.f, ai = ci, aj = cj;
-    if (ci < 0 || ci >= F || cj < 0 || cj >= F) {
-      _nc.f = f; _nc.ci = ci; _nc.cj = cj; _nc.ck = ck;
-      normalizeCell(_nc);
-      f = _nc.f; ai = _nc.ci; aj = _nc.cj;
-    }
+    // An address past the edge of this face is NOT tested against the
+    // neighbour, and this is the line that decides whether a seam can be walked
+    // over at all.
+    //
+    // It used to re-anchor onto the next face and test there at the same layer
+    // number - but a layer means something different on each face, so if the
+    // ground over there stood any higher the probe landed inside it, came back
+    // solid, and the body was stopped a hair short of the edge. The crossing
+    // could then never trigger, and the owner had to jump a block that was one
+    // higher: "I should just be teleported to the other side top of block no
+    // matter the height".
+    //
+    // Reporting it clear is safe now in a way it was not when this re-anchor
+    // was written. Back then crossing was geometric and a body could genuinely
+    // linger out here; now the movement step converts an off-face address into
+    // a crossing on the same tick and seats the body on the far ground, so this
+    // space is never occupied - it is only ever passed through.
+    if (ci < 0 || ci >= F || cj < 0 || cj >= F) return false;
+    const f = this.cell.f, ai = ci, aj = cj;
     const baseI = Math.floor(ai), baseJ = Math.floor(aj);
     // Still off the grid: fail solid, never as air.
     if (baseI < 0 || baseI >= F || baseJ < 0 || baseJ >= F) return true;
@@ -1039,10 +1052,10 @@ export class Player {
     const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
     const col = cidx(c.f, i, j);
     const surf = this.planet.surfaceK(col);
-    // Land at the same height over the new ground as you left the old at. This
-    // is what makes a seam crossable whatever the two sides' ground levels are:
-    // the raw layer number means something different on each face, but "two
-    // blocks over the ground" means the same thing on both.
+    // Straight onto the top of whatever is over there, high or low. Anything
+    // cleverer - keeping your old layer, keeping your height above the old
+    // ground - makes the crossing depend on the two sides agreeing about where
+    // the ground is, and they do not have to.
     if (surf >= 0) c.ck = surf + 1 + Math.max(0, lift);
     // Belt and braces for the case there is no ground to read - an ungenerated
     // column, or a crossing into open air. Bounded so it can never become a
@@ -1088,13 +1101,10 @@ export class Player {
         if (_hit.push > 0) { this.grounded = true; this.vel.k = Math.max(0, this.vel.k); }
         else this.vel.k = Math.min(0, this.vel.k);
       }
+      // `_escape` only ever pushes a stuck box out; the seam crossing belongs
+      // in the movement step, not here.
       if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) {
-        const wasF = c.f;
-        // How far above its own ground the body was, measured BEFORE the fold.
-        // This is what gets carried across, not the raw layer number.
-        const lift = this._heightAboveGround();
         normalizeCell(c);
-        if (c.f !== wasF) this._standOnArrival(lift);
         this._sync();
       }
       if (!this._blocked(c.ci, c.cj, c.ck, height)) return true;
@@ -1606,12 +1616,28 @@ export class Player {
         c.ck = nk;
       }
 
+      // Cross when the BODY reaches the edge, not when its centre has passed
+      // it. Waiting for the centre means walking the last half cell THROUGH
+      // whatever stands on the neighbouring face, so a block one higher over
+      // there had to be jumped first: "I still have to be in same level on
+      // other side or higher to cross over". The owner's rule is that reaching
+      // the edge is enough, whatever the height, so the edge is the trigger.
+      if (c.ci + HALF_W >= F && this.vel.i > 0) c.ci = F + 1e-3;
+      else if (c.ci - HALF_W < 0 && this.vel.i < 0) c.ci = -1e-3;
+      if (c.cj + HALF_W >= F && this.vel.j > 0) c.cj = F + 1e-3;
+      else if (c.cj - HALF_W < 0 && this.vel.j < 0) c.cj = -1e-3;
+
       // crossing a cube edge re-anchors us onto the neighbouring face
       if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) {
+        const wasF = c.f;
+        // Only what you were carrying in the air comes across. On foot the
+        // answer is simply "the top of the block over there".
+        const lift = this.grounded ? 0 : this._heightAboveGround();
         // carry the velocity through the seam in world space, so strafing and
         // running keep their true heading across a cube edge
         const worldV = _v4.copy(this._toWorldVelocity(_v3));
         normalizeCell(c);
+        if (c.f !== wasF) this._standOnArrival(lift);
         this._sync();
         const re = this._toCellVelocity(worldV.x, worldV.y, worldV.z);
         this.vel.i = re.i; this.vel.j = re.j;

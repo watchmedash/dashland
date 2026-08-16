@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import {
   F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST, FACE_ROLE, FACE_NORMAL, FACE_CINDER,
+  FACE_POLAR,
 } from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn, walkColumns,
@@ -1725,6 +1726,19 @@ const monster = (file, o) => ({
   // What two of come out of the corpse. See `_split`.
   ...(o.splitsInto ? { splitsInto: o.splitsInto } : null),
   ...(o.slime ? { slime: true } : null),
+  // The hare's five, and every one of them is here because this builder drops
+  // what it does not name — the slime lost `tint` and `splitsInto` that way and
+  // came out as the wrong creature entirely.
+  //   timid     never decides about the player on its own; only being hit does
+  //   rage      the colour it wears once it has been
+  //   leap      how far off it will jump at you, in cells
+  //   hydro     health a second while it is standing in water
+  //   cap/capPolar  how many of this species may be alive at once
+  ...(o.timid ? { timid: true } : null),
+  ...(o.rage ? { rage: o.rage } : null),
+  ...(o.leap ? { leap: o.leap } : null),
+  ...(o.hydro ? { hydro: o.hydro } : null),
+  ...(o.cap ? { cap: o.cap, capPolar: o.capPolar ?? o.cap } : null),
 });
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
@@ -2582,6 +2596,47 @@ const SPECIES = {
     flies: true, flyAnim: false, hover: 0.9,
     tint: [1.00, 0.62, 0.22], glow: 0.14,
     drops: [['sulfur', 1, 1], ['cinder', 1, 1]],
+  }),
+
+  /**
+   * The one you start.
+   *
+   * Everything else on this table is a thing that comes for you; this is a
+   * thing that ignores you until you swing at it, and then never stops. Look
+   * at it all you like - `timid` keeps it out of the acquire test in `_hunt`
+   * altogether, so there is no sight probe, no ring and no chase until `hurt`
+   * flips `enraged`, and that flag is never cleared while the body lives.
+   *
+   * One cell high, which is the whole silhouette: it is the smallest thing in
+   * the game that can kill you, and it reads as the rabbit it is until it is
+   * red.
+   *
+   * It does not close and swing like the rest. It leaps - see `_leap` - and the
+   * blow lands where it lands, so the counterplay is movement rather than
+   * blocking. `dmg` is therefore the damage of an *average* leap and not a
+   * fixed toll; a short hop is worth much less and a long one much more.
+   *
+   * `aggro` is long because it is only ever asked once the fight has started:
+   * a passive body never reaches the acquire test at all, so a wide ring costs
+   * nothing and is what makes "attacks nonstop" true rather than a chase you
+   * can walk out of.
+   *
+   * Water is the weakness, the enderman's, and it is the answer to the rest of
+   * it: `hydro` is health a second while it is standing in one, and a leap
+   * that lands in a river is a leap it does not come out of.
+   */
+  dread_hare: monster('hare', {
+    label: 'Dread Hare', h: 1.0, hp: 24, spd: 1.30, shy: 0, turn: 4.2, accel: 8.5,
+    dmg: 6, reach: 1.3, swing: 1.2, aggro: 40,
+    timid: true, leap: 15, hydro: 3.0,
+    // Not far off the pack's own reds, and it has to survive `sky` and the
+    // block-light multiply in _animate, so green and blue are cut rather than
+    // red raised - the note above HUSK_KIND explains why a tint over 1 is not
+    // free on this material.
+    rage: [1.30, 0.16, 0.14],
+    // One on an ordinary face, fifty on the polar one. See `_underTypeCap`.
+    cap: 1, capPolar: 50,
+    drops: [['hide', 1, 2]],
   }),
 
   // --- and the ones with wings ---
@@ -3751,20 +3806,24 @@ const BLOOM = new Set(
  * wiki before their wall is safe.
  */
 const MONSTER_BY_BIOME = {
-  SNOW: ['yeti', 'yeti', 'ghost'],
+  // The hare is listed heavily on the polar face's two biomes and once each
+  // elsewhere, and that is not decoration: its own cap is 1 off the polar face,
+  // so a single entry is all an ordinary biome can ever use, while the polar
+  // face has fifty to fill and has to keep drawing it.
+  SNOW: ['yeti', 'yeti', 'ghost', 'dread_hare', 'dread_hare', 'dread_hare'],
   // Everything in the game that is already made of fire, on the face made of
   // it. This is the population the cinderlands are supposed to have.
   CINDER: ['magma_slime', 'magma_slime', 'cinderling', 'emberling', 'emberling', 'demon', 'dragon'],
-  TUNDRA: ['yeti', 'skull'],
-  MOUNTAIN: ['cyclops', 'bat', 'dragon', 'cinderling'],
+  TUNDRA: ['yeti', 'skull', 'dread_hare', 'dread_hare'],
+  MOUNTAIN: ['cyclops', 'bat', 'dragon', 'cinderling', 'dread_hare'],
   DESERT: ['cactus_monster', 'cactus_monster', 'skull'],
   BADLANDS: ['demon', 'greendemon', 'demon', 'skull', 'dragon', 'cinderling'],
   SAVANNA: ['greendemon', 'skull'],
-  FOREST: ['mushroom_monster', 'mushroom_monster', 'ghost'],
+  FOREST: ['mushroom_monster', 'mushroom_monster', 'ghost', 'dread_hare'],
   PINE_FOREST: ['mushroom_monster', 'ghost', 'bat'],
   OCEAN: ['cthulhu'],
   BEACH: ['cthulhu', 'ghost'],
-  PLAINS: ['alien', 'alien_tall'],
+  PLAINS: ['alien', 'alien_tall', 'dread_hare'],
   // MEADOW is missing on purpose — see above.
 };
 
@@ -4838,6 +4897,29 @@ export class Mobs {
       ? MAX_MONSTERS : MAX_MONSTERS_HOSTILE_FACE;
   }
 
+  /**
+   * ...and the same question asked of one species rather than of the roster.
+   *
+   * A `cap` on a spec is a promise about how many of that creature may be alive
+   * at once, and it sits *under* `_monsterCap` rather than beside it: the
+   * budget still has to have room, this only refuses a species that has had its
+   * share. Counted off `this.list` for the same reason `_countSlimes` is - the
+   * list is what exists, bodies outside the despawn ring do not.
+   *
+   * `capPolar` is the snow face's own number. The face rather than the biome,
+   * because SNOW is a temperature verdict and every snow-capped peak in the
+   * world reads as one - see POLAR_SIN_LAT for the same trap caught in the
+   * wildlife draw.
+   */
+  _underTypeCap(type, col) {
+    const spec = SPECIES[type];
+    if (!spec || !spec.cap) return true;
+    const cap = FACE_ROLE[(col / (F * F)) | 0] === FACE_POLAR ? spec.capPolar : spec.cap;
+    let n = 0;
+    for (const m of this.list) if (m.type === type && ++n >= cap) return false;
+    return true;
+  }
+
   _spawnMonster(col, k) {
     const list = MONSTER_BY_BIOME[BIOME_NAME[this.planet.colBiome[col]]];
     if (!list || !list.length) return false;
@@ -4845,6 +4927,7 @@ export class Mobs {
     // not be waiting for a player who has just been handed six torches.
     if (this._nearHome(col, k)) return false;
     const type = list[(Math.random() * list.length) | 0];
+    if (!this._underTypeCap(type, col)) return false;
     return !!this.spawn(type, col, k);
   }
 

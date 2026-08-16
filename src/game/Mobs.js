@@ -5461,29 +5461,6 @@ export class Mobs {
    * repeated rather than shared, because a parameter that inverts the meaning
    * of a function is how one function becomes two functions in a trench coat.
    */
-  /**
-   * The first ground a body could stand on, looking down from the canopy.
-   *
-   * `surfaceK` answers "topmost thing that is not air or liquid", and under a
-   * tree that is a LEAF. Every candidate in a wood was therefore thrown out for
-   * standing on leaves - measured, 72% of the stalker's candidates died here
-   * and the four commonest rejects were oak leaves, pine leaves, tall grass and
-   * birch leaves. He could only ever appear on bare open ground, which is the
-   * one place a figure watching you would not be.
-   *
-   * Bounded, so this is a peek through a canopy rather than a shaft-sinking
-   * search: past a dozen layers of foliage there is no ground worth standing on
-   * under it anyway.
-   */
-  _standableK(col) {
-    let k = this.planet.surfaceK(col);
-    for (let n = 0; n < 12 && k > 0; n++) {
-      if (SPAWNABLE_GROUND.has(this.planet.at(col, k))) return k;
-      k--;
-    }
-    return -1;
-  }
-
   _findStalkerSpot(nearCol, playerPos) {
     const p = this.planet;
     if (!this.camera) return null;
@@ -5494,8 +5471,17 @@ export class Mobs {
     for (let tries = 0; tries < 60; tries++) {
       const steps = STALKER_STEPS_MIN + Math.floor(Math.random() * STALKER_STEPS_SPAN);
       const col = this._walkOut(nearCol, steps);
-      // Under the canopy, not on top of it. See `_standableK`.
-      const k = this._standableK(col);
+      // Whatever the top of this column is. He stands ANYWHERE - the owner:
+      // "he can stand anywhere obviously not water or magma" - so there is no
+      // ground-type test at all, and that is not laziness: requiring grass or
+      // sand threw out 72% of every candidate, the four commonest rejects
+      // being oak leaves, pine leaves, tall grass and birch leaves. A figure on
+      // the canopy is also a figure you can SEE, which is the whole point of
+      // him; one on the forest floor is behind four trunks.
+      //
+      // The liquid tests below are the only ground rule he has, and they are
+      // the two the owner named: not standing in the sea, not standing in lava.
+      const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;

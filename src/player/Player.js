@@ -4,7 +4,9 @@
 
 import * as THREE from 'three';
 import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
-import { cellToWorld, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
+import {
+  cellToWorld, tangentFrame, stepColumn, normalizeCell, colParts,
+} from '../world/Sphere.js';
 import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
   CONTACT_HURT, CONTACT_POISON, SINK, SINK_BUOYANT, GRIP,
@@ -378,6 +380,28 @@ const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _crossFrom = new THREE.Vector3();
+
+/**
+ * A neighbouring column, or -1 when that neighbour is on another face.
+ *
+ * Every box test in here works in the player's own (i, j, k) frame, and across
+ * a seam that frame does not apply: the neighbouring column measures k along a
+ * different normal, so "the cell next door at my k" is a cell deep inside the
+ * next face's ground. Reading it as a wall is what made every edge impassable -
+ * you walked into solid rock that was ten blocks away and perpendicular to you.
+ * The owner, twice: "I am glitching like an invisible block is blocking me",
+ * then "damn man I can't cross over faces".
+ *
+ * Skipping is the honest answer rather than a workaround. There is no correct
+ * box to test - the blocks over there stand at ninety degrees to these - and
+ * the one step where it matters is the step the fold is about to take anyway.
+ */
+const _sfs = { f: 0, i: 0, j: 0 };
+function sameFaceStep(baseCol, di, dj) {
+  const col = stepColumn(baseCol, di, dj);
+  colParts(col, _sfs);
+  return _sfs.f === ((baseCol / (F * F)) | 0) ? col : -1;
+}
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
@@ -599,7 +623,8 @@ export class Player {
     for (let di = -1; di <= 1; di++) {
       for (let dj = -1; dj <= 1; dj++) {
         if (Math.abs(di) + Math.abs(dj) > 1) continue;      // no diagonals
-        const col = stepColumn(baseCol, di, dj);
+        const col = sameFaceStep(baseCol, di, dj);
+        if (col < 0) continue;
         for (let k = k0; k <= k1; k++) {
           if (!IS_LADDER[p.at(col, k)]) continue;
           if (di === 0 && dj === 0) {
@@ -846,7 +871,8 @@ export class Player {
         const loj = baseJ + dj, hij = loj + 1;
         const ovJ = Math.min(aj + HALF_W, hij) - Math.max(aj - HALF_W, loj);
         if (ovJ <= 0) continue;
-        const col = stepColumn(baseCol, di, dj);
+        const col = sameFaceStep(baseCol, di, dj);
+        if (col < 0) continue;
         for (let k = kLow; k <= k1; k++) {
           const bid = p.at(col, k);
           if (!IS_SOLID[bid]) continue;
@@ -949,7 +975,8 @@ export class Player {
       for (let dj = -1; dj <= 1; dj++) {
         const cLoJ = baseJ + dj;
         if (Math.min(hiJ, cLoJ + 1) - Math.max(loJ, cLoJ) <= 0) continue;
-        const col = stepColumn(baseCol, di, dj);
+        const col = sameFaceStep(baseCol, di, dj);
+        if (col < 0) continue;
         // One layer below the feet and one above the head: the grown box can
         // reach into either, and being stood on top of a cactus is the case
         // that lives in the layer below.
@@ -989,6 +1016,36 @@ export class Player {
   }
 
   /**
+   * Put the body on top of the ground it just arrived on.
+   *
+   * Crossing a seam re-measures height against the NEW face, and the two faces
+   * do not agree about where the ground is: every border is lifted to a low dry
+   * ridge a couple of blocks over the waterline, so the corner is a lip, and
+   * arriving at the height the crossing computes drops you a block or two
+   * INSIDE it. Collision then shoved the body straight back where it came from,
+   * which is why a seam read as impassable: "damn man I can't cross over faces".
+   *
+   * Measured on the case that failed: leave face 5 standing on ground at layer
+   * 34, arrive on face 1 at 33.4 with the ground there also at 34 - feet and
+   * head both in solid rock.
+   *
+   * Bounded, because this must never become a general climbing aid. Six layers
+   * covers the ridge either side plus the fade; anything deeper than that is
+   * not a seam lip and is left to `_escape` and to gravity.
+   */
+  _standOnArrival() {
+    const c = this.cell;
+    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
+    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
+    const col = cidx(c.f, i, j);
+    for (let n = 0; n < 6; n++) {
+      const k = Math.floor(c.ck);
+      if (!this.planet.solidAt(col, k) && !this.planet.solidAt(col, k + 1)) break;
+      c.ck = k + 1;
+    }
+  }
+
+  /**
    * Push the box out of anything it is inside, along the shallowest axis.
    *
    * The old safety net only ever pushed *upward* by whole layers, so a hair of
@@ -1013,7 +1070,12 @@ export class Player {
         if (_hit.push > 0) { this.grounded = true; this.vel.k = Math.max(0, this.vel.k); }
         else this.vel.k = Math.min(0, this.vel.k);
       }
-      if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) { normalizeCell(c); this._sync(); }
+      if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) {
+        const wasF = c.f;
+        normalizeCell(c);
+        if (c.f !== wasF) this._standOnArrival();
+        this._sync();
+      }
       if (!this._blocked(c.ci, c.cj, c.ck, height)) return true;
     }
     // Eight pushes and still inside: there is no legal position nearby — a gap
@@ -1049,7 +1111,8 @@ export class Player {
       if (Math.min(ci + HALF_W, baseI + di + 1) - Math.max(ci - HALF_W, baseI + di) <= 0) continue;
       for (let dj = -1; dj <= 1; dj++) {
         if (Math.min(cj + HALF_W, baseJ + dj + 1) - Math.max(cj - HALF_W, baseJ + dj) <= 0) continue;
-        const col = stepColumn(baseCol, di, dj);
+        const col = sameFaceStep(baseCol, di, dj);
+        if (col < 0) continue;
         // Only the cell the feet are in and the one under it can hold the floor.
         for (let k = Math.floor(ck + FOOT); k >= Math.floor(ck + FOOT) - 1; k--) {
           const id = p.at(col, k);

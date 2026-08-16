@@ -1303,8 +1303,22 @@ export const DECOR_MARGIN = 6;
 const _dtf = { f: 0, a: 0, b: 0 };
 /** Blocks over which terrain fades out at a face border. See height(). */
 const BORDER_FADE = 8;
-/** How far above the waterline a face border sits, so edges are never sea. */
-const BORDER_LIFT = 2.5;
+/**
+ * How far above the waterline a face border sits, so edges are never sea.
+ *
+ * 2.5 -> 1.0, and the number matters more than it looks: it is EXACTLY how far
+ * you sink when you cross a seam. Height on one face becomes tangential
+ * distance on the next, so arriving over a border ridge puts you the ridge's
+ * own height below the neighbour's ridge - at 2.5 that was two and a half
+ * blocks inside solid rock, collision shoved you back, and the seam read as
+ * impassable.
+ *
+ * 1.0 is the least that still does the job it was added for. Sea level is 208
+ * and a block at layer 33 spans 208 to 209, so a border at 209 is a course of
+ * dry land standing clear of water that stops at 208 - and one block is a step,
+ * which `_standOnArrival` absorbs without the player feeling it.
+ */
+const BORDER_LIFT = 1.0;
 /** Columns of bare ground kept at a face border, so no canopy spans a seam. */
 const TREE_EDGE_MARGIN = 6;
 /** How far inside a face the player must wake up. */

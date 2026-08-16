@@ -883,6 +883,16 @@ const _occFlame = new THREE.Vector3();
 const NEW_WORLD_GRACE = 180;
 
 /**
+ * The longest a falling block may spend in the air.
+ *
+ * A grain over a mineshaft can have forty layers of nothing under it, and
+ * sqrt(2h/g) on that is over a second and a half of a hole nobody can walk
+ * across. Capped, so a long drop lands early rather than leaving the shaft open.
+ */
+const FALL_MAX_SECONDS = 0.55;
+const _fallPos = new THREE.Vector3();
+
+/**
  * The hour the cinderlands are permanently held at.
  *
  * 0.02 rather than 0, so the sky keeps the deep blue a real night has instead
@@ -1956,6 +1966,8 @@ class Game {
      * `_dropUnsupported` already lives by for exactly the same reason.
      */
     this.falling = new Set();
+    /** Runs of gravity blocks in the air, waiting to land. See _settleGravity. */
+    this._settling = [];
     this.fallTimer = 0;
     /** The funnel in flight, or null. Never saved: see the head of Tornado.js. */
     this.tornado = null;
@@ -4855,6 +4867,33 @@ class Game {
    * grain silently declining to fall is the bug this method exists to remove,
    * and it would be indistinguishable from it.
    */
+  /**
+   * Land whatever has finished falling.
+   *
+   * Kept as a flat list with a clock on each entry rather than a queue keyed by
+   * time: a run is a handful of blocks at most and they all land together, so
+   * the sort a priority queue would buy is a sort of one thing.
+   *
+   * The placement goes through `_applyEdits` like every other block change, so
+   * lighting, meshing and the gravity queue all hear about it the ordinary way -
+   * including the case where the ground moved while the block was in the air
+   * and it now has further to go.
+   */
+  _tickSettling(dt) {
+    if (this._settling.length === 0) return;
+    const edits = [];
+    for (let n = this._settling.length - 1; n >= 0; n--) {
+      const e = this._settling[n];
+      e.t -= dt;
+      if (e.t > 0) continue;
+      this._settling.splice(n, 1);
+      // Only into air. Anything that arrived in the meantime - a block placed,
+      // water flowed in - keeps the cell, and the grain is simply gone.
+      if (this.planet.at(e.col, e.k) === 0) edits.push({ col: e.col, k: e.k, id: e.id });
+    }
+    if (edits.length) this._applyEdits(edits);
+  }
+
   _settleGravity() {
     if (this.falling.size === 0) return;
     const edits = [];
@@ -4883,7 +4922,27 @@ class Game {
       const run = [];
       for (let s = k; s <= top; s++) run.push(this.planet.at(col, s));
       for (let s = k; s <= top; s++) edits.push({ col, k: s, id: 0 });
-      for (let n = 0; n < run.length; n++) edits.push({ col, k: dest + n, id: run[n] });
+
+      /**
+       * The run leaves now and arrives later, which is the whole of the
+       * falling animation.
+       *
+       * Both edits used to land on the same frame, so a collapsing dune
+       * blinked from one place to another - the owner: "sand has no falling
+       * animation it just blinks". Emptying the old cells immediately and
+       * filling the new ones after the fall gives the eye something to follow,
+       * and a cube per block is drawn down the shaft in between.
+       *
+       * The gap is real: the blocks genuinely do not exist while they fall, so
+       * you can walk under a collapse. That is what a falling block is.
+       */
+      const drop = k - dest;
+      const secs = Math.min(FALL_MAX_SECONDS, Math.sqrt(2 * drop / GRAVITY));
+      for (let n = 0; n < run.length; n++) {
+        this.planet.centerOf(col, k + n, _fallPos);
+        this.particles.fallingBlock(_fallPos, this.player.up, BLOCKS[run[n]].particle, secs);
+        this._settling.push({ col, k: dest + n, id: run[n], t: secs });
+      }
     }
     // One batch for the whole tick. `_applyEdits` re-seeds the queue from these
     // edits, so whatever the move exposed — a grain above the run, a plant that
@@ -6252,11 +6311,15 @@ class Game {
     // After the water, so a grain that lands in a channel the flow just opened
     // is settled against the world the flow left behind rather than the one it
     // started the tick with.
+    this._safeTick('settling', () => this._tickSettling(dt));
     this._safeTick('gravity', () => {
       this.fallTimer -= dt;
       if (this.fallTimer > 0) return;
       this.fallTimer = GRAVITY_TICK;
       this._settleGravity();
+      // Landing is per frame rather than on the gravity tick's own clock: a
+      // block in the air has to arrive when it arrives, not on the next
+      // multiple of GRAVITY_PERIOD.
     });
     this._safeTick('freeze', () => this._tickFreeze(dt));
     this._safeTick('snowcover', () => this._tickSeasonSnow(dt));

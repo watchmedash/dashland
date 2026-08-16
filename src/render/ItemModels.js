@@ -1524,6 +1524,7 @@ export const BY_NAME = {
   void_shard: 'void_shard',
   cinder: 'cinder',
   coin: 'coin',
+  gold_carrot: 'gold_carrot',
   // The sapling is the only *block* in this table. Everything else here is an
   // item with no cube form because it never was a block; the sapling has a
   // block id but renders as a cross, so `ViewModel` and `Drops` had nothing to

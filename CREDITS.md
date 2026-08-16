@@ -73,29 +73,39 @@ any kind, which is also the reason they exist as models rather than as tiles:
 the block atlas is baked partly from a licensed pack, and nothing about this
 family needed to go near it.
 
-## Cinderling — UNRESOLVED LICENCE, must be settled before release
+## Cinderling, Dread Hare and the Gold Carrot by **Molotov Kittens** — AUTHOR KNOWN, LICENCE UNRESOLVED, must be settled before release
 
-`public/models/monsters/monster-cinderling.glb` is `Dragon-402.glb` from a pack
-supplied as `cute-monsters`, renamed on the way in. It is the only art in this
-repository whose licence is not known.
+Three models in this repository come from the same author, and they are the only
+art here whose licence terms are not known:
 
+- `public/models/monsters/monster-cinderling.glb` — `Dragon-402.glb`, supplied in
+  a folder named `cute-monsters`, renamed on the way in.
+- `public/models/monsters/monster-hare.glb` — `Rabbit-402.glb`, the dread hare.
+- `public/models/gold_carrot.glb` — `Carrot.glb`, the collectible.
+
+**The author is now known and is Molotov Kittens.** That was the first of the
+three remedies the earlier version of this section listed, and it is done. The
+other half of the question is untouched: **the terms are still unknown.** None of
+the three supplied folders — `Rabbit`, `Carrot`, `cute-monsters` — contains a
+`License.txt` or a licence statement of any kind, and none carries a source URL.
 Every other pack listed above arrived with an explicit `License.txt` marking it
-CC0. This one carries no licence file of any kind, no author name and no source
-URL, and it ships its `.blend` and `.blend1` sources alongside the export, which
+CC0. These ship their `.blend` and `.blend1` sources alongside the exports, which
 is the shape of a marketplace asset rather than of a free one. Nothing here is a
-claim that it is unlicensed — it is a statement that we do not know, and that
-nobody has looked it up, because guessing at a licence is worse than recording
-that there is a question.
+claim that they are unlicensed — it is a statement that we do not know, and that
+knowing the author's name is not knowing what he permits.
 
 This matters more than it would in a hobby project. The game ships commercially
-on Steam, the Microsoft Store and mobile, and a store takedown over one 400KB
-model is not a risk worth carrying for one mob. The options, in the order they
-should be tried: find the pack's origin and its terms; replace the model with a
-WAM original, which the toolchain in `wam/` already builds and which is how the
-reef and the raw materials were made; or drop the species. Only the model is at
-stake — the mechanic is entirely ours and lives in `game/Explosion.js` and the
-fuse machinery in `game/Mobs.js`, so a replacement body is a one-line change to
-`SPECIES.cinderling.urls` and nothing else.
+on Steam, the Microsoft Store and mobile, and a store takedown is not a risk
+worth carrying for two mobs and a vegetable. The options, in the order they
+should be tried: find where these were published and under what terms, now that
+there is a name to search for; replace the models with WAM originals, which the
+toolchain in `wam/` already builds and which is how the reef and the raw
+materials were made; or drop what depends on them. Only the models are at stake —
+the mechanics are entirely ours. The cinderling's fuse lives in
+`game/Explosion.js` and `game/Mobs.js`, the hare's leap in `game/Mobs.js`, and
+the carrot is an item id and a drop table line, so a replacement body is a
+one-line change: the model name passed to `monster()` for either mob, or
+`POSE.gold_carrot.file` for the carrot, and nothing else.
 
 ## Doors and fences — supplied, INSPECTED AND NOT USED
 

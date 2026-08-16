@@ -1740,6 +1740,56 @@ const monster = (file, o) => ({
   ...(o.hydro ? { hydro: o.hydro } : null),
   ...(o.cap ? { cap: o.cap, capPolar: o.capPolar ?? o.cap } : null),
 });
+/**
+ * The bosses' own file prefix and clip map.
+ *
+ * A separate set from `MON`, because it is a separate pack: the sixteen come
+ * out of Quaternius' Ultimate Platformer Pack rather than the Cute Animated
+ * Monsters one, and every one of them is on the pack's single fourteen-clip
+ * humanoid rig. So there is one map for all sixteen and no walker/flier split
+ * to make — none of them fly.
+ *
+ * `Run` is a real clip here, which it is not on the monsters' rig, so a boss
+ * that has decided on you visibly changes gait. `Punch` is the swing.
+ */
+const BOSS = (n) => `models/monsters/boss-${n}.glb`;
+const BOSS_CLIPS = {
+  idle: 'Idle', walk: 'Walk', run: 'Run', graze: 'Idle',
+  die: 'Death', attack: 'Punch',
+};
+
+/**
+ * One of the sixteen. See ENDGAME in `Endgame.js` for what spawns them.
+ *
+ * Everything a boss is beyond an ordinary monster is written out here rather
+ * than on the rows, because `monster()` and `pet()` both drop what they are not
+ * told about — the note on `monster` lists the five fields the hare lost that
+ * way. `boss` is the flag every one of those rules keys off:
+ *
+ *   - it is exempt from `_monsterCap` and does not count against it
+ *   - it hunts other mobs, not only the player (see `_bossPrey`)
+ *   - it is never spawned by the ordinary spawner, only by the endgame
+ *   - it is never written into the mob list of a save; the endgame owns it
+ *
+ * `var: 0` on purpose. Every other species is jittered per head so a herd does
+ * not look stamped; there is exactly one of each of these, its size is the
+ * number its stats were derived from, and the jitter is also what would put a
+ * measured height over a whole layer and cost it a block of headroom.
+ */
+const boss = (file, o) => ({
+  ...monster(file, o),
+  urls: [BOSS(file)],
+  clips: BOSS_CLIPS,
+  sizeVar: 0,
+  boss: true,
+  // Which face it belongs to, as data. The endgame reads it to place them and
+  // to know which faces to shut down.
+  bossFace: o.face,
+  // The one exception to "a boss does not touch fish". Only the Deepmaw carries
+  // it, and only the Deepmaw is in the water to use it.
+  ...(o.eatsFish ? { bossEatsFish: true } : null),
+});
+
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
   idle: 'idle', walk: 'walk', run: 'sprint', graze: 'idle',
@@ -2741,6 +2791,155 @@ const SPECIES = {
     // not the four-clip flying one.
     flyAnim: false,
     drops: [],
+  }),
+
+  /**
+   * --- the sixteen, and the end of the game --------------------------------
+   *
+   * Nothing here spawns on its own. Sixty-four gold carrots is the door (see
+   * `Endgame.js`), one of each comes through it, and when the last one is down
+   * the planet is finished. They never respawn and neither does anything they
+   * kill.
+   *
+   * ---- where the numbers come from -----------------------------------------
+   *
+   * Measured, not chosen. Every model in the Big set is on the same rig at the
+   * same authored scale, so their rest-pose heights are directly comparable:
+   * 3.256 for the frog up to 4.565 for the cactoro, in the pack's own units.
+   * That range is mapped onto a drawn height of 3.2 to 4.4 cells, and hp,
+   * damage, reach, swing, speed, turn and acceleration are all read off the
+   * same position in it. So the table below is one line of arithmetic per
+   * column rather than sixteen opinions, and a boss that looks bigger IS
+   * bigger, hits harder and turns slower, without anything having to be
+   * remembered.
+   *
+   * 4.4 is the ceiling for the reason the giraffe's 3.9 is: `modelExtents`
+   * rounds the drawn height up into `tall`, the headroom a body needs to walk,
+   * and the tallest of these already costs four clear cells. Five would wall
+   * them out of the ground they are standing on.
+   *
+   * Read against the roster they have to tower over: the dragon is the top of
+   * the ordinary table at hp 34 and dmg 9, and the cyclops is the tallest
+   * walker at 2.6. The smallest boss here is hp 50, dmg 10 and 3.2 tall.
+   * Nothing about which one you are looking at should ever be a question.
+   *
+   * hp is authored pre-`HOSTILE_HP`, exactly as every monster above is, so the
+   * bar a player actually meets is 1.5x these: 75 to 135. Against the top sword
+   * at 10.74 that is seven to thirteen swings, which is a fight. Twice that
+   * would be a wall of numbers with a health bar, and the whole reason the
+   * damage is up here with the size is so the pressure comes from the swing
+   * rather than from the length.
+   */
+  boss_frog: boss('frog', {
+    label: 'Croakmaw', face: FACE_POLAR,
+    h: 3.20, hp: 50, spd: 1.45, shy: 0, turn: 2.80, accel: 7.00,
+    dmg: 10, reach: 1.80, swing: 1.40, aggro: 22,
+    drops: [['hide', 1, 2], ['emerald', 1, 1]],
+  }),
+  boss_yeti: boss('yeti', {
+    label: 'Hoarfang', face: FACE_POLAR,
+    h: 3.34, hp: 55, spd: 1.41, shy: 0, turn: 2.73, accel: 6.82,
+    dmg: 11, reach: 1.92, swing: 1.46, aggro: 23,
+    drops: [['hide', 1, 2], ['sapphire', 1, 1]],
+  }),
+  boss_bluedemon: boss('bluedemon', {
+    label: 'Wraithflame', face: FACE_CINDER,
+    h: 3.37, hp: 56, spd: 1.40, shy: 0, turn: 2.71, accel: 6.78,
+    dmg: 11, reach: 1.94, swing: 1.47, aggro: 23,
+    drops: [['cinder', 1, 2], ['amethyst', 1, 1]],
+  }),
+  boss_monkroose: boss('monkroose', {
+    label: 'Bramblehorn', face: FACE_POLAR,
+    h: 3.57, hp: 62, spd: 1.34, shy: 0, turn: 2.61, accel: 6.53,
+    dmg: 12, reach: 2.11, swing: 1.56, aggro: 24,
+    drops: [['hide', 1, 2], ['meat', 1, 2], ['emerald', 1, 1]],
+  }),
+  boss_demon: boss('demon', {
+    label: 'Ashlord', face: FACE_CINDER,
+    h: 3.59, hp: 63, spd: 1.33, shy: 0, turn: 2.60, accel: 6.51,
+    dmg: 12, reach: 2.13, swing: 1.56, aggro: 25,
+    drops: [['cinder', 1, 2], ['ruby', 1, 1]],
+  }),
+  boss_orc: boss('orc', {
+    label: 'Slagbrute', face: FACE_CINDER,
+    h: 3.70, hp: 67, spd: 1.30, shy: 0, turn: 2.55, accel: 6.37,
+    dmg: 12, reach: 2.22, swing: 1.61, aggro: 25,
+    drops: [['iron_ingot', 1, 2], ['ruby', 1, 1]],
+  }),
+  boss_dino: boss('dino', {
+    label: 'Magmaw', face: FACE_CINDER,
+    h: 3.73, hp: 68, spd: 1.30, shy: 0, turn: 2.54, accel: 6.34,
+    dmg: 12, reach: 2.24, swing: 1.62, aggro: 26,
+    drops: [['hide', 1, 2], ['cinder', 1, 2], ['ruby', 1, 1]],
+  }),
+  boss_ninja: boss('ninja', {
+    label: 'Palecowl', face: FACE_POLAR,
+    h: 3.78, hp: 69, spd: 1.28, shy: 0, turn: 2.51, accel: 6.28,
+    dmg: 12, reach: 2.28, swing: 1.64, aggro: 26,
+    drops: [['flint', 1, 2], ['silver_ingot', 1, 1]],
+  }),
+  boss_orc_skull: boss('orc_skull', {
+    label: 'Bonehelm', face: FACE_CINDER,
+    h: 3.79, hp: 70, spd: 1.28, shy: 0, turn: 2.51, accel: 6.27,
+    dmg: 12, reach: 2.29, swing: 1.64, aggro: 26,
+    drops: [['flint', 1, 2], ['sulfur', 1, 2], ['ruby', 1, 1]],
+  }),
+  boss_bunny: boss('bunny', {
+    label: 'Thumpjaw', face: FACE_POLAR,
+    h: 3.79, hp: 70, spd: 1.28, shy: 0, turn: 2.50, accel: 6.26,
+    dmg: 12, reach: 2.29, swing: 1.65, aggro: 26,
+    drops: [['hide', 1, 2], ['meat', 1, 2], ['sapphire', 1, 1]],
+  }),
+  boss_alien: boss('alien', {
+    label: 'Voidspawn', face: FACE_CINDER,
+    h: 3.91, hp: 74, spd: 1.24, shy: 0, turn: 2.44, accel: 6.11,
+    dmg: 13, reach: 2.39, swing: 1.70, aggro: 27,
+    drops: [['crystal', 1, 2], ['void_shard', 1, 1]],
+  }),
+  boss_birb: boss('birb', {
+    label: 'Rimewing', face: FACE_POLAR,
+    // It has wings and it does not use them. `flies` puts a body on the flier
+    // budget, the hover clamp and the flying steering, and this rig has no
+    // Flying clip at all - it would glide at you in its rest pose. A bird that
+    // walks is the same decision the ghost already carries.
+    h: 4.03, hp: 78, spd: 1.21, shy: 0, turn: 2.38, accel: 5.96,
+    dmg: 13, reach: 2.50, swing: 1.75, aggro: 28,
+    drops: [['feather', 1, 2], ['poultry', 1, 2], ['sapphire', 1, 1]],
+  }),
+  boss_mushroomking: boss('mushroomking', {
+    label: 'Blightcrown', face: FACE_POLAR,
+    h: 4.08, hp: 79, spd: 1.19, shy: 0, turn: 2.36, accel: 5.90,
+    dmg: 14, reach: 2.53, swing: 1.77, aggro: 28,
+    drops: [['mushroom', 1, 2], ['emerald', 1, 1], ['void_shard', 1, 1]],
+  }),
+  boss_tribal: boss('tribal', {
+    label: 'Ashchief', face: FACE_CINDER,
+    h: 4.24, hp: 85, spd: 1.15, shy: 0, turn: 2.28, accel: 5.70,
+    dmg: 14, reach: 2.67, swing: 1.83, aggro: 29,
+    drops: [['gold_ingot', 1, 2], ['cinder', 1, 2], ['ruby', 1, 1]],
+  }),
+  /**
+   * The one in the water.
+   *
+   * `aquatic` rather than a fish dropped on an ice sheet, and it decides three
+   * things at once: where the endgame is allowed to put it (a column whose
+   * worldgen height is under sea level), that the floor clamp holds its body
+   * off the bed by `belly` like every other swimmer, and that the only things
+   * it can reach are the ones in the water with it. Which is the whole of the
+   * fish exception below - a boss does not touch fish, and this one lives on
+   * them.
+   */
+  boss_fish: boss('fish', {
+    label: 'Deepmaw', face: FACE_POLAR, aquatic: true, eatsFish: true,
+    h: 4.38, hp: 89, spd: 1.11, shy: 0, turn: 2.21, accel: 5.52,
+    dmg: 15, reach: 2.78, swing: 1.89, aggro: 30,
+    drops: [['fish', 1, 2], ['pearl', 1, 2], ['sapphire', 1, 1]],
+  }),
+  boss_cactoro: boss('cactoro', {
+    label: 'Emberthorn', face: FACE_CINDER,
+    h: 4.40, hp: 90, spd: 1.10, shy: 0, turn: 2.20, accel: 5.50,
+    dmg: 15, reach: 2.80, swing: 1.90, aggro: 30,
+    drops: [['cactus', 1, 2], ['emerald', 1, 1], ['ruby', 1, 1]],
   }),
 
   /**
@@ -4486,7 +4685,11 @@ export class Mobs {
 
   spawn(type, col, k, seed) {
     const spec = SPECIES[type];
-    if (!spec || this.list.length >= MAX_MOBS) return null;
+    // A boss is never refused for want of a slot. There are sixteen of them in
+    // the whole life of a world, they are the point of it, and a body that
+    // failed to appear because a shoal was in the way would be a boss the
+    // player is asked to kill and can never find.
+    if (!spec || (this.list.length >= MAX_MOBS && !spec.boss)) return null;
     const { f, i, j } = colParts(col);
 
     const s = (seed === undefined || seed === null) ? ((Math.random() * 0x7fffffff) | 0) : (seed | 0);
@@ -4958,7 +5161,11 @@ export class Mobs {
   /** How many monsters are abroad, counted rather than tracked. */
   _countMonsters() {
     let n = 0;
-    for (const m of this.list) if (m.spec.monster) n++;
+    // Bosses carry `monster` and are not part of this budget. Sixteen of them
+    // against a cap of thirteen would refuse the roster its own creatures, and
+    // an endgame face full of husks the spawner could not replace is the exact
+    // opposite of what the shutdown is for.
+    for (const m of this.list) if (m.spec.monster && !m.spec.boss) n++;
     return n;
   }
 
@@ -11681,7 +11888,15 @@ export class Mobs {
       // refills within one SPAWN_PERIOD of a load that lands after dark. It
       // also means the save file cannot accumulate anything about a mechanic
       // whose whole definition is that it does not survive the morning.
-      mobs: this.list.filter((m) => !m.spec.phantom && !m.spec.nightOnly).map((m) => {
+      // Nor is a boss, and that is a third argument again: a boss exists on its
+      // own face whether or not the player is standing on it, so the mob list -
+      // which is only ever what is inside the despawn ring - is structurally
+      // unable to hold one. `Endgame.js` keeps all sixteen, alive or dead, with
+      // the health they were last seen at, and re-materialises one when the
+      // player walks back into range. Writing a boss here as well would restore
+      // a second copy of it.
+      mobs: this.list.filter((m) => !m.spec.phantom && !m.spec.nightOnly && !m.spec.boss)
+        .map((m) => {
         const d = {
           t: m.type, c: [m.cell.f, m.cell.ci, m.cell.cj, m.cell.ck], h: m.health, s: m.seed,
           b: +m.baby.toFixed(1), l: +m.love.toFixed(1), d: +m.breedCooldown.toFixed(1),

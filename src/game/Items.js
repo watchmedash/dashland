@@ -1215,6 +1215,28 @@ for (const fam of Object.values(FAMILY_DISHES)) {
   });
 }
 
+/**
+ * The Gold Carrot — a collectible, and deliberately nothing else.
+ *
+ * Appended here, at the very end, for the reason the bow, the honeycomb, the
+ * lava bucket and the fifteen fish all give at length: ids are save state. The
+ * block loop at the top of this file runs before `MATERIALS`, the tool ladder
+ * and the armour ladder, so anything that lands in the middle of the array
+ * renumbers every tool, every ingot and every fish in every existing save. An
+ * item on the end costs nothing; a block on the end would have cost all of it.
+ *
+ * No `food`, no `seed`, no `crop`, no recipe and no shelf in the shop. It is a
+ * thing a dread hare carries and a thing you count, and every one of those
+ * properties is a system that would start treating it as something else — the
+ * larder stocks anything with `food`, and a carrot that could be eaten is a
+ * carrot that can be eaten by mistake when you are sixty-three of the way to
+ * whatever you were collecting them for.
+ */
+add({
+  name: 'gold_carrot', label: 'Gold Carrot',
+  color: '#d9791c', shine: '#f2b356',
+});
+
 /** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
 export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);
 

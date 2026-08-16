@@ -82,6 +82,12 @@ const PACKS = {
   // 0.296, wider than it is tall, and fitting its *height* to one would arrive
   // 1.14 cells across and grow through the wall beside it. See `bench` in POSE.
   survival: { atlas: 'survival/Textures/colormap.png', tint: false, nearest: true, ext: 'glb', fitMax: true },
+  // The one collectible, and treated exactly as the fish pack is: GLB, no
+  // atlas, no UVs worth keeping, and its two colours (root and leaf) living on
+  // `baseColorFactor` rather than on a texture. `bakeColor` moves them onto the
+  // vertices so the merged result is still one geometry and one material.
+  // Smooth normals like the fish and unlike WAM — the model ships real ones.
+  quest:    { atlas: null, tint: false, bakeColor: true, ext: 'glb' },
 };
 const BLANK =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII=';
@@ -735,6 +741,12 @@ export const POSE = {
   // rather than at a handle, so it turns in the fist instead of orbiting it.
   apple:  { file: 'applered01', pack: 'produce', height: 0.24, grip: 0.5, rot: [0.10, -0.50, 0.10], pos: [0.017, 0.104, -0.052] },
   roast:  { file: 'pumpkin01',  pack: 'produce', height: 0.28, grip: 0.5, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
+
+  // The collectible. Authored upright with the root at the bottom and the tuft
+  // on top, so `height` fits the long axis without `fitMax` and `grip` reads
+  // straight: 0.45 is the top of the root, where a hand actually closes on a
+  // carrot, and the leaves fall over the fist.
+  gold_carrot: { file: 'gold_carrot', pack: 'quest', height: 0.30, grip: 0.45, rot: [0.06, -0.50, 0.24], pos: [0.008, 0.05, -0.016], icon: [0.10, 0.42, -0.18] },
 
   // --- Kenney food kit ------------------------------------------------------
   //

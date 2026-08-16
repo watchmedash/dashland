@@ -1118,12 +1118,24 @@ const STALKER_DAY_CHANCE = 0.0004;
 /** Seconds after a sighting before the planet may roll for another. */
 const STALKER_REST = 300;
 /**
- * The band he may be placed in, in world units. The near edge is more than
- * twice SPAWN_MIN_DIST on purpose — "we might see him from afar" is the whole
- * brief, and a figure that resolves into a face is a mob rather than a rumour.
+ * The band he may be placed in, in world units.
+ *
+ * 46-92 -> 24-52, and the reason is measured rather than a taste change. A
+ * figure 1.5 tall standing 46 to 92 units off is BELOW the terrain noise: the
+ * sightline from an eye at 1.7 to a head at 1.5 grazes the ground for its whole
+ * length, and any rise in between stops it. Line-of-sight passed 4.5% of
+ * candidates in that band against 11.8% at 20-45 and 24.1% at 14-32.
+ *
+ * That one number is most of why the owner had never seen him once. It is not
+ * the roll and it is not the cap: the placement simply could not find anywhere
+ * he would be visible from.
+ *
+ * 24 still reads as distance - a body is 1.8 tall, so he is a silhouette at
+ * fourteen times his own height and nowhere near resolving into a face, which
+ * is what "we might see him from afar" was protecting.
  */
-const STALKER_NEAR = 46;
-const STALKER_FAR = 92;
+const STALKER_NEAR = 24;
+const STALKER_FAR = 52;
 const STALKER_STEPS_MIN = stepsFor(STALKER_NEAR);
 const STALKER_STEPS_SPAN = Math.max(1, stepsFor(STALKER_FAR) - STALKER_STEPS_MIN);
 /**
@@ -4148,20 +4160,26 @@ export class Mobs {
    *
    * Holding a heading covers ground linearly. Same measurement, median 28.
    */
+  /**
+   * A column `steps` away, in a straight line on a random bearing.
+   *
+   * This used to be a drunkard's walk that veered ninety degrees at 6% a step,
+   * and the trouble with that is `steps` stops meaning distance: an L-shaped
+   * path covers far less ground than its length, and one that turns twice can
+   * come back on itself. Measured against the stalker's 46-92 unit band, the
+   * walk produced a median of 38.5 and a MINIMUM of 1 - two thirds of every
+   * candidate was thrown out on distance before any of the interesting tests
+   * ran, which is most of why he was never seen.
+   *
+   * `walkColumns` goes straight and turns only at a seam, so the distance is
+   * the number asked for. Variety comes from the bearing, which is what it
+   * should have come from all along.
+   */
   _walkOut(nearCol, steps) {
-    let col = nearCol;
-    let dir = (Math.random() * 4) | 0;
-    for (let s = 0; s < steps; s++) {
-      // Veer square, never reverse: colNeighbor's 0/1 are the two ways along i
-      // and 2/3 the two along j, so turning means swapping which pair the
-      // direction is drawn from. Adding one would just walk back.
-      if (Math.random() < 0.06) {
-        dir = dir < 2 ? 2 + ((Math.random() * 2) | 0) : ((Math.random() * 2) | 0);
-      }
-      col = colNeighbor(col, dir);
-    }
-    return col;
+    const a = Math.random() * TAU;
+    return walkColumns(nearCol, Math.round(Math.cos(a) * steps), Math.round(Math.sin(a) * steps));
   }
+
 
   /**
    * Go `units` of world distance from `nearCol` on a random bearing.
@@ -5443,16 +5461,42 @@ export class Mobs {
    * repeated rather than shared, because a parameter that inverts the meaning
    * of a function is how one function becomes two functions in a trench coat.
    */
+  /**
+   * The first ground a body could stand on, looking down from the canopy.
+   *
+   * `surfaceK` answers "topmost thing that is not air or liquid", and under a
+   * tree that is a LEAF. Every candidate in a wood was therefore thrown out for
+   * standing on leaves - measured, 72% of the stalker's candidates died here
+   * and the four commonest rejects were oak leaves, pine leaves, tall grass and
+   * birch leaves. He could only ever appear on bare open ground, which is the
+   * one place a figure watching you would not be.
+   *
+   * Bounded, so this is a peek through a canopy rather than a shaft-sinking
+   * search: past a dozen layers of foliage there is no ground worth standing on
+   * under it anyway.
+   */
+  _standableK(col) {
+    let k = this.planet.surfaceK(col);
+    for (let n = 0; n < 12 && k > 0; n++) {
+      if (SPAWNABLE_GROUND.has(this.planet.at(col, k))) return k;
+      k--;
+    }
+    return -1;
+  }
+
   _findStalkerSpot(nearCol, playerPos) {
     const p = this.planet;
     if (!this.camera) return null;
-    for (let tries = 0; tries < 24; tries++) {
+    // Sixty rather than twenty-four. Each try is a walk and a handful of tests,
+    // and the pass rate per candidate is around one in seventy - at 24 tries a
+    // call succeeded about 4% of the time, which multiplied against an already
+    // rare roll into a sighting every few hours of darkness.
+    for (let tries = 0; tries < 60; tries++) {
       const steps = STALKER_STEPS_MIN + Math.floor(Math.random() * STALKER_STEPS_SPAN);
       const col = this._walkOut(nearCol, steps);
-      const k = p.surfaceK(col);
+      // Under the canopy, not on top of it. See `_standableK`.
+      const k = this._standableK(col);
       if (k < 0 || k > D - 6) continue;
-      const surf = p.at(col, k);
-      if (!SPAWNABLE_GROUND.has(surf)) continue;
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
       // A hearth is a place the player has made safe. Whatever else he is, he
@@ -5478,7 +5522,13 @@ export class Mobs {
       const ax = Math.abs(_ndc.x);
       if (ax < STALKER_EDGE_MIN || ax > STALKER_EDGE_MAX) continue;
       if (Math.abs(_ndc.y) > 0.75 || _ndc.z > 1) continue;
-      if (!this._lineOfSight(cam.position, _eye)) continue;
+      // From the EYE, not the camera. In third person the camera sits behind
+      // and above the body and is frequently inside the hillside it has backed
+      // into, so the sight test asked "can a point buried in rock see him" and
+      // answered no essentially always - measured, every candidate that passed
+      // the frustum tests then failed this one. The eye is the honest question
+      // anyway: whether the PLAYER can see him.
+      if (!this._lineOfSight(this.playerEye || cam.position, _eye)) continue;
       return { col, k };
     }
     return null;
@@ -9242,6 +9292,8 @@ export class Mobs {
     // Is the sun up where the player is standing? On a planet this is local,
     // not global — the far side is in night at the same moment.
     this.daylight = sky ? sky.sunDir.dot(player.up) : 1;
+    // The point the stalker's sighting test looks from. See `_findStalkerSpot`.
+    this.playerEye = player.eye;
     // The cinderlands are permanent night, and everything that keys off the
     // hour has to agree with the sky about that: husks spawn, monsters prowl,
     // and nothing there burns at dawn because dawn does not come.

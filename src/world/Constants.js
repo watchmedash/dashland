@@ -343,9 +343,14 @@ export const FACE_ROLE = [
  * velocity. Doubling the impulse instead would have quadrupled the height.
  */
 export const FACE_PHYSICS = [
-  { speed: 1, jump: 1, staminaDrain: 1 },
-  { speed: 1 / 1.5, jump: 1, staminaDrain: 1 / 1.5 },
-  { speed: 1, jump: 2, staminaDrain: 1.5 },
+  { speed: 1, jump: 1, staminaDrain: 1, fog: 1 },
+  // The cap gets weather as well as physics: a snowfield is a whiteout, and it
+  // is the one place where not being able to see far is the character of the
+  // ground rather than a limitation of it.
+  { speed: 1 / 1.5, jump: 1, staminaDrain: 1 / 1.5, fog: 2.1 },
+  // The cinderlands are hazier than ordinary air but not blinding - heat and
+  // ash, and you need to see the lava coming.
+  { speed: 1, jump: 2, staminaDrain: 1.5, fog: 1.35 },
 ];
 
 /** grass tint, foliage tint, water tint */

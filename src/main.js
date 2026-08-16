@@ -70,7 +70,7 @@ import {
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns, regionOfCol,
-  BIOME, FACE_ROLE, FACE_CINDER,
+  BIOME, FACE_ROLE, FACE_CINDER, FACE_POLAR, FACE_PHYSICS,
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
@@ -6609,7 +6609,18 @@ class Game {
     // is not, which is every frame of bobbing at the surface. Reading the
     // colour off `inSink` alone would flicker it to grey on those frames.
     if (id) this._buriedColor = BLOCKS[id].particle;
-    this._buried += ((p.headInSink ? 0.9 : 0) - this._buried) * Math.min(1, 9 * dt);
+    // 0.9 -> 1. Nine tenths of an overlay is a tenth of a window, and what you
+    // could see through it was the inside of the planet with its ore in place:
+    // "sinking in quicksand makes us see through the planet which might reveal
+    // ore placements". Being buried means seeing the stuff you are buried in,
+    // which is what the block's own particle colour already is. Powder snow
+    // rides the same path, being a sink block, so it is covered too.
+    //
+    // Faster in than out, so the cover closes as the head goes under rather
+    // than fading in behind it, and still eases on the way out.
+    const wantBuried = p.headInSink ? 1 : 0;
+    const rate = wantBuried > this._buried ? 16 : 9;
+    this._buried += (wantBuried - this._buried) * Math.min(1, rate * dt);
   }
 
   /**
@@ -7333,6 +7344,13 @@ class Game {
       const dj = Math.round((Math.random() * 2 - 1) * SNOW_RADIUS);
       const col = stepColumn(base, di, dj);
       if (col < 0 || !this.planet.liveCol(col)) continue;
+      // The cap is frozen, permanently and by definition - it is a snowfield,
+      // not a place that happens to be cold this month. The season has no
+      // memory of worldgen's own snow, so a thaw there had to guess what was
+      // underneath and guessed dirt, which quietly turned the ice cap brown a
+      // patch at a time. The owner: "snow blocks shouldn't change to dirt
+      // blocks on snow face". Nothing seasonal touches that face at all.
+      if (FACE_ROLE[(col / (F * F)) | 0] === FACE_POLAR) continue;
       const k = this._seasonGroundK(col);
       if (k < 0) continue;
       const cur = this.planet.at(col, k);
@@ -10987,7 +11005,12 @@ class Game {
       .lerp(p.fog, 1 - w.sun)
       .lerp(MOON_REFLECT, n2);
     voxelUniforms.uFogColor.value.copy(p.fog);
-    voxelUniforms.uFogDensity.value = this.player.headInWater ? 0 : 0.0013 * Math.min(1.9, w.fog);
+    // Weather, then the ground you are standing on. See FACE_PHYSICS.fog: the
+    // cap is a whiteout because a snowfield is one, and the cinderlands are
+    // hazy with heat without being blinding.
+    const faceFog = (FACE_PHYSICS[FACE_ROLE[this.player.cell.f]] || FACE_PHYSICS[0]).fog;
+    voxelUniforms.uFogDensity.value = this.player.headInWater
+      ? 0 : 0.0013 * Math.min(1.9, w.fog) * faceFog;
     voxelUniforms.uCamPos.value.copy(this.camera.position);
     voxelUniforms.uUnderwater.value = this.player.headInWater ? 1 : 0;
     if (this.player.headInWater) {

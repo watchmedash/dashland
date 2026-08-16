@@ -145,10 +145,14 @@ const GradeShader = {
       // fill edge to edge reads as the renderer having died.
       if (uBuried.w > 0.001) {
         // Strongest at the middle, where the stuff is pressed against the lens,
-        // and it never quite reaches 1: a hint of the world stays visible at
-        // the rim, which is what tells the player they are looking at something
-        // rather than at nothing.
-        float pack = uBuried.w * (1.0 - 0.22 * smoothstep(0.02, 0.25, r2));
+        // and only slightly thinner at the rim so the picture keeps a shape.
+        //
+        // The rim used to keep 22% of the world, and that was a window: what
+        // showed through it was the inside of the planet with its ore veins
+        // sitting in the rock, because a body under the surface is inside the
+        // geometry and the far walls are back-faces. 6% keeps the "you are
+        // looking at something" cue without being see-through.
+        float pack = uBuried.w * (1.0 - 0.06 * smoothstep(0.02, 0.25, r2));
         col = mix(col, uBuried.rgb, pack);
       }
 

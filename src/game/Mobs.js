@@ -23,7 +23,7 @@ import {
 } from '../world/Sphere.js';
 import {
   ID, IS_SHAPED, IS_LEAF, IS_TREE, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
-  isPassable, CONTACT_HURT,
+  isPassable, CONTACT_HURT, SINK,
 } from '../world/Blocks.js';
 import { SKY_ATTEN } from '../world/Lighting.js';
 import { itemIdOf } from './Items.js';
@@ -451,6 +451,11 @@ const MAX_MONSTERS_HOSTILE_FACE = 24;
  * fought at the same time and a third will not compound on top of them.
  */
 const SLIME_CAP = 12;
+
+/** Seconds a body flounders in a sink block before it starts to lose. */
+const SINK_MOB_GRACE = 1.6;
+/** Health a second once it is under. A husk in a drift is a dead husk. */
+const SINK_MOB_DPS = 2.2;
 
 /**
  * How often a monster spawn is tried, per spawn tick.
@@ -10165,6 +10170,40 @@ export class Mobs {
         }
         mob.vel.k -= GRAVITY * dt;
       }
+
+      /**
+       * Quicksand and powder snow take animals too.
+       *
+       * They were the player's hazards alone, which made a pool of quicksand a
+       * thing the herd walked over and a drift of powder snow a thing a husk
+       * chased you across. The owner: "powdered snow and quicksand should also
+       * work against mobs/monsters/animals except for fishes".
+       *
+       * Deliberately simpler than the player's version. A body has no Space
+       * key to struggle with and no stillness to hold, so it gets the two
+       * things that matter and nothing else: it wades at a fraction of its
+       * speed, and it goes down. What kills it is being under - the same
+       * drowning clock the water already runs - rather than a second rule.
+       *
+       * Fish are exempt because a seabed pool is still the sea to them, and
+       * anything already swimming is left alone for the same reason.
+       */
+      const sinkId = SINK[this.planet.at(this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj),
+        Math.floor(mob.cell.ck))];
+      if (sinkId > 0 && !mob.spec.aquatic && !mob.swimming) {
+        mob.vel.k = Math.min(mob.vel.k, -sinkId);
+        mob.sinkT = (mob.sinkT || 0) + dt;
+        // Under the surface of it, and losing. The test is whether there is
+        // MORE of the stuff overhead, not whether the cell above is solid: a
+        // sink block is deliberately not solid - that is what lets a body fall
+        // into it - so `solidAt` was false every time and nothing ever drowned.
+        // Slow enough that a body can still wade out of a shallow patch.
+        const above = SINK[this.planet.at(
+          this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj), Math.floor(mob.cell.ck) + 1)];
+        if (mob.sinkT > SINK_MOB_GRACE && above > 0) {
+          if (this._damage(mob, SINK_MOB_DPS * dt)) continue;
+        }
+      } else if (mob.sinkT) mob.sinkT = 0;
 
       // One step per frame, no substepping, and the footprint test below checks
       // the destination rather than sweeping the line to it — so the step has to

@@ -559,6 +559,13 @@ export class Planet {
    *
    * Cross plants (tall grass, flowers, wheat) are the one block that is *not*
    * treated as a full cell: see `CROSS_HALF` below.
+   *
+   * `opts.face` gates the cast to one cube face: a block owned by any other
+   * face stops the ray dead and reports no hit, so it can be seen but never
+   * mined, built on, used or fished. The fold already hands back the owning
+   * face - the same Chebyshev rule `cellWrite` uses - so there is no second
+   * notion of who a cell belongs to. Casts that only want to look (the
+   * crosshair name, the camera) leave it off.
    * @returns {{col,k,prevCol,prevK,id,dist,point:THREE.Vector3,normal:THREE.Vector3}|null}
    */
   raycast(origin, dir, maxDist = 6, opts = {}) {
@@ -567,6 +574,7 @@ export class Planet {
     let curCol = -1, curK = -1;
     let curCross = false;
     const hitLiquid = !!opts.hitLiquid;
+    const gate = opts.face ?? -1;
 
     for (let t = 0; t <= maxDist; t += step) {
       const x = origin.x + dir.x * t, y = origin.y + dir.y * t, z = origin.z + dir.z * t;
@@ -591,6 +599,9 @@ export class Planet {
       if (id === 0) continue;
       if (RENDER_TYPE[id] === R_LIQUID && !hitLiquid) continue;
       if (curCross && !insideCross(id, c, i, j)) continue;
+      // Another face's block: no hit, and nothing behind it either, or you
+      // could mine straight through the border.
+      if (gate >= 0 && c.f !== gate) return null;
 
       const point = new THREE.Vector3(x, y, z);
       const normal = new THREE.Vector3();

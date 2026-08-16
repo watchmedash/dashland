@@ -9558,7 +9558,13 @@ class Game {
   }
 
   _interact(dt, input) {
-    const hit = this.planet.raycast(this.player.eye, this.player.lookDir, this.player.reach);
+    // Gated to the face the player is standing on: everything downstream of
+    // this one cast - mining, placing, tilling, planting, the highlight box -
+    // inherits "another face's blocks are scenery" from here.
+    const hit = this.planet.raycast(
+      this.player.eye, this.player.lookDir, this.player.reach,
+      { face: this.player.cell.f },
+    );
     // Handed to `_tickBow`, which runs before this method and needs the same
     // answer to decide whether a shovel in the main hand has talked the offhand
     // bow out of the click. See the note there about why it does not cast again.
@@ -10164,6 +10170,9 @@ class Game {
       if (p.distanceTo(from) > FISH_CAST_RANGE) return null;
       const cell = this.planet.cellAt(p.x, p.y, p.z);
       if (!cell) return null;
+      // The arc crossed onto another face. Its blocks are scenery, so the
+      // water over there is not a target either and the throw simply fails.
+      if (cell.f !== this.player.cell.f) return null;
       const id = this.planet.at(cell.col, cell.k);
       if (id === ID.water) return cell;
       if (id === ID.lava || IS_SOLID[id]) return null;
@@ -10870,7 +10879,8 @@ class Game {
     const FILLED = { water: 'water_bucket', lava: 'lava_bucket' };
     // A ray that stops on liquid, which the normal interaction ray does not.
     const wet = this.planet.raycast(
-      this.player.eye, this.player.lookDir, this.player.reach, { hitLiquid: true },
+      this.player.eye, this.player.lookDir, this.player.reach,
+      { hitLiquid: true, face: this.player.cell.f },
     );
 
     if (empty) {

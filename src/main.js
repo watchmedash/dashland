@@ -5454,6 +5454,10 @@ class Game {
     const col = replacing ? hit.col : hit.prevCol;
     const k = replacing ? hit.k : hit.prevK;
     if (k < 0 || k >= D) return false;
+    // The aimed block is already known to be this face's - the cast saw to
+    // that - but the cell in front of it can still be over the border when you
+    // build along a seam, and that cell is not yours to fill.
+    if (((col / (F * F)) | 0) !== this.player.cell.f) return false;
     const existing = this.planet.at(col, k);
     if (existing !== 0 && RENDER_TYPE[existing] !== R_LIQUID && RENDER_TYPE[existing] !== R_CROSS) return false;
     // A liquid cell counts as free space above — which is right for a wall, and
@@ -10926,6 +10930,9 @@ class Game {
     if (pouring === undefined) return false;
     const target = wet && wet.prevCol >= 0 ? { col: wet.prevCol, k: wet.prevK } : null;
     if (!target) return false;
+    // Same border rule as placing a block: the cell in front of the aimed one
+    // can be over the seam, and a pail does not reach across it.
+    if (((target.col / (F * F)) | 0) !== this.player.cell.f) return false;
     // Air, or something the liquid would destroy anyway. It used to be air
     // alone, and the mismatch was visible in a single tuft of grass: the flow
     // sim washes every non-submerged cross plant and every torch out of its way

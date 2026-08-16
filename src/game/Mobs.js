@@ -404,6 +404,16 @@ const MAX_HOSTILE_SAVAGE = 14;
  * The roll is per spawn tick, the same tick the wildlife top-up runs on.
  */
 const MAX_MONSTERS = 3;
+
+/**
+ * How many magma slimes of any size may be abroad at once.
+ *
+ * Separate from MAX_MONSTERS because a split is a replacement, not a new
+ * arrival, and at a monster cap of three the creature could never split at all.
+ * Twelve is a little under two full chains (7 each), so two big ones can be
+ * fought at the same time and a third will not compound on top of them.
+ */
+const SLIME_CAP = 12;
 const MONSTER_CHANCE = 0.05;
 const MAX_HOSTILE_CAVE = 4;
 /**
@@ -1624,6 +1634,13 @@ const monster = (file, o) => ({
   // row, which is what `_hunt` tests: no `blast`, no arming branch, and the
   // swing it has always taken.
   ...(o.blast ? { blast: o.blast } : null),
+  // A fixed recolour of the pack model, for the species that are the same body
+  // wearing a different creature. Same reason as `glow` above: this builder
+  // drops what it does not name.
+  ...(o.tint ? { tint: o.tint } : null),
+  // What two of come out of the corpse. See `_split`.
+  ...(o.splitsInto ? { splitsInto: o.splitsInto } : null),
+  ...(o.slime ? { slime: true } : null),
 });
 /** Clip names shipped by the Blocky Characters rig — no eat, but it can fight. */
 const CHAR_CLIPS = {
@@ -2417,6 +2434,62 @@ const SPECIES = {
     glow: 0.10,
     drops: [['sulfur', 1, 2], ['cinder', 1, 1]],
   }),
+  /**
+   * The magma slimes, and the one thing in the game that gets worse when you
+   * hit it.
+   *
+   * Three species rather than one with a size field. The rig's scale is derived
+   * from the authored height at spawn, so a tier IS a species as far as
+   * everything downstream is concerned - health, damage, drops, the model - and
+   * writing it as three rows keeps `splitsInto` a plain name instead of a
+   * parallel size system nothing else understands.
+   *
+   * Killing one is not the end of it: `splitsInto` names what two of come out
+   * of the corpse, so a big one is three fights and a small one is the only
+   * kind that actually dies. The payout is on the small tier alone, which is
+   * what stops a big one being farmed for triple drops.
+   *
+   * Art is the pack's mushroom body, which is the only blob in it, tinted
+   * molten. A dedicated model is worth doing later; the shape reads as a slime
+   * at the sizes these are drawn at.
+   */
+  magma_slime: monster('mushroom', {
+    label: 'Magma Slime', h: 1.6, hp: 18, spd: 0.85, shy: 0, turn: 2.4, accel: 5.0,
+    dmg: 5, reach: 1.5, swing: 1.4, aggro: 13,
+    tint: [1.00, 0.42, 0.14], glow: 0.16,
+    splitsInto: 'magma_slime_mid',
+    drops: [],
+  }),
+  magma_slime_mid: monster('mushroom', {
+    label: 'Magma Slime', h: 1.05, hp: 10, spd: 1.05, shy: 0, turn: 3.2, accel: 6.5,
+    dmg: 3, reach: 1.2, swing: 1.2, aggro: 12,
+    tint: [1.00, 0.50, 0.18], glow: 0.14,
+    splitsInto: 'magma_slime_small',
+    drops: [],
+  }),
+  magma_slime_small: monster('mushroom', {
+    label: 'Magma Slime', h: 0.65, hp: 5, spd: 1.25, shy: 0, turn: 4.0, accel: 8.0,
+    dmg: 2, reach: 1.0, swing: 1.0, aggro: 11,
+    tint: [1.00, 0.58, 0.24], glow: 0.12, slime: true,
+    drops: [['cinder', 1, 2], ['sulfur', 0, 1]],
+  }),
+
+  /**
+   * The second exploder, and the reason there are two.
+   *
+   * A cinderling is slow enough to walk away from once you have heard it. This
+   * one is faster and lighter and carries a smaller charge, so the answer to it
+   * is different - you cannot outwalk it, you have to break line of sight or
+   * kill it first. Same fuse, same block damage, different problem.
+   */
+  emberling: monster('cinderling', {
+    label: 'Emberling', h: 0.95, hp: 7, spd: 1.5, shy: 0, turn: 4.4, accel: 9.5,
+    dmg: 0, reach: 1.4, swing: 1.0, aggro: 15,
+    blast: 1.0,
+    tint: [1.00, 0.62, 0.22], glow: 0.14,
+    drops: [['sulfur', 1, 1], ['cinder', 1, 1]],
+  }),
+
   // --- and the ones with wings ---
   //
   // `hover` has to sit *inside* `reach`, and that is not obvious until you
@@ -3587,7 +3660,7 @@ const MONSTER_BY_BIOME = {
   SNOW: ['yeti', 'yeti', 'ghost'],
   // Everything in the game that is already made of fire, on the face made of
   // it. This is the population the cinderlands are supposed to have.
-  CINDER: ['cinderling', 'cinderling', 'demon', 'dragon', 'skull'],
+  CINDER: ['magma_slime', 'magma_slime', 'cinderling', 'emberling', 'emberling', 'demon', 'dragon'],
   TUNDRA: ['yeti', 'skull'],
   MOUNTAIN: ['cyclops', 'bat', 'dragon', 'cinderling'],
   DESERT: ['cactus_monster', 'cactus_monster', 'skull'],
@@ -4098,6 +4171,44 @@ export class Mobs {
   }
 
   /**
+   * Two of the next size down, on either side of where the parent stood.
+   *
+   * Placed one column apart rather than both on the corpse's own cell: two
+   * bodies spawned in the same place resolve out of each other on the first
+   * frame, which reads as one of them being flung. The `_colOf` walk keeps
+   * them on the parent's face, which they are bound to anyway.
+   *
+   * Capped against the monster budget like anything else - a slime that splits
+   * into a pen full of slimes is a spawn loop with extra steps - so if the face
+   * is already full the split simply produces fewer.
+   */
+  /** How many slimes of any size are abroad. See `_split`. */
+  _countSlimes() {
+    let n = 0;
+    for (const m of this.list) if (m.spec.splitsInto || m.spec.slime) n++;
+    return n;
+  }
+
+  _split(mob) {
+    const type = mob.spec.splitsInto;
+    if (!SPECIES[type]) return;
+    const c = mob.cell;
+    // NOT against MAX_MONSTERS, which is 3 - a slime splitting would be
+    // refused on the first hit and the whole creature would be pointless. A
+    // split is not new pressure either: one body dies and two smaller ones
+    // replace it, and the chain ends by itself because the smallest tier has
+    // no `splitsInto`. One big slime is 1 + 2 + 4 = 7 bodies at the very most.
+    // SLIME_CAP is only there so a face full of them cannot compound.
+    for (const off of [-1, 1]) {
+      if (this._countSlimes() >= SLIME_CAP) break;
+      const col = this._colOf(c.f, c.ci + off, c.cj);
+      const k = this.planet.surfaceK(col);
+      if (k < 0) continue;
+      this.spawn(type, col, k + 1);
+    }
+  }
+
+  /**
    * The health a body is born with, which is its species' health on a young
    * world and a little more on an old one.
    *
@@ -4308,9 +4419,12 @@ export class Mobs {
        * but two, and which costs those bodies exactly the three multiplies they
        * were already doing against a hard-coded 1.
        */
-      kindR: kind ? kind.tint[0] : 1,
-      kindG: kind ? kind.tint[1] : 1,
-      kindB: kind ? kind.tint[2] : 1,
+      // A biome husk's tint, or the species' own if it has one. The slimes
+      // and the second exploder are recoloured pack models, so the tint is
+      // what makes them read as the creature they are meant to be.
+      kindR: kind ? kind.tint[0] : (spec.tint ? spec.tint[0] : 1),
+      kindG: kind ? kind.tint[1] : (spec.tint ? spec.tint[1] : 1),
+      kindB: kind ? kind.tint[2] : (spec.tint ? spec.tint[2] : 1),
       scale, sizeJitter,
       cell: { f, ci: i + 0.5, cj: j + 0.5, ck: k + 1.02 },
       vel: { i: 0, j: 0, k: 0 },
@@ -8938,6 +9052,10 @@ export class Mobs {
    * does anything the world killed rather than the player.
    */
   _die(mob, drops = mob.spec.drops) {
+    // A slime does not die so much as become two smaller problems. Done before
+    // anything else in here, because the body is about to be released and the
+    // children are placed off the cell it is still standing in.
+    if (mob.spec.splitsInto) this._split(mob);
     const dieClip = mob.spec.clips.die;
     // Killing the merchant costs you the merchant. The body is removed by one
     // of two paths below, so the wait is started here where both pass through.

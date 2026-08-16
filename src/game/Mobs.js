@@ -2626,9 +2626,15 @@ const SPECIES = {
    * that lands in a river is a leap it does not come out of.
    */
   dread_hare: monster('hare', {
-    label: 'Dread Hare', h: 1.0, hp: 24, spd: 1.30, shy: 0, turn: 4.2, accel: 8.5,
+    // 0.98 and no spread, both to the same end: `modelExtents` rounds the
+    // collision height UP to whole layers, so anything measuring a hair over 1
+    // occupies two of them and cannot get through a one-block gap. A hare that
+    // is one block high everywhere except in the one place it matters is not
+    // one block high, and the per-head size variation is what would have put a
+    // twelfth of them over the line.
+    label: 'Dread Hare', h: 0.98, var: 0, hp: 24, spd: 1.30, shy: 0, turn: 4.2, accel: 8.5,
     dmg: 6, reach: 1.3, swing: 1.2, aggro: 40,
-    timid: true, leap: 15, hydro: 3.0,
+    timid: true, leap: 12, hydro: 3.0,
     // Not far off the pack's own reds, and it has to survive `sky` and the
     // block-light multiply in _animate, so green and blue are cut rather than
     // red raised - the note above HUSK_KIND explains why a tint over 1 is not
@@ -3135,6 +3141,32 @@ const lootBulk = (h) => clamp(
 
 /** Seconds of the scale pop that stands in for a missing attack clip. */
 const LUNGE_TIME = 0.3;
+
+// --- the leap ---------------------------------------------------------------
+//
+// One creature uses these, and they are up here with the rest of the tuning
+// rather than beside it because every other number a body moves by is.
+//
+// The arc is thrown at 45 degrees, which is the angle that reaches furthest for
+// a given effort and is also the one that looks like a jump rather than a
+// charge: `LEAP_UP` is derived from the gap to cross, so a hare across the
+// clearing goes high and slow and one at your elbow goes low and quick. That
+// derivation is the whole of "damage scales with velocity and altitude" too -
+// see `_landLeap`, which prices the blow off the arc that was actually flown
+// rather than off a number in the table.
+/** Bounds on the launch, cells/s upward. The apex is v^2 / 2g: 0.94 to 3.0. */
+const LEAP_UP_MIN = 7.0;
+const LEAP_UP_MAX = 12.5;
+/** How wide of you it aims: radians of bearing, and a fraction of the range. */
+const LEAP_SPREAD = 0.30;
+const LEAP_SHORT = 0.20;
+/** Seconds between leaps, counted from the landing. */
+const LEAP_COOLDOWN = 1.0;
+/** How close the landing has to be to count as a hit, over the body's reach. */
+const LEAP_SPLASH = 0.5;
+/** The arc `spec.damage` is priced against: impact speed, and apex height. */
+const LEAP_REF_V = 11;
+const LEAP_REF_H = (LEAP_REF_V * LEAP_REF_V) / (2 * GRAVITY);
 
 /**
  * How far past its own reach the player has to get for a cinderling to call the
@@ -7859,8 +7891,19 @@ export class Mobs {
     // savage world a lion cub acquired the player and swung for the adult's
     // full damage. The test goes on the savage term alone: nothing hostile or
     // monstrous is ever born a cub.
-    const acquires = spec.hostile || spec.monster
-      || (this.savage && !!spec.preyOn && !!spec.predator && mob.baby <= 0);
+    const acquires = (spec.hostile || spec.monster
+      || (this.savage && !!spec.preyOn && !!spec.predator && mob.baby <= 0))
+      // ...and the one that decides nothing until it has been hit. Looking at
+      // it does nothing, walking past it does nothing, and standing in front of
+      // it does nothing - `hurt` is the only door into this, and once through
+      // it the body never goes back (see `enraged` there).
+      && (!spec.timid || mob.enraged);
+    // Provoked once, hunting blind forever. The sighting is what the ACQUIRE BY
+    // SIGHT rule below gates on, and this species has already met the condition
+    // the rule is for: the player is unquestionably there, because they swung.
+    // Without it a hare that lost you behind a rock would stand there passively
+    // - a wall would be a cure, and being permanently angry is the creature.
+    if (mob.enraged) mob.sighted = true;
     /**
      * ACQUIRE BY SIGHT, COMMIT BLIND. The rule, written down.
      *
@@ -8083,6 +8126,22 @@ export class Mobs {
     // is the only test that can tell 1.39-through-stone from 1.39-in-the-open,
     // because they are the same number.
     const reach = spec.reach + mob.radius;
+    // The leap, which is this species' whole attack and replaces the approach
+    // rather than finishing it: it does not have to arrive first.
+    //
+    // Gated outside `reach` so a player standing on top of it still gets the
+    // ordinary swing below - a mob that could only ever jump would have a blind
+    // spot at its feet, which is the one place a player is guaranteed to be
+    // after it lands.
+    mob.leapCool = (mob.leapCool ?? 0) - dt;
+    if (spec.leap && mob.enraged && mob.grounded && !mob.leaping
+      && mob.leapCool <= 0 && dist > reach && dist < spec.leap
+      && this._blowClearPlayer(mob, player)) {
+      this._leap(mob, dist, ra, rb, fr);
+      mob.state = 'chase';
+      mob.stateT = 0.5;
+      return true;
+    }
     // Close enough is not the same as able to. A body one block away through a
     // wall is inside every reach in the table, and swinging at the wall would
     // be both free damage and a mob visibly attacking masonry — so a blocked
@@ -8371,6 +8430,85 @@ export class Mobs {
     const named = clips.attack && mob.model.actions[clips.attack];
     MobModels.playOnce(mob.model, named ? clips.attack : clips.run, named ? 1.35 : 2.1);
     mob.lungeT = LUNGE_TIME;
+  }
+
+  /**
+   * Off the ground, at you, and deliberately not quite at you.
+   *
+   * The body leaves the walking rules for the length of the arc. That is what
+   * `tumbling` already means - "this is happening TO the body, it has stopped
+   * choosing" - so a leap goes over the river a hare would never walk into and
+   * off the ledge it would never step off, and lands wherever the arithmetic
+   * puts it. Reusing the flag rather than adding a second airborne mode is also
+   * what keeps `_tumble`'s substepping, which is the thing that stops something
+   * moving fifteen cells a second from straddling a wall.
+   *
+   * Its own velocity, in `leapI`/`leapJ`, because `vel.i`/`vel.j` are rebuilt
+   * from the heading every frame by the steering (see the integrate block in
+   * `update`) and a heading that keeps turning toward the player would home the
+   * jump in mid-air - which is the one thing the attack must not do.
+   *
+   * The inaccuracy is the counterplay and it is two things at once: the aim is
+   * jittered in bearing and short in range, and it aims where the player is NOW
+   * with no lead at all, so a second of flight against a walk of 4.4 is most of
+   * the dodge on its own. Standing still is what gets you hit.
+   */
+  _leap(mob, dist, ra, rb, fr) {
+    // 45 degrees: up as much as along. `LEAP_UP` bounds it at both ends, so the
+    // shortest hop still leaves the ground and the longest is still a jump.
+    const vUp = clamp(Math.sqrt(GRAVITY * dist * 0.5), LEAP_UP_MIN, LEAP_UP_MAX);
+    const flight = (2 * vUp) / GRAVITY;
+    const aim = Math.atan2(rb, ra) + (Math.random() - 0.5) * 2 * LEAP_SPREAD;
+    const range = dist * (1 - Math.random() * LEAP_SHORT);
+    const speed = range / flight;
+    mob.leapI = Math.cos(aim) * speed / fr.arcA;
+    mob.leapJ = Math.sin(aim) * speed / fr.arcB;
+    mob.heading = aim;
+    mob.want = aim;
+    mob.vel.k = vUp;
+    mob.grounded = false;
+    mob.tumbling = true;
+    mob.leaping = true;
+    mob.leapPeak = mob.cell.ck;
+    // It is not falling, it is attacking. `climbGrace` is the existing "do not
+    // charge this body for the height it is losing" flag, and an animal hurting
+    // itself with its own attack every time is not a mechanic.
+    mob.climbGrace = flight + 0.4;
+    // Re-armed properly at the landing; this only stops a second launch mid-air
+    // if anything ever asks.
+    mob.leapCool = flight + LEAP_COOLDOWN;
+    this._lunge(mob);
+    if (this.onSound) this.onSound('attack', mob);
+  }
+
+  /**
+   * The landing, and what it costs whoever is standing there.
+   *
+   * Priced off the arc that was actually flown rather than off `spec.damage`
+   * alone: the apex it reached and the speed it comes down at, half each, both
+   * against a reference leap that pays exactly `spec.damage`. The two terms are
+   * one thing physically - a ballistic body's impact speed IS its height - and
+   * they are written out separately anyway because they are the two halves of
+   * what the blow is meant to read as, and because either could stop being a
+   * function of the other the moment anything pushes the body mid-air.
+   *
+   * The hit is tested here rather than through `_pendingHits` because a leap
+   * has no contact frame to schedule: it lands when it lands. Everything that
+   * door checks is checked here - alive, in range, and a clear line - so a
+   * player who moved, or who put a wall between them, takes nothing.
+   */
+  _landLeap(mob, player) {
+    mob.leaping = false;
+    mob.climbGrace = 0;
+    mob.leapCool = LEAP_COOLDOWN;
+    const drop = Math.max(0, mob.leapPeak - mob.cell.ck);
+    const impact = Math.sqrt(2 * GRAVITY * drop);
+    const dmg = Math.max(1, Math.round(mob.spec.damage
+      * (0.5 * impact / LEAP_REF_V + 0.5 * drop / LEAP_REF_H)));
+    const reach = mob.spec.reach + mob.radius + LEAP_SPLASH;
+    if (mob.pos.distanceTo(player.position) > reach) return;
+    if (!this._blowClearPlayer(mob, player)) return;
+    if (this.onAttack) this.onAttack(dmg, mob);
   }
 
   /**
@@ -10375,7 +10513,12 @@ export class Mobs {
         mob.vel.i = 0; mob.vel.j = 0;
         mob.tumbling = false;
       } else if (tumbling) {
-        this._tumble(mob, mob.vel.i * dt, mob.vel.j * dt);
+        // A leap carries its own horizontal velocity rather than the steering's:
+        // `vel.i`/`vel.j` are rebuilt from the heading every frame, so a jump
+        // that used them would curve toward the player in mid-air. See `_leap`.
+        this._tumble(mob,
+          (mob.leaping ? mob.leapI : mob.vel.i) * dt,
+          (mob.leaping ? mob.leapJ : mob.vel.j) * dt);
         // A thrown body does not get its rotation policed either, for the same
         // reason it does not get the footprint test: it has stopped choosing.
         // Leaving the flag at whatever the last walking frame set would have a
@@ -10594,6 +10737,22 @@ export class Mobs {
         }
       }
 
+      // ...and the one body that feels the same way about water.
+      //
+      // Nothing in the game hurt a mob for being wet before this, so it is
+      // written as lava is rather than borrowed from anything: a per-species
+      // rate, on the same instalment clock, in the same place. `inWater` is
+      // touching it at any depth, which is the point of a weakness - a hare
+      // that leaps into the shallows to reach you is a hare that made a
+      // mistake, and it should not have to be out of its depth to pay for it.
+      if (spec.hydro && inWater) {
+        mob.hydroT = (mob.hydroT || 0) - dt;
+        if (mob.hydroT <= 0) {
+          mob.hydroT = LAVA_PERIOD;
+          if (this._damage(mob, spec.hydro * LAVA_PERIOD)) continue;
+        }
+      } else if (mob.hydroT) mob.hydroT = 0;
+
       // Lava. The footprint test refuses to walk into it, so the only way a
       // body is standing in this is that something put it there — a shove, a
       // bucket, or the block it was standing on being mined.
@@ -10712,6 +10871,17 @@ export class Mobs {
         this._sync(mob);
       } else {
         this._sync(mob);
+      }
+
+      // The leap's apex and its landing. After `_sync`, so the blow is measured
+      // from where the body actually came down rather than from where it was a
+      // frame ago - at the speeds a leap travels that gap is a quarter of a cell
+      // of free reach. Water counts as landing: a hare that comes down in a
+      // river is never `grounded` again, and would otherwise stay airborne for
+      // the rest of a life the water is already ending.
+      if (mob.leaping) {
+        if (c.ck > mob.leapPeak) mob.leapPeak = c.ck;
+        if (mob.grounded || mob.wading || mob.swimming) this._landLeap(mob, player);
       }
 
       this._animate(mob, dt);
@@ -11310,6 +11480,21 @@ export class Mobs {
       mob.state = 'chase';
       mob.stateT = 0.5;
       mob.vel.k = KNOCK_LIFT * 0.4 * mass;
+      // ...and for the one species that was not hunting anybody until now, the
+      // switch that never goes back. `timid` keeps a body out of the acquire
+      // test in `_hunt` entirely, so this line is the whole of its aggression:
+      // the first blow buys the rest of its life. The colour is written into
+      // `kindR/G/B` rather than flashed, because those are what `_animate`
+      // starts every frame's tint from - so it stays red through pain, through
+      // nightfall and through a torch, which a flash would not.
+      if (mob.spec.timid && !mob.enraged) {
+        mob.enraged = true;
+        if (mob.spec.rage) {
+          mob.kindR = mob.spec.rage[0];
+          mob.kindG = mob.spec.rage[1];
+          mob.kindB = mob.spec.rage[2];
+        }
+      }
     } else if (mob.spec.trader) {
       // It has seen worse. Bolting would also strand its stock somewhere you
       // cannot follow, and there is only ever one.

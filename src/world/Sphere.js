@@ -218,6 +218,79 @@ export function stepColumn(col, di, dj) {
   return patchColumn(_cp.f, _cp.i, _cp.j, di, dj);
 }
 
+/**
+ * Walk (di, dj) columns across the surface, turning at every edge.
+ *
+ * `stepColumn` extends the face's own plane and folds the result once, which is
+ * exact for a step of a cell or two and badly wrong for a long one: a walk that
+ * runs a hundred cells past an edge lands at a point far outside the cube, and
+ * the fold then CLAMPS it back to the border. Every long walk crossing a seam
+ * therefore arrived at the same handful of border columns, which is why animals
+ * bunched along the edges and why husks on one face appeared to stream out of a
+ * single spot.
+ *
+ * Walking around a cube is not a straight line in any one face's coordinates -
+ * it turns ninety degrees at each seam - so this steps cell by cell and rotates
+ * the direction through world space at each crossing, the same way a heading is
+ * carried. Cost is one iteration per cell walked, which is fine where it is
+ * used (spawn placement, not a per-frame path).
+ */
+export function walkColumns(col, di, dj) {
+  const steps = Math.max(Math.abs(di), Math.abs(dj));
+  if (steps === 0) return col;
+  const p = colParts(col, { f: 0, i: 0, j: 0 });
+  let f = p.f, i = p.i, j = p.j;
+  let dirI = di / steps, dirJ = dj / steps;
+  let accI = 0, accJ = 0;
+  const q = { f: 0, i: 0, j: 0 };
+  for (let s = 0; s < steps; s++) {
+    accI += dirI; accJ += dirJ;
+    const si = Math.round(accI), sj = Math.round(accJ);
+    if (si === 0 && sj === 0) continue;
+    accI -= si; accJ -= sj;
+    const ni = i + si, nj = j + sj;
+    if (ni >= 0 && ni < F && nj >= 0 && nj < F) { i = ni; j = nj; continue; }
+    colParts(patchColumn(f, i, j, si, sj), q);
+    if (q.f !== f) {
+      // Turn the corner as a RIGID 90 degree rotation about the seam, not by
+      // projecting onto the new face's axes.
+      //
+      // Projecting throws away the part of the direction that pointed outward,
+      // and that part is exactly what should become "forward, into the new
+      // face". Dropping it maps a whole spread of incoming headings onto a
+      // narrow outgoing one, which compresses area at every seam - measured,
+      // 29% of walks finished within ten columns of a border against 9.7% for
+      // an even scatter, which is why animals bunched along the edges.
+      //
+      // Rodrigues about oldN x newN, where the angle is always a right angle so
+      // cos is 0 and sin is 1. Same operation carryYaw does for a view.
+      const A = FACE_R[f], B = FACE_U[f], N1 = FACE_N[f], N2 = FACE_N[q.f];
+      const vx = A[0] * dirI + B[0] * dirJ;
+      const vy = A[1] * dirI + B[1] * dirJ;
+      const vz = A[2] * dirI + B[2] * dirJ;
+      const ax = N1[1] * N2[2] - N1[2] * N2[1];
+      const ay = N1[2] * N2[0] - N1[0] * N2[2];
+      const az = N1[0] * N2[1] - N1[1] * N2[0];
+      const al = Math.hypot(ax, ay, az);
+      let wx = vx, wy = vy, wz = vz;
+      if (al > 1e-6) {
+        const nx = ax / al, ny = ay / al, nz = az / al;
+        const cx = ny * vz - nz * vy;
+        const cy = nz * vx - nx * vz;
+        const cz = nx * vy - ny * vx;
+        const dp = nx * vx + ny * vy + nz * vz;
+        wx = cx + nx * dp; wy = cy + ny * dp; wz = cz + nz * dp;
+      }
+      const A2 = FACE_R[q.f], B2 = FACE_U[q.f];
+      dirI = wx * A2[0] + wy * A2[1] + wz * A2[2];
+      dirJ = wx * B2[0] + wy * B2[1] + wz * B2[2];
+      accI = 0; accJ = 0;
+    }
+    f = q.f; i = q.i; j = q.j;
+  }
+  return cidx(f, i, j);
+}
+
 // --- continuous cell space ---------------------------------------------------
 
 export function worldToCell(x, y, z, out = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 }) {

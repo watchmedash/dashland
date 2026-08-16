@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import { F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST } from '../world/Constants.js';
 import {
-  cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn,
+  cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn, walkColumns,
   centerDir,
 } from '../world/Sphere.js';
 import {
@@ -4020,13 +4020,13 @@ export class Mobs {
     // not a hill. The layer itself is arbitrary; only the difference is used.
     cellToWorld(a.f, a.i + 0.5, a.j + 0.5, R_SEA - R_MIN, _wa);
     let n = units / CELL_SIZE;
-    let col = stepColumn(nearCol, Math.round(ca * n), Math.round(sa * n));
+    let col = walkColumns(nearCol, Math.round(ca * n), Math.round(sa * n));
     const b = colParts(col);
     cellToWorld(b.f, b.i + 0.5, b.j + 0.5, R_SEA - R_MIN, _wb);
     const got = Math.hypot(_wb[0] - _wa[0], _wb[1] - _wa[1], _wb[2] - _wa[2]);
     if (got > 1) {
       n *= units / got;
-      col = stepColumn(nearCol, Math.round(ca * n), Math.round(sa * n));
+      col = walkColumns(nearCol, Math.round(ca * n), Math.round(sa * n));
     }
     return col;
   }

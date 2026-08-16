@@ -1654,6 +1654,27 @@ const HOSTILE_HP = 1.5;
  * new and 8/7/5/4/3 at the cap. One extra swing at the top tier, two or three
  * at the bottom. That is the honest size of it.
  */
+/**
+ * The one place difficulty reaches a health bar, and only a boss's.
+ *
+ * The rule everywhere else in this file is that difficulty is damage and
+ * nothing but damage — `_spawnHealth` says so at length, and it is right: the
+ * two compose by addition of effects rather than by multiplication, so an aged
+ * world on Extreme is a longer fight against the same swing rather than a swing
+ * scaled twice. The owner asked for the bosses' health to answer the world's
+ * difficulty as well, and this is the narrowest way to give them that without
+ * inventing a second difficulty: it is `mobDamageScale` from `NewGame.js`,
+ * pushed in as `damageScale`, read once, and softened.
+ *
+ * Softened because the raw multiplier is the wrong shape for a bar. 0.5 through
+ * 2 applied to damage is four legible fights; applied to 135 health it is a
+ * boss that dies in four swings on easy and takes twenty-eight on extreme, and
+ * twenty-eight swings is not a harder fight, it is the wall of numbers the
+ * table above exists to avoid. The square root keeps the order and the sign of
+ * the ladder and costs the ends their absurdity: 0.71, 1, 1.22, 1.41.
+ */
+const bossDifficulty = (scale) => Math.sqrt(scale > 0 ? scale : 1);
+
 const HARDEN_STEP = 0.01;
 /** Seconds of play per step. Ten "days", a day being an hour at the keyboard. */
 const HARDEN_PERIOD = 10 * 3600;
@@ -4217,6 +4238,19 @@ const MERCHANT_PURSE_MAX = 460;
 /** Every model the species table can ask for, for the one-time preload. */
 export const MOB_MODEL_URLS = Object.values(SPECIES).flatMap((s) => s.urls);
 
+/**
+ * The sixteen, derived off the table rather than written out a second time.
+ *
+ * `Endgame.js` places them and remembers which are still standing, and it must
+ * not carry its own copy of the roster: a boss added or renamed here would
+ * leave a list over there naming a species that no longer exists. Face and
+ * aquatic come along because the placement is decided entirely by those two —
+ * which face, and whether it wants water or ground.
+ */
+export const BOSS_ROSTER = Object.entries(SPECIES)
+  .filter(([, s]) => s.boss)
+  .map(([type, s]) => ({ type, face: s.bossFace, label: s.label, aquatic: !!s.aquatic }));
+
 // --- the manager ------------------------------------------------------------
 
 export class Mobs {
@@ -4346,6 +4380,23 @@ export class Mobs {
      * in _hunt and MAX_HOSTILE_SAVAGE.
      */
     this.savage = false;
+    /**
+     * `mobDamageScale` for this world, pushed in by main.js beside `savage`.
+     *
+     * Same arrangement and same reason: this file does not know what the New
+     * Game screen offers. Read by exactly one thing — `bossDifficulty`, which
+     * is the only place a difficulty reaches a health bar in this game.
+     */
+    this.damageScale = 1;
+    /**
+     * Faces that have stopped making anything hostile, for good.
+     *
+     * Owned by `Endgame.js` and held here by reference rather than copied, so
+     * there is one set and the spawner cannot be looking at a stale one. Null
+     * until an endgame exists, which is every world that has not reached it and
+     * every headless harness that never builds one.
+     */
+    this.hostileShut = null;
     /**
      * The player is not really there: a spectator of their own world.
      *
@@ -4679,7 +4730,7 @@ export class Mobs {
    */
   _spawnHealth(spec) {
     if (!spec.hostile && !spec.monster) return spec.health;
-    const mul = worldHardening(this.playtime);
+    const mul = worldHardening(this.playtime) * (spec.boss ? bossDifficulty(this.damageScale) : 1);
     return Math.max(spec.health, Math.round(spec.health * mul));
   }
 
@@ -5215,6 +5266,26 @@ export class Mobs {
     let n = 0;
     for (const m of this.list) if (m.type === type && ++n >= cap) return false;
     return true;
+  }
+
+  /**
+   * One of the sixteen, onto a column the endgame picked.
+   *
+   * The layer is resolved here rather than handed in, because it is a question
+   * about voxels and the endgame only has the height field: `colHeight` is
+   * complete for the whole planet from the moment worldgen answers, which is
+   * what lets a boss be placed on a face nobody has ever visited, but it says
+   * nothing about where the blocks actually ended up once caves, trees and the
+   * sea had their turn. So the endgame chooses the column and this chooses the
+   * layer, and it can only do so once the ground is built — a -1 here means
+   * "not yet", and the caller simply asks again when the player is closer.
+   */
+  spawnBoss(type, col) {
+    const spec = SPECIES[type];
+    if (!spec || !spec.boss) return null;
+    const k = spec.aquatic ? this._waterLayer(col) : this.planet.surfaceK(col);
+    if (k < 0) return null;
+    return this.spawn(type, col, k);
   }
 
   _spawnMonster(col, k) {
@@ -9695,6 +9766,11 @@ export class Mobs {
    * does anything the world killed rather than the player.
    */
   _die(mob, drops = mob.spec.drops) {
+    // Told before the body is touched, and told once: `_die` is the single door
+    // out of being alive for everything on this table, so the endgame cannot
+    // miss a boss however it went down - the player, a fall, lava, another
+    // boss. It never respawns, so this is the last thing anyone hears of it.
+    if (mob.spec.boss) this.onBossDown?.(mob);
     // A slime does not die so much as become two smaller problems. Done before
     // anything else in here, because the body is about to be released and the
     // children are placed off the cell it is still standing in.

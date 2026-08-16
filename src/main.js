@@ -41,6 +41,7 @@ import { Weather } from './game/Weather.js';
 import { siteTornado } from './game/Tornado.js';
 import { Seasons, snowLine } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
+import { Endgame } from './game/Endgame.js';
 import * as MobModels from './game/MobModels.js';
 import { explode } from './game/Explosion.js';
 import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
@@ -1892,6 +1893,28 @@ class Game {
     this.mobs.onMerchant = (mob) => {
       this.audio.mob(mob.type, 'idle', mob.pos);
     };
+    /**
+     * The end of the game. See the head of `Endgame.js`.
+     *
+     * Made once and reset per world, like the mob manager it sits on top of: it
+     * holds the sixteen bosses and the two faces that have stopped making
+     * monsters, and everything it does is a call into `Mobs`. `_newWorld`
+     * resets it and `_loadWorld` reads it back.
+     */
+    this.endgame = new Endgame(this.planet, this.mobs);
+    // Two lines of copy for the whole feature, and both are labels rather than
+    // explanations. Where they are and what they do is the game's to show.
+    this.endgame.onBegin = () => {
+      this.ui.toast('The sixteen are awake.', itemIdOf('gold_carrot'), 6000);
+      this.audio.ui(320);
+    };
+    // The mark itself is set by `Achievements.scan` off `endgame.won`, on the
+    // same once-a-second sweep every other flag is found by. This is only the
+    // moment.
+    this.endgame.onWin = () => {
+      this.ui.toast('All sixteen down.', itemIdOf('gold_carrot'), 9000);
+      this.audio.ui(720);
+    };
     // The player's body. Built after Drops because it borrows the same factory
     // the drops use — what you carry and what you dropped are the same mesh.
     this.character = new PlayerCharacter(this.scene, (id) => this.drops.createItemMesh(id));
@@ -2522,6 +2545,9 @@ class Game {
   _setDifficulty(name) {
     this.difficulty = normalizeDifficulty(name);
     this.mobs.savage = huntsOnSight(this.difficulty);
+    // The third thing that follows from it, and it goes through the same door
+    // for the same reason. Only the bosses read it; see `bossDifficulty`.
+    this.mobs.damageScale = this.mobDamageMul;
   }
 
   /**
@@ -2701,6 +2727,10 @@ class Game {
     this.seasonSnow.clear();
     this.hearths.clear();
     this.coreFound = false;
+    // A new planet has its own sixteen, none of them placed and neither face
+    // shut. `reset` also re-hands `Mobs` the shutdown set, which the spawner
+    // holds a reference to.
+    this.endgame.reset();
     // Cleared with the rest of the world state so a new world cannot inherit
     // the last one's sky and greet the player with a squall, or its clock and
     // announce a dawn, on the first frame. Both edges are armed by the first
@@ -3514,6 +3544,10 @@ class Game {
       if (skin) for (let n = 0; n + 1 < skin.length; n += 2) this.seasonSnow.set(skin[n], skin[n + 1]);
       this.hearths = new Set(save.hearths || []);
       this.coreFound = !!save.coreFound;
+      // Which bosses are still standing, where, at what health, and which faces
+      // have stopped making monsters. Before `_setDifficulty` below only by
+      // accident of order: nothing here reads it.
+      this.endgame.fromJSON(save.endgame);
       // A world started on hard loads as hard. Saves written before this
       // existed carry no field and `normalizeDifficulty` reads them as normal,
       // which is the game they were played under. The loadout is a record of
@@ -4392,6 +4426,11 @@ class Game {
       seasonSnow: this._saveSeasonSnow(),
       hearths: [...this.hearths],
       coreFound: this.coreFound,
+      // Null until the sixty-four are found, and absent altogether in every
+      // world written before this existed. `Endgame.fromJSON` reads both as the
+      // same thing, which is why no version bump goes with this - the save
+      // format's convention here is a defaulted key, not a number.
+      endgame: this.endgame.toJSON(),
       // Top level rather than inside `player`: how hard the animals hit is a
       // rule of this planet, not a fact about the person walking on it, and it
       // has to be true of whoever loads it. `Save.write` copies it into the slot
@@ -6359,6 +6398,10 @@ class Game {
     // than stored anywhere else so there is only ever one copy of the number.
     this.mobs.playtime = this.playtime;
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
+    // Before the door is checked and after the herd has moved: the reconcile
+    // wants this frame's despawns, so a boss the ring has just dropped hands its
+    // health back before anything can ask for it again.
+    if (!ghost) this._safeTick('endgame', () => this._tickEndgame(dt));
     // After the animals have moved, so a shot lands where the body is drawn
     // this frame rather than where it was drawn last one. The mob list is handed
     // over per call rather than held; see the constructor.
@@ -7075,6 +7118,24 @@ class Game {
    * you had arrived. The planet gives you a hearth instead: the only one there
    * will ever be, and the reason to have dug.
    */
+  /**
+   * The endgame: the door, and the bodies.
+   *
+   * Two jobs on two clocks. The reconcile runs every frame because it is
+   * chasing the despawn ring, which moves at whatever pace the player walks.
+   * The door is asked once a second, on the same reasoning `Achievements.scan`
+   * takes to the same question: counting a stack means walking forty slots, and
+   * a thing that can happen once in a world's life has no business in the frame
+   * budget.
+   */
+  _tickEndgame(dt) {
+    this.endgame.update(this.player);
+    this._endgameT = (this._endgameT ?? 0) - dt;
+    if (this._endgameT > 0) return;
+    this._endgameT = 1;
+    this.endgame.check(this.inventory);
+  }
+
   _tickCore(dt) {
     if (this.coreFound) return;
     this._coreT = (this._coreT ?? 0) - dt;

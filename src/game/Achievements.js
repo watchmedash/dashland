@@ -234,6 +234,7 @@ export const MARKS = [
   { key: 'play', kind: 'count', need: 24 * 3600, label: 'Long Haul', note: '24 hours played.', time: true },
   { key: 'core', kind: 'flag', need: 1, label: 'Core', note: 'Reach the planet core.' },
   { key: 'night', kind: 'flag', need: 1, label: 'First Light', note: 'Survive a night in the open.' },
+  { key: 'endgame', kind: 'flag', need: 1, label: 'The Sixteen', note: 'Fell every boss.' },
 ];
 
 /** The four counters that are diffed rather than copied. See `rebase`. */
@@ -242,7 +243,7 @@ const COUNTERS = ['mined', 'placed', 'crafted', 'fished', 'kills'];
 const blank = () => ({
   v: 1, ore: [], item: [],
   n: { mined: 0, placed: 0, crafted: 0, fished: 0, kills: 0, play: 0 },
-  f: { core: 0, night: 0 },
+  f: { core: 0, night: 0, endgame: 0 },
 });
 
 /**
@@ -372,6 +373,10 @@ export class Achievements {
     this._prev = now;
 
     if (game.coreFound && !this.rec.f.core) { this.rec.f.core = 1; this._dirty = true; }
+    // Per player rather than per planet, like every other mark on this page: a
+    // world is finished once, and finishing one is a fact about the person who
+    // did it. See the head of this file.
+    if (game.endgame?.won && !this.rec.f.endgame) { this.rec.f.endgame = 1; this._dirty = true; }
     if ((game._nightOut ?? 0) >= NIGHT_SECONDS && !this.rec.f.night) {
       this.rec.f.night = 1; this._dirty = true;
     }

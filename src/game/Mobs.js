@@ -415,21 +415,32 @@ const MAX_HOSTILE_SAVAGE = 14;
  * against MAX_MOBS 134, so 121 + 8 = 129 and there is still headroom. Night is
  * nowhere near it either way.
  *
- * The cap is still the thing that decides how many can be ON you at once,
- * which is the part that matters for whether a fight is survivable; what
- * changes is that the world is no longer empty between them.
+ * 8 -> 13, and the reasoning that held it lower is wrong. It was "the cap
+ * decides how many can be on you at once, which is what keeps a fight
+ * survivable" - and the owner's answer to that is the correct one: "who says
+ * fight is survivable? we can run you know". Escape is the player's tool and it
+ * always has been; a spawn cap standing in for it just empties the world.
+ *
+ * 13 is the whole of what the DAY line has left, which is the real constraint:
+ * 84 land + 18 water + 18 air + 1 trader = 121 against MAX_MOBS 134. Night has
+ * far more room again. Past this the ceiling itself would have to move, and
+ * that one is about how many bodies are drawn and pathed at once rather than
+ * about difficulty.
  */
-const MAX_MONSTERS = 8;
+const MAX_MONSTERS = 13;
 /**
  * The same, on the two faces whose whole point is what lives there.
  *
- * The cinderlands are supposed to be hostile ground you go to on purpose, so
- * the population is the feature rather than the cost. Still under the day line:
- * 121 + 16 = 137 would be over, but the dedicated faces carry almost no
- * wildlife - the cinderlands carry none at all - so the roster there is far
- * short of the ordinary world's.
+ * The cinderlands are hostile ground you go to on purpose, so the population is
+ * the feature rather than the cost, and there is room for it: they carry NO
+ * wildlife at all and the cap carries very little, so the roster on either is
+ * nowhere near the ordinary world's 121. 24 against a ceiling of 134 still
+ * leaves the fliers, the husks and the trader their slots.
+ *
+ * This is the number to raise first if the face still feels quiet. It is not
+ * gated on fairness - you can always leave.
  */
-const MAX_MONSTERS_HOSTILE_FACE = 16;
+const MAX_MONSTERS_HOSTILE_FACE = 24;
 
 /**
  * How many magma slimes of any size may be abroad at once.
@@ -444,11 +455,19 @@ const SLIME_CAP = 12;
 /**
  * How often a monster spawn is tried, per spawn tick.
  *
- * 0.05 -> 0.16 alongside the cap. Raising the ceiling alone would have left the
- * world just as empty for just as long and then filled up hours later; the roll
- * is what decides how quickly the population you allow actually arrives.
+ * 0.05 -> 0.50, and the rate turned out to matter more than the cap did.
+ *
+ * The tick is every SPAWN_PERIOD (2s), so the old 0.05 was one attempt every
+ * forty seconds - and an attempt is not a monster, since the placement can
+ * fail and the body despawns again the moment you walk out of the ring.
+ * Measured after raising the cap to 13 and the roll to 0.16: seventy seconds of
+ * standing still produced ONE monster, and then it wandered off. The ceiling
+ * was never the thing keeping the world empty.
+ *
+ * At 0.5 an attempt lands every four seconds, so the allowance actually fills
+ * while you are somewhere rather than hours after you left.
  */
-const MONSTER_CHANCE = 0.16;
+const MONSTER_CHANCE = 0.5;
 const MAX_HOSTILE_CAVE = 4;
 /**
  * ...and the third husk budget: the ones in the water.

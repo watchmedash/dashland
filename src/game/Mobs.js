@@ -3453,6 +3453,21 @@ function growthScale(mob) {
  * biome cannot spawn an empty world.
  */
 /** Biome id → name, so the table above can be keyed by something readable. */
+/**
+ * Ground a body can be placed on.
+ *
+ * Was grass, sand or snow, which is every surface the ordinary four faces have
+ * and NONE of the two dedicated ones: the cap is two thirds ice and the
+ * cinderlands are basalt and ash. So nothing could be placed on either, and
+ * what did appear there came from the paths that do not use this test - which
+ * is most of why husks on the lava face seemed to pour out of one spot.
+ */
+const SPAWNABLE_GROUND = new Set([
+  ID.grass, ID.sand, ID.snow,
+  ID.ice, ID.packed_ice, ID.blue_ice, ID.snow_brick,
+  ID.basalt, ID.ash_stone, ID.magma_stone,
+]);
+
 const BIOME_NAME = [];
 for (const [name, id] of Object.entries(BIOME)) BIOME_NAME[id] = name;
 
@@ -3506,6 +3521,9 @@ const HUSK_KIND = {
   // Frost. The one direction the base texture has almost nothing of, which is
   // why the cold biomes read as the biggest change of the twelve.
   SNOW: { label: 'Frost Husk', tint: [0.40, 0.68, 1.00] },
+  // Scorched: every channel down, red furthest up, so it reads as charred
+  // rather than merely dark against basalt.
+  CINDER: { label: 'Cinder Husk', tint: [1.00, 0.42, 0.20] },
   TUNDRA: { label: 'Frost Husk', tint: [0.56, 0.80, 1.00] },
   // Stone: every channel down and the green down furthest, which is as close to
   // grey as a multiply gets on a body that is painted green to begin with.
@@ -3567,6 +3585,9 @@ const BLOOM = new Set(
  */
 const MONSTER_BY_BIOME = {
   SNOW: ['yeti', 'yeti', 'ghost'],
+  // Everything in the game that is already made of fire, on the face made of
+  // it. This is the population the cinderlands are supposed to have.
+  CINDER: ['cinderling', 'cinderling', 'demon', 'dragon', 'skull'],
   TUNDRA: ['yeti', 'skull'],
   MOUNTAIN: ['cyclops', 'bat', 'dragon', 'cinderling'],
   DESERT: ['cactus_monster', 'cactus_monster', 'skull'],
@@ -3614,6 +3635,11 @@ const _polarDir = [0, 0, 0];
 const COMMON = ['bunny', 'bunny', 'bee', 'caterpillar', 'fox'];
 const SPAWN_BY_BIOME = {
   SNOW: ['penguin', 'penguin', 'polar', 'fox', 'deer'],
+  // The cinderlands. Deliberately one entry and a hardy one: the face is meant
+  // to read as a place nothing chose to live, and what moves there should be
+  // the monsters rather than the wildlife. Without a row here at all it fell
+  // through to COMMON and put cows on a lava plain.
+  CINDER: ['caterpillar'],
   TUNDRA: ['deer', 'deer', 'fox', 'fox', 'bunny', 'polar'],
   MOUNTAIN: ['deer', 'fox', 'bunny', 'bee', 'tiger'],
   // Sparse on purpose: an empty-feeling desert is the point of a desert. The
@@ -4051,7 +4077,7 @@ export class Mobs {
       const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
       const surf = p.at(col, k);
-      if (surf !== ID.grass && surf !== ID.sand && surf !== ID.snow) continue;
+      if (!SPAWNABLE_GROUND.has(surf)) continue;
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       // a sandy seabed passes every test above, so reject anything submerged
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
@@ -5212,7 +5238,7 @@ export class Mobs {
       const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
       const surf = p.at(col, k);
-      if (surf !== ID.grass && surf !== ID.sand && surf !== ID.snow) continue;
+      if (!SPAWNABLE_GROUND.has(surf)) continue;
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
       // A hearth is a place the player has made safe. Whatever else he is, he
@@ -5481,7 +5507,7 @@ export class Mobs {
       const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
       const surf = p.at(col, k);
-      if (surf !== ID.grass && surf !== ID.sand && surf !== ID.snow) continue;
+      if (!SPAWNABLE_GROUND.has(surf)) continue;
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
       const { f, i, j } = colParts(col);

@@ -3635,11 +3635,12 @@ const _polarDir = [0, 0, 0];
 const COMMON = ['bunny', 'bunny', 'bee', 'caterpillar', 'fox'];
 const SPAWN_BY_BIOME = {
   SNOW: ['penguin', 'penguin', 'polar', 'fox', 'deer'],
-  // The cinderlands. Deliberately one entry and a hardy one: the face is meant
-  // to read as a place nothing chose to live, and what moves there should be
-  // the monsters rather than the wildlife. Without a row here at all it fell
-  // through to COMMON and put cows on a lava plain.
-  CINDER: ['caterpillar'],
+  // The cinderlands: nothing ordinary lives here at all. The one hardy species
+  // this used to carry was still an animal on a lava plain, which is exactly
+  // what the owner asked to stop seeing. An empty list is handled - the draw
+  // returns null and the caller declines the spawn - and the face gets its
+  // population from MONSTER_BY_BIOME instead, which is the point of it.
+  CINDER: [],
   TUNDRA: ['deer', 'deer', 'fox', 'fox', 'bunny', 'polar'],
   MOUNTAIN: ['deer', 'fox', 'bunny', 'bee', 'tiger'],
   // Sparse on purpose: an empty-feeling desert is the point of a desert. The

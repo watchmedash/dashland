@@ -1033,16 +1033,34 @@ export class Player {
    * covers the ridge either side plus the fade; anything deeper than that is
    * not a seam lip and is left to `_escape` and to gravity.
    */
-  _standOnArrival() {
+  _standOnArrival(lift) {
     const c = this.cell;
     const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
     const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
     const col = cidx(c.f, i, j);
+    const surf = this.planet.surfaceK(col);
+    // Land at the same height over the new ground as you left the old at. This
+    // is what makes a seam crossable whatever the two sides' ground levels are:
+    // the raw layer number means something different on each face, but "two
+    // blocks over the ground" means the same thing on both.
+    if (surf >= 0) c.ck = surf + 1 + Math.max(0, lift);
+    // Belt and braces for the case there is no ground to read - an ungenerated
+    // column, or a crossing into open air. Bounded so it can never become a
+    // climbing aid.
     for (let n = 0; n < 6; n++) {
       const k = Math.floor(c.ck);
       if (!this.planet.solidAt(col, k) && !this.planet.solidAt(col, k + 1)) break;
       c.ck = k + 1;
     }
+  }
+
+  /** How far the feet are above the ground of the column they are over. */
+  _heightAboveGround() {
+    const c = this.cell;
+    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
+    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
+    const surf = this.planet.surfaceK(cidx(c.f, i, j));
+    return surf < 0 ? 0 : Math.max(0, c.ck - (surf + 1));
   }
 
   /**
@@ -1072,8 +1090,11 @@ export class Player {
       }
       if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) {
         const wasF = c.f;
+        // How far above its own ground the body was, measured BEFORE the fold.
+        // This is what gets carried across, not the raw layer number.
+        const lift = this._heightAboveGround();
         normalizeCell(c);
-        if (c.f !== wasF) this._standOnArrival();
+        if (c.f !== wasF) this._standOnArrival(lift);
         this._sync();
       }
       if (!this._blocked(c.ci, c.cj, c.ck, height)) return true;

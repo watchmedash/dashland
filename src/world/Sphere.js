@@ -367,12 +367,21 @@ export function normalizeCell(c) {
   // once you are down on it. Terrain is faded flat and dry for the last few
   // columns of every face, so a walk across a seam happens at exactly the
   // height where this is exact, and that is the case that has to be perfect.
-  if (c.ck > SEA_K + EDGE_SLACK) {
-    c.ci = c.ci <= 0 ? 0 : (c.ci >= F ? F - 1e-4 : c.ci);
-    c.cj = c.cj <= 0 ? 0 : (c.cj >= F ? F - 1e-4 : c.cj);
-    return c;
-  }
-
+  // The crossing is always allowed, whatever the two sides' heights.
+  //
+  // It used to be refused above a height budget, because the arrival height
+  // came straight out of the geometry: height on one face becomes tangential
+  // distance on the next, so any real difference in ground level at the seam
+  // put the destination outside the neighbour's square. Refusing meant clamping
+  // the mover back inside their own face every frame, which is an invisible
+  // wall - and the owner was right that height should not decide whether an
+  // edge can be walked over.
+  //
+  // The caller re-seats the height against the destination's OWN ground and
+  // keeps how far above it you were (Player._standOnArrival), so the raw
+  // geometry no longer has to be representable for the crossing to be honest.
+  // What survives here is the clamp, which only ever pins the in-face
+  // coordinate to the border column it belongs in.
   c.f = g;
   c.ci = ci <= 0 ? 0 : (ci >= F ? F - 1e-4 : ci);
   c.cj = cj <= 0 ? 0 : (cj >= F ? F - 1e-4 : cj);
@@ -382,39 +391,6 @@ export function normalizeCell(c) {
 const _np = [0, 0, 0];
 const _tp = [0, 0, 0];
 
-/**
- * The layer the shell surface sits on, and how far above it a seam may still be
- * crossed.
- *
- * Height on the old face becomes *tangential* distance on the new one, so a
- * crossing lands (ck - SEA_K) columns outside the neighbour's square and has to
- * be nudged back in. That nudge is the whole budget: 5 keeps it to five blocks
- * at the very worst and covers the border ridge, which stands a couple of
- * blocks proud of the waterline, plus the height of a jump taken from it.
- *
- * Above that the edge is simply a wall. There is nothing dishonest about
- * refusing: a point high over a corner is outside BOTH faces' squares and
- * (column, layer) has no way to say where it is, so the alternative is not a
- * better answer, it is being flung a long way out along the wrong axis - which
- * is what put the owner in the next face's sea with the surface on its side.
- */
-const SEA_K = 33;
-/*
- * 5 -> 12.
- *
- * At 5 the wall was reachable in ordinary play: the border ridge already
- * stands a couple of blocks over the waterline, a jump adds one and a half, and
- * a single placed block put you over it - at which point holding forward
- * clamped you every frame and read as an invisible block. The owner hit it.
- *
- * The nudge this admits is larger (up to twelve blocks rather than five), and
- * that is only acceptable because the player no longer SEES it: Player._sync
- * takes the correction as a smoothed camera offset and spends it over a few
- * tenths of a second. Above twelve it is still a wall, and still on purpose -
- * a point that high over a corner is outside both faces and there is no honest
- * answer to give.
- */
-const EDGE_SLACK = 12;
 
 /** A cell is one unit across everywhere on a cube. */
 export const cellArc = () => 1;

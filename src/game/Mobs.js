@@ -2480,6 +2480,56 @@ const SPECIES = {
     label: 'Sporeling', h: 1.2, hp: 14, spd: 1.20, shy: 0, turn: 4.0, accel: 7.5,
     dmg: 3, reach: 1.2, swing: 1.1, aggro: 12, drops: [['mushroom', 1, 3]],
   }),
+  // The last eight of the pack, and every one of them shares a model name with
+  // an animal that is already on this table. `bee`, `crab`, `deer`, `panda` and
+  // `penguin` are all `pet` species with those exact keys and labels, so these
+  // carry `_monster` keys and names of their own — a player must never meet two
+  // creatures both called Deer. Chicken and pig have no animal to collide with;
+  // they are named in the same voice anyway, because "Chicken" reads as poultry
+  // rather than as something that wants you dead.
+  bee_monster: monster('bee', {
+    label: 'Stinger', h: 0.9, hp: 9, spd: 1.80, shy: 0, turn: 5.2, accel: 9.5,
+    dmg: 3, reach: 1.2, swing: 0.9, aggro: 13, flies: true, hover: 1.6,
+    drops: [['honeycomb', 1, 1]],
+  }),
+  chicken_monster: monster('chicken', {
+    label: 'Squawker', h: 1.0, hp: 12, spd: 1.50, shy: 0, turn: 4.6, accel: 8.5,
+    dmg: 3, reach: 1.2, swing: 1.0, aggro: 13,
+    drops: [['feather', 1, 3], ['poultry', 1, 1]],
+  }),
+  crab_monster: monster('crab', {
+    label: 'Nipper', h: 1.1, hp: 16, spd: 1.05, shy: 0, turn: 3.0, accel: 6.0,
+    dmg: 5, reach: 1.3, swing: 1.4, aggro: 12,
+    drops: [['crab_meat', 1, 2]],
+  }),
+  penguin_monster: monster('penguin', {
+    label: 'Frostbeak', h: 1.1, hp: 15, spd: 1.25, shy: 0, turn: 3.6, accel: 7.0,
+    dmg: 4, reach: 1.3, swing: 1.2, aggro: 13,
+    drops: [['poultry', 1, 1], ['feather', 1, 2]],
+  }),
+  deer_monster: monster('deer', {
+    label: 'Gorehorn', h: 1.8, hp: 21, spd: 1.50, shy: 0, turn: 3.4, accel: 8.0,
+    dmg: 6, reach: 1.6, swing: 1.3, aggro: 15,
+    drops: [['hide', 1, 2], ['meat', 1, 1]],
+  }),
+  pig_monster: monster('pig', {
+    label: 'Tusker', h: 1.4, hp: 23, spd: 1.30, shy: 0, turn: 3.0, accel: 7.5,
+    dmg: 6, reach: 1.5, swing: 1.4, aggro: 14,
+    drops: [['meat', 1, 2], ['hide', 1, 1]],
+  }),
+  panda_monster: monster('panda', {
+    label: 'Maulder', h: 1.7, hp: 25, spd: 1.00, shy: 0, turn: 2.6, accel: 5.5,
+    dmg: 7, reach: 1.6, swing: 1.6, aggro: 13,
+    drops: [['hide', 1, 2], ['meat', 1, 2]],
+  }),
+  tree_monster: monster('tree', {
+    // The heaviest walker short of the dragon, and the slowest thing on the
+    // table. The pack animates it without a Death clip — `play` ignores a name
+    // it has no action for, so it dies holding whatever it was doing.
+    label: 'Timberjaw', h: 2.5, hp: 30, spd: 0.85, shy: 0, turn: 2.4, accel: 5.0,
+    dmg: 8, reach: 2.0, swing: 2.0, aggro: 12,
+    drops: [['log_oak', 1, 2], ['stick', 1, 3], ['sapling', 1, 1]],
+  }),
   /**
    * The one that does not swing.
    *
@@ -3848,20 +3898,22 @@ const MONSTER_BY_BIOME = {
   // elsewhere, and that is not decoration: its own cap is 1 off the polar face,
   // so a single entry is all an ordinary biome can ever use, while the polar
   // face has fifty to fill and has to keep drawing it.
-  SNOW: ['yeti', 'yeti', 'ghost', 'dread_hare', 'dread_hare', 'dread_hare'],
+  SNOW: ['yeti', 'yeti', 'ghost', 'dread_hare', 'dread_hare', 'dread_hare',
+    'penguin_monster', 'penguin_monster'],
   // Everything in the game that is already made of fire, on the face made of
   // it. This is the population the cinderlands are supposed to have.
   CINDER: ['magma_slime', 'magma_slime', 'cinderling', 'emberling', 'emberling', 'demon', 'dragon'],
-  TUNDRA: ['yeti', 'skull', 'dread_hare', 'dread_hare'],
-  MOUNTAIN: ['cyclops', 'bat', 'dragon', 'cinderling', 'dread_hare'],
+  TUNDRA: ['yeti', 'skull', 'dread_hare', 'dread_hare', 'penguin_monster'],
+  MOUNTAIN: ['cyclops', 'bat', 'dragon', 'cinderling', 'dread_hare', 'panda_monster'],
   DESERT: ['cactus_monster', 'cactus_monster', 'skull'],
   BADLANDS: ['demon', 'greendemon', 'demon', 'skull', 'dragon', 'cinderling'],
-  SAVANNA: ['greendemon', 'skull'],
-  FOREST: ['mushroom_monster', 'mushroom_monster', 'ghost', 'dread_hare'],
-  PINE_FOREST: ['mushroom_monster', 'ghost', 'bat'],
-  OCEAN: ['cthulhu'],
-  BEACH: ['cthulhu', 'ghost'],
-  PLAINS: ['alien', 'alien_tall', 'dread_hare'],
+  SAVANNA: ['greendemon', 'skull', 'pig_monster', 'bee_monster'],
+  FOREST: ['mushroom_monster', 'mushroom_monster', 'ghost', 'dread_hare',
+    'tree_monster', 'deer_monster', 'bee_monster'],
+  PINE_FOREST: ['mushroom_monster', 'ghost', 'bat', 'tree_monster', 'panda_monster'],
+  OCEAN: ['cthulhu', 'crab_monster'],
+  BEACH: ['cthulhu', 'ghost', 'crab_monster', 'crab_monster'],
+  PLAINS: ['alien', 'alien_tall', 'dread_hare', 'chicken_monster', 'deer_monster'],
   // MEADOW is missing on purpose — see above.
 };
 

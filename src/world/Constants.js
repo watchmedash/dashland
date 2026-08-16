@@ -243,7 +243,7 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  * flora species: a pass that only decorates the surface does not bump. A pass
  * that moves, carves or replaces ground always does.**
  */
-export const GEN_VERSION = 8;
+export const GEN_VERSION = 9;
 
 // All five keep their distance from R_MIN, so the crust reads the same from
 // below: core three layers up, mantle eight. What changed is the room above
@@ -322,6 +322,30 @@ export const FACE_CINDER = 2;
 /** Indexed by face: +X, -X, +Y, -Y, +Z, -Z. */
 export const FACE_ROLE = [
   FACE_NORMAL, FACE_NORMAL, FACE_POLAR, FACE_CINDER, FACE_NORMAL, FACE_NORMAL,
+];
+
+/**
+ * What each face does to the body walking on it, indexed by FACE_ROLE.
+ *
+ * This is section 6e of CUBE-PLANET.md - per-face physics - and it is what
+ * gives the two dedicated faces a reason to exist beyond scenery. Each is a
+ * trade rather than a penalty, so going there is a decision:
+ *
+ *   the cap      heavy going, but you last. Half again as slow, and stamina
+ *                drains at two thirds, so it is the face you cross on foot
+ *                when you have a long way to go and nothing chasing you.
+ *   cinderlands  light and quick to tire. The low gravity lets you clear twice
+ *                the height, which is how you get over lava, and stamina burns
+ *                half again as fast, which is the clock on being there.
+ *
+ * `jump` is a multiplier on HEIGHT, not on the impulse - height goes with the
+ * square of take-off speed, so doubling it is a factor of sqrt(2) on the
+ * velocity. Doubling the impulse instead would have quadrupled the height.
+ */
+export const FACE_PHYSICS = [
+  { speed: 1, jump: 1, staminaDrain: 1 },
+  { speed: 1 / 1.5, jump: 1, staminaDrain: 1 / 1.5 },
+  { speed: 1, jump: 2, staminaDrain: 1.5 },
 ];
 
 /** grass tint, foliage tint, water tint */

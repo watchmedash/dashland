@@ -1336,6 +1336,16 @@ const SEAM_WALK_BAND = 56;
  * that is the price of an edge you can actually walk over.
  */
 const BORDER_FLAT = 24;
+/**
+ * How much easier every ore vein is to hit on the cinderlands.
+ *
+ * Subtracted from each vein's noise threshold, so the seams that already exist
+ * get fatter rather than new ones appearing - the same map, thicker. 0.06
+ * against thresholds in the 0.52-0.58 band is enough to be worth the trip
+ * without making the face the only place worth mining.
+ */
+const ORE_CINDER_BONUS = 0.06;
+
 /** Blocks of rise allowed per column approaching a seam. One is a step. */
 const SEAM_MAX_STEP = 1.0;
 /** How far inside a face the player must wake up. */
@@ -2823,6 +2833,8 @@ export class WorldGen {
     // base folded into cellIndex/cellWrite: storage is not slab-packed
     const dir = _fillDir;
     this._dirOf(col, dir);
+    // The cinderlands are the reason to go there. See ORE_CINDER_BONUS.
+    const oreBonus = this.colBiome[col] === BIOME.CINDER ? ORE_CINDER_BONUS : 0;
     for (let k = 0; k < D; k++) {
       if (!ORE_HOST[blocks[cellIndex(col, k)]]) continue;
       const bucket = ORE_BY_LAYER[k];
@@ -2837,8 +2849,12 @@ export class WorldGen {
         // expensive loop in worldgen. `veinNoise` then skips the second
         // octave whenever the first already rules the threshold out, which is
         // most of the time.
-        const n = veinNoise(no, px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, o.thr);
-        if (n > o.thr) { blocks[cellWrite(col, k)] = o.id; break; }
+        // Lowering the threshold widens the blob rather than adding new ones:
+        // the same seams, thicker, so what changes is how much you get out of a
+        // vein rather than the shape of the map.
+        const thr = o.thr - oreBonus;
+        const n = veinNoise(no, px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, thr);
+        if (n > thr) { blocks[cellWrite(col, k)] = o.id; break; }
       }
     }
   }

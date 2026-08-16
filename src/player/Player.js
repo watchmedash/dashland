@@ -3,7 +3,9 @@
 // voxel world, with no sinking or staircase artefacts.
 
 import * as THREE from 'three';
-import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
+import {
+  GRAVITY, F, D, R_MIN, cidx, FACE_ROLE, FACE_PHYSICS,
+} from '../world/Constants.js';
 import {
   cellToWorld, tangentFrame, stepColumn, normalizeCell, colParts,
 } from '../world/Sphere.js';
@@ -1336,8 +1338,10 @@ export class Player {
     // and the 0.62 wading factor instead of fighting them, and so that a fully
     // fed Agility player and a fully fed one with no tree are slowed by the
     // same *proportion* rather than the same absolute cells/s.
+    // What the ground you are standing on does to you. See FACE_PHYSICS.
+    const face = FACE_PHYSICS[FACE_ROLE[this.cell.f]] || FACE_PHYSICS[0];
     let speed = (this.crouching ? 2.0 : this.sprinting ? 6.8 : 4.4)
-      * (this.skills?.speedScale ?? 1) * this._energyScale();
+      * (this.skills?.speedScale ?? 1) * this._energyScale() * face.speed;
     if (this.inWater) speed *= 0.62;
     if (this.inSink) speed *= SINK_MOVE;
 
@@ -1550,7 +1554,9 @@ export class Player {
     } else {
       this.vel.k -= GRAVITY * dt;
       if (this.grounded && input.down('Space')) {
-        this.vel.k = 8.4;
+        // sqrt of the height multiplier: height goes with the square of the
+        // take-off speed. See FACE_PHYSICS.
+        this.vel.k = 8.4 * Math.sqrt((FACE_PHYSICS[FACE_ROLE[this.cell.f]] || FACE_PHYSICS[0]).jump);
         this.grounded = false;
       }
       this.vel.k = Math.max(this.vel.k, -58);
@@ -1741,7 +1747,9 @@ export class Player {
     // branch impossible to describe in one line — endurance is how long you can
     // keep going, and 8% a level off the drain already says that.
     if (this.sprinting && tanSpeed > 3) {
-      this.stamina = Math.max(0, this.stamina - dt * 0.055 * (this.skills?.staminaScale ?? 1));
+      this.stamina = Math.max(0, this.stamina - dt * 0.055
+        * (this.skills?.staminaScale ?? 1)
+        * (FACE_PHYSICS[FACE_ROLE[this.cell.f]] || FACE_PHYSICS[0]).staminaDrain);
     } else this.stamina = Math.min(1, this.stamina + dt * 0.12);
 
     // The arm labours when the water does. A penalty the player cannot see is

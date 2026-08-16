@@ -243,7 +243,7 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  * flora species: a pass that only decorates the surface does not bump. A pass
  * that moves, carves or replaces ground always does.**
  */
-export const GEN_VERSION = 7;
+export const GEN_VERSION = 8;
 
 // All five keep their distance from R_MIN, so the crust reads the same from
 // below: core three layers up, mantle eight. What changed is the room above

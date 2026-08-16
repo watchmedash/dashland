@@ -1903,6 +1903,41 @@ export class WorldGen {
       }
     }
 
+    /**
+     * Re-flood the sea, because the passes above moved the ground under it.
+     *
+     * `submerged` is decided from the height field long before this, and the
+     * slope limit only ever LOWERS columns - so a cliff cut down to a walkable
+     * ramp can end up under the waterline having never been marked wet. The
+     * fill then puts no water in it while the column beside it, which was
+     * marked, still fills to sea level: an ocean with a dry trench cut through
+     * it and a wall of water standing on nothing.
+     *
+     * The owner saw exactly that, and the tell was that it "updates when I
+     * break a block near them" - the runtime water sim re-evaluates and drains
+     * it, which is proof the generated state was wrong rather than the
+     * simulation.
+     *
+     * Seeded from everything already wet rather than from the ocean biome
+     * again, so this only ever grows the sea into ground that has just dropped
+     * below it.
+     */
+    {
+      const WET2 = R_SEA - 0.5;
+      const q2 = new Int32Array(COLUMNS);
+      let n2 = 0;
+      for (let col = 0; col < COLUMNS; col++) if (submerged[col]) q2[n2++] = col;
+      for (let qi = 0; qi < n2; qi++) {
+        const col = q2[qi];
+        for (let d = 0; d < 4; d++) {
+          const nb = colNeighbor(col, d);
+          if (nb < 0 || submerged[nb] || colHeight[nb] >= WET2) continue;
+          submerged[nb] = 1;
+          q2[n2++] = nb;
+        }
+      }
+    }
+
 
     /**
      * Water identity, straight off the lake pass. See WATER_OCEAN.

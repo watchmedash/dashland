@@ -1184,7 +1184,16 @@ export const POSE = {
   // scaled back to about seven tenths, which is bright enough to read as lit in
   // a dark cave without washing the mint out of the gills to white.
   mushroom:    { file: 'wam/mushroom',    pack: 'wam', height: 0.26, grip: 0.22, root: 0.38, rot: [0.02, -0.45, 0.22],  pos: [0.006, 0.03, -0.012], icon: [0.04, 0.42, -0.16],
-                 glowMatch: { hex: '#b6efd0', color: [0.42, 0.60, 0.49] } },
+                 // tol 0.22 -> 0.10 and a lighter body lift. The key is a pale
+                 // mint and the stalk is a pale cream, which at 0.22 sat inside
+                 // the match: the glow was landing on the whole body instead of
+                 // the gills, and the flat lift on top of it took what colour
+                 // was left. Reported as the drops being grey/white. Tight
+                 // enough now that only the mint reads as lit.
+                 glowMatch: {
+                   hex: '#b6efd0', color: [0.42, 0.60, 0.49],
+                   tol: 0.10, lift: [0.035, 0.03, 0.04],
+                 } },
 
   // --- the reef -------------------------------------------------------------
   //

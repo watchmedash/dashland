@@ -945,7 +945,25 @@ float tintMask = 1.0;
  * it. The whole term is four multiplies and an exp, on a fragment that has
  * already run a full standard-material BRDF.
  */
-const float AERIAL_GAIN = 3.6;
+/*
+ * 3.6 -> 7.0, because the planet stopped being round.
+ *
+ * On a sphere the ground fell away and hid its own distance for free. A cube
+ * face is flat and 416 blocks across, so you see all the way to the far side of
+ * it and, worse, you see the terrain simply STOP at the streaming horizon. The
+ * owner: "add fog in all faces like real fog so it's hard to see from
+ * distance".
+ *
+ * Sized against CHUNK_LOAD_DIST (150), which is where meshes end, so the air
+ * has to be doing most of the hiding before the world runs out:
+ *
+ *            60 cells   100 cells   150 cells   190 cells
+ *   3.6          8%        20%         39%         55%
+ *   7.0         26%        56%         84%         95%
+ *
+ * Weather still multiplies through it, so a storm's 1.9 is thicker again.
+ */
+const float AERIAL_GAIN = 7.0;
 /*
  * Left at 3.6, and here is the measurement that says someone should look at it
  * with an art eye rather than a bug-fixing one.

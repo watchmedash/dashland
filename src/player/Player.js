@@ -136,6 +136,20 @@ const SINK_MOVE = 0.32;
  * noticed, the way out is immediate rather than a wait.
  */
 const SINK_CALM = 0.9;
+
+/**
+ * How a seam crossing's leftover position correction is spent by the camera.
+ *
+ * RATE is the exponential decay: about a quarter of a second to become
+ * invisible, which is slow enough not to be a pop and fast enough that the view
+ * is not lagging the body when something is chasing you.
+ *
+ * MAX is a sanity gate. Only the small corrections are worth hiding; anything
+ * larger is a teleport the player SHOULD see, and smoothing it would drag the
+ * camera through the ground instead.
+ */
+const CROSS_SMOOTH_RATE = 14;
+const CROSS_SMOOTH_MAX = 16;
 /**
  * Cells per second you rise while you hold still in a *buoyant* sink block.
  *
@@ -363,6 +377,7 @@ export function lookScaleFor(fov, baseFov) {
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
+const _crossFrom = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
@@ -386,6 +401,8 @@ export class Player {
     // Physics up snaps 90 degrees at a cube edge; the camera must not. This
     // chases it so the horizon rolls over a fraction of a second instead.
     this.viewUp = new THREE.Vector3(0, 1, 0);
+    /** Un-spent part of a seam crossing's position correction. */
+    this._crossOffset = new THREE.Vector3();
     this._frameF = -1;
     this.forward = new THREE.Vector3(0, 0, -1);
     this.frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
@@ -731,6 +748,9 @@ export class Player {
     // in the new face's axes: a jump at an edge comes back to where it started.
     // Carried through world space, which is the only frame both faces agree in.
     const changed = c.f !== this._frameF;
+    // Where the body was before the crossing moved it, so the camera can be
+    // given the difference back and spend it smoothly. See `_crossOffset`.
+    if (changed && this._frameF >= 0) _crossFrom.copy(this.position);
     if (changed && this._frameF >= 0) {
       const o = this.frame;
       const vx = o.ea[0] * this.vel.i + o.eb[0] * this.vel.j + o.up[0] * this.vel.k;
@@ -743,6 +763,16 @@ export class Player {
       this.vel.k = vx * n.up[0] + vy * n.up[1] + vz * n.up[2];
     } else {
       tangentFrame(c.f, c.ci, c.cj, c.ck, this.frame);
+    }
+    if (changed && this._frameF >= 0) {
+      // A seam crossing cannot always land the body exactly where it was - see
+      // EDGE_SLACK - so the leftover is handed to the camera as an offset that
+      // decays instead of being applied to the view in one frame. The physics
+      // body is where it is; only the picture catches up.
+      _crossFrom.sub(this.position);
+      if (_crossFrom.lengthSq() < CROSS_SMOOTH_MAX * CROSS_SMOOTH_MAX) {
+        this._crossOffset.add(_crossFrom);
+      }
     }
     this._frameF = c.f;
     const nu = _a.set(this.frame.up[0], this.frame.up[1], this.frame.up[2]);
@@ -1765,16 +1795,27 @@ export class Player {
     // optional: lerping straight at the opposite vector stays collinear and
     // normalize pins it back, which leaves a player who arrived on the far side
     // of the planet rendered upside down for good.
+    // Spend the crossing correction. Exponential, so it is quickest at the
+    // moment it is largest and has no discontinuity at either end.
+    if (this._crossOffset.lengthSq() > 1e-8) {
+      this._crossOffset.multiplyScalar(Math.exp(-CROSS_SMOOTH_RATE * dt));
+    } else {
+      this._crossOffset.set(0, 0, 0);
+    }
+
     if (this.viewUp.dot(this.up) < -0.9) {
       this.viewUp.addScaledVector(_c.set(this.frame.eb[0], this.frame.eb[1], this.frame.eb[2]), 0.25).normalize();
     }
-    this.viewUp.lerp(this.up, 1 - Math.exp(-6 * dt)).normalize();
+    // 6 -> 4.2. The roll is the only thing smoothing a 90 degree change of
+    // gravity, and at 6 it was over in about a third of a second, which reads
+    // as a snap with a hint of ease rather than as turning a corner.
+    this.viewUp.lerp(this.up, 1 - Math.exp(-4.2 * dt)).normalize();
 
     const right = _c.copy(this.forward).cross(this.up).normalize();
     this.lookDir.copy(this.forward).multiplyScalar(Math.cos(this.pitch))
       .addScaledVector(this.up, Math.sin(this.pitch)).normalize();
 
-    this.eye.copy(this.position).addScaledVector(this.up, this.eyeHeight - this.stepOffset);
+    this.eye.copy(this.position).add(this._crossOffset).addScaledVector(this.up, this.eyeHeight - this.stepOffset);
     // Head bob is a first-person effect and only a first-person effect. Applied
     // to a camera three and a half cells out it stops reading as footfalls and
     // starts reading as a handheld shot of someone else walking.

@@ -399,7 +399,22 @@ const _tp = [0, 0, 0];
  * is what put the owner in the next face's sea with the surface on its side.
  */
 const SEA_K = 33;
-const EDGE_SLACK = 5;
+/*
+ * 5 -> 12.
+ *
+ * At 5 the wall was reachable in ordinary play: the border ridge already
+ * stands a couple of blocks over the waterline, a jump adds one and a half, and
+ * a single placed block put you over it - at which point holding forward
+ * clamped you every frame and read as an invisible block. The owner hit it.
+ *
+ * The nudge this admits is larger (up to twelve blocks rather than five), and
+ * that is only acceptable because the player no longer SEES it: Player._sync
+ * takes the correction as a smoothed camera offset and spends it over a few
+ * tenths of a second. Above twelve it is still a wall, and still on purpose -
+ * a point that high over a corner is outside both faces and there is no honest
+ * answer to give.
+ */
+const EDGE_SLACK = 12;
 
 /** A cell is one unit across everywhere on a cube. */
 export const cellArc = () => 1;

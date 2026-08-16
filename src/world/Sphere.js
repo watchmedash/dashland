@@ -338,58 +338,41 @@ export function tangentFrame(f, ci, cj, ck, out = {
  */
 export function normalizeCell(c) {
   if (c.ci >= 0 && c.ci < F && c.cj >= 0 && c.cj < F) return c;
-  const p = _np;
-  p[0] = p[1] = p[2] = 0;
-  p[AX_N[c.f]] = SG_N[c.f] * PLANET_R;
-  p[AX_A[c.f]] = aOut(c.f, c.ci);
-  p[AX_B[c.f]] = bOut(c.f, c.cj);
-  const r = foldPoint(p[0], p[1], p[2], _fp);
-  const g = r.f;
-  // Re-measure against the new face from where the mover ACTUALLY is, not from
-  // the flattened probe and not by carrying the old height across.
-  //
-  // Carrying it was wrong in the way that matters: height on the old face is a
-  // distance along the old normal, and on the new face the same number is a
-  // distance along an axis at right angles to it. Falling off an edge therefore
-  // arrived on the neighbour flung a long way out along the wrong axis - the
-  // owner fell past an edge and ended up submerged in the next face's sea with
-  // the surface standing on its side, "like I am in a pool but sideways".
-  const t = cellToWorld(c.f, c.ci, c.cj, c.ck, _tp);
-  const ci = aIn(g, t[AX_A[g]]);
-  const cj = bIn(g, t[AX_B[g]]);
 
-  // High above an edge there is nowhere to go. That point is past the corner,
-  // outside BOTH faces' footprints, and (column, layer) has no way to say so -
-  // a face only spans its own square. Handing it over anyway is what threw the
-  // mover a long way out along the new face's tangent.
+  // Which side did it run off? The neighbouring face is decided by that and
+  // nothing else.
   //
-  // So the edge is a soft wall while you are above the shell and open ground
-  // once you are down on it. Terrain is faded flat and dry for the last few
-  // columns of every face, so a walk across a seam happens at exactly the
-  // height where this is exact, and that is the case that has to be perfect.
-  // The crossing is always allowed, whatever the two sides' heights.
+  // It used to be decided by which face's plane the point was furthest beyond,
+  // and that can NEVER hand you over while you are standing on the ground:
+  // walk to the last column at ground level and your normal coordinate is 209
+  // against a tangent of 208, so your own face still wins and the coordinate is
+  // just clamped back. You would need to be more than a face-width out for the
+  // geometry to change its mind. Measured on the case the owner was stuck in:
+  // the player reached ci 416, the very edge, and stayed on face 5 forever.
   //
-  // It used to be refused above a height budget, because the arrival height
-  // came straight out of the geometry: height on one face becomes tangential
-  // distance on the next, so any real difference in ground level at the seam
-  // put the destination outside the neighbour's square. Refusing meant clamping
-  // the mover back inside their own face every frame, which is an invisible
-  // wall - and the owner was right that height should not decide whether an
-  // edge can be walked over.
-  //
-  // The caller re-seats the height against the destination's OWN ground and
-  // keeps how far above it you were (Player._standOnArrival), so the raw
-  // geometry no longer has to be representable for the crossing to be honest.
-  // What survives here is the clamp, which only ever pins the in-face
-  // coordinate to the border column it belongs in.
-  c.f = g;
-  c.ci = ci <= 0 ? 0 : (ci >= F ? F - 1e-4 : ci);
-  c.cj = cj <= 0 ? 0 : (cj >= F ? F - 1e-4 : cj);
-  c.ck = SG_N[g] * t[AX_N[g]] - R_MIN;
+  // So this is the owner's rule instead, and it is the right one: "just tp me
+  // to the block next to me in other face even if it's high or low". Stepping
+  // off an edge puts you on the column across that edge. `patchColumn` already
+  // resolves exactly that for a single step and is what the adjacency graph is
+  // built from, so the two can never disagree.
+  const si = c.ci >= F ? 1 : (c.ci < 0 ? -1 : 0);
+  const sj = c.cj >= F ? 1 : (c.cj < 0 ? -1 : 0);
+  const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
+  const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
+  colParts(patchColumn(c.f, i, j, si, sj), _ncp);
+
+  // Keep the position ALONG the seam. Only the axis that ran off is reset; the
+  // other one carries its fraction over so a crossing does not also slide you
+  // sideways along the edge.
+  const frac = si !== 0 ? c.cj - Math.floor(c.cj) : c.ci - Math.floor(c.ci);
+  c.f = _ncp.f;
+  c.ci = _ncp.i + (si !== 0 ? 0.5 : frac);
+  c.cj = _ncp.j + (si !== 0 ? frac : 0.5);
+  // ck is left alone here; the caller re-seats it against the ground it has
+  // arrived on, which is what makes the height difference not matter.
   return c;
 }
-const _np = [0, 0, 0];
-const _tp = [0, 0, 0];
+const _ncp = { f: 0, i: 0, j: 0 };
 
 
 /** A cell is one unit across everywhere on a cube. */

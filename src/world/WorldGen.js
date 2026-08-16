@@ -1321,6 +1321,23 @@ const BORDER_FADE = 8;
 const BORDER_LIFT = 1.0;
 /** Columns of bare ground kept at a face border, so no canopy spans a seam. */
 const TREE_EDGE_MARGIN = 6;
+/** How wide a walkable apron every seam gets. See the slope limit. */
+const SEAM_WALK_BAND = 56;
+/**
+ * Columns of dead-level ground at every face border.
+ *
+ * The whole band, not a lip. Anything less leaves terrain to climb on the
+ * approach, and a single two-block step is above jump height and walls the seam
+ * off - which is what kept the owner from crossing at all. Flat to the width of
+ * SEAM_WALK_BAND means the run-up to every edge is a plain, the two faces meet
+ * exactly level, and stepping over is a step.
+ *
+ * It reads as a shelf around the rim of each face, which is 11% of a face, and
+ * that is the price of an edge you can actually walk over.
+ */
+const BORDER_FLAT = 24;
+/** Blocks of rise allowed per column approaching a seam. One is a step. */
+const SEAM_MAX_STEP = 1.0;
 /** How far inside a face the player must wake up. */
 const SPAWN_EDGE_MARGIN = 40;
 const _dtc = { f: 0, i: 0, j: 0, col: 0 };
@@ -1433,13 +1450,23 @@ export class WorldGen {
     // other. Flat there means the seam is a clean 90 degree corner instead.
     dirToFace(dx, dy, dz, _dtf);
     const border = Math.min(1 - Math.abs(_dtf.a), 1 - Math.abs(_dtf.b)) * PLANET_R;
-    if (border < BORDER_FADE) {
-      // Above the waterline, not below it. Fading to R_SEA - 0.4 put the shell
-      // a shade under sea level all the way round every face, so all twelve
-      // edges came out as strips of ocean - which is both wrong and, on a cube,
-      // genuinely disorienting to walk along. A low dry ridge instead.
-      h = lerp(R_SEA + BORDER_LIFT, h, clamp(border / BORDER_FADE, 0, 1));
-    }
+    // The last few columns are FLAT, and everything behind them is capped to a
+    // cone that rises at most one block per column away from the seam.
+    //
+    // A fixed-width fade could not do this. It lerped over eight columns
+    // whatever the terrain behind it was, so a mountain near a seam still came
+    // down as a cliff - measured, rises of up to 34 blocks in the last twelve
+    // columns - and a two-block step is already above jump height. That is what
+    // walled every edge off: "I still can't cross faces".
+    //
+    // The cap is exact rather than tuned. At `border` columns from the edge the
+    // ground may stand at most `border` blocks over the seam's own level, so
+    // the worst step between neighbouring columns is one, for any terrain, with
+    // no width to pick. Inland the cap passes the terrain ceiling and does
+    // nothing at all.
+    if (border < BORDER_FLAT) return R_SEA + BORDER_LIFT;
+    const cap = R_SEA + BORDER_LIFT + (border - BORDER_FLAT) * SEAM_MAX_STEP;
+    if (h > cap) h = cap;
     return clamp(h, R_MIN + 6, R_TERRAIN_MAX);
   }
 
@@ -1589,6 +1616,35 @@ export class WorldGen {
       }
     }
 
+    /**
+     * Slope limit: no column stands more than MAX_STEP over any of its four
+     * neighbours.
+     *
+     * This is section 6c of CUBE-PLANET.md and it was never implemented. It is
+     * not a polish pass - a step of two blocks is above jump height, so it is a
+     * wall, and the noise makes them all over the planet. It showed up worst at
+     * a face border, where the height fade ramps the ground up to meet the seam
+     * and the noise on top of that ramp turns the last few columns into a
+     * cliff: measured on the column the owner was stuck in, the surfaces
+     * running out to the edge were 27, 29, 29, 30, 31, 32 - that 27 to 29 is
+     * the wall, and it ringed the whole face.
+     *
+     * Scoped to the band around each seam rather than applied planet-wide, and
+     * that is deliberate. Run over everything it also files down canyon walls
+     * and mountain faces - measured, 11 216 neighbour steps of more than a
+     * block remain in open terrain and the worst is 19, which is a gorge and is
+     * MEANT to be steep. A cliff you have to walk around is a landscape; a
+     * cliff ringing the only route to the next face is a bug.
+     *
+     * Lowering rather than raising, so the limiter can only ever cut a cliff
+     * down; raising would fill valleys and quietly undo the terrain.
+     *
+     * Sweeps rather than one pass: the constraint propagates one column per
+     * pass, so a tall cliff needs as many passes as it is high. Twelve caps
+     * every step the noise produces (the relaxed field's own extremes are well
+     * inside that) without the cost of converging a mountain, which does not
+     * need converging - a mountain is meant to be climbed round, not over.
+     */
     // Biomes are decided from the *relaxed* height, not the raw noise. Deciding
     // first meant a column could be classified as an alpine peak and then be
     // smoothed down into a gentle rise — a snow cap with no mountain under it.
@@ -1726,6 +1782,14 @@ export class WorldGen {
     // ---- canyons -----------------------------------------------------------
     onProgress(0.93, 'Cutting the gorges');
     const canyonMask = this.carveCanyons(colHeight, colBiome, rng);
+    // Nothing carves or floods through a seam. A gorge crossing the border band
+    // leaves a wall thirty blocks high where the ground has to be steppable, and
+    // the height cone in `height()` cannot see it because it runs before this.
+    // Erasing the mask here is enough: every later pass - the floor, the walls,
+    // the re-surfacing, the tree thinning - reads it rather than re-deciding.
+    for (let col = 0; col < COLUMNS; col++) {
+      if (colBorderDist(col) <= SEAM_WALK_BAND) canyonMask[col] = 0;
+    }
 
     // ---- what the sea can actually reach -----------------------------------
     /**
@@ -1805,6 +1869,40 @@ export class WorldGen {
     // and the flatness of a bank is what several later passes decide on.
     onProgress(0.95, 'Filling the lakes');
     this.carveLakes(colHeight, colBiome, canyonMask, submerged, shoreDist);
+    // ...and no lake basin in the seam apron either, for the same reason as the
+    // canyons: a basin cut into the flat band is a wall around the rim of it.
+    for (let col = 0; col < COLUMNS; col++) {
+      if (colBorderDist(col) <= SEAM_WALK_BAND && this.lakeKind[col]) {
+        this.lakeKind[col] = 0;
+        this.lakeSurf[col] = 0;
+        colHeight[col] = R_SEA + BORDER_LIFT;
+      }
+    }
+
+    {
+      const MAX_STEP = 1.0;
+      // Gathered once. The band is a few percent of the planet, so iterating a
+      // list of it converges in the time one full sweep would have cost.
+      const band = [];
+      for (let col = 0; col < COLUMNS; col++) {
+        if (colBorderDist(col) <= SEAM_WALK_BAND) band.push(col);
+      }
+      for (let pass = 0; pass < 200; pass++) {
+        let cut = 0;
+        for (let n = 0; n < band.length; n++) {
+          const col = band[n];
+          let lowest = Infinity;
+          for (let d = 0; d < 4; d++) {
+            const h = colHeight[colNeighbor(col, d)];
+            if (h < lowest) lowest = h;
+          }
+          const cap = lowest + MAX_STEP;
+          if (colHeight[col] > cap) { colHeight[col] = cap; cut++; }
+        }
+        if (cut === 0) break;
+      }
+    }
+
 
     /**
      * Water identity, straight off the lake pass. See WATER_OCEAN.

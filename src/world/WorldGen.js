@@ -375,7 +375,12 @@ const SPRING_RD = 1.5;         // the deep middle; outside it the pool is a shel
  * which is a feature you would not find. This puts it back to the same order.
  */
 const SPRING_CHANCE = 0.14;
-const SPRING_BIOMES = [BIOME.SNOW, BIOME.TUNDRA, BIOME.MOUNTAIN];
+// Moved off the cap and onto the cinderlands. A hot spring is water heated
+// from below, so a face of basalt and lava is where it belongs and a snowfield
+// is where it never made sense - the owner: "having hotsprings in snow face
+// doesn't make sense, perhaps put that hotspring in magma face". Mountain stays
+// because an alpine spring is the one temperate case that reads correctly.
+const SPRING_BIOMES = [BIOME.CINDER, BIOME.MOUNTAIN];
 
 /**
  * Waterfalls: a seep in a cliff face, falling into water that is already there.

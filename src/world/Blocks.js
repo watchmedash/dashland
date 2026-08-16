@@ -144,7 +144,7 @@ export const R_MODEL = 13;
 // ---------------------------------------------------------------------------
 export const TILES = [
   'stone', 'dirt', 'grass_top', 'grass_side', 'sand', 'sandstone', 'sandstone_top',
-  'gravel', 'clay', 'snow', 'snow_side', 'powder_snow', 'ice', 'water',
+  'gravel', 'clay', 'snow', 'snow_side', 'powder_snow', 'ice', 'water', 'quicksand',
   'log_oak', 'log_oak_top', 'leaves_oak',
   'log_birch', 'log_birch_top', 'leaves_birch',
   'log_pine', 'log_pine_top', 'leaves_pine',
@@ -1395,7 +1395,7 @@ export const BLOCKS = [
   // dune beside it is a plank across, not a filling-in, and the pool is still
   // there underneath when the plank is broken.
   block({
-    name: 'quicksand', label: 'Quicksand', top: 'mud', side: 'sand', bottom: 'sand',
+    name: 'quicksand', label: 'Quicksand', all: 'quicksand',
     solid: false, sink: 0.9, buoyant: true, hardness: 0.5, tool: 'shovel',
     particle: [0.56, 0.47, 0.33], sound: 'sand',
   }),
@@ -1514,6 +1514,15 @@ if (N_BLOCKS > 256) {
 export const IS_OPAQUE = new Uint8Array(N_BLOCKS);
 export const IS_SOLID = new Uint8Array(N_BLOCKS);
 /** Foliage cubes. The mesher culls leaf-against-leaf faces, "fast leaves" style. */
+/**
+ * How much of the ground's grip a block gives, 0..1. 1 is ordinary footing.
+ *
+ * Ice is the reason this exists and the polar cap is why it matters: two thirds
+ * of that face is ice, so this is most of a whole side of the planet rather
+ * than the occasional frozen pond.
+ */
+export const GRIP = new Float32Array(N_BLOCKS).fill(1);
+
 export const IS_LEAF = new Uint8Array(N_BLOCKS);
 /**
  * Wood or foliage — the parts of a tree a climber can hold on to.
@@ -2293,6 +2302,12 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_OPAQUE[i] = b.opaque ? 1 : 0;
   IS_SOLID[i] = b.solid ? 1 : 0;
   IS_LEAF[i] = b.name.startsWith('leaves') ? 1 : 0;
+  // Packed and blue ice are denser and read as more polished, so they are
+  // slicker than a frozen puddle. Snow is not ice: it grips very slightly less
+  // than soil, which is enough to feel without being a hazard.
+  GRIP[i] = b.name === 'ice' ? 0.16
+    : (b.name === 'packed_ice' || b.name === 'blue_ice') ? 0.10
+      : b.name === 'snow' ? 0.88 : 1;
   // A *standing* tree. The lying logs are deliberately out: IS_TREE answers
   // "can a climber hold on to this?", and a log on the forest floor is a thing
   // you step over, not a handhold. In it, a monkey beside a one-cell-high

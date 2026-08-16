@@ -89,6 +89,11 @@ const MAP = {
   // the palette was never the complaint, and sand is what the desert's whole
   // light balance was tuned against.
   sand: ['Sand', 5, { repeat: 2, bright: 1.09, warm: [0.96, 1.01, 1.10] }],
+  // Wet sand: the same grain, darker and a shade greyer, so a pool reads as
+  // sand that is holding water rather than as the mud tile it used to borrow.
+  // contrast runs BEFORE warm, so the warm row is applied to the darkened
+  // result and not the other way round.
+  quicksand: ['Sand', 5, { repeat: 2, contrast: 1.06, bright: 0.78, warm: [0.93, 0.91, 0.84] }],
   sandstone: ['Desert', 3],
   sandstone_top: ['Sand', 5, { repeat: 2, bright: 1.09, warm: [0.96, 1.01, 1.10] }],
   // Beach/6 is pale sand — it read as a second sand block, not as gravel.

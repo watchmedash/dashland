@@ -7,7 +7,7 @@ import { GRAVITY, F, D, R_MIN, cidx } from '../world/Constants.js';
 import { cellToWorld, tangentFrame, stepColumn, normalizeCell } from '../world/Sphere.js';
 import {
   RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
-  CONTACT_HURT, CONTACT_POISON, SINK, SINK_BUOYANT,
+  CONTACT_HURT, CONTACT_POISON, SINK, SINK_BUOYANT, GRIP,
 } from '../world/Blocks.js';
 // Imported rather than re-declared so there is exactly one "how much slower is
 // water" number in the game. Items.js owns it, Skills.js quotes it in prose
@@ -128,6 +128,14 @@ const FLOW_PUSH = 11;
  * which is the trade the whole hazard is built on.
  */
 const SINK_MOVE = 0.32;
+/**
+ * Seconds of holding still before quicksand will let you push off.
+ *
+ * Long enough that the reflex - thrash, then jump - does not work and you have
+ * to notice that stopping is what helps. Short enough that once you have
+ * noticed, the way out is immediate rather than a wait.
+ */
+const SINK_CALM = 0.9;
 /**
  * Cells per second you rise while you hold still in a *buoyant* sink block.
  *
@@ -411,6 +419,7 @@ export class Player {
      * powder snow.
      */
     this.inSink = 0;
+    this._sinkCalm = 0;
     /** Its `SINK` rate, cached so the physics does not look the table up twice. */
     this.sinkRate = 0;
     /** Feet in the pool's top layer, which is the one place a jump works. */
@@ -1213,7 +1222,12 @@ export class Player {
     const w2 = this._toCellVelocity(wish.x * speed, wish.y * speed, wish.z * speed);
     const wi = w2.i, wj = w2.j;
 
-    const accel = this.grounded ? 42 : 11;
+    // Footing. Ice gives you almost none of the ground's grip, so you build
+    // speed slowly and keep it far too long - which is what sliding is. Held to
+    // a floor of the airborne numbers rather than going to zero, or standing on
+    // ice would be standing on nothing.
+    const grip = this.grounded ? GRIP[this.groundBlock()] ?? 1 : 1;
+    const accel = this.grounded ? Math.max(11, 42 * grip) : 11;
     if (moving) {
       const t = Math.min(1, accel * dt);
       this.vel.i += (wi - this.vel.i) * t;
@@ -1223,7 +1237,7 @@ export class Player {
       // of the keys in one and the body stops where it is rather than coasting,
       // which is what "held" feels like — and it also means holding still is a
       // clean, unambiguous input rather than a slow drift you have to wait out.
-      const damp = this.inSink ? 18 : this.grounded ? 14 : this.inWater ? 4 : 1.2;
+      const damp = this.inSink ? 18 : this.grounded ? Math.max(1.2, 14 * grip) : this.inWater ? 4 : 1.2;
       const f2 = Math.max(0, 1 - damp * dt);
       this.vel.i *= f2; this.vel.j *= f2;
     }
@@ -1381,10 +1395,24 @@ export class Player {
        * worse than either hazard on its own.
        */
       const buoyant = SINK_BUOYANT[this.inSink] === 1;
-      if (this.sinkTop && input.down('Space')) {
+      const struggling = moving || input.down('Space');
+      // Stillness is the mechanic, so stillness has to be what buys the exit.
+      // The jump used to be available the instant the feet were in the top
+      // layer, which meant you could walk into a pool and hop straight back out
+      // without the hazard ever happening: "I can jump out of quicksand I
+      // thought not moving is way to escape it". Now the pool has to let go of
+      // you first - hold still, float up, and the push-off arrives a beat
+      // later. Any struggle spends it.
+      //
+      // Snow keeps the old rule and must: it has no buoyancy to wait for, so a
+      // calm timer there would be a hazard with no exit, which the note above
+      // records as the thing this must never become.
+      this._sinkCalm = buoyant
+        ? (struggling ? 0 : this._sinkCalm + dt)
+        : SINK_CALM;
+      if (this.sinkTop && input.down('Space') && this._sinkCalm >= SINK_CALM) {
         this.vel.k = 8.4;
       } else if (buoyant) {
-        const struggling = moving || input.down('Space');
         const target = struggling ? -this.sinkRate : SINK_RISE;
         this.vel.k += (target - this.vel.k) * Math.min(1, SINK_RATE_LERP * dt);
       } else {

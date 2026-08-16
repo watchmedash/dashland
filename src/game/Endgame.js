@@ -204,7 +204,10 @@ export class Endgame {
       const col = cidx(f, i, j);
       const ground = h[col];
       if (!(ground > R_MIN + 2) || !(ground < R_MIN + D - 8)) continue;
-      if (rec.aquatic ? !(ground < R_SEA - 3) : !(ground > R_SEA + 1)) continue;
+      // Eight below the surface rather than three: the Deepmaw is drawn very
+      // nearly four cells tall, and a body that size in four layers of water is
+      // wedged rather than swimming.
+      if (rec.aquatic ? !(ground < R_SEA - 8) : !(ground > R_SEA + 1)) continue;
       if (fallback < 0) fallback = col;
       let clear = true;
       for (const o of this.roster) {
@@ -297,9 +300,22 @@ export class Endgame {
       // Face indices rather than roles, because that is what the shutdown is
       // asked about and what a column answers.
       s: [...this.shut],
-      // One row per boss, keyed by type: the roster is derived from the species
-      // table, so a save must not depend on its order surviving an edit.
-      b: this.roster.map((r) => [r.type, r.col, r.dead ? 0 : Math.max(1, r.hp | 0)]),
+      /**
+       * One row per boss: type, column, down, health left.
+       *
+       * Keyed by type rather than by position, because the roster is derived
+       * from the species table and a save must not depend on that order
+       * surviving an edit.
+       *
+       * Four fields and not three, and the fourth is the one that matters.
+       * Death and health were folded together first - zero meant dead - and
+       * that reads a boss the player has never been near, whose record honestly
+       * holds no health at all yet, as a corpse. Clamping it to 1 instead is
+       * the same bug pointing the other way: sixteen bosses that load with one
+       * point of health each. So `down` is its own flag and 0 health means "not
+       * fought yet, take whatever `_spawnHealth` gives it".
+       */
+      b: this.roster.map((r) => [r.type, r.col, r.dead ? 1 : 0, Math.max(0, r.hp | 0)]),
     };
   }
 
@@ -315,14 +331,14 @@ export class Endgame {
     this.triggered = true;
     this.won = !!data.w;
     for (const f of data.s || []) this.shut.add(f | 0);
-    for (const [type, col, hp] of data.b) {
+    for (const [type, col, down, hp] of data.b) {
       const r = this.roster.find((x) => x.type === type);
       // A species that has since been removed from the table. Skipped rather
       // than restored, exactly as `Mobs.fromJSON` skips an unknown `d.t`.
       if (!r) continue;
       r.col = col | 0;
-      r.dead = !(hp > 0);
-      r.hp = r.dead ? 0 : hp | 0;
+      r.dead = !!down;
+      r.hp = r.dead ? 0 : Math.max(0, hp | 0);
     }
   }
 }

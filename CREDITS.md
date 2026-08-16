@@ -43,17 +43,35 @@ Eight of them share a model name with an animal this game already has from the
 Kenney pack above, so the hostile versions carry names of their own. That is a
 naming decision rather than an art one and it is recorded in `SPECIES`.
 
-## Monsters — Ultimate Platformer Pack by **Quaternius** — supplied, NOT YET IMPORTED
+## Bosses — Ultimate Platformer Pack by **Quaternius**
 
 [patreon.com/quaternius](https://www.patreon.com/quaternius) — **CC0 1.0**,
 stated verbatim in the pack's own `License.txt` and so **read off disk**. Big,
 blob and flying monster sets over one shared `Atlas_Monsters.png`, in
 `model/Ultimate monsters`.
 
-**Nothing from it is in this repository yet.** It is recorded here ahead of the
-import because the terms are settled and the same author's pack above is already
-the whole monster roster, so the two belong together on this page. When models
-land, list them here.
+**The Big set, all 16 of it**, in `public/models/monsters/` as
+`boss-<name>.glb`: the Croakmaw, Hoarfang, Wraithflame, Bramblehorn, Ashlord,
+Slagbrute, Magmaw, Palecowl, Bonehelm, Thumpjaw, Voidspawn, Rimewing,
+Blightcrown, Ashchief, Deepmaw and Emberthorn. Each GLB is a headless Blender
+import and re-export of the pack's own glTF and nothing else: no retopology, no
+repaint, no atlas change, which is the same pipeline the monsters above came
+through.
+
+**The Blob and Flying sets are unused.** Nothing from either is in this
+repository. There are sixteen bosses because the Big set has sixteen models in
+it, and a boss that flew or poured would need behaviour the roster does not
+have.
+
+Every model in the set is on one humanoid rig carrying the same fourteen clips,
+which is why `BOSS_CLIPS` in `src/game/Mobs.js` is a single map where the
+monsters need two. Their sizes are read off the models rather than chosen: the
+rest-pose heights run 3.256 to 4.565 in the pack's units, and that range is
+mapped onto the drawn heights, health and damage in `SPECIES`.
+
+Ten of the sixteen share a model name with a creature this game already has, so
+every boss carries a name of its own. That is a naming decision rather than an
+art one and it is recorded in `SPECIES`.
 
 ## Food — Food Kit by **Kenney**
 

@@ -2827,17 +2827,22 @@ const SPECIES = {
    * Measured, not chosen. Every model in the Big set is on the same rig at the
    * same authored scale, so their rest-pose heights are directly comparable:
    * 3.256 for the frog up to 4.565 for the cactoro, in the pack's own units.
-   * That range is mapped onto a drawn height of 3.2 to 4.4 cells, and hp,
+   * That range is mapped onto a drawn height of 3.10 to 3.98 cells, and hp,
    * damage, reach, swing, speed, turn and acceleration are all read off the
    * same position in it. So the table below is one line of arithmetic per
    * column rather than sixteen opinions, and a boss that looks bigger IS
    * bigger, hits harder and turns slower, without anything having to be
    * remembered.
    *
-   * 4.4 is the ceiling for the reason the giraffe's 3.9 is: `modelExtents`
-   * rounds the drawn height up into `tall`, the headroom a body needs to walk,
-   * and the tallest of these already costs four clear cells. Five would wall
-   * them out of the ground they are standing on.
+   * 3.98 is the ceiling for the reason the giraffe's 3.9 is, and it is a
+   * measured number rather than a cautious one: `modelExtents` rounds the drawn
+   * height up into `tall`, the headroom a body needs to walk, and these models
+   * put their feet on their own origin - measured `belly` 0.01 - so `tall` is
+   * simply `ceil(height)`. At 3.98 every one of the sixteen costs four clear
+   * cells, which is the giraffe's bill; anything over 4 costs five, and the
+   * note beside the giraffe records that five is enough to wall a body out of
+   * most of the terrain it lives on. Three of these were over the line before
+   * it was measured.
    *
    * Read against the roster they have to tower over: the dragon is the top of
    * the ordinary table at hp 34 and dmg 9, and the cyclops is the tallest
@@ -2853,67 +2858,67 @@ const SPECIES = {
    */
   boss_frog: boss('frog', {
     label: 'Croakmaw', face: FACE_POLAR,
-    h: 3.20, hp: 50, spd: 1.45, shy: 0, turn: 2.80, accel: 7.00,
+    h: 3.10, hp: 50, spd: 1.45, shy: 0, turn: 2.80, accel: 7.00,
     dmg: 10, reach: 1.80, swing: 1.40, aggro: 22,
     drops: [['hide', 1, 2], ['emerald', 1, 1]],
   }),
   boss_yeti: boss('yeti', {
     label: 'Hoarfang', face: FACE_POLAR,
-    h: 3.34, hp: 55, spd: 1.41, shy: 0, turn: 2.73, accel: 6.82,
+    h: 3.21, hp: 55, spd: 1.41, shy: 0, turn: 2.73, accel: 6.82,
     dmg: 11, reach: 1.92, swing: 1.46, aggro: 23,
     drops: [['hide', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_bluedemon: boss('bluedemon', {
     label: 'Wraithflame', face: FACE_CINDER,
-    h: 3.37, hp: 56, spd: 1.40, shy: 0, turn: 2.71, accel: 6.78,
+    h: 3.23, hp: 56, spd: 1.40, shy: 0, turn: 2.71, accel: 6.78,
     dmg: 11, reach: 1.94, swing: 1.47, aggro: 23,
     drops: [['cinder', 1, 2], ['amethyst', 1, 1]],
   }),
   boss_monkroose: boss('monkroose', {
     label: 'Bramblehorn', face: FACE_POLAR,
-    h: 3.57, hp: 62, spd: 1.34, shy: 0, turn: 2.61, accel: 6.53,
+    h: 3.37, hp: 62, spd: 1.34, shy: 0, turn: 2.61, accel: 6.53,
     dmg: 12, reach: 2.11, swing: 1.56, aggro: 24,
     drops: [['hide', 1, 2], ['meat', 1, 2], ['emerald', 1, 1]],
   }),
   boss_demon: boss('demon', {
     label: 'Ashlord', face: FACE_CINDER,
-    h: 3.59, hp: 63, spd: 1.33, shy: 0, turn: 2.60, accel: 6.51,
+    h: 3.39, hp: 63, spd: 1.33, shy: 0, turn: 2.60, accel: 6.51,
     dmg: 12, reach: 2.13, swing: 1.56, aggro: 25,
     drops: [['cinder', 1, 2], ['ruby', 1, 1]],
   }),
   boss_orc: boss('orc', {
     label: 'Slagbrute', face: FACE_CINDER,
-    h: 3.70, hp: 67, spd: 1.30, shy: 0, turn: 2.55, accel: 6.37,
+    h: 3.47, hp: 67, spd: 1.30, shy: 0, turn: 2.55, accel: 6.37,
     dmg: 12, reach: 2.22, swing: 1.61, aggro: 25,
     drops: [['iron_ingot', 1, 2], ['ruby', 1, 1]],
   }),
   boss_dino: boss('dino', {
     label: 'Magmaw', face: FACE_CINDER,
-    h: 3.73, hp: 68, spd: 1.30, shy: 0, turn: 2.54, accel: 6.34,
+    h: 3.49, hp: 68, spd: 1.30, shy: 0, turn: 2.54, accel: 6.34,
     dmg: 12, reach: 2.24, swing: 1.62, aggro: 26,
     drops: [['hide', 1, 2], ['cinder', 1, 2], ['ruby', 1, 1]],
   }),
   boss_ninja: boss('ninja', {
     label: 'Palecowl', face: FACE_POLAR,
-    h: 3.78, hp: 69, spd: 1.28, shy: 0, turn: 2.51, accel: 6.28,
+    h: 3.52, hp: 69, spd: 1.28, shy: 0, turn: 2.51, accel: 6.28,
     dmg: 12, reach: 2.28, swing: 1.64, aggro: 26,
     drops: [['flint', 1, 2], ['silver_ingot', 1, 1]],
   }),
   boss_orc_skull: boss('orc_skull', {
     label: 'Bonehelm', face: FACE_CINDER,
-    h: 3.79, hp: 70, spd: 1.28, shy: 0, turn: 2.51, accel: 6.27,
+    h: 3.53, hp: 70, spd: 1.28, shy: 0, turn: 2.51, accel: 6.27,
     dmg: 12, reach: 2.29, swing: 1.64, aggro: 26,
     drops: [['flint', 1, 2], ['sulfur', 1, 2], ['ruby', 1, 1]],
   }),
   boss_bunny: boss('bunny', {
     label: 'Thumpjaw', face: FACE_POLAR,
-    h: 3.79, hp: 70, spd: 1.28, shy: 0, turn: 2.50, accel: 6.26,
+    h: 3.53, hp: 70, spd: 1.28, shy: 0, turn: 2.50, accel: 6.26,
     dmg: 12, reach: 2.29, swing: 1.65, aggro: 26,
     drops: [['hide', 1, 2], ['meat', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_alien: boss('alien', {
     label: 'Voidspawn', face: FACE_CINDER,
-    h: 3.91, hp: 74, spd: 1.24, shy: 0, turn: 2.44, accel: 6.11,
+    h: 3.62, hp: 74, spd: 1.24, shy: 0, turn: 2.44, accel: 6.11,
     dmg: 13, reach: 2.39, swing: 1.70, aggro: 27,
     drops: [['crystal', 1, 2], ['void_shard', 1, 1]],
   }),
@@ -2923,19 +2928,19 @@ const SPECIES = {
     // budget, the hover clamp and the flying steering, and this rig has no
     // Flying clip at all - it would glide at you in its rest pose. A bird that
     // walks is the same decision the ghost already carries.
-    h: 4.03, hp: 78, spd: 1.21, shy: 0, turn: 2.38, accel: 5.96,
+    h: 3.71, hp: 78, spd: 1.21, shy: 0, turn: 2.38, accel: 5.96,
     dmg: 13, reach: 2.50, swing: 1.75, aggro: 28,
     drops: [['feather', 1, 2], ['poultry', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_mushroomking: boss('mushroomking', {
     label: 'Blightcrown', face: FACE_POLAR,
-    h: 4.08, hp: 79, spd: 1.19, shy: 0, turn: 2.36, accel: 5.90,
+    h: 3.74, hp: 79, spd: 1.19, shy: 0, turn: 2.36, accel: 5.90,
     dmg: 14, reach: 2.53, swing: 1.77, aggro: 28,
     drops: [['mushroom', 1, 2], ['emerald', 1, 1], ['void_shard', 1, 1]],
   }),
   boss_tribal: boss('tribal', {
     label: 'Ashchief', face: FACE_CINDER,
-    h: 4.24, hp: 85, spd: 1.15, shy: 0, turn: 2.28, accel: 5.70,
+    h: 3.86, hp: 85, spd: 1.15, shy: 0, turn: 2.28, accel: 5.70,
     dmg: 14, reach: 2.67, swing: 1.83, aggro: 29,
     drops: [['gold_ingot', 1, 2], ['cinder', 1, 2], ['ruby', 1, 1]],
   }),
@@ -2952,13 +2957,13 @@ const SPECIES = {
    */
   boss_fish: boss('fish', {
     label: 'Deepmaw', face: FACE_POLAR, aquatic: true, eatsFish: true,
-    h: 4.38, hp: 89, spd: 1.11, shy: 0, turn: 2.21, accel: 5.52,
+    h: 3.97, hp: 89, spd: 1.11, shy: 0, turn: 2.21, accel: 5.52,
     dmg: 15, reach: 2.78, swing: 1.89, aggro: 30,
     drops: [['fish', 1, 2], ['pearl', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_cactoro: boss('cactoro', {
     label: 'Emberthorn', face: FACE_CINDER,
-    h: 4.40, hp: 90, spd: 1.10, shy: 0, turn: 2.20, accel: 5.50,
+    h: 3.98, hp: 90, spd: 1.10, shy: 0, turn: 2.20, accel: 5.50,
     dmg: 15, reach: 2.80, swing: 1.90, aggro: 30,
     drops: [['cactus', 1, 2], ['emerald', 1, 1], ['ruby', 1, 1]],
   }),
@@ -5315,9 +5320,45 @@ export class Mobs {
   spawnBoss(type, col) {
     const spec = SPECIES[type];
     if (!spec || !spec.boss) return null;
-    const k = spec.aquatic ? this._waterLayer(col) : this.planet.surfaceK(col);
+    const k = spec.aquatic ? this._underIceLayer(col) : this.planet.surfaceK(col);
     if (k < 0) return null;
     return this.spawn(type, col, k);
+  }
+
+  /**
+   * Water in this column, whether or not there is a lid on it.
+   *
+   * `_waterLayer` is the fish spawner's own test and it cannot find this water,
+   * for a reason worth writing down: it takes the topmost SOLID layer as the
+   * bed and then looks for liquid above it. On the polar cap the sea is frozen
+   * over — measured on the Deepmaw's own column, two layers of ice at k 31-32
+   * over fifteen of water at 16-30 — so the "bed" it finds is the ice, there is
+   * nothing but air above that, and it answers -1 on water fifteen deep. Which
+   * is exactly the trap the placement rule was written against: on the cap, the
+   * only thing `_waterLayer` will ever agree to is the ice sheet.
+   *
+   * So this looks for the water instead of for the ground: the topmost liquid
+   * layer, then down through the run it belongs to. A boss placed by it swims
+   * under the ice, which is where a thing called the Deepmaw belongs, and
+   * reaching it is a hole the player has to cut.
+   *
+   * Not used by anything else, deliberately. The fish spawner wants ground it
+   * can read a depth off and a shoal it can put in open water; this is one
+   * individual with a fixed address and a different question.
+   */
+  _underIceLayer(col) {
+    const p = this.planet;
+    let top = -1;
+    for (let k = D - 1; k >= 1; k--) if (p.liquidAt(col, k)) { top = k; break; }
+    if (top < 0) return -1;
+    let bot = top;
+    while (bot > 1 && p.liquidAt(col, bot - 1)) bot--;
+    const depth = top - bot + 1;
+    if (depth < 3) return -1;
+    // The same fraction `_waterLayer` seats a fish at: low in the water rather
+    // than at the surface, so the buoyancy in update() has room to work either
+    // way and the body is not born skimming a ceiling of ice.
+    return bot + Math.floor(depth * 0.4);
   }
 
   _spawnMonster(col, k) {

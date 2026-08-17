@@ -2,7 +2,6 @@
 // voxel skylight / coloured block light, per-vertex AO, biome tint and wind.
 
 import * as THREE from 'three';
-import { F, R_MIN } from '../world/Constants.js';
 
 /**
  * The moving lights' shadow volume: one byte per cell, opaque or not, for a
@@ -64,8 +63,20 @@ import { F, R_MIN } from '../world/Constants.js';
  * which is 0 unless a flame is lit.
  */
 export const OCC_NI = 48, OCC_NJ = 48, OCC_NK = 32;
-/** Cell indices per radian: the 2F/PI above. Shared so the two cannot drift. */
-export const OCC_ANG = 2 * F / Math.PI;
+/**
+ * Cell indices per unit of world space, which on a flat map is one.
+ *
+ * It was `2 * F / Math.PI` - cells per RADIAN - because the cubesphere reached a
+ * cell index through an atan and the volume had to undo it. World space is
+ * Cartesian now and a cell is one unit on every axis, so there is no angle left
+ * anywhere in the chain and the conversion is the identity.
+ *
+ * Kept as an export rather than deleted because `main.js` imports it, and it
+ * still fills its `uOccOrg` with two `Math.atan2` calls scaled by this. Those go
+ * with the cube: the volume's origin is now a plain world-space offset. See
+ * `occFrame`. Integration point.
+ */
+export const OCC_ANG = 1;
 
 export const occupancyData = new Uint8Array(OCC_NI * OCC_NJ * OCC_NK);
 export const occupancyTexture = (() => {
@@ -102,7 +113,6 @@ export const voxelUniforms = {
   uBounceColor: { value: new THREE.Color(0.36, 0.30, 0.22) },
   uBlockIntensity: { value: 5.0 },
   uNormalScale: { value: 0.55 },
-  uPlanetCenter: { value: new THREE.Vector3(0, 0, 0) },
   uBreakPos: { value: new THREE.Vector3(-999, -999, -999) },
   uBreakStage: { value: -1 },
   uFogColor: { value: new THREE.Color(0.6, 0.72, 0.9) },
@@ -193,16 +203,13 @@ export const voxelUniforms = {
   uDropLightColor: { value: new THREE.Vector3() },
   uDropLightRadius: { value: 0 },
   // --- occlusion for those two, and only those two -----------------------------
-  // See the OCC_* block above. uOccN/R/U are the cube-face basis the volume is
-  // parameterised in; uOccOrg folds (F/2 - origin) and -(R_MIN + originK) into
-  // one add so the shader's cell coordinates come out volume-local and small.
-  // uOccActive is 0 whenever neither flame is lit, which is most frames, and
-  // gates every atan and every texture fetch below.
+  // See the OCC_* block above. uOccOrg is minus the world position of the
+  // volume's low corner, so a world point plus it is a volume-local cell
+  // coordinate and nothing else is needed - the cube's uOccN/R/U face basis is
+  // gone with the face. uOccActive is 0 whenever neither flame is lit, which is
+  // most frames, and gates every texture fetch below.
   uOccTex: { value: occupancyTexture },
   uOccOrg: { value: new THREE.Vector3() },
-  uOccN: { value: new THREE.Vector3(1, 0, 0) },
-  uOccR: { value: new THREE.Vector3(0, 0, -1) },
-  uOccU: { value: new THREE.Vector3(0, 1, 0) },
   uOccActive: { value: 0 },
   /**
    * How much sea detail this quality tier pays for: 1 on high, 0 on low.
@@ -263,7 +270,24 @@ varying float vWave;
 varying vec3 vWorldNormal;
 uniform float uTime;
 uniform float uWind;
-uniform vec3 uPlanetCenter;
+
+/**
+ * Up, everywhere, on every face. One gravity, one down.
+ *
+ * This was normalize(wp - uPlanetCenter) in fifteen places and it is the thing
+ * the flat map deleted most of: a direction derived from a position. There is no
+ * planet centre to subtract from and no radius to divide by, so the term is a
+ * constant and the compiler folds every dot product against it into a swizzle.
+ */
+const vec3 UP = vec3(0.0, 1.0, 0.0);
+/**
+ * Which way a plant leans when the wind blows.
+ *
+ * The value normalize(cross(UP, ref)) came out as on the cube's +Y face, which
+ * is now every face. One fixed direction for the whole world, so a meadow leans
+ * together rather than each face leaning its own way.
+ */
+const vec3 SWAY_TANG = vec3(0.0, 0.0, -1.0);
 `;
 
 const COMMON_VERT_BODY = /* glsl */`
@@ -291,12 +315,11 @@ const COMMON_VERT_BODY = /* glsl */`
   // position put them at the origin, which fogged them to black and broke the
   // sky-facing term. Go through the model matrix so both cases are correct.
   vec3 wp = (modelMatrix * vec4(transformed, 1.0)).xyz;
-  vec3 up = normalize(wp - uPlanetCenter);
+  vec3 up = UP;
 
   if (wType > 0.5 && wType < 1.5) {
     // grass / flowers: bend along a tangent, phase-offset per position
-    vec3 ref = abs(up.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
-    vec3 tang = normalize(cross(up, ref));
+    vec3 tang = SWAY_TANG;
     float ph = dot(wp, vec3(0.62, 0.41, 0.77));
     float sway = sin(uTime * 1.9 + ph) * 0.6 + sin(uTime * 3.9 + ph * 1.7) * 0.25;
     transformed += tang * sway * 0.13 * wAmt * uWind;
@@ -360,8 +383,7 @@ const COMMON_VERT_BODY = /* glsl */`
   } else if (wType > 3.5) {
     // leaves: subtle whole-canopy sway
     float ph = dot(wp, vec3(0.33, 0.51, 0.27));
-    vec3 ref = abs(up.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
-    vec3 tang = normalize(cross(up, ref));
+    vec3 tang = SWAY_TANG;
     transformed += tang * sin(uTime * 1.35 + ph) * 0.045 * uWind;
   }
   vWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
@@ -369,6 +391,24 @@ const COMMON_VERT_BODY = /* glsl */`
 
 const COMMON_FRAG_HEAD = /* glsl */`
 precision highp sampler2DArray;
+/**
+ * Up, everywhere, on every face. One gravity, one down.
+ *
+ * This was normalize(wp - uPlanetCenter) in fifteen places and it is the thing
+ * the flat map deleted most of: a direction derived from a position. There is no
+ * planet centre to subtract from and no radius to divide by, so the term is a
+ * constant and the compiler folds every dot product against it into a swizzle.
+ */
+const vec3 UP = vec3(0.0, 1.0, 0.0);
+/**
+ * Which way a plant leans when the wind blows.
+ *
+ * The value normalize(cross(UP, ref)) came out as on the cube's +Y face, which
+ * is now every face. One fixed direction for the whole world, so a meadow leans
+ * together rather than each face leaning its own way.
+ */
+const vec3 SWAY_TANG = vec3(0.0, 0.0, -1.0);
+
 precision highp sampler3D;
 uniform sampler2DArray uMap;
 uniform sampler2DArray uNormalMap;
@@ -389,7 +429,6 @@ uniform float uBlockIntensity;
 uniform float uNormalScale;
 uniform vec3 uBreakPos;
 uniform float uBreakStage;
-uniform vec3 uPlanetCenter;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform vec3 uCamPos;
@@ -428,9 +467,6 @@ uniform vec3 uDropLightColor;
 uniform float uDropLightRadius;
 uniform sampler3D uOccTex;
 uniform vec3 uOccOrg;
-uniform vec3 uOccN;
-uniform vec3 uOccR;
-uniform vec3 uOccU;
 uniform float uOccActive;
 
 /**
@@ -686,23 +722,16 @@ const int OCC_MAX_STEPS = 14;
  * World point, and a small world-space offset from it, in volume-local
  * continuous cell coordinates.
  *
- * The offset is not a second lookup: it is the analytic derivative of the one
- * above it, which is worth having because the normal bias would otherwise cost
- * two more atan calls per fragment. For ci = C + K*atan(a/n) with a = dot(d,R)
- * and n = dot(d,N), and a world displacement e at radius r, the tangential part
- * of the displacement is e minus its radial component and
- *
- *     d(ci) = K * dot(e_perp, n*R - a*N) / (r * (n*n + a*a))
- *
- * which is three dots and a divide. The radial part is just dot(d, e), because
- * one cell is one unit radially everywhere.
+ * An add and a copy. It used to be six dot products against a cube-face basis,
+ * on top of two atan calls per fragment to reach a cell index at all, and the
+ * offset had to be a hand-derived analytic derivative of that mapping because
+ * evaluating it twice would have doubled the atans. A cell is a unit cube on the
+ * world axes now, so the mapping is a translation, and the derivative of a
+ * translation is the identity.
  */
 void occFrame(vec3 wp, vec3 woff, out vec3 cell, out vec3 dcell) {
-  vec3 rel = wp - uPlanetCenter;
-  cell = vec3(dot(rel, uOccR) + uOccOrg.x,
-              dot(rel, uOccU) + uOccOrg.y,
-              dot(rel, uOccN) + uOccOrg.z);
-  dcell = vec3(dot(woff, uOccR), dot(woff, uOccU), dot(woff, uOccN));
+  cell = wp + uOccOrg;
+  dcell = woff;
 }
 
 /**
@@ -1064,11 +1093,7 @@ float caustic(vec2 p, float t) {
  * same twelve places.
  */
 vec2 liquidUv(vec3 p) {
-  vec3 rel = p - uPlanetCenter;
-  vec3 m = abs(rel);
-  if (m.x >= m.y && m.x >= m.z) return rel.zy;
-  if (m.y >= m.z) return rel.xz;
-  return rel.xy;
+  return p.xz;
 }
 
 /**
@@ -1148,24 +1173,7 @@ vec3 swellGrad(vec3 rel, float t, float detail) {
  * the edge it shares with its neighbour.
  */
 vec3 cellOffset(vec3 p, vec3 cen) {
-  vec3 c = cen - uPlanetCenter;
-  vec3 m = abs(c);
-  vec3 N, R, U;
-  if (m.x >= m.y && m.x >= m.z) {
-    N = vec3(c.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
-    R = vec3(0.0, 0.0, -N.x);
-    U = vec3(0.0, 1.0, 0.0);
-  } else if (m.y >= m.z) {
-    N = vec3(0.0, c.y >= 0.0 ? 1.0 : -1.0, 0.0);
-    R = vec3(1.0, 0.0, 0.0);
-    U = vec3(0.0, 0.0, -N.y);
-  } else {
-    N = vec3(0.0, 0.0, c.z >= 0.0 ? 1.0 : -1.0);
-    R = vec3(N.z, 0.0, 0.0);
-    U = vec3(0.0, 1.0, 0.0);
-  }
-  vec3 d = p - cen;
-  return vec3(dot(d, R), dot(d, U), dot(d, N));
+  return p - cen;
 }
 `;
 
@@ -1376,7 +1384,7 @@ const SEASON_FRAG = /* glsl */`
 const LEAF_SNOW_FRAG = /* glsl */`
   float snowCap = max(uSnowCap, (vWave > 4.5 && vWave < 5.5) ? 1.0 : 0.0);
   if (snowCap > 0.002 && vWave > 3.5 && vWave < 5.5) {
-    vec3 upW = normalize(vWorld - uPlanetCenter);
+    vec3 upW = UP;
     vec3 wn = normalize(vWorldNormal);
     // The cosine SIGNED, and kept signed. A top face still weighs 1 and a side
     // face still weighs the 0.30 the paragraph above bought and measured; the
@@ -1848,7 +1856,7 @@ const LIQUID_NORMAL_FRAG = /* glsl */`
     // normalize(n - grad h), so the gradient is subtracted from the tangential
     // pair after the map has had its say and both perturbations ride the same
     // reconstruction. See swellGrad.
-    vec3 gr = swellGrad(vWorld - uPlanetCenter, uTime, uSeaDetail);
+    vec3 gr = swellGrad(vWorld, uTime, uSeaDetail);
     nT.xy -= vec2(dot(gr, Tv), dot(gr, Bv));
   }
   normal = normalize(Tv * nT.x + Bv * nT.y + gN * nT.z);
@@ -2042,7 +2050,7 @@ const LIGHTS_END = /* glsl */`
   float skyTrim = 1.0 - (1.0 - SKY_FILL_TRIM) / dayLift;
   vec3 skyFill = mix(skyTinted, vec3(dot(skyTinted, vec3(0.2126, 0.7152, 0.0722))), skyTrim);
   // ground bounce, strongest on downward-facing surfaces
-  vec3 upDir = normalize(vWorld - uPlanetCenter);
+  vec3 upDir = UP;
   float downFace = clamp(-dot(normal, upDir) * 0.5 + 0.5, 0.0, 1.0);
   vec3 bounce = uBounceColor * uSkyIntensity * sunAmt * downFace * 0.6;
   // Hemisphere shaping: sky light lands hardest on upward faces.
@@ -2332,7 +2340,7 @@ const FOG_FRAG = /* glsl */`
 
     // Caustics before the fog, so they're attenuated by distance like the
     // surface they sit on. Only upward faces catch them.
-    vec3 upW = normalize(vWorld - uPlanetCenter);
+    vec3 upW = UP;
     float facing = clamp(dot(normalize(vNormal), upW), 0.0, 1.0);
     if (facing > 0.02) {
       vec3 e1 = normalize(cross(upW, abs(upW.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0)));
@@ -2480,7 +2488,7 @@ function patch(material, opts = {}) {
           const float SKY_SHAPE_MIN = 0.60;
           const float SKY_SHAPE_MAX = 1.70;
           vec3 rDir = reflect(vDir, normal);
-          vec3 wUp = normalize(vWorld - uPlanetCenter);
+          vec3 wUp = UP;
           // The same 0.42 curve the dome shader draws its gradient with, so the
           // sky in the water and the sky above it are the same sky.
           vec3 grad = mix(uSkyHorizon, uSkyZenith,
@@ -2952,7 +2960,6 @@ export function applyInstancedSway(material, loY, hiY) {
     // two drifting apart.
     shader.uniforms.uTime = voxelUniforms.uTime;
     shader.uniforms.uWind = voxelUniforms.uWind;
-    shader.uniforms.uPlanetCenter = voxelUniforms.uPlanetCenter;
     shader.uniforms.uSwayLo = { value: loY };
     shader.uniforms.uSwayHi = { value: hiY };
 
@@ -2961,8 +2968,7 @@ export function applyInstancedSway(material, loY, hiY) {
         #include <common>
         uniform float uTime;
         uniform float uWind;
-        uniform vec3 uPlanetCenter;
-        uniform float uSwayLo;
+                uniform float uSwayLo;
         uniform float uSwayHi;
       `)
       // Guarded, because a material with no instancing has no `instanceMatrix`
@@ -2976,9 +2982,10 @@ export function applyInstancedSway(material, loY, hiY) {
           mat3 rot = mat3(mi);
           float s2 = max(1e-8, dot(rot[0], rot[0]));
           vec3 iw = mi[3].xyz;
-          vec3 up = normalize(iw - uPlanetCenter);
-          vec3 ref = abs(up.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
-          vec3 tang = normalize(cross(up, ref));
+          vec3 up = vec3(0.0, 1.0, 0.0);
+          // The value the cube's cross(up, ref) came out as on a +Y face, which
+          // is now every face. One fixed sway direction for the whole world.
+          vec3 tang = vec3(0.0, 0.0, -1.0);
           float ph = dot(iw, vec3(0.62, 0.41, 0.77));
           float sway = sin(uTime * 1.9 + ph) * 0.6 + sin(uTime * 3.9 + ph * 1.7) * 0.25;
           // Squared, so the bend is a stem bending and not the whole plant

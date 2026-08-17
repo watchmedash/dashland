@@ -203,6 +203,13 @@ export const TILES = [
   // --- storage --------------------------------------------------------------
   'copper_block', 'silver_block', 'coal_block',
   'amethyst_block', 'ruby_block', 'sapphire_block', 'emerald_block', 'void_block',
+
+  // --- the world's edge -----------------------------------------------------
+  // The divider that seals the four corner faces. It wants to read as the end
+  // of the map rather than as a material, so it is its own tile and not a
+  // second use of obsidian: a wall made of something a player builds with looks
+  // like somebody's build. `TextureGen.js` owns what it looks like.
+  'edgestone',
 ];
 
 export const TILE_INDEX = Object.fromEntries(TILES.map((t, i) => [t, i]));
@@ -1472,6 +1479,33 @@ export const BLOCKS = [
     solid: false, opaque: false, hardness: 0.15, needsFloor: true,
     poison: true,
     particle: [0.82, 0.84, 0.68], sound: 'grass',
+  }),
+
+  /**
+   * The divider: the edge of the world, standing in a wall.
+   *
+   * NINE-FACES.md section 5. The four corner faces are sealed rooms, and what
+   * seals them is a one-column ring of this from bedrock to above the maximum
+   * build height — the full depth as well as the full height, which is the
+   * owner's requirement and is what makes the rule readable: now that some joins
+   * between faces are genuinely open, a boundary you can see from inside a cave
+   * is the only way to tell which kind of join you are standing next to.
+   *
+   * `hardness: -1` is what makes it unbreakable, and it is the same mechanism
+   * water and lava use: `breakTime` returns Infinity, `computeDrops` returns
+   * nothing, and the blast rule in Explosion.js exempts it. `drop: null` on top
+   * of that means no path exists by which one could reach an inventory, and a
+   * block that cannot be held cannot be placed — so unplaceable falls out of
+   * unbreakable rather than needing a rule of its own.
+   *
+   * It is deliberately not obsidian, not stone and not any of the coloured
+   * bricks: every one of those is something a player builds with, and a wall
+   * made of a building material reads as somebody's build rather than as the
+   * end of the map.
+   */
+  block({
+    name: 'edgestone', label: 'Edgestone', all: 'edgestone',
+    hardness: -1, drop: null, particle: [0.13, 0.12, 0.17], sound: 'stone',
   }),
 ];
 

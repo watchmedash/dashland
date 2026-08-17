@@ -1,23 +1,56 @@
-// Cubesphere planet generator. Terrain is built per radial column, so the
-// surface is a true height field over the sphere — every block sits upright.
+// The nine-face generator. One flat map, `W` by `W` columns and `D` layers
+// deep, wrapping on both axes, with one gravity. Terrain is still built per
+// column, so the surface is a height field and every block sits upright.
+//
+// WHAT WENT, and it is most of the win: there are no cube seams, so there is no
+// border fade, no border lift, no seam walk band, no slope limiter, no sea
+// re-flood, no seam floor, no spawn or tree edge margin, and no canyon or lake
+// suppression in a band. Every one of those existed to manage two faces meeting
+// at an angle. Nothing meets at an angle now.
+//
+// The five cross faces (2, 4, 5, 6, 8) are generated as ONE field and nothing at
+// all is done at a tile boundary; the four corners (1 Rime, 3 Tempest,
+// 7 Verdant, 9 Pyre) are sealed rooms, each the whole of one biome, walled off
+// by the dividers this file also builds.
 
-import { Noise, makeRng, hash3, clamp, lerp, smoothstep } from '../util/Noise.js';
+import { makeRng, clamp, lerp, smoothstep } from '../util/Noise.js';
 import {
-  F, D, FACES, R_MIN, R_MAX, R_CORE, R_MANTLE, R_SEA, R_SURFACE, R_TERRAIN_MAX, PLANET_R,
-  R_SEABED_MIN, R_CANYON_MIN,
-  COLUMNS, NUM_VOXELS, CHUNK_T, vidx, cidx, BIOME, regionOfCol,
-  FACE_ROLE, FACE_NORMAL, FACE_POLAR, FACE_CINDER,
+  D, W, SEA_K, K_CORE, K_MANTLE, K_SURFACE, K_TERRAIN_MAX,
+  K_SEABED_MIN, K_CANYON_MIN,
+  COLUMNS, CHUNK_T, BIOME, regionOfCol,
+  FACE_ROLE, FACE_NORMAL, FACE_RIME, FACE_TEMPEST, FACE_VERDANT, FACE_PYRE,
 } from './Constants.js';
-import {
-  centerDir, colNeighbor, colParts, patchColumn, dirToFace, axisToGrid, cellIndex, cellWrite,
-  colBorderDist,
-} from './Sphere.js';
+import { wrap, faceAt, isWall, delta } from './Grid.js';
+import { Periodic, surfScale, MAXA } from './Periodic.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
-// Imported and deliberately never called. The structure pass is switched off —
-// see the note beside `placeStructures` in `generateGlobal` for why, and for the
-// one line that switches it back on. The import stays so the builder keeps being
-// parsed and bundled with the rest of worldgen instead of quietly rotting.
-import { placeStructures } from './Structures.js';
+
+// --- the flat map's own arithmetic -------------------------------------------
+//
+// Four one-liners that replace the whole of `Sphere.js`. There is no ownership
+// rule, no fold and no normalisation: a column index is `x * W + y` and a cell
+// index is that times `D` plus the layer, and reading or writing a cell is the
+// same function, because no two columns share a cell any more.
+
+/** Column index for a possibly out-of-range (x, y). */
+const colOf = (x, y) => wrap(x) * W + wrap(y);
+/** Cell index. Column major, so a column's layers stay contiguous. */
+const cellAt = (col, k) => col * D + k;
+/** `cellWrite` and `cellIndex` were two names for this. They are one now. */
+const _xy = { x: 0, y: 0 };
+/** The (x, y) a column index came from, into a caller-owned scratch. */
+function colXY(col, out = _xy) {
+  out.y = col % W;
+  out.x = (col - out.y) / W;
+  return out;
+}
+/** North, south, west, east. Every column has all four; none can be missing. */
+const NB_DX = [0, 0, -1, 1], NB_DY = [-1, 1, 0, 0];
+function colNeighbor(col, d) {
+  const y = col % W, x = (col - y) / W;
+  return colOf(x + NB_DX[d], y + NB_DY[d]);
+}
+/** The column `(dx, dy)` from (x, y). No re-projection: the map is flat. */
+const patchCol = (x, y, dx, dy) => colOf(x + dx, y + dy);
 
 /**
  * Rock a cave is allowed to eat through, and rock a vein is allowed to replace.
@@ -35,13 +68,13 @@ import { placeStructures } from './Structures.js';
 /**
  * Where one rock stops and the next begins, as a fraction of the crust.
  *
- * The crust is R_MANTLE up to R_SEA — everything above the waterline shares the
+ * The crust is K_MANTLE up to SEA_K — everything above the waterline shares the
  * topmost band, which is what the old absolute thresholds did too. The four
  * fractions are the old edges (126, 120, 114, 110.5) re-expressed against the
  * old crust of 108..130, so the proportions of every stratum are preserved
  * exactly while the thicknesses grow with the shell.
  */
-const CRUST = R_SEA - R_MANTLE;
+const CRUST = SEA_K - K_MANTLE;
 /**
  * A radius from the old 108-mantle/130-sea crust, placed in the current one.
  *
@@ -51,7 +84,7 @@ const CRUST = R_SEA - R_MANTLE;
  * them all through one function keeps every one of those relationships exactly
  * as it was tuned, which re-deriving each band by eye would not.
  */
-const band = (r108) => R_MANTLE + (r108 - 108) * (CRUST / 22);
+const band = (r108) => K_MANTLE + (r108 - 108) * (CRUST / 22);
 
 /**
  * Two-octave fbm against a threshold, with an exact early-out.
@@ -67,20 +100,21 @@ const band = (r108) => R_MANTLE + (r108 - 108) * (CRUST / 22);
  * computing. This is a bound, not an approximation: the ore that generates is
  * bit-for-bit the ore that generated before.
  *
+ * The bound is against MAXA rather than against 1: the periodic lattice's
+ * ceiling is not the simplex's, and using the wrong one here would either skip
+ * ore that should have generated or stop skipping anything.
+ *
  * @returns the fbm value, or -1 when it provably cannot reach `thr`.
  */
-function veinNoise(no, x, y, z, thr) {
-  const s1 = no.simplex3(x, y, z);
-  if (s1 + 0.5 <= thr * 1.5) return -1;
-  // Exactly what `fbm3(x, y, z, 2, 2, 0.5)` does with its second octave: the
-  // caller's coordinates, times the lacunarity. Deriving them any other way
-  // risks a different float and therefore a different planet.
-  return (s1 + 0.5 * no.simplex3(x * 2, y * 2, z * 2)) / 1.5;
+function veinNoise(no, x, y, k, sc, koff, thr) {
+  const s1 = no.volOne(x, y, k, sc, koff);
+  if (s1 + 0.5 * MAXA <= thr * 1.5) return -1;
+  return (s1 + 0.5 * no.volOne(x, y, k, sc * 2, koff * 2)) / 1.5;
 }
-const BAND_STONE = R_MANTLE + CRUST * 0.818;      // was 126
-const BAND_LIMESTONE = R_MANTLE + CRUST * 0.545;  // was 120
-const BAND_GRANITE = R_MANTLE + CRUST * 0.273;    // was 114
-const BAND_SLATE = R_MANTLE + CRUST * 0.114;      // was 110.5
+const BAND_STONE = K_MANTLE + CRUST * 0.818;      // was 126
+const BAND_LIMESTONE = K_MANTLE + CRUST * 0.545;  // was 120
+const BAND_GRANITE = K_MANTLE + CRUST * 0.273;    // was 114
+const BAND_SLATE = K_MANTLE + CRUST * 0.114;      // was 110.5
 
 const CARVEABLE = new Uint8Array(N_BLOCKS);
 const ORE_HOST = new Uint8Array(N_BLOCKS);
@@ -98,12 +132,22 @@ for (const n of ['dirt', 'sandstone', 'red_sandstone', 'coarse_dirt', 'peat', 'm
 const BEACH_REACH = 1;
 
 /**
+ * How far the domain warp moves a sample point, in columns.
+ *
+ * The cube warped a unit direction by 0.16 and a column subtended 0.0037765 of
+ * one, so 0.16 was 42 columns of displacement. Written in columns here because
+ * columns are what the map has, and because a number in the units of the thing
+ * it moves is a number the next reader can check against a screenshot.
+ */
+const WARP_COLS = 42.4;
+
+/**
  * The ocean's depth profile, in blocks below sea level, as a function of how
  * many columns a cell sits from the nearest land.
  *
  * The sea used to bottom out at six blocks and sit at one for half its area,
  * because the height field flattens everything within three units of sea level
- * toward R_SEA - 0.4 — the same line that stops the coast fraying into a
+ * toward SEA_K - 0.4 — the same line that stops the coast fraying into a
  * fractal also drowns the basins. Deepening the *noise* to compensate was tried
  * and it does not work: the flattening runs afterwards and eats it, and turning
  * the flattening down brings back a shoreline with a thousand islands in it.
@@ -121,10 +165,10 @@ const BEACH_REACH = 1;
  */
 const SHELF_COLS = 3;          // wadeable, 0.8 blocks per column
 const SLOPE_COLS = 11;         // continental slope, 0.95 blocks per column
-// An `OCEAN_MAX_DEPTH = R_SEA - R_SEABED_MIN` sat here with nothing reading it,
+// An `OCEAN_MAX_DEPTH = SEA_K - K_SEABED_MIN` sat here with nothing reading it,
 // and its comment said 15 when the two constants have made it 17 for some time —
 // a stale number in a name that looks like the floor of the sea. The floor is
-// real and is applied where it can be: `Math.max(R_SEABED_MIN, ...)` clamps the
+// real and is applied where it can be: `Math.max(K_SEABED_MIN, ...)` clamps the
 // bathymetry as it is written into colHeight.
 
 function oceanDepthAt(d) {
@@ -233,35 +277,35 @@ CANYON_SCRUB[BIOME.MOUNTAIN] = ID.alpine_aster;
  *   108-112  emerald, sapphire, ruby, void    slate
  */
 const ORES = [
-  { id: ID.voidstone_ore, scale: 0.62, thr: 0.60, lo: R_MANTLE, hi: band(111), seed: 907 },
-  { id: ID.ruby_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(112.5), seed: 719 },
-  { id: ID.sapphire_ore, scale: 0.50, thr: 0.58, lo: R_MANTLE, hi: band(113), seed: 733 },
-  { id: ID.emerald_ore, scale: 0.48, thr: 0.57, lo: R_MANTLE, hi: band(114), seed: 641 },
-  { id: ID.deep_crystal_ore, scale: 0.46, thr: 0.60, lo: R_MANTLE, hi: band(113), seed: 811 },
-  { id: ID.deep_gold_ore, scale: 0.38, thr: 0.58, lo: R_MANTLE, hi: band(114), seed: 557 },
-  { id: ID.deep_silver_ore, scale: 0.36, thr: 0.57, lo: R_MANTLE, hi: band(113.5), seed: 463 },
-  { id: ID.deep_iron_ore, scale: 0.30, thr: 0.55, lo: R_MANTLE, hi: band(116), seed: 389 },
-  { id: ID.deep_copper_ore, scale: 0.28, thr: 0.55, lo: R_MANTLE, hi: band(115), seed: 293 },
-  { id: ID.deep_coal_ore, scale: 0.24, thr: 0.53, lo: R_MANTLE, hi: band(116), seed: 197 },
+  { id: ID.voidstone_ore, scale: 0.62, thr: 0.60, lo: K_MANTLE, hi: band(111), seed: 907 },
+  { id: ID.ruby_ore, scale: 0.50, thr: 0.58, lo: K_MANTLE, hi: band(112.5), seed: 719 },
+  { id: ID.sapphire_ore, scale: 0.50, thr: 0.58, lo: K_MANTLE, hi: band(113), seed: 733 },
+  { id: ID.emerald_ore, scale: 0.48, thr: 0.57, lo: K_MANTLE, hi: band(114), seed: 641 },
+  { id: ID.deep_crystal_ore, scale: 0.46, thr: 0.60, lo: K_MANTLE, hi: band(113), seed: 811 },
+  { id: ID.deep_gold_ore, scale: 0.38, thr: 0.58, lo: K_MANTLE, hi: band(114), seed: 557 },
+  { id: ID.deep_silver_ore, scale: 0.36, thr: 0.57, lo: K_MANTLE, hi: band(113.5), seed: 463 },
+  { id: ID.deep_iron_ore, scale: 0.30, thr: 0.55, lo: K_MANTLE, hi: band(116), seed: 389 },
+  { id: ID.deep_copper_ore, scale: 0.28, thr: 0.55, lo: K_MANTLE, hi: band(115), seed: 293 },
+  { id: ID.deep_coal_ore, scale: 0.24, thr: 0.53, lo: K_MANTLE, hi: band(116), seed: 197 },
 
-  { id: ID.sulfur_ore, scale: 0.34, thr: 0.57, lo: R_MANTLE, hi: band(118), seed: 101 },
-  { id: ID.amethyst_ore, scale: 0.42, thr: 0.60, lo: R_MANTLE + 2, hi: band(120), seed: 149 },
+  { id: ID.sulfur_ore, scale: 0.34, thr: 0.57, lo: K_MANTLE, hi: band(118), seed: 101 },
+  { id: ID.amethyst_ore, scale: 0.42, thr: 0.60, lo: K_MANTLE + 2, hi: band(120), seed: 149 },
   { id: ID.crystal_ore, scale: 0.40, thr: 0.62, lo: band(112), hi: band(121), seed: 219 },
   { id: ID.gold_ore, scale: 0.34, thr: 0.60, lo: band(114), hi: band(125), seed: 143 },
   { id: ID.silver_ore, scale: 0.32, thr: 0.58, lo: band(113), hi: band(124), seed: 89 },
-  { id: ID.iron_ore, scale: 0.26, thr: 0.56, lo: band(116), hi: R_SURFACE - 2, seed: 71 },
-  { id: ID.copper_ore, scale: 0.24, thr: 0.55, lo: band(120), hi: R_TERRAIN_MAX, seed: 37 },
-  { id: ID.coal_ore, scale: 0.20, thr: 0.52, lo: band(118), hi: R_TERRAIN_MAX, seed: 0 },
+  { id: ID.iron_ore, scale: 0.26, thr: 0.56, lo: band(116), hi: K_SURFACE - 2, seed: 71 },
+  { id: ID.copper_ore, scale: 0.24, thr: 0.55, lo: band(120), hi: K_TERRAIN_MAX, seed: 37 },
+  { id: ID.coal_ore, scale: 0.20, thr: 0.52, lo: band(118), hi: K_TERRAIN_MAX, seed: 0 },
 
-  { id: ID.gravel, scale: 0.14, thr: 0.58, lo: R_MANTLE + 4, hi: R_TERRAIN_MAX, seed: 311 },
+  { id: ID.gravel, scale: 0.14, thr: 0.58, lo: K_MANTLE + 4, hi: K_TERRAIN_MAX, seed: 311 },
   // Clay and moss keep the bands they always had — clay's `lo` was 32, i.e.
   // below the innermost radius, so it has always meant "everywhere the host
   // rock reaches". Narrowing it here would quietly halve the brick supply.
-  { id: ID.clay, scale: 0.22, thr: 0.62, lo: R_MANTLE, hi: R_SEA, seed: 407 },
-  { id: ID.moss_stone, scale: 0.18, thr: 0.60, lo: R_MANTLE, hi: R_SURFACE, seed: 503 },
+  { id: ID.clay, scale: 0.22, thr: 0.62, lo: K_MANTLE, hi: SEA_K, seed: 407 },
+  { id: ID.moss_stone, scale: 0.18, thr: 0.60, lo: K_MANTLE, hi: K_SURFACE, seed: 503 },
   // Moss is the only way to get a soft green block underground, and it is
   // shallow on purpose: it belongs to the cave mouth, not to the deep.
-  { id: ID.moss_block, scale: 0.20, thr: 0.66, lo: band(124), hi: R_SURFACE, seed: 601 },
+  { id: ID.moss_block, scale: 0.20, thr: 0.66, lo: band(124), hi: K_SURFACE, seed: 601 },
 ];
 
 /**
@@ -279,7 +323,7 @@ const ORES = [
  */
 const ORE_BY_LAYER = [];
 for (let k = 0; k < D; k++) {
-  const r = R_MIN + k + 0.5;
+  const r = k + 0.5;
   ORE_BY_LAYER.push(ORES.filter((o) => r >= o.lo && r <= o.hi));
 }
 
@@ -303,18 +347,18 @@ for (let k = 0; k < D; k++) {
  * feel like reading the ground.
  */
 const ORE_CINDER_SURFACE = [
-  { id: ID.crystal_ore, scale: 0.40, thr: 0.76, lo: band(121), hi: R_TERRAIN_MAX, seed: 219 },
-  { id: ID.gold_ore, scale: 0.34, thr: 0.74, lo: band(125), hi: R_TERRAIN_MAX, seed: 143 },
-  { id: ID.sulfur_ore, scale: 0.34, thr: 0.70, lo: band(118), hi: R_TERRAIN_MAX, seed: 101 },
-  { id: ID.silver_ore, scale: 0.32, thr: 0.72, lo: band(124), hi: R_TERRAIN_MAX, seed: 89 },
-  { id: ID.iron_ore, scale: 0.26, thr: 0.66, lo: R_SURFACE - 2, hi: R_TERRAIN_MAX, seed: 71 },
+  { id: ID.crystal_ore, scale: 0.40, thr: 0.76, lo: band(121), hi: K_TERRAIN_MAX, seed: 219 },
+  { id: ID.gold_ore, scale: 0.34, thr: 0.74, lo: band(125), hi: K_TERRAIN_MAX, seed: 143 },
+  { id: ID.sulfur_ore, scale: 0.34, thr: 0.70, lo: band(118), hi: K_TERRAIN_MAX, seed: 101 },
+  { id: ID.silver_ore, scale: 0.32, thr: 0.72, lo: band(124), hi: K_TERRAIN_MAX, seed: 89 },
+  { id: ID.iron_ore, scale: 0.26, thr: 0.66, lo: K_SURFACE - 2, hi: K_TERRAIN_MAX, seed: 71 },
 ];
 
 /** The cinder seams alone, per layer, and the same list folded into ORE_BY_LAYER. */
 const ORE_CINDER_ONLY = [];
 const ORE_CINDER_BY_LAYER = [];
 for (let k = 0; k < D; k++) {
-  const r = R_MIN + k + 0.5;
+  const r = k + 0.5;
   const mine = ORE_CINDER_SURFACE.filter((o) => r >= o.lo && r <= o.hi);
   ORE_CINDER_ONLY.push(mine);
   // Rarest first, as in ORES: the loop stops at the first vein that claims a
@@ -389,8 +433,8 @@ const AQ_AIR = 2;              // layers of air left under the roof, at most
  * cell directly above the topmost water and directly below the lowest, and
  * those can only fall outside the window if the window is exactly the band.
  */
-const AQ_K0 = Math.max(1, Math.floor(AQ_LO - R_MIN - 0.5) - 1);
-const AQ_K1 = Math.min(D - 2, Math.ceil(AQ_HI - R_MIN - 0.5) + 1);
+const AQ_K0 = Math.max(1, Math.floor(AQ_LO - 0.5) - 1);
+const AQ_K1 = Math.min(D - 2, Math.ceil(AQ_HI - 0.5) + 1);
 
 /**
  * Hot springs. Small, rare, and deliberately on a lattice.
@@ -585,6 +629,19 @@ const TREE_CFG = {
   birch: { h: [7, 10], log: ID.log_birch, leaf: ID.leaves_birch, rad: 2.2, shape: 'round' },
   pine: { h: [7, 11], log: ID.log_pine, leaf: ID.leaves_pine, rad: 3.0, shape: 'cone' },
   savanna: { h: [5, 7], log: ID.log_oak, leaf: ID.leaves_oak, rad: 3.3, shape: 'flat' },
+  /**
+   * Verdant's tree, and the only reason the face reads as a jungle rather than
+   * as a green field.
+   *
+   * Taller and much wider than anything in the cross: `_treeSize` damps the
+   * crown by up to 1.225 and the round profile frays another 0.45 past that, so
+   * 3.8 comes out at 5.1 columns of reach against DECOR_MARGIN's 6 — the widest
+   * a tree is allowed to be without a canopy running off the edge of the margin
+   * a region was handed. It uses the oak's own log and leaf so the face needs no
+   * new art to exist; what makes it a jungle is the density, the height and the
+   * tint row, not a second green.
+   */
+  jungle: { h: [11, 16], log: ID.log_oak, leaf: ID.leaves_oak, rad: 3.8, shape: 'round' },
 };
 
 /** The two ids per species, indexed [axis 0:i 1:j]. */
@@ -647,28 +704,32 @@ const SINK_DEPTH_SNOW = 3;
  */
 const QS_CAVE_CLEAR = SINK_DEPTH_SNOW + 2.2;
 
-/** Shared scratch for the per-column passes — they are called a million times. */
-const _fillDir = [0, 0, 0];
+/**
+ * Shared (x, y) scratch for the per-column passes — they are called a million
+ * times. These were `[0, 0, 0]` unit directions on the cube; a column's sample
+ * point is now just its own map coordinates.
+ */
+const _fillXY = { x: 0, y: 0 };
 /** Aquifers and springs get their own, because they run inside the others. */
-const _aqDir = [0, 0, 0];
-const _spParts = { f: 0, i: 0, j: 0 };
+const _aqXY = { x: 0, y: 0 };
+const _spParts = { x: 0, y: 0 };
 /**
  * Two more for the fallen logs, and they have to be two. The log pass holds a
  * candidate's coordinates across a loop that calls `_springNear` — which owns
  * `_spParts` — and inside that loop walks a second column's neighbourhood.
  * Sharing any of the three would rewrite the centre halfway through the run.
  */
-const _logParts = { f: 0, i: 0, j: 0 };
-const _logNb = { f: 0, i: 0, j: 0 };
+const _logParts = { x: 0, y: 0 };
+const _logNb = { x: 0, y: 0 };
 /**
  * And one for the cactus's room check, which holds its centre live across a
  * sweep that calls `_treeKind` — which owns `_spParts` through `_springNear`
  * and allocates its own for the parity test. Sharing either would move the
  * centre halfway through the sweep.
  */
-const _cactusParts = { f: 0, i: 0, j: 0 };
+const _cactusParts = { x: 0, y: 0 };
 /** And one for the waterfalls, which run in their own sweep. */
-const _fallParts = { f: 0, i: 0, j: 0 };
+const _fallParts = { x: 0, y: 0 };
 
 /**
  * Inland lakes.
@@ -737,23 +798,22 @@ const LAKE_SHORE = 0x80;
 const LAKE_ISLE = 0x40;
 /**
  * The hard ceiling on the wobbled radius. Everything else is pinned to it:
- * LAKE_LATTICE is 2 * (this + 1 guard column) rounded up, LAKE_EDGE keeps a
- * whole disc on one face, and LAKE_BFS is the L1 radius that provably contains
- * a Euclidean disc of this size — L1 distance is what the column graph
- * measures, and a diamond of radius r only reaches r/sqrt(2) on the diagonal.
+ * LAKE_LATTICE is 2 * (this + 1 guard column) rounded up, and LAKE_BFS is the
+ * L1 radius that provably contains a Euclidean disc of this size — L1 distance
+ * is what the column graph measures, and a diamond of radius r only reaches
+ * r/sqrt(2) on the diagonal.
+ *
+ * There is no longer a rule about keeping a disc on one face: a lake that
+ * straddles a join inside the cross is a lake that straddles a join, and
+ * nothing about the join is different from any other pair of columns.
  */
 const LAKE_MAX_R = 11.5;
-const LAKE_EDGE = 16;
 const LAKE_BFS = Math.ceil((LAKE_MAX_R + 2.5) * Math.SQRT2) + 1;
 const LAKE_DISC_MAX = 2 * LAKE_BFS * LAKE_BFS + 2 * LAKE_BFS + 1 + 64;
-/**
- * Columns per radian. The mapping is equi-angular along a face axis — see
- * Sphere.js — so a column is exactly pi/(2F) of arc there, and within about
- * 15% of it anywhere else on the face. That is what lets the profile be taken
- * from real angular distance instead of from graph distance: graph distance is
- * L1, and a lake shaped by an L1 radius comes out a diamond.
- */
-const LAKE_COL_PER_RAD = 2 * F / Math.PI;
+// A `LAKE_COL_PER_RAD` stood here, converting angular distance on the sphere
+// into columns so a lake would not come out an L1 diamond. The map is flat and
+// wraps, so the distance between two columns is `hypot(delta(x), delta(y))` in
+// columns already, and the conversion has nothing left to convert.
 /**
  * Freeboard: how far the water surface sits below the *lowest* column of the
  * ring that touches the lake.
@@ -811,9 +871,9 @@ const LAKE_CUT = [];
  * LAKE_MIN_ALT is barely above the waterline for the three lowland kinds, and
  * that is measured rather than slack. The height field flattens low ground
  * toward the sea, and the biome classifier hands everything above about
- * R_SEA + 5 to Mountain or Snow — so Plains, Forest, Meadow, Savanna, Tundra,
+ * SEA_K + 5 to Mountain or Snow — so Plains, Forest, Meadow, Savanna, Tundra,
  * Desert and Badlands all live in a five-block band over sea level, with a
- * median of about two. A floor of R_SEA + 4, which looks conservative, rejected
+ * median of about two. A floor of SEA_K + 4, which looks conservative, rejected
  * 84 of 100 candidates outright and left the planet with four lakes on it, all
  * of them tarns.
  *
@@ -830,7 +890,7 @@ LAKE_BED_ROUGH[LAKE_POND] = 0.5;
 LAKE_CHANCE[LAKE_POND] = 0.9;
 LAKE_TOL[LAKE_POND] = 6.0;
 LAKE_CUT[LAKE_POND] = 2.0;
-LAKE_MIN_ALT[LAKE_POND] = R_SEA - 0.25;
+LAKE_MIN_ALT[LAKE_POND] = SEA_K - 0.25;
 LAKE_R[LAKE_TARN] = [3, 5];
 LAKE_DEPTH[LAKE_TARN] = [4.5, 7.5];
 LAKE_WOBBLE[LAKE_TARN] = [0.10, 0.05];
@@ -841,7 +901,7 @@ LAKE_CHANCE[LAKE_TARN] = 0.55;
 // does, so this is only here to throw out a cliff face.
 LAKE_TOL[LAKE_TARN] = 9.0;
 LAKE_CUT[LAKE_TARN] = 3.2;
-LAKE_MIN_ALT[LAKE_TARN] = R_SEA + 9;
+LAKE_MIN_ALT[LAKE_TARN] = SEA_K + 9;
 LAKE_R[LAKE_MARSH] = [6.5, 9.5];
 LAKE_DEPTH[LAKE_MARSH] = [1.7, 2.3];
 LAKE_WOBBLE[LAKE_MARSH] = [0.26, 0.12];
@@ -849,7 +909,7 @@ LAKE_BED_ROUGH[LAKE_MARSH] = 0.35;
 LAKE_CHANCE[LAKE_MARSH] = 0.85;
 LAKE_TOL[LAKE_MARSH] = 5.0;
 LAKE_CUT[LAKE_MARSH] = 2.0;
-LAKE_MIN_ALT[LAKE_MARSH] = R_SEA - 0.25;
+LAKE_MIN_ALT[LAKE_MARSH] = SEA_K - 0.25;
 LAKE_R[LAKE_OASIS] = [3, 4.5];
 LAKE_DEPTH[LAKE_OASIS] = [2.2, 3.2];
 LAKE_WOBBLE[LAKE_OASIS] = [0.14, 0.07];
@@ -859,7 +919,7 @@ LAKE_BED_ROUGH[LAKE_OASIS] = 0.3;
 LAKE_CHANCE[LAKE_OASIS] = 0.45;
 LAKE_TOL[LAKE_OASIS] = 5.0;
 LAKE_CUT[LAKE_OASIS] = 2.0;
-LAKE_MIN_ALT[LAKE_OASIS] = R_SEA - 0.25;
+LAKE_MIN_ALT[LAKE_OASIS] = SEA_K - 0.25;
 LAKE_R[LAKE_PLUNGE] = [3.4, 5.4];
 LAKE_DEPTH[LAKE_PLUNGE] = [4.0, 6.0];
 LAKE_WOBBLE[LAKE_PLUNGE] = [0.12, 0.06];
@@ -879,7 +939,7 @@ LAKE_CHANCE[LAKE_PLUNGE] = 0.6;
 LAKE_TOL[LAKE_PLUNGE] = 26.0;
 LAKE_CUT[LAKE_PLUNGE] = 15.0;
 /** Mountain country only, and well clear of the sea. */
-LAKE_MIN_ALT[LAKE_PLUNGE] = R_SEA + 8;
+LAKE_MIN_ALT[LAKE_PLUNGE] = SEA_K + 8;
 /** The least water a site has to hold to be worth being a lake at all. */
 const LAKE_MIN_DEPTH = 1.5;
 const LAKE_MIN_CELLS = 8;
@@ -920,10 +980,8 @@ export const WATER_PLUNGE = 5;
 export const WATER_SPRING = 6;
 export const WATER_FALL = 7;
 
-/** Scratch for the lake pass. It runs once, planet-wide, before any voxel. */
-const _lakeDir = [0, 0, 0];
-const _lakeCtr = [0, 0, 0];
-const _lakeParts = { f: 0, i: 0, j: 0 };
+/** Scratch for the lake pass. It runs once, world-wide, before any voxel. */
+const _lakeXY = { x: 0, y: 0 };
 
 /**
  * The reef.
@@ -962,15 +1020,15 @@ const REEF_LI = 1;
 const REEF_LJ = 4;
 /**
  * The ocean's topmost water cell, which is the same layer on every column of
- * the planet: cell `k` is centred at `R_MIN + k + 0.5` and water is every cell
- * whose centre is at or under R_SEA, so it is one number and not a search.
+ * the planet: cell `k` is centred at `k + 0.5` and water is every cell
+ * whose centre is at or under SEA_K, so it is one number and not a search.
  * Deriving it from the constants rather than scanning the block array for the
  * last `ID.water` is not an optimisation — a scan would be reading the column
  * *after* an earlier pass may have written into it.
  */
-const SEA_TOP_K = Math.floor(R_SEA - R_MIN - 0.5);
+const SEA_TOP_K = Math.floor(SEA_K - 0.5);
 /** Depth below the waterline of the floor cell whose layer is `k`. */
-const depthOfK = (k) => R_SEA - (R_MIN + k + 0.5);
+const depthOfK = (k) => SEA_K - (k + 0.5);
 /**
  * A reef's radius, in columns.
  *
@@ -996,7 +1054,7 @@ const REEF_R_MAX = 3.4;
 /** How many lattice candidates in warm water actually carry a reef. */
 const REEF_CHANCE = 0.55;
 /**
- * The depth band, in blocks below R_SEA, measured to the floor cell's centre.
+ * The depth band, in blocks below SEA_K, measured to the floor cell's centre.
  *
  * 2 was the shallowest a prop can stand without owning the surface quad, and
  * the band ran to 12 — so measured in the running game the whole distribution
@@ -1006,7 +1064,7 @@ const REEF_CHANCE = 0.55;
  *
  * 5 to 16 instead. The floor is deep enough that a reef is under the surface
  * rather than beside it, and 16 is against the real bathymetry — the ocean
- * bottoms out at R_SEA - R_SEABED_MIN = 17 — so the band now reaches the foot
+ * bottoms out at SEA_K - K_SEABED_MIN = 17 — so the band now reaches the foot
  * of the slope instead of stopping a third of the way down it. The shallow
  * limit stays a limit for the surface-quad reason, it just is not the one
  * doing the work any more.
@@ -1082,7 +1140,7 @@ const LETTUCE_TEMP_MIN = 0.05;
  * The abyssal anemone: the deep floor's light, and the rarest thing that grows.
  *
  * Depth is the whole gate. The reef band tops out at 16 and the ocean bottoms
- * out at R_SEA - R_SEABED_MIN = 17, so "below the reef" is not a clean cut —
+ * out at SEA_K - K_SEABED_MIN = 17, so "below the reef" is not a clean cut —
  * instead this fades in from 13.5 and is only at full strength at 16.5, which
  * in practice means the flat floor beyond the foot of the continental slope.
  * The two bands do overlap between 13.5 and 16, and the overlap is thin twice
@@ -1153,8 +1211,7 @@ const LAKE_WEED = new Uint8Array(8);
 // LAKE_WEED[LAKE_MARSH] = 1;
 
 /** Scratch for the two reef passes. Neither nests inside anything. */
-const _reefDir = [0, 0, 0];
-const _reefParts = { f: 0, i: 0, j: 0 };
+const _reefXY = { x: 0, y: 0 };
 
 /**
  * The land flora, the cave floor, and the stands.
@@ -1332,8 +1389,8 @@ const CAVE_COLD_MIN = 16;
 const CAVE_COLD_FULL = 34;
 
 /** Scratch for the three land-flora passes. None nests inside another. */
-const _landDir = [0, 0, 0];
-const _standParts = { f: 0, i: 0, j: 0 };
+const _landXY = { x: 0, y: 0 };
+const _standParts = { x: 0, y: 0 };
 
 /**
  * Volcano geometry. Module scope rather than locals now that choosing a site
@@ -1361,63 +1418,26 @@ const VOLCANO_TARGET = 4;
  */
 export const DECOR_MARGIN = 6;
 
-// Scratch for dirToColumn — this is called a million times in the canyon walk.
-const _dtf = { f: 0, a: 0, b: 0 };
-/** Blocks over which terrain fades out at a face border. See height(). */
-const BORDER_FADE = 8;
 /**
- * How far above the waterline a face border sits, so edges are never sea.
+ * BORDER_FADE, BORDER_LIFT, BORDER_FLAT, SEAM_WALK_BAND, SEAM_MAX_STEP,
+ * TREE_EDGE_MARGIN, SPAWN_EDGE_MARGIN, `seamFloor` and the seam slope limiter
+ * all stood here and are all gone.
  *
- * 2.5 -> 1.0, and the number matters more than it looks: it is EXACTLY how far
- * you sink when you cross a seam. Height on one face becomes tangential
- * distance on the next, so arriving over a border ridge puts you the ridge's
- * own height below the neighbour's ridge - at 2.5 that was two and a half
- * blocks inside solid rock, collision shoved you back, and the seam read as
- * impassable.
+ * Between them they flattened a 24-column shelf around every face, lifted it
+ * clear of the waterline, capped the terrain behind it to a one-block-a-column
+ * cone, put a floor under it so the sea could not climb in, ran a 200-pass
+ * limiter over the band, re-flooded the sea afterwards because the limiter had
+ * moved the ground under it, erased any canyon or lake that fell inside it, and
+ * kept trees and the spawn point out of it. That is eleven percent of every face
+ * spent, and a long tail of bugs, on the single problem of two faces meeting at
+ * ninety degrees.
  *
- * 1.0 is the least that still does the job it was added for. Sea level is 208
- * and a block at layer 33 spans 208 to 209, so a border at 209 is a course of
- * dry land standing clear of water that stops at 208 - and one block is a step,
- * which `_standOnArrival` absorbs without the player feeling it.
+ * There is no such meeting now. A join inside the cross is a coordinate
+ * carrying on, so the generator does NOTHING there — that is the whole of the
+ * change, and the test asserts it by measuring neighbour height steps at a join
+ * against steps mid-tile. A join that is a divider is not a join at all: there
+ * is unbreakable rock in the way, and `fillWall` puts it there.
  */
-const BORDER_LIFT = 1.0;
-/** Columns of bare ground kept at a face border, so no canopy spans a seam. */
-const TREE_EDGE_MARGIN = 6;
-/** How wide a walkable apron every seam gets. See the slope limit. */
-const SEAM_WALK_BAND = 56;
-/**
- * Columns of dead-level ground at every face border.
- *
- * The whole band, not a lip. Anything less leaves terrain to climb on the
- * approach, and a single two-block step is above jump height and walls the seam
- * off - which is what kept the owner from crossing at all. Flat to the width of
- * SEAM_WALK_BAND means the run-up to every edge is a plain, the two faces meet
- * exactly level, and stepping over is a step.
- *
- * It reads as a shelf around the rim of each face, which is 11% of a face, and
- * that is the price of an edge you can actually walk over.
- */
-const BORDER_FLAT = 24;
-/**
- * The lowest the ground may sit at `border` columns from a seam.
- *
- * The mirror of the cone in `height()`, and it exists because the cone alone
- * never stopped water reaching an edge. The cap only ever pushes ground DOWN,
- * so an ocean basin was free to come right up against the flat shelf; the seam
- * slope limiter, which runs last and also only ever lowers, then cut the shelf
- * down a block a column to meet it, and the sea re-flood filled what it had
- * cut. Measured on seed 4242 that put sea within 11 columns of a seam and made
- * 10% of the shelf itself water - the canal the owner reported, back by a route
- * that did not exist when it was first fixed in `height()`.
- *
- * So the band gets a floor as well as a ceiling: at `border` columns out the
- * ground may sit at most `border - BORDER_FLAT` blocks BELOW the shelf. The
- * shelf stays dry, the sea gets a one-block-a-column beach to climb instead of
- * a cliff for the limiter to file down, and past about twenty columns the floor
- * is under the seabed and does nothing.
- */
-const seamFloor = (border) =>
-  R_SEA + BORDER_LIFT - Math.max(0, border - BORDER_FLAT) * SEAM_MAX_STEP;
 /**
  * How much easier every ore vein is to hit on the cinderlands.
  *
@@ -1446,33 +1466,37 @@ const ORE_CINDER_BONUS = 0.06;
 const GLOW_CINDER_FREQ = 11;
 const GLOW_CINDER_THR = 0.84;
 
-/** Blocks of rise allowed per column approaching a seam. One is a step. */
-const SEAM_MAX_STEP = 1.0;
-/** How far inside a face the player must wake up. */
-const SPAWN_EDGE_MARGIN = 40;
-const _dtc = { f: 0, i: 0, j: 0, col: 0 };
-
-/** World direction → the column containing it. */
-function dirToColumn(x, y, z, out = _dtc) {
-  dirToFace(x, y, z, _dtf);
-  const i = Math.min(F - 1, Math.max(0, Math.floor(axisToGrid(_dtf.a))));
-  const j = Math.min(F - 1, Math.max(0, Math.floor(axisToGrid(_dtf.b))));
-  out.f = _dtf.f; out.i = i; out.j = j;
-  out.col = cidx(_dtf.f, i, j);
-  return out;
+/**
+ * The divider: what a sealed face's wall is made of.
+ *
+ * `Grid.isWall` says which columns, and they are the outermost ring of each
+ * corner face, which gives all twelve sealed joins a wall for free and leaves
+ * the connected cross entirely untouched. This fills them from layer 0 to the
+ * top of the array — the owner's requirement is the full depth as well as the
+ * full height, so that a boundary is visible from inside a cave and a player
+ * standing next to a join can tell which kind it is.
+ *
+ * `edgestone` is unbreakable (hardness below zero) and drops nothing, so it can
+ * never enter an inventory and therefore can never be placed. See Blocks.js.
+ */
+function fillWall(blocks, col) {
+  for (let k = 0; k < D; k++) blocks[cellAt(col, k)] = ID.edgestone;
 }
 
 export class WorldGen {
   constructor(seed = 20260805) {
     this.seed = seed;
-    this.n = new Noise(seed);
-    this.nWarp = new Noise(seed + 101);
-    this.nCave = new Noise(seed + 202);
-    this.nOre = new Noise(seed + 303);
-    this.nBiome = new Noise(seed + 404);
-    this.nDetail = new Noise(seed + 505);
-    this.nAq = new Noise(seed + 606);
-    this.nLake = new Noise(seed + 707);
+    // Every one of these is periodic over W on both axes. See Periodic.js: the
+    // lattice cell at x and the cell at x + W are the same cell, so value and
+    // derivative match at the wrap by construction rather than by tuning.
+    this.n = new Periodic(seed);
+    this.nWarp = new Periodic(seed + 101);
+    this.nCave = new Periodic(seed + 202);
+    this.nOre = new Periodic(seed + 303);
+    this.nBiome = new Periodic(seed + 404);
+    this.nDetail = new Periodic(seed + 505);
+    this.nAq = new Periodic(seed + 606);
+    this.nLake = new Periodic(seed + 707);
     /**
      * Water surface radius per column, 0 where there is no lake — see
      * `carveLakes`. A Float32Array(COLUMNS) is 5 MB resident, which is real
@@ -1506,84 +1530,97 @@ export class WorldGen {
     this._spring = new Map();
   }
 
-  height(dx, dy, dz) {
+  /**
+   * The ground height of a column, as a layer.
+   *
+   * Every field in here is periodic over W on both axes, including the domain
+   * warp — a warp whose own field is periodic moves the sample point at x and
+   * the sample point at x + W by the same amount, so the pair stay exactly W
+   * apart and the warped field is periodic too. That is the whole of the flat
+   * map's new requirement and it is asserted directly in the test.
+   *
+   * Nothing here knows about tiles. The five cross faces are one field; the
+   * four corners get their character from `_faceShape` below and from the biome,
+   * not from a different generator.
+   */
+  height(x, y) {
     const w = this.nWarp;
-    const wx = w.simplex3(dx * 2.1, dy * 2.1, dz * 2.1) * 0.16;
-    const wy = w.simplex3(dx * 2.1 + 31.4, dy * 2.1, dz * 2.1) * 0.16;
-    const wz = w.simplex3(dx * 2.1, dy * 2.1 + 17.7, dz * 2.1) * 0.16;
-    const x = dx + wx, y = dy + wy, z = dz + wz;
+    // Domain warp, in COLUMNS. The cube warped a unit direction by 0.16, and a
+    // column was 0.0037765 of one, so 0.16 was 42 columns; this is that number
+    // written in the units the map actually has.
+    const wx = w.one(x, y, 0, surfScale(2.1)) * WARP_COLS;
+    const wy = w.one(x, y, 31.4, surfScale(2.1)) * WARP_COLS;
+    const px = x + wx, py = y + wy;
 
-    const continent = this.n.fbm3(x * 1.25, y * 1.25, z * 1.25, 4, 2, 0.55);
+    const continent = this.n.fbm(px, py, 0, surfScale(1.25), 4, 0.55);
     const land = smoothstep(-0.10, 0.20, continent);
-    // broad ridges rather than needles — high-frequency ridged noise on a
-    // sphere this small turns into single-column spikes
-    const ridge = this.n.ridged3(x * 1.9, y * 1.9, z * 1.9, 4, 2.0, 0.5);
+    // Broad ridges rather than needles: high-frequency ridged noise on a world
+    // this size turns into single-column spikes.
+    const ridge = this.n.ridged(px, py, 0, surfScale(1.9), 4, 0.5);
     const peaks = Math.pow(clamp(ridge * 1.15 - 0.14, 0, 1), 1.8);
-    const hills = this.nDetail.fbm3(x * 3.2, y * 3.2, z * 3.2, 4, 2, 0.5);
-    const detail = this.nDetail.fbm3(x * 8, y * 8, z * 8, 3, 2, 0.5);
-    const mask = smoothstep(0.25, 0.75, this.n.fbm3(x * 1.9 + 9.1, y * 1.9, z * 1.9, 3, 2, 0.5) * 0.5 + 0.5);
+    const hills = this.nDetail.fbm(px, py, 0, surfScale(3.2), 4, 0.5);
+    const detail = this.nDetail.fbm(px, py, 0, surfScale(8), 3, 0.5);
+    const mask = smoothstep(0.25, 0.75,
+      this.n.fbm(px, py, 9.1, surfScale(1.9), 3, 0.5) * 0.5 + 0.5);
 
-    // Amplitudes in blocks, and the third time they have been let out to meet a
-    // roof that moved. The relief available over the waterline was 12, then 24,
-    // and is now 65 — D went to 99 and the sea came down eight — so a ceiling
-    // that was the binding constraint on every summit is no longer the thing
-    // deciding what a mountain looks like.
-    //
-    // Peaks take most of it, as before and for the same reason: it is the
-    // ridged term and the only one that makes a summit. Putting the increase
-    // into `continent` instead lifts whole landmasses uniformly, which from the
-    // ground reads as nothing at all. `hills` goes up too, so the land between
-    // the summits stops being a plain.
-    //
-    // The basin term is deepened as well. With the waterline eight lower the
-    // sea would otherwise have become a puddle over the old floor; -5 puts the
-    // deepest ocean at about 266, comfortably clear of the mantle at 258, and
-    // keeps enough water column for the deep-water fish that need eight layers.
-    //
-    // The sum still has to clear R_TERRAIN_MAX with room: at the extreme this
-    // is R_SURFACE + 12 + 46 + 3 = 343.9 against a clamp of 347, and a clamp
-    // that bites is a plateau where a peak should be.
-    let h = R_SURFACE;
+    // Amplitudes in blocks, carried across unchanged: they were tuned against a
+    // waterline at layer 33 and a ceiling at 86, and both are still there. At
+    // the extreme this is K_SURFACE + 12 + 34 + 3 = 82.9 against a clamp of 86,
+    // and a clamp that bites is a plateau where a peak should be.
+    let h = K_SURFACE;
     h += continent * 12.0;
     h += Math.min(0, continent) * 5.0;              // carve real ocean basins
-    // 46 -> 34: the roof came down with the cube (R_TERRAIN_MAX 261 over a
-    // waterline of 208), and the sum has to clear it without the clamp biting,
-    // because a clamp that bites is a plateau where a peak should be. At the
-    // extreme this is now R_SURFACE + 12 + 34 + 3 = 257.9 against 261.
     h += land * peaks * 34.0 * (0.35 + mask * 0.65);
     h += land * hills * 3.0;
     h += detail * 0.18;
-    if (h < R_SEA + 1.2 && h > R_SEA - 3) h = lerp(h, R_SEA - 0.4, 0.4);
-    // Fade to the bare shell at a face border. Two faces' terrain rises along
-    // two different normals and the same corner cells belong to both, so
-    // without this every cube edge is two mountain ranges growing through each
-    // other. Flat there means the seam is a clean 90 degree corner instead.
-    dirToFace(dx, dy, dz, _dtf);
-    const border = Math.min(1 - Math.abs(_dtf.a), 1 - Math.abs(_dtf.b)) * PLANET_R;
-    // The last few columns are FLAT, and everything behind them is capped to a
-    // cone that rises at most one block per column away from the seam.
-    //
-    // A fixed-width fade could not do this. It lerped over eight columns
-    // whatever the terrain behind it was, so a mountain near a seam still came
-    // down as a cliff - measured, rises of up to 34 blocks in the last twelve
-    // columns - and a two-block step is already above jump height. That is what
-    // walled every edge off: "I still can't cross faces".
-    //
-    // The cap is exact rather than tuned. At `border` columns from the edge the
-    // ground may stand at most `border` blocks over the seam's own level, so
-    // the worst step between neighbouring columns is one, for any terrain, with
-    // no width to pick. Inland the cap passes the terrain ceiling and does
-    // nothing at all.
-    if (border < BORDER_FLAT) return R_SEA + BORDER_LIFT;
-    const cap = R_SEA + BORDER_LIFT + (border - BORDER_FLAT) * SEAM_MAX_STEP;
-    if (h > cap) h = cap;
-    const floor = seamFloor(border);
-    if (h < floor) h = floor;
-    return clamp(h, R_MIN + 6, R_TERRAIN_MAX);
+    if (h < SEA_K + 1.2 && h > SEA_K - 3) h = lerp(h, SEA_K - 0.4, 0.4);
+    return clamp(this._faceShape(x, y, h), 6, K_TERRAIN_MAX);
   }
 
   /**
-   * Which rock sits at radius `r` under a given direction.
+   * What a sealed face does to the height field it inherits.
+   *
+   * Rime and Pyre take it unchanged, which is exactly what the cube did with
+   * them: the cap and the cinderlands were the ordinary terrain generator with a
+   * different biome and a different liquid, and the port keeps that so the two
+   * faces come out the places they already were.
+   *
+   * Tempest and Verdant are new and each is one line, because the character of a
+   * face belongs in what is built on it rather than in a second height field:
+   *
+   *   Tempest has NO SAFE HIGH GROUND, which is the brief, so everything over
+   *   the waterline is compressed toward it. Nothing on the face stands more
+   *   than about six layers up, there is no summit to shelter behind, and the
+   *   low ground is left alone so the face keeps its standing water.
+   *
+   *   Verdant is lifted clear of the sea and given back its relief. A jungle is
+   *   land — a sealed room that came out half ocean would be a lagoon — so the
+   *   floor is raised over the waterline and the ridges are exaggerated, which
+   *   is what gives the canopy its valleys.
+   */
+  _faceShape(x, y, h) {
+    const role = FACE_ROLE[faceAt(x, y)];
+    if (role === FACE_TEMPEST) {
+      // Nothing on the face stands more than about ten layers over the water,
+      // whatever the ridged term wanted, so there is no summit to shelter
+      // behind. The low ground is left alone and keeps its standing water.
+      return h <= SEA_K ? h : SEA_K + Math.pow(h - SEA_K, 0.55) * 1.1;
+    }
+    if (role === FACE_VERDANT) {
+      // Lifted 2.5 layers clear of the waterline, with the relief above it
+      // untouched and the ground below it flattened to a fifth. So the face is
+      // land end to end apart from a few shallow pools, and the highest ground
+      // still lands short of K_TERRAIN_MAX — a clamp that bites is a plateau
+      // where a peak should be, and that is as true on a sealed face as it is
+      // in the cross.
+      const over = h - SEA_K;
+      return SEA_K + 2.5 + (over > 0 ? over : over * 0.18);
+    }
+    return h;
+  }
+
+  /**
+   * Which rock sits at the layer whose centre is `r`, in the column (x, y).
    *
    * The band edges are fractions of the crust — the mantle to the waterline —
    * and not the absolute radii they used to be. Those were written when sea
@@ -1602,10 +1639,10 @@ export class WorldGen {
    * crust voxel — roughly three million of them — and the pockets only need to
    * be blobs, not landforms.
    */
-  stratum(r, dx, dy, dz) {
-    const px = dx * r, py = dy * r, pz = dz * r;
-    const rr = r + this.nDetail.fbm3(px * 0.045, py * 0.045, pz * 0.045, 2, 2, 0.5) * 3.4;
-    const p = this.nOre.simplex3(px * 0.13 + 3.7, py * 0.13, pz * 0.13);
+  stratum(r, x, y) {
+    const k = r - 0.5;
+    const rr = r + this.nDetail.volFbm(x, y, k, 0.045, 2, 0.5) * 3.4;
+    const p = this.nOre.volOne(x, y, k, 0.13, 3.7);
     if (rr >= BAND_STONE) return p > 0.52 ? ID.andesite : ID.stone;
     if (rr >= BAND_LIMESTONE) return p > 0.50 ? ID.marble : ID.limestone;
     if (rr >= BAND_GRANITE) return p > 0.48 ? ID.granite : (p < -0.50 ? ID.tuff : ID.andesite);
@@ -1616,15 +1653,32 @@ export class WorldGen {
     return p > 0.30 ? ID.magma_stone : (p < -0.46 ? ID.crystal_stone : ID.slate);
   }
 
-  climate(dx, dy, dz, h) {
-    const lat = Math.abs(dy);
+  climate(x, y, h) {
+    /**
+     * The latitude term, and it is the one piece of climate the flat map had to
+     * be given rather than ported.
+     *
+     * On the cube it was `|dy|` — the distance from the equatorial plane — which
+     * is a real, smooth, globally consistent number on a sphere and does not
+     * exist on a torus. Nothing about a wrapped square has a pole. Substituting
+     * a linear ramp in `y` is the obvious answer and is wrong twice over: it
+     * does not wrap, so it is a discontinuity at exactly the seam this whole
+     * conversion is about, and it would make the climate belts run along the
+     * tile rows, which is precisely the "biomes lined up with the faces" the
+     * cross is supposed to stop.
+     *
+     * So the belts come from a very low frequency periodic field instead,
+     * mapped into [0, 1] with the same mean and spread `|dy|` had. Cold country
+     * is then a place on the map rather than a band, and the thresholds in
+     * `biomeAt` — every one of them measured against the old distribution — keep
+     * their meaning.
+     */
+    const lat = clamp(0.5 + this.nBiome.fbm(x, y, 0, surfScale(0.9), 3, 0.5) * 1.55, 0, 1);
     let temp = 1 - lat * 1.35;
-    temp += this.nBiome.fbm3(dx * 2.2, dy * 2.2, dz * 2.2, 3, 2, 0.5) * 0.45;
-    // Altitude cooling at 0.055/unit put a modest 8-unit rise a full 0.33 below
-    // its surroundings — enough to tip a hill inside a temperate forest all the
-    // way to snow. Gentler, and it only starts biting well above the surface.
-    temp -= Math.max(0, h - R_SURFACE - 4) * 0.028;
-    const hum = this.nBiome.fbm3(dx * 2.9 + 51.3, dy * 2.9, dz * 2.9, 4, 2, 0.5) * 0.5 + 0.5;
+    temp += this.nBiome.fbm(x, y, 12.7, surfScale(2.2), 3, 0.5) * 0.45;
+    // Altitude cooling. Gentle, and it only starts biting well above the mean.
+    temp -= Math.max(0, h - K_SURFACE - 4) * 0.028;
+    const hum = this.nBiome.fbm(x, y, 51.3, surfScale(2.9), 4, 0.5) * 0.5 + 0.5;
     return { temp, hum };
   }
 
@@ -1639,19 +1693,28 @@ export class WorldGen {
    * than desert. Temperature is much wider, roughly -0.4 to 1.0.
    */
   biomeAt(h, temp, hum, role = FACE_NORMAL) {
-    // The cinderlands are the whole face, sea bed and all: the low ground is
-    // not ocean, it is where the lava sits. See `fillColumn`.
-    if (role === FACE_CINDER) return BIOME.CINDER;
-    if (h < R_SEA - 0.6) return BIOME.OCEAN;
-    // The cap. Snow above the waterline, tundra only where the ground is low
-    // and dry, so there is somewhere on it that is not a snowfield.
-    if (role === FACE_POLAR) return hum < 0.34 && h < R_SURFACE ? BIOME.TUNDRA : BIOME.SNOW;
+    // Pyre is the whole face, sea bed and all: the low ground is not ocean, it
+    // is where the lava sits. See `fillColumn`. Ported unchanged off the cube's
+    // cinderlands, including the ore and the sunstone outcrops.
+    if (role === FACE_PYRE) return BIOME.CINDER;
+    // Verdant is one biome end to end for Pyre's reason — a sealed room is a
+    // place, not a climate map — and it stays jungle under its own water, so
+    // there is no ocean case to fall through to.
+    if (role === FACE_VERDANT) return BIOME.JUNGLE;
+    if (h < SEA_K - 0.6) return role === FACE_TEMPEST ? BIOME.STORM : BIOME.OCEAN;
+    // Tempest above the waterline. Sodden, scoured ground, and it is the whole
+    // face: the standing water is part of it rather than a sea in it.
+    if (role === FACE_TEMPEST) return BIOME.STORM;
+    // Rime. Snow above the waterline, tundra only where the ground is low and
+    // dry, so there is somewhere on it that is not a snowfield. The cube's cap,
+    // unchanged.
+    if (role === FACE_RIME) return hum < 0.34 && h < K_SURFACE ? BIOME.TUNDRA : BIOME.SNOW;
     // Alpine ground is settled by height before climate: a peak is a peak at any
     // latitude, and a cold one wears a snow cap rather than turning into tundra.
     // No snow anywhere but the cap. A cold peak wears bare rock and a cold
     // lowland is tundra; both used to turn white, which is what put snowfields
     // on every face. Carried snow still lies wherever it is put.
-    if (h > R_SURFACE + 3.8) return BIOME.MOUNTAIN;
+    if (h > K_SURFACE + 3.8) return BIOME.MOUNTAIN;
     if (temp < -0.26) return BIOME.TUNDRA;
     if (temp < -0.02) return BIOME.TUNDRA;
     // Hot and dry, driest first. Badlands used to sit *after* desert and savanna
@@ -1696,19 +1759,16 @@ export class WorldGen {
     const colHeight = new Float32Array(COLUMNS);
     const colSlope = new Float32Array(COLUMNS);
     const rng = makeRng(this.seed ^ 0x5bf03635);
-    const dir = [0, 0, 0];
 
     // ---- 1. height field + climate ----------------------------------------
-    onProgress(0.02, 'Sculpting the sphere');
-    for (let f = 0; f < FACES; f++) {
-      for (let i = 0; i < F; i++) {
-        for (let j = 0; j < F; j++) {
-          const col = cidx(f, i, j);
-          centerDir(f, i, j, dir);
-          colHeight[col] = this.height(dir[0], dir[1], dir[2]);
-        }
-      }
-      onProgress(0.02 + 0.58 * ((f + 1) / FACES), 'Sculpting the sphere');
+    //
+    // One loop over one map. The cube ran this six times, once per face, and
+    // then spent the rest of the function undoing what the six had done to each
+    // other at the borders.
+    onProgress(0.02, 'Sculpting the world');
+    for (let x = 0; x < W; x++) {
+      for (let y = 0; y < W; y++) colHeight[x * W + y] = this.height(x, y);
+      if ((x & 63) === 0) onProgress(0.02 + 0.58 * (x / W), 'Sculpting the world');
     }
 
     // Relax the height field across the column graph. Voxel terrain quantises
@@ -1760,15 +1820,12 @@ export class WorldGen {
     // Biomes are decided from the *relaxed* height, not the raw noise. Deciding
     // first meant a column could be classified as an alpine peak and then be
     // smoothed down into a gentle rise — a snow cap with no mountain under it.
-    for (let f = 0; f < FACES; f++) {
-      for (let i = 0; i < F; i++) {
-        for (let j = 0; j < F; j++) {
-          const col = cidx(f, i, j);
-          centerDir(f, i, j, dir);
-          const h = colHeight[col];
-          const { temp, hum } = this.climate(dir[0], dir[1], dir[2], h);
-          colBiome[col] = this.biomeAt(h, temp, hum, FACE_ROLE[f]);
-        }
+    for (let x = 0; x < W; x++) {
+      for (let y = 0; y < W; y++) {
+        const col = x * W + y;
+        const h = colHeight[col];
+        const { temp, hum } = this.climate(x, y, h);
+        colBiome[col] = this.biomeAt(h, temp, hum, FACE_ROLE[faceAt(x, y)]);
       }
     }
 
@@ -1827,7 +1884,7 @@ export class WorldGen {
       for (let col = 0; col < COLUMNS; col++) {
         if (colBiome[col] === BIOME.OCEAN || shoreDist[col] > BEACH_REACH) continue;
         // a cliff dropping straight into the sea is a headland, not a beach
-        if (colHeight[col] > R_SEA + 2.2) continue;
+        if (colHeight[col] > SEA_K + 2.2) continue;
         // a frozen coast keeps its snow rather than turning tropical
         if (colBiome[col] === BIOME.SNOW) continue;
         colBiome[col] = BIOME.BEACH;
@@ -1869,24 +1926,21 @@ export class WorldGen {
         }
       }
 
-      for (let f = 0; f < FACES; f++) {
-        for (let i = 0; i < F; i++) {
-          for (let j = 0; j < F; j++) {
-            const col = cidx(f, i, j);
-            const d = oceanDist[col];
-            if (d <= 0) continue;
-            centerDir(f, i, j, dir);
-            // A flat plate at the bottom of the profile reads as a swimming
-            // pool. This is the same field the crust uses for its band edges,
-            // at low frequency and small amplitude: seamounts and hollows of a
-            // couple of blocks, enough to give the deep somewhere to swim over.
-            const bump = this.n.fbm3(dir[0] * 3.4 + 61.7, dir[1] * 3.4, dir[2] * 3.4, 3, 2, 0.5) * 1.9;
-            const want = R_SEA - oceanDepthAt(d) + bump;
-            // `min` so an existing basin that was already deeper keeps its
-            // floor, and the clamp so no amount of noise can put the seabed
-            // into the rock the mantle and the cave pass need.
-            colHeight[col] = Math.max(R_SEABED_MIN, Math.min(colHeight[col], want));
-          }
+      for (let x = 0; x < W; x++) {
+        for (let y = 0; y < W; y++) {
+          const col = x * W + y;
+          const d = oceanDist[col];
+          if (d <= 0) continue;
+          // A flat plate at the bottom of the profile reads as a swimming
+          // pool. This is the same field the crust uses for its band edges,
+          // at low frequency and small amplitude: seamounts and hollows of a
+          // couple of blocks, enough to give the deep somewhere to swim over.
+          const bump = this.n.fbm(x, y, 61.7, surfScale(3.4), 3, 0.5) * 1.9;
+          const want = SEA_K - oceanDepthAt(d) + bump;
+          // `min` so an existing basin that was already deeper keeps its
+          // floor, and the clamp so no amount of noise can put the seabed
+          // into the rock the mantle and the cave pass need.
+          colHeight[col] = Math.max(K_SEABED_MIN, Math.min(colHeight[col], want));
         }
       }
     }
@@ -1894,21 +1948,18 @@ export class WorldGen {
     // ---- canyons -----------------------------------------------------------
     onProgress(0.93, 'Cutting the gorges');
     const canyonMask = this.carveCanyons(colHeight, colBiome, rng);
-    // Nothing carves or floods through a seam. A gorge crossing the border band
-    // leaves a wall thirty blocks high where the ground has to be steppable, and
-    // the height cone in `height()` cannot see it because it runs before this.
-    // Erasing the mask here is enough: every later pass - the floor, the walls,
-    // the re-surfacing, the tree thinning - reads it rather than re-deciding.
-    for (let col = 0; col < COLUMNS; col++) {
-      if (colBorderDist(col) <= SEAM_WALK_BAND) canyonMask[col] = 0;
-    }
+    // A gorge used to be erased anywhere within 56 columns of a face border,
+    // because a wall thirty blocks high across the only walkable route between
+    // two faces is a wall. A canyon may now run through a join inside the cross
+    // and nothing needs to be done about it; where it meets a divider it stops
+    // against unbreakable rock, which is what a divider is for.
 
     // ---- what the sea can actually reach -----------------------------------
     /**
      * Which sub-sea-level columns are connected to the ocean.
      *
      * The fill pass has always decided water by altitude alone — anything
-     * below R_SEA and above the ground is water — and until there were canyons
+     * below SEA_K and above the ground is water — and until there were canyons
      * that was exactly equivalent, because the only ground below sea level was
      * ocean floor by definition. It stopped being equivalent the moment a
      * gorge was cut fourteen blocks into land that stands two blocks out of the
@@ -1930,19 +1981,21 @@ export class WorldGen {
         // their basins are seeded by height instead, and what fills them is
         // lava. See the liquid pick in `fillColumn`.
         if (colBiome[col] === BIOME.OCEAN
-          || (colBiome[col] === BIOME.CINDER && colHeight[col] < R_SEA - 0.6)) {
+          || (colBiome[col] === BIOME.CINDER && colHeight[col] < SEA_K - 0.6)
+          || (colBiome[col] === BIOME.STORM && colHeight[col] < SEA_K - 0.6)
+          || (colBiome[col] === BIOME.JUNGLE && colHeight[col] < SEA_K - 0.6)) {
           submerged[col] = 1; queue[qn++] = col;
         }
       }
-      // The cutoff is R_SEA - 0.5, not R_SEA, and the half block matters. The
+      // The cutoff is SEA_K - 0.5, not SEA_K, and the half block matters. The
       // topmost cell the fill can put water in has its centre at 129.5, so a
       // column standing at 129.7 holds no water — but there is a lot of such
       // ground, because the height field deliberately flattens everything near
-      // sea level toward R_SEA - 0.4 and that pile lands just above the line.
+      // sea level toward SEA_K - 0.4 and that pile lands just above the line.
       // Letting it conduct made a continuous wet web out of every coastal
       // plain on the planet, and four of the six canyons filled through it
       // from a shore they never actually reached.
-      const WET = R_SEA - 0.5;
+      const WET = SEA_K - 0.5;
       for (let qi = 0; qi < qn; qi++) {
         const col = queue[qi];
         for (let n = 0; n < 4; n++) {
@@ -1965,7 +2018,7 @@ export class WorldGen {
            * is a good thing to find: the canyon behind it is fourteen blocks
            * below sea level, and the bar is diggable.
            */
-          if (canyonMask[nb] === 2) { colHeight[nb] = R_SEA + 0.2; continue; }
+          if (canyonMask[nb] === 2) { colHeight[nb] = SEA_K + 0.2; continue; }
           submerged[nb] = 1;
           queue[qn++] = nb;
         }
@@ -1981,92 +2034,12 @@ export class WorldGen {
     // and the flatness of a bank is what several later passes decide on.
     onProgress(0.95, 'Filling the lakes');
     this.carveLakes(colHeight, colBiome, canyonMask, submerged, shoreDist);
-    // ...and no lake basin in the seam apron either, for the same reason as the
-    // canyons: a basin cut into the flat band is a wall around the rim of it.
-    for (let col = 0; col < COLUMNS; col++) {
-      if (colBorderDist(col) <= SEAM_WALK_BAND && this.lakeKind[col]) {
-        this.lakeKind[col] = 0;
-        this.lakeSurf[col] = 0;
-        colHeight[col] = R_SEA + BORDER_LIFT;
-      }
-    }
-
-    // ...and the seabed pass is not allowed to dig under the seam apron either.
-    // `height()` sets the floor, but the relaxation, the ocean depth pass and
-    // the lakes all move ground after it, so it is re-asserted here, on the
-    // finished field and just before the limiter that has to respect it.
-    for (let col = 0; col < COLUMNS; col++) {
-      const d = colBorderDist(col);
-      if (d > SEAM_WALK_BAND) continue;
-      const f = seamFloor(d);
-      if (colHeight[col] < f) colHeight[col] = f;
-      // Ground that has just come up out of the water is not seabed any more.
-      // The mirror of the re-flood below: that grows the sea into what dropped,
-      // this drops what rose, and leaving the flag set would surface a dry
-      // shelf as sea floor and let fish and coral be placed inside it.
-      if (submerged[col] && colHeight[col] >= R_SEA - 0.5) submerged[col] = 0;
-    }
-
-    {
-      const MAX_STEP = 1.0;
-      // Gathered once. The band is a few percent of the planet, so iterating a
-      // list of it converges in the time one full sweep would have cost.
-      const band = [];
-      for (let col = 0; col < COLUMNS; col++) {
-        if (colBorderDist(col) <= SEAM_WALK_BAND) band.push(col);
-      }
-      for (let pass = 0; pass < 200; pass++) {
-        let cut = 0;
-        for (let n = 0; n < band.length; n++) {
-          const col = band[n];
-          let lowest = Infinity;
-          for (let d = 0; d < 4; d++) {
-            const h = colHeight[colNeighbor(col, d)];
-            if (h < lowest) lowest = h;
-          }
-          // Never below the band's own floor, or the limiter walks the shelf
-          // down into the sea one column at a time. See seamFloor.
-          const cap = Math.max(lowest + MAX_STEP, seamFloor(colBorderDist(col)));
-          if (colHeight[col] > cap) { colHeight[col] = cap; cut++; }
-        }
-        if (cut === 0) break;
-      }
-    }
-
-    /**
-     * Re-flood the sea, because the passes above moved the ground under it.
-     *
-     * `submerged` is decided from the height field long before this, and the
-     * slope limit only ever LOWERS columns - so a cliff cut down to a walkable
-     * ramp can end up under the waterline having never been marked wet. The
-     * fill then puts no water in it while the column beside it, which was
-     * marked, still fills to sea level: an ocean with a dry trench cut through
-     * it and a wall of water standing on nothing.
-     *
-     * The owner saw exactly that, and the tell was that it "updates when I
-     * break a block near them" - the runtime water sim re-evaluates and drains
-     * it, which is proof the generated state was wrong rather than the
-     * simulation.
-     *
-     * Seeded from everything already wet rather than from the ocean biome
-     * again, so this only ever grows the sea into ground that has just dropped
-     * below it.
-     */
-    {
-      const WET2 = R_SEA - 0.5;
-      const q2 = new Int32Array(COLUMNS);
-      let n2 = 0;
-      for (let col = 0; col < COLUMNS; col++) if (submerged[col]) q2[n2++] = col;
-      for (let qi = 0; qi < n2; qi++) {
-        const col = q2[qi];
-        for (let d = 0; d < 4; d++) {
-          const nb = colNeighbor(col, d);
-          if (nb < 0 || submerged[nb] || colHeight[nb] >= WET2) continue;
-          submerged[nb] = 1;
-          q2[n2++] = nb;
-        }
-      }
-    }
+    // A lake basin used to be erased inside the seam apron, the apron's floor
+    // re-asserted over the finished field, a 200-pass slope limiter run across
+    // it, and the sea then re-flooded because the limiter had moved the ground
+    // out from under it. Four passes, all of them about the same ninety-degree
+    // corner, and all four are gone. Nothing after this moves the height field,
+    // so nothing after this has to repair what it moved.
 
 
     /**
@@ -2082,6 +2055,32 @@ export class WorldGen {
     this.colWaterStyle = new Uint8Array(COLUMNS);
     for (let col = 0; col < COLUMNS; col++) {
       if (this.lakeSurf[col] > 0) this.colWaterStyle[col] = this.lakeKind[col] & 7;
+    }
+
+    /**
+     * The dividers, in the height field.
+     *
+     * The wall columns get a height at the ceiling so that everything derived
+     * from the field agrees a divider is solid ground to the top: the slope
+     * term below sees a cliff, `groundKOf` answers with the top layer, and every
+     * decoration pass that tests altitude, slope or ground refuses them without
+     * having to know walls exist. The voxels themselves are written by
+     * `fillWall`, which does not consult this.
+     *
+     * The lake and canyon passes have already run, and neither can have touched
+     * a wall column: both refuse ocean and beach, and a wall's own biome is set
+     * below. What this does have to undo is any lake or gorge that reached one
+     * from outside, which the two lines here do.
+     */
+    for (let col = 0; col < COLUMNS; col++) {
+      const y = col % W, x = (col - y) / W;
+      if (!isWall(x, y)) continue;
+      colHeight[col] = K_TERRAIN_MAX;
+      colBiome[col] = BIOME.MOUNTAIN;
+      submerged[col] = 0;
+      canyonMask[col] = 0;
+      this.lakeKind[col] = 0;
+      this.lakeSurf[col] = 0;
     }
 
     // slope from the finished height field — exact, unlike sampling the noise
@@ -2148,22 +2147,16 @@ export class WorldGen {
     this.placeVolcanoSites(rng);
 
     // ---- structures --------------------------------------------------------
-    // No ruins, crypts or vaults. A planet you can walk around in four minutes
+    // No ruins, crypts or vaults. A world you can walk around in a few minutes
     // reads as *yours*; salting it with somebody else's architecture makes it
-    // read as a level someone built, which is the opposite of the point. The
-    // builder is kept — Structures.js still compiles and its patch mapping is
-    // used elsewhere — so this is one line to put back if that judgement
-    // changes, and the line is
-    //   placeStructures(blocks, colHeight, colBiome, colSlope, seed)
-    // which is why the import at the top of this file is still here with nothing
-    // calling it. A `this.structureCounts = {}` also stood here: an empty object
-    // that was never filled and never read, left behind by the pass that used to
-    // report what it had built.
+    // read as a level someone built, which is the opposite of the point.
     //
-    // Keeping the builder costs nothing shipped, so do not delete it to save
-    // bundle size: an import that is never called is tree-shaken, and neither
-    // built chunk contains a single string from `Structures.js` - checked for
-    // `placeStructures`, `crypt` and `monolith`, all zero in both.
+    // The import of `Structures.js` that used to sit at the top of this file,
+    // never called, so the builder kept being parsed, is gone with the cube:
+    // that builder places a patch in FACE coordinates through `patchColumn`,
+    // which no longer exists. Putting structures back means porting it, not
+    // uncommenting a line, and pretending otherwise with a dead import would be
+    // the worse of the two.
 
     onProgress(1, 'Ready');
     return { colBiome, colHeight, spawn: this.pickSpawn() };
@@ -2187,15 +2180,15 @@ export class WorldGen {
       const col = (rng() * COLUMNS) | 0;
       const bi = this.colBiome[col];
       if (bi === BIOME.OCEAN || bi === BIOME.BEACH) continue;
-      // You wake up in the ordinary world. The cap and the cinderlands are
-      // places to travel to, not to be dropped into with nothing.
-      if (FACE_ROLE[(col / (F * F)) | 0] !== FACE_NORMAL) continue;
-      // Not on the rim of the world either. This scores by flatness, and the
-      // border band is flat by construction - the height fade levels it so the
-      // twelve edges meet cleanly - so it was the most attractive ground on the
-      // planet and the early break took it almost every time. Measured before
-      // this line: a spawn one column from the edge.
-      if (colBorderDist(col) < SPAWN_EDGE_MARGIN) continue;
+      // You wake up in the ordinary world. The four sealed faces are places to
+      // travel to, not to be dropped into with nothing — and there is no way
+      // out of one except the portal, so a spawn in Pyre would be a soft lock.
+      // `SPAWN_EDGE_MARGIN` stood under this and is gone with the rest of the
+      // border machinery: the cross has no rim to be pushed away from.
+      {
+        const yy = col % W;
+        if (FACE_ROLE[faceAt((col - yy) / W, yy)] !== FACE_NORMAL) continue;
+      }
       // Not in a gorge and not on its rim: waking up fourteen blocks down a
       // slot canyon is a memorable start and a miserable one.
       if (this.canyonNear[col] < CANYON_NEAR_MAX) continue;
@@ -2203,7 +2196,7 @@ export class WorldGen {
       // after the lake pass describes the bed rather than the water over it.
       if (this.lakeKind[col]) continue;
       const h = this.colHeight[col];
-      if (h < R_SEA + 1.5 || h > R_SURFACE + 3.0) continue;
+      if (h < SEA_K + 1.5 || h > K_SURFACE + 3.0) continue;
       let score = 4 - Math.min(4, this.colSlope[col] * 3);
       if (bi === BIOME.PLAINS || bi === BIOME.MEADOW || bi === BIOME.FOREST) score += 2;
       if (score > bestScore) { bestScore = score; best = col; }
@@ -2212,11 +2205,16 @@ export class WorldGen {
     return best < 0 ? 0 : best;
   }
 
-  /** Unit direction through a column's centre, into the shared scratch. */
-  _dirOf(col, out) {
-    const f = (col / (F * F)) | 0;
-    const rem = col - f * F * F;
-    return centerDir(f, (rem / F) | 0, rem % F, out);
+  /**
+   * A column's own map coordinates, into a caller-owned scratch.
+   *
+   * This was `_dirOf`, which turned a column into a unit direction so the noise
+   * could be sampled on the sphere. There is no direction now: a column's
+   * sample point IS its (x, y), and every field is periodic over the map rather
+   * than closed over a shell.
+   */
+  _xyOf(col, out) {
+    return colXY(col, out);
   }
 
   /**
@@ -2230,7 +2228,7 @@ export class WorldGen {
    * and a vein replaces one rock with another.
    */
   groundKOf(col) {
-    const k = Math.floor(this.colHeight[col] - R_MIN - 0.5);
+    const k = Math.floor(this.colHeight[col] - 0.5);
     return k < 0 ? -1 : (k >= D ? D - 1 : k);
   }
 
@@ -2255,7 +2253,7 @@ export class WorldGen {
   }
 
   /**
-   * The climate of a piece of seabed, from a unit direction through it.
+   * The climate of a piece of seabed, from its column's own coordinates.
    *
    * This is the temperature term of the biome climate and nothing else — the
    * latitude ramp plus the same low-frequency wobble that makes the biome map
@@ -2268,9 +2266,9 @@ export class WorldGen {
    * separately tomorrow is how you get coral growing on polar gravel: the
    * ground would say one climate and the thing standing on it another.
    */
-  _seaTemp(dir) {
-    return 1 - Math.abs(dir[1]) * 1.35
-      + this.nBiome.fbm3(dir[0] * 2.2, dir[1] * 2.2, dir[2] * 2.2, 3, 2, 0.5) * 0.45;
+  _seaTemp(x, y) {
+    const lat = clamp(0.5 + this.nBiome.fbm(x, y, 0, surfScale(0.9), 3, 0.5) * 1.55, 0, 1);
+    return 1 - lat * 1.35 + this.nBiome.fbm(x, y, 12.7, surfScale(2.2), 3, 0.5) * 0.45;
   }
 
   /**
@@ -2355,13 +2353,13 @@ export class WorldGen {
    *   - **not steep.** `rocky` repaints anything over 1.35 of slope to bare
    *     stone anyway, and sand does not pool on a dune face.
    */
-  sinkDepthOf(col, dir) {
+  sinkDepthOf(col, p) {
     const id = this.sinkIdOf(col);
     if (!id) return 0;
     if (this.canyonMask[col] || this.lakeKind[col] || this.submerged[col]) return 0;
     if (this.colSlope[col] > 0.9) return 0;
-    if (this.colHeight[col] < R_SEA + 1.6) return 0;
-    const q = this.nDetail.fbm3(dir[0] * QS_FREQ, dir[1] * QS_FREQ, dir[2] * QS_FREQ, 3, 2, 0.5);
+    if (this.colHeight[col] < SEA_K + 1.6) return 0;
+    const q = this.nDetail.fbm(p.x, p.y, 0, surfScale(QS_FREQ), 3, 0.5);
     if (q <= QS_THR) return 0;
     if (q <= QS_THR + QS_RIM) return 1;
     return id === ID.powder_snow ? SINK_DEPTH_SNOW : SINK_DEPTH_SAND;
@@ -2377,19 +2375,21 @@ export class WorldGen {
       colHeight, colBiome, colSlope, canyonMask, shoreDist, submerged,
       lakeSurf, lakeKind,
     } = this;
-    const dir = _fillDir;
+    const p = _fillXY;
+    this._xyOf(col, p);
+    // The dividers, first and unconditionally: a wall column is not terrain and
+    // has nothing else decided about it. See `fillWall`.
+    if (isWall(p.x, p.y)) { fillWall(blocks, col); return; }
     const h = colHeight[col];
     const bi = colBiome[col];
-    const polar = FACE_ROLE[(col / (F * F)) | 0] === FACE_POLAR;
+    const rime = FACE_ROLE[faceAt(p.x, p.y)] === FACE_RIME;
     const rocky = colSlope[col] > 1.35;
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
-    this._dirOf(col, dir);
 
     // Surface material varies within a biome, not just between biomes: the
     // same field that drifts tundra snow is reused to break up ocean silt,
     // podzol under pines and the grit in a savanna, so no biome is a flat
     // wash of one block.
-    const patch = this.nDetail.fbm3(dir[0] * 14, dir[1] * 14, dir[2] * 14, 3, 2, 0.5);
+    const patch = this.nDetail.fbm(p.x, p.y, 0, surfScale(14), 3, 0.5);
 
     let top, sub;
     switch (bi) {
@@ -2404,9 +2404,9 @@ export class WorldGen {
       // water, silt and gravel over the slope, and clay and bare stone in
       // the deep where nothing settles.
       case BIOME.OCEAN: {
-        const depth = R_SEA - h;
+        const depth = SEA_K - h;
         // Bands against the ocean this planet actually has, which is
-        // R_SEA - R_SEABED_MIN = 17 layers. The numbers here were 4 and 11 for
+        // SEA_K - K_SEABED_MIN = 17 layers. The numbers here were 4 and 11 for
         // a 15-layer sea and were never checked again when the shell grew; they
         // are re-derived rather than carried, because a threshold tuned to a
         // depth the world no longer reaches is a band that never fires.
@@ -2419,7 +2419,7 @@ export class WorldGen {
         // rather than stored: a Float32Array(COLUMNS) would be 5 MB resident
         // for a value only seabed columns ever read, against one extra fbm on
         // those same columns.
-        const temp = this._seaTemp(dir);
+        const temp = this._seaTemp(p.x, p.y);
         // `patch` is frequency 14 — a blob about twenty columns across, which
         // on its own still reads as flat ground with a smear on it. `grit` is
         // the single-column speckle that makes a bed look like a bed at the
@@ -2481,6 +2481,35 @@ export class WorldGen {
         top = patch > 0.22 ? ID.ash_stone : (patch < -0.24 ? ID.magma_stone : ID.basalt);
         sub = patch < -0.10 ? ID.magma_stone : ID.basalt;
         break;
+      /**
+       * Tempest: ground that has been rained on for as long as there has been
+       * ground. Scoured to bare rock on the rises, standing mud and peat in the
+       * hollows, and nothing that would look dry from a distance.
+       *
+       * The palette is deliberately three cold greys and a brown rather than
+       * anything new: what makes the face is the sky and the water on it, and a
+       * storm face in bright materials would read as a swamp with a filter over
+       * it. Mud and peat are the only soil, so `growsOn` keeps the ordinary land
+       * carpet off it almost everywhere without a single special case.
+       */
+      case BIOME.STORM:
+        top = patch > 0.20 ? ID.andesite
+          : (patch < -0.22 ? ID.mud : (rocky ? ID.stone : ID.gravel));
+        sub = patch < -0.10 ? ID.peat : ID.andesite;
+        break;
+      /**
+       * Verdant: jungle floor. Deep leaf litter over clay, mossed wherever the
+       * canopy is thickest, and never bare — a jungle with stone showing through
+       * is a hillside.
+       *
+       * `rocky` is overridden below for this biome for that reason, which is the
+       * one place the two new faces need the fill loop to treat them specially.
+       */
+      case BIOME.JUNGLE:
+        top = patch > 0.18 ? ID.moss_block
+          : (patch < -0.20 ? ID.coarse_dirt : ID.grass);
+        sub = patch < -0.05 ? ID.clay : ID.dirt;
+        break;
       case BIOME.MOUNTAIN: top = rocky ? ID.stone : ID.grass; sub = ID.stone; break;
       case BIOME.PINE_FOREST: top = patch > 0.08 ? ID.podzol : ID.grass; sub = ID.dirt; break;
       case BIOME.SAVANNA: top = ID.grass; sub = patch > -0.05 ? ID.coarse_dirt : ID.dirt; break;
@@ -2489,7 +2518,7 @@ export class WorldGen {
         // soil and stone. Tundra had no case here at all and fell through
         // to grass — the same block as a meadow, which is how a biome
         // named for permafrost ended up green and full of flowers.
-        const drift = this.nDetail.fbm3(dir[0] * 16, dir[1] * 16, dir[2] * 16, 3, 2, 0.5);
+        const drift = this.nDetail.fbm(p.x, p.y, 0, surfScale(16), 3, 0.5);
         top = drift > 0.10 ? ID.snow : (drift < -0.24 ? ID.gravel : ID.coarse_dirt);
         // Permafrost bog. Peat is a fuel, so the biome that grows almost
         // no wood is the one that hands you something to burn instead.
@@ -2498,7 +2527,10 @@ export class WorldGen {
       }
       default: top = ID.grass; sub = ID.dirt; break;
     }
-    if (rocky && bi !== BIOME.DESERT && bi !== BIOME.BADLANDS) { top = ID.stone; sub = ID.stone; }
+    // Verdant is exempt: the jungle's own case has already decided what a steep
+    // column wears, and a jungle whose slopes are bare stone is not one.
+    if (rocky && bi !== BIOME.DESERT && bi !== BIOME.BADLANDS
+      && bi !== BIOME.JUNGLE && bi !== BIOME.STORM) { top = ID.stone; sub = ID.stone; }
     // A canyon is cut in the height field, so without this the floor and
     // the terraces inherit whatever the rim wears and a fourteen-block
     // gorge comes out lined with meadow turf — a green ditch. The walls
@@ -2527,7 +2559,8 @@ export class WorldGen {
     // carrying a beach the last half block into water the height field put
     // below the line without the biome pass calling it Ocean, and it still
     // does exactly that.
-    if (h < R_SEA + 0.4 && bi !== BIOME.OCEAN && bi !== BIOME.SNOW
+    if (h < SEA_K + 0.4 && bi !== BIOME.OCEAN && bi !== BIOME.SNOW
+      && bi !== BIOME.STORM && bi !== BIOME.JUNGLE
       && shoreDist[col] <= BEACH_REACH + 1) {
       top = ID.sand; sub = ID.sand;
     }
@@ -2632,43 +2665,42 @@ export class WorldGen {
      * tuned for landmarks to steer by and not for daylight: see GLOW_CINDER_THR.
      */
     if (bi === BIOME.CINDER
-      && this.nDetail.simplex3(dir[0] * GLOW_CINDER_FREQ + 91.7, dir[1] * GLOW_CINDER_FREQ,
-        dir[2] * GLOW_CINDER_FREQ + 33.1) > GLOW_CINDER_THR) {
+      && this.nDetail.one(p.x, p.y, 91.7, surfScale(GLOW_CINDER_FREQ)) > GLOW_CINDER_THR) {
       top = ID.glowstone; sub = ID.glowstone;
     }
 
-    const sinkD = this.sinkDepthOf(col, dir);
+    const sinkD = this.sinkDepthOf(col, p);
     const sinkId = sinkD ? this.sinkIdOf(col) : 0;
 
     for (let k = 0; k < D; k++) {
-      const r = R_MIN + k + 0.5;
+      const r = k + 0.5;
       let id;
-      if (r < R_CORE) id = ID.core;
-      else if (r < R_MANTLE) {
-        const m = this.nCave.fbm3(dir[0] * r * 0.22, dir[1] * r * 0.22, dir[2] * r * 0.22, 3, 2, 0.5);
+      if (r < K_CORE) id = ID.core;
+      else if (r < K_MANTLE) {
+        const m = this.nCave.volFbm(p.x, p.y, k, 0.22, 3, 0.5);
         id = m > 0.42 ? ID.obsidian
           : m > 0.16 ? ID.ash_stone
             : (m < -0.5 ? ID.lava : ID.basalt);
       } else if (r > h) {
-        // Two independent waters: the sea, which is everything below R_SEA the
+        // Two independent waters: the sea, which is everything below SEA_K the
         // flood fill could reach, and a lake, which is everything below its own
         // surface. `lakeSurf` is 0 off a lake, so the second test costs one
         // compare per cell and cannot fire by accident.
-        // What fills a basin: lava in the cinderlands, and on the cap a sheet
-        // of ice over the sea rather than open water, because a pole whose
-        // ocean is liquid is just a cold coast.
-        id = ((r <= R_SEA && submerged[col]) || r <= lakeSurf[col])
+        // What fills a basin: lava on Pyre, and on Rime a sheet of ice over the
+        // sea rather than open water, because a pole whose ocean is liquid is
+        // just a cold coast.
+        id = ((r <= SEA_K && submerged[col]) || r <= lakeSurf[col])
           ? (bi === BIOME.CINDER ? ID.lava
-            : (polar && r > R_SEA - 1.6 ? ID.ice : ID.water))
+            : (rime && r > SEA_K - 1.6 ? ID.ice : ID.water))
           : ID.air;
       } else {
         const depth = h - r;
         if (depth < sinkD) id = sinkId;
         else if (depth < 1.0) id = top;
         else if (depth < 4.0) id = sub;
-        else id = this.stratum(r, dir[0], dir[1], dir[2]);
+        else id = this.stratum(r, p.x, p.y);
       }
-      blocks[cellWrite(col, k)] = id;
+      blocks[cellAt(col, k)] = id;
     }
   }
 
@@ -2677,9 +2709,11 @@ export class WorldGen {
     const nc = this.nCave;
     const canyonMask = this.canyonMask;
     const h = this.colHeight[col];
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
-    const dir = _fillDir;
-    this._dirOf(col, dir);
+    const p = _fillXY;
+    this._xyOf(col, p);
+    // No cave in a divider. It is unbreakable rock to the top of the world and
+    // a passage through one would be a way round a wall.
+    if (isWall(p.x, p.y)) return;
     {
       // How much rock a cave has to leave under the surface. 2.2 everywhere
       // else, because a cave that breaks daylight at random leaves the planet
@@ -2694,7 +2728,7 @@ export class WorldGen {
       // the ordinary 2.2 leaves the patch's own floor cell carveable, and a
       // pool with a cavern under it is a hole, not a hazard.
       const skin = canyonMask[col] ? 1.0
-        : (this.sinkDepthOf(col, dir) ? QS_CAVE_CLEAR : 2.2);
+        : (this.sinkDepthOf(col, p) ? QS_CAVE_CLEAR : 2.2);
       /**
        * Under a lake — bed or bank — the skin rule is not enough on its own,
        * and the way it fails is the flood bug rather than a cosmetic one.
@@ -2737,16 +2771,15 @@ export class WorldGen {
       for (let d = 0; d < 4; d++) {
         const nb = colNeighbor(col, d);
         if (!this.submerged[nb]) continue;
-        const kb = Math.floor(this.colHeight[nb] - R_MIN - 0.5) + 1;
+        const kb = Math.floor(this.colHeight[nb] - 0.5) + 1;
         if (kb < kWet0) kWet0 = kb;
       }
-      const kWet1 = Math.floor(R_SEA - R_MIN - 0.5);
+      const kWet1 = Math.floor(SEA_K - 0.5);
       for (let k = 0; k < D; k++) {
-        if (!CARVEABLE[blocks[cellIndex(col, k)]]) continue;
+        if (!CARVEABLE[blocks[cellAt(col, k)]]) continue;
         if (k >= kWet0 && k <= kWet1) continue;
-        const r = R_MIN + k + 0.5;
-        if (r < R_MANTLE + 1.5 || r > ceil) continue;
-        const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
+        const r = k + 0.5;
+        if (r < K_MANTLE + 1.5 || r > ceil) continue;
         // Cheapest term first, and short-circuit on it.
         //
         // The condition is `min(a, b) > 0.86 || cav > 0.58`, and the two ridged
@@ -2760,11 +2793,10 @@ export class WorldGen {
         // octave the most the remaining two can add is 0.75/1.75. If that
         // cannot reach 0.58 the chamber is ruled out and the other two octaves
         // are never computed.
-        const cx = px * 0.035 + 11.1, cy = py * 0.035, cz = pz * 0.035;
-        const c1 = nc.simplex3(cx, cy, cz);
-        const cav = c1 + 0.75 <= 0.52 * 1.75 ? -1
-          : (c1 + 0.5 * nc.simplex3(cx * 2, cy * 2, cz * 2)
-            + 0.25 * nc.simplex3(cx * 4, cy * 4, cz * 4)) / 1.75;
+        const c1 = nc.volOne(p.x, p.y, k, 0.035, 11.1);
+        const cav = c1 + 0.75 * MAXA <= 0.52 * 1.75 ? -1
+          : (c1 + 0.5 * nc.volOne(p.x, p.y, k, 0.070, 22.2)
+            + 0.25 * nc.volOne(p.x, p.y, k, 0.140, 44.4)) / 1.75;
         let open = cav > 0.52;
         if (!open) {
           // Tunnels as a thin shell around an isosurface, not as the peak of a
@@ -2802,11 +2834,11 @@ export class WorldGen {
           // on the same machine: 0.065 medians 19.5 ms, 0.085 medians 22, 0.100
           // medians 22-26 with p95 up to 38. Cave quality between 0.085 and
           // 0.100 is inside seed noise; the frame cost is not.
-          open = Math.abs(nc.simplex3(px * q + 5.5, py * q, pz * q)) < 0.085
-            && Math.abs(nc.simplex3(px * q - 31.2, py * q + 7.7, pz * q)) < 0.143;
+          open = Math.abs(nc.volOne(p.x, p.y, k, q, 5.5)) < 0.085
+            && Math.abs(nc.volOne(p.x, p.y, k, q, -31.2)) < 0.143;
         }
         if (open) {
-          blocks[cellWrite(col, k)] = (r < R_MANTLE + 4 && cav > 0.7) ? ID.lava : ID.air;
+          blocks[cellAt(col, k)] = (r < K_MANTLE + 4 && cav > 0.7) ? ID.lava : ID.air;
         }
       }
     }
@@ -2847,8 +2879,8 @@ export class WorldGen {
     const roof = hMin - AQ_ROOF;
     if (roof <= AQ_LO) return o;
 
-    const dir = this._dirOf(col, _aqDir);
-    const lens = this.nAq.fbm3(dir[0] * 5.5, dir[1] * 5.5, dir[2] * 5.5, 2, 2, 0.5);
+    const q = this._xyOf(col, _aqXY);
+    const lens = this.nAq.fbm(q.x, q.y, 0, surfScale(5.5), 2, 0.5);
     if (lens <= AQ_THR) return o;
     const thick = Math.min(AQ_MAX_THICK, (lens - AQ_THR) * AQ_THICK);
     if (thick < 1) return o;
@@ -2857,15 +2889,13 @@ export class WorldGen {
     // perfectly concentric shell, which is the same complaint the strata had:
     // two shafts sunk a hundred columns apart would meet the water at exactly
     // the same depth.
-    const mid = AQ_MID + this.nAq.simplex3(
-      dir[0] * 3.1 + 19.4, dir[1] * 3.1, dir[2] * 3.1,
-    ) * 3.2;
+    const mid = AQ_MID + this.nAq.one(q.x, q.y, 19.4, surfScale(3.1)) * 3.2;
     const top = Math.min(mid + thick * 0.5, AQ_HI, roof);
     const bot = Math.max(mid - thick * 0.5, AQ_LO);
     if (top < bot) return o;
 
-    const kBot = Math.max(AQ_K0 + 1, Math.ceil(bot - R_MIN - 0.5));
-    const kTop = Math.min(AQ_K1 - 1, Math.floor(top - R_MIN - 0.5));
+    const kBot = Math.max(AQ_K0 + 1, Math.ceil(bot - 0.5));
+    const kTop = Math.min(AQ_K1 - 1, Math.floor(top - 0.5));
     if (kTop < kBot) return o;
     // An air gap under the roof, so a big aquifer is somewhere to surface
     // rather than somewhere to drown. Only when there is room for one: a
@@ -2902,6 +2932,8 @@ export class WorldGen {
    * around it instead of standing out as a clean shell of bare stone.
    */
   aquiferColumn(blocks, col) {
+    const w = colXY(col, _fillXY);
+    if (isWall(w.x, w.y)) return;
     const oOwn = this._aqRecord(col);
     const a = this._aq;
     const nb0 = colNeighbor(col, 0), nb1 = colNeighbor(col, 1);
@@ -2914,11 +2946,10 @@ export class WorldGen {
     if (a[oOwn + 1] > a[oOwn + 2] && a[oA + 1] > a[oA + 2] && a[oB + 1] > a[oB + 2]
       && a[oC + 1] > a[oC + 2] && a[oD + 1] > a[oD + 2]) return;
 
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
-    const dir = this._dirOf(col, _aqDir);
+    const q = this._xyOf(col, _aqXY);
     for (let k = AQ_K0; k <= AQ_K1; k++) {
       const mine = this._aquiferAt(col, k);
-      if (mine === 2) { blocks[cellWrite(col, k)] = ID.air; continue; }
+      if (mine === 2) { blocks[cellAt(col, k)] = ID.air; continue; }
       if (mine === 1) {
         /**
          * Water goes in only where no neighbour's air pocket is at this layer,
@@ -2957,17 +2988,16 @@ export class WorldGen {
          */
         const dry = this._aquiferAt(nb0, k) === 2 || this._aquiferAt(nb1, k) === 2
           || this._aquiferAt(nb2, k) === 2 || this._aquiferAt(nb3, k) === 2;
-        blocks[cellWrite(col, k)] = dry
-          ? this.stratum(R_MIN + k + 0.5, dir[0], dir[1], dir[2]) : ID.water;
+        blocks[cellAt(col, k)] = dry ? this.stratum(k + 0.5, q.x, q.y) : ID.water;
         continue;
       }
       const touching = this._aquiferAt(col, k - 1) || this._aquiferAt(col, k + 1)
         || this._aquiferAt(nb0, k) || this._aquiferAt(nb1, k)
         || this._aquiferAt(nb2, k) || this._aquiferAt(nb3, k);
       if (!touching) continue;
-      const cur = blocks[cellIndex(col, k)];
+      const cur = blocks[cellAt(col, k)];
       if (cur === ID.air || cur === ID.water || cur === ID.lava) {
-        blocks[cellWrite(col, k)] = this.stratum(R_MIN + k + 0.5, dir[0], dir[1], dir[2]);
+        blocks[cellAt(col, k)] = this.stratum(k + 0.5, q.x, q.y);
       }
     }
   }
@@ -2975,23 +3005,21 @@ export class WorldGen {
   /** Ore veins, for one already-carved column. See ORE_BY_LAYER. */
   oreColumn(blocks, col) {
     const no = this.nOre;
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
-    const dir = _fillDir;
-    this._dirOf(col, dir);
+    const p = _fillXY;
+    this._xyOf(col, p);
+    if (isWall(p.x, p.y)) return;
     // The cinderlands are the reason to go there. See ORE_CINDER_BONUS, and
     // ORE_CINDER_SURFACE / CINDER_SKIN_HOST for the seams that reach daylight.
     const cinder = this.colBiome[col] === BIOME.CINDER;
     const oreBonus = cinder ? ORE_CINDER_BONUS : 0;
     const layers = cinder ? ORE_CINDER_BY_LAYER : ORE_BY_LAYER;
     for (let k = 0; k < D; k++) {
-      const cur = blocks[cellIndex(col, k)];
+      const cur = blocks[cellAt(col, k)];
       let bucket;
       if (ORE_HOST[cur]) bucket = layers[k];
       else if (cinder && CINDER_SKIN_HOST[cur]) bucket = ORE_CINDER_ONLY[k];
       else continue;
       if (bucket.length === 0) continue;
-      const r = R_MIN + k + 0.5;
-      const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;
       for (let oi = 0; oi < bucket.length; oi++) {
         const o = bucket[oi];
         // Two octaves, not three. A vein is a blob — the third octave was
@@ -3004,8 +3032,8 @@ export class WorldGen {
         // the same seams, thicker, so what changes is how much you get out of a
         // vein rather than the shape of the map.
         const thr = o.thr - oreBonus;
-        const n = veinNoise(no, px * o.scale + o.seed, py * o.scale, pz * o.scale + o.seed * 0.5, thr);
-        if (n > thr) { blocks[cellWrite(col, k)] = o.id; break; }
+        const n = veinNoise(no, p.x, p.y, k, o.scale, o.seed, thr);
+        if (n > thr) { blocks[cellAt(col, k)] = o.id; break; }
       }
     }
   }
@@ -3093,15 +3121,17 @@ export class WorldGen {
     /** 0 outside, 1 bed (carved), 2 surround, 3 ring (touches the bed). */
     const role = new Uint8Array(LAKE_DISC_MAX);
     const newH = new Float32Array(LAKE_DISC_MAX);
-    const ctr = _lakeCtr, dir = _lakeDir, p = _lakeParts;
+    const p = _lakeXY;
     let sid = 0;
 
-    for (let f = 0; f < FACES; f++) {
-      for (let ci = LAKE_LI; ci < F - LAKE_EDGE; ci += LAKE_LATTICE) {
-        if (ci < LAKE_EDGE) continue;
-        for (let cj = LAKE_LJ; cj < F - LAKE_EDGE; cj += LAKE_LATTICE) {
-          if (cj < LAKE_EDGE) continue;
-          const col = cidx(f, ci, cj);
+    // The lattice runs over the whole map. LAKE_LATTICE is 26 and W is 1248, so
+    // 26 divides it 48 times exactly — a lattice that did not divide W would
+    // put two candidates a short step apart across the wrap and break its own
+    // separation guarantee there. 1248 = 2^5 * 3 * 13, which is why 26 works.
+    {
+      for (let ci = LAKE_LI; ci < W; ci += LAKE_LATTICE) {
+        for (let cj = LAKE_LJ; cj < W; cj += LAKE_LATTICE) {
+          const col = ci * W + cj;
           const bi = colBiome[col];
 
           // Every draw before every test, so a site that is thrown away costs
@@ -3133,7 +3163,6 @@ export class WorldGen {
           const rBase = rr[0] + pickR * (rr[1] - rr[0]);
           const depthMax = dd[0] + pickD * (dd[1] - dd[0]);
           const rough = LAKE_BED_ROUGH[kind];
-          centerDir(f, ci, cj, ctr);
 
           // ---- the disc, over the column graph ----------------------------
           sid++;
@@ -3159,17 +3188,20 @@ export class WorldGen {
           const minAlt = LAKE_MIN_ALT[kind];
           for (let t = 0; t < n; t++) {
             const c = disc[t];
-            this._dirOf(c, dir);
-            const chord = Math.hypot(dir[0] - ctr[0], dir[1] - ctr[1], dir[2] - ctr[2]);
-            const da = 2 * Math.asin(Math.min(1, chord * 0.5)) * LAKE_COL_PER_RAD;
+            this._xyOf(c, p);
+            // Distance in columns, straight off the map and through the wrap.
+            // The cube had to go via a chord and an arcsine to avoid an L1
+            // diamond; `delta` is the same protection here and is two
+            // subtractions.
+            const da = Math.hypot(delta(ci, p.x), delta(cj, p.y));
             adist[t] = da;
             role[t] = 0; rEff[t] = 0;
             // No radius can reach past the clamp, so this is exact, not a
             // guess — and it keeps the noise off the 80% of the ball that is
             // only there because an L1 diamond has to be big to hold a circle.
             if (da > LAKE_MAX_R + 2.5) continue;
-            const s1 = this.nLake.simplex3(dir[0] * 46, dir[1] * 46, dir[2] * 46);
-            const s2 = this.nLake.simplex3(dir[0] * 110 + 5.3, dir[1] * 110, dir[2] * 110 - 2.7);
+            const s1 = this.nLake.one(p.x, p.y, 0, surfScale(46));
+            const s2 = this.nLake.one(p.x, p.y, 5.3, surfScale(110));
             const re = Math.max(2, Math.min(LAKE_MAX_R,
               rBase * (1 + wob[0] * s1 + wob[1] * s2)));
             rEff[t] = re;
@@ -3188,7 +3220,7 @@ export class WorldGen {
             if (b2 === BIOME.OCEAN || b2 === BIOME.BEACH
               || shoreDist[c] <= BEACH_REACH + 1) { bad = true; break; }
             const hh = colHeight[c];
-            if (hh < minAlt || hh > R_TERRAIN_MAX - 6) { bad = true; break; }
+            if (hh < minAlt || hh > K_TERRAIN_MAX - 6) { bad = true; break; }
             if (role[t] === 1) nBed++;
           }
           if (bad || nBed < LAKE_MIN_CELLS) continue;
@@ -3231,10 +3263,8 @@ export class WorldGen {
             if (role[t] !== 1) continue;
             const c = disc[t];
             const u = Math.min(1, adist[t] / rEff[t]);
-            this._dirOf(c, dir);
-            const bump = this.nLake.simplex3(
-              dir[0] * 130 + 21.7, dir[1] * 130, dir[2] * 130,
-            ) * rough;
+            this._xyOf(c, p);
+            const bump = this.nLake.one(p.x, p.y, 21.7, surfScale(130)) * rough;
             /**
              * What separates the kinds in the water more than any block does.
              * A tarn is very nearly a cylinder — steep walls, flat floor, you
@@ -3291,8 +3321,8 @@ export class WorldGen {
               let hn = newH[t];
               let flag = 0;
               if (isleR > 0) {
-                colParts(c, p);
-                const di = p.i - (ci + oi), dj = p.j - (cj + oj);
+                colXY(c, p);
+                const di = delta(ci + oi, p.x), dj = delta(cj + oj, p.y);
                 if (di * di + dj * dj <= isleR * isleR) {
                   if (hn < surf + 0.9) hn = surf + 0.9;
                   flag = LAKE_ISLE; nIsle++;
@@ -3317,7 +3347,7 @@ export class WorldGen {
             }
           }
           this.lakes.push({
-            f, i: ci, j: cj, col, kind, biome: bi,
+            x: ci, y: cj, col, kind, biome: bi,
             r: rBase, surf, depth: deepest, cells: water, bed: nBed, isle: nIsle,
           });
         }
@@ -3350,7 +3380,7 @@ export class WorldGen {
    * later pass — caves, ore, trees, the slope test — is reasoning about a
    * surface that is no longer there. Lowering the height field instead means
    * the fill pass builds the gorge as ordinary terrain. The floor gets soil
-   * over `stratum` like anywhere else, a floor below R_SEA fills with water
+   * over `stratum` like anywhere else, a floor below SEA_K fills with water
    * because the fill loop already does that, and the walls come out showing the
    * limestone and granite courses for nothing, because a wall column is just a
    * column whose neighbour is fourteen blocks lower.
@@ -3377,14 +3407,14 @@ export class WorldGen {
     // the dry one is usually the deeper, and letting it claim the crossing
     // puts a dam across the middle of a river.
     const wetOwn = new Uint8Array(COLUMNS);
-    const cell = { f: 0, i: 0, j: 0, col: 0 };
     const nW = this.nWarp;
     const nD = this.nDetail;
-    // One step is one column: a canyon has to be able to bend on the scale of
-    // the blocks it is cut into, and a column subtends 1/R at the surface.
-    const STEP = 1 / R_SURFACE;
-    const AHEAD = Math.cos(STEP * 6), AHEAD_S = Math.sin(STEP * 6);
-    const CS = Math.cos(STEP), SN = Math.sin(STEP);
+    // One step is one column, and on a flat map that is literally one column:
+    // the walk carries a position in columns and a heading in radians, and
+    // advances by the unit vector. The cube did the same thing on a great
+    // circle, with a `1 / R_SURFACE` step, two rotation matrices per step and a
+    // re-normalisation to stop the position drifting off the shell. None of
+    // that has anything left to do.
 
     /**
      * Walk one watercourse and stamp it.
@@ -3409,34 +3439,26 @@ export class WorldGen {
      *
      * @returns {Array<number[]>} sampled points along the path, for branching
      */
-    const walk = (p0, t0, o) => {
-      let px = p0[0], py = p0[1], pz = p0[2];
-      let tx = t0[0], ty = t0[1], tz = t0[2];
-      // orthonormalise the tangent against the position once; the advance step
-      // keeps them orthogonal from then on
-      let d = px * tx + py * ty + pz * tz;
-      tx -= px * d; ty -= py * d; tz -= pz * d;
-      let l = Math.hypot(tx, ty, tz) || 1;
-      tx /= l; ty /= l; tz /= l;
-
+    const walk = (x0, y0, a0, o) => {
+      let px = x0, py = y0, ang = a0;
       const trail = [];
       let floorR = Infinity;
       let wet = -1;                       // step at which the path went under water
-      // Contour steering is anchored to the height the canyon *started* at,
-      // not to the height of the column it is currently standing on. Chasing
-      // the current height is a random walk in altitude: each step's error is
-      // small, two hundred of them are not, and the canyon slides two or three
-      // blocks downhill over its length and finds the coast anyway — which is
-      // the whole thing contour steering exists to avoid.
+      // Contour steering is anchored to the height the canyon *started* at, not
+      // to the height of the column it is standing on. Chasing the current
+      // height is a random walk in altitude: each step's error is small, two
+      // hundred of them are not, and the canyon slides downhill and finds the
+      // coast anyway — which is the whole thing contour steering exists to
+      // avoid.
       let anchor = 0;
 
-      for (let s = 0; s < o.len; s++) {
-        dirToColumn(px, py, pz, cell);
-        const col = cell.col;
+      for (let st = 0; st < o.len; st++) {
+        const cx = Math.round(px), cy = Math.round(py);
+        const col = colOf(cx, cy);
         const hRim = colHeight[col];
-        if (s === 0) anchor = hRim;
+        if (st === 0) anchor = hRim;
 
-        const sFrac = s / o.len;
+        const sFrac = st / o.len;
         const head = smoothstep(0, 0.10, sFrac);
         let tail = smoothstep(1.0, 0.84, sFrac);
 
@@ -3444,84 +3466,71 @@ export class WorldGen {
          * What happens at the coast, and it is the single most important
          * decision in this pass.
          *
-         * Sea level is 130 and median land is 132.3 — the whole planet stands
-         * two and a bit blocks out of the water. So *every* canyon worth
-         * cutting has its floor below sea level along almost its entire
-         * length; measured on the first working version, 84% of canyon floor
-         * columns were under the waterline, and the fill pass drowned all of
-         * them. Six flooded trenches is not what was asked for and is not
-         * worth having: you cannot climb into a fjord.
-         *
+         * The land stands two and a bit layers out of the water on average, so
+         * *every* canyon worth cutting has its floor below sea level along
+         * almost its whole length, and the fill pass would drown all of them.
          * So most canyons are closed off short of the coast, tapering to
-         * nothing over sixteen columns so the gorge dies out in the coastal
-         * plain rather than ending in a wall of seawater. Whether they end up
-         * wet is then settled properly, by the connectivity fill further down
-         * — a floor below sea level that has no path to the sea stays dry, the
-         * way a rift basin does.
+         * nothing over sixteen columns; whether they end up wet is then settled
+         * properly by the connectivity fill in `generateGlobal`.
          *
          * `o.sea` opts two of the six out of that and lets them run straight
-         * into the water at full depth. A drowned gorge is worth having as
-         * well: it is the one place a fifteen-block dive starts from dry land,
-         * and it is the only reason the shelf and the deep are reachable
-         * without swimming out of sight of the shore.
+         * into the water at full depth. A drowned gorge is worth having: it is
+         * the one place a fifteen-block dive starts from dry land.
          */
         if (o.sea) {
-          if (wet < 0 && hRim < R_SEA - 0.5) wet = s;
-          if (wet >= 0) { tail = 1; if (s - wet > 12) break; }
+          if (wet < 0 && hRim < SEA_K - 0.5) wet = st;
+          if (wet >= 0) { tail = 1; if (st - wet > 12) break; }
         } else {
-          if (wet < 0 && hRim < R_SEA + 1.5) wet = s;
+          if (wet < 0 && hRim < SEA_K + 1.5) wet = st;
           if (wet >= 0) {
-            const ct = 1 - (s - wet) / 16;
+            const ct = 1 - (st - wet) / 16;
             if (ct <= 0) break;
             if (ct < tail) tail = ct;
           }
         }
 
-        const dn = nD.simplex3(px * 3.1 + o.dseed, py * 3.1, pz * 3.1);
-        const wn = nD.simplex3(px * 4.3 + o.wseed, py * 4.3, pz * 4.3);
+        const dn = nD.one(px, py, o.dseed, surfScale(3.1));
+        const wn = nD.one(px, py, o.wseed, surfScale(4.3));
         const dep = o.dep * head * tail * (0.76 + 0.42 * (dn * 0.5 + 0.5));
-        const W = o.wid * (0.70 + 0.58 * (wn * 0.5 + 0.5));
+        const wid = o.wid * (0.70 + 0.58 * (wn * 0.5 + 0.5));
 
         if (dep >= 0.8) {
           let fr = hRim - dep;
           // Only the watercourses hold their floor monotone downhill; that is
           // what makes one read as somewhere water went rather than as a
           // trench. A contoured slot canyon deliberately does not — its floor
-          // follows the plateau, which is what a slot canyon does. It is also
-          // released the moment either taper starts biting: otherwise it wins
-          // the `min` and pins the floor at full depth right through the
-          // close-out, turning a gorge that was supposed to die out into one
-          // that stops at a cliff.
+          // follows the plateau. It is also released the moment either taper
+          // starts biting, or it would pin the floor at full depth right
+          // through the close-out and end the gorge at a cliff.
           if (floorR < Infinity && o.steer < 0 && head * tail > 0.98) {
             fr = Math.min(fr, floorR + 0.05);
           }
-          fr = Math.max(fr, hRim - CANYON_MAX_DEPTH, R_CANYON_MIN);
+          fr = Math.max(fr, hRim - CANYON_MAX_DEPTH, K_CANYON_MIN);
           floorR = fr;
 
-          const ri = Math.ceil(W) + 1;
+          const ri = Math.ceil(wid) + 1;
           for (let di = -ri; di <= ri; di++) {
             for (let dj = -ri; dj <= ri; dj++) {
               const dist = Math.hypot(di, dj);
-              if (dist > W) continue;
+              if (dist > wid) continue;
               // Flat floor, near-vertical wall: full depth out to 0.58 of the
               // half-width, then the whole drop is spent in the last 0.42.
-              const w = smoothstep(1.0, 0.58, dist / W);
+              const w = smoothstep(1.0, 0.58, dist / wid);
               if (w <= 0.001) continue;
-              // The footprint is stamped in the path column's own face frame.
-              // Across a cube seam that mapping stops being exactly 1:1 and
-              // loses a handful of cells out of a disc this size — in a
-              // building that is a hole in a wall, here it is one column of
-              // canyon wall that came out a block wider. Refusing seam
-              // crossings the way `placeStructures` does is not an option: a
-              // canyon two hundred columns long crosses seams by definition.
-              const c = patchColumn(cell.f, cell.i, cell.j, di, dj);
+              // No re-projection and no lost cells. The cube stamped this
+              // footprint in the path column's own face frame, which stopped
+              // being 1:1 across a seam and dropped a handful of the disc.
+              const c = patchCol(cx, cy, di, dj);
+              // A divider is not ground a gorge may cut. It is unbreakable to
+              // the top of the world, and a canyon that took a bite out of one
+              // would be a hole in the only thing sealing a corner face.
+              if (isWall(cx + di, cy + dj)) continue;
               const cRim = colHeight[c];
               let hh = cRim + (fr - cRim) * w;
               // Terrace the wall. Free scenery: the crust's bands sit at fixed
-              // radii, so a wall that steps in three-block courses puts a
+              // layers, so a wall that steps in three-block courses puts a
               // walkable ledge at the limestone line and again at the granite
-              // one, and the gorge shows its own stratigraphy instead of being
-              // a smooth ramp of whatever rock the rim happened to be made of.
+              // one, and the gorge shows its own stratigraphy.
               if (w < 0.92) hh = fr + Math.ceil((hh - fr) / CANYON_BENCH) * CANYON_BENCH;
               if (o.sea) wetOwn[c] = 1;
               if (hh < target[c]) target[c] = hh;
@@ -3529,42 +3538,34 @@ export class WorldGen {
           }
         }
 
-        if ((s & 7) === 0) trail.push([px, py, pz, tx, ty, tz]);
+        if ((st & 7) === 0) trail.push([px, py, ang]);
 
         // --- steer ---
-        const ux = py * tz - pz * ty, uy = pz * tx - px * tz, uz = px * ty - py * tx;
         let bestA = 0, bestScore = Infinity;
         for (let c = -2; c <= 2; c++) {
           const a = c * 0.34;
-          const ca = Math.cos(a), sa = Math.sin(a);
-          const qx = tx * ca + ux * sa, qy = ty * ca + uy * sa, qz = tz * ca + uz * sa;
-          const hh = colHeight[dirToColumn(
-            px * AHEAD + qx * AHEAD_S, py * AHEAD + qy * AHEAD_S, pz * AHEAD + qz * AHEAD_S, cell,
-          ).col];
+          const hh = colHeight[colOf(
+            Math.round(px + Math.cos(ang + a) * 6),
+            Math.round(py + Math.sin(ang + a) * 6),
+          )];
           const score = o.steer < 0 ? hh : o.steer > 0 ? -hh : Math.abs(hh - anchor);
           if (score < bestScore) { bestScore = score; bestA = a; }
         }
-        const wander = nW.simplex3(px * 5.7 + o.wseed, py * 5.7, pz * 5.7) * 0.19;
+        const wander = nW.one(px, py, o.wseed, surfScale(5.7)) * 0.19;
         let turn = wander + bestA * 0.40;
         // Cap the turn per column. Uncapped, the downhill term wins on a slope
         // and the path spirals round the contour until it eats its own tail.
         if (turn > 0.22) turn = 0.22; else if (turn < -0.22) turn = -0.22;
-        const ct = Math.cos(turn), st = Math.sin(turn);
-        tx = tx * ct + ux * st; ty = ty * ct + uy * st; tz = tz * ct + uz * st;
+        ang += turn;
 
-        // --- advance along the great circle in the tangent's direction ---
-        const nx = px * CS + tx * SN, ny = py * CS + ty * SN, nz = pz * CS + tz * SN;
-        tx = tx * CS - px * SN; ty = ty * CS - py * SN; tz = tz * CS - pz * SN;
-        px = nx; py = ny; pz = nz;
-        const pl = Math.hypot(px, py, pz) || 1;
-        px /= pl; py /= pl; pz /= pl;
+        px += Math.cos(ang); py += Math.sin(ang);
       }
       return trail;
     };
 
     // --- pick well-separated highland sources ---
-    const dir = [0, 0, 0];
     const starts = [];
+    const SEP = 260;      // columns; the cube's 0.70 dot on a unit sphere
     for (let t = 0; t < 200000 && starts.length < CANYON_COUNT; t++) {
       const col = (rng() * COLUMNS) | 0;
       const bi = colBiome[col];
@@ -3572,36 +3573,30 @@ export class WorldGen {
       // Start on high ground. A canyon head at sea level has nowhere to run to,
       // and the depth budget is measured down from the rim — a head three
       // blocks above the water gets a three-block ditch.
-      if (colHeight[col] < R_SURFACE + 3.0) continue;
-      const p = colParts(col);
-      centerDir(p.f, p.i, p.j, dir);
+      if (colHeight[col] < K_SURFACE + 3.0) continue;
+      const cy = col % W, cx = (col - cy) / W;
+      // Not on a corner face. A gorge two hundred columns long does not fit in
+      // a sealed room, and one that started in the cross and wandered into a
+      // corner would be a route through a divider.
+      if (FACE_ROLE[faceAt(cx, cy)] !== FACE_NORMAL) continue;
       let clash = false;
-      for (const s of starts) {
-        if (s[0] * dir[0] + s[1] * dir[1] + s[2] * dir[2] > 0.70) { clash = true; break; }
+      for (const st of starts) {
+        // Separation through the wrap, which is what `delta` is for. Raw
+        // subtraction would call two heads on opposite edges of the map far
+        // apart when they are one step from each other.
+        if (Math.hypot(delta(cx, st[0]), delta(cy, st[1])) < SEP) { clash = true; break; }
       }
       if (clash) continue;
-      starts.push([dir[0], dir[1], dir[2]]);
+      starts.push([cx, cy]);
     }
 
     for (let n = 0; n < starts.length; n++) {
-      const p = starts[n];
-      // any direction in the tangent plane will do — the steering takes over
-      // within a dozen columns
-      const ax = Math.abs(p[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-      const bx = [p[1] * ax[2] - p[2] * ax[1], p[2] * ax[0] - p[0] * ax[2], p[0] * ax[1] - p[1] * ax[0]];
-      const cx = [p[1] * bx[2] - p[2] * bx[1], p[2] * bx[0] - p[0] * bx[2], p[0] * bx[1] - p[1] * bx[0]];
-      const a0 = rng() * Math.PI * 2;
-      const t0 = [
-        bx[0] * Math.cos(a0) + cx[0] * Math.sin(a0),
-        bx[1] * Math.cos(a0) + cx[1] * Math.sin(a0),
-        bx[2] * Math.cos(a0) + cx[2] * Math.sin(a0),
-      ];
-
+      const st = starts[n];
       const len = 130 + ((rng() * 91) | 0);
       // The first two run to the sea and drown; the rest stop short of it. See
       // the coast note in `walk` for why the split exists at all.
       const sea = n < 2;
-      const trail = walk(p, t0, {
+      const trail = walk(st[0], st[1], rng() * Math.PI * 2, {
         len, dep: 10 + rng() * 8, wid: 4 + rng() * 7,
         dseed: rng() * 100, wseed: rng() * 100, steer: sea ? -1 : 0, sea,
       });
@@ -3614,20 +3609,15 @@ export class WorldGen {
         const idx = Math.min(trail.length - 2,
           Math.max(1, ((0.25 + rng() * 0.45) * trail.length) | 0));
         const q = trail[idx];
-        // leave the trunk at roughly a right angle, either side
+        // Leave the trunk at roughly a right angle, either side, with a little
+        // downstream lean so it is a confluence and not a T.
         const sgn = rng() < 0.5 ? -1 : 1;
-        const ux = q[1] * q[5] - q[2] * q[4];
-        const uy = q[2] * q[3] - q[0] * q[5];
-        const uz = q[0] * q[4] - q[1] * q[3];
-        const sk = 0.55 + rng() * 0.35;   // a little downstream lean, not a T
-        walk([q[0], q[1], q[2]],
-          [q[3] * (1 - sk) + ux * sgn * sk, q[4] * (1 - sk) + uy * sgn * sk,
-            q[5] * (1 - sk) + uz * sgn * sk],
-          {
-            len: (len * (0.30 + rng() * 0.25)) | 0,
-            dep: 7 + rng() * 5, wid: 3 + rng() * 4,
-            dseed: rng() * 100, wseed: rng() * 100, steer: 1, sea,
-          });
+        const sk = 0.55 + rng() * 0.35;
+        walk(q[0], q[1], q[2] + sgn * sk * Math.PI * 0.5, {
+          len: (len * (0.30 + rng() * 0.25)) | 0,
+          dep: 7 + rng() * 5, wid: 3 + rng() * 4,
+          dseed: rng() * 100, wseed: rng() * 100, steer: 1, sea,
+        });
       }
     }
 
@@ -3636,7 +3626,7 @@ export class WorldGen {
       if (t === Infinity) continue;
       const h = colHeight[col];
       if (t >= h - 1.5) continue;
-      colHeight[col] = Math.max(R_CANYON_MIN, t);
+      colHeight[col] = Math.max(K_CANYON_MIN, t);
       // 1 for a gorge that is allowed to drown, 2 for one that must not.
       mask[col] = wetOwn[col] ? 1 : 2;
     }
@@ -3690,7 +3680,7 @@ export class WorldGen {
     const { colHeight, colBiome, colSlope, canyonMask } = this;
     const HOSTS = [BIOME.BADLANDS, BIOME.DESERT, BIOME.SAVANNA, BIOME.MOUNTAIN, BIOME.PLAINS];
     const claim = new Uint8Array(COLUMNS);
-    const parts = { f: 0, i: 0, j: 0 };
+    const parts = { x: 0, y: 0 };
     const sites = [];
 
     for (let t = 0; t < 300000 && sites.length < VOLCANO_TARGET; t++) {
@@ -3698,29 +3688,33 @@ export class WorldGen {
       if (!HOSTS.includes(colBiome[col]) || claim[col] || canyonMask[col]) continue;
       const h = colHeight[col];
       // The height window is narrow and both edges are load-bearing. Below
-      // R_SEA + 2.5 the crater floor is at or under the waterline and one
+      // SEA_K + 2.5 the crater floor is at or under the waterline and one
       // player tunnel from the coast turns the vent into a pool. The upper edge
       // is where a six-block cone stops fitting under the two clear layers the
-      // shell keeps at the top — expressed against R_MAX rather than as the
+      // shell keeps at the top — expressed against D rather than as the
       // bare 135.5 it was, which was that same ceiling on the old 144 shell.
-      if (h < R_SEA + 2.5 || h > R_MAX - 8.5) continue;
+      if (h < SEA_K + 2.5 || h > D - 8.5) continue;
       if (colSlope[col] > 0.85) continue;
-      colParts(col, parts);
-      // Keep the whole apron on one face. Same reason as `placeStructures`: a
-      // forty-column disc folded over a seam loses cells, and unlike a canyon
-      // wall a cone with holes in it reads as broken.
-      //
-      // Lazy generation leans on this a second time. Because the footprint
-      // cannot leave its face, "which regions does this volcano touch" is a
-      // rectangle in face coordinates rather than a walk over the column graph.
-      if (parts.i < APRON || parts.i >= F - APRON
-        || parts.j < APRON || parts.j >= F - APRON) continue;
+      colXY(col, parts);
+      // The apron no longer has to stay on one face — a disc that crosses a
+      // join inside the cross crosses nothing — but it must not reach a
+      // divider, because a cone stamped over one would fill a wall column with
+      // ash and open the room behind it.
+      {
+        let onWall = false;
+        for (let a = -APRON; a <= APRON && !onWall; a += 4) {
+          for (let b = -APRON; b <= APRON; b += 4) {
+            if (isWall(parts.x + a, parts.y + b)) { onWall = true; break; }
+          }
+        }
+        if (onWall) continue;
+      }
 
       // Flat enough, dry enough, and nobody else's ground.
       let lo = 99, hi = -99, bad = false;
       for (let di = -CONE; di <= CONE && !bad; di += 3) {
         for (let dj = -CONE; dj <= CONE; dj += 3) {
-          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          const c = patchCol(parts.x, parts.y, di, dj);
           const g = this.groundKOf(c);
           if (g < 0 || g > D - 3 - CONE_H) { bad = true; break; }
           if (colBiome[c] === BIOME.OCEAN || colBiome[c] === BIOME.BEACH) { bad = true; break; }
@@ -3749,7 +3743,7 @@ export class WorldGen {
       for (let di = -APRON; di <= APRON && !bad; di += 2) {
         for (let dj = -APRON; dj <= APRON; dj += 2) {
           if (Math.hypot(di, dj) > APRON) continue;
-          if (this.lakeKind[patchColumn(parts.f, parts.i, parts.j, di, dj)]) { bad = true; break; }
+          if (this.lakeKind[patchCol(parts.x, parts.y, di, dj)]) { bad = true; break; }
         }
       }
       if (bad) continue;
@@ -3760,12 +3754,12 @@ export class WorldGen {
       for (let di = -APRON; di <= APRON; di++) {
         for (let dj = -APRON; dj <= APRON; dj++) {
           if (Math.hypot(di, dj) > APRON) continue;
-          claim[patchColumn(parts.f, parts.i, parts.j, di, dj)] = 1;
+          claim[patchCol(parts.x, parts.y, di, dj)] = 1;
         }
       }
 
       sites.push({
-        f: parts.f, i: parts.i, j: parts.j,
+        x: parts.x, y: parts.y,
         kBase: hi,                            // build off the high side, so no
         seed: (rng() * 0x7fffffff) | 0,       // part of the cone is left buried
         stamped: false,
@@ -3787,18 +3781,17 @@ export class WorldGen {
     if (site.stamped) return;
     site.stamped = true;
     const rng = makeRng(site.seed);
-    const parts = { f: site.f, i: site.i, j: site.j };
+    const sx = site.x, sy = site.y;
 
     const groundK = (col) => {
-      // base folded into cellIndex/cellWrite: storage is not slab-packed
-      for (let k = D - 1; k >= 0; k--) {
-        const b = blocks[cellIndex(col, k)];
+        for (let k = D - 1; k >= 0; k--) {
+        const b = blocks[cellAt(col, k)];
         if (b !== ID.air && b !== ID.water) return k;
       }
       return -1;
     };
-    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[cellWrite(col, k)] = id; };
-    const get = (col, k) => (k >= 0 && k < D ? blocks[cellIndex(col, k)] : ID.stone);
+    const set = (col, k, id) => { if (k >= 0 && k < D) blocks[cellAt(col, k)] = id; };
+    const get = (col, k) => (k >= 0 && k < D ? blocks[cellAt(col, k)] : ID.stone);
 
     {
       const kBase = site.kBase;
@@ -3810,7 +3803,7 @@ export class WorldGen {
         for (let dj = -APRON; dj <= APRON; dj++) {
           const d = Math.hypot(di, dj);
           if (d > APRON) continue;
-          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          const c = patchCol(sx, sy, di, dj);
           if (d <= CONE - 1) continue;        // the cone lays its own ground
           const g = groundK(c);
           if (g < 1 || g >= D - 1) continue;
@@ -3835,7 +3828,7 @@ export class WorldGen {
         for (let dj = -CONE; dj <= CONE; dj++) {
           const d = Math.hypot(di, dj);
           if (d > CONE) continue;
-          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          const c = patchCol(sx, sy, di, dj);
           const g = groundK(c);
           if (g < 1 || g >= D - 1) continue;
           // A summit plateau out to the crater lip, then flanks. The obvious
@@ -3863,7 +3856,7 @@ export class WorldGen {
         for (let dj = -VENT; dj <= VENT; dj++) {
           const d = Math.hypot(di, dj);
           if (d > VENT) continue;
-          const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+          const c = patchCol(sx, sy, di, dj);
           for (let k = kCrater + 1; k < D; k++) {
             if (get(c, k) === ID.air) break;
             set(c, k, ID.air);
@@ -3896,7 +3889,7 @@ export class WorldGen {
             const di = Math.round(fi) + (w ? Math.round(-Math.sin(ang)) : 0);
             const dj = Math.round(fj) + (w ? Math.round(Math.cos(ang)) : 0);
             if (Math.hypot(di, dj) > APRON - 1) continue;
-            const c = patchColumn(parts.f, parts.i, parts.j, di, dj);
+            const c = patchCol(sx, sy, di, dj);
             const g = groundK(c);
             if (g < 6 || g >= D - 1) continue;
             const kF = g - 4;
@@ -3944,9 +3937,8 @@ export class WorldGen {
 
   /** Highest solid layer in a column, or -1. */
   surfaceK(blocks, col) {
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
     for (let k = D - 1; k >= 0; k--) {
-      const b = blocks[cellIndex(col, k)];
+      const b = blocks[cellAt(col, k)];
       if (b !== ID.air && b !== ID.water) return k;
     }
     return -1;
@@ -3978,17 +3970,19 @@ export class WorldGen {
   }
 
   _springCenterUncached(col) {
-    const p = colParts(col, _spParts);
-    if (p.i % SPRING_LATTICE !== SPRING_LI || p.j % SPRING_LATTICE !== SPRING_LJ) return -1;
-    const edge = Math.ceil(SPRING_R) + 2;
-    if (p.i < edge || p.i >= F - edge || p.j < edge || p.j >= F - edge) return -1;
+    const p = colXY(col, _spParts);
+    // The lattice is over the whole map rather than over a face, which it can
+    // be because SPRING_LATTICE divides W: 1248 = 2^5 * 3 * 13, and 8 goes into
+    // it 156 times. A lattice that did not divide W would break its own pattern
+    // at the wrap, which is the flat map's version of the seam bug.
+    if (p.x % SPRING_LATTICE !== SPRING_LI || p.y % SPRING_LATTICE !== SPRING_LJ) return -1;
     if (!SPRING_BIOMES.includes(this.colBiome[col])) return -1;
     // Flat, dry, well clear of the waterline and out of any gorge. The height
     // test is what keeps a pool from ever meeting the sea: the water surface
     // ends up a block below this and the sea cannot reach uphill.
     if (this.colSlope[col] > 0.35) return -1;
     if (this.canyonNear[col] < CANYON_NEAR_MAX) return -1;
-    if (this.colHeight[col] < R_SEA + 3.0) return -1;
+    if (this.colHeight[col] < SEA_K + 3.0) return -1;
     if (this.colRng(col, 0x8b17)() > SPRING_CHANCE) return -1;
     // Not on a volcano's apron. Mountain is a host biome for both, and the cone
     // is stamped from the *block array* after the height field says the ground
@@ -3999,8 +3993,7 @@ export class WorldGen {
     if (this.volcanoes) {
       for (let v = 0; v < this.volcanoes.length; v++) {
         const s = this.volcanoes[v];
-        if (s.f !== p.f) continue;
-        if (Math.hypot(s.i - p.i, s.j - p.j) <= APRON + SPRING_R + 1) return -1;
+        if (Math.hypot(delta(p.x, s.x), delta(p.y, s.y)) <= APRON + SPRING_R + 1) return -1;
       }
     }
 
@@ -4011,7 +4004,7 @@ export class WorldGen {
     for (let di = -ri; di <= ri; di++) {
       for (let dj = -ri; dj <= ri; dj++) {
         if (Math.hypot(di, dj) > SPRING_R) continue;
-        const c = patchColumn(p.f, p.i, p.j, di, dj);
+        const c = patchCol(p.x, p.y, di, dj);
         const bi = this.colBiome[c];
         if (bi === BIOME.OCEAN || bi === BIOME.BEACH) return -1;
         // Not into a lake or its bank. A hot spring cuts its own bowl and lays
@@ -4039,17 +4032,17 @@ export class WorldGen {
    * possibly reach here. See SPRING_LATTICE for why that matters.
    */
   _springNear(col) {
-    const p = colParts(col, _spParts);
-    const ri = ((p.i - SPRING_LI) % SPRING_LATTICE + SPRING_LATTICE) % SPRING_LATTICE;
-    const i0 = ri <= SPRING_R ? p.i - ri
-      : (SPRING_LATTICE - ri <= SPRING_R ? p.i + (SPRING_LATTICE - ri) : -1);
-    if (i0 < 0 || i0 >= F) return -1;
-    const rj = ((p.j - SPRING_LJ) % SPRING_LATTICE + SPRING_LATTICE) % SPRING_LATTICE;
-    const j0 = rj <= SPRING_R ? p.j - rj
-      : (SPRING_LATTICE - rj <= SPRING_R ? p.j + (SPRING_LATTICE - rj) : -1);
-    if (j0 < 0 || j0 >= F) return -1;
-    if (Math.hypot(p.i - i0, p.j - j0) > SPRING_R) return -1;
-    return this._springCenter(cidx(p.f, i0, j0));
+    const p = colXY(col, _spParts);
+    const ri = ((p.x - SPRING_LI) % SPRING_LATTICE + SPRING_LATTICE) % SPRING_LATTICE;
+    const x0 = ri <= SPRING_R ? p.x - ri
+      : (SPRING_LATTICE - ri <= SPRING_R ? p.x + (SPRING_LATTICE - ri) : null);
+    if (x0 === null) return -1;
+    const rj = ((p.y - SPRING_LJ) % SPRING_LATTICE + SPRING_LATTICE) % SPRING_LATTICE;
+    const y0 = rj <= SPRING_R ? p.y - rj
+      : (SPRING_LATTICE - rj <= SPRING_R ? p.y + (SPRING_LATTICE - rj) : null);
+    if (y0 === null) return -1;
+    if (Math.hypot(p.x - x0, p.y - y0) > SPRING_R) return -1;
+    return this._springCenter(colOf(x0, y0));
   }
 
   /**
@@ -4079,14 +4072,15 @@ export class WorldGen {
   springAt(blocks, col, rid) {
     const kb = this._springCenter(col);
     if (kb < 0) return;
-    const p = colParts(col, _spParts);
+    const p = colXY(col, _spParts);
+    const px = p.x, py = p.y;
     const rng = this.colRng(col, 0x3c0d);
     const ri = Math.ceil(SPRING_R);
     for (let di = -ri; di <= ri; di++) {
       for (let dj = -ri; dj <= ri; dj++) {
         const d = Math.hypot(di, dj);
         if (d > SPRING_R) continue;
-        const c = patchColumn(p.f, p.i, p.j, di, dj);
+        const c = patchCol(px, py, di, dj);
         const crust = rng() < 0.42 ? ID.sulfur_ore : ID.tuff;
         // Before the region clip, like every draw from the stream above it: the
         // style of a column has to come out the same whichever region stamps
@@ -4094,27 +4088,26 @@ export class WorldGen {
         // region will write the same value into when its turn comes.
         if (d <= SPRING_RI) this.colWaterStyle[c] = WATER_SPRING;
         if (regionOfCol(c) !== rid) continue;
-        // base folded into cellIndex/cellWrite: storage is not slab-packed
-        if (d <= SPRING_RI) {
+            if (d <= SPRING_RI) {
           // The bath. Two deep in the middle, one on the shelf around it, and
           // the water surface at kb-1 either way — which is what keeps the
           // enclosure argument above intact: there is exactly one water layer
           // that reaches the rim, and its neighbours are rim or more water.
           const deep = d <= SPRING_RD;
-          blocks[cellWrite(c, kb - 3)] = ID.tuff;
-          blocks[cellWrite(c, kb - 2)] = deep ? ID.water : ID.tuff;
-          blocks[cellWrite(c, kb - 1)] = ID.water;
+          blocks[cellAt(c, kb - 3)] = ID.tuff;
+          blocks[cellAt(c, kb - 2)] = deep ? ID.water : ID.tuff;
+          blocks[cellAt(c, kb - 1)] = ID.water;
         } else {
-          blocks[cellWrite(c, kb - 3)] = ID.tuff;
-          blocks[cellWrite(c, kb - 2)] = ID.tuff;
-          blocks[cellWrite(c, kb - 1)] = ID.tuff;
-          blocks[cellWrite(c, kb)] = crust;
+          blocks[cellAt(c, kb - 3)] = ID.tuff;
+          blocks[cellAt(c, kb - 2)] = ID.tuff;
+          blocks[cellAt(c, kb - 1)] = ID.tuff;
+          blocks[cellAt(c, kb)] = crust;
         }
         // Clear the headroom either way. On the rim this is what levels a
         // one-layer step into the terrace; over the water it is what stops a
         // drift of snow sitting on top of the pool.
         for (let k = kb + (d <= SPRING_RI ? 0 : 1); k <= kb + 2 && k < D; k++) {
-          blocks[cellWrite(c, k)] = ID.air;
+          blocks[cellAt(c, k)] = ID.air;
         }
       }
     }
@@ -4132,7 +4125,7 @@ export class WorldGen {
   _fallBaseR(col) {
     const ls = this.lakeSurf[col];
     if (ls > 0) return this.inLakeBed(col) ? ls : 0;
-    return this.submerged[col] ? R_SEA : 0;
+    return this.submerged[col] ? SEA_K : 0;
   }
 
   /**
@@ -4145,7 +4138,7 @@ export class WorldGen {
   _fallSite(col) {
     const wsR = this._fallBaseR(col);
     if (wsR <= 0) return null;
-    const kW = Math.floor(wsR - R_MIN - 0.5);
+    const kW = Math.floor(wsR - 0.5);
     if (kW < 2 || kW > D - 6) return null;
     // Two layers of water under the fall. One would put the foot cell on the
     // bed, where a single mined block turns it into a spreading foot; two is
@@ -4159,8 +4152,8 @@ export class WorldGen {
      * CHUNK_T columns square, so keeping one column off each edge is the whole
      * of it, and it also keeps the patch on one cube face.
      */
-    const p = colParts(col, _fallParts);
-    const li = p.i % CHUNK_T, lj = p.j % CHUNK_T;
+    const p = colXY(col, _fallParts);
+    const li = p.x % CHUNK_T, lj = p.y % CHUNK_T;
     if (li < 1 || li > CHUNK_T - 2 || lj < 1 || lj > CHUNK_T - 2) return null;
     /**
      * A checkerboard, and it is the cheapest possible way to make two falls
@@ -4172,7 +4165,7 @@ export class WorldGen {
      * spring with an open side is the flood this whole feature is built to
      * avoid. The parity costs half the candidates and FALL_CHANCE pays it back.
      */
-    if ((p.i + p.j) % 2 !== 0) return null;
+    if ((p.x + p.y) % 2 !== 0) return null;
     if (this.colRng(col, 0x4f13)() > FALL_CHANCE) return null;
 
     // The lip hangs off the tallest neighbour, set FALL_LIP into its rock so
@@ -4204,8 +4197,7 @@ export class WorldGen {
     if (this.volcanoes) {
       for (let v = 0; v < this.volcanoes.length; v++) {
         const s = this.volcanoes[v];
-        if (s.f !== p.f) continue;
-        if (Math.hypot(s.i - p.i, s.j - p.j) <= APRON + 2) return null;
+        if (Math.hypot(delta(p.x, s.x), delta(p.y, s.y)) <= APRON + 2) return null;
       }
     }
     return { kW, kTop };
@@ -4226,7 +4218,6 @@ export class WorldGen {
     const site = this._fallSite(col);
     if (!site) return;
     const { kW, kTop } = site;
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
 
     // What the cliff is made of, so the lip is not a grey patch on red rock.
     // Read off terrain rather than chosen, and terrain is region-independent —
@@ -4234,7 +4225,7 @@ export class WorldGen {
     let rock = ID.stone;
     for (let d = 0; d < 4; d++) {
       const n = colNeighbor(col, d);
-      const id = blocks[cellIndex(n, kTop)];
+      const id = blocks[cellAt(n, kTop)];
       if (IS_OPAQUE[id] && id !== ID.core) { rock = id; break; }
     }
 
@@ -4242,21 +4233,20 @@ export class WorldGen {
     // sea or the lake. Unconditional: these cells are air by construction — the
     // ground of this column is under the waterline — and writing them anyway is
     // what makes the result independent of which pass ran first.
-    for (let k = kW + 1; k <= kTop; k++) blocks[cellWrite(col, k)] = ID.water;
+    for (let k = kW + 1; k <= kTop; k++) blocks[cellAt(col, k)] = ID.water;
     // The lip: a roof over the head and four shut sides at its own layer. This
     // is the part that is written rather than tested. A source cell with one
     // open side spreads six columns every tick it is woken, so "there was rock
     // there anyway" is not good enough — a cave, an ore vein or a later change
     // to the carve would all be silent ways to lose it.
-    blocks[cellWrite(col, kTop + 1)] = rock;
+    blocks[cellAt(col, kTop + 1)] = rock;
     for (let d = 0; d < 4; d++) {
       const n = colNeighbor(col, d);
-      // base folded into cellIndex/cellWrite: storage is not slab-packed
-      blocks[cellWrite(n, kTop)] = rock;
+        blocks[cellAt(n, kTop)] = rock;
       // Second layer only where the column is open, so the lip reads as a shelf
       // of rock rather than as one floating tile. Where the neighbour is
       // already cliff this would be replacing its own stone with its own stone.
-      if (this.groundKOf(n) < kTop) blocks[cellWrite(n, kTop + 1)] = rock;
+      if (this.groundKOf(n) < kTop) blocks[cellAt(n, kTop + 1)] = rock;
     }
     // Foam and speed at the fall itself, and at the patch of the pool it lands
     // in — the style is per column, so the cell where it hits reads aerated,
@@ -4298,14 +4288,11 @@ export class WorldGen {
    */
   _treeKind(blocks, col, noCrowdCheck = false) {
     const bi = this.colBiome[col];
-    // Nothing takes root within reach of a face border. A canopy is up to four
-    // columns across and it is stamped in the face's own (i, j), so a trunk
-    // near the seam threw half its leaves onto the neighbouring face, where
-    // they came out lying on their side against a different gravity. Cheaper
-    // and better looking to keep the last few columns bare, and it sits inside
-    // the band the height fade already flattens.
-    if (colBorderDist(col) < TREE_EDGE_MARGIN) return null;
-    // Nothing takes root in the cinderlands.
+    // A TREE_EDGE_MARGIN stood here keeping the last six columns of every face
+    // bare, because a canopy stamped in one face's (i, j) threw half its leaves
+    // onto the next face's gravity. A canopy now spans a join the way it spans
+    // any other pair of columns.
+    // Nothing takes root on Pyre.
     if (bi === BIOME.CINDER) return null;
     if (this.colSlope[col] > 1.5) return null;
     if (this.inLakeBed(col)) return null;
@@ -4329,7 +4316,7 @@ export class WorldGen {
      * approach and not from the other.
      *
      * The height field cannot disagree with itself. Nothing decoration places
-     * ever sits at or below the ground layer, so `blocks[cellIndex(col, k)]` is still
+     * ever sits at or below the ground layer, so `blocks[cellAt(col, k)]` is still
      * the real surface block, and the volcano — the one pass that does move the
      * ground — is always stamped before any of this runs.
      */
@@ -4337,7 +4324,7 @@ export class WorldGen {
     // need some headroom, but the land surface sits around k=40 of 66 — this
     // bound has to be generous or it rejects the entire planet
     if (k < 0 || k > D - 7) return null;
-    const surf = blocks[cellIndex(col, k)];
+    const surf = blocks[cellAt(col, k)];
     // Nothing grows out of a flooded cell.
     //
     // `stampTree` writes with `set()`, which skips a cell that is not air — so
@@ -4370,14 +4357,22 @@ export class WorldGen {
     // sand shore one cell under the water line that used to grow a cactus
     // standing on the sea — while leaving the answer a pure function of the
     // ground.
-    const above = blocks[cellIndex(col, k + 1)];
+    const above = blocks[cellAt(col, k + 1)];
     if (above === ID.water || above === ID.lava) return null;
     const rng = this.colRng(col, 0x7a11);
 
     let kind = null, chance = 0;
     // Podzol is a pine-forest floor block, so pines have to be allowed to
     // stand on it or the biome would thin out wherever it appears.
-    if (surf === ID.grass || surf === ID.podzol) {
+    // Verdant, first, because its ground is three blocks and two of them are
+    // not the turf the branch below tests for. The chance is the highest in the
+    // table by a wide margin and that IS the face: a forest's 0.115 leaves gaps
+    // you can see the sky through, and a canopy you cannot see the sky through
+    // is what a player is walking into a sealed jungle to find.
+    if (bi === BIOME.JUNGLE
+      && (surf === ID.grass || surf === ID.moss_block || surf === ID.coarse_dirt)) {
+      kind = 'jungle'; chance = 0.20;
+    } else if (surf === ID.grass || surf === ID.podzol) {
       if (bi === BIOME.FOREST) { kind = rng() < 0.68 ? 'oak' : 'birch'; chance = 0.115; }
       else if (bi === BIOME.PINE_FOREST) { kind = 'pine'; chance = 0.115; }
       else if (bi === BIOME.PLAINS) { kind = rng() < 0.6 ? 'oak' : 'birch'; chance = 0.014; }
@@ -4450,8 +4445,11 @@ export class WorldGen {
       // 0.138 and not 0.069 for the same reason 0.069 was not 0.04: the lattice
       // went from half the columns to a quarter, so the roll doubles to hold
       // the desert's cactus count roughly where it was.
-      const cp = colParts(col);
-      if ((cp.i & 1) === 0 && (cp.j & 1) === 0) { kind = 'cactus'; chance = 0.138; }
+      // Every second column on BOTH axes, which is what keeps two cacti from
+      // touching even at a corner. W is even, so the lattice survives the wrap —
+      // on the cube it did not, and a pair could meet exactly on a seam line.
+      const cp = colXY(col);
+      if ((cp.x & 1) === 0 && (cp.y & 1) === 0) { kind = 'cactus'; chance = 0.138; }
     }
 
     if (!kind || rng() > chance * thin) return null;
@@ -4506,18 +4504,18 @@ export class WorldGen {
       const nb = colNeighbor(col, d);
       if (nb < 0 || this.groundKOf(nb) > k) return false;
     }
-    const p = colParts(col, _cactusParts);
-    const pf = p.f, pi = p.i, pj = p.j;
+    const p = colXY(col, _cactusParts);
+    const pi = p.x, pj = p.y;
     for (let di = -3; di <= 3; di++) {
       for (let dj = -3; dj <= 3; dj++) {
-        if (this._boulderKind(blocks, patchColumn(pf, pi, pj, di, dj))) return false;
+        if (this._boulderKind(blocks, patchCol(pi, pj, di, dj))) return false;
       }
     }
     const kLo = k + 1, kHi = k + CACTUS_MAX;
     for (let di = -DECOR_MARGIN; di <= DECOR_MARGIN; di++) {
       for (let dj = -DECOR_MARGIN; dj <= DECOR_MARGIN; dj++) {
         if (di === 0 && dj === 0) continue;
-        const t = this._treeKind(blocks, patchColumn(pf, pi, pj, di, dj), true);
+        const t = this._treeKind(blocks, patchCol(pi, pj, di, dj), true);
         if (t === null || t.kind === 'cactus') continue;
         const s = this._treeSize(t.kind, t.k + 1, t.rng);
         if (t.k + 1 > kHi || s.hiK < kLo) continue;
@@ -4547,7 +4545,7 @@ export class WorldGen {
     // Same reason as `treeAt`: the ground, not whatever is standing on it.
     const k = this.groundKOf(col);
     if (k < 0 || k > D - 5) return null;
-    const surf = blocks[cellIndex(col, k)];
+    const surf = blocks[cellAt(col, k)];
     if (surf !== ID.grass && surf !== ID.stone && surf !== ID.snow) return null;
     // A boulder is scenery, and a gorge floor already has rock lying about it.
     if (this.canyonNear[col] === 0) return null;
@@ -4563,14 +4561,14 @@ export class WorldGen {
     const { rng, k } = b;
     const rad = 1 + Math.floor(rng() * 2);
     const mossy = rng() < 0.4;
-    const bp = colParts(col);
+    const bpx = colXY(col).x, bpy = colXY(col).y;
     for (let di = -rad; di <= rad; di++) {
       for (let dj = -rad; dj <= rad; dj++) {
         for (let dk = 0; dk <= rad; dk++) {
           if (di * di + dj * dj + dk * dk > rad * rad + 0.5) continue;
           // Same reason as the canopy below: a boulder is up to five columns
           // across and must not fold over a seam.
-          const c = patchColumn(bp.f, bp.i, bp.j, di, dj);
+          const c = patchCol(bpx, bpy, di, dj);
           const kk = k + 1 + dk;
           if (kk >= D) continue;
           /**
@@ -4587,8 +4585,8 @@ export class WorldGen {
            */
           const id = mossy && rng() < 0.5 ? ID.moss_stone : ID.stone;
           if (rid >= 0 && regionOfCol(c) !== rid) continue;
-          if (blocks[cellIndex(c, kk)] !== ID.air) continue;
-          blocks[cellWrite(c, kk)] = id;
+          if (blocks[cellAt(c, kk)] !== ID.air) continue;
+          blocks[cellAt(c, kk)] = id;
         }
       }
     }
@@ -4610,8 +4608,8 @@ export class WorldGen {
    * depends entirely on which region the player walked into first.
    */
   _fallenLog(blocks, col) {
-    const p = colParts(col, _logParts);
-    const f = p.f, ci = p.i, cj = p.j;
+    const p = colXY(col, _logParts);
+    const ci = p.x, cj = p.y;
     if (ci % LOG_LATTICE !== LOG_LI || cj % LOG_LATTICE !== LOG_LJ) return null;
     const bi = this.colBiome[col];
     const chance = LOG_CHANCE[bi] || 0;
@@ -4631,14 +4629,10 @@ export class WorldGen {
     const pickSpecies = rng();
 
     // Centred on the candidate — see LOG_LATTICE for why that is a constraint
-    // and not a preference.
+    // and not a preference. There is no longer a rule keeping the run inside
+    // one face: the map's x is the map's x everywhere, so a trunk that crosses
+    // a join keeps its grain.
     const off0 = -((len - 1) >> 1);
-    const along = axis === 0 ? ci : cj;
-    // The run stays inside one face. `_i` and `_j` name the *face's* tangential
-    // axes, and past a cube seam the neighbouring face's i points somewhere
-    // else entirely — a trunk that crossed one would visibly kink and wear its
-    // end grain sideways.
-    if (along + off0 < 0 || along + off0 + len > F) return null;
 
     // Not on a volcano's apron. The cone is stamped into the block array after
     // the height field is settled, so `groundKOf` there describes the ground the
@@ -4646,8 +4640,7 @@ export class WorldGen {
     if (this.volcanoes) {
       for (let v = 0; v < this.volcanoes.length; v++) {
         const s = this.volcanoes[v];
-        if (s.f !== f) continue;
-        if (Math.hypot(s.i - ci, s.j - cj) <= APRON + LOG_MAX) return null;
+        if (Math.hypot(delta(ci, s.x), delta(cj, s.y)) <= APRON + LOG_MAX) return null;
       }
     }
 
@@ -4655,7 +4648,7 @@ export class WorldGen {
     if (k < 1 || k > D - 3) return null;
     for (let n = 0; n < len; n++) {
       const d = off0 + n;
-      const c = axis === 0 ? patchColumn(f, ci, cj, d, 0) : patchColumn(f, ci, cj, 0, d);
+      const c = axis === 0 ? patchCol(ci, cj, d, 0) : patchCol(ci, cj, 0, d);
       if (!this._logRests(blocks, c, k)) return null;
     }
 
@@ -4666,7 +4659,7 @@ export class WorldGen {
       : bi === BIOME.MEADOW ? 'birch'
         : bi === BIOME.FOREST ? (pickSpecies < 0.68 ? 'oak' : 'birch')
           : (pickSpecies < 0.6 ? 'oak' : 'birch');
-    return { f, ci, cj, axis, len, gap, off0, k, kind, id: LOG_IDS[kind][axis] };
+    return { ci, cj, axis, len, gap, off0, k, kind, id: LOG_IDS[kind][axis] };
   }
 
   /**
@@ -4707,22 +4700,22 @@ export class WorldGen {
     if (this.inLakeBed(c)) return false;
     if (this._springNear(c) >= 0) return false;
     if (this.groundKOf(c) !== k) return false;
-    if (!LOG_FLOOR[blocks[cellIndex(c, k)]]) return false;
+    if (!LOG_FLOOR[blocks[cellAt(c, k)]]) return false;
     // Liquid specifically, not "is it air" — for exactly the reason spelled out
     // at length in `_treeKind`. Terrain puts air or water in the cell above the
     // ground and nothing else; decoration puts trees and boulders there, and
     // asking about those would be asking whether the region next door has been
     // decorated yet.
-    const above = blocks[cellIndex(c, k + 1)];
+    const above = blocks[cellAt(c, k + 1)];
     if (above === ID.water || above === ID.lava) return false;
     // Nothing lies through a standing trunk, and nothing lies through a
     // boulder — which is up to two columns across, hence the sweep.
     if (this._treeKind(blocks, c)) return false;
-    const q = colParts(c, _logNb);
-    const qf = q.f, qi = q.i, qj = q.j;
+    const q = colXY(c, _logNb);
+    const qi = q.x, qj = q.y;
     for (let di = -2; di <= 2; di++) {
       for (let dj = -2; dj <= 2; dj++) {
-        if (this._boulderKind(blocks, patchColumn(qf, qi, qj, di, dj))) return false;
+        if (this._boulderKind(blocks, patchCol(qi, qj, di, dj))) return false;
       }
     }
     return true;
@@ -4736,10 +4729,10 @@ export class WorldGen {
       if (n === plan.gap) continue;
       const d = plan.off0 + n;
       const c = plan.axis === 0
-        ? patchColumn(plan.f, plan.ci, plan.cj, d, 0)
-        : patchColumn(plan.f, plan.ci, plan.cj, 0, d);
+        ? patchCol(plan.ci, plan.cj, d, 0)
+        : patchCol(plan.ci, plan.cj, 0, d);
       if (rid >= 0 && regionOfCol(c) !== rid) continue;
-      blocks[cellWrite(c, plan.k + 1)] = plan.id;
+      blocks[cellAt(c, plan.k + 1)] = plan.id;
     }
   }
 
@@ -4816,17 +4809,12 @@ export class WorldGen {
     const set = (c, k, id, force = false) => {
       if (k < 0 || k >= D) return;
       if (rid >= 0 && regionOfCol(c) !== rid) return;
-      const cur = blocks[cellIndex(c, k)];
-      if (cur === ID.air || force) blocks[cellWrite(c, k)] = id;
+      const cur = blocks[cellAt(c, k)];
+      if (cur === ID.air || force) blocks[cellAt(c, k)] = id;
     };
-    // A canopy is three or four columns across, which is wide enough to care
-    // which way is which. Walking the grid answers in the destination face's
-    // frame, so a tree near a cube seam had leaves land on columns other leaves
-    // had already claimed — up to 23 of a 49-column spread — and grew with a
-    // bite out of one side. Trees away from a seam are untouched: the two
-    // agree exactly whenever the canopy stays on one face.
-    const tp = colParts(col);
-    const at = (di, dj) => patchColumn(tp.f, tp.i, tp.j, di, dj);
+    const tp = colXY(col);
+    const tx = tp.x, ty = tp.y;
+    const at = (di, dj) => patchCol(tx, ty, di, dj);
 
     if (kind === 'cactus') {
       const h = 2 + Math.floor(rng() * CACTUS_MAX_STEP);
@@ -5005,27 +4993,26 @@ export class WorldGen {
     if (this.inLakeBed(col)) return;
     const k = this.surfaceK(blocks, col);
     if (k < 0 || k >= D - 2) return;
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
-    const surf = blocks[cellIndex(col, k)];
-    if (blocks[cellIndex(col, k + 1)] !== ID.air) return;
+    const surf = blocks[cellAt(col, k)];
+    if (blocks[cellAt(col, k + 1)] !== ID.air) return;
 
     const n = this.nBiome;
-    const dir = _fillDir;
-    this._dirOf(col, dir);
+    const p = _fillXY;
+    this._xyOf(col, p);
     const bi = this.colBiome[col];
     const rng = this.colRng(col, 0xf10a);
     const inCanyon = this.canyonNear[col] === 0;
 
     if (surf === ID.grass) {
-      const dens = n.fbm3(dir[0] * 9, dir[1] * 9, dir[2] * 9, 3, 2, 0.5) * 0.5 + 0.5;
-      const p = 0.12 + dens * 0.55;
+      const dens = n.fbm(p.x, p.y, 0, surfScale(9), 3, 0.5) * 0.5 + 0.5;
+      const pr = 0.12 + dens * 0.55;
       const h = rng();
-      if (h < p * 0.72) blocks[cellWrite(col, k + 1)] = ID.tall_grass;
-      else if (h < p * 0.82) {
+      if (h < pr * 0.72) blocks[cellAt(col, k + 1)] = ID.tall_grass;
+      else if (h < pr * 0.82) {
         const c = rng();
-        blocks[cellWrite(col, k + 1)] = c < 0.34 ? ID.flower_red : c < 0.67 ? ID.flower_gold : ID.flower_blue;
-      } else if (h < p * 0.84 && (bi === BIOME.FOREST || bi === BIOME.MEADOW)) {
-        blocks[cellWrite(col, k + 1)] = ID.pumpkin;
+        blocks[cellAt(col, k + 1)] = c < 0.34 ? ID.flower_red : c < 0.67 ? ID.flower_gold : ID.flower_blue;
+      } else if (h < pr * 0.84 && (bi === BIOME.FOREST || bi === BIOME.MEADOW)) {
+        blocks[cellAt(col, k + 1)] = ID.pumpkin;
       }
     } else if (inCanyon && (surf === ID.coarse_dirt || surf === ID.gravel || surf === ID.red_sand)) {
       // The other half of the canyon rule. Taking the trees away and leaving
@@ -5051,13 +5038,13 @@ export class WorldGen {
       // by biome, and `_floraSoilOk` still has the final word.
       const h = rng();
       if (surf === ID.coarse_dirt) {
-        if (h < 0.11) blocks[cellWrite(col, k + 1)] = ID.tall_grass;
+        if (h < 0.11) blocks[cellAt(col, k + 1)] = ID.tall_grass;
         else if (h < 0.125) {
-          blocks[cellWrite(col, k + 1)] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
+          blocks[cellAt(col, k + 1)] = rng() < 0.5 ? ID.flower_gold : ID.flower_red;
         }
       } else if (h < 0.085) {
         const scrub = CANYON_SCRUB[bi];
-        if (scrub && this._floraSoilOk(scrub, surf)) blocks[cellWrite(col, k + 1)] = scrub;
+        if (scrub && this._floraSoilOk(scrub, surf)) blocks[cellAt(col, k + 1)] = scrub;
       }
     }
 
@@ -5075,10 +5062,10 @@ export class WorldGen {
     // purpose: drawing at the same rate as before keeps every mushroom that was
     // already correct exactly where it was, and only removes the bad ones.
     for (let kk = 2; kk < k - 2; kk++) {
-      if (blocks[cellIndex(col, kk)] === ID.air && CARVEABLE[blocks[cellIndex(col, kk - 1)]]
-        && rng() < 0.006 && blocks[cellIndex(col, kk + 1)] === ID.air
-        && growsOn(ID.mushroom, blocks[cellIndex(col, kk - 1)])) {
-        blocks[cellWrite(col, kk)] = ID.mushroom;
+      if (blocks[cellAt(col, kk)] === ID.air && CARVEABLE[blocks[cellAt(col, kk - 1)]]
+        && rng() < 0.006 && blocks[cellAt(col, kk + 1)] === ID.air
+        && growsOn(ID.mushroom, blocks[cellAt(col, kk - 1)])) {
+        blocks[cellAt(col, kk)] = ID.mushroom;
       }
     }
   }
@@ -5144,8 +5131,7 @@ export class WorldGen {
 
     const k = this.groundKOf(col);
     if (k < 1 || k >= D - 2) return;
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
-    if (blocks[cellIndex(col, k + 1)] !== ID.air) return;
+    if (blocks[cellAt(col, k + 1)] !== ID.air) return;
     // ...and a ceiling on it is as good as no room at all. A boulder is a
     // hemisphere sat on the ground, so a column one step below its centre gets
     // the overhang rather than the rock: `k + 1` comes out air and `k + 2` is
@@ -5159,18 +5145,17 @@ export class WorldGen {
     // region's whole margin before this pass runs over its columns, and no
     // other region ever writes into ours — so what is found is the finished
     // answer and it is the same from either side of a boundary.
-    if (IS_OPAQUE[blocks[cellIndex(col, k + 2)]]) return;
-    const surf = blocks[cellIndex(col, k)];
+    if (IS_OPAQUE[blocks[cellAt(col, k + 2)]]) return;
+    const surf = blocks[cellAt(col, k)];
     const bi = this.colBiome[col];
 
-    const dir = _landDir;
-    this._dirOf(col, dir);
+    const q = _landXY;
+    this._xyOf(col, q);
     // One field for all of it, at a frequency that makes patches a few dozen
     // columns across. Two species inside one biome share it deliberately —
     // clover and lavender should thicken and thin together, because what they
     // are between them is "the rich part of the meadow".
-    const f = this.nDetail.fbm3(dir[0] * 8.4 + 73.1, dir[1] * 8.4 - 41.2,
-      dir[2] * 8.4 + 19.6, 3, 2, 0.5);
+    const f = this.nDetail.fbm(q.x, q.y, 73.1, surfScale(8.4), 3, 0.5);
     const dp = Math.pow(clamp(f * 0.5 + 0.5, 0, 1), LAND_CLUMP);
     const r = this.colRng(col, 0xa17c)();
 
@@ -5201,7 +5186,7 @@ export class WorldGen {
       // root, so it went to the tundra below, where the ground is coarse dirt.
       if (r < 0.38 * dp) id = ID.swampreed;
       else if (r < 0.50 * dp) id = ID.lotus;
-      if (id && this._floraSoilOk(id, surf)) blocks[cellWrite(col, k + 1)] = id;
+      if (id && this._floraSoilOk(id, surf)) blocks[cellAt(col, k + 1)] = id;
       return;
     }
     switch (bi) {
@@ -5325,6 +5310,22 @@ export class WorldGen {
         if (r < 0.42 * dp) id = ID.marram;
         else if (r < 0.48 * dp) id = ID.driftwood;
         break;
+      // Verdant's understorey, and it is the densest carpet in the table for
+      // the same reason its canopy is the densest canopy: what a jungle floor
+      // is, is that you cannot see it. Fern for the bulk, with the two wetland
+      // species the shade and the standing water earn, and the deathcap at the
+      // forest's own ratio because rotting leaf litter is where one grows.
+      case BIOME.JUNGLE:
+        if (r < 0.82 * dp) id = ID.fern;
+        else if (r < 0.88 * dp) id = ID.swampreed;
+        else if (r < 0.92 * dp) id = ID.mireroot;
+        else if (r < 0.955 * dp) id = ID.deathcap;
+        break;
+      // Tempest grows nothing, and that is written out rather than left to the
+      // default so the next reader can see it was decided. The face is scoured
+      // rock, gravel and standing mud with the wind never off it; a carpet on it
+      // would be a carpet that has no business surviving there, and the bare
+      // ground is most of what makes the place read as hostile.
       default: return;
     }
     // The soil test comes *after* the species is chosen, and that ordering is
@@ -5332,7 +5333,7 @@ export class WorldGen {
     // ground says whether it may. A mountain shoulder that has weathered to
     // bare stone grows no aster, and the roll is spent either way, so the
     // column's stream does not depend on what it is standing on.
-    if (id && this._floraSoilOk(id, surf)) blocks[cellWrite(col, k + 1)] = id;
+    if (id && this._floraSoilOk(id, surf)) blocks[cellAt(col, k + 1)] = id;
   }
 
   /**
@@ -5363,15 +5364,13 @@ export class WorldGen {
     // mantle starts at the bottom of the array, so ten is the point below which
     // there is no cave to be in.
     if (kTop < 10) return;
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
 
-    const dir = _landDir;
-    this._dirOf(col, dir);
-    // Its own frequency and its own offsets, like every other density field in
-    // this file: a cave garden and a meadow drawn from one field are one field
-    // wearing two hats, and the seam shows wherever a cave runs near a surface.
-    const f = this.nDetail.fbm3(dir[0] * 4.3 + 88.1, dir[1] * 4.3 - 23.6,
-      dir[2] * 4.3 + 61.9, 3, 2, 0.5);
+    const q = _landXY;
+    this._xyOf(col, q);
+    // Its own frequency and its own plane of the lattice, like every other
+    // density field in this file: a cave garden and a meadow drawn from one
+    // field are one field wearing two hats.
+    const f = this.nDetail.fbm(q.x, q.y, 88.1, surfScale(4.3), 3, 0.5);
     const lush = Math.pow(clamp(f * 0.5 + 0.5, 0, 1), CAVE_CLUMP);
     const rng = this.colRng(col, 0x6d3e);
 
@@ -5380,9 +5379,9 @@ export class WorldGen {
     // has come out wrong.
     const kMax = Math.min(kTop - 3, D - 3);
     for (let k = 2; k <= kMax; k++) {
-      if (blocks[cellIndex(col, k)] !== ID.air) continue;
-      if (blocks[cellIndex(col, k + 1)] !== ID.air) continue;
-      const floor = blocks[cellIndex(col, k - 1)];
+      if (blocks[cellAt(col, k)] !== ID.air) continue;
+      if (blocks[cellAt(col, k + 1)] !== ID.air) continue;
+      const floor = blocks[cellAt(col, k - 1)];
       // CARVEABLE says "this is rock a passage could have been cut through",
       // which is what keeps these out of the air gaps inside a structure or
       // under a fallen log. The soil test per species is checked below, once
@@ -5413,7 +5412,7 @@ export class WorldGen {
       else if (r < pMush + pShelf) id = ID.shelf_fungus;
       else if (r < pMush + pShelf + pTruffle) id = ID.truffle;
       else if (r < pMush + pShelf + pTruffle + pCrystal) id = ID.crystal_cluster;
-      if (id && growsOn(id, floor)) blocks[cellWrite(col, k)] = id;
+      if (id && growsOn(id, floor)) blocks[cellAt(col, k)] = id;
     }
   }
 
@@ -5432,8 +5431,8 @@ export class WorldGen {
    * scarp reads as a spill.
    */
   _standSite(col) {
-    const p = colParts(col, _standParts);
-    if (p.i % STAND_LATTICE !== STAND_LI || p.j % STAND_LATTICE !== STAND_LJ) return null;
+    const p = colXY(col, _standParts);
+    if (p.x % STAND_LATTICE !== STAND_LI || p.y % STAND_LATTICE !== STAND_LJ) return null;
     const spec = STAND_SPEC[this.colBiome[col]];
     if (spec === undefined) return null;
     if (this.submerged[col] || this.lakeKind[col]) return null;
@@ -5462,7 +5461,7 @@ export class WorldGen {
     // it does not read as one texture stamped twice.
     const rich = 0.62 + rng() * 0.38;
     if (roll > spec.chance) return null;
-    return { f: p.f, i: p.i, j: p.j, bi: this.colBiome[col], rad, rich, id: spec.id };
+    return { x: p.x, y: p.y, bi: this.colBiome[col], rad, rich, id: spec.id };
   }
 
   /**
@@ -5487,9 +5486,7 @@ export class WorldGen {
       for (let dj = -ri; dj <= ri; dj++) {
         const d = Math.hypot(di, dj);
         if (d > site.rad) continue;
-        // Grid arithmetic on the face and then a re-projection, for the reef's
-        // reason: a seven-column disc can sit on a cube seam.
-        const c = patchColumn(site.f, site.i, site.j, di, dj);
+        const c = patchCol(site.x, site.y, di, dj);
         if (rid >= 0 && regionOfCol(c) !== rid) continue;
         // The stand stops at its biome's edge rather than running over it. A
         // lavender field that spills two columns into the neighbouring desert
@@ -5501,14 +5498,13 @@ export class WorldGen {
         if (this.colSlope[c] > 1.4) continue;
         const k = this.groundKOf(c);
         if (k < 1 || k >= D - 2) continue;
-        // base folded into cellIndex/cellWrite: storage is not slab-packed
-        const surf = blocks[cellIndex(c, k)];
+            const surf = blocks[cellAt(c, k)];
         if (!this._floraSoilOk(site.id, surf)) continue;
-        if (!STAND_CLEARS[blocks[cellIndex(c, k + 1)]]) continue;
+        if (!STAND_CLEARS[blocks[cellAt(c, k + 1)]]) continue;
         // Headroom, for the reason spelled out in `landFloraAt`: the cell above
         // the ground can be clear under a boulder's overhang and still be a
         // sealed gap.
-        if (IS_OPAQUE[blocks[cellIndex(c, k + 2)]]) continue;
+        if (IS_OPAQUE[blocks[cellAt(c, k + 2)]]) continue;
 
         const w = 1 - d / site.rad;
         // The reef's smoothstep, and here for the same measured reason: a plain
@@ -5524,7 +5520,7 @@ export class WorldGen {
         // minimum radius both raised, it is the patch you can pick out from the
         // other side of a valley, which is the only reason the pass exists.
         if (this.colRng(c, 0x2f85)() < site.rich * STAND_FILL * smoothstep(0, 0.20, w)) {
-          blocks[cellWrite(c, k + 1)] = site.id;
+          blocks[cellAt(c, k + 1)] = site.id;
         }
       }
     }
@@ -5536,7 +5532,7 @@ export class WorldGen {
    * The topmost *water* cell of a column, or -1 if it holds no water.
    *
    * Two independent waters, exactly as `fillColumn` fills them: the sea, which
-   * is everything at or below R_SEA the flood fill could reach, and a lake,
+   * is everything at or below SEA_K the flood fill could reach, and a lake,
    * which is everything at or below its own surface. A column can in principle
    * be under both — a pond sitting in a coastal hollow — so it is the higher of
    * the two, because that is the one whose cell carries the surface quad.
@@ -5545,7 +5541,7 @@ export class WorldGen {
     let top = this.submerged[col] ? SEA_TOP_K : -1;
     const ls = this.lakeSurf[col];
     if (ls > 0) {
-      const lk = Math.floor(ls - R_MIN - 0.5);
+      const lk = Math.floor(ls - 0.5);
       if (lk > top) top = lk;
     }
     return top >= D ? D - 1 : top;
@@ -5570,7 +5566,7 @@ export class WorldGen {
   _reefFloorK(blocks, col) {
     const k = this.groundKOf(col);
     if (k < 1 || k > D - 3) return -1;
-    return supports(blocks[cellIndex(col, k)]) ? k : -1;
+    return supports(blocks[cellAt(col, k)]) ? k : -1;
   }
 
   /**
@@ -5580,8 +5576,8 @@ export class WorldGen {
   _propAt(blocks, col, id, floorK, topK) {
     const k = floorK + 1;
     if (k >= topK) return false;
-    if (blocks[cellIndex(col, k)] !== ID.water) return false;
-    blocks[cellWrite(col, k)] = id;
+    if (blocks[cellAt(col, k)] !== ID.water) return false;
+    blocks[cellAt(col, k)] = id;
     return true;
   }
 
@@ -5599,9 +5595,8 @@ export class WorldGen {
   _kelpAt(blocks, col, n, floorK, topK) {
     const base = floorK + 1;
     if (n < KELP_MIN || base + n - 1 >= topK) return 0;
-    // base folded into cellIndex/cellWrite: storage is not slab-packed
-    for (let s = 0; s < n; s++) if (blocks[cellIndex(col, base + s)] !== ID.water) return 0;
-    for (let s = 0; s < n; s++) blocks[cellWrite(col, base + s)] = ID.kelp;
+    for (let s = 0; s < n; s++) if (blocks[cellAt(col, base + s)] !== ID.water) return 0;
+    for (let s = 0; s < n; s++) blocks[cellAt(col, base + s)] = ID.kelp;
     return n;
   }
 
@@ -5620,8 +5615,8 @@ export class WorldGen {
    * stream stays a pure function of the column.
    */
   _reefSite(col) {
-    const p = colParts(col, _reefParts);
-    if (p.i % REEF_LATTICE !== REEF_LI || p.j % REEF_LATTICE !== REEF_LJ) return null;
+    const p = colXY(col, _reefXY);
+    if (p.x % REEF_LATTICE !== REEF_LI || p.y % REEF_LATTICE !== REEF_LJ) return null;
     // Sea only, and never a lake. Coral in a pond is the one thing this pass is
     // most likely to be asked to do by accident: a coastal pond is submerged,
     // is at sea level and has a floor two cells down, so it passes every test
@@ -5633,9 +5628,7 @@ export class WorldGen {
     const depth = depthOfK(floorK);
     if (depth < REEF_DEPTH_MIN || depth > REEF_DEPTH_MAX) return null;
 
-    const dir = _reefDir;
-    this._dirOf(col, dir);
-    const warm = clamp((this._seaTemp(dir) - REEF_TEMP_MIN)
+    const warm = clamp((this._seaTemp(p.x, p.y) - REEF_TEMP_MIN)
       / (REEF_TEMP_FULL - REEF_TEMP_MIN), 0, 1);
     if (warm <= 0) return null;
 
@@ -5646,7 +5639,7 @@ export class WorldGen {
     // comes out the same density and a bank of three reads as one texture.
     const rich = 0.55 + rng() * 0.45;
     if (roll > REEF_CHANCE * warm) return null;
-    return { f: p.f, i: p.i, j: p.j, rad, rich, warm };
+    return { x: p.x, y: p.y, rad, rich, warm };
   }
 
   /**
@@ -5672,10 +5665,7 @@ export class WorldGen {
       for (let dj = -ri; dj <= ri; dj++) {
         const d = Math.hypot(di, dj);
         if (d > site.rad) continue;
-        // Grid arithmetic on the *face*, then a re-projection, because a reef
-        // eight columns across can sit on a cube seam and the neighbouring
-        // face's i points somewhere else entirely.
-        const c = patchColumn(site.f, site.i, site.j, di, dj);
+        const c = patchCol(site.x, site.y, di, dj);
         if (rid >= 0 && regionOfCol(c) !== rid) continue;
         if (this.colBiome[c] !== BIOME.OCEAN || !this.submerged[c]) continue;
         if (this.lakeKind[c]) continue;
@@ -5765,18 +5755,16 @@ export class WorldGen {
       if (depth < SEAB_DEPTH_MIN || depth > SEAB_DEPTH_MAX) return;
     }
 
-    const dir = _reefDir;
-    this._dirOf(col, dir);
+    const q = _reefXY;
+    this._xyOf(col, q);
     // A pond is fresh water at whatever altitude the land put it, so the
     // seabed climate term means nothing there. Weed grows in all of them.
-    const temp = inLake ? 0.2 : this._seaTemp(dir);
-    // Two fields at two frequencies and two offsets, so a kelp forest and a
-    // grass bed are not the same patch wearing two hats.
-    const gf = this.nDetail.fbm3(dir[0] * 7.5, dir[1] * 7.5, dir[2] * 7.5, 3, 2, 0.5);
-    const kf = this.nDetail.fbm3(dir[0] * 5.0 + 31.7, dir[1] * 5.0, dir[2] * 5.0 - 12.3, 3, 2, 0.5);
-    // The third field. Its own frequency and its own offsets for the reason the
-    // second one has them: two beds drawn from one field are one bed.
-    const lf = this.nDetail.fbm3(dir[0] * 6.2 - 18.4, dir[1] * 6.2, dir[2] * 6.2 + 24.1, 3, 2, 0.5);
+    const temp = inLake ? 0.2 : this._seaTemp(q.x, q.y);
+    // Three fields at three frequencies and three planes, so a kelp forest, a
+    // lettuce bed and a grass meadow are not one patch wearing three hats.
+    const gf = this.nDetail.fbm(q.x, q.y, 0, surfScale(7.5), 3, 0.5);
+    const kf = this.nDetail.fbm(q.x, q.y, 31.7, surfScale(5.0), 3, 0.5);
+    const lf = this.nDetail.fbm(q.x, q.y, -18.4, surfScale(6.2), 3, 0.5);
     const gDens = clamp(gf * 0.5 + 0.55, 0, 1);
     const kDens = clamp(kf * 0.5 + 0.42, 0, 1);
     const lDens = clamp(lf * 0.5 + 0.46, 0, 1);
@@ -5836,11 +5824,11 @@ export class WorldGen {
     const depth = depthOfK(floorK);
     if (depth < ABYSS_DEPTH_MIN) return;
 
-    const dir = _reefDir;
-    this._dirOf(col, dir);
+    const q = _reefXY;
+    this._xyOf(col, q);
     // A low frequency and a high exponent: patches a few columns across with
     // long empty floor between them. See ABYSS_CLUMP.
-    const af = this.nDetail.fbm3(dir[0] * 3.1 + 57.3, dir[1] * 3.1 - 9.7, dir[2] * 3.1 + 41.5, 3, 2, 0.5);
+    const af = this.nDetail.fbm(q.x, q.y, 57.3, surfScale(3.1), 3, 0.5);
     const aDens = clamp(af * 0.5 + 0.5, 0, 1);
     const deep = clamp((depth - ABYSS_DEPTH_MIN) / (ABYSS_DEPTH_FULL - ABYSS_DEPTH_MIN), 0, 1);
     const rng = this.colRng(col, 0x2b9f);

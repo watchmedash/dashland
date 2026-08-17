@@ -7536,7 +7536,13 @@ class Game {
       // underneath and guessed dirt, which quietly turned the ice cap brown a
       // patch at a time. The owner: "snow blocks shouldn't change to dirt
       // blocks on snow face". Nothing seasonal touches that face at all.
-      if (FACE_ROLE[(col / (F * F)) | 0] === FACE_POLAR) continue;
+      // The cinderlands are the same rule from the other end: it is the fire
+      // face and worldgen puts no snow on it at all, but 1 629 of its columns
+      // wear the stone and gravel of a steep ridge, which IS_SEASON_GROUND
+      // accepts - so winter was whitening the ash fields. Neither dedicated
+      // face has a season.
+      const role = FACE_ROLE[(col / (F * F)) | 0];
+      if (role === FACE_POLAR || role === FACE_CINDER) continue;
       const k = this._seasonGroundK(col);
       if (k < 0) continue;
       const cur = this.planet.at(col, k);

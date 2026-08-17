@@ -302,6 +302,14 @@ other fourteen live here.**
   hostile to you as well."* A neutral who sees an angry one chasing you joins
   the chase.
 
+  **Trees do not block sight; walls do.** In a jungle at 20% tree coverage a
+  strict line of sight would mean almost nobody ever witnesses anything, and
+  the whole mechanic would quietly not happen. Leaves and trunks are see
+  through for this purpose; solid ground and built walls are not. That is the
+  same call the lighting already makes - `SKY_ATTEN` deliberately does not
+  treat leaves as a roof - so the two agree rather than being two different
+  ideas of what a tree is.
+
   This is worth more than a radius would be, and the reason is what it does to
   the player. Anger travels with the mob rather than sitting in a circle on the
   map, so **running through the village is the worst possible escape** - every

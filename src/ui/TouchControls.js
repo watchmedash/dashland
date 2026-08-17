@@ -261,8 +261,9 @@ export class TouchControls {
       // it once a frame and `endFrame` zeroes it, so several moves between two
       // frames add up rather than the last one winning, which is what keeps a
       // fast flick from being quantised down to one frame's worth.
-      this.input.mouseDX += (e.clientX - c.x) * LOOK_GAIN;
-      this.input.mouseDY += (e.clientY - c.y) * LOOK_GAIN;
+      const d = unrotate(e.clientX - c.x, e.clientY - c.y);
+      this.input.mouseDX += d.dx * LOOK_GAIN;
+      this.input.mouseDY += d.dy * LOOK_GAIN;
       c.x = e.clientX; c.y = e.clientY;
       e.preventDefault();
     });
@@ -520,8 +521,12 @@ export class TouchControls {
 
   _stick(e) {
     const c = this.claims.get(e.pointerId);
-    let dx = e.clientX - c.cx;
-    let dy = e.clientY - c.cy;
+    // Both the thumb and the pad's centre are window coordinates, so the vector
+    // between them is a window vector too, and on an upright phone the app is
+    // lying on its side inside that window. Turned back before it means a
+    // direction. The nub is moved with the same turned vector, so it still
+    // follows the thumb.
+    let { dx, dy } = unrotate(e.clientX - c.cx, e.clientY - c.cy);
     const d = Math.hypot(dx, dy) || 1;
     // The nub is clamped to the rim but the *reading* is not: a thumb that
     // slides past the edge of a 52px pad should still be running, and the

@@ -348,7 +348,12 @@
      which is a cap that silently is not there. */
   --gutter: 16px;
   --screen-h: calc(100vh - var(--gutter) * 2);
-  --cg-chrome: 350px;
+  /* What the picker's furniture costs above and below the stage, measured:
+     18 of sheet padding either side, a 20px heading, a 26px name, a 55px
+     difficulty row, a 45px foot, and the margins between them. It was 350 when
+     the picker was a card with a frame, a gutter and its own generous padding;
+     the sheet is the window now, so the stage gets the difference. */
+  --cg-chrome: 240px;
   --cg-stage: clamp(140px, calc(100vh - var(--cg-chrome)), 420px);
 }
 
@@ -2903,7 +2908,6 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    window's width, so `max-height` becomes `max-width` and nothing else moves. */
 @media (max-height: 660px),
        (orientation: portrait) and (pointer: coarse) and (max-width: 660px) {
-  .chargen-card { padding: 14px 18px 12px; }
   .chargen-card .chargen-stage { margin-top: 10px; }
   .cg-name { margin-top: 8px; }
   .cg-pick { margin-top: 10px; }
@@ -2911,7 +2915,6 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
   .menu-card { padding: 18px 22px 16px; }
   .menu-card.small { padding: 16px 20px 14px; }
   .menu-actions { margin-top: 12px; }
-  .panel { padding: 14px 18px; }
   .panel header { margin-bottom: 12px; padding-bottom: 9px; }
   .set-head, .ctl-head { margin-top: 11px; }
   .ctl-head { margin-bottom: 7px; }
@@ -2923,7 +2926,6 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    of one. */
 @media (max-height: 520px),
        (orientation: portrait) and (pointer: coarse) and (max-width: 520px) {
-  .chargen-card { padding: 10px 16px 10px; }
   .chargen-card h2 { font-size: var(--fs-md); }
   .cg-name { margin-top: 6px; }
   .cg-name b { font-size: var(--fs-lg); }

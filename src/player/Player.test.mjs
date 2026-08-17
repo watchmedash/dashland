@@ -497,7 +497,7 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
     for (let n = 0; n < 600 && !p.grounded; n++) { p.update(1 / 60, NONE); peak = Math.max(peak, p.position.y); }
     return peak - 34;
   };
-  const ordinary = walkOn(600.5, 600.5);            // face 5, Meadowlands
+  const ordinary = walkOn(600.5, 600.5);            // face 5, Solace
   near(ordinary, 4.4, 0.05, 'an ordinary face walks at 4.4');
   near(walkOn(200.5, 200.5), 4.4 / 1.5, 0.05, 'Rime is heavy going');       // 1
   near(walkOn(1000.5, 200.5), 4.4 * 1.25, 0.05, 'Tempest will not let you stand'); // 3

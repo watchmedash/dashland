@@ -129,7 +129,7 @@ the conclusion drawn from them was not.
 | 7 | **Verdant** | sealed, jungle |
 | 9 | **Pyre** | sealed, fire |
 | 2, 4, 6, 8 | Aurora, Zenith, Vesper, Umbra | connected, ordinary biomes |
-| 5 | Meadowlands | connected, ordinary, **start** |
+| 5 | Solace | connected, ordinary, **start** |
 
 ## 3. Gravity
 

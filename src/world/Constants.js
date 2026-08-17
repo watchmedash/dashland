@@ -190,12 +190,13 @@ export const FACE_ROLE = [
  * The five ordinary ones are a day, and 2, 6, 8, 4 are in RING ORDER on
  * purpose: the cross loops both ways through the middle, so walking one of those
  * loops walks the day in order and the name tells you which way round you are
- * going. Meadowlands is the middle and is where you start.
+ * going. Solace is the middle and is where you start: the one face with no
+ * element on it and nothing arranged to kill you.
  */
 export const FACE_NAME = [
   '',
   'Rime', 'Aurora', 'Tempest',
-  'Zenith', 'Meadowlands', 'Vesper',
+  'Zenith', 'Solace', 'Vesper',
   'Verdant', 'Umbra', 'Pyre',
 ];
 

@@ -210,7 +210,7 @@ const mobsOn = (planet) => {
   const mobs = mobsOn(planet);
   const o = faceOrigin(5);
   const mob = fakeMob(o.x + 8.5, o.y + 0.6, 35, { heading: -Math.PI / 2 });
-  eq(faceAt(Math.floor(mob.cell.x), Math.floor(mob.cell.y)), 5, 'it starts on Meadowlands');
+  eq(faceAt(Math.floor(mob.cell.x), Math.floor(mob.cell.y)), 5, 'it starts on Solace');
   for (let n = 0; n < 8; n++) {
     mobs._walkStep(mob, mob.cell.x, mob.cell.y - 0.34, 34, null);
     mobs._sync(mob);

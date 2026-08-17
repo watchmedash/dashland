@@ -700,5 +700,201 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
   }
 }
 
+// --- sneaking holds the edge ------------------------------------------------
+//
+// A plateau with nothing beyond it, so "off the edge" is a real void and not a
+// step down. `groundTo` cannot build this - it floors every column - so the
+// blocks are laid by hand.
+//
+// The lip: the last solid column is X1, so the surface ends at x = X1 + 1, and
+// a body with a 0.34 half-width is still supported until its centre is 0.34
+// past that. LIP below is that number, and hanging half off is the point of the
+// mechanic rather than a tolerance.
+{
+  const TOP = 34;                       // top of the plateau
+  const X0 = 600, X1 = 610;             // solid columns, inclusive
+  const Z0 = 600, Z1 = 610;
+  const LIP = X1 + 1 + 0.34;
+
+  const plateau = (x0, x1, z0, z1) => {
+    const planet = new FakePlanet();
+    for (let x = x0; x <= x1; x++) {
+      for (let z = z0; z <= z1; z++) for (let k = 0; k < TOP; k++) planet.fill(x, z, k);
+    }
+    return planet;
+  };
+  /** Walk east off the plateau, crouching or not, and report where you got to. */
+  const walkEast = (held, frames = 300) => {
+    const p = standing(plateau(X0, X1, Z0, Z1), 605.5, 605.5, TOP);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    for (let n = 0; n < frames; n++) p.update(1 / 60, keys('KeyW', ...held));
+    return p;
+  };
+
+  {
+    const p = walkEast(['ControlLeft']);
+    ok(p.crouching, 'Ctrl crouches');
+    ok(p.position.x > X1 + 1.2, `sneaking still walks you to the lip (x = ${p.position.x.toFixed(3)})`);
+    ok(p.position.x <= LIP + 0.05, `and no further (x = ${p.position.x.toFixed(3)}, lip ${LIP})`);
+    ok(p.grounded, 'and leaves you standing');
+    near(p.position.y, TOP, 1e-3, 'at the height you were walking at');
+    eq(p.health, 20, 'unhurt, because you never fell');
+  }
+
+  // The same walk without Ctrl. If this one stopped too, the test above would
+  // be asserting nothing at all.
+  {
+    const p = walkEast([]);
+    ok(p.position.x > LIP + 1, `walking off the same ledge falls (x = ${p.position.x.toFixed(3)})`);
+    ok(p.position.y < TOP - 5, `and ends up far below it (y = ${p.position.y.toFixed(2)})`);
+  }
+
+  // Sidling. Facing south with W and A held asks for +z AND +x at once: the x
+  // half is off the edge and must be refused, the z half runs along the lip and
+  // must not be.
+  {
+    const p = standing(plateau(X0, X1, Z0, Z1), 605.5, 602.5, TOP);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    for (let n = 0; n < 300; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    const atLip = p.position.x;
+    ok(atLip > X1 + 1.2, 'reached the lip first, hanging off it');
+
+    p.yaw = YAW_SOUTH;
+    p._updateForward();
+    const z0 = p.position.z;
+    for (let n = 0; n < 120; n++) p.update(1 / 60, keys('KeyW', 'KeyA', 'ControlLeft'));
+    ok(p.position.z > z0 + 1, `sidling along the ledge still moves you (dz = ${(p.position.z - z0).toFixed(2)})`);
+    // The x half of the same input buys at most the sub-step it was already
+    // short of the lip by, and never crosses it.
+    ok(p.position.x >= atLip && p.position.x <= LIP,
+      `while the axis that would drop you stays at the lip (x = ${p.position.x.toFixed(4)})`);
+    ok(p.grounded, 'and you are still on the ledge');
+  }
+
+  // A jump is not a walk. Crouched at the lip, Space still leaves the ground -
+  // and once you are off it the rule is gone, so the jump carries you over.
+  {
+    const p = standing(plateau(X0, X1, Z0, Z1), 605.5, 605.5, TOP);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    for (let n = 0; n < 300; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    const x0 = p.position.x;
+    ok(p.grounded, 'crouched and standing at the lip');
+    p.update(1 / 60, keys('KeyW', 'ControlLeft', 'Space'));
+    ok(!p.grounded, 'a crouched jump still leaves the ground');
+    ok(p.vel.y > 0, 'and goes up');
+    for (let n = 0; n < 30; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    ok(p.position.x > x0 + 0.3, `and carries you off the ledge (dx = ${(p.position.x - x0).toFixed(2)})`);
+  }
+
+  // Airborne over the lip, and low enough that the ground under the feet is
+  // still the ground `_surfaceBelow` can see - which is exactly where a rule
+  // that forgot to ask whether you are standing would bite. A body in flight
+  // crosses the edge.
+  {
+    const p = new Player(plateau(X0, X1, Z0, Z1));
+    p.setPosition(X1 + 1.2, TOP + 0.5, 605.5);
+    p.grounded = false;
+    p.vel.x = 12;
+    p.update(1 / 60, keys('ControlLeft'));
+    ok(p.crouching, 'crouched in the air');
+    ok(p.position.x > LIP, `and carried straight over the lip (x = ${p.position.x.toFixed(3)})`);
+  }
+
+  // Mid-air, crouched, already past the edge: nothing about the fall changes.
+  {
+    const p = new Player(plateau(X0, X1, Z0, Z1));
+    p.setPosition(X1 + 0.5, TOP + 4, 605.5);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    const x0 = p.position.x;
+    for (let n = 0; n < 40; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    ok(p.position.x > x0 + 0.5, `a crouched body in the air still steers over the void (x = ${p.position.x.toFixed(2)})`);
+    ok(p.position.y < TOP + 4, 'and is still falling');
+  }
+
+  // The rule itself, asked directly, because the one case that matters most is
+  // the one a walk cannot stage: a body already over the void. Gravity takes it
+  // out of the air within a frame or two, so the freeze it would cause has to
+  // be denied at the predicate rather than observed at the position.
+  {
+    const p = standing(plateau(X0, X1, Z0, Z1), 605.5, 605.5, TOP);
+    eq(p._steppingOff(605.5 + 1, 605.5, TOP), false, 'a step across the plateau is not a step off');
+    p.setPosition(LIP - 0.02, TOP, 605.5);
+    eq(p._steppingOff(LIP + 0.02, 605.5, TOP), true, 'a step past the lip is');
+    p.setPosition(X1 + 4.5, TOP, 605.5);
+    eq(p._steppingOff(X1 + 5.5, 605.5, TOP), false,
+      'but over the void there is no edge left to hold, so nothing is refused');
+  }
+
+  // It must not trap you. Put a crouching body over the void with `grounded`
+  // set - a shove, a block mined out from under it - and it has to be able to
+  // move, because there is no edge left to hold.
+  {
+    const p = standing(plateau(X0, X1, Z0, Z1), X1 + 4.5, 605.5, TOP);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    const x0 = p.position.x;
+    for (let n = 0; n < 30; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    ok(p.position.x > x0 + 0.2, `already over the void, crouching does not freeze you (dx = ${(p.position.x - x0).toFixed(2)})`);
+  }
+
+  // A blow still shoves you off, and the case that needs the exemption by name
+  // is the one where you come back DOWN inside the blow: the token pop
+  // `knockback` gives you takes you off the ground on its own, so the frames
+  // that matter are the ones after you land again with the shove still running.
+  {
+    const p = standing(plateau(X0, X1, Z0, Z1), 605.5, 605.5, TOP);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    for (let n = 0; n < 300; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    const x0 = p.position.x;
+    p.knockback(x0 - 2, TOP, 605.5, 6);
+    ok(p.knockT > 0, 'the blow is on you');
+    // Back on your feet, mid-shove.
+    p.grounded = true; p.vel.y = 0;
+    p.update(1 / 60, keys('ControlLeft'));
+    ok(p.position.x > x0, `a blow shoves a sneaking player off the lip (dx = ${(p.position.x - x0).toFixed(3)})`);
+    for (let n = 0; n < 30; n++) p.update(1 / 60, keys('ControlLeft'));
+    ok(p.position.y < TOP - 1, `and over the edge you go (y = ${p.position.y.toFixed(2)})`);
+  }
+
+  // Swimming is not standing. Water over the lip and over the void beside it:
+  // the rule is off, so you swim out over the drop.
+  {
+    const planet = plateau(X0, X1, Z0, Z1);
+    for (let x = X0; x <= X1 + 6; x++) {
+      for (let z = Z0; z <= Z1; z++) for (let k = TOP; k < TOP + 3; k++) planet.fill(x, z, k, ID.water);
+    }
+    const p = standing(planet, 608.5, 605.5, TOP);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    p.update(1 / 60, NONE);
+    ok(p.inWater, 'the feet are in the water on top of the plateau');
+    for (let n = 0; n < 300; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    ok(p.position.x > LIP + 0.1, `sneaking does not hold the edge while swimming (x = ${p.position.x.toFixed(2)})`);
+  }
+
+  // At the map wrap. The plateau straddles x = 0, so the walk east crosses the
+  // seam and the lip it stops at is on the far side of it - which only works if
+  // the support test wraps. Raw subtraction fails here and nowhere else.
+  {
+    const planet = new FakePlanet();
+    for (let x = W - 3; x <= W + 3; x++) {
+      for (let z = Z0; z <= Z1; z++) for (let k = 0; k < TOP; k++) planet.fill(wrap(x), z, k);
+    }
+    const p = standing(planet, W - 2.5, 605.5, TOP);
+    p.yaw = YAW_EAST;
+    p._updateForward();
+    for (let n = 0; n < 300; n++) p.update(1 / 60, keys('KeyW', 'ControlLeft'));
+    ok(p.position.x > 4.2 && p.position.x <= 3 + 1 + 0.34 + 0.05,
+      `sneaking holds the edge across the wrap (x = ${p.position.x.toFixed(3)})`);
+    ok(p.grounded, 'still standing at the wrapped lip');
+    near(p.position.y, TOP, 1e-3, 'and at the plateau height');
+  }
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

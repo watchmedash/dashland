@@ -67,7 +67,9 @@ function BLOCK_BY_LABEL() {
  *  lateness as the table above. */
 let _folkLabels = null;
 function FOLK_LABELS() {
-  if (!_folkLabels) _folkLabels = new Set(CHARACTER_IDS.map(characterName));
+  // 'Verdant Folk' is what `folk()` in Mobs.js falls back to when a character
+  // id has no name, and it is the one label in the set that is not a person.
+  if (!_folkLabels) _folkLabels = new Set([...CHARACTER_IDS.map(characterName), 'Verdant Folk']);
   return _folkLabels;
 }
 

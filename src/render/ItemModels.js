@@ -756,13 +756,6 @@ export const POSE = {
   // carrot, and the leaves fall over the fist.
   gold_carrot: { file: 'gold_carrot', pack: 'quest', height: 0.30, grip: 0.45, rot: [0.06, -0.50, 0.24], pos: [0.008, 0.05, -0.016], icon: [0.10, 0.42, -0.18] },
 
-  // The currency. Authored lying on its side — the disc is in the model's YZ
-  // plane and the thin axis is X — so `spin` stands it up facing +Z, which is
-  // what puts a *face* rather than an edge in front of the camera in both the
-  // hand and the icon. No `fitMax`: after the spin the diameter is the height,
-  // and 0.17 is a coin against the coal lump beside it in the registry.
-  coin: { file: 'coin', pack: 'coin', height: 0.17, grip: 0.5, spin: [0, 1.5708, 0], rot: [0.10, -0.55, 0.12], pos: [0.011, 0.062, -0.028], icon: [0.10, 0.50, 0] },
-
   // --- Kenney food kit ------------------------------------------------------
   //
   // `height` here is the model's longest axis, not its height (see `fitMax`), so
@@ -1115,7 +1108,12 @@ export const POSE = {
   // fist is at NDC y -1.03, so more than half of it was below the bottom edge.
   // 0.22 with `grip` 0.16 brings the top back to -0.54 with the fist still on
   // the metal. It is still the smallest thing in the game and is meant to be.
-  coin:       { file: 'wam/coin',       pack: 'wam', height: 0.22, grip: 0.16, rot: [0.10, -0.30, 0.10],   pos: [0.003, 0.022, -0.009], icon: [0.12, 0.26, 0] },
+  //
+  // The model is a supplied one now rather than the WAM disc it was tuned on,
+  // and it keeps every number of that tuning: it is authored lying flat, so
+  // `spin` stands it on its rim facing +Z, which is where the WAM coin already
+  // was. Same size, same fist, same two yaws.
+  coin:       { file: 'coin',           pack: 'coin', height: 0.22, grip: 0.16, spin: [0, 1.5708, 0], rot: [0.10, -0.30, 0.10],   pos: [0.003, 0.022, -0.009], icon: [0.12, 0.26, 0] },
   // The sapling takes the shaft pose — it is a stem with a crown on top, and
   // the drawn diagonal is what the other tall, thin items use. `grip` is low
   // on purpose: you carry a seedling by its stem, so the fist closes under the

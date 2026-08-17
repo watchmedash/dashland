@@ -156,6 +156,29 @@ the carrot is an item id and a drop table line, so a replacement body is a
 one-line change: the model name passed to `monster()` for either mob, or
 `POSE.gold_carrot.file` for the carrot, and nothing else.
 
+## Coin — supplied, AUTHOR UNKNOWN, LICENCE UNRESOLVED, must be settled before release
+
+`public/models/coin.glb` and `public/models/coin_colortex.png` — the currency the
+merchant is priced in. Supplied in a folder named `coin` holding `coin.blend`,
+`coins.blend1`, `coin.fbx`, `coin.unitypackage` and a `textures coin` subfolder;
+the GLB is Blender's export of the `.blend`'s one mesh and the PNG is that
+folder's `coinC_2.png`, unaltered. The AO map beside it is not used.
+
+**Neither the author nor the terms are known.** The folder contains no
+`License.txt`, no readme, no source URL and no author name anywhere in it — less
+than the three models in the section above, where at least the name was
+eventually found. What it does contain is a `.blend`, a `.blend1`, an FBX and a
+Unity package, which is the shape of a marketplace asset rather than of a free
+one. As with those three, this is not a claim that it is unlicensed; it is a
+statement that we do not know.
+
+The same reasoning as above applies and for the same reason — Steam, the
+Microsoft Store and mobile — with one thing in its favour: **the model it
+replaced is still here.** The coin was a WAM original at `art/wam/items/coin.wam`
+and `public/models/wam/coin.gltf`, kept rather than deleted precisely so this is
+reversible. Pointing `POSE.coin` back at `file: 'wam/coin', pack: 'wam'` and
+dropping the `spin` restores it, and nothing else in the game changes.
+
 ## Doors and fences — supplied, INSPECTED AND NOT USED
 
 Two packs were supplied for the door, fence gate and ladder work and neither was

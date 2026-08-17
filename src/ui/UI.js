@@ -17,7 +17,7 @@ import {
   CharacterPicker, CHARACTER_IDS, characterUrl, characterTextureUrl,
 } from '../player/Character.js';
 import { Save } from '../game/Save.js';
-import { BIOME_COLORS, SEA_K, FACE_ROLE, FACE_PYRE } from '../world/Constants.js';
+import { BIOME_COLORS, SEA_K } from '../world/Constants.js';
 import { colIndex, delta, faceAt, isSealed, W } from '../world/Grid.js';
 import { compassFrame } from '../render/Sky.js';
 import { normalizeDifficulty, EXTREME } from '../game/NewGame.js';
@@ -784,18 +784,23 @@ export class UI {
     const el = this.el.minimap;
     const c = player.cell;
     /**
-     * No map on Pyre.
+     * No map on a sealed face. Any of the four.
      *
-     * The owner: "minimap should also be disabled in pyre". It is the face that
-     * is permanently dark, and a map is the one thing that gives the dark back
-     * its shape - you can be lost on Pyre only if nothing on screen is drawing
-     * you the ground. What is left to navigate by is what the face itself
-     * offers: the sunstone outcrops, the lava, and the violet standing over the
-     * dividers.
+     * It started as Pyre alone, because Pyre is permanently dark and a map is
+     * exactly the thing that hands the dark its shape back. The owner then
+     * extended it to the corners, and that is the better rule: the four sealed
+     * faces are places you go INTO, and a map turns all four into a floor plan.
+     * Rime, Tempest, Verdant and Pyre are each meant to be somewhere you learn
+     * by looking, and each already gives you something to look at - the
+     * sunstone, the lightning, the canopy, the violet standing over every
+     * divider.
+     *
+     * It also draws a line the player can feel without being told: the map
+     * works in the world, and stops at the places that are not it.
      *
      * Hidden rather than blanked, so nothing paints and nothing costs.
      */
-    if (FACE_ROLE[player.face] === FACE_PYRE) {
+    if (isSealed(player.face)) {
       el.classList.add('hidden');
       return;
     }

@@ -112,6 +112,9 @@
     <div id="status-bar">
       <div class="chip" id="chip-clock"><span class="dial" id="clock-dial"></span><span id="clock-text">--:--</span></div>
       <div class="chip" id="chip-face">-</div>
+      <!-- Where you are stood, as three integers: the map column, the layer,
+           and the map row. Filled by `updateStatus`. -->
+      <div class="chip" id="chip-pos"></div>
       <!-- Only while a pack is waiting to be recovered. A distance with no
            bearing is not findable on a sphere, so the arrow is the point. -->
       <div class="chip hidden" id="chip-pack"><i class="pack-arrow"></i><span id="pack-dist"></span></div>

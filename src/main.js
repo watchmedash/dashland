@@ -11360,7 +11360,7 @@ class Game {
     this.ui.updateVitals(this.player.health, this.player.maxHealth, this.breath, this.player.stamina, this.energy);
     const face = this.player.face;
     this.ui.updateStatus(this.timeOfDay(), FACE_NAME[face],
-      FACE_ROLE[face] !== FACE_PYRE);
+      FACE_ROLE[face] !== FACE_PYRE, this.player.cell);
     // Both read the planet's own tables and the player's tangent frame, and
     // neither writes anything back — so they go here with the rest of the
     // readouts rather than into the simulation above.

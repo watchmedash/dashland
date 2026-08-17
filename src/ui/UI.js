@@ -412,7 +412,7 @@ export class UI {
       vHealth: $('v-health'), vFood: $('v-food'),
       vStamina: $('v-stamina'), vBreath: $('v-breath'),
       chipClock: $('chip-clock'), clockDial: $('clock-dial'), clockText: $('clock-text'),
-      chipFace: $('chip-face'),
+      chipFace: $('chip-face'), chipPos: $('chip-pos'),
       chipPack: $('chip-pack'), packDist: $('pack-dist'), chipSave: $('chip-save'),
       pzQuit: $('pz-quit'),
       toasts: $('toasts'), debug: $('debug'), hint: $('hint'),
@@ -2786,7 +2786,7 @@ export class UI {
    * is for does not happen. An empty space says that better than a figure that
    * looks like it means something.
    */
-  updateStatus(clockFraction, faceName, clock = true) {
+  updateStatus(clockFraction, faceName, clock = true, cell = null) {
     this.el.chipClock.classList.toggle('hidden', !clock);
     if (clock) {
       const mins = Math.round(clockFraction * 1440);
@@ -2796,6 +2796,16 @@ export class UI {
       this.el.clockDial.style.transform = `rotate(${clockFraction * 360}deg)`;
     }
     this.el.chipFace.textContent = faceName ?? '-';
+    // Where you are stood. `cell` is the map column, the map row and the layer,
+    // and the layer is what a player means by y - the map's own y is world Z,
+    // so it is the one labelled z.
+    //
+    // Written only when a number actually changes: this runs every frame, and
+    // a cell changes about once a second at walking pace.
+    if (cell) {
+      const s = `x ${cell.x} y ${cell.k} z ${cell.y}`;
+      if (s !== this._posText) { this._posText = s; this.el.chipPos.textContent = s; }
+    }
     this._paintPackChip();
   }
 

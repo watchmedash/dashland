@@ -1116,6 +1116,8 @@ select.pick option { color: var(--ink); background: var(--parchment); }
 }
 #chip-clock #clock-text { font-family: var(--mono); letter-spacing: .04em; color: var(--ink); }
 #chip-face { color: var(--accent-deep); }
+/* A measurement, so mono, like the clock beside it. */
+#chip-pos { font-family: var(--mono); letter-spacing: .04em; gap: 0; }
 
 /* bottom cluster */
 #bottom {

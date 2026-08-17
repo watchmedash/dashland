@@ -1471,17 +1471,50 @@ const GLOW_CINDER_THR = 0.84;
  *
  * `Grid.isWall` says which columns, and they are the outermost ring of each
  * corner face, which gives all twelve sealed joins a wall for free and leaves
- * the connected cross entirely untouched. This fills them from layer 0 to the
- * top of the array — the owner's requirement is the full depth as well as the
- * full height, so that a boundary is visible from inside a cave and a player
- * standing next to a join can tell which kind it is.
+ * the connected cross entirely untouched.
+ *
+ * Full depth, from layer 0: the owner asked for a boundary visible from inside
+ * a cave, and that half is unchanged.
+ *
+ * The TOP is not the top of the array, and that was a mistake worth recording.
+ * Filling to D read the requirement "higher than max build height" literally,
+ * and max build height is 86 while the ground beside a wall is a measured
+ * median of 35 and a maximum of 65. So every divider stood 53 layers over the
+ * terrain it divided: one column thick, four hundred long, and seen through a
+ * 150-unit draw distance it read as a black monolith rather than as a wall.
+ * "It's literally a huge cube made of edgestones."
+ *
+ * It follows the ground now, WALL_RISE over the highest of its four terrain
+ * neighbours. That is unjumpable and unclimbable without deliberately building
+ * a tower, which is a different thing from unclimbable in principle - and worth
+ * the trade, because a wall you can see the top of is a wall, and one you
+ * cannot is scenery.
  *
  * `edgestone` is unbreakable (hardness below zero) and drops nothing, so it can
  * never enter an inventory and therefore can never be placed. See Blocks.js.
  */
-function fillWall(blocks, col) {
-  for (let k = 0; k < D; k++) blocks[cellAt(col, k)] = ID.edgestone;
+const WALL_RISE = 14;
+
+function fillWall(blocks, col, colHeight) {
+  // Follow the ground rather than the sky. The four neighbours are the terrain
+  // this wall is dividing; a wall column's own `colHeight` is a placeholder set
+  // to K_TERRAIN_MAX so that slope and altitude tests refuse it, so reading it
+  // here would give the flat 86 that made this a monolith.
+  const p = _wallXY;
+  colXY(col, p);
+  let ground = SEA_K;
+  for (let d = 0; d < 4; d++) {
+    const dx = d === 2 ? -1 : d === 3 ? 1 : 0;
+    const dy = d === 0 ? -1 : d === 1 ? 1 : 0;
+    const nx = wrap(p.x + dx), ny = wrap(p.y + dy);
+    if (isWall(nx, ny)) continue;
+    const h = colHeight[colIndex(nx, ny)];
+    if (h > ground) ground = h;
+  }
+  const top = Math.min(D, Math.round(ground) + WALL_RISE);
+  for (let k = 0; k < top; k++) blocks[cellAt(col, k)] = ID.edgestone;
 }
+const _wallXY = { x: 0, y: 0 };
 
 export class WorldGen {
   constructor(seed = 20260805) {
@@ -2394,7 +2427,7 @@ export class WorldGen {
     this._xyOf(col, p);
     // The dividers, first and unconditionally: a wall column is not terrain and
     // has nothing else decided about it. See `fillWall`.
-    if (isWall(p.x, p.y)) { fillWall(blocks, col); return; }
+    if (isWall(p.x, p.y)) { fillWall(blocks, col, colHeight); return; }
     const h = colHeight[col];
     const bi = colBiome[col];
     const rime = FACE_ROLE[faceAt(p.x, p.y)] === FACE_RIME;

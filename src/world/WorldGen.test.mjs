@@ -155,7 +155,10 @@ eq(colHeight.length, W * W, 'one height per column of one map');
 
 {
   const blocks = new Uint8Array(CELLS);
-  let wallCols = 0, crossCols = 0, badLayer = 0, notWall = 0, crossWall = 0;
+  let wallCols = 0, crossCols = 0, notWall = 0, crossWall = 0;
+  // Two counters, not one. These shared a variable, so the cross check below
+  // inherited the wall check's count and could never have failed on its own.
+  let wallBad = 0, crossBad = 0, tooShort = 0, tooTall = 0;
 
   // Every wall column of every sealed face, on a stride that still visits all
   // four sides of all four rings.
@@ -170,13 +173,28 @@ eq(colHeight.length, W * W, 'one height per column of one map');
         wallCols++;
         const col = wrap(x) * W + wrap(y);
         gen.terrainColumn(blocks, col);
-        for (let k = 0; k < D; k++) if (blocks[col * D + k] !== ID.edgestone) badLayer++;
+        // Solid from bedrock to its top, air above it, and nothing but those two.
+        let top = 0;
+        while (top < D && blocks[col * D + top] === ID.edgestone) top++;
+        for (let k = top; k < D; k++) if (blocks[col * D + k] !== 0) wallBad++;
+        // It has to out-top the ground on both sides, or it is a step.
+        let ground = 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = wrap(x + dx), ny = wrap(y + dy);
+          if (isWall(nx, ny)) continue;
+          const h = gen.colHeight[wrap(nx) * W + wrap(ny)];
+          if (h > ground) ground = h;
+        }
+        if (top < ground + 8) tooShort++;
+        if (top >= D) tooTall++;
       }
     }
   }
   ok(wallCols > 200, `the sample really visited the walls (${wallCols} columns)`);
   eq(notWall, 0, 'every column of a sealed face perimeter is a wall column');
-  eq(badLayer, 0, 'a wall column is edgestone at every layer, bedrock to ceiling');
+  eq(wallBad, 0, 'a wall column is solid edgestone then air, with nothing else in it');
+  eq(tooShort, 0, 'every wall clears the ground it divides');
+  eq(tooTall, 0, 'and no wall reaches the ceiling any more');
 
   // The other direction: nothing inside the cross is ever wall, and nothing
   // inside the cross ever generates edgestone.
@@ -189,13 +207,13 @@ eq(colHeight.length, W * W, 'one height per column of one map');
         if (isWall(x, y)) { crossWall++; continue; }
         const col = x * W + y;
         gen.terrainColumn(blocks, col);
-        for (let k = 0; k < D; k++) if (blocks[col * D + k] === ID.edgestone) badLayer++;
+        for (let k = 0; k < D; k++) if (blocks[col * D + k] === ID.edgestone) crossBad++;
       }
     }
   }
   ok(crossCols > 1500, `the cross sample is real (${crossCols} columns)`);
   eq(crossWall, 0, 'no column of the connected world is a divider');
-  eq(badLayer, 0, 'and no column of the connected world contains edgestone');
+  eq(crossBad, 0, 'and no column of the connected world contains edgestone');
 
   // The divider is unbreakable and cannot be obtained, which is what makes it
   // unplaceable: a block that never enters an inventory cannot come out of one.

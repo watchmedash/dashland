@@ -1,7 +1,8 @@
 # Nine Faces
 
-The planet stops being a solid. It becomes nine flat regions, walled at every
-edge and joined by portals, laid out as a wrapped 3x3 map.
+The planet stops being a solid. It becomes one flat 3x3 map that wraps both
+ways, in which the five faces of the cross are a single continuous world and the
+four corners are sealed rooms reached by portal.
 
 This document is the spec. It is written to be argued with before anything is
 built, the way `CUBE-PLANET.md` was, because the last conversion of this size
@@ -35,8 +36,16 @@ faces sharing cells at a border:
 - seven separate `direction * radius` leftovers, plus an eighth found in the
   whirlpool ripples
 
-**Walled faces share no cells with anything.** Every item on that list stops
-existing rather than getting another patch.
+**All of it comes from two faces meeting at an angle and sharing cells.** In the
+new model nothing meets at an angle: the map is flat and the gravity is the
+same everywhere, so a join inside the cross is just a coordinate carrying on. No
+fold, no ownership tie-break, no wedge. And a divider is not a join at all -
+there is solid rock in the way. Every item on that list stops existing rather
+than getting another patch.
+
+Note honestly that the cross does still have joins, and this is not a claim to
+have removed joins. It is a claim to have removed the thing that made them
+hard, which was the 90 degree turn.
 
 ---
 
@@ -68,65 +77,59 @@ left `c-1 mod 3`, right `c+1`. In full:
 | 8 | 5 | 2 | 7 | 9 |
 | 9 | 6 | 3 | 8 | 7 |
 
-### The corner problem
+### Connected, and sealed
 
-The original sketch was "corner faces special, cross faces normal". **Under
-this wrap there are no corners.** A wrapped 3x3 is a torus: every face has
-exactly four neighbours and every position is structurally identical.
+**The five cross faces are one world.** 2, 4, 5, 6 and 8 are literally
+continuous: one terrain, one sea, biomes and climate running across the joins,
+and animals and mobs walking between them freely. There is no divider anywhere
+among them and nothing about a join is visible on the ground.
 
-Concretely, in the numbering above, the four apparent corners 1, 3, 7 and 9 are
-**all adjacent to each other** - 1-3 and 7-9 across the rows, 1-7 and 3-9 up the
-columns. They form a closed ring with no ordinary face between any of them, so
-putting the four specials there gathers every hostile face into one block.
+**The four corner faces are sealed.** 1, 3, 7 and 9 are each closed on all four
+sides and entered only by portal. They are the specials.
 
-Nor can it be rearranged away. Enumerated over all 126 ways to choose four of
-the nine faces, the number of special-to-special borders is 2 in 45 cases, 3 in
-36 and 4 in 45. The largest set that never touches at all is **three**, so
-**two shared borders is the floor** and the question is not whether two
-specials touch, only which two.
+Counted off the wrap table: of the 18 edges, **6 are open and 12 are
+dividers**.
 
-The four corners score **4**, the joint worst. It is not merely imperfect, it
-is the worst available arrangement.
+| face | up | down | left | right |
+|------|----|------|------|-------|
+| 2 | 8 | 5 | wall | wall |
+| 4 | wall | wall | 6 | 5 |
+| 5 | 2 | 8 | 4 | 6 |
+| 6 | wall | wall | 5 | 4 |
+| 8 | 5 | 2 | wall | wall |
 
-### The layout
+So the connected world is a plus that **loops both ways through the middle**:
+5 -> 2 -> 8 -> 5 going up, and 5 -> 6 -> 4 -> 5 going right. Walk far enough in
+a straight line and you come back to where you started, which is the tiny-planet
+feel the cube was for, kept without the cube. The arms are walled along their
+flanks, and those flanks are the corner faces' outsides.
 
-Answer that question thematically: let Tempest be the one that touches, and let
-it touch the two extremes.
+### On the corners, and a correction
+
+An earlier draft of this document put the specials on a diagonal and called the
+corners the worst possible arrangement, on the grounds that 1, 3, 7 and 9 are
+all adjacent to one another under the wrap.
+
+**That argument does not apply here and the corners are right.** It assumed
+adjacency meant connection. Two sealed regions sharing a divider do not
+interact in any way, so it does not matter that the four corners touch. What
+matters instead is the shape of the part that IS connected, and the corners are
+the only choice that leaves the connected five as a symmetric plus through the
+centre. Any other four would leave the walkable world a lopsided snake.
+
+The graph facts in the earlier draft were correct and are kept for the record;
+the conclusion drawn from them was not.
+
+### The faces
 
 | face | name | role |
 |------|------|------|
-| 1 | **Rime** | special, ice |
-| 2 | Aurora | ordinary |
-| 3 | **Tempest** | special, storm |
-| 4 | Meadowlands | ordinary, **start** |
-| 5 | **Verdant** | special, jungle |
-| 6 | Vesper | ordinary |
-| 7 | Zenith | ordinary |
-| 8 | Umbra | ordinary |
-| 9 | **Pyre** | special, fire |
-
-The two forced borders are Tempest-Rime (3-1) and Tempest-Pyre (3-9), which is
-the storm sitting between the cold and the heat and is where a storm belongs.
-Verdant at the centre borders no other special at all.
-
-The start is face 4, the gentlest seat on the board: two of its four neighbours
-are ordinary, and of the two specials it touches, one is Verdant.
-
-Because travel is by portal, all of this is a table rather than a geometry.
-Renaming or re-siting a face later costs one edit and no code.
-
-**The four specials:**
-
-| face | element | what it does to you |
-|------|---------|---------------------|
-| Rime | ice | slow going, stamina lasts, whiteout fog |
-| Pyre | fire | permanent dark, double jump, stamina burns, best ore |
-| Tempest | air | permanent storm, lightning, wind that shoves, no safe high ground |
-| Verdant | life | giant hostile plants, canopy that blocks the light |
-
-**The five ordinary faces** carry the existing biome set between them.
-
----
+| 1 | **Rime** | sealed, ice |
+| 3 | **Tempest** | sealed, storm |
+| 7 | **Verdant** | sealed, jungle |
+| 9 | **Pyre** | sealed, fire |
+| 2, 4, 6, 8 | Aurora, Zenith, Vesper, Umbra | connected, ordinary biomes |
+| 5 | Meadowlands | connected, ordinary, **start** |
 
 ## 3. Gravity
 
@@ -147,53 +150,69 @@ storm. Sky is per-face state, not a consequence of where a face sits.
 
 ## 4. Coordinates and storage
 
-A cell is `(face, i, j, k)` with `face` 0..8, `i`/`j` 0..F-1 and `k` 0..D-1.
+Because the cross is genuinely continuous, the world is **one flat map**, not
+nine slabs. A cell is `(x, y, k)` on a `3F` by `3F` grid, `k` deep, with x and y
+wrapping. The face number is a **label** on a region of that map, used by the
+generator, the HUD and the portal table, and not a coordinate.
+
 That is the whole coordinate system. There is no fold, no normalisation, no
-ownership test, no `worldToCell` that can disagree with `cellWrite`.
+ownership test, no `worldToCell` that can disagree with `cellWrite`, and moving
+from face 5 to face 2 is `y` changing by one.
 
-Keeping `F = 416` and `D = 88`:
+Keeping `F = 416` and `D = 88`, so the map is 1248 by 1248:
 
-| | cube (now) | nine faces |
+| | cube (now) | one map |
 |---|---|---|
 | columns | 1 038 336 | 1 557 504 |
 | addressable cells | 137 100 288 | 137 060 352 |
 | allocated array | 147 197 952 (`528^3`) | 137 060 352 |
 | wasted | the whole core | none |
 
-So the array gets **smaller**, not bigger, because the cube allocated a solid
-cube of memory to store a shell. Fifty per cent more world for seven per cent
-less memory.
+The array gets **smaller** even though the world grows by half, because the cube
+allocated a solid cube of memory to store a shell.
 
-Index is `((face * F + i) * F + j) * D + k`, column-major so a column's layers
-stay contiguous, which is what the mesher and the raycast both walk.
+Index is `(x * 3F + y) * D + k`, column-major so a column's layers stay
+contiguous, which is what the mesher and the raycast both walk.
 
----
+**Noise must be periodic** over `3F` in both axes, or the terrain will not meet
+itself at the wrap. That is a property of the generator, not of the storage, and
+it is the one genuinely new requirement this section adds: get it wrong and the
+seam at the outer edge of the map is a cliff. It is also cheap to test, which
+stage 1 should do before any terrain exists.
 
-## 5. Walls and portals
+## 5. Dividers and portals
 
-**Walls** run the full perimeter of every face, from bedrock to above the
-maximum build height, so there is no seeing over and no building over. They are
-the "walking to the unknown" the owner asked for: you cannot see the next face
-because there is no line of sight to it, rather than because fog is hiding it.
+**Dividers stand on the 12 sealed edges only**, never inside the connected
+cross. Each runs the full height of the world and **the full depth**: from
+bedrock to above the maximum build height, so it is there underground as well as
+above it. That is the owner's requirement and it is what makes the rule
+readable - now that some joins are genuinely open, a boundary you can see from
+inside a cave is the only way to tell which kind of join you are standing next
+to.
 
-Wall material wants to be something that reads as world-edge rather than as
-somebody's build. Obsidian-like, unbreakable, unplaceable.
+They must be unbreakable and unplaceable, and want a material that reads as
+world-edge rather than as somebody's build.
 
-**Portals** sit at the middle of each of a face's four edges: four exits per
-face, wired to the wrapped 3x3 above. Stepping into one puts you at the
-matching portal on the far side of the destination face, facing inward, so
-travel preserves your heading and the map stays learnable.
+**Portals** are the only way into a sealed face. One at the middle of each
+divider between a corner and the cross gives each special two entrances, from
+the two ordinary faces that flank it. Corner-to-corner dividers carry no portal:
+you do not travel from Rime to Tempest directly, you come back out to the world
+first.
 
-Open questions, flagged rather than decided:
+Stepping through puts you at the matching portal on the far side, facing inward,
+so the map stays learnable.
 
-- Do portals need unlocking, or are they open from the first minute? Open is
-  simpler and the special faces already gate themselves by being lethal.
-- Do mobs use portals? Current rule is mobs never leave their face
-  (`FACE_BOUND`), and keeping that is both simpler and better: a face's
-  population stays its own.
-- Do items and drops pass through? They must, or you cannot carry ore home.
+Rules that follow from "the cross is one world":
 
----
+- **Animals and mobs cross freely inside the cross.** The old `FACE_BOUND` rule
+  (mobs never leave their face) applies only to the four sealed faces now, and
+  there it is free: a divider already stops them.
+- **Water flows across cross joins**, and a sea can span more than one face.
+- **Biomes and climate are continuous** across the cross, which means the
+  generator treats those five as one field rather than five, and a biome may
+  straddle a join without anything special being done about it.
+- Nothing at all crosses a divider except a player in a portal, and whatever
+  they are carrying.
 
 ## 6. What this breaks
 

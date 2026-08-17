@@ -3726,7 +3726,7 @@ class Game {
         : (b === ID.snow || b === ID.ice || b === ID.packed_ice) ? 2.2
           : (b === ID.basalt || b === ID.ash_stone || b === ID.magma_stone) ? 2.0 : 0;
       if (!score) continue;
-      if (k + 1 < SEA_K + 1) continue;
+      if (k < SEA_K) continue;
       // headroom
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2) || p.solidAt(col, k + 3)) continue;
       // flatness across the four neighbours

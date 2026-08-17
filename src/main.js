@@ -4568,8 +4568,8 @@ class Game {
     // edges. Two cacti meeting at a corner are still spines against spines.
     //
     // `stepColumn` rather than a second `colNeighbor` pass because there is no
-    // diagonal in COL_NB; it composes the two steps and carries them across a
-    // cube seam properly, which is the whole reason not to add i/j by hand.
+    // diagonal in the four-neighbour table; it composes the two steps and wraps
+    // them, which is the whole reason not to add x/y by hand.
     for (const [di, dj] of CORNER_STEPS) {
       const nb = stepColumn(col, di, dj);
       if (nb < 0) continue;
@@ -5041,13 +5041,12 @@ class Game {
 
   /**
    * Facing for a directional block placed at (col, k): the front turns to meet
-   * the player. Resolved in the cell's own tangent frame, so it stays correct
-   * across cube-face seams where the player's frame and the block's differ.
-   * @returns {number} 0:+i 1:-i 2:+j 3:-j
+   * the player. Resolved on the world axes, which is the only frame there is.
+   * @returns {number} 0:+x 1:-x 2:+y 3:-y, on the map
    */
   /**
-   * Axis for a log from the face it was placed against: 0 upright, 1 along i,
-   * 2 along j. A log laid against a wall should lie down, showing its cut ends
+   * Axis for a log from the face it was placed against: 0 upright, 1 along
+   * world X, 2 along world Z. A log laid against a wall should lie down, showing its cut ends
    * on the two faces the trunk runs through — placing one sideways and getting
    * an upright block is the thing that reads as the game ignoring you.
    *
@@ -8688,12 +8687,10 @@ class Game {
    * A torch is hand-placed and sparse, so one appearing at the rim is a thing
    * you might catch; a *meadow* appearing at the rim is unmissable, and unlike
    * the torch there is no billboard left behind to cover the gap. The bound
-   * that matters is therefore the horizon, not legibility: on a planet of
-   * R_SEA 290 the flat ground falls away about 34 cells from an eye two blocks
-   * up (`sqrt(2*R*h)`, the same arithmetic `CHUNK_LOAD_DIST` is derived from),
-   * so a 34-cell scan covers every flower on level ground the player can see at
-   * all. What is lost past it is flowers on high terrain 60+ cells out, at
-   * seven pixels and behind aerial fog.
+   * that matters is therefore legibility rather than a horizon: the map is
+   * flat and level ground runs to the draw distance, so 34 cells is where a
+   * flower is a few pixels wide and behind aerial fog. What is lost past it is
+   * flowers 60+ cells out that were never legible anyway.
    *
    * That costs 69 x 69 x 15 = 71 000 array reads per rescan, about three times
    * the old torch scan, and `planet.at` is a flat typed-array index. Torches

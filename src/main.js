@@ -6130,6 +6130,16 @@ class Game {
     // screen is open: looking at your own character in your inventory is the
     // main reason to want it there.
     if (input.pressed('KeyV')) this._cycleView();
+    // M for the map. It writes the same setting the Settings row writes, and
+    // persists it the same way, so the key and the box cannot disagree. Guarded
+    // on focus because `Input` listens on the window: typing a word with an m
+    // in it would otherwise flash the map. (The sign panel pauses the game, so
+    // it never reaches here at all.)
+    if (input.pressed('KeyM') && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) {
+      this.settings.minimap = this.settings.minimap === false;
+      this.persistSettings();
+      ui.syncSettings();
+    }
 
     // A container screen takes your hands, not the world. It used to return
     // early here, which froze breath, hunger, health, physics and every animal

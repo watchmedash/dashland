@@ -38,6 +38,13 @@ import { itemIdOf } from './Items.js';
 import { rollStock, rollRequest } from './Trade.js';
 import { makeRng, clamp, lerp } from '../util/Noise.js';
 import * as MobModels from './MobModels.js';
+import {
+  CHARACTER_IDS, CHARACTER_NAMES, ARM_NODE, HAND_LOCAL, handItemModel,
+} from '../player/Character.js';
+import {
+  FOLK_SIGHT, FOLK_JOIN, FOLK_PERIOD, FOLK_ARMS,
+  folkRoster, folkType, isTaboo, screensSight,
+} from './Folk.js';
 
 /**
  * Bodies alive at once, anywhere.
@@ -3251,6 +3258,64 @@ const SPECIES = {
 };
 
 /**
+ * --- and the fourteen you did not choose ---
+ *
+ * One species per character id, and that is not verbosity. `spawn` picks its
+ * model with `spec.urls[variant]` off the seed, and the *type* is the only
+ * thing a save writes about a body (see `toJSON`), so a single `folk` species
+ * with fifteen urls would come back from a reload wearing whichever body the
+ * seed happened to draw. These are named people with fixed goods - the one who
+ * wants cobblestone has always wanted cobblestone - so the identity has to be
+ * the thing that persists, and the type is what persists.
+ *
+ * Written out as literals through a small builder rather than through `pet()`
+ * or `monster()`, for the reason the husk, the stalker and the merchant are:
+ * those builders copy only the fields they have been told about, and every
+ * flag below would be dropped on the floor without a word. `monster()` would
+ * also be actively wrong here - it sets `monster: true`, and `xpForKill` pays
+ * out for anything carrying that flag or `hostile`. **A kill here must pay
+ * nothing**, so the absence of both flags is load-bearing rather than an
+ * oversight, and `drops: []` is the other half of it.
+ *
+ * `folk: true` is what the chase, the anger and the barter all key off. It is
+ * deliberately not `hostile`: that flag drives the night budgets, the dawn
+ * burn and main.js's grace-period wipe, none of which have anything to do with
+ * a person standing in a jungle.
+ */
+const folk = (id) => ({
+  label: CHARACTER_NAMES[id] || 'Verdant Folk',
+  urls: [CHAR(id)],
+  clips: { ...CHAR_CLIPS, graze: 'emote-yes' },
+  // The rig's own height, as the husk and the merchant have it. No jitter:
+  // these are fourteen individuals rather than a herd, and one of them being
+  // 12% taller than another reads as a mistake rather than as variety.
+  height: 1.72, sizeVar: 0,
+  // Enough that a fight is a decision. Below a husk's 21 so it is winnable,
+  // well above a chicken so it is not free, and fourteen of them will kill
+  // you: this number is per body and the mechanic is that they arrive in a
+  // crowd.
+  health: 24, speed: 1.15, skittish: 0, turn: 2.8, accel: 5.5,
+  // NOTHING. Not the tool out of their hand, not a scrap. See section 8:
+  // violence here is pure loss by construction, and this empty list plus the
+  // missing `hostile`/`monster` flags are the whole of it.
+  drops: [],
+  grazeChance: 0.25, idleMin: 1.0, idleMax: 3.0,
+  // Armed, and it is a real fight once it starts. A shade under a husk's 2.6
+  // damage per second: one of them is a mistake you can walk away from, four
+  // of them is not.
+  damage: 3, reach: 1.25, swing: 1.35,
+  // Only ever used once anger has been given to them by `_folkAnger` - see
+  // `acquires` in `_hunt`, where `folk` is gated on `mob.angry`. A neutral one
+  // never decides about the player at any distance.
+  aggroRange: 30,
+  folk: true,
+  folkId: id,
+  /** What is in the right fist. See `_armFolk`; it is never dropped. */
+  arm: FOLK_ARMS[id] || null,
+});
+for (const id of CHARACTER_IDS) SPECIES[folkType(id)] = folk(id);
+
+/**
  * How often a species is drawn from its biome's list, against the others on it.
  *
  * "Bigger animals should be more rare", and the honest way to do that is a
@@ -4294,6 +4359,19 @@ const MERCHANT_COOLDOWN = 900;
 // an event. 0.06 against a 2s tick is the 0.18-per-6s this always meant.
 const MERCHANT_CHANCE = 0.06;
 const MERCHANT_LIFE = 420;       // seconds before it moves on for good
+/**
+ * Where the fourteen stand, in cells from the player, and how fast they arrive.
+ *
+ * The near edge is SPAWN_MIN_DIST + a little, so nobody ever pops in under your
+ * nose; the far edge is well inside the despawn ring so a body placed this tick
+ * is not culled on the next. Three a tick against SPAWN_PERIOD 2.0 fills the
+ * roster inside ten seconds of arriving, which is about how long the portal pad
+ * takes to walk off.
+ */
+const FOLK_NEAR = 24;
+const FOLK_FAR = 70;
+const FOLK_PER_TICK = 3;
+
 /** Coins one trader can pay out before it has nothing left to buy with. */
 const MERCHANT_PURSE_MIN = 140;
 const MERCHANT_PURSE_MAX = 460;
@@ -4395,6 +4473,18 @@ export class Mobs {
      */
     this._threats = [];
     this._threatT = 0;
+    /**
+     * The character id the player took, so the other fourteen are the ones who
+     * live on Verdant. main.js writes it alongside `playerModel`; null until it
+     * does, and `_folkTopUp` refuses to place anybody while it is null rather
+     * than guessing, or the first world would put the player's own twin in the
+     * village.
+     */
+    this.playerCharacter = null;
+    /** Reused by every pass over the fourteen, so witnessing allocates nothing. */
+    this._folkScratch = [];
+    /** Clock to the next anger-propagation pass. See FOLK_PERIOD. */
+    this._folkT = 0;
     /** Recent bolts, as {pos, threat, mob, t}, for the herd cue. Expire on ALARM_LIFE. */
     this._alarms = [];
     /**
@@ -4943,6 +5033,11 @@ export class Mobs {
     this.group.add(model.root);
 
     const ext = modelExtents(model.root);
+    // ...and a tool or a weapon in the right fist, for the fourteen. After the
+    // body is measured, deliberately: `modelExtents` sizes the collision
+    // footprint off the rest pose, and a person carrying a pickaxe is not a
+    // wider person.
+    if (spec.arm) this._armFolk(model.root, spec.arm);
     const mob = {
       id: this._nextId++, type, spec, model, seed: s, variant,
       /**
@@ -5099,6 +5194,16 @@ export class Mobs {
       /** Last sight check's answer, and the clock to the next. See SIGHT_PERIOD. */
       sighted: false,
       sightT: 0,
+      /**
+       * One of the fourteen who has witnessed an offence. False for everything
+       * else on the table and never written for them.
+       *
+       * Deliberately NOT saved. Verdant's memory lasts one visit (see
+       * `calmFolk` and `Barter.forgetVisit`), and a save reloaded is a visit
+       * that ended - so the honest default on load is the same "they have
+       * forgotten" the divider gives you, and it costs no save code to get it.
+       */
+      angry: false,
       prey: null,
       // --- and the prey's own side of it: see _spook ---
       /** Accumulated unease, 0..SPOOK_TRIGGER-and-a-bit. */
@@ -5474,7 +5579,11 @@ export class Mobs {
   _census() {
     let land = 0, water = 0, air = 0;
     for (const m of this.list) {
+      // `folk` is excluded on the same terms as the merchant: it is a fixed
+      // roster on one face with its own top-up, not a population competing for
+      // somewhere to graze.
       if (m.spec.hostile || m.spec.monster || m.spec.trader || m.spec.phantom) continue;
+      if (m.spec.folk) continue;
       if (m.spec.aquatic) water++;
       else if (m.spec.flies) air++;
       else land++;
@@ -5531,6 +5640,9 @@ export class Mobs {
         const m = this.list[n];
         const s = m.spec;
         if (s.hostile || s.monster || s.trader || s.aquatic || s.phantom) continue;
+        // Nobody beds one of the fourteen down for the night. They are not
+        // over any budget, because they are not on one.
+        if (s.folk) continue;
         // Only from a category that is actually over its own budget.
         const flier = !!s.flies;
         if (flier ? air <= 0 : land <= 0) continue;
@@ -5663,6 +5775,10 @@ export class Mobs {
       if (taken.length >= want) break;
       const s = m.spec;
       if (s.hostile || s.monster || s.trader || s.phantom) continue;
+      // ...and a person is not raw material for a husk. Without this the
+      // village quietly turned undead at dusk and the whole face stopped
+      // being what it is.
+      if (s.folk) continue;
       if (s.aquatic || s.flies) continue;
       if (m.dying > 0 || m.baby > 0) continue;
       if (m.state === 'flee' || m.state === 'chase' || m.target) continue;
@@ -5846,8 +5962,12 @@ export class Mobs {
    *
    * @param {number} step sample spacing, in world units.
    * @param {number} skip how far short of `to` to stop.
+   * @param {boolean} wooded read the *witness* table instead: leaves and
+   *   trunks let the line through, walls and ground do not. See
+   *   `Folk.screensSight` for why Verdant needs a second answer here and why
+   *   it is a variant of this walk rather than a second walk.
    */
-  _lineOfSight(from, to, step = LOS_STEP, skip = 0.4) {
+  _lineOfSight(from, to, step = LOS_STEP, skip = 0.4, wooded = false) {
     relTo(_los, from, to);
     const len = _los.length();
     if (len < 1e-3) return true;
@@ -5866,9 +5986,10 @@ export class Mobs {
     // sample would otherwise be inside the camera's own block on a bad frame,
     // and the last inside the body we are asking about.
     for (let t = s; t < len - skip; t += s) {
-      if (this.planet.isSolidWorld(
-        from.x + _los.x * t, from.y + _los.y * t, from.z + _los.z * t,
-      )) return false;
+      const wx = from.x + _los.x * t, wy = from.y + _los.y * t, wz = from.z + _los.z * t;
+      if (wooded
+        ? screensSight(this.planet.blockAtWorld(wx, wy, wz))
+        : this.planet.isSolidWorld(wx, wy, wz)) return false;
     }
     return true;
   }
@@ -5918,14 +6039,228 @@ export class Mobs {
    *
    * @param {number} th the target's full height, in cells.
    */
-  _blowClear(mob, pos, up, th, step = BLOW_STEP, skip = BLOW_SKIP) {
+  _blowClear(mob, pos, up, th, step = BLOW_STEP, skip = BLOW_SKIP, wooded = false) {
     const sh = mob.spec.height;
     for (let n = 0; n < BLOW_RAYS.length; n += 2) {
       _ptA.copy(mob.position).addScaledVector(mob.up, sh * BLOW_RAYS[n]);
       _ptB.copy(pos).addScaledVector(up, th * BLOW_RAYS[n + 1]);
-      if (this._lineOfSight(_ptA, _ptB, step, skip)) return true;
+      if (this._lineOfSight(_ptA, _ptB, step, skip, wooded)) return true;
     }
     return false;
+  }
+
+  /**
+   * The same three rays again, at sighting cost, with the canopy taken out.
+   *
+   * This is the whole of "trees do not block sight; walls do", and it is a
+   * third calibration of one walk rather than a second walk for the reason
+   * `_sightClear` is: the three-ray shape is the right question at every range
+   * and only the sampling and the block table want to differ. Measured against
+   * the alternative in `Folk.test.mjs`: with the ordinary table a witness two
+   * trunks away sees nothing, which is the failure the spec predicts.
+   */
+  _witnessClear(mob, pos, up, th) {
+    return this._blowClear(mob, pos, up, th, LOS_STEP, 0.4, true);
+  }
+
+  /** ...and the player, who is not a mob. See `_blowClearPlayer`. */
+  _witnessClearPlayer(mob, player) {
+    return this._witnessClear(mob, player.position, player.up, PLAYER_HEIGHT);
+  }
+
+  // --- Verdant: anger, and how it travels -------------------------------------
+  //
+  // The most important mechanic on the face, and the one thing here that is
+  // NOT a radius. Two offences make a witness angry - mining anything that is
+  // not wood, and attacking one - and after that anger propagates by being
+  // *seen*: a neutral who watches an angry one chasing you joins the chase. So
+  // it travels with the bodies rather than sitting in a circle on the map, and
+  // the player learns from where the crowd is that running through the village
+  // is the worst possible escape while running away from it works.
+  //
+  // Every test below is `_witnessClear`, i.e. the leaf-transparent one. At 20%
+  // canopy a strict line of sight would mean almost nobody ever witnesses
+  // anything and none of this would happen.
+
+  /**
+   * Turn one of them, once.
+   *
+   * `sighted` is set here rather than left to the sight gate in `_hunt` for the
+   * same reason `enraged` sets it: this body has not inferred that the player
+   * is there, it has *watched* them do something, so the acquire-by-sight rule
+   * has already been met and the commit-blind half applies from this instant.
+   * Without it a witness that lost you behind a rock would stand there
+   * passively and a wall would be a cure.
+   *
+   * @returns {boolean} whether this call is what turned them, so a caller can
+   *   count witnesses rather than count folk.
+   */
+  _folkAnger(mob) {
+    if (!mob.spec.folk || mob.angry || mob.dying > 0 || mob.health <= 0) return false;
+    mob.angry = true;
+    mob.sighted = true;
+    mob.target = 'player';
+    mob.state = 'chase';
+    mob.stateT = 0.5;
+    mob.bestDist = Infinity;
+    mob.stallT = 0;
+    // A body that had given up on an earlier chase must not sit out this one.
+    mob.huntCooldown = 0;
+    return true;
+  }
+
+  /**
+   * Put a tool or a weapon in one of the fourteen's right fist.
+   *
+   * "They are armed" is a thing the player has to be able to *see* from across
+   * a clearing, because it is the whole warning that attacking one is a fight.
+   * It costs nothing to do properly here: these bodies are the same
+   * `character-*.glb` the player wears, so the grip already exists and is
+   * already measured - `Character.ARM_NODE`, `HAND_LOCAL` and `handItemModel`
+   * are the player's own third-person path, exported rather than copied so the
+   * two cannot drift.
+   *
+   * The item hangs down the limb and swings with the gait, which is what a
+   * person carrying an axe looks like. No holding *pose* is applied: that is a
+   * clip the mob animator does not have a layer for, and an arm frozen at the
+   * hold angle through the walk cycle reads much worse than a swinging one.
+   *
+   * `handItemModel` answers null until the item's GLB has landed, so the
+   * callback is the whole of the catch-up: the first neighbour you ever meet
+   * gets their axe a beat late rather than never. Nothing is disposed on
+   * release - the mesh is a clone over the item model's shared geometry, the
+   * same contract `Character.setHeld` keeps.
+   */
+  _armFolk(root, itemName) {
+    const id = itemIdOf(itemName);
+    if (!id) return;
+    const arm = root.getObjectByName(ARM_NODE.right);
+    if (!arm) return;
+    const anchor = new THREE.Group();
+    anchor.position.copy(HAND_LOCAL.right);
+    arm.add(anchor);
+    // `handItemModel` has already put the holder in the fist's frame, so there
+    // is no turn to make here. It answers null and calls back exactly once when
+    // the GLB has still to land - see `requestMesh` - so this cannot attach the
+    // same item twice.
+    const attach = (holder) => { if (holder && anchor.parent) anchor.add(holder); };
+    attach(handItemModel(id, attach));
+  }
+
+  /** Every one of the fourteen currently on the list, angry or not. */
+  _folkList(out = []) {
+    out.length = 0;
+    for (const m of this.list) {
+      if (m.spec.folk && m.dying <= 0 && m.health > 0) out.push(m);
+    }
+    return out;
+  }
+
+  /**
+   * The player broke a block. Anyone who saw it, and only they, turn.
+   *
+   * The offence is judged on the block and the sight is judged on the player,
+   * which is the pair that matches what a bystander actually observes: you do
+   * not see a cell change colour at forty cells, you see the person swinging.
+   *
+   * @param {number} blockId what was broken, before it became air
+   * @returns {number} how many turned, for the harness
+   */
+  witnessMine(blockId, player) {
+    if (!isTaboo(blockId)) return 0;
+    let n = 0;
+    for (const mob of this._folkList(this._folkScratch)) {
+      if (mob.angry) continue;
+      if (wrapDist(mob.position, player.position) > FOLK_SIGHT) continue;
+      if (!this._witnessClearPlayer(mob, player)) continue;
+      if (this._folkAnger(mob)) n++;
+    }
+    return n;
+  }
+
+  /**
+   * The player hit one of them. The victim always knows; the rest have to have
+   * seen it happen.
+   *
+   * Sight is measured to the *victim* rather than to the player, because the
+   * victim is where the offence is: someone watching a neighbour get hit from
+   * behind a tree has witnessed it, and someone on the far side of the same
+   * neighbour's house has not.
+   *
+   * @returns {number} how many turned
+   */
+  witnessHit(victim) {
+    if (!victim?.spec.folk) return 0;
+    let n = this._folkAnger(victim) ? 1 : 0;
+    for (const mob of this._folkList(this._folkScratch)) {
+      if (mob === victim || mob.angry) continue;
+      if (wrapDist(mob.position, victim.position) > FOLK_SIGHT) continue;
+      if (!this._witnessClear(mob, victim.position, victim.up, victim.spec.height)) continue;
+      if (this._folkAnger(mob)) n++;
+    }
+    return n;
+  }
+
+  /**
+   * ...and the propagation. A neutral who sees an angry one chasing you joins
+   * the chase.
+   *
+   * `target === 'player'` and not merely `angry` is the whole of "chasing":
+   * one who has been provoked but has lost you, or given up on a stall, is
+   * standing about looking cross and recruits nobody. What a bystander reads is
+   * a neighbour running, and that is exactly the state this tests for.
+   *
+   * O(n^2) over at most fourteen bodies, on FOLK_PERIOD rather than per frame.
+   *
+   * @returns {number} how many joined this pass, for the harness
+   */
+  _folkSpread(dt) {
+    this._folkT = (this._folkT ?? 0) - dt;
+    if (this._folkT > 0) return 0;
+    this._folkT = FOLK_PERIOD;
+    const all = this._folkList(this._folkScratch);
+    // Snapshotted before anyone joins, so a recruit cannot recruit again on the
+    // same pass: anger should travel one body per pass at most, or a line of
+    // fourteen would go up all at once and the spread would be invisible.
+    const chasers = all.filter((m) => m.angry && m.target === 'player');
+    if (!chasers.length) return 0;
+    let n = 0;
+    for (const mob of all) {
+      if (mob.angry) continue;
+      for (const c of chasers) {
+        if (wrapDist(mob.position, c.position) > FOLK_JOIN) continue;
+        if (!this._witnessClear(mob, c.position, c.up, c.spec.height)) continue;
+        if (this._folkAnger(mob)) n++;
+        break;
+      }
+    }
+    return n;
+  }
+
+  /**
+   * You left the face, and they have forgotten.
+   *
+   * The same sentence as `Barter.forgetVisit`, and main.js calls the two on the
+   * same event so that Verdant has ONE memory rule rather than two. Not
+   * permanent and not world-wide: leave and come back and they are people
+   * again.
+   *
+   * @returns {number} how many were calmed
+   */
+  calmFolk() {
+    let n = 0;
+    for (const mob of this.list) {
+      if (!mob.spec.folk || !mob.angry) continue;
+      mob.angry = false;
+      mob.target = null;
+      mob.sighted = false;
+      mob.sightT = 0;
+      mob.state = 'idle';
+      mob.stateT = 0.5;
+      mob.onPath = false;
+      n++;
+    }
+    return n;
   }
 
   /**
@@ -6316,6 +6651,79 @@ export class Mobs {
       return { col, k };
     }
     return null;
+  }
+
+  /**
+   * Ground for one of the fourteen: the merchant's search, closer in and
+   * pinned to the face.
+   *
+   * Closer because the mechanic needs it. Anger spreads by one of them seeing
+   * another, so they have to be within FOLK_JOIN of each other often enough for
+   * a chase to travel; scattered at the merchant's 50-to-80 they would each be
+   * an isolated encounter and the propagation would never fire. FOLK_NEAR to
+   * FOLK_FAR puts a handful of them inside sight of one another wherever the
+   * player is standing.
+   *
+   * Pinned because `_walkOut` is a random walk over columns and knows nothing
+   * about faces: run far enough from near Verdant's edge and it steps into the
+   * wall ring or out the other side, and one of the fourteen standing in the
+   * cinderlands is the kind of thing this codebase's seam bugs were all made
+   * of. `faceAt` is the whole guard.
+   */
+  _findFolkColumn(nearCol, playerPos, face) {
+    const p = this.planet;
+    for (let tries = 0; tries < 24; tries++) {
+      const col = this._walkOut(nearCol, stepsFor(FOLK_NEAR)
+        + Math.floor(Math.random() * (stepsFor(FOLK_FAR) - stepsFor(FOLK_NEAR))));
+      if (faceOfCol(col) !== face) continue;
+      const k = p.surfaceK(col);
+      if (k < 0 || k > D - 6) continue;
+      if (!SPAWNABLE_GROUND.has(p.at(col, k))) continue;
+      if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
+      if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
+      const d = wrapDist(colTop(col, k, _p), playerPos);
+      if (d < FOLK_NEAR || d > FOLK_FAR) continue;
+      return { col, k };
+    }
+    return null;
+  }
+
+  /**
+   * Keep the fourteen standing up, and only on Verdant.
+   *
+   * One of each unchosen id, which is what the spec asks for and is also why
+   * this is a roster rather than a headcount: the neighbour with the iron sword
+   * and the cobblestone habit is a *person*, so "is that one alive" is a
+   * question about a type and not about a population.
+   *
+   * They are placed around the player rather than in a fixed village, which is
+   * the same thing every other body on the planet does and is forced by the
+   * same constraint: the despawn ring is 145 units against a face 416 columns
+   * across, so a settlement at a fixed spot would be gone from memory the
+   * moment you walked away from it and would need the Endgame's out-of-band
+   * roster to come back. What is preserved instead is the part that carries the
+   * feature - who they are, what they carry and what they will swap - and that
+   * is preserved exactly, because it is derived from the id.
+   *
+   * @returns {number} how many were placed this tick
+   */
+  _folkTopUp(player, playerCol) {
+    if (FACE_ROLE[player.face] !== FACE_VERDANT) return 0;
+    // Nothing to exclude yet, so nothing is placed. Guessing would put the
+    // player's own body in the village on the one frame before main answers.
+    if (!this.playerCharacter) return 0;
+    const alive = new Set();
+    for (const m of this.list) if (m.spec.folk) alive.add(m.type);
+    let placed = 0;
+    for (const id of folkRoster(this.playerCharacter)) {
+      if (placed >= FOLK_PER_TICK) break;
+      const type = folkType(id);
+      if (alive.has(type)) continue;
+      const spot = this._findFolkColumn(playerCol, player.position, player.face);
+      if (!spot) continue;
+      if (this.spawn(type, spot.col, spot.k)) placed++;
+    }
+    return placed;
   }
 
   /**
@@ -8338,6 +8746,12 @@ export class Mobs {
     // full damage. The test goes on the savage term alone: nothing hostile or
     // monstrous is ever born a cub.
     const acquires = (spec.hostile || spec.monster
+      // ...and the fourteen, who decide about you only once they have witnessed
+      // something. `angry` is the whole gate: a neutral one is never asked at
+      // any distance, which is what "they do not attack on sight" means, and
+      // once it is set the body goes through exactly the chase every hostile
+      // uses. See `_folkAnger` for why `sighted` is set with it.
+      || (spec.folk && mob.angry)
       || (this.savage && !!spec.preyOn && !!spec.predator && mob.baby <= 0))
       // ...and the one that decides nothing until it has been hit. Looking at
       // it does nothing, walking past it does nothing, and standing in front of
@@ -9126,7 +9540,10 @@ export class Mobs {
    */
   _bossPrey(boss, o) {
     const s = o.spec;
-    if (s.boss || s.trader || s.phantom) return false;
+    // The fourteen are off the menu. A boss that ate one would be fed again by
+    // `_folkTopUp` the moment the roster noticed the gap, which is a growth
+    // curve with no ceiling on it.
+    if (s.boss || s.trader || s.phantom || s.folk) return false;
     if (s.aquatic) return !!boss.spec.bossEatsFish;
     return true;
   }
@@ -10023,6 +10440,10 @@ export class Mobs {
     // pass shared by every prey animal rather than one pass each. See _spook.
     this._threatT -= dt;
     if (this._threatT <= 0) { this._threatT = THREAT_PERIOD; this._buildThreats(); }
+    // ...and Verdant's, which is the same shape of thing: one shared pass on a
+    // clock rather than a question every body asks every frame. It self-clocks
+    // and costs a compare when nobody is angry, so it is unconditional here.
+    this._folkSpread(dt);
     for (let n = this._alarms.length - 1; n >= 0; n--) {
       if ((this._alarms[n].t -= dt) <= 0) this._alarms.splice(n, 1);
     }
@@ -10256,6 +10677,8 @@ export class Mobs {
         const mob = spot ? this.spawn('merchant', spot.col, spot.k) : null;
         if (mob) this.onMerchant?.(mob);
       }
+      // And the fourteen, on Verdant and nowhere else.
+      this._folkTopUp(player, playerCol);
     }
 
     for (let n = this.list.length - 1; n >= 0; n--) {
@@ -10377,7 +10800,7 @@ export class Mobs {
       const haunting = spec.phantom && this._haunt(mob, dt, dist, player);
       const prowling = !haunting && this._prowl(mob, dt, dist, player);
       const hunting = !prowling && !haunting
-        && (spec.hostile || spec.monster || spec.predator)
+        && (spec.hostile || spec.monster || spec.predator || spec.folk)
         && this._hunt(mob, dt, dist, player);
       // Then the herd. Hunting the player wins over hunting dinner: something
       // that has decided on you should not wander off after a rabbit mid-fight.
@@ -11864,6 +12287,10 @@ export class Mobs {
     // courting each other is prevented at present by a cap of one and by a
     // door nobody has opened; a rule is cheaper than either.
     if (mob.spec.phantom) return false;
+    // Neither are they livestock. `love` is the whole of the breeding path and
+    // a village that could be bred is a village you could farm, which is the
+    // one thing this face is built to refuse.
+    if (mob.spec.folk) return false;
     if (!FEEDS.has(itemId)) return false;
     if (mob.baby > 0) {
       // Feeding a calf just brings it up faster — it can't breed yet.
@@ -11941,7 +12368,8 @@ export class Mobs {
     // exactly where it was standing. See knockMass for the ladder.
     const mass = knockMass(mob.baseHeight ? mob.baseHeight * mob.grown : mob.spec.height);
     const push = (mob.spec.hostile || mob.spec.monster || mob.spec.predator ? KNOCK_HOSTILE
-      : mob.spec.trader ? KNOCK_HOSTILE * 0.5 : KNOCK_WILDLIFE) * weight * mass;
+      : mob.spec.trader || mob.spec.folk ? KNOCK_HOSTILE * 0.5
+        : KNOCK_WILDLIFE) * weight * mass;
     if (push > 0) {
       mob.knockX = (ra / rl) * push;
       mob.knockZ = (rb / rl) * push;
@@ -11984,6 +12412,19 @@ export class Mobs {
           mob.kindB = mob.spec.rage[2];
         }
       }
+    } else if (mob.spec.folk) {
+      // The second offence, and it is the one that needs no explaining.
+      //
+      // Routed through `witnessHit` rather than setting `angry` here, because
+      // hitting one is a thing other people SEE: the victim always knows, and
+      // everyone with a line to the victim joins them. Arrows come through this
+      // same door, which is why the call is here and not in main.js.
+      //
+      // Before the death test below on purpose. A blow that kills outright is
+      // the worst thing a bystander can watch you do, and `_folkAnger` already
+      // refuses the corpse itself.
+      this.witnessHit(mob);
+      mob.vel.y = KNOCK_LIFT * 0.35 * mass;
     } else if (mob.spec.trader) {
       // It has seen worse. Bolting would also strand its stock somewhere you
       // cannot follow, and there is only ever one.

@@ -205,7 +205,7 @@ const FIDGET_MAX = 19;
 const HANDS = ['right', 'left'];
 
 /** The rig node behind each hand. */
-const ARM_NODE = { right: 'arm-right', left: 'arm-left' };
+export const ARM_NODE = { right: 'arm-right', left: 'arm-left' };
 
 /**
  * Where an item sits in the hand, in arm-local model units.
@@ -221,7 +221,7 @@ const ARM_NODE = { right: 'arm-right', left: 'arm-left' };
  * offhand item outside the limb, floating a fifth of a unit off the knuckles,
  * which reads as a bug rather than as a torch.
  */
-const HAND_LOCAL = {
+export const HAND_LOCAL = {
   right: new THREE.Vector3(-0.2, -1.02, 0),
   left: new THREE.Vector3(0.2, -1.02, 0),
 };
@@ -255,6 +255,47 @@ const HAND_ITEM_SIZE = 0.9;
  * 0.46 it lands on HAND_ITEM_SIZE, the length the generic path was tuned to.
  */
 const HELD_POSE_SCALE = HAND_ITEM_SIZE / 0.46;
+
+/**
+ * The holder around one posed clone — the whole of the frame change.
+ *
+ * Both hands take it unmirrored, which is the answer to a question worth
+ * writing down because `HAND_LOCAL` *is* mirrored above. That offset is
+ * mirrored because the pack mirrors the arm *geometry* while leaving the node
+ * alone, so the two limbs' centre lines sit either side of their own origins.
+ * The node's axes are not mirrored, `holding-left` is the same quaternion as
+ * `holding-right`, and `ViewModel` puts an offhand item at the pose's rotation
+ * exactly as it does a main-hand one. So the two hands want the same roll, and
+ * giving the left one a mirrored turn would be the offhand holding its torch
+ * upside down. Measured, not assumed: both hands land on the first-person
+ * orientation to within floating point.
+ */
+function wearPose(posed) {
+  posed.position.set(0, 0, 0);
+
+  const holder = new THREE.Group();
+  holder.userData.modelled = true;
+  // XYZ order: Rx then Ry. See `_buildPosedItem` for what each turn is for.
+  holder.rotation.set(Math.PI / 2, Math.PI, 0);
+  holder.scale.setScalar(HELD_POSE_SCALE);
+  holder.add(posed);
+  return holder;
+}
+
+/**
+ * An item, posed for a fist on this rig. Null until its GLB has landed, with
+ * `onReady` called once it does.
+ *
+ * A free function rather than a method, and exported, because the *player* is
+ * not the only body wearing these models: the fourteen on Verdant are the same
+ * fifteen `character-*.glb` with the same `arm-right` node, and they are armed.
+ * Two copies of a measured grip offset is how the two drift apart, and the
+ * numbers here were measured off the geometry (see `HAND_LOCAL`).
+ */
+export function handItemModel(itemId, onReady) {
+  const posed = heldModel(itemId, onReady ? (m) => onReady(wearPose(m)) : null);
+  return posed ? wearPose(posed) : null;
+}
 
 /**
  * How much of the holding pose survives the gait.
@@ -1235,34 +1276,7 @@ export class PlayerCharacter {
    * longest axis is what makes a held apple look like a beach ball.
    */
   _buildPosedItem(itemId, onReady) {
-    const posed = heldModel(itemId, onReady ? (m) => onReady(this._wearPose(m)) : null);
-    return posed ? this._wearPose(posed) : null;
-  }
-
-  /**
-   * The holder around one posed clone — the whole of the frame change.
-   *
-   * Both hands take it unmirrored, which is the answer to a question worth
-   * writing down because `HAND_LOCAL` *is* mirrored a few lines up. That offset
-   * is mirrored because the pack mirrors the arm *geometry* while leaving the
-   * node alone, so the two limbs' centre lines sit either side of their own
-   * origins. The node's axes are not mirrored, `holding-left` is the same
-   * quaternion as `holding-right`, and `ViewModel` puts an offhand item at the
-   * pose's rotation exactly as it does a main-hand one. So the two hands want
-   * the same roll, and giving the left one a mirrored turn would be the offhand
-   * holding its torch upside down. Measured, not assumed: both hands land on
-   * the first-person orientation to within floating point.
-   */
-  _wearPose(posed) {
-    posed.position.set(0, 0, 0);
-
-    const holder = new THREE.Group();
-    holder.userData.modelled = true;
-    // XYZ order: Rx then Ry. See `_buildPosedItem` for what each turn is for.
-    holder.rotation.set(Math.PI / 2, Math.PI, 0);
-    holder.scale.setScalar(HELD_POSE_SCALE);
-    holder.add(posed);
-    return holder;
+    return handItemModel(itemId, onReady);
   }
 
   /**

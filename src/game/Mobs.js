@@ -42,7 +42,7 @@ import {
   CHARACTER_IDS, CHARACTER_NAMES, ARM_NODE, HAND_LOCAL, handItemModel,
 } from '../player/Character.js';
 import {
-  FOLK_SIGHT, FOLK_JOIN, FOLK_PERIOD, FOLK_ARMS,
+  FOLK_SIGHT, FOLK_JOIN, FOLK_PERIOD, FOLK_ARMS, SEE_THROUGH,
   folkRoster, folkType, isTaboo, screensSight,
 } from './Folk.js';
 
@@ -4371,6 +4371,23 @@ const MERCHANT_LIFE = 420;       // seconds before it moves on for good
 const FOLK_NEAR = 24;
 const FOLK_FAR = 70;
 const FOLK_PER_TICK = 3;
+/**
+ * Candidate columns tried per body. Higher than the merchant's 24 because
+ * this face refuses far more of them: a fifth of the columns carry a trunk
+ * (no headroom), a fifth of the floor is moss rather than grass, and a random
+ * walk of the right length still lands outside the band about half the time.
+ * Measured on seed 4242, 24 tries found nothing at all.
+ */
+const FOLK_TRIES = 60;
+/**
+ * How far from the first of them the rest are placed, in cells.
+ *
+ * FOLK_JOIN, and not by coincidence: every neighbour is within sight of the
+ * anchor when the village forms, so a chase running through it always has
+ * somebody to recruit. Any wider and the propagation becomes a thing that
+ * happens if you are lucky.
+ */
+const FOLK_HUDDLE = FOLK_JOIN;
 
 /** Coins one trader can pay out before it has nothing left to buy with. */
 const MERCHANT_PURSE_MIN = 140;
@@ -6692,22 +6709,61 @@ export class Mobs {
    * cinderlands is the kind of thing this codebase's seam bugs were all made
    * of. `faceAt` is the whole guard.
    */
-  _findFolkColumn(nearCol, playerPos, face) {
+  _findFolkColumn(nearCol, anchorPos, playerPos, face, spread) {
     const p = this.planet;
-    for (let tries = 0; tries < 24; tries++) {
-      const col = this._walkOut(nearCol, stepsFor(FOLK_NEAR)
-        + Math.floor(Math.random() * (stepsFor(FOLK_FAR) - stepsFor(FOLK_NEAR))));
+    const lo = stepsFor(2);
+    const hi = Math.max(lo + 1, stepsFor(spread));
+    for (let tries = 0; tries < FOLK_TRIES; tries++) {
+      const col = this._walkOut(nearCol, lo + Math.floor(Math.random() * (hi - lo)));
       if (faceOfCol(col) !== face) continue;
-      const k = p.surfaceK(col);
+      const k = this._floorUnderCanopy(col);
       if (k < 0 || k > D - 6) continue;
       if (!SPAWNABLE_GROUND.has(p.at(col, k))) continue;
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
-      const d = wrapDist(colTop(col, k, _p), playerPos);
-      if (d < FOLK_NEAR || d > FOLK_FAR) continue;
+      const top = colTop(col, k, _p);
+      // Never under the player's nose, and never so far out that the despawn
+      // ring takes it back on the next frame.
+      const d = wrapDist(top, playerPos);
+      if (d < FOLK_NEAR || d > this.despawnRadius - 30) continue;
+      // ...and inside the village, when there is one to be inside.
+      if (anchorPos && wrapDist(top, anchorPos) > spread) continue;
       return { col, k };
     }
     return null;
+  }
+
+  /**
+   * The ground under a jungle column, rather than the top of what is standing
+   * on it.
+   *
+   * `surfaceK` is "highest non-air, non-water layer", which on Verdant is the
+   * **canopy**: measured on seed 4242, twenty-four consecutive columns around
+   * the middle of the face all answered `leaves_oak`, because the trees are on
+   * a fifth of the columns and their crowns are wider than their trunks. So
+   * every spawn search on this face - the wildlife's and the merchant's
+   * included - is looking at a leaf and asking whether it is grass, and the
+   * answer is always no. That is why Verdant reads as empty.
+   *
+   * This is the fourteen's own answer to it and is deliberately not a change to
+   * `surfaceK`, which a dozen other things read and which is right about every
+   * other face. Descend through wood - the same `SEE_THROUGH` table the
+   * witnessing uses, so "what is a tree" is stated once - and what is left is
+   * the forest floor the village stands on.
+   */
+  _floorUnderCanopy(col) {
+    let k = this.planet.surfaceK(col);
+    // Past the air under it as well as past the wood. A crown sits several
+    // layers clear of the ground with nothing in between, so a descent that
+    // stopped at the first non-wood block stopped in mid-air - measured, and
+    // it answered layer 37 for a column whose floor is 35. The first SOLID
+    // block that is not wood is the floor, and nothing else is.
+    while (k >= 0) {
+      const id = this.planet.at(col, k);
+      if (IS_SOLID[id] === 1 && SEE_THROUGH[id] === 0) break;
+      k--;
+    }
+    return k;
   }
 
   /**
@@ -6735,15 +6791,29 @@ export class Mobs {
     // player's own body in the village on the one frame before main answers.
     if (!this.playerCharacter) return 0;
     const alive = new Set();
-    for (const m of this.list) if (m.spec.folk) alive.add(m.type);
+    // Whoever is already standing is where the village is. Without an anchor
+    // the fourteen are each placed on their own ring around the player and come
+    // out evenly spaced around it - measured, fourteen bodies at 41 to 69 cells
+    // with about 24 between neighbours, which is outside FOLK_JOIN. That is a
+    // patrol, not a village, and the propagation would almost never chain.
+    let anchor = null;
+    for (const m of this.list) {
+      if (!m.spec.folk) continue;
+      alive.add(m.type);
+      if (!anchor) anchor = m;
+    }
     let placed = 0;
     for (const id of folkRoster(this.playerCharacter)) {
       if (placed >= FOLK_PER_TICK) break;
       const type = folkType(id);
       if (alive.has(type)) continue;
-      const spot = this._findFolkColumn(playerCol, player.position, player.face);
+      const spot = anchor
+        ? this._findFolkColumn(this._colOf(anchor.cell.x, anchor.cell.y),
+          anchor.position, player.position, player.face, FOLK_HUDDLE)
+        : this._findFolkColumn(playerCol, null, player.position, player.face, FOLK_FAR);
       if (!spot) continue;
-      if (this.spawn(type, spot.col, spot.k)) placed++;
+      const mob = this.spawn(type, spot.col, spot.k);
+      if (mob) { placed++; if (!anchor) anchor = mob; }
     }
     return placed;
   }

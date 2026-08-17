@@ -281,8 +281,13 @@ and that is the right shape for what goes on it.
 The character select offers fifteen (`CHARACTER_IDS`) and you take one. **The
 other fourteen live here.**
 
-- **Neutral, and they trade.** Villagers in the Minecraft sense: you can deal
-  with them, and the face becomes the place you go to shop.
+- **Neutral, and they barter.** Not a shop and deliberately not an economy:
+  *"food for food, block for block, no ores no coins or plants, basically just
+  a useless trade but scale and fair trades only and only limited."* Like for
+  like, nothing outside those two families, equal value in both directions so
+  quantities scale, and a finite number of trades. Its whole worth is turning a
+  surplus you have into something you are short of, at no gain - which is also
+  why it can never be farmed.
 - **Mining is taboo.** Break any block within sight of one and **all of them
   turn hostile, for as long as you remain on the face**. Not permanent, not
   world-wide: leave and come back and they have forgotten.

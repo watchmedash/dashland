@@ -33,6 +33,11 @@
 // The point of deriving rather than tabulating is that the item registry keeps
 // growing. Anything new that declares `food`, or is craftable from things that
 // already have a price, gets a sensible one without being listed here.
+//
+// `Barter.js` is the other half of trading and has no coins in it at all: the
+// people on Verdant swap food for food and block for block at equal `valueOf`,
+// and the only thing they take from this file is that measure of worth and the
+// two counter prices they must never let a player beat.
 
 import { ITEMS, N_ITEMS, itemIdOf, FISH, fishPrice } from './Items.js';
 import { BLOCKS } from '../world/Blocks.js';

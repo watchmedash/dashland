@@ -843,8 +843,8 @@ G.snow = (s) => {
  *
  * Measured over the finished 128x128 tile: rgb min 17/3/35, max 243/138/253,
  * mean 145/63/186, and luma at the 5th/50th/95th percentiles 27.2 / 85.5 /
- * 161.0. Both ends of that matter. The mean sits far above the fog-banding
- * floor `edgestone` had to worry about, and the spread from 27 to 161 is what
+ * 161.0. Both ends of that matter. The mean sits far clear of the floor a
+ * near-black tile has to worry about, where the fog bands it, and the spread from 27 to 161 is what
  * says the tile still has a shape in it rather than having flattened into one
  * bright lilac wash.
  */

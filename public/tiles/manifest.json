@@ -2,7 +2,7 @@
   "size": 256,
   "cols": 12,
   "rows": 14,
-  "layers": 158,
+  "layers": 159,
   "ext": "webp",
   "crack": {
     "size": 64,
@@ -166,7 +166,8 @@
     "ruby_block",
     "sapphire_block",
     "emerald_block",
-    "void_block"
+    "void_block",
+    "portal"
   ],
   "bakedFromPack": 136
 }

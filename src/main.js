@@ -14,6 +14,7 @@ import { TouchControls } from './ui/TouchControls.js';
 import { Sky, MOON_FILL } from './render/Sky.js';
 import { PostFX } from './render/PostFX.js';
 import { Particles } from './render/Particles.js';
+import { Dividers } from './render/Dividers.js';
 import { BlockModels, CAP as BLOCK_MODEL_CAP } from './render/BlockModels.js';
 import { SignText } from './render/SignText.js';
 import {
@@ -1841,6 +1842,12 @@ class Game {
     this.player.autoJump = !!this.settings.autoJump;
     this.viewModel = new ViewModel((id) => this.drops.createItemMesh(id));
     this.sky = new Sky(this.scene, this.renderer);
+    // The dividers, seen from across the map. The portal blocks are terrain and
+    // terrain streams, so a boundary four hundred units off does not exist as
+    // geometry at all; this is the curtain of light that stands in for it past
+    // the streaming range. One draw call, built once, never rebuilt. See
+    // render/Dividers.js.
+    this.dividers = new Dividers(this.scene);
     this.particles = new Particles(this.scene, this.planet);
     // `setQuality` also does this, but it only runs when the tier CHANGES, and
     // a session that never opens the settings never calls it. The particles are
@@ -5922,6 +5929,7 @@ class Game {
     else this._frozenUpdate(dt);
 
     voxelUniforms.uTime.value += dt;
+    this.dividers.update(dt, this.camera);
     // Seat every chunk on the copy of itself nearest the eye, so terrain at
     // x = 0 seen from x = 1247 is drawn one unit away rather than 1247. The map
     // wraps and the vertices do not, so without this there is a hole in the

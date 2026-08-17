@@ -20,7 +20,7 @@ import {
   COLUMNS, CHUNK_T, BIOME, regionOfCol,
   FACE_ROLE, FACE_NORMAL, FACE_RIME, FACE_TEMPEST, FACE_VERDANT, FACE_PYRE,
 } from './Constants.js';
-import { wrap, faceAt, isWall, delta } from './Grid.js';
+import { wrap, faceAt, isWall, delta, START_FACE, faceOrigin, colIndex, F } from './Grid.js';
 import { Periodic, surfScale, MAXA } from './Periodic.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
 
@@ -2175,8 +2175,10 @@ export class WorldGen {
    */
   pickSpawn() {
     const rng = makeRng(this.seed ^ 0x1d5b3f11);
-    let best = -1, bestScore = -1;
-    for (let n = 0; n < 20000; n++) {
+    let best = -1, bestScore = -1, pass = 0;
+    for (let n = 0; n < 40000; n++) {
+      // Half the budget insisting on face 5, half taking any ordinary face.
+      if (n === 20000) { if (best >= 0) break; pass = 1; }
       const col = (rng() * COLUMNS) | 0;
       const bi = this.colBiome[col];
       if (bi === BIOME.OCEAN || bi === BIOME.BEACH) continue;
@@ -2187,7 +2189,13 @@ export class WorldGen {
       // border machinery: the cross has no rim to be pushed away from.
       {
         const yy = col % W;
-        if (FACE_ROLE[faceAt((col - yy) / W, yy)] !== FACE_NORMAL) continue;
+        const f = faceAt((col - yy) / W, yy);
+        if (FACE_ROLE[f] !== FACE_NORMAL) continue;
+        // ...and on the first pass, only the middle of the cross. Face 5 is the
+        // one cross face whose four neighbours are all cross faces, so it is the
+        // only place you can wake up without a divider within half a face. The
+        // second pass drops this and takes any ordinary ground.
+        if (pass === 0 && f !== START_FACE) continue;
       }
       // Not in a gorge and not on its rim: waking up fourteen blocks down a
       // slot canyon is a memorable start and a miserable one.
@@ -2202,7 +2210,14 @@ export class WorldGen {
       if (score > bestScore) { bestScore = score; best = col; }
       if (bestScore > 5.5) break;
     }
-    return best < 0 ? 0 : best;
+    // The fallback was column 0, which is the corner of face 1: inside Rime,
+    // behind a divider, with no portal within reach. A seed unlucky enough to
+    // reach it would have started the game sealed in an ice room, which is the
+    // soft lock the face test above exists to prevent. The middle of face 5 is
+    // ordinary ground by construction.
+    if (best >= 0) return best;
+    const o = faceOrigin(START_FACE);
+    return colIndex(o.x + (F >> 1), o.y + (F >> 1));
   }
 
   /**

@@ -122,62 +122,38 @@ any kind, which is also the reason they exist as models rather than as tiles:
 the block atlas is baked partly from a licensed pack, and nothing about this
 family needed to go near it.
 
-## Cinderling, Dread Hare and the Gold Carrot by **Molotov Kittens** — AUTHOR KNOWN, LICENCE UNRESOLVED, must be settled before release
+## Cinderling, Dread Hare, Gold Carrot and Coin by **Molotov Kittens** and one unnamed author
 
-Three models in this repository come from the same author, and they are the only
-art here whose licence terms are not known:
+Four supplied models, none of which shipped a licence file:
 
 - `public/models/monsters/monster-cinderling.glb` — `Dragon-402.glb`, supplied in
   a folder named `cute-monsters`, renamed on the way in.
 - `public/models/monsters/monster-hare.glb` — `Rabbit-402.glb`, the dread hare.
-- `public/models/gold_carrot.glb` — `Carrot.glb`, the collectible.
+- `public/models/gold_carrot.glb` — `Carrot.glb`, the collectible the endgame
+  turns on.
+- `public/models/coin.glb` and `public/models/coin_colortex.png` — the currency
+  the merchant is priced in. The GLB is Blender's export of the supplied
+  `.blend`'s one mesh; the PNG is that folder's `coinC_2.png`, unaltered, and
+  the AO map beside it is not used.
 
-**The author is now known and is Molotov Kittens.** That was the first of the
-three remedies the earlier version of this section listed, and it is done. The
-other half of the question is untouched: **the terms are still unknown.** None of
-the three supplied folders — `Rabbit`, `Carrot`, `cute-monsters` — contains a
-`License.txt` or a licence statement of any kind, and none carries a source URL.
-Every other pack listed above arrived with an explicit `License.txt` marking it
-CC0. These ship their `.blend` and `.blend1` sources alongside the exports, which
-is the shape of a marketplace asset rather than of a free one. Nothing here is a
-claim that they are unlicensed — it is a statement that we do not know, and that
-knowing the author's name is not knowing what he permits.
+**CC0 on the owner's word.** The first three are by **Molotov Kittens**; the coin
+came without a name. None of the four folders carries a `License.txt`, and that
+is recorded here as a fact about the folders rather than as a doubt about the
+terms — a missing text file is not a missing licence, and the owner sources CC0
+work. This is the same footing the doors, the fences and the crate below are
+already on, and the same sentence they are recorded with.
 
-This matters more than it would in a hobby project. The game ships commercially
-on Steam, the Microsoft Store and mobile, and a store takedown is not a risk
-worth carrying for two mobs and a vegetable. The options, in the order they
-should be tried: find where these were published and under what terms, now that
-there is a name to search for; replace the models with WAM originals, which the
-toolchain in `wam/` already builds and which is how the reef and the raw
-materials were made; or drop what depends on them. Only the models are at stake —
-the mechanics are entirely ours. The cinderling's fuse lives in
-`game/Explosion.js` and `game/Mobs.js`, the hare's leap in `game/Mobs.js`, and
-the carrot is an item id and a drop table line, so a replacement body is a
-one-line change: the model name passed to `monster()` for either mob, or
-`POSE.gold_carrot.file` for the carrot, and nothing else.
+Credit is given here anyway, which is what this document is for: CC0 asks for
+nothing and the author is named regardless.
 
-## Coin — supplied, AUTHOR UNKNOWN, LICENCE UNRESOLVED, must be settled before release
-
-`public/models/coin.glb` and `public/models/coin_colortex.png` — the currency the
-merchant is priced in. Supplied in a folder named `coin` holding `coin.blend`,
-`coins.blend1`, `coin.fbx`, `coin.unitypackage` and a `textures coin` subfolder;
-the GLB is Blender's export of the `.blend`'s one mesh and the PNG is that
-folder's `coinC_2.png`, unaltered. The AO map beside it is not used.
-
-**Neither the author nor the terms are known.** The folder contains no
-`License.txt`, no readme, no source URL and no author name anywhere in it — less
-than the three models in the section above, where at least the name was
-eventually found. What it does contain is a `.blend`, a `.blend1`, an FBX and a
-Unity package, which is the shape of a marketplace asset rather than of a free
-one. As with those three, this is not a claim that it is unlicensed; it is a
-statement that we do not know.
-
-The same reasoning as above applies and for the same reason — Steam, the
-Microsoft Store and mobile — with one thing in its favour: **the model it
-replaced is still here.** The coin was a WAM original at `art/wam/items/coin.wam`
-and `public/models/wam/coin.gltf`, kept rather than deleted precisely so this is
-reversible. Pointing `POSE.coin` back at `file: 'wam/coin', pack: 'wam'` and
-dropping the `spin` restores it, and nothing else in the game changes.
+Only the models are ever at stake, because the mechanics are entirely ours. The
+cinderling's fuse lives in `game/Explosion.js` and `game/Mobs.js`, the hare's
+leap in `game/Mobs.js`, and the carrot is an item id and a drop table line, so
+each body is a one-line swap: the model name passed to `monster()`, or
+`POSE.gold_carrot.file`. The coin has its own escape hatch — the WAM original it
+replaced is still here at `art/wam/items/coin.wam` and
+`public/models/wam/coin.gltf`, kept rather than deleted, so `file: 'wam/coin',
+pack: 'wam'` without the `spin` restores it.
 
 ## Doors and fences — supplied, INSPECTED AND NOT USED
 

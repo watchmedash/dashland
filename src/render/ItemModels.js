@@ -1113,7 +1113,13 @@ export const POSE = {
   // and it keeps every number of that tuning: it is authored lying flat, so
   // `spin` stands it on its rim facing +Z, which is where the WAM coin already
   // was. Same size, same fist, same two yaws.
-  coin:       { file: 'coin',           pack: 'coin', height: 0.22, grip: 0.16, spin: [0, 1.5708, 0], rot: [0.10, -0.30, 0.10],   pos: [0.003, 0.022, -0.009], icon: [0.12, 0.26, 0] },
+  // `height` is a raw multiplier on the model's own units, not a target size,
+  // so it does not survive a model swap. The WAM coin was 0.158 units across
+  // and the supplied one is 2.0 - 12.7x - which at the inherited 0.22 rendered
+  // a 0.44 dinner plate in the fist. 0.0174 puts it back at the WAM coin's
+  // 0.0348. The icon is unaffected either way: `iconModel` resets the scale to
+  // 1 and frames on the bounding box.
+  coin:       { file: 'coin',           pack: 'coin', height: 0.0174, grip: 0.16, spin: [0, 1.5708, 0], rot: [0.10, -0.30, 0.10],   pos: [0.003, 0.022, -0.009], icon: [0.12, 0.26, 0] },
   // The sapling takes the shaft pose — it is a stem with a crown on top, and
   // the drawn diagonal is what the other tall, thin items use. `grip` is low
   // on purpose: you carry a seedling by its stem, so the fist closes under the

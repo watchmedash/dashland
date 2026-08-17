@@ -5922,6 +5922,12 @@ class Game {
     else this._frozenUpdate(dt);
 
     voxelUniforms.uTime.value += dt;
+    // Seat every chunk on the copy of itself nearest the eye, so terrain at
+    // x = 0 seen from x = 1247 is drawn one unit away rather than 1247. The map
+    // wraps and the vertices do not, so without this there is a hole in the
+    // ground at each of the two wrap lines. `setView` writes only when a mesh's
+    // offset actually changes, and is a no-op away from a seam.
+    this.planet.setView(this.camera.position.x, this.camera.position.z);
     this.postfx.render(dt, {
       damage: this.damageFlash,
       underwater: this.player.headInWater,

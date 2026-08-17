@@ -11,9 +11,15 @@
 // reads, for the reason `Systems.test.mjs` gives: `Mobs.spawn` refuses a body
 // whose GLB has not loaded, so nothing here can obtain a real one.
 //
-// Mutation-checked: sixteen deliberate breakages, sixteen caught. The list is
-// at the foot of the file, and so is the one equivalent mutation that was
-// tried and discarded rather than counted.
+// Mutation-checked: thirty-five deliberate breakages, thirty-five caught. The
+// list is at the foot of the file, and so is the one equivalent mutation that
+// was tried and discarded rather than counted.
+//
+// The second half of the file is the night - `VerdantNight.js` and the swap in
+// `Mobs.js` - and it hunts one class of bug the way the first half hunts
+// "anger is a radius": **a body seen to leave**. Every retreat here is an
+// unobserved one, and the two ways that quietly stops being true are a sight
+// test that always answers yes and a body that can never satisfy it.
 
 import { register } from 'node:module';
 
@@ -44,6 +50,11 @@ const {
 const {
   newBarterState, offersLeft, forgetVisit, accept,
 } = await import('./Barter.js');
+const {
+  VERDANT_HUSKS, VERDANT_CINDER, VERDANT_NIGHT_CAP, VERDANT_NIGHT_SPECIES,
+  VERDANT_HIDE, VERDANT_PER_TICK, VERDANT_LINGER, VERDANT_NIGHT_NEAR,
+  VERDANT_NIGHT_FAR, VERDANT_GROUND, verdantNightDraw,
+} = await import('./VerdantNight.js');
 const { CHARACTER_IDS } = await import('../player/Character.js');
 
 let pass = 0, fail = 0;
@@ -146,7 +157,7 @@ function fakePlanet() {
   };
 }
 
-const mobsOn = (planet) => new Mobs({ add() {} }, planet, { spawn() {} });
+const mobsOn = (planet) => new Mobs({ add() {}, remove() {} }, planet, { spawn() {} });
 
 /** A body of one of the fourteen, at map (x, y), standing on GK. */
 function fakeFolk(mobs, id, x, y) {
@@ -426,6 +437,346 @@ const fakePlayer = (x, y) => ({
   eq(mobs._folkTopUp(on, 0), 0, 'nor before the roster is known');
 }
 
+// --- the night: what it is made of ------------------------------------------
+//
+// `VerdantNight.js` on its own, the way the head of this file asserts `Folk.js`
+// on its own. Everything here is a number with an argument behind it, and the
+// argument is the thing worth pinning: a night whose roster drifted to nine
+// exploders is a different game from the one section 8 describes.
+{
+  eq(VERDANT_HUSKS, folkRoster('a').length, 'one husk for every person who left');
+  eq(VERDANT_NIGHT_CAP, VERDANT_HUSKS + VERDANT_CINDER, 'and the cap is the two of them');
+  eq(VERDANT_NIGHT_CAP, 21, 'twenty-one bodies');
+  // MAX_MONSTERS_HOSTILE_FACE, which this file cannot import. The number is
+  // written out rather than skipped because it is the whole justification for
+  // twenty-one: a sealed face has already been played at twenty-four.
+  ok(VERDANT_NIGHT_CAP < 24, '...under the ceiling a sealed face already carries');
+  ok(VERDANT_HUSKS > 8, 'and above an ordinary night, which carries eight husks');
+  ok(VERDANT_HUSKS >= 14, '...at a savage night\'s fourteen on every difficulty');
+  // STALKER_VANISH, likewise not importable. If VERDANT_HIDE ever slipped to or
+  // below it, `_unobserved`'s "too close counts as unobserved" branch would
+  // reopen and a neighbour could blink out at arm's length.
+  ok(VERDANT_HIDE > 24, 'the hide floor is outside the stalker vanish ring');
+  ok(VERDANT_NIGHT_NEAR > 34, 'and the night arrives outside a husk\'s aggro ring');
+  ok(VERDANT_NIGHT_FAR > VERDANT_NIGHT_NEAR, 'on a ring with width to it');
+
+  // The draw, run out to a full night.
+  let husks = 0, cinders = 0, run = 0, worstRun = 0;
+  const order = [];
+  for (let n = 0; n < VERDANT_NIGHT_CAP; n++) {
+    const type = verdantNightDraw(husks, cinders);
+    order.push(type);
+    ok(VERDANT_NIGHT_SPECIES.includes(type), `${type} is on the night's roster`);
+    if (type === 'cinderling') { cinders++; run++; } else { husks++; run = 0; }
+    worstRun = Math.max(worstRun, run);
+  }
+  eq(husks, VERDANT_HUSKS, 'a full night is fourteen husks');
+  eq(cinders, VERDANT_CINDER, '...and seven cinderlings');
+  eq(order[0], 'husk', 'the first thing out of the dark is the common one');
+  eq(verdantNightDraw(husks, cinders), null, 'and the night is then full');
+  eq(worstRun, 1, 'no two exploders arrive back to back');
+  // The two ends, so the draw cannot answer a species that is already at quota.
+  eq(verdantNightDraw(VERDANT_HUSKS, 0), 'cinderling', 'a full husk quota draws the other');
+  eq(verdantNightDraw(0, VERDANT_CINDER), 'husk', '...and the other way round');
+
+  // The roster is husks and cinderlings, and they are the two the ask names.
+  eq(VERDANT_NIGHT_SPECIES.length, 2, 'two species and no more');
+  ok(specOf('husk').hostile, 'the husk is the night\'s baseline');
+  ok(specOf('cinderling').blast > 0, '...and the cinderling is the one with a fuse');
+  ok(!specOf('cinderling').damage, 'which does not hit you, it goes off');
+
+  // The jungle floor is three blocks and the night has to stand on all three.
+  for (const name of ['grass', 'moss_block', 'coarse_dirt']) {
+    ok(VERDANT_GROUND.has(idOf(name)), `the night stands on ${name}`);
+  }
+  ok(!VERDANT_GROUND.has(idOf('leaves_oak')), 'and never on the canopy');
+  ok(!VERDANT_GROUND.has(ID.water), 'nor on water');
+}
+
+// --- the floor under the canopy ---------------------------------------------
+//
+// The trap this face sets for every spawn search written against it. Asserted
+// here rather than taken on trust, because the failure is silent: the search
+// simply never returns a column and the face reads as empty.
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const col = 100 * W + 100;
+  // A crown three layers thick with clear air under it, which is what a jungle
+  // column actually looks like: `surfaceK` answers the top of the leaves.
+  planet.put(100, 100, GK + 4, GK + 6, idOf('leaves_oak'));
+  planet.surfaceK = () => GK + 6;
+  eq(planet.at(col, planet.surfaceK(col)), idOf('leaves_oak'),
+    'surfaceK on this face answers the canopy');
+  eq(mobs._floorUnderCanopy(col), GK, '...and the floor is what is under it');
+  // A trunk standing on the floor, so the descent is through wood as well as
+  // through air.
+  planet.put(100, 100, GK + 1, GK + 3, idOf('log_oak'));
+  eq(mobs._floorUnderCanopy(col), GK, 'a trunk is not the floor either');
+  // ...and one column of the fifth that carries nothing at all.
+  eq(mobs._floorUnderCanopy(101 * W + 101), GK, 'an open column answers the same');
+}
+
+/** A husk-shaped body of the night, at map (x, y). */
+function fakeNight(mobs, type, x, y) {
+  const spec = specOf(type);
+  const model = { root: new THREE.Object3D(), owned: [], actions: {},
+    mixer: { stopAllAction() {}, uncacheRoot() {} } };
+  const mob = {
+    id: x * 1000 + y, type, spec, model, verdantNight: true,
+    position: { x: x + 0.5, y: GK + 1.5, z: y + 0.5 },
+    up: { x: 0, y: 1, z: 0 },
+    cell: { x: x + 0.5, y: y + 0.5, k: GK + 1 },
+    health: spec.health, dying: 0, released: false,
+  };
+  mobs.list.push(mob);
+  return mob;
+}
+
+// --- the fourteen go, from the far side in ----------------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const player = fakePlayer(1100, 1100);
+  // Fourteen of them, spread out along a line at 30, 34, 38 ... cells.
+  const village = folkRoster('a').map((id, n) =>
+    fakeFolk(mobs, id, 1100 + VERDANT_HIDE + 4 + n * 4, 1100));
+  eq(village.length, 14, 'a full village');
+
+  eq(mobs._verdantSendOff(player, 0), VERDANT_PER_TICK, 'three leave on the first tick');
+  ok(!mobs.list.includes(village[13]), 'and the furthest one goes first');
+  ok(!mobs.list.includes(village[12]) && !mobs.list.includes(village[11]),
+    '...then the next two');
+  ok(mobs.list.includes(village[0]), 'while the nearest is still standing there');
+  // Four more ticks empties it. Fourteen at three a tick is five ticks, which
+  // at SPAWN_PERIOD is about ten seconds of nightfall.
+  for (let t = 0; t < 4; t++) mobs._verdantSendOff(player, 0);
+  eq(mobs.list.filter((m) => m.spec.folk).length, 0, 'the village is empty');
+  eq(mobs._verdantSendOff(player, 0), 0, 'and an empty village sends nobody off');
+}
+
+// --- ...and nothing goes while you are looking at it ------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const player = fakePlayer(1200, 1200);
+  const watched = fakeFolk(mobs, 'b', 1200 + 40, 1200);
+  const husk = fakeNight(mobs, 'husk', 1200 + 44, 1200);
+
+  // A real camera, at the player, looking straight down +x at both of them.
+  const cam = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 400);
+  cam.position.set(player.position.x, player.position.y + 0.6, player.position.z);
+  cam.lookAt(watched.position.x, watched.position.y, watched.position.z);
+  const aim = () => {
+    cam.updateMatrixWorld(true);
+    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+  };
+  aim();
+  mobs.camera = cam;
+  ok(mobs._inView(watched, 1.0), 'the camera is genuinely looking at him');
+  eq(mobs._verdantSendOff(player, 0), 0, 'and nobody leaves in the player\'s view');
+  eq(mobs._verdantDawnCull(player, 0), 0, '...nor does the night in it');
+
+  // Turn round. Same bodies, same distances, and now they go.
+  cam.lookAt(player.position.x - 10, player.position.y, player.position.z);
+  aim();
+  ok(!mobs._inView(watched, 1.0), 'now the camera is turned away');
+  eq(mobs._verdantSendOff(player, 0), 1, 'the one behind you leaves');
+  eq(mobs._verdantDawnCull(player, 0), 1, '...and so does the husk');
+  ok(mobs.list.length === 0, 'both gone');
+}
+
+// --- ...and a body that can never be unobserved still goes ------------------
+//
+// The hole the linger clock closes, and it is not the player staring: it is one
+// of them CHASING you, glued inside its own reach and therefore inside
+// VERDANT_HIDE forever. Without a clock that body is on the face at noon.
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const player = fakePlayer(1300, 1300);
+  const chaser = fakeFolk(mobs, 'b', 1301, 1300);
+  mobs._folkAnger(chaser);
+  ok(1 < VERDANT_HIDE, 'the chaser is inside the hide floor');
+  eq(mobs._verdantSendOff(player, VERDANT_LINGER * 0.5), 0, 'so the far-end pass never takes him');
+  ok(mobs.list.includes(chaser), 'and he is still there mid-night');
+  eq(mobs._verdantSendOff(player, VERDANT_LINGER * 0.6), 1, 'the clock takes him');
+  eq(mobs.list.length, 0, 'and the face is clear');
+}
+
+// --- the morning ------------------------------------------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const player = fakePlayer(1400, 1400);
+
+  // A night in progress: the roster standing, the village gone.
+  for (let n = 0; n < 6; n++) fakeNight(mobs, n % 3 === 2 ? 'cinderling' : 'husk',
+    1400 + VERDANT_HIDE + 4 + n * 4, 1400);
+  eq(mobs.list.length, 6, 'six of the night are up');
+  // Dawn takes them three at a tick, exactly as the dusk took the village.
+  eq(mobs._verdantDawnCull(player, 0), VERDANT_PER_TICK, 'three go with the light');
+  mobs._verdantDawnCull(player, 0);
+  eq(mobs.list.length, 0, 'and the night is over');
+
+  // The barter counter, which is the second caller of `forgetVisit`. Wired the
+  // way main wires it: Mobs knows the morning happened, `Barter.js` knows what
+  // a visit is, and neither knows the other.
+  const state = newBarterState();
+  const seed = 4242;
+  const key = traderIdOf('b');
+  const before = offersLeft(state, seed, key);
+  const inv = {
+    _n: new Map(),
+    count(id) { return this._n.get(id) ?? 0; },
+    roomFor() { return true; },
+    remove(id, n) { this._n.set(id, this.count(id) - n); return n; },
+    add(id, n) { this._n.set(id, this.count(id) + n); },
+    changed() {},
+  };
+  inv.add(before[0].give.item, before[0].give.count);
+  eq(accept(inv, state, seed, key, 0), true, 'a swap is taken during the day');
+  ok(offersLeft(state, seed, key)[0].left < before[0].left, 'which spends a use');
+
+  let dawns = 0;
+  mobs.onFolkDawn = () => { dawns++; forgetVisit(state); };
+  mobs._verdantDawn();
+  eq(dawns, 1, 'the morning fires once');
+  eq(offersLeft(state, seed, key)[0].left, before[0].left,
+    'and their stock is fresh again');
+}
+
+// --- a grudge never crosses a night -----------------------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const player = fakePlayer(1500, 1500);
+  const a = fakeFolk(mobs, 'b', 1500 + 8, 1500);
+  const b = fakeFolk(mobs, 'c', 1500 + 14, 1500);
+  eq(mobs.witnessMine(idOf('stone'), player), 2, 'two of them saw you mining');
+  ok(a.angry && b.angry, 'and both are hostile');
+
+  // The night takes the bodies, so there is nothing left to hold a grudge.
+  // Both are chasing you and therefore inside VERDANT_HIDE, so it is the linger
+  // clock that takes them - which is the case that matters here.
+  mobs._verdantSendOff(player, VERDANT_LINGER + 1);
+  eq(mobs.list.filter((m) => m.spec.folk).length, 0, 'the angry ones left with the rest');
+  // ...and the morning states it outright, for anything that somehow survived.
+  const straggler = fakeFolk(mobs, 'e', 1500 + 4, 1500);
+  mobs._folkAnger(straggler);
+  mobs._verdantDawn();
+  eq(straggler.angry, false, 'anger does not survive a night');
+  eq(straggler.target, null, '...and neither does the chase');
+  ok(mobs.canBarter(straggler), 'so the morning trades with you');
+}
+
+// --- the two populations never overlap --------------------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const player = fakePlayer(1600, 1600);
+  const person = fakeFolk(mobs, 'b', 1600 + 40, 1600);
+  const husk = fakeNight(mobs, 'husk', 1600 + 44, 1600);
+  // The dusk takes people and the dawn takes the night, and neither takes the
+  // other. A predicate that read `spec.hostile` or `spec.monster` would have
+  // taken the husk on both.
+  eq(mobs._verdantDawnCull(player, 0), 1, 'the dawn cull takes the night body');
+  ok(mobs.list.includes(person), 'and leaves the person standing');
+  eq(mobs._verdantSendOff(player, 0), 1, 'the send-off takes the person');
+  eq(mobs.list.length, 0, 'and that is both of them');
+}
+
+// --- a night body is never written down -------------------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  fakeNight(mobs, 'husk', 1700, 1700);
+  const written = mobs.toJSON().mobs;
+  eq(written.length, 0, 'the save holds nothing the morning is going to take');
+}
+
+// --- and nobody is topped up into a night -----------------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  mobs.playerCharacter = 'a';
+  const o = faceOrigin(7);
+  const on = fakePlayer(o.x + 20, o.y + 20);
+  on.face = 7;
+  // Counted at the search rather than at the spawn: `spawn` refuses a body
+  // whose GLB has not loaded, so headless every top-up "places" nobody whether
+  // or not it tried, and an assertion on the return value alone would pass with
+  // the stand-down deleted.
+  let searches = 0;
+  mobs._findFolkColumn = () => { searches++; return null; };
+  mobs.verdantNight = true;
+  eq(mobs._folkTopUp(on, 0), 0, 'the village does not refill behind the retreat');
+  eq(searches, 0, '...and does not so much as look for ground');
+  mobs.verdantNight = false;
+  mobs._folkTopUp(on, 0);
+  ok(searches > 0, 'while by day it looks');
+}
+
+// --- the night stands on the floor, not on the canopy -----------------------
+//
+// The one search this feature adds, against the trap the face sets. A version
+// written on `surfaceK` finds nothing at all here and the face reads as empty,
+// which is exactly how Verdant came to have no wildlife.
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const o = faceOrigin(7);
+  // Jungle floor everywhere, under a canopy everywhere.
+  planet.at = (col, k) => (k === GK ? idOf('moss_block')
+    : (k < GK ? idOf('stone') : (k >= GK + 4 && k <= GK + 6 ? idOf('leaves_oak') : 0)));
+  planet.surfaceK = () => GK + 6;
+  const near = fakePlayer(o.x + 60, o.y + 60);
+  const spot = mobs._findVerdantColumn(
+    mobs._colOf(near.cell.x, near.cell.y), near.position, 7);
+  ok(!!spot, 'the night finds ground on Verdant');
+  eq(spot.k, GK, '...under the canopy rather than on top of it');
+
+  // ...and never off it. Run from twenty cells inside the edge, where a random
+  // walk out to VERDANT_NIGHT_FAR steps over the seam most of the time - which
+  // is the whole reason the search tests the face at all. Every column above is
+  // standable here, so an unguarded walk answers with one.
+  const edge = fakePlayer(o.x + 20, o.y + 20);
+  const edgeCol = mobs._colOf(edge.cell.x, edge.cell.y);
+  let off = 0, found = 0;
+  for (let n = 0; n < 200; n++) {
+    const s = mobs._findVerdantColumn(edgeCol, edge.position, 7);
+    if (!s) continue;
+    found++;
+    if (faceAt(Math.floor(s.col / W), s.col % W) !== 7) off++;
+  }
+  ok(found > 0, 'the search answers near the seam');
+  eq(off, 0, 'and never with a column on another face');
+}
+
+// --- a body never arrives in shot -------------------------------------------
+{
+  const planet = fakePlanet();
+  const mobs = mobsOn(planet);
+  const player = fakePlayer(1800, 1800);
+  // `spawn` refuses a body whose GLB has not loaded, so the placement is stood
+  // in for and only the sight half is under test.
+  mobs.spawn = (type) => fakeNight(mobs, type, 1840, 1800);
+  const cam = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 400);
+  cam.position.set(player.position.x, player.position.y + 0.6, player.position.z);
+  const aim = (tx, tz) => {
+    cam.lookAt(tx, player.position.y, tz);
+    cam.updateMatrixWorld(true);
+    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+  };
+  mobs.camera = cam;
+  aim(1840.5, 1800.5);
+  eq(mobs._placeUnseen('husk', 0, GK), null, 'a body that lands in shot is taken back');
+  eq(mobs.list.length, 0, '...and is not left on the list');
+  aim(1700, 1800.5);
+  ok(!!mobs._placeUnseen('husk', 0, GK), 'and one behind you stays');
+  eq(mobs.list.length, 1, 'on the list');
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
 
@@ -447,6 +798,28 @@ process.exit(fail ? 1 : 0);
 // 14  `_hunt`'s `acquires` gains `spec.folk` unguarded  caught (neutral hunts)
 // 15  `calmFolk` clears `angry` but not `target`        caught
 // 16  the `folk` row gains `monster: true`              caught (XP paid)
+//
+// ...and nineteen more for the night, nineteen caught:
+//
+// 17  `_folkTopUp` drops the night stand-down             caught (it searches)
+// 18  `_verdantRetire` drops the VERDANT_HIDE floor       caught (chaser)
+// 19  `_verdantRetire` drops `_unobserved`                caught (in view)
+// 20  `_verdantRetire` takes the nearest                  caught
+// 21  `_verdantRetire` drops the linger clock             caught (chaser)
+// 22  `_verdantRetire` takes everyone at once             caught (stagger)
+// 23  `FOLK_BODY` matches every body                      caught (husk taken)
+// 24  `NIGHT_BODY` reads `spec.hostile` instead           caught (person taken)
+// 25  `toJSON` writes a night body                        caught
+// 26  `_verdantDawn` drops `calmFolk`                     caught
+// 27  `_verdantDawn` drops `onFolkDawn`                   caught (barter)
+// 28  `_floorUnderCanopy` drops its `IS_SOLID` term       caught (mid-air)
+// 29  `_findVerdantColumn` uses `surfaceK`                caught (no ground)
+// 30  `_placeUnseen` drops the frame test                 caught
+// 31  `_findVerdantColumn` drops the face test            caught (off-face)
+// 32  `verdantNightDraw`'s comparison is reversed         caught (order)
+// 33  VERDANT_CINDER raised to 14                         caught (mix)
+// 34  VERDANT_HIDE lowered under STALKER_VANISH           caught
+// 35  VERDANT_GROUND is grass and sand only               caught
 //
 // Discarded rather than counted: dropping the `blockId > 0` guard in `isTaboo`,
 // and starting the `TABOO` loop at 0 instead of 1. Both are equivalent

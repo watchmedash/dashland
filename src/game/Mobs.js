@@ -4394,6 +4394,10 @@ const FOLK_TRIES = 60;
  */
 const FOLK_HUDDLE = FOLK_JOIN;
 
+/** The two populations `_verdantRetire` swaps. See it for why they are here. */
+const FOLK_BODY = (m) => !!m.spec.folk;
+const NIGHT_BODY = (m) => !!m.verdantNight;
+
 /** Coins one trader can pay out before it has nothing left to buy with. */
 const MERCHANT_PURSE_MIN = 140;
 const MERCHANT_PURSE_MAX = 460;
@@ -6884,8 +6888,8 @@ export class Mobs {
    *
    * @returns {number} bodies placed, for the harness
    */
-  _verdantNightTick(player, playerCol) {
-    this._verdantSendOff(player);
+  _verdantNightTick(player, playerCol, dt) {
+    this._verdantSendOff(player, dt);
     let husks = 0, cinders = 0;
     for (const m of this.list) {
       if (!m.verdantNight) continue;
@@ -6928,49 +6932,59 @@ export class Mobs {
    *
    * @returns {number} how many left this tick
    */
-  _verdantSendOff(player) {
-    let n = 0;
-    for (let i = 0; i < VERDANT_PER_TICK; i++) {
-      let far = -1, farD = -1;
-      for (let j = this.list.length - 1; j >= 0; j--) {
-        const m = this.list[j];
-        if (!m.spec.folk) continue;
-        const d = wrapDist(m.position, player.position);
-        if (d < VERDANT_HIDE || !this._unobserved(m, d)) continue;
-        if (d > farD) { farD = d; far = j; }
-      }
-      if (far < 0) break;
-      this._release(this.list[far]); this.list.splice(far, 1); n++;
-    }
-    return n;
+  _verdantSendOff(player, dt) {
+    return this._verdantRetire(player, dt, FOLK_BODY);
   }
 
   /**
-   * ...and the night leaving, on the same terms plus a clock.
+   * ...and the night leaving in the morning, on exactly the same terms.
    *
    * The same shape as `_dawnCull`, which retires the drowned, and deliberately
    * not that function: it keys off `spec.nightOnly`, and a husk on Verdant is
    * an ordinary husk wearing one extra field. Sharing it would have meant a
    * species flag that means "night" on one face and nothing on the others.
    *
-   * The linger clock is what guarantees the last one goes. Without it a player
-   * who stands still and stares holds the night open past noon.
-   *
    * @returns {number} how many were retired
    */
   _verdantDawnCull(player, dt) {
+    return this._verdantRetire(player, dt, NIGHT_BODY);
+  }
+
+  /**
+   * Take a population off this face without the player seeing it happen.
+   *
+   * One function and two callers, because the dusk and the dawn are the same
+   * exchange run in opposite directions and any difference between them would
+   * be a difference the player could catch. `mine` is the only thing that
+   * varies, and the two predicates are module constants rather than closures so
+   * that neither call allocates one per tick.
+   *
+   * Two passes, and they answer two different questions:
+   *
+   *   the clock    what guarantees this *finishes*. The unobserved rule alone
+   *                can be held open forever — by staring at the last body, and
+   *                also by an angry one chasing you, which is glued inside
+   *                VERDANT_HIDE and never qualifies on distance at all. After
+   *                VERDANT_LINGER of the new hour, whoever is left goes.
+   *   the far end  what makes it invisible, and it is furthest-first exactly as
+   *                `_bedDown` and `_dawnCull` take the herd.
+   *
+   * @param {(mob) => boolean} mine which population this call is retiring
+   * @returns {number} how many were retired
+   */
+  _verdantRetire(player, dt, mine) {
     let n = 0;
     for (let j = this.list.length - 1; j >= 0; j--) {
       const m = this.list[j];
-      if (!m.verdantNight) continue;
-      m.dawnT = (m.dawnT || 0) + dt;
-      if (m.dawnT > VERDANT_LINGER) { this._release(m); this.list.splice(j, 1); n++; }
+      if (!mine(m)) continue;
+      m.verdantT = (m.verdantT || 0) + dt;
+      if (m.verdantT > VERDANT_LINGER) { this._release(m); this.list.splice(j, 1); n++; }
     }
     for (let i = 0; i < VERDANT_PER_TICK; i++) {
       let far = -1, farD = -1;
       for (let j = this.list.length - 1; j >= 0; j--) {
         const m = this.list[j];
-        if (!m.verdantNight) continue;
+        if (!mine(m)) continue;
         const d = wrapDist(m.position, player.position);
         if (d < VERDANT_HIDE || !this._unobserved(m, d)) continue;
         if (d > farD) { farD = d; far = j; }
@@ -11002,7 +11016,7 @@ export class Mobs {
       if (FACE_ROLE[player.face] === FACE_VERDANT) {
         if (!night && this.verdantNight) this._verdantDawn();
         this.verdantNight = night;
-        if (night) this._verdantNightTick(player, playerCol);
+        if (night) this._verdantNightTick(player, playerCol, SPAWN_PERIOD);
         else this._verdantDawnCull(player, SPAWN_PERIOD);
       }
       // And the fourteen, on Verdant and nowhere else.

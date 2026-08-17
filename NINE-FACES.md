@@ -249,3 +249,48 @@ Stages 1 and 2 are the ones worth being slow about. The cube conversion's
 lesson was that a coordinate bug found in stage 7 costs more than stages 1 to 6
 combined, and that the fastest way to find one is a test file that asserts the
 model directly rather than a game that looks wrong.
+
+---
+
+## 8. What the two new faces are for
+
+Terrain alone is not a reason to go somewhere. Rime has its ores and its cold,
+Pyre has its ores and its dark. These two were built with ground and nothing
+else, and this is the owner's design for what they hold.
+
+### Tempest — the storm flat
+
+Measured as generated: 44% of its surface is water, the rest gravel, mud and
+andesite; the whole face spans layers 32 to 40 against an ordinary face's 19 to
+69; nothing grows on it at all. It is a drowned grey plain with no high ground,
+and that is the right shape for what goes on it.
+
+- **Lightning storms.** Permanent, not weather that passes. `Weather.js`
+  already has a `lightning` flash and an `onThunder` hook, but nothing strikes:
+  this face wants real strikes that land, hurt, and start no fires it cannot
+  put out on wet ground. The flatness is the mechanic - there is nowhere to
+  shelter and nothing taller than you.
+- **Hostile mobs**, of its own kind, in a face that currently has none.
+- **The best fishing in the world.** Rare species are meaningfully likelier
+  here than anywhere else. That is the reward that justifies standing in the
+  open during a lightning storm, and it uses the 44% water the face already
+  has. `fishTable(salt, deep)` in `Items.js` owns the odds.
+
+### Verdant — the others
+
+The character select offers fifteen (`CHARACTER_IDS`) and you take one. **The
+other fourteen live here.**
+
+- **Neutral, and they trade.** Villagers in the Minecraft sense: you can deal
+  with them, and the face becomes the place you go to shop.
+- **Mining is taboo.** Break any block within sight of one and **all of them
+  turn hostile, for as long as you remain on the face**. Not permanent, not
+  world-wide: leave and come back and they have forgotten.
+- **Except wood.** Trunks and leaves are fair game. Everything else - stone,
+  ore, soil, their own ground - is not.
+- **Killing them pays nothing.** No drops, no XP. The design intent is that
+  violence here is pure loss, so the only sensible way to treat them is as
+  people.
+
+The two faces are deliberate opposites in play as well as in terrain: Tempest
+is the one you survive for a prize, Verdant is the one you must not fight.

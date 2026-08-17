@@ -582,6 +582,59 @@ eq(colHeight.length, W * W, 'one height per column of one map');
   ok(gen.volcanoCount > 0, `and volcanic fields (${gen.volcanoCount})`);
 }
 
+// ===========================================================================
+// A region is the same region whichever order it was built in
+// ===========================================================================
+//
+// The invariant the whole lazy scheme rests on, and the one the cube kept
+// losing: a decoration pass that reads what is standing in a cell is really
+// asking whether the region next door has been decorated yet, and the answer
+// depends on which way the player walked in. Nine regions are built forwards
+// and then backwards and the bytes are compared.
+//
+// It is checked here because the port touched almost every one of those passes
+// — the lattices, the `patchCol` arithmetic, the neighbour walk — and a
+// coordinate that came out subtly asymmetric would show up exactly like this.
+{
+  const dilate = (cols) => {
+    const seen = new Map(); const q = [...cols];
+    for (const c of cols) seen.set(c, 0);
+    for (let i = 0; i < q.length; i++) {
+      const c = q[i], d = seen.get(c);
+      if (d >= 6) continue;
+      const yy = c % W, xx = (c - yy) / W;
+      for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+        const nn = wrap(xx + dx) * W + wrap(yy + dy);
+        if (!seen.has(nn)) { seen.set(nn, d + 1); q.push(nn); }
+      }
+    }
+    return q;
+  };
+  const build = (order) => {
+    const b = new Uint8Array(CELLS);
+    const built = new Set();
+    for (const seed of order) {
+      const cols = [...regionColumns(regionOfCol(seed))];
+      const m = dilate(cols);
+      for (const c of m) if (!built.has(c)) { built.add(c); gen.terrainColumn(b, c); }
+      gen.decorateRegion(b, cols, m);
+    }
+    return b;
+  };
+  const o5 = faceOrigin(5);
+  const seeds = [];
+  for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) seeds.push((o5.x + 180 + a * 16) * W + (o5.y + 180 + b * 16));
+  const A = build(seeds), B = build([...seeds].reverse());
+  let diff = 0, cells = 0;
+  for (const seed of seeds) {
+    for (const c of regionColumns(regionOfCol(seed))) {
+      for (let k = 0; k < D; k++) { cells++; if (A[c * D + k] !== B[c * D + k]) diff++; }
+    }
+  }
+  ok(cells > 100000, `the order test really built nine regions (${cells} cells)`);
+  eq(diff, 0, 'a region comes out the same whichever order its neighbours were built in');
+}
+
 console.log(`built in ${(buildMs / 1000).toFixed(1)}s`);
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

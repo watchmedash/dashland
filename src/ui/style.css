@@ -2854,6 +2854,33 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
   .chargen-foot { margin-top: 8px; padding-top: 7px; }
 }
 
+/* A phone held sideways, which is the only way this game is played on one. The
+   card is a column of furniture stacked over the stage, and a column in a
+   window twice as wide as it is tall spends its height on the furniture and
+   gives the figure whatever is left: at 844x390 the stage sat at the 140px
+   floor of its clamp with 400px of window unused either side of the card.
+
+   Beside the controls instead. The stage takes the card's whole height and the
+   furniture takes the width, which is the axis there is room on. Same parts,
+   same order to read them in, turned a quarter turn like the phone. The stage
+   is still square and still sized off the window height - only `--cg-chrome`
+   changes, because in two columns the furniture no longer costs the stage
+   anything vertically. */
+@media (max-height: 520px) and (min-width: 620px) {
+  :root { --cg-chrome: 74px; }
+  .chargen-card {
+    width: min(760px, 100%);
+    display: grid; column-gap: 18px;
+    grid-template-columns: var(--cg-stage) minmax(0, 1fr);
+    grid-template-rows: auto auto auto 1fr;
+  }
+  .chargen-card h2, .cg-name, .cg-pick, .chargen-foot { grid-column: 2; }
+  .chargen-stage { grid-column: 1; grid-row: 1 / -1; align-self: center; margin-top: 0; }
+  /* Pushed to the foot of the column so Back and Begin sit level with the
+     bottom of the stage rather than floating under the difficulty row. */
+  .chargen-foot { align-self: end; margin-top: 0; }
+}
+
 ::-webkit-scrollbar { width: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(120, 100, 70, .32); border-radius: 99px; }

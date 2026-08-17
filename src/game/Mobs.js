@@ -8896,8 +8896,8 @@ export class Mobs {
     const aim = Math.atan2(rb, ra) + (Math.random() - 0.5) * 2 * LEAP_SPREAD;
     const range = dist * (1 - Math.random() * LEAP_SHORT);
     const speed = range / flight;
-    mob.leapX = Math.cos(aim) * speed ;
-    mob.leapZ = Math.sin(aim) * speed ;
+    mob.leapX = Math.cos(aim) * speed;
+    mob.leapZ = Math.sin(aim) * speed;
     mob.heading = aim;
     mob.want = aim;
     mob.vel.y = vUp;
@@ -9681,10 +9681,7 @@ export class Mobs {
       relTo(_rel, mob.position, prey.position);
       prey.state = 'flee';
       prey.stateT = 1.4 + Math.random();
-      prey.want = Math.atan2(
-        _rel.z,
-        _rel.x,
-      );
+      prey.want = Math.atan2(_rel.z, _rel.x);
     }
 
     const reach = (spec.reach ?? 1.0) + mob.radius + prey.radius;
@@ -9694,10 +9691,7 @@ export class Mobs {
     // reach — the hunter keeps chasing, and if there is a door it will find it.
     if (d > reach || !this._blowClear(mob, prey.position, prey.up, prey.spec.height)) {
       relTo(_rel, mob.position, prey.position);
-      mob.want = Math.atan2(
-        _rel.z,
-        _rel.x,
-      );
+      mob.want = Math.atan2(_rel.z, _rel.x);
       mob.state = 'chase';
       mob.stateT = 0.5;
       return true;
@@ -10230,10 +10224,7 @@ export class Mobs {
           // the next second anyway, and a figure caught mid-turn on the frame
           // he is noticed reads as one that walked there.
           relTo(_rel, seen.position, player.position);
-          seen.heading = Math.atan2(
-            _rel.z,
-            _rel.x,
-          );
+          seen.heading = Math.atan2(_rel.z, _rel.x);
           seen.want = seen.heading;
           seen.placed = false;      // adopt that heading outright, do not slerp
           this._animate(seen, 0);
@@ -10745,8 +10736,8 @@ export class Mobs {
 
       // --- integrate in cell space ------------------------------------------
       const ch = Math.cos(mob.heading), sh = Math.sin(mob.heading);
-      mob.vel.x = ch * mob.speedNow ;
-      mob.vel.z = sh * mob.speedNow ;
+      mob.vel.x = ch * mob.speedNow;
+      mob.vel.z = sh * mob.speedNow;
 
       // Knockback rides on top of steering rather than replacing it, so a husk
       // is shoved back while still facing you and closes again the moment it
@@ -10756,8 +10747,8 @@ export class Mobs {
       // fell over. This is the beat that makes a fight a fight.
       if (mob.knockT > 0) {
         const decay = mob.knockT / KNOCK_TIME;
-        mob.vel.x += mob.knockX * decay ;
-        mob.vel.z += mob.knockZ * decay ;
+        mob.vel.x += mob.knockX * decay;
+        mob.vel.z += mob.knockZ * decay;
         mob.knockT = Math.max(0, mob.knockT - dt);
       }
 

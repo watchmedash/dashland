@@ -195,8 +195,8 @@ export const FACE_ROLE = [
 export const FACE_NAME = [
   '',
   'Rime', 'Aurora', 'Tempest',
-  'Umbra', 'Meadowlands', 'Vesper',
-  'Verdant', 'Zenith', 'Pyre',
+  'Zenith', 'Meadowlands', 'Vesper',
+  'Verdant', 'Umbra', 'Pyre',
 ];
 
 /**

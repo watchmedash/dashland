@@ -71,7 +71,7 @@ import {
   FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
   CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
   NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns, regionOfCol,
-  BIOME, FACE_ROLE, FACE_CINDER, FACE_POLAR, FACE_PHYSICS,
+  BIOME, FACE_ROLE, FACE_CINDER, FACE_POLAR, FACE_PHYSICS, FACE_NAME,
 } from './world/Constants.js';
 import {
   colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
@@ -6578,7 +6578,7 @@ class Game {
     this.particles.update(dt, this.camera, this.player.up, this.sky);
     this._updateSharedUniforms();
     this._updateAudio(biomeId);
-    this._updateHud(biomeId);
+    this._updateHud();
 
     this.autosaveTimer += dt;
     if (this.autosaveTimer > 90) { this.autosaveTimer = 0; this.saveGame(false); }
@@ -11350,9 +11350,9 @@ class Game {
     return Math.min(1, n / 6);
   }
 
-  _updateHud(biomeId) {
+  _updateHud() {
     this.ui.updateVitals(this.player.health, this.player.maxHealth, this.breath, this.player.stamina, this.energy);
-    this.ui.updateStatus(this.timeOfDay(), biomeId, this.weather.label, this.seasons);
+    this.ui.updateStatus(this.timeOfDay(), FACE_NAME[this.player.cell.f]);
     // Both read the planet's own tables and the player's tangent frame, and
     // neither writes anything back — so they go here with the rest of the
     // readouts rather than into the simulation above.

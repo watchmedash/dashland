@@ -325,6 +325,18 @@ export const FACE_ROLE = [
 ];
 
 /**
+ * What each face is called, same index order.
+ *
+ * Rime and Pyre are the two dedicated faces and are one syllable each because
+ * each is nothing but its element. The other four are a day, and they are in
+ * RING ORDER on purpose: walking +X -> +Z -> -X -> -Z is walking Aurora ->
+ * Zenith -> Vesper -> Umbra, so the name tells you which way round the planet
+ * you are going and which face comes next. That is the whole reason for the
+ * set, so a swapped name has to keep its place in the day.
+ */
+export const FACE_NAME = ['Aurora', 'Vesper', 'Rime', 'Pyre', 'Zenith', 'Umbra'];
+
+/**
  * What each face does to the body walking on it, indexed by FACE_ROLE.
  *
  * This is section 6e of CUBE-PLANET.md - per-face physics - and it is what

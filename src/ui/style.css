@@ -1110,7 +1110,7 @@ select.pick option { color: var(--ink); background: var(--parchment); }
   transition: transform .5s linear;
 }
 #chip-clock #clock-text { font-family: var(--mono); letter-spacing: .04em; color: var(--ink); }
-#chip-biome { color: var(--accent-deep); }
+#chip-face { color: var(--accent-deep); }
 
 /* bottom cluster */
 #bottom {

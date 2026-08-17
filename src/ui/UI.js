@@ -20,7 +20,10 @@ import { patchColumn } from '../world/Sphere.js';
 import { compassFrame } from '../render/Sky.js';
 import { normalizeDifficulty, EXTREME } from '../game/NewGame.js';
 
-const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands', 'Cinderlands'];
+// Biome names are no longer shown in the status row, but `audio/Ambience.js`
+// still indexes its beds against this order, so the list is the contract
+// between the two and stays here.
+export const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands', 'Cinderlands'];
 
 /**
  * Who the fifteen are, if `Character.js` has not said yet.
@@ -452,7 +455,7 @@ export class UI {
       vHealth: $('v-health'), vFood: $('v-food'),
       vStamina: $('v-stamina'), vBreath: $('v-breath'),
       clockDial: $('clock-dial'), clockText: $('clock-text'),
-      chipWeather: $('chip-weather'), chipBiome: $('chip-biome'), chipSeason: $('chip-season'),
+      chipFace: $('chip-face'),
       chipPack: $('chip-pack'), packDist: $('pack-dist'), chipSave: $('chip-save'),
       pzQuit: $('pz-quit'),
       toasts: $('toasts'), debug: $('debug'), hint: $('hint'),
@@ -1700,7 +1703,7 @@ export class UI {
    * of them can change again, and a health bar pinned at empty is a worse way
    * of saying "you are dead" than simply not having one.
    *
-   * What stays is the status row (clock, weather, season, biome), the compass
+   * What stays is the status row (clock and face), the compass
    * and the minimap, because those are about the planet rather than the person
    * and exploring is the entire remaining game.
    *
@@ -2831,19 +2834,22 @@ export class UI {
       breath < 0.999);
   }
 
-  updateStatus(clockFraction, biomeId, weatherLabel, season = null) {
+  /**
+   * The status row: the clock and where you are, and nothing else.
+   *
+   * It carried weather, season and biome too. All three were readable out of
+   * the window - rain is rain, autumn is the colour of the trees, and a desert
+   * announces itself - so they were a caption on a picture the player was
+   * already looking at. The face name is the one thing the view cannot say,
+   * because every face looks like a world and none of them says which.
+   */
+  updateStatus(clockFraction, faceName) {
     const mins = Math.round(clockFraction * 1440);
     const h = String(Math.floor(mins / 60) % 24).padStart(2, '0');
     const m = String(mins % 60).padStart(2, '0');
     this.el.clockText.textContent = `${h}:${m}`;
     this.el.clockDial.style.transform = `rotate(${clockFraction * 360}deg)`;
-    this.el.chipBiome.textContent = BIOME_NAMES[biomeId] ?? '-';
-    this.el.chipWeather.textContent = weatherLabel;
-    // "Autumn 2" rather than "Autumn": which day of the season is the part a
-    // farmer needs, since it says how long is left to bring a field in.
-    if (season && this.el.chipSeason) {
-      this.el.chipSeason.textContent = `${season.name} ${season.dayOfSeason}`;
-    }
+    this.el.chipFace.textContent = faceName ?? '-';
     this._paintPackChip();
   }
 

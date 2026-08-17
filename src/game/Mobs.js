@@ -10748,6 +10748,14 @@ export class Mobs {
     // and nothing there burns at dawn because dawn does not come.
     if (FACE_ROLE[player.face] === FACE_PYRE) this.daylight = -1;
     const night = this.daylight < 0.02;
+    // Verdant's night, as a fact about *this frame* rather than about the face's
+    // memory. `this.verdantNight` is deliberately sticky — it survives walking
+    // out through the portal at midnight, so that walking back in at noon is a
+    // dawn — and that stickiness is exactly wrong for the two spawners it
+    // stands down. Measured: leaving Verdant after dark left the flag set and
+    // the husk and drowned budgets stood down on every face the player then
+    // visited, until morning.
+    const verdantDark = night && FACE_ROLE[player.face] === FACE_VERDANT;
 
     // The night stalk's two clocks, ticked once for the planet rather than once
     // per cat — see the note where they are declared. They are allowed to run in
@@ -10903,7 +10911,7 @@ export class Mobs {
       // Not a small point: the ordinary search does find ground on this face on
       // the columns that carry no tree, so leaving it running would have laid
       // eight more husks on top of twenty-one and made the cap a fiction.
-      if (night && !this.verdantNight && !this.spawnGrace
+      if (night && !verdantDark && !this.spawnGrace
           && this._countHostile(false) < surfaceCap) {
         const spot = this._findSpawnColumn(playerCol, player.position);
         if (spot && this._hostileHere(spot.col)) {
@@ -10930,7 +10938,7 @@ export class Mobs {
       // world's opening minutes are not where any of this belongs, and a player
       // who starts beside an ocean after dark should not meet this before they
       // have found the mouse.
-      if (night && !this.verdantNight && !this.spawnGrace
+      if (night && !verdantDark && !this.spawnGrace
           && this._countDrowned() < MAX_DROWNED) {
         const spot = this._findDeepColumn(playerCol, player.position);
         if (spot && this._hostileHere(spot.col)) this.spawn('drowned', spot.col, spot.k);

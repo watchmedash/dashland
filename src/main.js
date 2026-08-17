@@ -140,6 +140,27 @@ const _castV = new THREE.Vector3();
 const _bobY = new THREE.Vector3(0, 1, 0);
 
 /**
+ * Is the app being drawn sideways?
+ *
+ * iOS Safari has no orientation-lock API, so an upright phone gets a CSS
+ * rotation instead and the app's box becomes the TRANSPOSE of the window:
+ * `100dvh` wide by `100dvw` tall. `renderer.setSize(w, h, false)` does not
+ * touch the CSS size, so a drawing buffer taken straight off `innerWidth` is
+ * portrait inside a landscape box - a stretched image and a camera aspect that
+ * is the reciprocal of the right one.
+ *
+ * A coarse pointer is in the query on purpose: nothing about this can fire on
+ * a desktop, in portrait or otherwise, so `viewSize` there is exactly the two
+ * lines it replaced.
+ */
+const ROTATED = matchMedia('(orientation: portrait) and (pointer: coarse)');
+
+/** The size to draw at, transposed when the app is rotated. */
+const viewSize = () => (ROTATED.matches
+  ? { w: window.innerHeight, h: window.innerWidth }
+  : { w: window.innerWidth, h: window.innerHeight });
+
+/**
  * The four diagonal steps, as (di, dj) pairs for `stepColumn`.
  *
  * `COL_NB` only holds the four edge neighbours, so a rule that cares about all
@@ -2184,14 +2205,15 @@ class Game {
     // player who dropped the scale for performance would otherwise get a
     // full-resolution first session every time they reloaded.
     renderer.setPixelRatio(this._pixelRatio());
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    const vs = viewSize();
+    renderer.setSize(vs.w, vs.h, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer = renderer;
-    this.width = window.innerWidth; this.height = window.innerHeight;
+    this.width = vs.w; this.height = vs.h;
 
     this.scene = new THREE.Scene();
     // Scene fog exists for ONE job: the underwater tint, on everything the
@@ -2309,6 +2331,9 @@ class Game {
 
   _bindWindow() {
     window.addEventListener('resize', () => this._resize());
+    // Turning the phone changes which way round the box is without necessarily
+    // changing the window, so `resize` alone can leave the buffer transposed.
+    ROTATED.addEventListener('change', () => this._resize());
     window.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('beforeunload', () => {
       // The marks ride in that payload now, so this is the only thing that
@@ -2411,7 +2436,8 @@ class Game {
   }
 
   _resize() {
-    this.width = window.innerWidth; this.height = window.innerHeight;
+    const vs = viewSize();
+    this.width = vs.w; this.height = vs.h;
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(this.width, this.height, false);

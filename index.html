@@ -3,11 +3,20 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Mojazer: Tiny Planet</title>
+<title>Mojazer</title>
 <link rel="stylesheet" href="/src/ui/style.css" />
+<link rel="manifest" href="./manifest.webmanifest" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪐</text></svg>" />
 </head>
 <body>
+  <!-- Everything the game draws lives in here, and on a desktop this element is
+       `display: contents` and therefore not a box at all. It exists for one
+       case: a touch device held upright. The game is landscape, and iOS Safari
+       has no orientation lock to ask, so the stylesheet turns this wrapper a
+       quarter turn and hands it the window's dimensions swapped over. See the
+       last block of style.css, and `_rot` in TouchControls.js, which is what
+       turns a thumb's drag back the same amount. -->
+  <div id="app">
   <canvas id="view"></canvas>
 
   <!-- ── loading ─────────────────────────────────────────── -->
@@ -15,7 +24,7 @@
     <div class="loader-inner">
       <div class="planet-mark"><span></span><span></span><span></span></div>
       <h1>MOJA<em>ZER</em></h1>
-      <p class="tagline">A tiny planet, entirely yours.</p>
+      <p class="tagline">A world, entirely yours.</p>
       <div class="bar"><div class="bar-fill" id="load-fill"></div></div>
       <p class="status" id="load-status">Waking the void</p>
     </div>
@@ -25,7 +34,7 @@
   <div id="menu" class="overlay hidden">
     <div class="menu-card">
       <h1>MOJA<em>ZER</em></h1>
-      <p class="tagline">A tiny planet, entirely yours.</p>
+      <p class="tagline">A world, entirely yours.</p>
       <div class="menu-actions">
         <button id="mm-continue" class="primary">Continue</button>
         <button id="mm-new">New Game</button>
@@ -464,6 +473,26 @@
       </div>
     </div>
   </div>
+
+  </div>
+
+  <!-- Ask the browser for landscape, once, on the first touch anywhere. Both
+       calls need a user gesture and both are missing or refused on plenty of
+       browsers, so every one of them is wrapped and every rejection is dropped:
+       this is an improvement where it works and nothing where it does not. The
+       CSS rotation above is what covers the rest. -->
+  <script>
+    (function () {
+      // Touch only. On a mouse the window is whatever size the player left it,
+      // and taking it fullscreen because he clicked something is not ours to do.
+      if (!matchMedia('(pointer: coarse)').matches) return;
+      var hush = function (p) { if (p && p.catch) p.catch(function () {}); };
+      addEventListener('pointerdown', function () {
+        try { hush(document.documentElement.requestFullscreen()); } catch (e) {}
+        try { hush(screen.orientation.lock('landscape')); } catch (e) {}
+      }, { once: true, passive: true });
+    })();
+  </script>
 
   <script type="module" src="/src/main.js"></script>
 </body>

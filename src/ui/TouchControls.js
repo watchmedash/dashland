@@ -59,6 +59,24 @@ const STICK_R = 52;
 const DEAD = 0.24;
 const SPRINT = 0.86;
 
+/** Is the app being drawn side-on inside an upright window?
+ *
+ *  The stylesheet turns `#app` a quarter turn on a portrait touch device, which
+ *  the browser handles for hit testing - a button is where it looks - but not
+ *  for coordinates. `clientX/Y` stay the *window's*, so a thumb dragged towards
+ *  the top of the phone as the player holds it arrives here as a drag to the
+ *  left, and both the look surface and the stick read raw deltas. This is the
+ *  one media query in the game that JavaScript has to agree with; it is the same
+ *  condition as the last block of style.css and has to stay that way. */
+const rotated = () =>
+  matchMedia('(orientation: portrait) and (pointer: coarse)').matches;
+
+/** Turn a window-space delta back into an app-space one. `rotate(90deg)` sends
+ *  app (x, y) to window (-y, x), so the way back is (y, -x). */
+function unrotate(dx, dy) {
+  return rotated() ? { dx: dy, dy: -dx } : { dx, dy };
+}
+
 /** Hold a hotbar cell this long and it starts dropping, then keeps dropping at
  *  this rate. 420ms is long enough that nobody selecting a slot ever reaches it
  *  — a tap is under 150ms — and short enough that it does not feel stuck.

@@ -2719,6 +2719,78 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 .ach-row.done { background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7)); }
 .ach-row.done .ach-count { color: var(--ink); }
 
+/* ══════════════════════════════════════════════════════════
+   SCREENS, NOT WINDOWS
+   ══════════════════════════════════════════════════════════
+   A menu is the screen. It was a card floating on a dimmed photo of the world,
+   which is a shape borrowed from a desktop with a large window and it is a poor
+   one anywhere else: on a phone held sideways the gutter, the frame, the card's
+   own padding and the air the card needs around it spent about a quarter of
+   390px before a single row of content existed, and the character picker's
+   figure was left with 138 of them.
+
+   So the sheet is the viewport now, on both axes, and the FURNITURE is what
+   went away: the frame, the corner radius, the drop shadow, the dim behind it.
+   The material did not. Same parchment, same brass tack ahead of a heading,
+   same carved groove under it, same keys.
+
+   What did not become full width is the CONTENT. A settings row 1900px across
+   is not a screen, it is a spreadsheet, so each screen keeps the width it was
+   already tuned to and centres it, using its own padding to do it: the sheet is
+   the window, the column in it is `--sheet` wide. One expression, no wrapper
+   element, and it degrades to a plain gutter the moment the window is narrower
+   than the column.
+
+   The four cards that are NOT screens are the ones raised over a world you are
+   meant to keep seeing or over a screen you have not left: pause, death, the
+   sign, and the confirm. A pause menu that hides the world is a menu you cannot
+   pause *in*, and a yes/no that replaces the screen that asked it has taken the
+   question away with it. Those stay cards, on the dim, exactly as they were. */
+
+#menu, #chargen, #slots, #screen, #settings, #controls, #achievements, #skills {
+  padding: 0;
+  background: none;
+  backdrop-filter: none;
+}
+#menu > .menu-card,
+#chargen > .chargen-card,
+#slots > .panel, #screen > .panel, #settings > .panel,
+#controls > .panel, #achievements > .panel, #skills > .panel {
+  --sheet: 660px;
+  width: 100%; max-width: none;
+  height: 100%; max-height: none;
+  margin: 0;
+  border: none; border-radius: 0;
+  background: var(--paper);
+  box-shadow: none;
+  /* The column, centred by padding rather than by a wrapper. */
+  padding: 18px max(var(--gutter), calc((100% - var(--sheet)) / 2));
+}
+/* No seam, because there is no frame for one to be the edge of. */
+#menu > .menu-card::before,
+#chargen > .chargen-card::before,
+#slots > .panel::before, #screen > .panel::before, #settings > .panel::before,
+#controls > .panel::before, #achievements > .panel::before,
+#skills > .panel::before { display: none; }
+
+/* Each screen keeps the column width it was already tuned to. */
+#slots > .panel { --sheet: 520px; }
+#skills > .panel { --sheet: 560px; }
+#screen > .panel { --sheet: 830px; }
+#chargen > .chargen-card { --sheet: 760px; }
+
+/* The main menu is a wordmark and four keys, so it is centred in the sheet
+   rather than sitting at the top of it. */
+/* Grid and not flex, on purpose: a flex child shrinks below its own content
+   when the sheet is shorter than the stack, and the one child here that must
+   never be shrunk is a square canvas. A grid row does not do that. */
+#menu > .menu-card,
+#chargen > .chargen-card {
+  display: grid; align-content: center;
+  overflow-y: auto;
+}
+#menu .menu-actions { width: min(340px, 100%); margin-left: auto; margin-right: auto; }
+
 /* ── narrow windows ────────────────────────────────────── */
 /* The nine-column grid and the 236px sidebar together need ~760px of viewport.
    Below that the grid used to overflow the panel and get clipped on both
@@ -2825,7 +2897,12 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    for. The stage is already capped against the height by `--cg-stage`; this
    buys it the rest by taking the air out of everything around it, so a figure
    in a short window is small rather than cropped. */
-@media (max-height: 660px) {
+/* Each of the three short-window blocks below is asked twice. The second half
+   of the condition is the same question put to a portrait phone that the last
+   block in this file has turned on its side: there the app's height is the
+   window's width, so `max-height` becomes `max-width` and nothing else moves. */
+@media (max-height: 660px),
+       (orientation: portrait) and (pointer: coarse) and (max-width: 660px) {
   .chargen-card { padding: 14px 18px 12px; }
   .chargen-card .chargen-stage { margin-top: 10px; }
   .cg-name { margin-top: 8px; }
@@ -2844,7 +2921,8 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    the only room left is in the furniture, so the last of it goes here and the
    card still lands inside a 450px window rather than hanging out of the bottom
    of one. */
-@media (max-height: 520px) {
+@media (max-height: 520px),
+       (orientation: portrait) and (pointer: coarse) and (max-width: 520px) {
   .chargen-card { padding: 10px 16px 10px; }
   .chargen-card h2 { font-size: var(--fs-md); }
   .cg-name { margin-top: 6px; }
@@ -2866,10 +2944,12 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    is still square and still sized off the window height - only `--cg-chrome`
    changes, because in two columns the furniture no longer costs the stage
    anything vertically. */
-@media (max-height: 520px) and (min-width: 620px) {
+@media (max-height: 520px) and (min-width: 620px),
+       (orientation: portrait) and (pointer: coarse) and (max-width: 520px) and (min-height: 620px) {
   :root { --cg-chrome: 74px; }
-  .chargen-card {
-    width: min(760px, 100%);
+  /* The id is here to beat the full-sheet block at the foot of this file, which
+     lays the same card out as a centred column. */
+  #chargen > .chargen-card {
     display: grid; column-gap: 18px;
     grid-template-columns: var(--cg-stage) minmax(0, 1fr);
     grid-template-rows: auto auto auto 1fr;
@@ -2886,19 +2966,13 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 ::-webkit-scrollbar-thumb { background: rgba(120, 100, 70, .32); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(120, 100, 70, .5); }
 
-/* No Close buttons on the sheets. The key that opened a screen closes it, and
-   so does clicking the dark outside - both of which a player already tries
-   before hunting for a button. The elements stay in the markup and stay wired,
-   so the shortcut hint and the click target are still there for anyone
-   navigating by keyboard; they are simply not drawn.
-
-   The death card keeps its buttons: it is the one sheet you cannot dismiss by
-   changing your mind, and Wake Up is a decision rather than an exit. */
-[data-close-screen][data-close-screen],
-[data-close-skills][data-close-skills],
-[data-close-settings][data-close-settings],
-[data-close-controls][data-close-controls],
-[data-close-slots][data-close-slots] { display: none; }
+/* The Close buttons on the sheets used to be hidden here, on the reasoning that
+   the key that opened a screen closes it and so does clicking the dark outside,
+   and that both are tried before anyone hunts for a button. Both of those went
+   with the card: a screen that fills the window has no dark outside to click,
+   and a phone has no Escape key. So the buttons are drawn again. They were
+   never removed from the markup and were always wired, which is why this is a
+   deletion and not a feature. */
 
 /* ══════════════════════════════════════════════════════════
    THUMBS
@@ -3255,3 +3329,48 @@ body.touch .slot.tc-drop {
 body.touch .controls-touch { display: block; }
 body.touch #controls .panel-body > .ctl-head,
 body.touch #controls .panel-body > .controls-grid { display: none; }
+
+/* ══════════════════════════════════════════════════════════
+   A PHONE HELD UPRIGHT
+   ══════════════════════════════════════════════════════════
+   This game is landscape. Android honours `"orientation": "landscape"` in the
+   manifest and `screen.orientation.lock`, and index.html asks for both; iOS
+   Safari has neither and never will. So on a touch device held in portrait the
+   whole app is turned a quarter turn and handed the window's dimensions swapped
+   over, and every rule above this reads a landscape box and behaves exactly as
+   it does on a phone already on its side.
+
+   `#app` is `display: contents` everywhere else, which means it generates no
+   box at all: on a desktop this wrapper costs the layout nothing and changes
+   nothing. `pointer: coarse` is what keeps a desktop browser in a narrow window
+   out of it, and a tablet somebody is deliberately holding upright with a
+   keyboard attached with it. */
+#app { display: contents; }
+
+@media (orientation: portrait) and (pointer: coarse) {
+  /* The two window numbers the stylesheet is built out of are the window's, and
+     inside a rotated box they are the wrong way round: the app's height is the
+     window's *width*. Swapped here rather than at every use. */
+  :root {
+    --screen-h: calc(100vw - var(--gutter) * 2);
+    --cg-stage: clamp(140px, calc(100vw - var(--cg-chrome)), 420px);
+  }
+  #app {
+    display: block; position: fixed; top: 0; left: 0;
+    width: 100vh; height: 100vw;
+    transform-origin: 0 0;
+    /* Read right to left: lift the box by its own height, then turn it about
+       the window's top-left corner. It lands filling the window. */
+    transform: rotate(90deg) translateY(-100%);
+    overflow: hidden;
+  }
+}
+@supports (height: 100dvh) {
+  @media (orientation: portrait) and (pointer: coarse) {
+    :root {
+      --screen-h: calc(100dvw - var(--gutter) * 2);
+      --cg-stage: clamp(140px, calc(100dvw - var(--cg-chrome)), 420px);
+    }
+    #app { width: 100dvh; height: 100dvw; }
+  }
+}

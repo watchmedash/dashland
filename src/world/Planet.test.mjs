@@ -11,11 +11,11 @@
 // renderer or a DOM: `raycast` marches `blocks` and returns plain numbers, and
 // `centerOf` writes into a Vector3. The mesher half is pure.
 
-import { W, D, wrap, colIndex, faceAt, worldOf, cellOf } from './Grid.js';
+import { W, D, wrap, colIndex, faceAt, worldOf, cellOf, delta } from './Grid.js';
 import {
   CHUNK_T, CHUNK_K, CW, CK, NUM_CHUNKS, NUM_REGIONS, REGION_COLS, REGION_VOXELS,
   chunkIdx, chunkDecode, regionOfCol, regionOfChunk, regionColumns, stepColumn,
-  cellIdx, colParts, contCell, cellCorner,
+  cellIdx, colParts, contCell, cellCorner, nearOffset, nearWorld,
 } from './Layout.js';
 import { Planet } from './Planet.js';
 import { meshChunk } from './Mesher.js';
@@ -435,6 +435,92 @@ const quadsOf = (res) => (res.groups[0] ? res.groups[0].position.length / 12 : 0
   }
   eq(seamQuads, quadsOf(a), 'the same shape on the seam is the same number of quads');
   ok(s !== null, 'and the seam chunk meshes');
+}
+
+// --- drawing across the wrap ------------------------------------------------
+{
+  // nearOffset is always a multiple of W, is zero within half a map, and picks
+  // the same copy Grid.delta does - the two must never disagree.
+  for (const [view, v] of [[0, 0], [10, 20], [0, W - 1], [W - 1, 0], [600, 100],
+    [1247, 3], [0, W / 2], [0, -W / 2], [500, 1200]]) {
+    const off = nearOffset(view, v);
+    eq(off % W, 0, `nearOffset(${view},${v}) is a multiple of W`);
+    eq(v + off - view, delta(view, v), `nearOffset agrees with Grid.delta at ${view},${v}`);
+    ok(Math.abs(v + off - view) <= W / 2, `and lands within half a map at ${view},${v}`);
+  }
+  eq(nearOffset(10, 20), 0, 'a nearby column does not move');
+  eq(nearOffset(600, 700), 0, 'nor does one a hundred away');
+  eq(nearOffset(W - 1, 3), W, 'a column across the seam is pulled a map east');
+  eq(nearOffset(3, W - 1), -W, 'and one the other way a map west');
+  near(nearWorld(1247, 3), 1251, 'so x = 3 is drawn four units east of x = 1247');
+}
+{
+  // viewOf is a no-op except across a seam, and never moves y.
+  const planet = new Planet({});
+  planet.setView(1247.5, 10.5);
+  const a = planet.viewOf(3.5, 40.5, 10.5);
+  ok(a.x === 1251.5 && a.y === 40.5 && a.z === 10.5,
+    `viewOf across the seam gives ${a.x},${a.y},${a.z}`);
+  const b = planet.viewOf(1246.5, 40.5, 10.5);
+  ok(b.x === 1246.5 && b.z === 10.5, 'and leaves a nearby position alone');
+  // and the cell-centre spelling of it agrees with centerOf plus the offset
+  const col = colIndex(3, 10);
+  const c = planet.viewCenterOf(col, 40);
+  const abs = planet.centerOf(col, 40);
+  ok(c.x === abs.x + W && c.y === abs.y && c.z === abs.z,
+    'viewCenterOf is centerOf on the copy nearest the viewer');
+}
+{
+  // The real bug: standing at the east edge, the chunk at cx = 0 must be DRAWN
+  // just east of the viewer rather than a map width west.
+  const blocks = newBlocks();
+  blocks[colIndex(2, 2) * D + 3] = STONE;
+  const payload = mesh(blocks, 0, 0, 0);
+
+  const planet = new Planet({
+    opaque: null, cutout: null, transparent: null, liquid: null,
+  });
+  planet.setView(W - 1.5, 2.5);
+  planet.applyChunk(0, 0, 0, payload.groups);
+  const meshes = [...planet.meshes.values()];
+  ok(meshes.length > 0, 'the chunk produced a mesh');
+  const m = meshes[0];
+  eq(m.position.x, W, 'a chunk at x = 0 seen from x = W - 1.5 is drawn a map east');
+  eq(m.position.z, 0, 'and is not moved on z, where it is already nearest');
+  // the block itself is at absolute x 2..3, so it is drawn at 1250..1251, which
+  // is three and a half units east of the viewer rather than 1245 west
+  const drawnX = 2 + m.position.x;
+  near(drawnX - (W - 1.5), 3.5, 'and the block lands three and a half units east');
+
+  // Walk back over the seam and it must re-seat itself.
+  planet.setView(1.5, 2.5);
+  eq(m.position.x, 0, 'walking back over the seam re-seats the chunk');
+  ok(m.matrix.elements[12] === 0, 'and the transform was rebuilt, not just the position');
+
+  // ...and out again.
+  planet.setView(W - 1.5, 2.5);
+  eq(m.position.x, W, 're-seats again on the way out');
+  eq(m.matrix.elements[12], W, 'and the transform followed');
+}
+{
+  // No resident chunk is ever drawn more than half a map away, from anywhere.
+  // That is the property the hole in the ground was the absence of.
+  const blocks = newBlocks();
+  blocks[colIndex(2, 2) * D + 3] = STONE;
+  const payload = mesh(blocks, 0, 0, 0);
+  const planet = new Planet({ opaque: null, cutout: null, transparent: null, liquid: null });
+  planet.applyChunk(0, 0, 0, payload.groups);
+  const m = [...planet.meshes.values()][0];
+  let worst = 0;
+  for (let vx = 0; vx < W; vx += 37) {
+    for (let vz = 0; vz < W; vz += 173) {
+      planet.setView(vx + 0.5, vz + 0.5);
+      const dx = (CHUNK_T * 0.5 + m.position.x) - (vx + 0.5);
+      const dz = (CHUNK_T * 0.5 + m.position.z) - (vz + 0.5);
+      worst = Math.max(worst, Math.abs(dx), Math.abs(dz));
+    }
+  }
+  ok(worst <= W / 2, `the chunk is never drawn further than half a map away, worst ${worst}`);
 }
 
 // --- chunkBuried ------------------------------------------------------------

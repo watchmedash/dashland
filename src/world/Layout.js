@@ -164,3 +164,41 @@ export function contCell(wx, wy, wz, out = { cx: 0, cy: 0, ck: 0 }) {
 
 /** Integer column for a world point. */
 export const colAtWorld = (wx, wz) => colIndex(Math.floor(wx), Math.floor(wz));
+
+// --- drawing across the wrap -----------------------------------------------
+//
+// Storage wraps, and world space does not. A column at x = 3 and a column at
+// x = W - 1 are four apart on the map and 1 244 apart in world coordinates, so
+// anything placed at its absolute world position is drawn a whole map width
+// away from a viewer standing on the other side of the join. On the ground that
+// is a hole in the terrain at each of the two wrap lines and at their crossing.
+//
+// The fix is to draw the COPY NEAREST THE VIEWER. Every world coordinate has
+// copies at `v + n * W` for every integer n; exactly one of them is within half
+// a map of the viewer, and that is the one to draw. Note what this deliberately
+// does NOT do: it does not re-base the world around the camera. The offset is
+// zero for everything within W/2 of the view, which is everything except what is
+// across a seam, so a position that was already right stays untouched and only
+// the far copy moves.
+
+/**
+ * The multiple of W to add to world coordinate `v` to bring it as near `view` as
+ * the wrap allows. Always a multiple of W, and zero within half a map.
+ *
+ * Deliberately the same way round as `Grid.delta`, including at exactly half a
+ * map, so the two can never disagree about which copy is nearer.
+ */
+export function nearOffset(view, v) {
+  // Into [0, W) first and only then down, which is what puts the range at
+  // (-W/2, W/2] and makes a viewer exactly half a map away agree with `delta`
+  // about which copy is nearer. Taking the raw remainder instead leaves it
+  // signed, and the two then disagree at exactly the half - the one input where
+  // the answer is a coin toss and the one place a disagreement is invisible
+  // until it is a seam.
+  let d = (((v - view) % W) + W) % W;
+  if (d > W / 2) d -= W;
+  return view + d - v;
+}
+
+/** `v`, moved to the copy nearest `view`. */
+export const nearWorld = (view, v) => v + nearOffset(view, v);

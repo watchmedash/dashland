@@ -2,6 +2,7 @@
 // voxel skylight / coloured block light, per-vertex AO, biome tint and wind.
 
 import * as THREE from 'three';
+import { W as MAP_W } from '../world/Layout.js';
 
 /**
  * The moving lights' shadow volume: one byte per cell, opaque or not, for a
@@ -288,6 +289,29 @@ const vec3 UP = vec3(0.0, 1.0, 0.0);
  * together rather than each face leaning its own way.
  */
 const vec3 SWAY_TANG = vec3(0.0, 0.0, -1.0);
+/** The map's width, on both wrapping axes. */
+const float MAP_W = ${MAP_W}.0;
+/**
+ * Bring a world position to the copy of it nearest another, on the two wrapping
+ * axes.
+ *
+ * The terrain is drawn on the copy of itself nearest the camera, so a fragment
+ * of ground is never more than half a map from the eye. A position handed in
+ * from the CPU carries no such promise: uBreakPos, the two flame positions and
+ * the occupancy volume's origin are all built from wrapped columns, so any of
+ * them can be a full map width away from the fragment it is being differenced
+ * against - which reads as the mining crack refusing to appear and a torch
+ * refusing to light, on the far side of a seam only.
+ *
+ * Doing it here rather than on the CPU is deliberate: the shader then never has
+ * to trust that a uniform arrived in the same copy, and a caller that forgets
+ * cannot break it.
+ */
+vec3 wrapNear(vec3 p, vec3 about) {
+  vec2 d = p.xz - about.xz;
+  p.xz -= MAP_W * floor(d / MAP_W + 0.5);
+  return p;
+}
 `;
 
 const COMMON_VERT_BODY = /* glsl */`
@@ -408,6 +432,28 @@ const vec3 UP = vec3(0.0, 1.0, 0.0);
  * together rather than each face leaning its own way.
  */
 const vec3 SWAY_TANG = vec3(0.0, 0.0, -1.0);
+const float MAP_W = ${MAP_W}.0;
+/**
+ * Bring a world position to the copy of it nearest another, on the two wrapping
+ * axes.
+ *
+ * The terrain is drawn on the copy of itself nearest the camera, so a fragment
+ * of ground is never more than half a map from the eye. A position handed in
+ * from the CPU carries no such promise: uBreakPos, the two flame positions and
+ * the occupancy volume's origin are all built from wrapped columns, so any of
+ * them can be a full map width away from the fragment it is being differenced
+ * against - which reads as the mining crack refusing to appear and a torch
+ * refusing to light, on the far side of a seam only.
+ *
+ * Doing it here rather than on the CPU is deliberate: the shader then never has
+ * to trust that a uniform arrived in the same copy, and a caller that forgets
+ * cannot break it.
+ */
+vec3 wrapNear(vec3 p, vec3 about) {
+  vec2 d = p.xz - about.xz;
+  p.xz -= MAP_W * floor(d / MAP_W + 0.5);
+  return p;
+}
 
 precision highp sampler3D;
 uniform sampler2DArray uMap;
@@ -731,6 +777,11 @@ const int OCC_MAX_STEPS = 14;
  */
 void occFrame(vec3 wp, vec3 woff, out vec3 cell, out vec3 dcell) {
   cell = wp + uOccOrg;
+  // ...and onto whichever copy of the map the volume itself is on. The volume
+  // is 48 cells across against a map of MAP_W, so a fragment whose WRAPPED
+  // position is inside it lands inside it and everything else stays outside and
+  // reads empty, which is the fail-open occAt already relies on.
+  cell.xz -= MAP_W * floor((cell.xz - OCC_DIM.xz * 0.5) / MAP_W + 0.5);
   dcell = woff;
 }
 
@@ -876,8 +927,12 @@ float occMarch(vec3 fcell, vec3 lcell, float lrad) {
  * stale. The cost is two atan calls, and only for a fragment that has already
  * passed the radius, distance and wrap tests.
  */
-vec3 flameLight(vec3 lpos, vec3 lcol, float lrad, vec3 nrm, vec3 world, vec3 fcell) {
+vec3 flameLight(vec3 lposAbs, vec3 lcol, float lrad, vec3 nrm, vec3 world, vec3 fcell) {
   if (lrad <= 0.0) return vec3(0.0);
+  // The flame is placed from a wrapped column and the fragment is drawn on the
+  // copy nearest the eye, so across a seam the two are a map apart and every
+  // test below would refuse the light. See wrapNear.
+  vec3 lpos = wrapNear(lposAbs, world);
   vec3 toL = lpos - world;
   float dist = length(toL);
   if (dist >= lrad) return vec3(0.0);
@@ -2278,8 +2333,9 @@ const LAVA_EMISSIVE = /* glsl */`
  * means.
  */
 const BREAK_FRAG = /* glsl */`
-  if (uBreakStage >= 0.0 && distance(vWorld, uBreakPos) < 1.9) {
-    vec3 dCell = cellOffset(vWorld, uBreakPos);
+  vec3 breakPos = wrapNear(uBreakPos, vWorld);
+  if (uBreakStage >= 0.0 && distance(vWorld, breakPos) < 1.9) {
+    vec3 dCell = cellOffset(vWorld, breakPos);
     if (all(lessThanEqual(abs(dCell), vec3(0.502)))) {
       // Normalise the crack to the part of THIS quad that lies in the break
       // cell, rather than to the tile.

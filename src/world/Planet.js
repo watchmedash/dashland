@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import {
   W, D, COLUMNS, CELLS, CHUNK_T, CHUNK_K, CK,
   NUM_REGIONS, REGION_COLS, regionOfCol, regionColumns, chunkIdx, contCell,
+  nearOffset,
 } from './Layout.js';
 import { wrap } from './Grid.js';
 import {
@@ -146,6 +147,12 @@ export class Planet {
     this.liquidRoot.renderOrder = 6;
     this.root.add(this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot);
     this.meshes = new Map();
+    /**
+     * Where the viewer is, in world x and z, so a chunk can be drawn on the
+     * side of the wrap the viewer is standing on. See `setView`.
+     */
+    this.viewX = 0;
+    this.viewZ = 0;
     /**
      * Kept, and it is a zero vector that means nothing.
      *
@@ -406,10 +413,76 @@ export class Planet {
     return out.set((col - y) / W + 0.5, k + 0.5, y + 0.5);
   }
 
+  // --- drawing across the wrap ----------------------------------------------
+
+  /**
+   * Tell the planet where the viewer is, so chunks are drawn on the side of the
+   * wrap the viewer is standing on.
+   *
+   * Chunk vertices are built at ABSOLUTE map positions and the offset lives in
+   * the mesh's own transform, which is a multiple of W on x and z. Standing at
+   * x = 1247 and looking east, the terrain at x = 0..10 is 1 247 units away in
+   * absolute coordinates and is simply not there to see; seated against this it
+   * is drawn one unit east, which is where it is.
+   *
+   * **Every frame, writing only when the value changes.** The alternative was to
+   * seat a mesh once when it is built and never touch it again, which is sound
+   * today and rests on an invariant nobody would think to protect: a chunk's
+   * offset only changes when the viewer passes half a map from it, and the
+   * streamer evicts at 190 units, so 434 units of margin make it unreachable.
+   * That is a real argument and it is exactly the kind that stops being true
+   * when somebody raises the view distance. This costs a compare per resident
+   * mesh - about 2 600 of them, six arithmetic operations each - and is correct
+   * with no invariant at all, including after a teleport, a respawn or a portal,
+   * none of which move the player politely.
+   *
+   * Idempotent and cheap, so calling it per frame is fine; calling it only when
+   * the player crosses a chunk boundary would also be correct.
+   */
+  setView(x, z) {
+    this.viewX = x;
+    this.viewZ = z;
+    for (const mesh of this.meshes.values()) this._seat(mesh);
+  }
+
+  /** Put one mesh on the copy of its chunk nearest the viewer. */
+  _seat(mesh) {
+    const u = mesh.userData;
+    const ox = nearOffset(this.viewX, u.chunkX);
+    const oz = nearOffset(this.viewZ, u.chunkZ);
+    if (mesh.position.x === ox && mesh.position.z === oz) return;
+    mesh.position.set(ox, 0, oz);
+    mesh.updateMatrix();
+  }
+
+  /**
+   * An absolute world position, moved to the copy nearest the viewer - which is
+   * the space the terrain is actually drawn in.
+   *
+   * Anything positioned in the scene from a wrapped column has this bug and
+   * needs this: a mob, a dropped item, a particle, the block highlight. Nothing
+   * within half a map of the viewer moves, so this is a no-op except across a
+   * seam, which is the only place it was ever wrong.
+   */
+  viewOf(x, y, z, out = new THREE.Vector3()) {
+    return out.set(x + nearOffset(this.viewX, x), y, z + nearOffset(this.viewZ, z));
+  }
+
+  /** `centerOf` in the space the terrain is drawn in. */
+  viewCenterOf(col, k, out = new THREE.Vector3()) {
+    const y = col % W;
+    return this.viewOf((col - y) / W + 0.5, k + 0.5, y + 0.5, out);
+  }
+
   // --- chunk meshes ---------------------------------------------------------
 
   applyChunk(cx, cy, ck, groups) {
     const id = chunkIdx(cx, cy, ck);
+    // The middle of the chunk's footprint, in absolute world x and z. The middle
+    // rather than the corner so that which copy is nearest is decided by the
+    // chunk as a whole; see `_seat`.
+    const chunkX = cx * CHUNK_T + CHUNK_T * 0.5;
+    const chunkZ = cy * CHUNK_T + CHUNK_T * 0.5;
     const roots = [this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot];
     const mats = [this.materials.opaque, this.materials.cutout, this.materials.transparent, this.materials.liquid];
 
@@ -456,7 +529,16 @@ export class Planet {
         }
         mesh.receiveShadow = gi !== GROUP_LIQUID;
         mesh.matrixAutoUpdate = false;
-        mesh.updateMatrix();
+        // Which chunk this is, so `setView` can re-seat it without decoding a
+        // string key. The vertices are absolute; the transform is the offset.
+        mesh.userData.chunkX = chunkX;
+        mesh.userData.chunkZ = chunkZ;
+        // Onto the copy the viewer can see, now rather than at the next
+        // `setView`: a chunk that arrives across the seam would otherwise be
+        // drawn a map width away for a frame. A fresh mesh is at the origin with
+        // an identity matrix, which is already what a zero offset wants, so
+        // `_seat` skipping that case leaves it correct.
+        this._seat(mesh);
         roots[gi].add(mesh);
         this.meshes.set(key, mesh);
       }

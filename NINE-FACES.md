@@ -323,5 +323,28 @@ other fourteen live here.**
 The three rules compose into one sentence a player can work out without being
 told: on this face you are a guest, and the only thing you can take is wood.
 
+### Night, and the loophole that is not a bug
+
+At nightfall the fourteen leave and the jungle fills with husks and cinderlings.
+At dawn they come back and the night's population goes. See the night section
+in `Mobs.js`.
+
+**So Verdant CAN be mined, at night, and that is deliberate.** The taboo is a
+witness rule and after dark there are no witnesses; the fourteen return calm, so
+it cannot be punished later either. It emerged from the two rules rather than
+being designed, the owner was shown it and kept it - *"that's better we can mine
+in verdant at night lol"* - and it should not be "fixed".
+
+It is worth keeping because of the trade it creates. The stone under the richest
+jungle in the world is available to anyone willing to stand in the most
+dangerous night in the game: 21 bodies in a 22 to 66 unit ring, under a canopy
+that blocks sight in both directions, so contact comes out of nowhere and keeps
+coming. Standing still killed a full-health character in 28 seconds. Nothing
+about that had to be balanced - the same darkness that removes the witnesses
+supplies the price.
+
+It also settles what the face IS at each hour rather than leaving it muddled: by
+day a village you are a guest in, by night terrain like any other.
+
 The two faces are deliberate opposites in play as well as in terrain: Tempest
 is the one you survive for a prize, Verdant is the one you must not fight.

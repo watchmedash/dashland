@@ -93,6 +93,9 @@ const cellDecode = (idx, out = _kd) => {
 import { CROSS_LIGHT_ADDR_SHIFT } from './world/Mesher.js';
 import { EntityLightField } from './world/EntityLight.js';
 import { makeRng } from './util/Noise.js';
+// Every world-space distance on this map goes through one of these: X and Z
+// wrap, so `distanceTo` is a full turn out half the time.
+import { wrapDist2, relTo, nearestTo } from './game/Wrap.js';
 
 /**
  * Shortest signed distance along a wrapped world axis.
@@ -718,11 +721,20 @@ for (const n of ['grass', 'dirt', 'coarse_dirt', 'podzol', 'peat', 'stone',
  */
 const GRAVITY_TICK = 0.1;
 const GRAVITY_PER_TICK = 256;
-const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
+/**
+ * The one basis, and it never turns.
+ *
+ * Facing 0..3 is +x, -x, +y, -y on the map, so `ea` is world X and `eb` is
+ * world Z. There used to be a per-cell `tangentFrame` behind this because
+ * gravity turned; it does not any more.
+ */
+const FLAT_EA = [1, 0, 0];
+const FLAT_EB = [0, 0, 1];
+const FLAT_UP = [0, 1, 0];
 /** Scratch for the steam emitter, which asks for a cell centre twice a tick. */
 const _steamAt = [0, 0, 0];
 /** Scratch for `_crossLightAt`, which runs once per modelled instance per frame. */
-const _clParts = { f: 0, i: 0, j: 0 };
+const _clParts = { x: 0, y: 0 };
 /** Scratch for the player body's own block-light probe. */
 const _entityL = { r: 0, g: 0, b: 0 };
 const WHITE = new THREE.Color(1, 1, 1);
@@ -5520,10 +5532,6 @@ class Game {
     const col = replacing ? hit.col : hit.prevCol;
     const k = replacing ? hit.k : hit.prevK;
     if (k < 0 || k >= D) return false;
-    // The aimed block is already known to be this face's - the cast saw to
-    // that - but the cell in front of it can still be over the border when you
-    // build along a seam, and that cell is not yours to fill.
-    if (((col / (F * F)) | 0) !== this.player.face) return false;
     const existing = this.planet.at(col, k);
     if (existing !== 0 && RENDER_TYPE[existing] !== R_LIQUID && RENDER_TYPE[existing] !== R_CROSS) return false;
     // A liquid cell counts as free space above — which is right for a wall, and
@@ -5759,7 +5767,7 @@ class Game {
    * handful of supplies, one at the bottom of a dungeon is worth the descent.
    */
   _fillCache(c) {
-    const below = Math.max(0, Math.round(R_SEA - R_MIN) - c.k);   // layers under sea level
+    const below = Math.max(0, SEA_K - c.k);   // layers under sea level
     const rng = makeRng(((this.seed ^ (c.col * 2654435761)) + c.k * 40503) | 0);
     const deep = below > 8;
     const mid = below > 2;
@@ -5919,13 +5927,15 @@ class Game {
     // The menu's orbit camera flies right past where the body is standing.
     this.character.hide();
     const t = performance.now() * 0.00005;
-    const r = R_TERRAIN_MAX + 34;
-    this.camera.position.set(Math.cos(t) * r, Math.sin(t * 0.53) * r * 0.38, Math.sin(t) * r);
-    this.camera.lookAt(0, 0, 0);
+    // A slow turn on the spot, high over the middle of the map. There is no
+    // planet to orbit any more, so the camera is a bearing rather than a radius.
+    const r = K_TERRAIN_MAX + 34;
+    this.camera.position.set(W * 0.5, r, W * 0.5);
+    this.camera.lookAt(W * 0.5 + Math.cos(t) * 100, r - 28, W * 0.5 + Math.sin(t) * 100);
     if (this.camera.fov !== 44) { this.camera.fov = 44; this.camera.updateProjectionMatrix(); }
-    const up = _v1.copy(this.camera.position).normalize();
+    const up = _v1.set(0, 1, 0);
     this.sky.setSolarTime(up, this.timeOfDay());
-    this.sky.update(dt, this.camera, up, this.planet.center);
+    this.sky.update(dt, this.camera, up, this.camera.position);
     this.particles.update(dt, this.camera, up, this.sky);
     this._updateSharedUniforms();
   }
@@ -6188,15 +6198,15 @@ class Game {
     if (!onBuiltGround) {
       this._streamPending = false;
       this._streamTimer = 0;
-      this.player.vel.i = 0; this.player.vel.j = 0; this.player.vel.k = 0;
+      this.player.vel.x = 0; this.player.vel.y = 0; this.player.vel.z = 0;
     }
     const wasInWater = this.player.inWater;
     // How fast the body was going down on the frame before it got wet. Read
     // here rather than after the physics because `Player.update` is where the
-    // water brake is applied: by the time the flag flips, `vel.k` has already
+    // water brake is applied: by the time the flag flips, `vel.y` has already
     // been clamped to the -5 sink rate and every entry in the game looks the
     // same speed. Negative is downward; a wade across a shoreline is ~0.
-    const entryVK = this.player.vel.k;
+    const entryVK = this.player.vel.y;
     // Captured with it, for the gasp on the way back up. Both edges existed in
     // the physics and neither had ever been listened for: only the entry
     // splash was wired, so a dive in was loud and the way out was silent.
@@ -6478,7 +6488,7 @@ class Game {
 
     const c = this.player.cell;
     const biomeId = this.planet.colBiome[colIndex(c.x, c.y)] ?? 2;
-    const altitude = this.player.position.length() - R_SEA;
+    const altitude = this.player.position.y - SEA_K;
     this.weather.update(dt, biomeId, altitude, this.seasons.cold);
     // A funnel, if the sky wants one and the ground will take one. Weather owns
     // the odds and Tornado.js owns everything else — see the head of that file
@@ -6799,7 +6809,7 @@ class Game {
   _tickWhirl(dt) {
     const p = this.player;
     p.whirlPull = 0;
-    p.whirlI = 0; p.whirlJ = 0; p.whirlSpin = 0;
+    p.whirlX = 0; p.whirlZ = 0; p.whirlSpin = 0;
     this._whirlDrag ||= { i: 0, j: 0, spin: 0 };
     if (this.spectating) { this._whirlT = 0; return; }
     const c = p.cell;
@@ -6811,7 +6821,7 @@ class Game {
     if (p.inWater && !p.inLava) {
       p.whirlPull = this.whirlpools.pullAt(col, c.k);
       const d = this.whirlpools.dragAt(col, c.k, this._whirlDrag);
-      p.whirlI = d.i; p.whirlJ = d.j; p.whirlSpin = d.spin;
+      p.whirlX = d.i; p.whirlZ = d.j; p.whirlSpin = d.spin;
     }
 
     const eye = this.whirlpools.centreWithin(col, WHIRL_CUE);
@@ -6837,11 +6847,8 @@ class Game {
       const rr = Math.random() * WHIRL_R;
       const at = stepColumn(eye, Math.round(Math.cos(a) * rr), Math.round(Math.sin(a) * rr));
       const pos = this.planet.centerOf(at, K_SEA, _v1);
-      // The face's own normal, NOT `pos.normalize()`. The radial answer is the
-      // sphere one and it is only right in the middle of a face: out towards a
-      // seam it leans away by up to 45 degrees, which tilted every ring off the
-      // water and is what "whirlpool is diagonal" was looking at.
-      _v2.fromArray(FACE_N[colParts(at).f]);
+      // Up, and nothing else. Water lies flat everywhere now.
+      _v2.set(0, 1, 0);
       this.particles.ripple(pos, _v2, 2.0 + Math.random() * 3.0, 1);
       // A quarter of the rings get spray with them. Any more and the general
       // particle pool is a fountain that starves the dig crumbs and the embers;
@@ -7551,7 +7558,7 @@ class Game {
       // face has a season. Measured in a forced winter standing on a cinder
       // ridge, seed 4242: 67 cells went white over 200 passes, and 0 with this
       // clause; a temperate face still snows 751 in the same run.
-      const role = FACE_ROLE[(col / (F * F)) | 0];
+      const role = FACE_ROLE[faceOfCol(col)];
       if (role === FACE_RIME || role === FACE_PYRE) continue;
       const k = this._seasonGroundK(col);
       if (k < 0) continue;
@@ -7605,7 +7612,7 @@ class Game {
       // the edge of every snowfield. `was` names the buried plant, so the same
       // correction is available on the way back out.
       const onPlant = buries || (isSnow && was !== undefined && IS_REPLACEABLE[was]);
-      const alt = R_MIN + (onPlant ? k - 1 : k) - R_SEA;
+      const alt = (onPlant ? k - 1 : k) - SEA_K;
       if (freezing && !isSnow && alt > line) {
         // Cold enough for this column, and it is not white yet. Either we took
         // the snow off it and are putting it back, or this is ground - or a
@@ -7681,7 +7688,7 @@ class Game {
    * winter is what that cost.
    */
   _seasonGroundK(col) {
-    const top = Math.min(D - 2, Math.floor(this.planet.colHeight[col] - R_MIN) + 3);
+    const top = Math.min(D - 2, Math.floor(this.planet.colHeight[col]) + 3);
     const low = Math.max(1, top - 7);
     for (let k = top; k >= low; k--) {
       if (this.planet.at(col, k) === 0) continue;
@@ -8500,9 +8507,7 @@ class Game {
     this._flameNext = ((this._flameNext ?? 0) + 1) % flames.length;
     const f = flames[this._flameNext];
     this._flameHead(f, _v1);
-    const p = colParts(f.col);
-    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, f.k + 0.5, _frame);
-    _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
+    _v2.set(0, 1, 0);
     this.particles.embers(_v1, _v2, 1, 0.10);
   }
 
@@ -8585,15 +8590,8 @@ class Game {
     for (let e = 0; e < 2 && cells.length; e++) {
       this._steamNext = ((this._steamNext ?? 0) + 1) % cells.length;
       const h = cells[this._steamNext];
-      const pp = colParts(h.col);
-      tangentFrame(pp.f, pp.i + 0.5, pp.j + 0.5, h.k + 1, _frame);
-      _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
-      // Integer i and j. `cellCenterPos` INDEXES the direction table with them
-      // -- unlike `tangentFrame` above, which interpolates -- so a half-column
-      // offset reads past the end of the array, and the puff comes out at NaN
-      // and is silently never drawn. Sixty-six live instances and an empty
-      // frame is exactly what that looks like.
-      _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, h.k, _steamAt));
+      _v2.set(0, 1, 0);
+      this.planet.centerOf(h.col, h.k, _v1);
       _v1.addScaledVector(_v2, 0.55);
       this.particles.steam(_v1, _v2, 0.9, 1);
     }
@@ -8609,12 +8607,9 @@ class Game {
       for (const key of lv.keys()) {
         if (i++ !== n) continue;
         cellDecode(key, _kd);
-        const k = _kd.k;
-        const pp = colParts(_kd.col);
-        _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, k, _steamAt));
-        if (_v1.distanceToSquared(this.player.position) > 900) break;
-        tangentFrame(pp.f, pp.i + 0.5, pp.j + 0.5, k, _frame);
-        _v2.set(_frame.up[0], _frame.up[1], _frame.up[2]);
+        this.planet.centerOf(_kd.col, _kd.k, _v1);
+        if (wrapDist2(_v1, this.player.position) > 900) break;
+        _v2.set(0, 1, 0);
         this.particles.steam(_v1, _v2, 0.8, 0);
         break;
       }
@@ -8647,9 +8642,8 @@ class Game {
     let sd = Infinity;
     for (let i = 0; i < this._steamCells.length; i++) {
       const h = this._steamCells[i];
-      const pp = colParts(h.col);
-      _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, h.k, _steamAt));
-      const d = _v1.distanceToSquared(P);
+      this.planet.centerOf(h.col, h.k, _v1);
+      const d = wrapDist2(_v1, P);
       if (d < sd) { sd = d; this._springAt.copy(_v1); }
     }
     // 26m and 56m are the placed panners' own maxDistance. Past those the
@@ -8664,10 +8658,8 @@ class Game {
     let fd = Infinity, n = 0;
     for (const key of this.water.level.keys()) {
       cellDecode(key, _kd);
-      const k = _kd.k;
-      const pp = colParts(_kd.col);
-      _v1.fromArray(cellCenterPos(pp.f, pp.i, pp.j, k, _steamAt));
-      const d = _v1.distanceToSquared(P);
+      this.planet.centerOf(_kd.col, _kd.k, _v1);
+      const d = wrapDist2(_v1, P);
       if (d > 56 * 56) continue;
       n++;
       if (d < fd) { fd = d; this._fallAt.copy(_v1); }
@@ -8733,9 +8725,9 @@ class Game {
   _crossLightAt(col, k) {
     const p = colParts(col, _clParts);
     const arr = this.crossLight.get(chunkIdx(
-      p.f, (p.i / CHUNK_T) | 0, (p.j / CHUNK_T) | 0, (k / CHUNK_K) | 0));
+      (p.x / CHUNK_T) | 0, (p.y / CHUNK_T) | 0, (k / CHUNK_K) | 0));
     if (!arr) return -1;
-    const addr = ((p.i % CHUNK_T) * CHUNK_T + (p.j % CHUNK_T)) * CHUNK_K + (k % CHUNK_K);
+    const addr = ((p.x % CHUNK_T) * CHUNK_T + (p.y % CHUNK_T)) * CHUNK_K + (k % CHUNK_K);
     let lo = 0, hi = arr.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
@@ -8776,11 +8768,11 @@ class Game {
       const col = _kd.col, k = _kd.k;
       if (!IS_SIGN[this.planet.at(col, k)]) continue;
       const pos = this.planet.centerOf(col, k, new THREE.Vector3());
-      if (pos.distanceToSquared(this.player.position) > RANGE * RANGE) continue;
-      const p = colParts(col);
-      const fr = tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5);
+      if (wrapDist2(pos, this.player.position) > RANGE * RANGE) continue;
+      // The board is nailed to the world axes and never turns, so the basis
+      // SignText wants is the same three vectors for every sign on the planet.
       list.push({
-        pos, ea: fr.ea, eb: fr.eb, up: fr.up, arcA: fr.arcA, arcB: fr.arcB,
+        pos, ea: FLAT_EA, eb: FLAT_EB, up: FLAT_UP, arcA: 1, arcB: 1,
         dir: this.planet.facingAt(col, k) & 7, text,
       });
     }
@@ -8842,10 +8834,8 @@ class Game {
             const topper = nearK ? TOPPER_KIND[id] : 0;
             const modelled = nearK ? MODEL_KIND[id] : 0;
             if (!flower && !topper && !modelled && !(torchable && IS_TORCH[id])) continue;
-            const p = colParts(col);
-            tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
             const pos = this.planet.centerOf(col, k, new THREE.Vector3());
-            const up = new THREE.Vector3(_frame.up[0], _frame.up[1], _frame.up[2]);
+            const up = new THREE.Vector3(0, 1, 0);
 
             if (modelled) {
               // Its own cell, and no spin. A flower is scenery and a grid of
@@ -8884,11 +8874,10 @@ class Game {
             const byte = this.planet.facingAt(col, k) & 7;
             const e = { pos, up, out: null, d2, col, k, light: -1 };
             if (byte !== 0) {
+              // The step is on the map, so it is (x, z) in world space and the
+              // torch leans back out of the wall along it.
               const [wi, wj] = TORCH_WALL_STEP[(byte - 1) & 3];
-              const ea = _frame.ea, eb = _frame.eb;
-              e.out = new THREE.Vector3(
-                -(ea[0] * wi + eb[0] * wj), -(ea[1] * wi + eb[1] * wj),
-                -(ea[2] * wi + eb[2] * wj));
+              e.out = new THREE.Vector3(-wi, 0, -wj);
             }
             lists.torch.push(e);
           }
@@ -8936,19 +8925,15 @@ class Game {
   /** Where the fire actually is in a burning cell, in world space. */
   _flameHead(f, out) {
     this.planet.centerOf(f.col, f.k, out);
-    const p = colParts(f.col);
-    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, f.k + 0.5, _frame);
     if (!IS_TORCH[f.id]) return out;
     // A floor torch burns just above its own centre; a wall torch burns out
     // over the cell, at the far end of the bracket.
     const byte = f.byte & 7;
-    if (byte === 0) return out.addScaledVector(
-      _v3.set(_frame.up[0], _frame.up[1], _frame.up[2]), 0.22);
+    if (byte === 0) { out.y += 0.22; return out; }
     const [di, dj] = TORCH_WALL_STEP[(byte - 1) & 3];
-    const ea = _frame.ea, eb = _frame.eb;
-    out.x += -(ea[0] * di + eb[0] * dj) * 0.16 + _frame.up[0] * 0.28;
-    out.y += -(ea[1] * di + eb[1] * dj) * 0.16 + _frame.up[1] * 0.28;
-    out.z += -(ea[2] * di + eb[2] * dj) * 0.16 + _frame.up[2] * 0.28;
+    out.x -= di * 0.16;
+    out.y += 0.28;
+    out.z -= dj * 0.16;
     return out;
   }
 
@@ -10388,7 +10373,7 @@ class Game {
         // own edge - while a pond lying in plains or forest a layer under sea
         // level is fresh water whatever its altitude says.
         salt: this.planet.colBiome[wet.col] === BIOME.OCEAN
-          || (this.planet.colBiome[wet.col] === BIOME.BEACH && R_MIN + k < R_SEA),
+          || (this.planet.colBiome[wet.col] === BIOME.BEACH && k < SEA_K),
         // How far the throw actually went, straight-line from the rod tip to
         // the float. Read off the arc rather than off the aim, because those
         // are different numbers the moment the shore is not flat — and it is
@@ -11060,9 +11045,6 @@ class Game {
     if (pouring === undefined) return false;
     const target = wet && wet.prevCol >= 0 ? { col: wet.prevCol, k: wet.prevK } : null;
     if (!target) return false;
-    // Same border rule as placing a block: the cell in front of the aimed one
-    // can be over the seam, and a pail does not reach across it.
-    if (((target.col / (F * F)) | 0) !== this.player.face) return false;
     // Air, or something the liquid would destroy anyway. It used to be air
     // alone, and the mismatch was visible in a single tuft of grass: the flow
     // sim washes every non-submerged cross plant and every torch out of its way
@@ -11238,7 +11220,7 @@ class Game {
       // you are standing in, which is the case that matters; a fish at a very
       // different depth from the camera is wrong by the difference, and there is
       // no second colour to give it.
-      const depth = Math.max(0, R_SEA - this.player.position.length());
+      const depth = Math.max(0, SEA_K - this.player.position.y);
       const murkLit = 0.16 + 0.84 * Math.max(0, 1 - depth / 15);
       this.scene.fog.color.copy(voxelUniforms.uWaterFog.value).multiplyScalar(murkLit);
       // Fitted to the shader's green channel at 22 cells: 1 - exp(-0.052·22) is
@@ -11280,7 +11262,7 @@ class Game {
       _v2.x, _v2.y, _v2.z,
     );
 
-    const alt = this.player.position.length() - R_SEA;
+    const alt = this.player.position.y - SEA_K;
     // How high and exposed you are, which is what the wind answers to. This is
     // NOT openness: it used to be both, and `cave: 1 - alt/8` meant that
     // standing in open daylight two metres above sea level armed the
@@ -11365,7 +11347,7 @@ class Game {
       this.ui.setDebug(
         `${(1 / avg).toFixed(0)} fps   ${(avg * 1000).toFixed(1)} ms\n` +
         `face ${c.f}  i ${c.ci.toFixed(2)}  j ${c.cj.toFixed(2)}  k ${c.ck.toFixed(2)}\n` +
-        `alt  ${(this.player.position.length() - R_SEA).toFixed(1)}\n` +
+        `alt  ${(this.player.position.y - SEA_K).toFixed(1)}\n` +
         `draw ${info.render.calls}   tris ${(info.render.triangles / 1000).toFixed(0)}k\n` +
         `chunks ${this.planet.meshes.size}   drops ${this.drops.list.length}\n` +
         `sun ${this.sky.elevation?.toFixed(2)}   ${this.weather.state} ${(this.weather.precip * 100) | 0}%\n` +

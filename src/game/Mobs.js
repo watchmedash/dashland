@@ -45,6 +45,11 @@ import {
   FOLK_SIGHT, FOLK_JOIN, FOLK_PERIOD, FOLK_ARMS, SEE_THROUGH,
   folkRoster, folkType, isTaboo, screensSight,
 } from './Folk.js';
+import {
+  VERDANT_HUSKS, VERDANT_CINDER, VERDANT_HIDE, VERDANT_PER_TICK,
+  VERDANT_LINGER, VERDANT_NIGHT_NEAR, VERDANT_NIGHT_FAR, VERDANT_TRIES,
+  VERDANT_GROUND, verdantNightDraw,
+} from './VerdantNight.js';
 
 /**
  * Bodies alive at once, anywhere.
@@ -4469,6 +4474,25 @@ export class Mobs {
      */
     this.onBlast = null;
     /**
+     * () => void — dawn has just come on Verdant.
+     *
+     * One hook rather than a reference to the barter state, for the reason
+     * `onBlast` is one: Mobs owns the bodies and knows nothing about what they
+     * will swap with you. main wires this to `Barter.forgetVisit`, which is
+     * then called on two events rather than one — leaving the face, and the
+     * morning. Both are the same sentence: the fourteen have been away.
+     */
+    this.onFolkDawn = null;
+    /**
+     * Is the player standing on Verdant after dark? See `VerdantNight.js`.
+     *
+     * A fact about where the player is and not about the world clock, so it is
+     * only ever written while they are on the face. A player who walks out
+     * through the portal at midnight leaves it set, which is right: coming back
+     * in daylight is a dawn as far as this face is concerned.
+     */
+    this.verdantNight = false;
+    /**
      * (mob, secondsLeft, justArmed) => void — a fuse is burning.
      *
      * Fired on the arming frame with `justArmed` true, every frame after it
@@ -6787,6 +6811,10 @@ export class Mobs {
    */
   _folkTopUp(player, playerCol) {
     if (FACE_ROLE[player.face] !== FACE_VERDANT) return 0;
+    // Nobody is home after dark. `_verdantSendOff` is taking away whoever is
+    // still standing, and a top-up running against it would refill the village
+    // behind the retreat one body at a time forever.
+    if (this.verdantNight) return 0;
     // Nothing to exclude yet, so nothing is placed. Guessing would put the
     // player's own body in the village on the one frame before main answers.
     if (!this.playerCharacter) return 0;
@@ -6812,10 +6840,197 @@ export class Mobs {
           anchor.position, player.position, player.face, FOLK_HUDDLE)
         : this._findFolkColumn(playerCol, null, player.position, player.face, FOLK_FAR);
       if (!spot) continue;
-      const mob = this.spawn(type, spot.col, spot.k);
+      const mob = this._placeUnseen(type, spot.col, spot.k);
       if (mob) { placed++; if (!anchor) anchor = mob; }
     }
     return placed;
+  }
+
+  /**
+   * Put a body down, and take it back if the player was looking that way.
+   *
+   * The distance bands every spawner in this file uses are the cheap half of
+   * "nothing is seen to pop in" and they are not the whole of it: FOLK_NEAR is
+   * 24 units, and 24 units of open ground is a body arriving in shot. This is
+   * the exact half - the stalker's own frame test, at the precise edge of the
+   * screen - and it is applied after the spawn rather than to the column
+   * because `_inView` reads a body's head, and a column has no head.
+   *
+   * Spawning and immediately releasing is not free, but it happens only when a
+   * search has already landed somewhere visible, which the bands make rare and
+   * a jungle canopy makes rarer still. The alternative is a second frustum test
+   * written against a position, and one sight test on this file's terms is
+   * worth more than two.
+   *
+   * Headless there is no camera, `_inView` answers false, and this is the plain
+   * spawn it wraps.
+   */
+  _placeUnseen(type, col, k) {
+    const mob = this.spawn(type, col, k);
+    if (!mob) return null;
+    if (!this._inView(mob, 1.0)) return mob;
+    const i = this.list.indexOf(mob);
+    if (i >= 0) { this._release(mob); this.list.splice(i, 1); }
+    return null;
+  }
+
+  /**
+   * Verdant's night, once every spawn tick while the player stands in it.
+   *
+   * Two halves in one call and in this order, because they are one exchange:
+   * the village goes first so the budget it was holding is free before the
+   * dark spends it, and because the beat the player reads is *emptying, then
+   * filling* rather than the two at once.
+   *
+   * @returns {number} bodies placed, for the harness
+   */
+  _verdantNightTick(player, playerCol) {
+    this._verdantSendOff(player);
+    let husks = 0, cinders = 0;
+    for (const m of this.list) {
+      if (!m.verdantNight) continue;
+      if (m.type === 'cinderling') cinders++; else husks++;
+    }
+    let placed = 0;
+    for (let n = 0; n < VERDANT_PER_TICK; n++) {
+      const type = verdantNightDraw(husks, cinders);
+      if (!type) break;
+      const spot = this._findVerdantColumn(playerCol, player.position, player.face);
+      if (!spot) break;
+      // The endgame's shutdown outranks the face. A boss has stood here and
+      // nothing hostile is made on this ground again — see `_hostileHere`.
+      if (!this._hostileHere(spot.col)) break;
+      const mob = this._placeUnseen(type, spot.col, spot.k);
+      if (!mob) continue;
+      // What makes this body the night's rather than the ordinary spawner's.
+      // It is read in three places: the count above, `_verdantDawnCull`, and
+      // `toJSON`, which refuses to write one down for the same reason it
+      // refuses a drowned — a population defined by not surviving the morning
+      // has no honest way to be in a save file.
+      mob.verdantNight = true;
+      if (type === 'cinderling') cinders++; else husks++;
+      placed++;
+    }
+    return placed;
+  }
+
+  /**
+   * The fourteen leaving, from the far side of the clearing in.
+   *
+   * `_unobserved` is the stalker's predicate and it is reused rather than
+   * reimplemented, with one term added: see VERDANT_HIDE for why its
+   * "too close counts as unobserved" branch is the wrong way round here.
+   *
+   * Furthest first, exactly as `_bedDown` and `_dawnCull` take the herd. The
+   * one nearest you is therefore the last to go, which is the one you were
+   * looking at — so the village does not empty around a survivor, it empties
+   * towards him.
+   *
+   * @returns {number} how many left this tick
+   */
+  _verdantSendOff(player) {
+    let n = 0;
+    for (let i = 0; i < VERDANT_PER_TICK; i++) {
+      let far = -1, farD = -1;
+      for (let j = this.list.length - 1; j >= 0; j--) {
+        const m = this.list[j];
+        if (!m.spec.folk) continue;
+        const d = wrapDist(m.position, player.position);
+        if (d < VERDANT_HIDE || !this._unobserved(m, d)) continue;
+        if (d > farD) { farD = d; far = j; }
+      }
+      if (far < 0) break;
+      this._release(this.list[far]); this.list.splice(far, 1); n++;
+    }
+    return n;
+  }
+
+  /**
+   * ...and the night leaving, on the same terms plus a clock.
+   *
+   * The same shape as `_dawnCull`, which retires the drowned, and deliberately
+   * not that function: it keys off `spec.nightOnly`, and a husk on Verdant is
+   * an ordinary husk wearing one extra field. Sharing it would have meant a
+   * species flag that means "night" on one face and nothing on the others.
+   *
+   * The linger clock is what guarantees the last one goes. Without it a player
+   * who stands still and stares holds the night open past noon.
+   *
+   * @returns {number} how many were retired
+   */
+  _verdantDawnCull(player, dt) {
+    let n = 0;
+    for (let j = this.list.length - 1; j >= 0; j--) {
+      const m = this.list[j];
+      if (!m.verdantNight) continue;
+      m.dawnT = (m.dawnT || 0) + dt;
+      if (m.dawnT > VERDANT_LINGER) { this._release(m); this.list.splice(j, 1); n++; }
+    }
+    for (let i = 0; i < VERDANT_PER_TICK; i++) {
+      let far = -1, farD = -1;
+      for (let j = this.list.length - 1; j >= 0; j--) {
+        const m = this.list[j];
+        if (!m.verdantNight) continue;
+        const d = wrapDist(m.position, player.position);
+        if (d < VERDANT_HIDE || !this._unobserved(m, d)) continue;
+        if (d > farD) { farD = d; far = j; }
+      }
+      if (far < 0) break;
+      this._release(this.list[far]); this.list.splice(far, 1); n++;
+    }
+    return n;
+  }
+
+  /**
+   * The morning, once.
+   *
+   * Three things, and all three are the same sentence: *they have been away.*
+   * The bodies that come back are new bodies, so `calmFolk` is a guarantee
+   * rather than a repair — nothing angry can normally survive a night, because
+   * nothing at all does — and it is called anyway so that "a grudge never
+   * crosses a night" is true by construction and not by inference from the
+   * despawn. `onFolkDawn` is main's `Barter.forgetVisit`: their stock is fresh,
+   * which is the reason to come back tomorrow.
+   */
+  _verdantDawn() {
+    this.calmFolk();
+    this.onFolkDawn?.();
+  }
+
+  /**
+   * Ground for a night body: the fourteen's own search, on a wider ring.
+   *
+   * `_floorUnderCanopy` rather than `surfaceK` is the whole of why this is a
+   * separate function from `_findSpawnColumn` — on this face `surfaceK` answers
+   * the canopy, so the ordinary search spends every try asking a leaf whether
+   * it is grass. VERDANT_GROUND rather than SPAWNABLE_GROUND for the second
+   * half of the same problem; see its note.
+   *
+   * `faceAt` on the walked column is not optional. `_walkOut` is a random walk
+   * that knows nothing about faces, and at VERDANT_NIGHT_FAR it steps off
+   * Verdant readily — a husk spawned into the wall ring by a Verdant night is
+   * the exact shape of every seam bug this codebase has had.
+   */
+  _findVerdantColumn(nearCol, playerPos, face) {
+    const p = this.planet;
+    const lo = stepsFor(VERDANT_NIGHT_NEAR);
+    const hi = Math.max(lo + 1, stepsFor(VERDANT_NIGHT_FAR));
+    for (let tries = 0; tries < VERDANT_TRIES; tries++) {
+      const col = this._walkOut(nearCol, lo + Math.floor(Math.random() * (hi - lo)));
+      if (faceOfCol(col) !== face) continue;
+      const k = this._floorUnderCanopy(col);
+      if (k < 0 || k > D - 6) continue;
+      if (!VERDANT_GROUND.has(p.at(col, k))) continue;
+      if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
+      if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
+      // A hearth is ground the player has made safe, and the night is not an
+      // exception to that on any face.
+      if (this._warded(col, k)) continue;
+      const d = wrapDist(colTop(col, k, _p), playerPos);
+      if (d < VERDANT_NIGHT_NEAR || d > Math.min(VERDANT_NIGHT_FAR, this.despawnRadius - 30)) continue;
+      return { col, k };
+    }
+    return null;
   }
 
   /**
@@ -10670,7 +10885,12 @@ export class Mobs {
       // converted ones are a separate population on a separate budget (the
       // herd's own — see `wildCap`) and are skipped by `_countHostile`, so
       // neither can crowd the other out. Eight is still eight.
-      if (night && !this.spawnGrace && this._countHostile(false) < surfaceCap) {
+      // ...except on Verdant, whose night is its own roster and its own budget.
+      // Not a small point: the ordinary search does find ground on this face on
+      // the columns that carry no tree, so leaving it running would have laid
+      // eight more husks on top of twenty-one and made the cap a fiction.
+      if (night && !this.verdantNight && !this.spawnGrace
+          && this._countHostile(false) < surfaceCap) {
         const spot = this._findSpawnColumn(playerCol, player.position);
         if (spot && this._hostileHere(spot.col)) {
           const m = this.spawn('husk', spot.col, spot.k); if (m) m.fromCave = false;
@@ -10696,7 +10916,8 @@ export class Mobs {
       // world's opening minutes are not where any of this belongs, and a player
       // who starts beside an ocean after dark should not meet this before they
       // have found the mouse.
-      if (night && !this.spawnGrace && this._countDrowned() < MAX_DROWNED) {
+      if (night && !this.verdantNight && !this.spawnGrace
+          && this._countDrowned() < MAX_DROWNED) {
         const spot = this._findDeepColumn(playerCol, player.position);
         if (spot && this._hostileHere(spot.col)) this.spawn('drowned', spot.col, spot.k);
       }
@@ -10768,6 +10989,21 @@ export class Mobs {
         const spot = this._findMerchantColumn(playerCol, player.position);
         const mob = spot ? this.spawn('merchant', spot.col, spot.k) : null;
         if (mob) this.onMerchant?.(mob);
+      }
+      // Verdant's night, before the fourteen are topped up and not after: the
+      // flag this sets is what stands the top-up down, and a top-up that ran
+      // first would place three neighbours into a night that then spends its
+      // next tick taking them away again.
+      //
+      // Level-triggered rather than edge-triggered, so a player who walks in
+      // through the portal at midnight gets the same face as one who was
+      // standing on it at sunset. Only `_verdantDawn` is an edge, because it is
+      // the only part that must happen exactly once.
+      if (FACE_ROLE[player.face] === FACE_VERDANT) {
+        if (!night && this.verdantNight) this._verdantDawn();
+        this.verdantNight = night;
+        if (night) this._verdantNightTick(player, playerCol);
+        else this._verdantDawnCull(player, SPAWN_PERIOD);
       }
       // And the fourteen, on Verdant and nowhere else.
       this._folkTopUp(player, playerCol);
@@ -12651,7 +12887,14 @@ export class Mobs {
       // the health they were last seen at, and re-materialises one when the
       // player walks back into range. Writing a boss here as well would restore
       // a second copy of it.
-      mobs: this.list.filter((m) => !m.spec.phantom && !m.spec.nightOnly && !m.spec.boss)
+      // Nor is a Verdant night body, and that is the drowned's argument again
+      // about a body with no species flag of its own: an ordinary husk that
+      // happens to be standing in a jungle for one night. `mob.verdantNight` is
+      // therefore the only mark it has, and refusing to write one down is what
+      // keeps that mark honest — nothing carrying it ever outlives the session,
+      // so it can never be missing from a body that has it.
+      mobs: this.list.filter((m) => !m.spec.phantom && !m.spec.nightOnly
+        && !m.spec.boss && !m.verdantNight)
         .map((m) => {
         const d = {
           t: m.type, c: [m.cell.x, m.cell.y, m.cell.k], h: m.health, s: m.seed,

@@ -1,7 +1,7 @@
 // Block debris, footstep dust, splashes, ambient motes and weather.
 
 import * as THREE from 'three';
-import { GRAVITY, R_MIN } from '../world/Constants.js';
+import { GRAVITY } from '../world/Constants.js';
 import { BLOCKS, ID } from '../world/Blocks.js';
 
 const _v = new THREE.Vector3();
@@ -95,7 +95,6 @@ const TORNADO_H = 34;
 export class Particles {
   constructor(scene, planet) {
     this.planet = planet;
-    this.center = new THREE.Vector3(0, 0, 0);
 
     // --- debris cubes ---
     const geo = new THREE.BoxGeometry(1, 1, 1);
@@ -455,13 +454,13 @@ export class Particles {
         uTime: { value: 0 }, uCam: { value: new THREE.Vector3() },
         uUp: { value: new THREE.Vector3(0, 1, 0) }, uIntensity: { value: 0 },
         uSnow: { value: 0 }, uPixelRatio: { value: 1 }, uColor: { value: new THREE.Color(0xbcd2e8) },
-        uWaterR: { value: 0 },
+        uWaterY: { value: 0 },
       },
       vertexShader: /* glsl */`
         attribute vec3 aSeed;
         uniform float uTime; uniform vec3 uCam; uniform vec3 uUp;
         uniform float uIntensity; uniform float uSnow; uniform float uPixelRatio;
-        uniform float uWaterR;
+        uniform float uWaterY;
         varying float vA;
         void main() {
           vec3 ref = abs(uUp.y) > 0.9 ? vec3(1.0,0.0,0.0) : vec3(0.0,1.0,0.0);
@@ -485,10 +484,9 @@ export class Particles {
           // through the terrain under it. Below opaque ground nobody can tell;
           // the sea is transparent, so over water you could watch the whole
           // storm carry on falling under the surface. Kill each drop at the
-          // waterline instead. uWaterR is the radius of the water surface in
-          // the camera's own column (0 when there is none in reach), which on
-          // a sphere is all a horizontal surface is.
-          if (uWaterR > 0.0 && length(p) < uWaterR) vA = 0.0;
+          // waterline instead. uWaterY is the world Y of the water surface in
+          // the camera's own column, 0 when there is none in reach.
+          if (uWaterY > 0.0 && p.y < uWaterY) vA = 0.0;
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
           // Rain used to be drawn at 1.6px scaled by distance, which is about
@@ -895,18 +893,19 @@ export class Particles {
   }
 
   /**
-   * Radius of the top of the water in the camera's column, or 0 if there is
+   * World Y of the top of the water in the camera's column, or 0 if there is
    * none within the height the rain box covers. Sampled every half unit so a
    * one-unit cell can't be stepped over, and resolved back to the exact top of
    * the cell that hit rather than to the sample point — a half-unit error puts
    * the cut visibly under the surface.
    */
-  _waterSurfaceRadius({ position }, up) {
+  _waterSurfaceY({ position }) {
     for (let d = 15; d >= -15; d -= 0.5) {
-      _probe.copy(position).addScaledVector(up, d);
+      _probe.copy(position);
+      _probe.y += d;
       if (!this.planet.isLiquidWorld(_probe.x, _probe.y, _probe.z)) continue;
       const a = this.planet.cellAt(_probe.x, _probe.y, _probe.z);
-      return a ? R_MIN + a.k + 1 : 0;
+      return a ? a.k + 1 : 0;
     }
     return 0;
   }
@@ -919,7 +918,7 @@ export class Particles {
       if (!p.alive) continue;
       p.life += dt;
       if (p.life >= p.maxLife) { p.alive = false; continue; }
-      _v.copy(p.pos).sub(this.center).normalize();
+      _v.set(0, 1, 0);
       if (p.steam) {
         // Rises, and slows as it cools and spreads. No collision test: vapour
         // goes round a rock, and a puff bouncing off the rim of its own pool is
@@ -1023,7 +1022,7 @@ export class Particles {
     this.weather.visible = this.weatherIntensity > 0.01 && !this.submerged;
     // The probe costs ~60 block lookups, so only pay for it while something is
     // actually falling and visible.
-    wu.uWaterR.value = this.weather.visible ? this._waterSurfaceRadius(camera, up) : 0;
+    wu.uWaterY.value = this.weather.visible ? this._waterSurfaceY(camera) : 0;
 
     // The funnel's clock. Advanced here and not in `tornado()` so the spin never
     // depends on how often the game happens to call that — and stepped only
@@ -1034,7 +1033,7 @@ export class Particles {
       this.tornadoMotes.material.uniforms.uTime.value += dt;
     }
 
-    this._rainRipples(dt, camera, up, wu.uWaterR.value);
+    this._rainRipples(dt, camera, up, wu.uWaterY.value);
     this._updateRipples(dt);
   }
 
@@ -1042,13 +1041,13 @@ export class Particles {
    * Rain landing on water.
    *
    * The gap this closes is a hole rather than a polish pass: the weather shader
-   * kills every drop at the waterline (`uWaterR`, see `_buildWeather`) because
+   * kills every drop at the waterline (`uWaterY`, see `_buildWeather`) because
    * a storm carrying on underneath the sea is worse, and nothing was put in its
    * place. So rain over water simply ceased to exist a metre before it arrived,
    * and standing on a beach in a downpour the sea was the one flat, dry, silent
    * surface in the frame.
    *
-   * Rides the radius the weather shader is already using, so the rings land on
+   * Rides the height the weather shader is already using, so the rings land on
    * exactly the surface the drops are being cut at and the two cannot disagree.
    *
    * Each candidate is tested against the world before it is used. Scattering
@@ -1056,8 +1055,8 @@ export class Particles {
    * shoreline, and without the test a beach gets rained-on rings on the sand.
    * One block lookup per spawn, at a few dozen a second.
    */
-  _rainRipples(dt, camera, up, waterR) {
-    if (waterR <= 0 || this.weatherMode !== 'rain' || this.submerged) { this._rainOwed = 0; return; }
+  _rainRipples(dt, camera, up, waterY) {
+    if (waterY <= 0 || this.weatherMode !== 'rain' || this.submerged) { this._rainOwed = 0; return; }
     this._rainOwed += dt * RAIN_RIPPLE_RATE * this.weatherIntensity * this.rippleScale;
     let n = Math.floor(this._rainOwed);
     if (n <= 0) return;
@@ -1077,12 +1076,12 @@ export class Particles {
       _probe.copy(camera.position)
         .addScaledVector(_t1, Math.cos(th) * rr)
         .addScaledVector(_t2, Math.sin(th) * rr);
-      // Back onto the water's own sphere. Half a cell down, so the test lands
-      // inside the water cell rather than in the air directly above it.
-      _probe.setLength(waterR - 0.5);
+      // Back onto the waterline. Half a cell down, so the test lands inside
+      // the water cell rather than in the air directly above it.
+      _probe.y = waterY - 0.5;
       if (!this.planet.isLiquidWorld(_probe.x, _probe.y, _probe.z)) continue;
-      _v.copy(_probe).normalize();
-      _probe.copy(_v).multiplyScalar(waterR);
+      _v.set(0, 1, 0);
+      _probe.y = waterY;
       // Sized in CELLS, and deliberately far larger than a raindrop.
       //
       // The first pass used a physical 0.22-0.38, which is about what a drop
@@ -1115,14 +1114,14 @@ export class Particles {
    * player emitting a halo instead of pushing water past themselves.
    */
   swimWake(pos, up, forward, strength = 1) {
-    const r = this._waterSurfaceRadius({ position: pos }, up);
+    const r = this._waterSurfaceY({ position: pos });
     if (r <= 0) return;
     for (const side of [1, -1]) {
       _probe.copy(pos)
         .addScaledVector(forward, -0.25)
-        .addScaledVector(_t1.copy(forward).cross(up).normalize(), side * 0.42)
-        .setLength(r);
-      this.ripple(_probe, _t2.copy(_probe).normalize(), 0.75 + 0.35 * strength, 0.5 * strength);
+        .addScaledVector(_t1.copy(forward).cross(up).normalize(), side * 0.42);
+      _probe.y = r;
+      this.ripple(_probe, _t2.set(0, 1, 0), 0.75 + 0.35 * strength, 0.5 * strength);
     }
   }
 

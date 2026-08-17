@@ -1,8 +1,14 @@
-// Skylight and coloured block light, flood-filled over the cubesphere's
-// 6-neighbour graph (four tangential neighbours + up/down the column).
+// Skylight and coloured block light, flood-filled over the map's 6-neighbour
+// graph (four neighbouring columns, wrapping, + up/down the column).
+//
+// The cube needed COL_BASE/COL_STEP to find a column's cells, because its
+// storage strided differently per face. The flat map stores a column's layers
+// contiguously at `col * D + k`, so a block index and a light index are the same
+// number and both are written out directly.
 
-import { D, COLUMNS, NUM_VOXELS } from './Constants.js';
-import { COL_NB, COL_BASE, COL_STEP } from './Sphere.js';
+import { D, COLUMNS, CELLS } from './Constants.js';
+import { W } from './Grid.js';
+import { colNeighbor } from './Layout.js';
 import {
   BLOCKS, IS_OPAQUE, IS_SLAB, IS_STAIR, LIGHT_EMIT, LIGHT_R, LIGHT_G, LIGHT_B, N_BLOCKS,
 } from './Blocks.js';
@@ -121,14 +127,14 @@ for (let i = 0; i < N_BLOCKS; i++) ATTEN_V[i] = SKY_ATTEN[i] === 255 ? 255 : ATT
  * change a save, a seed or a single voxel.
  */
 const QUEUE_START = 8 * 1024 * 1024;
-const QUEUE_MAX = NUM_VOXELS;
+const QUEUE_MAX = CELLS;
 
 export class LightField {
   constructor() {
-    this.sun = new Uint8Array(NUM_VOXELS);
-    this.r = new Uint8Array(NUM_VOXELS);
-    this.g = new Uint8Array(NUM_VOXELS);
-    this.b = new Uint8Array(NUM_VOXELS);
+    this.sun = new Uint8Array(CELLS);
+    this.r = new Uint8Array(CELLS);
+    this.g = new Uint8Array(CELLS);
+    this.b = new Uint8Array(CELLS);
     this._queue = new Int32Array(QUEUE_START);
     /**
      * Which columns have actually been generated, or null for "all of them".
@@ -186,10 +192,9 @@ export class LightField {
     // At most D entries go in below, so one check per column covers the lot.
     const q = this._ensureQueue(tail + D);
     const base = col * D;
-    const bb = COL_BASE[col], bs = COL_STEP[col];
     let v = MAX_LIGHT;
     for (let k = D - 1; k >= 0; k--) {
-      const c = SKY_ATTEN[blocks[bb + k * bs]];
+      const c = SKY_ATTEN[blocks[base + k]];
       if (c === 255) break;
       if (c !== 0) {
         v -= c;
@@ -225,6 +230,9 @@ export class LightField {
       const k = i % D;
       const colBase = i - k;
       const col = colBase / D;
+      // The neighbour walk is inlined and wraps on both axes, which is the whole
+      // of the graph now: no seam, no turn, no ownership test.
+      const cy = col % W, cx = (col - cy) / W;
       for (let d = 0; d < 6; d++) {
         let ni, at;
         // The two vertical steps read ATTEN_V and the four tangential ones read
@@ -233,15 +241,18 @@ export class LightField {
         // arrays in the hot line is what turns a monomorphic load polymorphic.
         if (d === 4) {
           if (k + 1 >= D) continue;
-          ni = i + 1; at = ATTEN_V[blocks[COL_BASE[col] + (k + 1) * COL_STEP[col]]];
+          ni = i + 1; at = ATTEN_V[blocks[colBase + k + 1]];
         } else if (d === 5) {
           if (k === 0) continue;
-          ni = i - 1; at = ATTEN_V[blocks[COL_BASE[col] + (k - 1) * COL_STEP[col]]];
+          ni = i - 1; at = ATTEN_V[blocks[colBase + k - 1]];
         } else {
-          const nc = COL_NB[col * 4 + d];
+          const nc = d === 0 ? (cx * W + (cy === 0 ? W - 1 : cy - 1))
+            : d === 1 ? (cx * W + (cy === W - 1 ? 0 : cy + 1))
+              : d === 2 ? ((cx === 0 ? W - 1 : cx - 1) * W + cy)
+                : ((cx === W - 1 ? 0 : cx + 1) * W + cy);
           if (live !== null && live[nc] === 0) continue;
           ni = nc * D + k;
-          at = ATTEN[blocks[COL_BASE[nc] + k * COL_STEP[nc]]];
+          at = ATTEN[blocks[nc * D + k]];
         }
         if (at === 255) continue;
         const nv = lv - at;
@@ -322,19 +333,19 @@ export class LightField {
     for (const list of all) {
       for (let n = 0; n < list.length; n++) {
         const col = list[n];
-        const base = col * D;        const bb = COL_BASE[col], bs = COL_STEP[col];
+        const base = col * D;
         tail = this._seedSky(blocks, col, tail);
         // Pull light in from the columns beyond the ring, which keep whatever
         // they already have. Without this the outermost course of the ring is
         // recomputed as if the rest of the planet were dark and the seam moves
         // outward instead of disappearing.
         for (let d = 0; d < 4; d++) {
-          const nb = COL_NB[col * 4 + d];
+          const nb = colNeighbor(col, d);
           if (inSet[nb]) continue;
           if (this.live !== null && this.live[nb] === 0) continue;
           const q = this._ensureQueue(tail + D);
           for (let k = 0; k < D; k++) {
-            const at = ATTEN[blocks[bb + k * bs]];
+            const at = ATTEN[blocks[base + k]];
             if (at === 255) continue;
             const v = this.sun[nb * D + k] - at;
             if (v > this.sun[base + k]) { this.sun[base + k] = v; q[tail++] = base + k; }
@@ -353,20 +364,20 @@ export class LightField {
       for (const list of all) {
         for (let n = 0; n < list.length; n++) {
           const col = list[n];
-          const base = col * D;          const bb = COL_BASE[col], bs = COL_STEP[col];
+          const base = col * D;
           let q = this._ensureQueue(tail + D);
           for (let k = 0; k < D; k++) {
-            const b = blocks[bb + k * bs];
+            const b = blocks[base + k];
             const v = LIGHT_EMIT[b] > 0 ? Math.round(LIGHT_EMIT[b] * (scale[b] / 255)) : 0;
             if (v > chan[base + k]) { chan[base + k] = v; q[tail++] = base + k; }
           }
           for (let d = 0; d < 4; d++) {
-            const nb = COL_NB[col * 4 + d];
+            const nb = colNeighbor(col, d);
             if (inSet[nb]) continue;
             if (this.live !== null && this.live[nb] === 0) continue;
             q = this._ensureQueue(tail + D);
             for (let k = 0; k < D; k++) {
-              const at = ATTEN[blocks[bb + k * bs]];
+              const at = ATTEN[blocks[base + k]];
               if (at === 255) continue;
               const v = chan[nb * D + k] - at;
               if (v > chan[base + k]) { chan[base + k] = v; q[tail++] = base + k; }
@@ -406,7 +417,7 @@ export class LightField {
       const next = [];
       for (const c of frontier) {
         for (let d = 0; d < 4; d++) {
-          const n = COL_NB[c * 4 + d];
+          const n = colNeighbor(c, d);
           if (!region.has(n)) { region.add(n); next.push(n); }
         }
       }
@@ -417,7 +428,7 @@ export class LightField {
     const cols = [...region];
     const before = new Map();
     for (const col of cols) {
-      const base = col * D;      const bb = COL_BASE[col], bs = COL_STEP[col];
+      const base = col * D;
       const snap = new Uint8Array(D * 4);
       for (let k = 0; k < D; k++) {
         snap[k] = this.sun[base + k];
@@ -434,15 +445,15 @@ export class LightField {
     // --- sunlight ---
     let tail = 0;
     for (const col of cols) {
-      const base = col * D;      const bb = COL_BASE[col], bs = COL_STEP[col];
+      const base = col * D;
       tail = this._seedSky(blocks, col, tail);
       // pull light in from neighbouring columns outside the region
       for (let d = 0; d < 4; d++) {
-        const n = COL_NB[col * 4 + d];
+        const n = colNeighbor(col, d);
         if (inRegion(n)) continue;
         const q = this._ensureQueue(tail + D);
         for (let k = 0; k < D; k++) {
-          const at = ATTEN[blocks[bb + k * bs]];
+          const at = ATTEN[blocks[base + k]];
           if (at === 255) continue;
           const v = this.sun[n * D + k] - at;
           if (v > this.sun[base + k]) { this.sun[base + k] = v; q[tail++] = base + k; }
@@ -458,19 +469,19 @@ export class LightField {
       const chan = chans[c], scale = scales[c];
       tail = 0;
       for (const col of cols) {
-        const base = col * D;        const bb = COL_BASE[col], bs = COL_STEP[col];
+        const base = col * D;
         let q = this._ensureQueue(tail + D);
         for (let k = 0; k < D; k++) {
-          const b = blocks[bb + k * bs];
+          const b = blocks[base + k];
           let v = LIGHT_EMIT[b] > 0 ? Math.round(LIGHT_EMIT[b] * (scale[b] / 255)) : 0;
           if (v > chan[base + k]) { chan[base + k] = v; q[tail++] = base + k; }
         }
         for (let d = 0; d < 4; d++) {
-          const n = COL_NB[col * 4 + d];
+          const n = colNeighbor(col, d);
           if (inRegion(n)) continue;
           q = this._ensureQueue(tail + D);
           for (let k = 0; k < D; k++) {
-            const at = ATTEN[blocks[bb + k * bs]];
+            const at = ATTEN[blocks[base + k]];
             if (at === 255) continue;
             const v = chan[n * D + k] - at;
             if (v > chan[base + k]) { chan[base + k] = v; q[tail++] = base + k; }
@@ -481,7 +492,7 @@ export class LightField {
     }
 
     for (const col of cols) {
-      const base = col * D;      const bb = COL_BASE[col], bs = COL_STEP[col];
+      const base = col * D;
       const snap = before.get(col);
       for (let k = 0; k < D; k++) {
         if (snap[k] !== this.sun[base + k] || snap[D + k] !== this.r[base + k]

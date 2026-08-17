@@ -1675,7 +1675,20 @@ const LIQUID_MAP_FRAG = /* glsl */`
      * ones is sparse and has no period. The second is on the swapped axes and
      * offset, so the two cannot be the same field at a different scale.
      */
-    float fil = caustic(q * 0.55, pT * 0.35) * caustic(q.yx * 0.31 + 11.0, pT * 0.28);
+    /*
+     * DOMAIN-WARPED, and photographed before and after. Two caustics multiplied
+     * is sparse but it is not aperiodic: from twenty blocks back the wall came
+     * out as a regular diagonal weave, because caustic's own frequencies are
+     * fixed and the second call only shifts them. The warp is the band field
+     * itself, which is smooth, has no period either call can beat against, and
+     * is already being computed - and it is applied in OPPOSITE directions to
+     * the two, so nothing is left that could line up. Amplitude is about half
+     * the finer caustic's wavelength, which is what it takes to break a lattice
+     * rather than slide it.
+     */
+    vec2 warp = vec2(bands, sin(q.x * 0.19 - q.y * 0.27 + pT * 0.13) * 1.6) * 0.7;
+    float fil = caustic((q + warp) * 0.55, pT * 0.35)
+              * caustic((q.yx - warp) * 0.31 + 11.0, pT * 0.28);
 
     /*
      * Dark, and darker than it looks like it should be. The block is light 15

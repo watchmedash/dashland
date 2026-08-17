@@ -6057,6 +6057,11 @@ class Game {
     this.persistSettings();
   }
 
+  /** The pause screen's Camera button, which is V for a hand with no keyboard.
+   *  It cannot go through the key: V is read inside `_update`, and `_update` is
+   *  the one thing that does not run while the game is paused. */
+  cycleView() { this._cycleView(); }
+
   _frozenUpdate(dt) {
     // Two things have to be let go of here, and for the same reason: losing the
     // pointer lock clears the key set, so `_update` never sees the key released.

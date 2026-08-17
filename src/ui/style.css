@@ -3469,6 +3469,11 @@ body.touch .recipe-row.lp {
   box-shadow: 0 0 0 2px #e2a052, 0 0 14px -2px rgba(226, 160, 82, .85);
 }
 
+/* Rows that only exist for a hand with no keyboard. Hidden by default rather
+   than revealed on desktop, so a new one is invisible until it is asked for. */
+.touch-only { display: none; }
+body.touch .touch-only { display: block; }
+
 /* ── the Controls screen swaps sides ───────────────────── */
 /* The keyboard rows are hidden rather than removed, and the touch block is
    revealed, so one screen serves both and neither is a fork of the other. The

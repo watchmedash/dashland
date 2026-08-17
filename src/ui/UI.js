@@ -792,6 +792,16 @@ export class UI {
     $('cg-next').onclick = () => this.stepCharacter(1);
 
     $('pz-resume').onclick = () => g.resume();
+    // Through the game's own V, not a second copy of `_cycleView`: the crosshair
+    // rule, the character model and the persisted setting all hang off it.
+    $('pz-camera').onclick = () => g.cycleView();
+    // The same field the M key and the Settings row write, so all three agree.
+    // The label carries the state because the map itself is behind this card.
+    $('pz-map').onclick = () => {
+      g.settings.minimap = g.settings.minimap === false;
+      g.persistSettings();
+      this.syncSettings();
+    };
     $('pz-settings').onclick = () => this.openSettings();
     $('pz-controls').onclick = () => this.openControls();
     $('pz-achievements').onclick = () => this.openAchievements();
@@ -904,6 +914,7 @@ export class UI {
     $('set-autojump').checked = !!s.autoJump;
     $('set-minimap').checked = s.minimap !== false;
     $('set-compass').checked = s.compass !== false;
+    $('pz-map').textContent = s.minimap === false ? 'Show Map' : 'Hide Map';
   }
 
   // --- the game's own yes/no ------------------------------------------------
@@ -1615,7 +1626,9 @@ export class UI {
       || !this.el.achievements.classList.contains('hidden');
   }
 
-  openPause() { this.el.pause.classList.remove('hidden'); }
+  // Synced on the way in, because the Map button's label is the only place the
+  // setting is written down and M or the Settings row may have moved it since.
+  openPause() { this.syncSettings(); this.el.pause.classList.remove('hidden'); }
   closePause() {
     this.el.pause.classList.add('hidden');
     this.closeSettings(); this.closeControls(); this.closeAchievements();

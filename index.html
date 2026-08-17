@@ -252,6 +252,13 @@
       <h2>Paused</h2>
       <div class="menu-actions">
         <button id="pz-resume" class="primary">Resume</button>
+        <!-- V and M, for a hand with no keyboard. Here rather than on the HUD
+             because the thumb layer is already the size it can afford to be and
+             both of these are opened rather than played: the world is still
+             drawn behind this card, so a camera cycled from here is visible
+             while you cycle it. Hidden on desktop, which has the keys. -->
+        <button id="pz-camera" class="touch-only">Camera</button>
+        <button id="pz-map" class="touch-only">Hide Map</button>
         <button id="pz-settings">Settings</button>
         <button id="pz-controls">Controls</button>
         <button id="pz-achievements">Achievements</button>
@@ -380,6 +387,10 @@
           <div><span class="keys"><kbd>Place</kbd></span><span>Food, a door, a bed, a merchant</span></div>
           <div><span class="keys"><kbd>Jump</kbd></span><span>Jump, or swim up</span></div>
           <div><span class="keys"><kbd>Sneak</kbd></span><span>Sneak, or swim down. Stays on.</span></div>
+          <!-- The keyboard's Ctrl+RMB. Sneak is already a latch, so it is
+               already the modifier that row needs, and nothing new is added
+               for it. Not a hold of Place: Place and Mine are both holds. -->
+          <div><span class="keys"><kbd>Sneak</kbd>+<kbd>Place</kbd></span><span>Lay a log lengthways</span></div>
         </div>
       </section>
 
@@ -392,12 +403,27 @@
         </div>
       </section>
 
+      <!-- A hold is Shift and a drag is the right button, because a phone has
+           neither. The same 420ms hold the bag and the hotbar drop use. -->
+      <section class="ctl-group controls-touch">
+        <h3 class="ctl-head">In the bag</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>Tap</kbd></span><span>A slot, to pick it up</span></div>
+          <div><span class="keys"><kbd>Drag</kbd></span><span>Out of a slot, for half</span></div>
+          <div><span class="keys"><kbd>Hold</kbd></span><span>A slot, to move the whole stack</span></div>
+          <div><span class="keys"><kbd>Hold</kbd></span><span>A recipe, to craft as many as you can</span></div>
+          <div><span class="keys"><kbd>Hold</kbd></span><span>The result, to craft as many as you can</span></div>
+        </div>
+      </section>
+
       <section class="ctl-group controls-touch">
         <h3 class="ctl-head">Screens</h3>
         <div class="controls-grid">
           <div><span class="keys"><kbd>Bag</kbd></span><span>Inventory</span></div>
           <div><span class="keys"><kbd>Bag</kbd></span><span>Hold for Growth</span></div>
           <div><span class="keys"><kbd>Pause</kbd></span><span>Pause</span></div>
+          <div><span class="keys"><kbd>Pause</kbd></span><span>Camera</span></div>
+          <div><span class="keys"><kbd>Pause</kbd></span><span>Map</span></div>
         </div>
       </section>
 

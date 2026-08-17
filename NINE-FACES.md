@@ -293,9 +293,18 @@ other fourteen live here.**
   world-wide: leave and come back and they have forgotten.
 - **Except wood.** Trunks and leaves are fair game. Everything else - stone,
   ore, soil, their own ground - is not.
-- **Killing them pays nothing.** No drops, no XP. The design intent is that
-  violence here is pure loss, so the only sensible way to treat them is as
-  people.
+- **They fight back**, and they are armed. Each carries things - tools, weapons,
+  whatever suits them - so attacking one is a real fight rather than a free
+  kill.
+- **Attacking one turns all of them**, exactly as mining does. There is no
+  picking off a straggler.
+- **Nothing they hold ever drops**, and **killing them pays nothing** - no
+  loot, no XP, not even the weapon out of their hand. Violence here is pure
+  loss by construction, which is what makes treating them as people the only
+  sensible play rather than merely the nice one.
+
+The three rules compose into one sentence a player can work out without being
+told: on this face you are a guest, and the only thing you can take is wood.
 
 The two faces are deliberate opposites in play as well as in terrain: Tempest
 is the one you survive for a prize, Verdant is the one you must not fight.

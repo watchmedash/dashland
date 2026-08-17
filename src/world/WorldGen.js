@@ -20,7 +20,10 @@ import {
   COLUMNS, CHUNK_T, BIOME, regionOfCol,
   FACE_ROLE, FACE_NORMAL, FACE_RIME, FACE_TEMPEST, FACE_VERDANT, FACE_PYRE,
 } from './Constants.js';
-import { wrap, faceAt, isWall, delta, START_FACE, faceOrigin, colIndex, F } from './Grid.js';
+import {
+  wrap, faceAt, isWall, delta, START_FACE, faceOrigin, colIndex, F,
+  gateAt, GATE_H, DIR_STEP,
+} from './Grid.js';
 import { Periodic, surfScale, MAXA } from './Periodic.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
 
@@ -1511,9 +1514,39 @@ function fillWall(blocks, col, colHeight) {
     const h = colHeight[colIndex(nx, ny)];
     if (h > ground) ground = h;
   }
-  const top = Math.min(D, Math.round(ground) + WALL_RISE);
+  let top = Math.min(D, Math.round(ground) + WALL_RISE);
+  // A gate column has to be tall enough to hold its own opening and a lintel.
+  if (gateAt(p.x, p.y, _gate)) top = Math.min(D, Math.max(top, Math.round(ground) + GATE_H + 3));
   for (let k = 0; k < top; k++) blocks[cellAt(col, k)] = ID.edgestone;
+
+  // The way through. See `Grid.gateAt`: a hole, not a teleport, because the
+  // sealed face is already touching the cross on the other side of this column.
+  if (!gateAt(p.x, p.y, _gate)) return;
+  // Cut it against the two columns the gate actually joins, not against the
+  // four neighbours: the wall's height uses the HIGHEST of its neighbours, and
+  // a sill at that height is a doorway partway up a cliff on the lower side.
+  // Measured before this, four of the eight gates were unreachable from one
+  // side, the worst by seven layers. Floor to the lower ground so both sides
+  // can step in, ceiling to the higher one so both have headroom.
+  const [gdx, gdy] = DIR_STEP[_gate.dir];
+  const hOut = colHeight[colIndex(wrap(p.x + gdx), wrap(p.y + gdy))];
+  const hIn = colHeight[colIndex(wrap(p.x - gdx), wrap(p.y - gdy))];
+  // Generous on both ends. `colHeight` is the height FIELD, and the ground a
+  // player actually stands on is whatever the surface pass put on top of it -
+  // snow, a plant, a shore - so a gate cut exactly to the field is a layer or
+  // two out on one side and becomes a crawl. One under and three over absorbs
+  // that.
+  const sill = Math.max(0, Math.floor(Math.min(hOut, hIn)) - 1);
+  const head = Math.min(D - 1, Math.ceil(Math.max(hOut, hIn)) + GATE_H + 3);
+  for (let k = sill; k < head; k++) blocks[cellAt(col, k)] = 0;
+  // A lintel of sunstone over it, and it is not decoration: eight gates on a
+  // 1248-column map, each five columns wide in a wall four hundred long, is a
+  // needle in a haystack. This is the only part of a divider that emits light,
+  // so a gate is a warm line visible from well outside the draw distance the
+  // wall itself resolves at.
+  if (head < top) blocks[cellAt(col, head)] = ID.glowstone;
 }
+const _gate = { x: 0, y: 0, dir: 0 };
 const _wallXY = { x: 0, y: 0 };
 
 export class WorldGen {

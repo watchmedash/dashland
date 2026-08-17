@@ -164,6 +164,50 @@ export function allPortals() {
 }
 
 /**
+ * How wide a gate is either side of its middle, and how tall its opening is.
+ *
+ * Five columns across and five layers of headroom: wide enough to find and to
+ * walk through without catching a shoulder, narrow enough against a 416-column
+ * wall to still read as a door in it.
+ */
+export const GATE_HALF = 2;
+export const GATE_H = 5;
+
+/**
+ * Is this column part of a gate through a divider?
+ *
+ * A GATE, not a teleport, and that is the whole design decision of this
+ * feature. The spec called these portals because the nine faces were first
+ * imagined as separate regions that would have to be travelled between. They
+ * are not: the map is one flat sheet and a sealed face is geometrically
+ * touching the cross it borders, so a hole in the wall IS the way through. A
+ * teleport would be code, an arrival-safety problem and a loading seam, all to
+ * reproduce what one column of missing rock already does - and you can see
+ * through a hole, which is worth more here than any effect.
+ *
+ * Returns the portal record so a caller knows which way the gate faces, or null.
+ */
+export function gateAt(x, y, out = { x: 0, y: 0, dir: 0 }) {
+  const f = faceAt(x, y);
+  if (!IS_SEALED[f]) return null;
+  const wx = wrap(x), wy = wrap(y);
+  for (const p of portalsOf(f)) {
+    // A gate sits in one edge of the ring, so it must match on the axis the
+    // wall is thin along and be within half a gate on the axis it runs along.
+    if (p.dir === NORTH || p.dir === SOUTH) {
+      if (wy !== p.y) continue;
+      if (Math.abs(delta(p.x, wx)) > GATE_HALF) continue;
+    } else {
+      if (wx !== p.x) continue;
+      if (Math.abs(delta(p.y, wy)) > GATE_HALF) continue;
+    }
+    out.x = p.x; out.y = p.y; out.dir = p.dir;
+    return out;
+  }
+  return null;
+}
+
+/**
  * Shortest signed distance from a to b on one wrapped axis.
  *
  * The map wraps, so "b - a" is wrong by a full turn half the time, and every

@@ -2761,7 +2761,7 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 #chargen > .chargen-card,
 #slots > .panel, #screen > .panel, #settings > .panel,
 #controls > .panel, #achievements > .panel, #skills > .panel {
-  --sheet: 660px;
+  --sheet: 1680px;
   width: 100%; max-width: none;
   height: 100%; max-height: none;
   margin: 0;
@@ -2778,11 +2778,81 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 #controls > .panel::before, #achievements > .panel::before,
 #skills > .panel::before { display: none; }
 
-/* Each screen keeps the column width it was already tuned to. */
-#slots > .panel { --sheet: 520px; }
-#skills > .panel { --sheet: 560px; }
-#screen > .panel { --sheet: 830px; }
-#chargen > .chargen-card { --sheet: 760px; }
+/* The two screens that are a single object rather than a list of them: the bag
+   is nine pockets wide by construction and the picker is one figure, so both
+   are given a wide column rather than the whole monitor. */
+#screen > .panel { --sheet: 1240px; }
+#chargen > .chargen-card { --sheet: 1180px; }
+
+/* ── the column is the window ──────────────────────────────
+   "You expanded the menus to full screen but contents are still contained."
+   Right, and the paragraph above is the thing that was wrong: the sheet was
+   the window and the CONTENT was a 660px column down the middle of it, so a
+   1920px monitor showed a third of a screen of settings and two thirds of
+   empty parchment.
+
+   The distinction the paragraph was reaching for is not screen versus content,
+   it is REPEATED THINGS versus RUNNING TEXT. Anything made of repeated things
+   — settings rows, key rows, saves, achievements, branches — gains columns
+   instead of length, and every one of them does it with the same expression:
+   `auto-fit` against the minimum width that row actually needs. One rule
+   covers every window, because a phone divides that minimum into one column
+   and a monitor into five, and no breakpoint has to decide which. The narrow
+   blocks further down still fire underneath and are untouched.
+
+   Running text is the exception, and it is capped in CHARACTERS rather than by
+   its box: a 200-character line is unreadable at any screen size. So the
+   credits and the taglines carry a `max-width` and nothing around them does. */
+.settings { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+/* A heading rules off the whole screen, not one column of it, and the credits
+   are prose sitting under all of them. */
+.set-head, .settings details.credits { grid-column: 1 / -1; }
+/* `auto-fill` and not `auto-fit` for this one alone: the controls screen is
+   five separate grids under five headings, and a group of four would size its
+   own tracks wider than the group of seven under it. An empty track holds its
+   width, so every group is ruled to the same columns. */
+.controls-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+/* 520 is what a name, its line and a 190px meter need before the name starts
+   wrapping; 460 is a save row with its index chip, day and age. */
+.ach-list { grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); }
+.slot-list { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); }
+.skill-tree { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
+.settings, .ach-list, .slot-list, .skill-tree {
+  display: grid; align-content: start; align-items: start;
+}
+.settings { column-gap: 26px; row-gap: 0; }
+.ach-list, .slot-list { gap: 6px; }
+.skill-tree { gap: 8px; }
+/* Prose, capped where it is set rather than where it sits. */
+.credit-list { max-width: 78ch; }
+.tagline { max-width: 60ch; margin-left: auto; margin-right: auto; }
+
+/* The bag is the one screen that cannot simply grow columns: it is nine
+   pockets wide because the hotbar is nine wide, and a tenth would be a
+   different game. So it spends the width on the two things that can take it —
+   bigger pockets, and a craft list that is no longer a 236px strip. */
+@media (min-width: 1100px) {
+  .islot { width: 58px; height: 58px; border-radius: 4px; }
+  .islot img { width: 50px; height: 50px; }
+  .craft-out .islot { width: 70px; height: 70px; }
+  .craft-out .islot img { width: 60px; height: 60px; }
+  .inv-grid { gap: 6px; }
+  .inv-section { padding: 8px; }
+  .recipe-panel { width: clamp(236px, 24vw, 420px); }
+  #recipe-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 5px; }
+}
+@media (min-width: 1500px) {
+  .islot { width: 66px; height: 66px; }
+  .islot img { width: 57px; height: 57px; }
+  .craft-out .islot { width: 78px; height: 78px; }
+  .craft-out .islot img { width: 66px; height: 66px; }
+}
+/* The picker's stage was capped at 420px against a window that has three times
+   that. The cap is the only thing raised: the clamp still sizes it off the
+   height, so it grows into a big window and is unchanged in a small one. */
+@media (min-width: 1200px) and (min-height: 800px) {
+  :root { --cg-stage: clamp(140px, calc(100vh - var(--cg-chrome)), 660px); }
+}
 
 /* The main menu is a wordmark and four keys, so it is centred in the sheet
    rather than sitting at the top of it. */

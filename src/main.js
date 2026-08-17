@@ -95,7 +95,7 @@ import { EntityLightField } from './world/EntityLight.js';
 import { makeRng } from './util/Noise.js';
 // Every world-space distance on this map goes through one of these: X and Z
 // wrap, so `distanceTo` is a full turn out half the time.
-import { wrapDist2 } from './game/Wrap.js';
+import { wrapDist, wrapDist2 } from './game/Wrap.js';
 
 /**
  * Shortest signed distance along a wrapped world axis.
@@ -5683,7 +5683,7 @@ class Game {
     const c = this.planet.centerOf(col, k, _v1);
     for (const h of [0.28, 0.9, 1.55]) {
       _v2.copy(this.player.position).addScaledVector(this.player.up, h);
-      if (_v2.distanceToSquared(c) < 0.78 * 0.78) return true;
+      if (wrapDist2(_v2, c) < 0.78 * 0.78) return true;
     }
     return false;
   }
@@ -6859,7 +6859,7 @@ class Game {
     if (this._whirlSndT <= 0) {
       this._whirlSndT = 1.9 + Math.random() * 0.6;
       const eyePos = this.planet.centerOf(eye, K_SEA, _v1);
-      const d = eyePos.distanceTo(p.position);
+      const d = wrapDist(eyePos, p.position);
       this.audio.churn(eyePos, Math.max(0.15, 1 - d / (WHIRL_CUE + WHIRL_R)));
     }
   }
@@ -7401,7 +7401,7 @@ class Game {
   _iceHeard(edits, freeze) {
     let best = null, bestD = ICE_EARSHOT * ICE_EARSHOT;
     for (const e of edits) {
-      const d = this.planet.centerOf(e.col, e.k, _v2).distanceToSquared(this.player.position);
+      const d = wrapDist2(this.planet.centerOf(e.col, e.k, _v2), this.player.position);
       if (d < bestD) { bestD = d; best = _v1.copy(_v2); }
     }
     if (best) this.audio.ice(freeze, best);
@@ -8122,11 +8122,10 @@ class Game {
     let n = 0;
     for (let i = 0; i < emitters.length; i++) {
       const e = emitters[i];
-      const d = pos.distanceTo(e.pos);
+      const d = wrapDist(pos, e.pos);
       if (d >= e.reach) continue;
-      // Same curve as the hand light's, in world units rather than cells — the
-      // two differ by the cell's arc length, which on this planet is within a
-      // few percent of one.
+      // Same curve as the hand light's, in world units rather than cells, and
+      // a cell is exactly one unit now.
       // Linear for the same reason `flameLight` is: the terrain's own block
       // light loses one level per cell, so a squared curve here made a mob
       // several times darker than the ground it stands on. "Why is a lion
@@ -8229,7 +8228,7 @@ class Game {
       const rad = i ? u.uDropLightRadius.value : u.uHandLightRadius.value;
       if (rad <= 0.01) continue;
       const lp = i ? u.uDropLightPos.value : u.uHandLightPos.value;
-      const d = pos.distanceTo(lp);
+      const d = wrapDist(pos, lp);
       if (d >= rad) continue;
       const col = i ? u.uDropLightColor.value : u.uHandLightColor.value;
       const fall = (1 - d / rad) / Math.PI;
@@ -9026,7 +9025,7 @@ class Game {
       const bl = def?.block !== undefined ? BLOCKS[def.block] : null;
       const emit = bl?.light ?? 0;
       if (!emit) continue;
-      const d2 = d.pos.distanceToSquared(this.player.position);
+      const d2 = wrapDist2(d.pos, this.player.position);
       if (d2 > DROP_LIGHT_RANGE * DROP_LIGHT_RANGE) continue;
       if (emit > bestEmit || (emit === bestEmit && d2 < bestD2)) {
         best = { drop: d, block: bl }; bestEmit = emit; bestD2 = d2;
@@ -10369,7 +10368,7 @@ class Game {
         // are different numbers the moment the shore is not flat — and it is
         // the throw the player is being rewarded for. Weights the loot roll
         // when something finally bites; see `_rollCatch`.
-        dist: c.distanceTo(tip),
+        dist: wrapDist(c, tip),
         // Where you were standing when you cast. The leash is measured from
         // here, not from the float — see FISH_LEASH.
         from: this.player.position.clone(),
@@ -10660,7 +10659,7 @@ class Game {
     if (!f) return;
     // Wander off and the line comes in on its own, rather than fishing a lake
     // you are no longer standing beside.
-    if (this.player.position.distanceTo(f.from ?? f.pos) > FISH_LEASH) {
+    if (wrapDist(this.player.position, f.from ?? f.pos) > FISH_LEASH) {
       this._stopFishing(); return;
     }
 
@@ -10989,7 +10988,7 @@ class Game {
     // A ray that stops on liquid, which the normal interaction ray does not.
     const wet = this.planet.raycast(
       this.player.eye, this.player.lookDir, this.player.reach,
-      { hitLiquid: true, face: this.player.face },
+      { hitLiquid: true },
     );
 
     if (empty) {
@@ -11336,7 +11335,7 @@ class Game {
       const c = this.player.cell;
       this.ui.setDebug(
         `${(1 / avg).toFixed(0)} fps   ${(avg * 1000).toFixed(1)} ms\n` +
-        `face ${c.f}  i ${c.ci.toFixed(2)}  j ${c.cj.toFixed(2)}  k ${c.ck.toFixed(2)}\n` +
+        `face ${this.player.face}  x ${c.x}  y ${c.y}  k ${c.k}\n` +
         `alt  ${(this.player.position.y - SEA_K).toFixed(1)}\n` +
         `draw ${info.render.calls}   tris ${(info.render.triangles / 1000).toFixed(0)}k\n` +
         `chunks ${this.planet.meshes.size}   drops ${this.drops.list.length}\n` +

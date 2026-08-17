@@ -101,15 +101,18 @@ const TORNADO_H = 34;
 // shape of a bolt across the sky behind it. Points and lines are already on the
 // right side of that fence.
 //
-// Three strands rather than one. A single 1px polyline is what the hardware
-// gives whatever `linewidth` says, and at 40 cells that is a hair; three strands
-// jittered a third of a cell apart read as one bright forked channel and cost
-// nothing. The bolt is drawn additively and blows out to white at its core,
-// which is what a line width the platform will not give has to be faked with.
+// Seven strands rather than one, and the count is measured rather than felt
+// for. A single polyline is 1px whatever `linewidth` says — the platform simply
+// ignores it — and screenshotted at 18 cells that is a hair you have to look
+// for, which fails the one job the drawing has. Seven, sharing a foot and
+// separating as they climb, read as one bright forked channel: they are drawn
+// additively, so where they overlap near the ground the colour blows out to
+// white and the channel has a core. Width the hardware will not give has to be
+// faked with count.
 const BOLT_MAX = 4;
 /** Points down one strand, so BOLT_STEPS - 1 segments. */
 const BOLT_STEPS = 15;
-const BOLT_STRANDS = 3;
+const BOLT_STRANDS = 7;
 /** Cells above the ground the channel comes out of the cloud deck. */
 const BOLT_H = 46;
 /**
@@ -292,13 +295,13 @@ export class Particles {
     const pts = [];
     for (let s = 0; s < BOLT_STRANDS; s++) {
       const strand = new Float32Array(BOLT_STEPS * 3);
-      let dx = (Math.random() - 0.5) * 0.7, dz = (Math.random() - 0.5) * 0.7;
+      let dx = (Math.random() - 0.5) * 0.25, dz = (Math.random() - 0.5) * 0.25;
       for (let i = 0; i < BOLT_STEPS; i++) {
         const t = i / (BOLT_STEPS - 1);
         // Wander grows with height and is shared by the whole bolt only at the
         // foot, so the three strands separate as they climb.
-        dx += (Math.random() - 0.5) * 2.6 * t;
-        dz += (Math.random() - 0.5) * 2.6 * t;
+        dx += (Math.random() - 0.5) * 2.2 * t;
+        dz += (Math.random() - 0.5) * 2.2 * t;
         strand[i * 3] = pos.x + dx;
         strand[i * 3 + 1] = pos.y + t * BOLT_H;
         strand[i * 3 + 2] = pos.z + dz;

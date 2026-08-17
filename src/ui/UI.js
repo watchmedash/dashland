@@ -454,7 +454,7 @@ export class UI {
       itemName: $('item-name'), lookAt: $('look-at'),
       vHealth: $('v-health'), vFood: $('v-food'),
       vStamina: $('v-stamina'), vBreath: $('v-breath'),
-      clockDial: $('clock-dial'), clockText: $('clock-text'),
+      chipClock: $('chip-clock'), clockDial: $('clock-dial'), clockText: $('clock-text'),
       chipFace: $('chip-face'),
       chipPack: $('chip-pack'), packDist: $('pack-dist'), chipSave: $('chip-save'),
       pzQuit: $('pz-quit'),
@@ -2842,13 +2842,22 @@ export class UI {
    * announces itself - so they were a caption on a picture the player was
    * already looking at. The face name is the one thing the view cannot say,
    * because every face looks like a world and none of them says which.
+   *
+   * `clock` false drops the clock entirely, which is Pyre. That face is
+   * permanently dark, so a running time of day there is a number that predicts
+   * nothing: it never gets light, dawn never arrives, and the one thing a clock
+   * is for does not happen. An empty space says that better than a figure that
+   * looks like it means something.
    */
-  updateStatus(clockFraction, faceName) {
-    const mins = Math.round(clockFraction * 1440);
-    const h = String(Math.floor(mins / 60) % 24).padStart(2, '0');
-    const m = String(mins % 60).padStart(2, '0');
-    this.el.clockText.textContent = `${h}:${m}`;
-    this.el.clockDial.style.transform = `rotate(${clockFraction * 360}deg)`;
+  updateStatus(clockFraction, faceName, clock = true) {
+    this.el.chipClock.classList.toggle('hidden', !clock);
+    if (clock) {
+      const mins = Math.round(clockFraction * 1440);
+      const h = String(Math.floor(mins / 60) % 24).padStart(2, '0');
+      const m = String(mins % 60).padStart(2, '0');
+      this.el.clockText.textContent = `${h}:${m}`;
+      this.el.clockDial.style.transform = `rotate(${clockFraction * 360}deg)`;
+    }
     this.el.chipFace.textContent = faceName ?? '-';
     this._paintPackChip();
   }

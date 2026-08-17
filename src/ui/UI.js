@@ -15,8 +15,8 @@ import {
 import * as Character from '../player/Character.js';
 import { CharacterPicker, CHARACTER_IDS, characterUrl } from '../player/Character.js';
 import { Save } from '../game/Save.js';
-import { BIOME_COLORS, R_SEA, F, cidx } from '../world/Constants.js';
-import { patchColumn } from '../world/Sphere.js';
+import { BIOME_COLORS, SEA_K } from '../world/Constants.js';
+import { colIndex, delta } from '../world/Grid.js';
 import { compassFrame } from '../render/Sky.js';
 import { normalizeDifficulty, EXTREME } from '../game/NewGame.js';
 
@@ -140,8 +140,6 @@ export const DEFAULT_ON_DEATH = 'lose';
 // Scratch for the pack bearing, which runs once a frame.
 const _dir = new THREE.Vector3();
 const _right = new THREE.Vector3();
-const _here = new THREE.Vector3();
-const _there = new THREE.Vector3();
 
 // Colours go in as plain `#rrggbb` — pre-encoding them as %23 then running
 // encodeURIComponent double-escapes the %, which yields an invalid fill and
@@ -297,32 +295,11 @@ const MAP_PIVOT = 0.58;
 /** Pixels per degree on the strip, and half the visible window. */
 const CMP_PX = 3.2;
 const CMP_HALF = 160;
-/**
- * Where the compass gives up, as |Y × up| — see `compassFrame`, which is where
- * this number's meaning lives.
- *
- * These used to be 19° and 31° of latitude, derived from the reference-axis
- * swap the frame no longer has: 5% of the planet with no bearing and 14%
- * dimmed, and because `WorldGen.climate` bands on |dy| that was exactly the
- * snowfields, where a white horizon makes a bearing worth most. The frame is
- * continuous now, so the only thing left to hide from is the *rate*: |Y × up|
- * is the sine of the angle down from the pole, so walking a great circle past
- * the pole turns the bearing at about 1/polar degrees per radian of travel.
- * Measured on that traverse at sprint speed 6.8:
- *
- *   polar 0.50  (148 blocks out)   0.35°/block     2°/s
- *   polar 0.050 (14 blocks)        4.05°/block    28°/s
- *   polar 0.010 (2.8 blocks)      19.89°/block   135°/s
- *
- * At CMP_PX 3.2 that is 90 px/s against a 320px window at fifteen blocks, and
- * 432 px/s — a window and a third every second — at three. The first is a
- * strip; the second is not. So: lit to 15 blocks of the pole, out by 3, both
- * written as block distances against R_SEA because that is what they were
- * chosen as. 3 blocks is a cap of 0.61° of latitude, 6e-5 of the planet's
- * surface across both poles, against 5% before.
- */
-export const POLAR_HIDE = 3 / R_SEA;
-export const POLAR_FULL = 15 / R_SEA;
+// POLAR_HIDE, POLAR_FULL and `compassLit` were deleted rather than retuned.
+// They faded the strip out near the poles of a sphere, where the tangent frame
+// degenerated and the bearing skated. The map is flat and has one frame
+// everywhere - east +X, north -Z - so there is no pole, no dead zone and
+// nothing left to fade.
 
 /** Scratch for the navigation HUD, which runs once a frame. */
 const _east = new THREE.Vector3();
@@ -331,8 +308,7 @@ const _cellF = { i: 0, j: 0 };
 const _cellN = { i: 0, j: 0 };
 
 /**
- * The player's heading as a bearing in degrees, 0 due north and 90 due east,
- * plus how much of a frame that bearing came out of.
+ * The player's heading as a bearing in degrees, 0 due north and 90 due east.
  *
  * Pulled out of the HUD as a plain function so it can be checked against the
  * sun without a browser: `Sky.setSolarTime` builds the sunrise direction out of
@@ -340,60 +316,41 @@ const _cellN = { i: 0, j: 0 };
  * be asserted rather than eyeballed. `east` and `north` are written through for
  * the caller — the minimap's north pip wants the vector, not the angle.
  *
- * @param {THREE.Vector3} up radial, unit
- * @param {THREE.Vector3} forward the player's tangential heading, unit
+ * A bearing is a real thing on this world in a way it was not on the cube. One
+ * gravity and one frame means north is north wherever you stand, so the number
+ * this returns is comparable between two places rather than being an angle
+ * against whatever basis the ground happened to have.
+ *
+ * @param {THREE.Vector3} up the one up, (0, 1, 0)
+ * @param {THREE.Vector3} forward the player's heading, unit and horizontal
  */
 export function bearingOf(up, forward, east = _east, north = _north) {
-  const polar = compassFrame(up, east, north);
-  const deg = (Math.atan2(forward.dot(east), forward.dot(north)) * 180 / Math.PI + 360) % 360;
-  return { deg, polar };
+  compassFrame(up, east, north);
+  return (Math.atan2(forward.dot(east), forward.dot(north)) * 180 / Math.PI + 360) % 360;
 }
 
-/** How lit the compass is at this distance from the pole, 0..1. */
-export const compassLit = (polar) =>
-  Math.max(0, Math.min(1, (polar - POLAR_HIDE) / (POLAR_FULL - POLAR_HIDE)));
-
 /**
- * The columns the map samples around (f, i, j), row-major, `dj` outer.
+ * The columns the map samples around (x, y), row-major, the map's y outer.
  *
- * THE CONVENTION, and it is the whole of what the map has to get right: on the
- * unrotated image +i runs to the right and **+j runs UP**, i.e. `dj` decreases
- * as the image row index increases. That is not a taste: `Sphere.js` picks its
- * face bases so that R x U = N (outward), so (ea, eb, up) is right handed, and
- * a top-down picture of the ground seen from above is only unmirrored when its
- * screen-right and screen-up axes cross to `up` the same way. Writing +j down
- * the image instead makes the picture a reflection, and no rotation can undo a
- * reflection: it was measured as agreeing with the world at 0 of 12 heading and
- * site combinations, and agreeing at 12 of 12 once the reader mirrored itself
- * back. `updateMinimap` derives its CSS rotation from this same convention, so
- * the two cannot be flipped independently.
+ * THE CONVENTION, and it is the whole of what the map has to get right: the
+ * picture is north-up before any rotation is applied, so the image's +x is the
+ * map's +x (east) and the image's +y, which runs DOWN the rows, is the map's +y
+ * (south). That is the unmirrored top-down view: looking down the world's -Y
+ * with north at the top puts east on the right, and screen-right cross screen-up
+ * is +Y, back at the eye.
  *
- * `patchColumn` rather than a walk with `colNeighbor`, and rather than any
- * arithmetic at all on a column index — the seams are real and index arithmetic
- * across one is a bug this codebase has already paid for. Of the two safe
- * options it is the right one here for the reason its own comment gives: it
- * extends the *centre's* face coordinates outward and resolves them through
- * world space, so a patch this wide stays one continuous sheet, where a walk
- * re-anchors into each new face's axes and peels the far side of the patch off
- * sideways.
- *
- * That is not a hunch, it is the measurement that decided it. Over every face,
- * every edge and all eight cube corners, at this radius: walking loses up to
- * 49% of its 6561 samples to duplicates (worst at a cube corner — half the map
- * would be the same column drawn twice), and this loses 6%. What it costs
- * instead is reach: past a cube edge the centre's extended coordinates and the
- * neighbour's own drift apart, so the far corner of the patch stretches to
- * 1.14x its ideal angle. A map being a seventh generous about distance near a
- * seam is what every flat projection of a sphere does; a map folded back on
- * itself is not a map. It also can never leave the grid — `patchColumn`
- * resolves through `dirToFace`, which by construction lands on a real face.
+ * The cube needed `patchColumn` here, and a long argument about why walking the
+ * neighbour graph peeled the patch apart at a seam. Both are gone: the map wraps
+ * and is flat, so a patch is `colIndex` of the centre plus an offset, it is one
+ * continuous sheet by construction, and no sample can be a duplicate of another
+ * until the patch is as wide as the world.
  */
-export function mapColumns(f, i, j, out = new Int32Array(MAP_SAMPLES * MAP_SAMPLES)) {
+export function mapColumns(x, y, out = new Int32Array(MAP_SAMPLES * MAP_SAMPLES)) {
   const N = MAP_SAMPLES;
   for (let sy = 0; sy < N; sy++) {
-    const dj = (MAP_RADIUS - sy) * MAP_STEP;
+    const dy = (sy - MAP_RADIUS) * MAP_STEP;
     for (let sx = 0; sx < N; sx++) {
-      out[sy * N + sx] = patchColumn(f, i, j, (sx - MAP_RADIUS) * MAP_STEP, dj);
+      out[sy * N + sx] = colIndex(x + (sx - MAP_RADIUS) * MAP_STEP, y + dy);
     }
   }
   return out;
@@ -596,12 +553,8 @@ export class UI {
     win.appendChild(track);
     const notch = document.createElement('u');
     notch.className = 'cmp-notch';
-    // No cap element of any kind. It used to read "Pole" and was then emptied,
-    // but an empty one is worse than either: `#compass.polar` in style.css
-    // forces opacity to 1 and swaps the strip for it, so a blank parchment
-    // plate snapped in at full brightness exactly where the fade was supposed
-    // to be finishing. The cap is now three blocks wide (see POLAR_HIDE), so
-    // there is nothing left to announce - the strip just fades to nothing.
+    // No cap element of any kind. It used to read "Pole" on a sphere that had
+    // one; there are no poles on a flat wrapped map and nothing to announce.
     cmp.append(win, notch);
     hud.appendChild(cmp);
 
@@ -623,28 +576,16 @@ export class UI {
   /**
    * The compass strip: where the player is facing, as a bearing.
    *
-   * There is no yaw to read here and there could not be — `player.forward` is a
-   * world vector living in a tangent plane that is different at every point on
-   * the planet, so a "yaw" is only ever an angle against a local basis and says
-   * nothing about which way you are walking. The bearing is rebuilt from the
-   * sky's own east/north frame instead, which is the same frame the sun's arc
-   * is constructed from, so the strip and the sunrise cannot disagree. See
-   * `compassFrame`.
+   * Read out of the sky's own east/north frame rather than off the player's
+   * yaw, which is the same frame the sun's arc is constructed from, so the strip
+   * and the sunrise cannot disagree. See `compassFrame`.
    */
   updateCompass(player) {
     const el = this.el.compass;
     if (this.game.settings.compass === false) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
 
-    const { deg, polar } = bearingOf(player.up, player.forward);
-    // Fade rather than cut, so walking into the cap is a compass quietly
-    // giving up over the last twelve blocks of approach (about three seconds
-    // at a walk) instead of a HUD element blinking out from under you. It is
-    // also what keeps the strip from snapping: the bearing is still turning
-    // fast in there, and it dims as it speeds up.
-    const lit = compassLit(polar);
-    el.style.opacity = lit.toFixed(2);
-    if (lit <= 0) return;
+    const deg = bearingOf(player.up, player.forward);
 
     // Quantised to a tenth of a degree before the compare. Written every frame
     // it is a style recalc sixty times a second for a strip that has not moved,
@@ -685,9 +626,7 @@ export class UI {
   updateMinimap(planet, player) {
     const el = this.el.minimap;
     const c = player.cell;
-    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-    const col = cidx(c.f, i, j);
+    const col = colIndex(c.x, c.y);
     // colHeight is filled in one go before any voxel arrives, so a zero here
     // means the world has not handed its tables over yet — not sea level.
     const on = this.game.settings.minimap !== false && planet.colHeight[col] > 0;
@@ -702,7 +641,7 @@ export class UI {
     if (col !== this._mmCol && now - this._mmAt >= MAP_REDRAW_MS) {
       this._mmCol = col;
       this._mmAt = now;
-      this._paintMinimap(planet, c.f, i, j);
+      this._paintMinimap(planet, c.x, c.y);
     }
 
     // Which way is the player facing, in the sample grid's own axes: the grid
@@ -714,14 +653,16 @@ export class UI {
     // their left. That is the entire specification, and both halves of it are
     // this one line plus `mapColumns`.
     //
-    // `mapColumns` paints +i to the right and +j UP, so a tangent vector with
-    // cell components (i, j) sits at `atan2(j, i)` measured anticlockwise from
-    // screen right, like any other picture drawn the right way round. A CSS
-    // `rotate` of a positive angle turns the canvas clockwise, which subtracts
-    // from that, so putting `forward` at the top (a quarter turn round) is a
-    // spin of exactly its own angle minus a quarter turn.
-    const face = Math.atan2(_cellF.j, _cellF.i);
-    const spin = face - Math.PI / 2;
+    // `mapColumns` paints the map's +x to the right and its +y DOWN the rows,
+    // so a heading with map components (x, y) sits at `atan2(y, x)` measured
+    // CLOCKWISE from screen right, which is the sense a CSS `rotate` turns in.
+    // Bringing that heading to the top of the frame — screen up, a quarter turn
+    // anticlockwise of right — is therefore a spin of minus a quarter turn less
+    // its own angle. Facing north is (0, -1), angle -PI/2, spin 0: the picture
+    // is drawn north-up and needs no rotation at all, which is the one value of
+    // this expression that can be checked by reading it.
+    const face = Math.atan2(_cellF.y, _cellF.x);
+    const spin = -Math.PI / 2 - face;
     const q = Math.round(spin * 500);
     if (q !== this._mmTurn) {
       this._mmTurn = q;
@@ -732,22 +673,17 @@ export class UI {
     // which is what guarantees the two cannot end up pointing different ways.
     // `bearingOf` fills `_north` on the way past; the angle it returns is the
     // compass's business, not the map's.
-    const lit = compassLit(bearingOf(player.up, player.forward, _east, _north).polar);
+    bearingOf(player.up, player.forward, _east, _north);
     const pipEl = this.el.mmNorth;
-    pipEl.style.opacity = lit.toFixed(2);
-    if (lit > 0) {
-      player.tangentToCell(_north, _cellN);
-      // North's angle on the canvas, the same way `face` was read, less the
-      // spin the canvas has since been given; then negated, because `northPip`
-      // works in image space where y is downward and this does not. Facing
-      // north makes `_cellN` and `_cellF` the same vector, so `at` collapses to
-      // -PI/2 and the pip sits at the top of the frame, which is the one value
-      // of this expression that can be checked by reading it.
-      const at = spin - Math.atan2(_cellN.j, _cellN.i);
-      const p = northPip(at, MAP_RIM);
-      pipEl.style.transform =
-        `translate(-50%,-50%) translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px)`;
-    }
+    player.tangentToCell(_north, _cellN);
+    // Where north lies on the canvas once the canvas has been spun: its own
+    // angle in image space plus the spin. `northPip` works in that same space,
+    // y downward and clockwise positive, so nothing has to be negated. Facing
+    // north the spin is 0 and this is -PI/2, which puts the pip at the top.
+    const at = spin + Math.atan2(_cellN.y, _cellN.x);
+    const p = northPip(at, MAP_RIM);
+    pipEl.style.transform =
+      `translate(-50%,-50%) translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px)`;
   }
 
   /**
@@ -757,13 +693,13 @@ export class UI {
    * neighbours are not known until the whole field has been gathered — see
    * `mapColumns` for why the gather is done the way it is.
    */
-  _paintMinimap(planet, f, i, j) {
+  _paintMinimap(planet, x, y) {
     const N = MAP_SAMPLES;
     const H = this._mmH;
     const B = this._mmB;
     const heights = planet.colHeight;
     const biomes = planet.colBiome;
-    const cols = mapColumns(f, i, j, this._mmCols);
+    const cols = mapColumns(x, y, this._mmCols);
 
     for (let n = 0; n < cols.length; n++) {
       H[n] = heights[cols[n]];
@@ -777,11 +713,11 @@ export class UI {
         const h = H[n];
         const bc = BIOME_COLORS[B[n]] || BIOME_COLORS[2];
         let r, g, b;
-        if (h < R_SEA) {
+        if (h < SEA_K) {
           // Under the sea. Deeper is darker, which is the only cue on the map
           // that tells a shallow bay you can wade apart from open ocean.
           const w = bc.water;
-          const k = 1 - Math.min(1, (R_SEA - h) / 16) * 0.55;
+          const k = 1 - Math.min(1, (SEA_K - h) / 16) * 0.55;
           r = w[0] * k; g = w[1] * k; b = w[2] * k;
         } else {
           // Relief, from the slope across this sample. The light is fixed to
@@ -797,7 +733,7 @@ export class UI {
           const k = Math.max(0.5, Math.min(1.55, 1 + slope * 0.20))
             // A gentle altitude ramp under the relief, so a plateau reads as
             // high ground even where it is flat enough to cast no slope at all.
-            * (0.92 + Math.min(1, (h - R_SEA) / 46) * 0.26);
+            * (0.92 + Math.min(1, (h - SEA_K) / 46) * 0.26);
           const gc = bc.grass;
           r = gc[0] * k; g = gc[1] * k; b = gc[2] * k;
         }
@@ -2902,26 +2838,20 @@ export class UI {
     if (!el) return;
     if (!site) { el.classList.add('hidden'); return; }
     const p = g.player;
-    // How far you have to *walk*, not how far it is through the planet. The
-    // bearing below was already rebuilt on the sphere; the distance was a
-    // straight line, which on a ball of radius ~132 quietly understates the
-    // trip — by a tenth for a death over the hill, and by better than a third
-    // for one on the far side, where the chord cuts through the core.
-    const c = g.planet.center;
-    _here.copy(p.position).sub(c);
-    _there.copy(site.pos).sub(c);
-    const radius = _here.length();
-    const cosA = _here.normalize().dot(_there.normalize());
-    const d = Math.acos(Math.max(-1, Math.min(1, cosA))) * radius;
+    // How far you have to *walk*, across a map that wraps. The straight line
+    // between two points is wrong by a full turn whenever the short way round is
+    // the other way, which is what `Grid.delta` is for; the vertical drop is left
+    // out because the number is a "how far to walk", not a distance in space.
+    const dx = delta(p.position.x, site.pos.x);
+    const dz = delta(p.position.z, site.pos.z);
+    const d = Math.hypot(dx, dz);
     el.classList.remove('hidden');
     this.el.packDist.textContent = `${Math.round(d)}m`;
 
-    // Bearing in the player's own tangent plane — on a sphere a compass has to
-    // be rebuilt from the local frame, there is no global north to lean on.
-    _dir.copy(site.pos).sub(p.position);
-    _dir.addScaledVector(p.up, -_dir.dot(p.up));
-    if (_dir.lengthSq() < 1e-6) return;
-    _dir.normalize();
+    // The bearing, off the same two deltas so the arrow and the distance cannot
+    // disagree about which way round the wrap the pack is.
+    if (d < 1e-3) return;
+    _dir.set(dx, 0, dz).normalize();
     _right.copy(p.forward).cross(p.up).normalize();
     const ang = Math.atan2(_dir.dot(_right), _dir.dot(p.forward));
     el.firstElementChild.style.transform = `rotate(${ang}rad)`;

@@ -3,61 +3,44 @@
 // dome shader, so every other system can read the same colours.
 
 import * as THREE from 'three';
-import { R_MAX, R_TERRAIN_MAX } from '../world/Constants.js';
 import { makeRng } from '../util/Noise.js';
 import { voxelUniforms } from './VoxelMaterial.js';
 
 /**
- * Radius of the shadowed region around the player. The geometric horizon on a
- * planet this size is ~13 units over flat ground, and ~42 for the tallest
- * terrain the generator can raise; 30 covers everything that reads as shadowed
- * on screen while being far tighter than the ±46 box it replaces.
+ * How far out the moon billboard is anchored.
+ *
+ * Sun, moon, stars and the cloud shell all hang off the CAMERA now. There is no
+ * planet centre to hang them off and no horizon to clear: the ground is flat and
+ * wraps, so the sky is simply what is over your head wherever you stand.
+ *
+ * The one hard constraint is the camera's far plane, a literal 1400 in main.js.
+ * Anything the sky draws has to fit inside it or it is clipped and never
+ * appears, which is exactly what used to happen to the moon. In order outward:
+ * clouds 460, moon 800, stars 900, far plane 1400. The moon's angular size does
+ * not depend on this number - `place` scales by DISC_DIST / 700 - so moving it
+ * changes nothing on screen.
  */
-// How far out the moon billboard is anchored. It has to stay inside the
-// camera's far plane or it is clipped and never drawn — which is exactly what
-// used to happen when this was 700 against a far plane of 420.
-//
-// Both ends of that constraint now move with the planet, so this does too: the
-// far plane is 3.2x the outer radius, and anchoring the moon at 2.75x keeps it
-// comfortably inside while staying far enough out to read as sky rather than as
-// an object hanging over the terrain.
-const DISC_DIST = Math.round(R_MAX * 2.75);
+const DISC_DIST = 800;
 
 /**
  * Radius of the lower cloud shell, and how far the upper one sits above it.
  *
- * This was `R_MAX + 30` — 379 — and that number was written when R_MAX was the
- * top of the world. It is not: terrain is allowed up to R_TERRAIN_MAX 347, so
- * the deck hung 32 blocks over the tallest peak the generator can raise, and
- * only 94 blocks over the sea.
+ * The shell is centred on the camera rather than on a planet, so the noise field
+ * is seen at a fixed angular scale from wherever the player is. That retires
+ * this constant's old argument entirely: the field used to be indexed by
+ * direction from the planet's centre and so was magnified by R / h, h being the
+ * viewer's distance below the deck, which meant climbing sixty blocks tripled
+ * the magnification and smeared the clouds across the frame. From the eye there
+ * is no h and nothing to magnify.
  *
- * 94 is what breaks the elevated view, which is the whole of the recon's third
- * cloud defect. The noise field is indexed by direction *from the planet's
- * centre*, so what a viewer sees is that field magnified by R / h, where h is
- * their distance below the deck. From the beach that was 379/94 = 4.0x, which
- * is the good look. From 60 blocks up — a hilltop, or the tiny-planet shot the
- * game is at its best in — h collapses to 34 and the magnification triples to
- * 11x: the same clouds smeared over the whole frame with no detail left in
- * them, which is exactly what `recon_r2_high.png` shows.
- *
- * The cure is to put the deck far enough away that climbing 60 blocks is not a
- * large fraction of the distance to it, and then wind the noise frequency back
- * by the same factor so the view from the ground is unchanged. At R_TERRAIN_MAX
- * + 120 = 467 with NOISE_SCALE 5.7 (from 9.0):
- *
- *   ground (eye 285): 467 / (182 * 5.7) = 0.45   — was 379 / (94 * 9) = 0.448
- *   60 up  (eye 345): 467 / (122 * 5.7) = 0.67   — was 379 / (34 * 9) = 1.24
- *
- * i.e. the good case is preserved to within a percent and the broken one comes
- * back to within half a stop of it. Raising the shell alone would have shrunk
- * the clouds everywhere, and raising the frequency alone would have made them
- * noisy; it is the pair that leaves the picture where it was.
- *
- * The gap keeps the same *relative* separation the old 9 had, so the parallax
- * between the two shells reads the same.
+ * NOISE_SCALE moves with it, and is now noise cells per radian AS SEEN BY THE
+ * EYE. The ground view is preserved: the old pair measured 467 / (182 * 5.7) =
+ * 0.45 radians per cell from the beach, and 1 / 0.45 = 2.2 cells per radian is
+ * that same picture with nothing left in it that can distort.
  */
-const CLOUD_R = R_TERRAIN_MAX + 120;
+const CLOUD_R = 460;
 const CLOUD_GAP = 11;
+const NOISE_SCALE = 2.2;
 
 const SHADOW_DIST = 30;
 /** Ceiling on that radius: the fixed extent this fitting replaced. */
@@ -88,8 +71,6 @@ const _white = new THREE.Color(1, 1, 1);
  */
 export const MOON_FILL = new THREE.Color(0.22, 0.32, 0.80);
 
-// Only used at the axis itself, where any direction is as good as any other.
-const _refX = new THREE.Vector3(1, 0, 0);
 /** The sun's bearing in the tangent plane — rebuilt every frame in `update`. */
 const _sunAz = new THREE.Vector3();
 const _east = new THREE.Vector3();
@@ -97,64 +78,30 @@ const _north = new THREE.Vector3();
 const _zenith = new THREE.Vector3();
 
 /**
- * How degenerate the frame has to be before an arbitrary one is substituted, as
- * |Y × up|.
+ * The compass frame: which way is east, which way is north.
  *
- * This is not a latitude anyone stands at: 1e-9 of |Y × up| is 2.8e-7 blocks
- * from the axis at R_SEA 282, i.e. the pole column itself and nothing else. It
- * exists so `east` is never the zero vector — `solarDirection` multiplies it,
- * and a zero sun direction is a NaN horizon, not a dark one. Everywhere a
- * player can actually be, the frame below is the single continuous one.
- */
-export const POLAR_EPS = 1e-9;
-
-/**
- * The local compass frame standing at `up`: which way is east, which way is
- * north. Writes into the two vectors given and returns how much of a frame it
- * is (see below).
+ * It is the same frame everywhere now, and that is the whole of the change. The
+ * cube had an up vector per face and a sphere had one per column, so this had to
+ * build a tangent basis and had a pole in it where the basis degenerated; the
+ * flat map has one up, (0, 1, 0), so east is +X and north is -Z at every column
+ * in the world and a bearing is finally a meaningful thing to show a player.
  *
- * This is the planet's *only* definition of north, and it is not decoration —
- * `setSolarTime` builds the sun's entire arc out of the `east` this hands back,
+ * Still the only definition of north there is, and still not decoration -
+ * `setSolarTime` builds the sun's whole arc out of the `east` handed back here,
  * so the sun rises due east and sets due west by construction rather than by
- * agreement. Anything that wants to show a bearing has to come through here.
- * Two copies of these three lines is precisely how a compass ends up pointing
- * somewhere the sky contradicts, and on a planet with no landmarks the sun is
- * the only thing a player can check it against.
+ * agreement. Anything drawing a bearing comes through here.
  *
- * North is the world +Y axis dropped into the tangent plane. That axis is not
- * arbitrary either: `WorldGen.climate` bands temperature on `Math.abs(dy)` and
- * nothing else, so the snowfields genuinely are at ±Y and "north is where it
- * gets cold" is true on this planet.
+ * `up` is taken and ignored: every caller has one to hand and passing it keeps
+ * the call sites honest about what frame they are asking for.
  *
- * The reference axis is Y and only Y, at every latitude. It used to swap to X
- * inside the polar cap to keep the cross product away from zero, and that swap
- * was the whole reason the compass had a dead zone: at the swap latitude,
- * standing over ±X, east flipped a full 180° for one step sideways, measured
- * here as a 180.000° jump between adjacent samples 0.02° of latitude apart, so
- * the strip had to be dark for 19° of latitude either side of it and dimmed to
- * 31° — about 5% of the planet blind and 14% murky, all of it snowfield. Y × up
- * alone is smooth everywhere except *at* the axis, where the only defence
- * needed is POLAR_EPS above. Walked over 1500 great circles at a block per
- * sample, the worst step between neighbours is 3.4° anywhere the compass is
- * fully lit and 6.8° anywhere it is drawn at all, against 180.000° before.
- *
- * @returns {number} |Y × up| — the sine of the angle down from the pole. 1 at
- *   the equator, 0 at either pole. It is a measure of how much of an answer
- *   this is: at 0 there is no north to point at, and approaching zero the
- *   bearing stays continuous but turns faster and faster for a fixed walking
- *   speed (it goes as 1/this — meridians converging). So a caller drawing a
- *   bearing still reads this, not to dodge a discontinuity that no longer
- *   exists, but to stop drawing a strip that has begun to skate. See
- *   POLAR_HIDE in UI.js for where that lands: 3 blocks from the pole.
+ * @returns {number} how much of a frame this is, which is always 1. The sphere
+ *   returned |Y × up| here and callers dimmed a compass with it near the poles.
+ *   There are no poles, so there is nothing to dim.
  */
 export function compassFrame(up, east, north) {
-  const polar = Math.hypot(up.x, up.z);
-  // Y × up in closed form. Below POLAR_EPS there is no direction to give, so
-  // any orthonormal pair will do; the returned 0 tells the caller not to draw.
-  if (polar > POLAR_EPS) east.set(up.z, 0, -up.x).divideScalar(polar);
-  else east.crossVectors(_refX, up).normalize();
-  north.crossVectors(up, east).normalize();
-  return polar;
+  east.set(1, 0, 0);
+  north.set(0, 0, -1);
+  return 1;
 }
 
 /**
@@ -176,16 +123,15 @@ const SOLAR_TILT = 0.36;
  * context or a `Sky` instance (which needs a canvas for the moon texture). It is
  * pure: same inputs, same output, no state touched.
  *
- * @param {THREE.Vector3} up  the player's radial up, need not be unit length
+ * @param {THREE.Vector3} up  the one up, (0, 1, 0). Kept for the call sites.
  * @param {number} dayFraction 0 = midnight, 0.25 = sunrise, 0.5 = noon
  * @param {THREE.Vector3} out written and returned
  */
 export function solarDirection(up, dayFraction, out) {
   const f = ((dayFraction % 1) + 1) % 1;
   const th = (f - 0.25) * Math.PI * 2;      // 0 at sunrise, π/2 at noon
-  // a compass frame that varies smoothly as the player walks
   compassFrame(up, _east, _north);
-  _zenith.copy(up).normalize().multiplyScalar(Math.cos(SOLAR_TILT))
+  _zenith.set(0, 1, 0).multiplyScalar(Math.cos(SOLAR_TILT))
     .addScaledVector(_north, Math.sin(SOLAR_TILT)).normalize();
   return out.copy(_east).multiplyScalar(Math.cos(th))
     .addScaledVector(_zenith, Math.sin(th)).normalize();
@@ -359,12 +305,11 @@ void main() {
 
   // How far *below* the tangent plane the sky still reaches.
   //
-  // On a planet this small the horizon is not at eye level: it dips by
-  // acos(R / (R + eye)) ~ sqrt(2 * eye / R) radians, which at R_SEA 282 and an
-  // eye 1.7 units up is 0.11 — and further still looking down from a hilltop.
-  // Everything above h = -HORIZON_DIP is therefore sky you can genuinely see,
-  // and it is the single most looked-at band in the game: the curved rim the
-  // whole planet reads as.
+  // The ground is flat and wraps, so the horizon is at eye level and the sky
+  // below it is only ever seen past the edge of the loaded terrain or down a
+  // hole. The band is kept because it is what stops the underside of the dome
+  // reading as a second sky, and it starts below the eye rather than at it so
+  // the rim itself is untouched.
   //
   // The darkening this replaces started at h = 0.02 and was down to 0.70 of the
   // sky colour by h = -0.12, so it painted a dull grey band across exactly that
@@ -412,7 +357,7 @@ uniform float uTime;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uZenith;
-uniform vec3 uCenter;
+uniform vec3 uCenter;   // the camera, which the shell rides
 uniform vec3 uCamPos;
 uniform float uCoverage;
 uniform float uOpacity;
@@ -443,11 +388,10 @@ float fbm(vec3 p) {
 }
 
 void main() {
+  // Which way this patch of deck lies from the eye. uCenter is the camera, and
+  // the shell is centred on it, so this is a direction and nothing else.
   vec3 dir = normalize(vWorld - uCenter);
-  // NOISE_SCALE is coupled to CLOUD_R in the JS below and must move with it —
-  // see the note there for the arithmetic. It is noise cells per radian of the
-  // field as seen from the planet's centre, not per unit of anything.
-  vec3 p = dir * 5.7;
+  vec3 p = dir * ${NOISE_SCALE.toFixed(1)};
   vec3 drift = vec3(uTime * 0.012, uTime * 0.006, -uTime * 0.009);
   // Large-scale weather mask, carving open sky between cloud fields — and it
   // has to widen with the weather. Held at a fixed threshold it zeroed most of
@@ -538,9 +482,8 @@ void main() {
   // same constant. Without this the dome would go cold in the east while the
   // clouds hanging in front of it stayed sunset-salmon, which is a worse
   // picture than the uniform one it replaces. dir is the patch's direction
-  // from the planet's centre, and the visible deck spans a 53 degree cap around
-  // the player's up, so at a sunset — sun perpendicular to that up — this term
-  // genuinely runs the whole -0.8..0.8 the window is cut for.
+  // from the eye, so at a sunset — sun on the horizon — this term genuinely runs
+  // the whole -0.8..0.8 the window is cut for.
   float side = dot(normalize(uSunDir), dir);
   vec3 skyFill = mix(uSkyLightOpp, uSkyLight, smoothstep(uSunSide.x, uSunSide.y, side));
   illum += (skyFill * 0.55 + uMoonLight) * mix(1.0, 0.26, thick);
@@ -566,7 +509,6 @@ void main() {
 export class Sky {
   constructor(scene, renderer) {
     this.scene = scene;
-    this.center = new THREE.Vector3(0, 0, 0);
     // The day fraction `setSolarTime` was last given. `orbit`, a second copy of
     // it labelled "sun's phase around the planet", used to sit beside it and was
     // deleted: it was set once here and never written or read again, so it named
@@ -624,7 +566,7 @@ export class Sky {
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uSunColor: { value: new THREE.Color(0xffffff) },
       uZenith: { value: new THREE.Color(0x2662c8) },
-      uCenter: { value: this.center.clone() },
+      uCenter: { value: new THREE.Vector3() },
       uCamPos: { value: new THREE.Vector3() },
       uCoverage: { value: 0.30 },
       uOpacity: { value: 0.88 },
@@ -645,7 +587,6 @@ export class Sky {
     this.clouds = new THREE.Group();
     for (let i = 0; i < 2; i++) {
       const m = new THREE.Mesh(new THREE.SphereGeometry(CLOUD_R + i * CLOUD_GAP, 96, 64), cloudMat);
-      m.position.copy(this.center);
       m.renderOrder = 20 + i;
       this.clouds.add(m);
     }
@@ -991,6 +932,10 @@ export class Sky {
     this.cloudUniforms.uSunColor.value.copy(p.sun);
     this.cloudUniforms.uZenith.value.copy(p.zenith);
     this.cloudUniforms.uCamPos.value.copy(camera.position);
+    // The shell rides the camera, and uCenter is what the shader measures the
+    // deck's direction from, so the two are the same point by construction.
+    this.clouds.position.copy(camera.position);
+    this.cloudUniforms.uCenter.value.copy(camera.position);
 
     // The light on the deck, published as radiance so CLOUD_FRAG can do albedo
     // x illumination instead of art-directing a colour. See the long note there.

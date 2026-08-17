@@ -893,9 +893,9 @@ button.ghost:active:not(:disabled) {
    the name is the last thing to go rather than the first. `text-align: right`
    is what the old `auto` track was doing for free by hugging its text. */
 .panel .slot-open {
-  flex: 1; display: grid; gap: 0 12px; text-align: left;
-  grid-template-columns: 68px minmax(0, 5fr) minmax(0, 3fr);
-  align-items: center; padding: 10px 13px; border-radius: var(--r-md);
+  flex: 1; display: grid; gap: 0 13px; text-align: left;
+  grid-template-columns: 52px minmax(0, 5fr) minmax(0, 3fr);
+  align-items: center; padding: 9px 12px; border-radius: var(--r-md);
   background: var(--paper-cell); border: none; box-shadow: var(--emboss);
   transition: box-shadow var(--t-fast) ease, background var(--t-fast) ease, transform var(--t-fast) var(--ease);
 }
@@ -904,23 +904,72 @@ button.ghost:active:not(:disabled) {
   box-shadow: var(--emboss-lift), var(--ring);
 }
 .panel .slot-open:active:not(:disabled) { transform: translateY(var(--lip)); box-shadow: var(--emboss-press); }
-/* The index, in a well of its own: it is a fixed label on the furniture, not
-   part of what is saved in the slot. */
-.slot-open b {
+
+/* THE WORLD, and its number under it.
+   The left column used to be a "Slot 4" chip and nothing else, which is a
+   filing label at the head of a row of filing. It is a picture of the world
+   now - the loading screen's own 3x3, turned by the seed - with the number
+   demoted to the caption it always was. It is the one change that makes this
+   screen a shelf of worlds rather than a table of saves. */
+.slot-mark {
   grid-row: 1 / span 2; align-self: center; justify-self: start;
-  padding: 4px 7px; border-radius: var(--r-sm);
-  font: 700 var(--fs-xs)/1 var(--mono); letter-spacing: var(--ls-cap);
-  /* "Slot 10" is the widest of the ten and it broke onto a second line inside
-     the chip on a phone-width window. The track above holds it. */
-  white-space: nowrap;
-  text-transform: uppercase; color: var(--ink-soft);
-  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.slot-sigil {
+  --mk: 46px;
+  margin: 0; flex: none; animation: none;
+  box-shadow:
+    0 0 0 1px rgba(20, 12, 5, .78),
+    inset 0 0 0 1px rgba(255, 255, 255, .12),
+    0 1px 0 rgba(255, 255, 255, .6);
+}
+/* Static in a list of ten. The mark earns its weather on the loading screen,
+   where it is the only thing on the page; ten of them blinking at each other
+   down a column is a screen that will not sit still to be read. */
+.slot-sigil i::after, .slot-sigil b { animation: none; }
+/* The seal is a line at this size and not a line plus a bloom. The mark's own
+   inner glow is measured in pixels and the tile here is fifteen of them
+   across, so at row size the glow is the whole corner and every world came out
+   violet. */
+.slot-sigil i:nth-child(1), .slot-sigil i:nth-child(3),
+.slot-sigil i:nth-child(7), .slot-sigil i:nth-child(9) {
+  box-shadow: inset 0 0 0 1px rgba(198, 84, 255, .85);
+}
+/* The land is the world's own. `filter` is allowed here for the reason stated
+   at the top of this file: this is painted once when the screen opens and is
+   nowhere near the per-frame HUD. */
+.slot-sigil i:nth-child(2), .slot-sigil i:nth-child(4),
+.slot-sigil i:nth-child(5), .slot-sigil i:nth-child(6),
+.slot-sigil i:nth-child(8) { filter: hue-rotate(var(--sig-rot, 0deg)); }
+/* An empty slot is the same square with nothing in it. */
+.slot-sigil.empty {
+  width: 46px; height: 46px; border-radius: var(--r-md);
+  background: rgba(122, 94, 54, .1);
+  box-shadow: var(--sunk);
+}
+.slot-open b {
+  font: 700 var(--fs-2xs)/1 var(--mono); letter-spacing: var(--ls-cap);
+  white-space: nowrap; text-transform: uppercase;
+  color: var(--ink-soft); opacity: .8;
 }
 .slot-open .slot-who, .slot-open .slot-when {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.slot-open .slot-who { font-size: var(--fs-md); font-weight: 700; color: var(--ink); }
-.slot-open .slot-who.empty { color: var(--ink-faint); font-weight: 600; }
+/* The name is the answer to "which one is this", so it is the loudest thing on
+   the row by a step rather than by nothing. Everything else on the row is a
+   detail about it and is set at detail size. */
+.slot-open .slot-who {
+  font-size: var(--fs-lg); font-weight: var(--fw-disp); letter-spacing: var(--ls-disp);
+  color: var(--ink); text-shadow: var(--carved);
+}
+/* An empty slot names itself and stops. It is set back a step because on the
+   Continue screen it is not a thing you can press, and on New Game it is the
+   quiet half of a choice you are already making. */
+.slot-open .slot-who.empty {
+  font-size: var(--fs-md); font-weight: 600; letter-spacing: var(--ls-cap);
+  text-transform: uppercase; text-shadow: none;
+  color: var(--ink-faint);
+}
 .slot-open .slot-when { grid-column: 2; font-size: var(--fs-sm); font-weight: 500; color: var(--ink-soft); }
 .slot-open .slot-ago {
   grid-column: 3; grid-row: 1; align-self: center;
@@ -952,13 +1001,31 @@ button.ghost:active:not(:disabled) {
 .panel .slot-row:not(.filled) .slot-open {
   background: rgba(122, 94, 54, .05); box-shadow: var(--sunk);
 }
+/* Delete is not one of the ten things this screen is for. It used to be a full
+   parchment key standing beside every row, as loud as the world it destroys is
+   important, so half of what the eye counted down the column was Deletes. It
+   is a cut tab now, and it only becomes a red key under the pointer that is
+   about to press it. */
 .panel .slot-del {
-  padding: 8px 12px; font-size: var(--fs-sm); border-radius: var(--r-md);
-  box-shadow: var(--emboss);
+  align-self: center; padding: 8px 11px; border-radius: var(--r-md);
+  font-size: var(--fs-2xs); font-weight: 700;
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  color: var(--ink-faint); text-shadow: none;
+  background: rgba(122, 94, 54, .08);
+  box-shadow:
+    inset 0 0 0 1px rgba(58, 38, 16, .3),
+    inset 0 1px 0 rgba(255, 255, 255, .45);
 }
-.panel .slot-del:hover {
+.panel .slot-del:hover:not(:disabled) {
+  transform: none;
   background: linear-gradient(180deg, #e2634b, #a33a28); color: #fff5f2;
-  box-shadow: var(--emboss-lift), 0 0 0 1px rgba(120, 34, 22, .5);
+  text-shadow: 0 1px 0 rgba(90, 20, 12, .5);
+  box-shadow: 0 0 0 1px rgba(90, 20, 12, .8), 0 var(--lip) 0 #5e1c11;
+}
+.panel .slot-del:active:not(:disabled) {
+  transform: translateY(var(--lip));
+  background: #93331f; color: #ffe9e2;
+  box-shadow: 0 0 0 1px rgba(90, 20, 12, .8), inset 0 2px 5px rgba(40, 8, 4, .6);
 }
 
 /* ── character select ──────────────────────────────────── */
@@ -2971,6 +3038,19 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    chip, day and age. */
 .ach-list { grid-template-columns: repeat(auto-fit, minmax(372px, 1fr)); }
 .slot-list { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); }
+/* Ten worlds are a shelf, not a spreadsheet, so the tray is capped and centred
+   the way the skill tree above it is: uncapped it took a 1920px monitor as
+   three columns of 620px rows, with half of every row empty between the name
+   and the age, and the whole block pinned to the top of a screen of parchment.
+   Two columns of five, in the middle of the sheet.
+
+   `margin: auto 0` and not `align-content: center`, and it is the same rule and
+   the same reason as `.overlay > *` at the top of this file: an auto margin
+   resolves to zero when there is no free space, so a list too long for the
+   window pins to the top and scrolls instead of losing its first rows off the
+   top edge with no way to scroll back to them. */
+#slots .panel-body { display: flex; }
+#slots .slot-list { width: 100%; max-width: 1180px; margin: auto; }
 /* Three trunks side by side. 248 is a branch name, its segments and its price
    on one line with the blurb under it, and three of them fit a phone held
    sideways, which is what turns the whole tree into one look instead of two
@@ -3164,8 +3244,8 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
      the day, and "Day 14, 2h 0…" is the exact failure this block exists to
      undo. The age is the one line with room to spare, so the two of them share
      it, one against each edge. */
-  .panel .slot-open { grid-template-columns: 68px minmax(0, 1fr) auto; }
-  .slot-open b { grid-row: 1 / span 3; }
+  .panel .slot-open { grid-template-columns: 52px minmax(0, 1fr) auto; }
+  .slot-mark { grid-row: 1 / span 3; }
   .slot-open .slot-who, .slot-open .slot-when { grid-column: 2 / span 2; }
   .slot-open .slot-ago { grid-column: 2; grid-row: 3; text-align: left; }
   .slot-open .slot-diff { grid-column: 3; grid-row: 3; }

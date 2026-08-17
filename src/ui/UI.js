@@ -400,6 +400,43 @@ function agoText(at) {
   return `${months} month${months === 1 ? '' : 's'} ago`;
 }
 
+/**
+ * A saved world, as a picture of itself.
+ *
+ * The same nine-tile mark the loading screen opens on, at row size: the plus
+ * is the five continuous faces, the corners are the four sealed ones in their
+ * own weather, and the violet between them is the plane you cross to reach
+ * them. It is one object drawn twice rather than two shapes that happen to
+ * rhyme, which is why this hands back `.world-mark` and only overrides its
+ * size and its land.
+ *
+ * The land is turned by the world's own seed, so two saves are told apart by
+ * looking rather than by reading their timestamps - which is the whole
+ * difference between choosing a world and reading a table. Only the plus
+ * turns: Rime is ice in every world, so the corners are fixed. The range is a
+ * deliberate arc of greens through olive to a cold blue-green, and no further:
+ * a hue wheel free to land anywhere gives somebody a magenta continent.
+ *
+ * An empty slot gets the same square with nothing in it, because a hole in the
+ * tray is still the shape of what would go there.
+ *
+ * @param {number|null} seed the world's seed, or null for an empty slot
+ * @param {string} num "Slot 4", the fixed label on the furniture
+ */
+function worldSigil(seed, num) {
+  if (seed == null) {
+    return `<span class="slot-mark"><span class="slot-sigil empty"></span><b>${num}</b></span>`;
+  }
+  // Mixed before it is taken modulo: consecutive seeds are a real case (the
+  // debug worlds, and anything seeded off a counter) and `seed % 92` on those
+  // walks the arc one degree at a time, so ten saves come out the same green.
+  const mix = ((Math.abs(seed | 0) * 2654435761) >>> 0) % 92;
+  return `<span class="slot-mark">`
+    + `<span class="world-mark slot-sigil" style="--sig-rot:${mix - 46}deg">`
+    + '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>'
+    + `</span><b>${num}</b></span>`;
+}
+
 export class UI {
   constructor(game) {
     this.game = game;
@@ -1087,7 +1124,7 @@ export class UI {
       open.disabled = !meta && !newGame;
       const num = `Slot ${i + 1}`;
       if (meta) {
-        open.innerHTML = `<b>${num}</b>`
+        open.innerHTML = worldSigil(meta.seed, num)
           + `<span class="slot-who">${characterName(meta.character)}</span>`
           + `<span class="slot-when">Day ${meta.day || 1}, ${playedFor(meta.playtime)} played</span>`
           // The time, and not the word "Saved" in front of it ten times. The
@@ -1105,7 +1142,8 @@ export class UI {
           + `<span class="slot-diff${normalizeDifficulty(meta.difficulty) === EXTREME ? ' extreme' : ''}">`
           + `${difficultyLabel(meta.difficulty)}</span>`;
       } else {
-        open.innerHTML = `<b>${num}</b><span class="slot-who empty">Empty</span>`;
+        open.innerHTML = worldSigil(null, num)
+          + `<span class="slot-who empty">Empty</span>`;
       }
       open.onclick = () => this._pickSlot(i, meta);
       row.appendChild(open);

@@ -503,6 +503,21 @@ const quadsOf = (res) => (res.groups[0] ? res.groups[0].position.length / 12 : 0
   eq(m.matrix.elements[12], W, 'and the transform followed');
 }
 {
+  // A chunk whose two coordinates differ, seated from a view that tells them
+  // apart: cx = 0 is across the seam from the viewer and cy = 40 is right under
+  // it, so the two axes must take different offsets. With (0, 0) the whole
+  // question is invisible, which is what a mutant swapping them proved.
+  const blocks = newBlocks();
+  blocks[colIndex(2, 40 * CHUNK_T + 2) * D + 3] = STONE;
+  const payload = mesh(blocks, 0, 40, 0);
+  const planet = new Planet({ opaque: null, cutout: null, transparent: null, liquid: null });
+  planet.setView(W - 1.5, 40 * CHUNK_T + 2.5);
+  planet.applyChunk(0, 40, 0, payload.groups);
+  const m = [...planet.meshes.values()][0];
+  eq(m.position.x, W, 'the chunk is pulled a map east on x, where the seam is');
+  eq(m.position.z, 0, 'and left alone on z, where the viewer already stands');
+}
+{
   // No resident chunk is ever drawn more than half a map away, from anywhere.
   // That is the property the hole in the ground was the absence of.
   const blocks = newBlocks();

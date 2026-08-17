@@ -67,40 +67,57 @@ import {
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
 } from './world/Blocks.js';
 import {
-  F, D, R_MIN, R_MAX, R_SEA, R_TERRAIN_MAX, COLUMNS, cidx, vidx, GRAVITY,
-  FACES, CT, CK, CHUNK_T, CHUNK_K, NUM_CHUNKS, chunkIdx,
-  CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
-  NUM_REGIONS, REGION_COLS, REGION_VOXELS, GEN_VERSION, regionColumns, regionOfCol,
-  BIOME, FACE_ROLE, FACE_CINDER, FACE_POLAR, FACE_PHYSICS, FACE_NAME,
+  F, D, COLUMNS, GRAVITY, FACES, GEN_VERSION,
+  K_TERRAIN_MAX, CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
+  BIOME, FACE_ROLE, FACE_RIME, FACE_PYRE, FACE_PHYSICS, FACE_NAME,
 } from './world/Constants.js';
 import {
-  colParts, cornerPos, colNeighbor, tangentFrame, stepColumn, cellCenterPos,
-  patchColumn, normalizeCell, FACE_N, FACE_R, FACE_U,
-  cellIndex, cellDecode, COL_BASE, COL_STEP,
-} from './world/Sphere.js';
+  W, SEA_K, wrap, colIndex, faceAt, delta, dist2,
+} from './world/Grid.js';
+import {
+  colParts, colNeighbor, stepColumn, cellIdx, cellCorner,
+  CHUNK_T, CHUNK_K, CW as CT, CK, NUM_CHUNKS, chunkIdx,
+  NUM_REGIONS, REGION_COLS, REGION_VOXELS, regionColumns, regionOfCol,
+} from './world/Layout.js';
 
 const _kd = { col: 0, k: 0 };
+/** Which face labels a column, 1..9. */
+const faceOfCol = (col) => faceAt((col - (col % W)) / W, col % W);
+
+/** Decode a `cellIdx` back into a column and a layer. */
+const cellDecode = (idx, out = _kd) => {
+  out.k = idx % D;
+  out.col = (idx - out.k) / D;
+  return out;
+};
 import { CROSS_LIGHT_ADDR_SHIFT } from './world/Mesher.js';
 import { EntityLightField } from './world/EntityLight.js';
 import { makeRng } from './util/Noise.js';
 
 /**
+ * Shortest signed distance along a wrapped world axis.
+ *
+ * `Grid.delta` is the integer column version of this. Everything that measures
+ * a distance across the map on X or Z has to go through one of the two, because
+ * the map joins up and plain subtraction is a full turn out half the time.
+ */
+const WRAP_HALF = W / 2;
+const wrapDelta = (d) => (d > WRAP_HALF ? d - W : d < -WRAP_HALF ? d + W : d);
+
+/**
  * World-space centre of every chunk, built once. The streamer runs a distance
- * test against all 30 276 of them a few times a second; recomputing the centres
+ * test against all 48 672 of them a few times a second; recomputing the centres
  * each time would cost more than the test.
  */
 const CHUNK_CENTER = (() => {
   const out = new Float32Array(NUM_CHUNKS * 3);
-  const p = [0, 0, 0];
-  for (let f = 0; f < FACES; f++) {
-    for (let ci = 0; ci < CT; ci++) {
-      for (let cj = 0; cj < CT; cj++) {
-        for (let ck = 0; ck < CK; ck++) {
-          cellCenterPos(f, ci * CHUNK_T + CHUNK_T / 2, cj * CHUNK_T + CHUNK_T / 2,
-            ck * CHUNK_K + CHUNK_K / 2, p);
-          const o = chunkIdx(f, ci, cj, ck) * 3;
-          out[o] = p[0]; out[o + 1] = p[1]; out[o + 2] = p[2];
-        }
+  for (let cx = 0; cx < CT; cx++) {
+    for (let cy = 0; cy < CT; cy++) {
+      for (let ck = 0; ck < CK; ck++) {
+        const o = chunkIdx(cx, cy, ck) * 3;
+        out[o] = cx * CHUNK_T + CHUNK_T / 2;
+        out[o + 1] = ck * CHUNK_K + CHUNK_K / 2;
+        out[o + 2] = cy * CHUNK_T + CHUNK_T / 2;
       }
     }
   }
@@ -215,7 +232,7 @@ const CRIT_CHARGE = 0.9;
  * The condition is *falling*, not airborne. Gating on `!grounded` alone would
  * make the mechanic "hold jump": you would crit on the way up as well, at which
  * point every player simply never touches the ground and the timing this is
- * supposed to reward stops existing. At the apex of a jump `vel.k` passes
+ * supposed to reward stops existing. At the apex of a jump `vel.y` passes
  * through zero and there is deliberately no crit — the top of a hop is not a
  * fall, and a window that opened there would be the same "hold jump" strategy
  * with one extra frame of patience.
@@ -233,7 +250,7 @@ const CRIT_CHARGE = 0.9;
  * if one ever lands it belongs in this list beside the ladder, for the same
  * reason — a descent you get to hold is not a fall you had to time.
  *
- * @param {object} p the player — reads `grounded`, `inWater`, `onLadder`, `vel.k`
+ * @param {object} p the player — reads `grounded`, `inWater`, `onLadder`, `vel.y`
  * @param {number} charge 0..1 swing weight, as `_interact` computes it
  */
 export function critMultiplier(p, charge) {
@@ -241,7 +258,7 @@ export function critMultiplier(p, charge) {
   if (p.grounded || p.inWater || p.onLadder) return 1;
   // Written as a positive test so that a NaN velocity — which no code path
   // should produce, but a physics bug might — fails closed to "no crit".
-  if (!(p.vel.k <= CRIT_FALL_SPEED)) return 1;
+  if (!(p.vel.y <= CRIT_FALL_SPEED)) return 1;
   if (!(charge >= CRIT_CHARGE)) return 1;
   return CRIT_MULT;
 }
@@ -2207,13 +2224,13 @@ class Game {
     // huge far plane wrecks depth precision, which shows up as GTAO haze over
     // the sky and softer shadows.
     //
-    // Derived from the planet rather than written down, because it was a bare
-    // 420 tuned against a sea-level radius of 130 and there is nothing in the
-    // number to say so. 3.2x the outer radius keeps the same generous margin
-    // over the cloud shell that 420 had, and moves when the planet does.
+    // There is no outer radius to derive this from any more. What has to fit
+    // inside it is the cloud shell and the sky dome, both of which are hung a
+    // fixed distance off the camera on a flat map, so the far plane is written
+    // down against the same number the horizon is.
     this.camera = new THREE.PerspectiveCamera(
-      this.settings.fov, this.width / this.height, 0.06, Math.round(R_MAX * 3.2));
-    this.camera.position.set(0, R_TERRAIN_MAX + 10, 0);
+      this.settings.fov, this.width / this.height, 0.06, 1400);
+    this.camera.position.set(0, K_TERRAIN_MAX + 10, 0);
     this.scene.add(this.camera);
   }
 
@@ -2230,38 +2247,30 @@ class Game {
     this._hlCorners = Array.from({ length: 8 }, () => [0, 0, 0]);
   }
 
-  /**
-   * Draw the wireframe of a curved cell.
-   *
-   * `foreign` outlines a block owned by a neighbouring face: visible, named,
-   * and inert. It gets its own colour because the alternative is no outline at
-   * all, and an unmarked block that eats every swing is indistinguishable from
-   * a bug.
-   */
-  _showHighlight(col, k, foreign = false) {
-    const { f, i, j } = colParts(col);
+  /** Draw the wireframe of a cell. It is a unit cube, so it is eight corners. */
+  _showHighlight(col, k) {
+    const { x, y } = colParts(col);
     const c = this._hlCorners;
-    cornerPos(f, i, j, k, c[0]);
-    cornerPos(f, i + 1, j, k, c[1]);
-    cornerPos(f, i + 1, j + 1, k, c[2]);
-    cornerPos(f, i, j + 1, k, c[3]);
-    cornerPos(f, i, j, k + 1, c[4]);
-    cornerPos(f, i + 1, j, k + 1, c[5]);
-    cornerPos(f, i + 1, j + 1, k + 1, c[6]);
-    cornerPos(f, i, j + 1, k + 1, c[7]);
+    cellCorner(x, y, k, c[0]);
+    cellCorner(x + 1, y, k, c[1]);
+    cellCorner(x + 1, y + 1, k, c[2]);
+    cellCorner(x, y + 1, k, c[3]);
+    cellCorner(x, y, k + 1, c[4]);
+    cellCorner(x + 1, y, k + 1, c[5]);
+    cellCorner(x + 1, y + 1, k + 1, c[6]);
+    cellCorner(x, y + 1, k + 1, c[7]);
     const edges = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7];
     const arr = this.highlight.geometry.attributes.position.array;
-    // nudge outward a hair so the outline never z-fights
+    // Nudge out from the cell's own centre so the outline never z-fights. The
+    // old version scaled off the world origin, which was a radius.
+    const mx = x + 0.5, my = k + 0.5, mz = y + 0.5;
     for (let e = 0; e < 24; e++) {
       const p = c[edges[e]];
-      const l = Math.hypot(p[0], p[1], p[2]) || 1;
-      const s = (l + 0.006) / l;
-      arr[e * 3] = p[0] * s; arr[e * 3 + 1] = p[1] * s; arr[e * 3 + 2] = p[2] * s;
+      arr[e * 3] = mx + (p[0] - mx) * 1.012;
+      arr[e * 3 + 1] = my + (p[1] - my) * 1.012;
+      arr[e * 3 + 2] = mz + (p[2] - mz) * 1.012;
     }
     this.highlight.geometry.attributes.position.needsUpdate = true;
-    const m = this.highlight.material;
-    m.color.setHex(foreign ? 0x8fc4d6 : 0x08080d);
-    m.opacity = foreign ? 0.26 : 0.38;
     this.highlight.visible = true;
   }
 
@@ -3151,8 +3160,8 @@ class Game {
     } else if (data.blocks.length !== COLUMNS * D) return BAD;
     if (data.colBiome && data.colBiome.length !== COLUMNS) return BAD;
     if (Array.isArray(data.geom)) {
-      const [f, d, rmin] = data.geom;
-      if (f !== F || d !== D || rmin !== R_MIN) return OLD;
+      const [w, d] = data.geom;
+      if (w !== W || d !== D) return OLD;
     }
     /*
      * Where the player stood, because the loader dereferences it before there
@@ -3166,7 +3175,7 @@ class Game {
      * the load never completed and nothing was said.
      */
     const cell = data.player?.cell;
-    if (!Array.isArray(cell) || cell.length !== 4 || cell.some((n) => !Number.isFinite(n))) return BAD;
+    if (!Array.isArray(cell) || cell.length !== 3 || cell.some((n) => !Number.isFinite(n))) return BAD;
     /*
      * And a block id this build does not have.
      *
@@ -3238,9 +3247,9 @@ class Game {
         // A chunk requested just before the player turned away can land after
         // we have already evicted it. Without this it would be re-added with no
         // entry in liveChunks, so nothing would ever free it again.
-        const id = chunkIdx(msg.f, msg.ci, msg.cj, msg.ck);
+        const id = chunkIdx(msg.cx, msg.cy, msg.ck);
         if (this.liveChunks.has(id)) {
-          this.planet.applyChunk(msg.f, msg.ci, msg.cj, msg.ck, msg.groups);
+          this.planet.applyChunk(msg.cx, msg.cy, msg.ck, msg.groups);
           // Must be *replaced*, not merged, and must be deleted when the chunk
           // comes back empty: a remesh is the whole truth about that chunk, so
           // picking the last flower out of it has to leave nothing behind or
@@ -3349,9 +3358,9 @@ class Game {
     const planet = this.planet;
     for (let id = 0; id < NUM_CHUNKS; id++) {
       const o = id * 3;
-      const dx = CHUNK_CENTER[o] - eye.x;
+      const dx = wrapDelta(CHUNK_CENTER[o] - eye.x);
       const dy = CHUNK_CENTER[o + 1] - eye.y;
-      const dz = CHUNK_CENTER[o + 2] - eye.z;
+      const dz = wrapDelta(CHUNK_CENTER[o + 2] - eye.z);
       const d2 = dx * dx + dy * dy + dz * dz;
       const has = live.has(id);
       // The cheap test first: `chunkBuried` is two loads and a compare, but the
@@ -3385,15 +3394,13 @@ class Game {
   _seatPlayer(spawnCol) {
     const save = this._pendingSave;
     if (save) {
-      this.player.cell.f = save.player.cell[0];
-      this.player.cell.ci = save.player.cell[1];
-      this.player.cell.cj = save.player.cell[2];
-      this.player.cell.ck = save.player.cell[3];
-      this.player._sync();
+      const [x, y, k] = save.player.cell;
+      this.player.setPosition(x + 0.5, k + 0.05, y + 0.5);
       return;
     }
     const col = spawnCol ?? 0;
-    this.player.spawnAtColumn(col, Math.floor(this.planet.colHeight[col] - R_MIN - 0.5));
+    // `colHeight` is a LAYER now, so there is nothing to subtract off it.
+    this.player.spawnAtColumn(col, Math.floor(this.planet.colHeight[col]));
   }
 
   /**
@@ -3414,9 +3421,9 @@ class Game {
     const sources = this.water.sources;
     for (let n = 0; n < REGION_COLS; n++) {
       const col = cols[n];
-      const base = COL_BASE[col], step = COL_STEP[col];
+      const base = col * D;
       for (let k = 0; k < D; k++) {
-        const i = base + k * step;
+        const i = base + k;
         if (RENDER_TYPE[blocks[i]] !== R_LIQUID || level.has(i)) continue;
         if (this._isFallingCell(col, k)) level.set(i, LEVEL_MAX);
         else sources.add(i);
@@ -3467,10 +3474,9 @@ class Game {
    */
   _isFallingCell(col, k) {
     if (k < 1 || k + 1 >= D) return false;
-    const step = COL_STEP[col];
-    const base = COL_BASE[col] + k * step;
-    if (RENDER_TYPE[this.planet.blocks[base + step]] !== R_LIQUID) return false;
-    if (RENDER_TYPE[this.planet.blocks[base - step]] !== R_LIQUID) return false;
+    const base = col * D + k;
+    if (RENDER_TYPE[this.planet.blocks[base + 1]] !== R_LIQUID) return false;
+    if (RENDER_TYPE[this.planet.blocks[base - 1]] !== R_LIQUID) return false;
     const rid = regionOfCol(col);
     let open = 0;
     for (let d = 0; d < 4; d++) {
@@ -3487,11 +3493,8 @@ class Game {
   _placeEntities() {
     const save = this._pendingSave;
     if (save) {
-      this.player.cell.f = save.player.cell[0];
-      this.player.cell.ci = save.player.cell[1];
-      this.player.cell.cj = save.player.cell[2];
-      this.player.cell.ck = save.player.cell[3];
-      this.player._sync();
+      const [px, py, pk] = save.player.cell;
+      this.player.setPosition(px + 0.5, pk + 0.05, py + 0.5);
       this.player.forward.fromArray(save.player.forward);
       this.player.pitch = save.player.pitch;
       this.player.health = save.player.health;
@@ -3681,7 +3684,7 @@ class Game {
    * taking the night away takes the danger with it.
    */
   skyTimeOfDay() {
-    return FACE_ROLE[this.player.cell.f] === FACE_CINDER ? CINDER_HOUR : this.timeOfDay();
+    return FACE_ROLE[this.player.face] === FACE_PYRE ? CINDER_HOUR : this.timeOfDay();
   }
 
   _spawnPlayer() {
@@ -3693,7 +3696,7 @@ class Game {
     // forces — it is also better behaviour, because respawning three thousand
     // columns from everything you own was never what anyone wanted.
     const c = this.player.cell;
-    const hint = cidx(c.f, Math.floor(c.ci), Math.floor(c.cj));
+    const hint = colIndex(c.x, c.y);
     const REACH = 40;
     let best = -1, bestScore = -1, bestK = 0;
     for (let n = 0; n < 3000; n++) {
@@ -3701,11 +3704,11 @@ class Game {
         ((Math.random() * (REACH * 2 + 1)) | 0) - REACH,
         ((Math.random() * (REACH * 2 + 1)) | 0) - REACH);
       if (!p.liveCol(col)) continue;
-      // Never wake up on a different face from the one you died on. A search
-      // radius of forty columns crosses a seam near an edge, and being killed
-      // on the cinderlands only to reappear in a meadow is the planet deciding
-      // your expedition is over. The owner asked for this outright.
-      if (((col / (F * F)) | 0) !== c.f) continue;
+      // Never wake up on a different face from the one you died on. The cross
+      // is one world and a join inside it is nothing, but a sealed face is a
+      // room: being killed on the cinderlands only to reappear in a meadow is
+      // the planet deciding your expedition is over.
+      if (faceOfCol(col) !== this.player.face) continue;
       const k = p.surfaceK(col);
       if (k < 6 || k >= D - 6) continue;
       const b = p.at(col, k);
@@ -3716,7 +3719,7 @@ class Game {
         : (b === ID.snow || b === ID.ice || b === ID.packed_ice) ? 2.2
           : (b === ID.basalt || b === ID.ash_stone || b === ID.magma_stone) ? 2.0 : 0;
       if (!score) continue;
-      if (R_MIN + k + 1 < R_SEA + 1) continue;
+      if (k + 1 < SEA_K + 1) continue;
       // headroom
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2) || p.solidAt(col, k + 3)) continue;
       // flatness across the four neighbours
@@ -4157,7 +4160,7 @@ class Game {
     this.ui.setSpectator(true);
     // Nothing carried over from the last frame it was alive: no stagger, no
     // held bow, no sprint. It drifts from where it fell.
-    this.player.vel.i = 0; this.player.vel.j = 0; this.player.vel.k = 0;
+    this.player.vel.x = 0; this.player.vel.y = 0; this.player.vel.z = 0;
     this.player.knockT = 0;
     this.bow.t = 0;
     this.breath = 1;
@@ -4182,15 +4185,12 @@ class Game {
    * a guarantee. This writes a position. There is nothing else in it to go
    * wrong, and no way to add anything without meaning to.
    *
-   * The steering is the player's own: `forward` and `up` are whatever `look`
-   * has already set, so the drift follows the camera through a cube seam
-   * exactly as walking does — `tangentToCell` is the same Gram solve the
-   * walking move uses, and `normalizeCell` is what carries the body onto the
-   * neighbouring face.
+   * The steering is the player's own: `forward` is whatever `look` has already
+   * set, and the wish is a world-space vector added straight to the position.
+   * There is no cell space to convert into and back out of any more.
    */
   _drift(dt, input) {
     const p = this.player;
-    const c = p.cell;
     const fast = input.down('ShiftLeft') || input.down('ShiftRight');
     const speed = fast ? SPECTATE_FAST : SPECTATE_SPEED;
     const iz = (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0);
@@ -4201,22 +4201,14 @@ class Game {
     const wish = _v1.set(0, 0, 0).addScaledVector(p.forward, iz).addScaledVector(right, ix);
     if (wish.lengthSq() > 1) wish.normalize();
     wish.multiplyScalar(speed);
-    // Split the wish into the two things cell space keeps apart: along the
-    // ground, and away from the middle of the planet. Looking up and walking
-    // forward should climb, which is the whole of what a free camera is for.
-    const radial = wish.dot(p.up);
-    const flat = _v3.copy(wish).addScaledVector(p.up, -radial);
-    const v = p.tangentToCell(flat);
-    c.ci += v.i * dt;
-    c.cj += v.j * dt;
-    c.ck += (radial + iy * speed) * dt;
-    // The two hard edges of the shell. Bedrock is not a wall a spectator is
-    // being kept out of — it is the bottom of the array — and the same at the
+    wish.y += iy * speed;
+    const pos = p.position;
+    // The two hard edges of the array. Bedrock is not a wall a spectator is
+    // being kept out of - it is the bottom of the array - and the same at the
     // top, where there is no world left to look at.
-    if (c.ck < 1) c.ck = 1;
-    if (c.ck > D - 2) c.ck = D - 2;
-    if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) normalizeCell(c);
-    p._sync();
+    p.setPosition(pos.x + wish.x * dt,
+      Math.min(D - 1.5, Math.max(1, pos.y + wish.y * dt)),
+      pos.z + wish.z * dt);
   }
 
   /**
@@ -4324,8 +4316,8 @@ class Game {
       regionColumns(live[n], tmp);
       let o = n * REGION_VOXELS;
       for (let c = 0; c < REGION_COLS; c++) {
-        const base = COL_BASE[tmp[c]], step = COL_STEP[tmp[c]];
-        for (let k = 0; k < D; k++) blocks[o + k] = this.planet.blocks[base + k * step];
+        const base = tmp[c] * D;
+        for (let k = 0; k < D; k++) blocks[o + k] = this.planet.blocks[base + k];
         o += D;
       }
     }
@@ -4345,14 +4337,14 @@ class Game {
     return {
       // The shape of the planet this save was written for.
       //
-      // Everything below indexes into a flat array whose size is F*F*6*D, and
-      // the loader used to take that array on trust. Change the face resolution
-      // or the shell depth and every index in an old save points somewhere
-      // else: the block array is silently the wrong length, reads past its end
-      // come back as air, and what you get is not an error but a corrupt planet
-      // that looks almost plausible. Stamping the geometry in is what lets the
+      // Everything below indexes into a flat array whose size is W*W*D, and
+      // the loader used to take that array on trust. Change the map width or
+      // the depth and every index in an old save points somewhere else: the
+      // block array is silently the wrong length, reads past its end come back
+      // as air, and what you get is not an error but a corrupt planet that
+      // looks almost plausible. Stamping the geometry in is what lets the
       // loader say no.
-      geom: [F, D, R_MIN],
+      geom: [W, D],
       gen: GEN_VERSION,
       seed: this.seed,
       ...this._saveBlocks(),
@@ -4382,7 +4374,7 @@ class Game {
       // default. Every field is read with a fallback, so a save written before
       // any of them existed loads unchanged.
       player: {
-        cell: [c.f, c.ci, c.cj, c.ck],
+        cell: [c.x, c.y, c.k],
         forward: this.player.forward.toArray(),
         pitch: this.player.pitch,
         health: this.player.health,
@@ -4486,7 +4478,7 @@ class Game {
       dayT: +this.dayT.toFixed(5),
       season: this.seasons.toJSON(),
       stats: this.stats,
-      biome: this.planet.colBiome[cidx(c.f, Math.floor(c.ci), Math.floor(c.cj))] ?? 2,
+      biome: this.planet.colBiome[colIndex(c.x, c.y)] ?? 2,
     };
   }
 
@@ -4652,7 +4644,7 @@ class Game {
           : stepColumn(e.col, CORNER_STEPS[d - 4][0], CORNER_STEPS[d - 4][1]);
         if (nb < 0) continue;
         if (!NEEDS_ROOM[this.planet.at(nb, e.k)]) continue;
-        const key = cellIndex(nb, e.k);
+        const key = cellIdx(nb, e.k);
         if (!doomed) doomed = new Map();
         doomed.set(key, { col: nb, k: e.k, id: this.planet.at(nb, e.k) });
       }
@@ -4761,7 +4753,7 @@ class Game {
       // what holds it up (today: none).
       for (let k = e.k + 1; k < D && NEEDS_FLOOR[this.planet.at(e.col, k)]; k++) {
         if (!doomed) doomed = new Map();
-        doomed.set(cellIndex(e.col, k), { col: e.col, k, id: this.planet.at(e.col, k) });
+        doomed.set(cellIdx(e.col, k), { col: e.col, k, id: this.planet.at(e.col, k) });
       }
     }
     if (!doomed) return;
@@ -4809,7 +4801,7 @@ class Game {
       const soil = this.planet.at(e.col, k);
       if (soil !== ID.farmland && soil !== ID.farmland_wet) continue;
       if (!reverts) reverts = new Map();
-      reverts.set(cellIndex(e.col, k), { col: e.col, k, id: ID.dirt });
+      reverts.set(cellIdx(e.col, k), { col: e.col, k, id: ID.dirt });
     }
     if (reverts) this._applyEdits([...reverts.values()]);
   }
@@ -4830,7 +4822,7 @@ class Game {
       // (the kiln ⇄ lit-kiln swap) inherits whatever the cell already had.
       const fac = this.planet.applyFacing(e.col, e.k, e.id, e.facing);
       if (fac >= 0) e.facing = fac; else delete e.facing;
-      if (e.id === ID.hearth) this.hearths.add(cellIndex(e.col, e.k));
+      if (e.id === ID.hearth) this.hearths.add(cellIdx(e.col, e.k));
     }
     this.worldWorker.postMessage({ type: 'edit', edits, id: ++this.editSeq });
     // The shadow volume is a copy of what is opaque around the player, and this
@@ -4875,8 +4867,8 @@ class Game {
    */
   _seedGravity(edits) {
     for (const e of edits) {
-      if (HAS_GRAVITY[this.planet.at(e.col, e.k + 1)]) this.falling.add(cellIndex(e.col, e.k + 1));
-      if (HAS_GRAVITY[e.id]) this.falling.add(cellIndex(e.col, e.k));
+      if (HAS_GRAVITY[this.planet.at(e.col, e.k + 1)]) this.falling.add(cellIdx(e.col, e.k + 1));
+      if (HAS_GRAVITY[e.id]) this.falling.add(cellIdx(e.col, e.k));
     }
   }
 
@@ -5066,22 +5058,16 @@ class Game {
    */
   _axisFromFace(hit, col, k) {
     if (this.player.crouching) {
-      const p = colParts(col);
-      tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
       const d = this.player.lookDir;
-      const a = Math.abs(d.x * _frame.ea[0] + d.y * _frame.ea[1] + d.z * _frame.ea[2]);
-      const b = Math.abs(d.x * _frame.eb[0] + d.y * _frame.eb[1] + d.z * _frame.eb[2]);
-      return a >= b ? 1 : 2;
+      return Math.abs(d.x) >= Math.abs(d.z) ? 1 : 2;
     }
     // The face normal is the step from the block hit to the cell being filled.
     if (hit.col === col) return 0;                 // stacked above or below
-    const p = colParts(col);
-    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
-    _v1.copy(this.planet.centerOf(col, k, _v2))
-      .sub(this.planet.centerOf(hit.col, hit.k, _v3));
-    const da = Math.abs(_v1.x * _frame.ea[0] + _v1.y * _frame.ea[1] + _v1.z * _frame.ea[2]);
-    const db = Math.abs(_v1.x * _frame.eb[0] + _v1.y * _frame.eb[1] + _v1.z * _frame.eb[2]);
-    const up = Math.abs(_v1.x * _frame.up[0] + _v1.y * _frame.up[1] + _v1.z * _frame.up[2]);
+    const a = this.planet.centerOf(col, k, _v2);
+    const b = this.planet.centerOf(hit.col, hit.k, _v3);
+    const da = Math.abs(wrapDelta(a.x - b.x));
+    const db = Math.abs(wrapDelta(a.z - b.z));
+    const up = Math.abs(a.y - b.y);
     if (up >= da && up >= db) return 0;
     return da >= db ? 1 : 2;
   }
@@ -5109,11 +5095,7 @@ class Game {
   _slabHalf(hit, col, k, aim = false) {
     if (!aim && hit.col === col) return hit.k > k ? 1 : 0;   // stacked: fill the near half
     // Side placement: compare the aim point with the cell's mid-height.
-    const p = colParts(col);
-    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
-    _v1.copy(hit.point ?? this.player.eye).sub(this.planet.centerOf(col, k, _v2));
-    const up = _v1.x * _frame.up[0] + _v1.y * _frame.up[1] + _v1.z * _frame.up[2];
-    return up > 0 ? 1 : 0;
+    return (hit.point ?? this.player.eye).y > k + 0.5 ? 1 : 0;
   }
 
   /**
@@ -5145,7 +5127,7 @@ class Game {
    * screen, and restores the lock on the way out.
    */
   _writeSign(col, k) {
-    const key = cellIndex(col, k);
+    const key = cellIdx(col, k);
     const el = document.getElementById('sign-write');
     const input = document.getElementById('sign-line');
     if (!el || !input) return;
@@ -5264,12 +5246,12 @@ class Game {
    */
   _ladderFacing(hit, col, k) {
     if (hit.col === col) return this._facingToward(col, k) ^ 1;   // no wall: face outward
-    const p = colParts(col);
-    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
-    _v1.copy(this.planet.centerOf(hit.col, hit.k, _v2))
-      .sub(this.planet.centerOf(col, k, _v3));
-    const da = _v1.x * _frame.ea[0] + _v1.y * _frame.ea[1] + _v1.z * _frame.ea[2];
-    const db = _v1.x * _frame.eb[0] + _v1.y * _frame.eb[1] + _v1.z * _frame.eb[2];
+    // Facing 0..3 is +x, -x, +y, -y on the map, which is TORCH_WALL_STEP's
+    // order. `wrapDelta` because the two cells may be a whole map apart in
+    // plain subtraction and one step apart in fact.
+    const a = this.planet.centerOf(hit.col, hit.k, _v2);
+    const b = this.planet.centerOf(col, k, _v3);
+    const da = wrapDelta(a.x - b.x), db = wrapDelta(a.z - b.z);
     if (Math.abs(da) >= Math.abs(db)) return da > 0 ? 0 : 1;
     return db > 0 ? 2 : 3;
   }
@@ -5306,11 +5288,8 @@ class Game {
   /**
    * Is there anything for a sign in this cell, with this byte, to hold on to?
    *
-   * Seam-safe, and checked rather than assumed: a sign in the last column of
-   * face 0 nailed to a wall on face 5, 4, 2 or 3 derives the right writing
-   * direction and reports supported in all four. It holds because the only two
-   * things here that cross a face are `stepColumn` and, in `_ladderFacing`, a
-   * difference of two world positions - never arithmetic on a column index.
+   * `stepColumn` wraps, so the wall a sign is nailed to is found the same way
+   * at the far edge of the map as anywhere else.
    */
   _signSupported(col, k, byte) {
     if (!(byte & SIGN_WALL)) return this.planet.solidAt(col, k - 1);
@@ -5327,12 +5306,10 @@ class Game {
   }
 
   _facingToward(col, k) {
-    const p = colParts(col);
-    tangentFrame(p.f, p.i + 0.5, p.j + 0.5, k + 0.5, _frame);
-    // block → player, flattened onto the tangent plane
-    _v1.copy(this.player.eye).sub(this.planet.centerOf(col, k, _v2));
-    const da = _v1.x * _frame.ea[0] + _v1.y * _frame.ea[1] + _v1.z * _frame.ea[2];
-    const db = _v1.x * _frame.eb[0] + _v1.y * _frame.eb[1] + _v1.z * _frame.eb[2];
+    // block -> player, flattened onto the ground plane
+    const b = this.planet.centerOf(col, k, _v2);
+    const da = wrapDelta(this.player.eye.x - b.x);
+    const db = wrapDelta(this.player.eye.z - b.z);
     if (Math.abs(da) < 1e-6 && Math.abs(db) < 1e-6) return FACING_DEFAULT;
     if (Math.abs(da) >= Math.abs(db)) return da >= 0 ? 0 : 1;
     return db >= 0 ? 2 : 3;
@@ -5366,7 +5343,7 @@ class Game {
    * @param {THREE.Vector3} center where to put what comes out
    */
   _emptyContainer(col, k, id, center) {
-    const key = cellIndex(col, k);
+    const key = cellIdx(col, k);
     const kiln = this.kilns.get(key);
     if (kiln) {
       for (const s of [kiln.input, kiln.fuel, kiln.output]) {
@@ -5546,7 +5523,7 @@ class Game {
     // The aimed block is already known to be this face's - the cast saw to
     // that - but the cell in front of it can still be over the border when you
     // build along a seam, and that cell is not yours to fill.
-    if (((col / (F * F)) | 0) !== this.player.cell.f) return false;
+    if (((col / (F * F)) | 0) !== this.player.face) return false;
     const existing = this.planet.at(col, k);
     if (existing !== 0 && RENDER_TYPE[existing] !== R_LIQUID && RENDER_TYPE[existing] !== R_CROSS) return false;
     // A liquid cell counts as free space above — which is right for a wall, and
@@ -5676,7 +5653,7 @@ class Game {
     // marker for "worldgen put this here", so a crate you set down yourself
     // would otherwise fill itself with treasure the first time you opened it.
     if (id === ID.crate) {
-      const key = cellIndex(col, k);
+      const key = cellIdx(col, k);
       if (!this.crates.has(key)) {
         this.crates.set(key, {
           slots: Array.from({ length: CRATE_SLOTS }, () => new Slot()), col, k,
@@ -5763,7 +5740,7 @@ class Game {
    * worker, which has no way to reach this map.
    */
   _crateAt(col, k) {
-    const key = cellIndex(col, k);
+    const key = cellIdx(col, k);
     let c = this.crates.get(key);
     if (!c) {
       c = { slots: Array.from({ length: CRATE_SLOTS }, () => new Slot()), col, k };
@@ -5815,7 +5792,7 @@ class Game {
   }
 
   _kilnAt(col, k) {
-    const key = cellIndex(col, k);
+    const key = cellIdx(col, k);
     let s = this.kilns.get(key);
     if (!s) {
       s = {
@@ -6207,7 +6184,7 @@ class Game {
      */
     const pc = this.player.cell;
     const onBuiltGround = this.planet
-      .liveCol(cidx(pc.f, Math.floor(pc.ci), Math.floor(pc.cj)));
+      .liveCol(colIndex(pc.x, pc.y));
     if (!onBuiltGround) {
       this._streamPending = false;
       this._streamTimer = 0;
@@ -6500,7 +6477,7 @@ class Game {
     this.drops.update(dt, this.player, bag);
 
     const c = this.player.cell;
-    const biomeId = this.planet.colBiome[cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)))] ?? 2;
+    const biomeId = this.planet.colBiome[colIndex(c.x, c.y)] ?? 2;
     const altitude = this.player.position.length() - R_SEA;
     this.weather.update(dt, biomeId, altitude, this.seasons.cold);
     // A funnel, if the sky wants one and the ground will take one. Weather owns
@@ -6826,16 +6803,14 @@ class Game {
     this._whirlDrag ||= { i: 0, j: 0, spin: 0 };
     if (this.spectating) { this._whirlT = 0; return; }
     const c = p.cell;
-    const ci = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-    const cj = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-    const col = cidx(c.f, ci, cj);
+    const col = colIndex(c.x, c.y);
 
     // The drag. Gated on being in water and not on being near one, because
     // `pullAt` is already the narrower test and asking it twice would be two
     // places that have to agree about where the funnel is.
     if (p.inWater && !p.inLava) {
-      p.whirlPull = this.whirlpools.pullAt(col, Math.floor(c.ck));
-      const d = this.whirlpools.dragAt(col, Math.floor(c.ck), this._whirlDrag);
+      p.whirlPull = this.whirlpools.pullAt(col, c.k);
+      const d = this.whirlpools.dragAt(col, c.k, this._whirlDrag);
       p.whirlI = d.i; p.whirlJ = d.j; p.whirlSpin = d.spin;
     }
 
@@ -7099,7 +7074,7 @@ class Game {
     this.soakT += dt;
 
     // The cinderlands pool. All three bars, no clock, no sting. See BALM_HEAL.
-    if (FACE_ROLE[p.cell.f] === FACE_CINDER) {
+    if (FACE_ROLE[p.face] === FACE_PYRE) {
       this._scaldT = 0;
       if (p.moveAmount <= SOAK_STILL) {
         this.energy = Math.min(1, this.energy + dt * SOAK_ENERGY);
@@ -7223,15 +7198,15 @@ class Game {
     if (this._coreT > 0) return;
     this._coreT = 0.4;
     const c = this.player.cell;
-    if (c.ck > CORE_REACH_K) return;
+    if (c.k > CORE_REACH_K) return;
     // Actually next to it, not merely deep — the core tops out at layer 2 and
     // the last few layers of basalt are not the same achievement.
-    const col = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    const col = colIndex(c.x, c.y);
     let touching = false;
     for (let di = -1; di <= 1 && !touching; di++) {
       for (let dj = -1; dj <= 1 && !touching; dj++) {
         const cc = stepColumn(col, di, dj);
-        for (let k = Math.max(0, Math.floor(c.ck) - 2); k <= Math.floor(c.ck) + 1; k++) {
+        for (let k = Math.max(0, c.k - 2); k <= c.k + 1; k++) {
           if (this.planet.at(cc, k) === ID.core) { touching = true; break; }
         }
       }
@@ -7376,7 +7351,7 @@ class Game {
 
   _freezeSome() {
     const c = this.player.cell;
-    const base = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    const base = colIndex(c.x, c.y);
     const edits = [];
     for (let n = 0; n < FREEZE_SCAN && edits.length < FREEZE_BATCH; n++) {
       // Sampled rather than swept: a full disc is 2 000 columns a pass, and the
@@ -7386,7 +7361,7 @@ class Game {
       const col = stepColumn(base, di, dj);
       const k = this._openWaterK(col);
       if (k < 0) continue;
-      const key = cellIndex(col, k);
+      const key = cellIdx(col, k);
       if (this.frozen.has(key)) continue;
       // Only standing water freezes. A spring has no level entry; anything with
       // one is a flow, and a running stream icing over is both wrong and the
@@ -7537,7 +7512,7 @@ class Game {
     // its own ground rather than about the player's.
     const line = snowLine(chill);
     const c = this.player.cell;
-    const base = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    const base = colIndex(c.x, c.y);
     const edits = [];
     /**
      * Cells this pass has already decided about, and it is not an optimisation.
@@ -7577,7 +7552,7 @@ class Game {
       // ridge, seed 4242: 67 cells went white over 200 passes, and 0 with this
       // clause; a temperate face still snows 751 in the same run.
       const role = FACE_ROLE[(col / (F * F)) | 0];
-      if (role === FACE_POLAR || role === FACE_CINDER) continue;
+      if (role === FACE_RIME || role === FACE_PYRE) continue;
       const k = this._seasonGroundK(col);
       if (k < 0) continue;
       const cur = this.planet.at(col, k);
@@ -7619,7 +7594,7 @@ class Game {
       const buries = !isSnow && !IS_SEASON_GROUND[cur] && IS_REPLACEABLE[cur]
         && IS_SEASON_GROUND[this.planet.at(col, k - 1)];
       if (!isSnow && !buries && !IS_SEASON_GROUND[cur]) continue;
-      const key = cellIndex(col, k);
+      const key = cellIdx(col, k);
       if (seen.has(key)) continue;
       seen.add(key);
       const was = this.seasonSnow.get(key);
@@ -7823,8 +7798,8 @@ class Game {
    */
   _handLight() {
     const c = this.player.cell;
-    const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
-    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
+    const ck = c.k;
+    const baseCol = colIndex(c.x, c.y);
 
     // Nothing about this changes until you cross into another cell or the world
     // is edited, and the scan is ~2000 cell reads — by far the most expensive
@@ -7948,7 +7923,7 @@ class Game {
     // down, so the lava it found is lava you have gone to.
     if (sawLava) {
       const c = this.player.cell;
-      const surf = this.planet.surfaceK(cidx(c.f, Math.round(c.ci), Math.round(c.cj)));
+      const surf = this.planet.surfaceK(colIndex(c.x, c.y));
     }
 
     // A single torch on a wall is a small, close, quiet thing and six of them
@@ -8574,8 +8549,8 @@ class Game {
     if (this._steamT > 0) return;
     this._steamT = STEAM_PERIOD;
     const c = this.player.cell;
-    const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
-    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
+    const ck = c.k;
+    const baseCol = colIndex(c.x, c.y);
 
     const cells = this._steamCells;
     if (this._stCol !== baseCol || this._stK !== ck || this._stSeq !== this.editSeq) {
@@ -8783,9 +8758,8 @@ class Game {
   _syncSignText() {
     if (!this.signText) return;
     const c = this.player.cell;
-    const ck = Math.floor(c.ck);
-    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, Math.floor(c.ci))),
-      Math.min(F - 1, Math.max(0, Math.floor(c.cj))));
+    const ck = c.k;
+    const baseCol = colIndex(c.x, c.y);
     if (this._stCol === baseCol && this._stK === ck
       && this._stSeq === this.editSeq && this._stSigns === this.signSeq) return;
     this._stCol = baseCol; this._stK = ck;
@@ -8828,8 +8802,8 @@ class Game {
     }
 
     const c = this.player.cell;
-    const ci = Math.floor(c.ci), cj = Math.floor(c.cj), ck = Math.floor(c.ck);
-    const baseCol = cidx(c.f, Math.min(F - 1, Math.max(0, ci)), Math.min(F - 1, Math.max(0, cj)));
+    const ck = c.k;
+    const baseCol = colIndex(c.x, c.y);
     const lists = this._modelLists || (this._modelLists = { torch: [] });
     for (const n of FLOWER_NAMES) lists[n] = lists[n] || [];
     for (const n in MODELLED_TOPPERS) lists[n] = lists[n] || [];
@@ -9722,14 +9696,8 @@ class Game {
   }
 
   _interact(dt, input) {
-    // Gated to the face the player is standing on: everything downstream of
-    // this one cast - mining, placing, tilling, planting, the highlight box -
-    // inherits "another face's blocks are scenery" from here.
-    const blocked = this._faceBlocked ||= { col: -1, k: -1, hit: false };
-    blocked.hit = false;
     const hit = this.planet.raycast(
       this.player.eye, this.player.lookDir, this.player.reach,
-      { face: this.player.cell.f, blocked },
     );
     // Handed to `_tickBow`, which runs before this method and needs the same
     // answer to decide whether a shovel in the main hand has talked the offhand
@@ -9927,10 +9895,7 @@ class Game {
       this._showHighlight(hit.col, hit.k);
       this.ui.setCrosshairActive(true);
     } else {
-      // Outlined but not offered: the crosshair stays inactive, because nothing
-      // here can be acted on.
-      if (blocked.hit) this._showHighlight(blocked.col, blocked.k, true);
-      else this.highlight.visible = false;
+      this.highlight.visible = false;
       this.ui.setCrosshairActive(false);
       // Swung at nothing. Sound only, and no cooldown of its own: `clicked` is
       // edge-triggered so this is one whoosh per press, and the voice budget's
@@ -9972,7 +9937,7 @@ class Game {
     if (hit && IS_SIGN[hit.id]) {
       // Reading is looking: no key to press and nothing to open, so a row of
       // signs can be read by sweeping across them.
-      const text = this.signs.get(cellIndex(hit.col, hit.k));
+      const text = this.signs.get(cellIdx(hit.col, hit.k));
       // The hint is one line, so the board's own line breaks become spaces
       // rather than vanishing into a run-on: "WEST GATE\nkeep out" reads as
       // "WEST GATE keep out" and not as "WEST GATEkeep out".
@@ -9998,7 +9963,7 @@ class Game {
     // about which hand is mining — see `_breakBlock` for why it is the main one.
     const heldDef = ITEMS[this.inventory.held().item];
     if (input.buttons[0] && hit && input.locked) {
-      const key = cellIndex(hit.col, hit.k);
+      const key = cellIdx(hit.col, hit.k);
       if (m.key !== key) { m.key = key; m.progress = 0; }
       // The hands branch is a multiplier on the finished timer rather than a
       // term inside `miningTime`: that function is shared with the worker's
@@ -10341,7 +10306,7 @@ class Game {
       if (!cell) return null;
       // The arc crossed onto another face. Its blocks are scenery, so the
       // water over there is not a target either and the throw simply fails.
-      if (cell.f !== this.player.cell.f) return null;
+      if (cell.f !== this.player.face) return null;
       const id = this.planet.at(cell.col, cell.k);
       if (id === ID.water) return cell;
       if (id === ID.lava || IS_SOLID[id]) return null;
@@ -11049,7 +11014,7 @@ class Game {
     // A ray that stops on liquid, which the normal interaction ray does not.
     const wet = this.planet.raycast(
       this.player.eye, this.player.lookDir, this.player.reach,
-      { hitLiquid: true, face: this.player.cell.f },
+      { hitLiquid: true, face: this.player.face },
     );
 
     if (empty) {
@@ -11097,7 +11062,7 @@ class Game {
     if (!target) return false;
     // Same border rule as placing a block: the cell in front of the aimed one
     // can be over the seam, and a pail does not reach across it.
-    if (((target.col / (F * F)) | 0) !== this.player.cell.f) return false;
+    if (((target.col / (F * F)) | 0) !== this.player.face) return false;
     // Air, or something the liquid would destroy anyway. It used to be air
     // alone, and the mismatch was visible in a single tuft of grass: the flow
     // sim washes every non-submerged cross plant and every torch out of its way
@@ -11163,10 +11128,9 @@ class Game {
    */
   _skyExposure() {
     const c = this.player.cell;
-    const col = cidx(c.f, Math.min(F - 1, Math.max(0, Math.floor(c.ci))),
-      Math.min(F - 1, Math.max(0, Math.floor(c.cj))));
+    const col = colIndex(c.x, c.y);
     let blocked = 0;
-    for (let k = Math.floor(c.ck) + 2; k < D; k++) {
+    for (let k = c.k + 2; k < D; k++) {
       if (this.planet.solidAt(col, k)) { blocked++; if (blocked >= 3) return 0; }
     }
     return 1 - blocked / 3;
@@ -11253,7 +11217,7 @@ class Game {
     // Weather, then the ground you are standing on. See FACE_PHYSICS.fog: the
     // cap is a whiteout because a snowfield is one, and the cinderlands are
     // hazy with heat without being blinding.
-    const faceFog = (FACE_PHYSICS[FACE_ROLE[this.player.cell.f]] || FACE_PHYSICS[0]).fog;
+    const faceFog = (FACE_PHYSICS[FACE_ROLE[this.player.face]] || FACE_PHYSICS[0]).fog;
     voxelUniforms.uFogDensity.value = this.player.headInWater
       ? 0 : 0.0013 * Math.min(1.9, w.fog) * faceFog;
     voxelUniforms.uCamPos.value.copy(this.camera.position);
@@ -11374,20 +11338,20 @@ class Game {
 
   _nearLiquid() {
     const c = this.player.cell;
-    const col = cidx(c.f, Math.min(F - 1, Math.floor(c.ci)), Math.min(F - 1, Math.floor(c.cj)));
+    const col = colIndex(c.x, c.y);
     let n = 0;
     for (let d = 0; d < 4; d++) {
       const nb = colNeighbor(col, d);
-      for (let dk = -1; dk <= 1; dk++) if (this.planet.liquidAt(nb, Math.floor(c.ck) + dk)) n++;
+      for (let dk = -1; dk <= 1; dk++) if (this.planet.liquidAt(nb, c.k + dk)) n++;
     }
     return Math.min(1, n / 6);
   }
 
   _updateHud() {
     this.ui.updateVitals(this.player.health, this.player.maxHealth, this.breath, this.player.stamina, this.energy);
-    const face = this.player.cell.f;
+    const face = this.player.face;
     this.ui.updateStatus(this.timeOfDay(), FACE_NAME[face],
-      FACE_ROLE[face] !== FACE_CINDER);
+      FACE_ROLE[face] !== FACE_PYRE);
     // Both read the planet's own tables and the player's tangent frame, and
     // neither writes anything back — so they go here with the rest of the
     // readouts rather than into the simulation above.

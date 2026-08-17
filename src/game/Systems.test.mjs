@@ -45,6 +45,7 @@ const { Whirlpools, WHIRL_LATTICE, WHIRL_R, WHIRL_CUE, K_SEA } = await import('.
 const { Mobs, BOSS_ROSTER } = await import('./Mobs.js');
 const { Endgame } = await import('./Endgame.js');
 const { ID } = await import('../world/Blocks.js');
+const { fishTable } = await import('./Items.js');
 
 let pass = 0, fail = 0;
 const ok = (cond, what) => { if (cond) pass++; else { fail++; console.log('FAIL', what); } };
@@ -486,6 +487,55 @@ const mobsOn = (planet) => {
     const p2 = { position: { x: 2.5, y: 40, z: 500.5 } };
     near(end._distance(rec, p2), 0, 1e-9, 'and none at all when you are on it');
   }
+}
+
+// --- fishing: the storm face's odds -----------------------------------------
+//
+// Pure arithmetic over the shipped ladder, so the numbers the design was argued
+// with are the numbers the game deals. The band cuts are `fishFood`'s own rungs
+// (r < 0.25, r < 0.58, the rest), which is what "common, uncommon, rare" means
+// everywhere else in Items.js.
+{
+  const share = (table, lo, hi) => table
+    .filter((f) => f.rarity >= lo && f.rarity < hi)
+    .reduce((a, f) => a + f.p, 0);
+  // `upTo` is cumulative; the per-species share is the step it takes.
+  const spread = (t) => t.map((f, i) => ({ ...f, p: f.upTo - (i ? t[i - 1].upTo : 0) }));
+  const fresh = spread(fishTable(false, false));
+  const salt = spread(fishTable(true, false));
+  const deep = spread(fishTable(true, true));
+  const storm = spread(fishTable(false, false, true));
+
+  eq(fresh.length, 5, 'fresh water holds five species');
+  eq(salt.length, 7, 'shallow salt holds seven');
+  eq(deep.length, 10, 'deep salt holds ten');
+  eq(storm.length, 15, 'and the storm holds all fifteen, whatever the water reads as');
+  // The flag overrides the water rather than joining it: Tempest has one kind.
+  eq(fishTable(true, true, true).length, 15, 'salt and deep make no difference on Tempest');
+
+  for (const [name, t] of [['fresh', fresh], ['salt', salt], ['deep', deep], ['storm', storm]]) {
+    near(t[t.length - 1].upTo, 1, 1e-12, `${name} table sums to one`);
+    let sorted = true;
+    for (let i = 1; i < t.length; i++) if (t[i].p > t[i - 1].p) sorted = false;
+    ok(sorted, `${name} table is commonest first`);
+  }
+
+  const rare = (t) => share(t, 0.58, 2);
+  near(rare(fresh), 0.048, 0.001, 'rare band in fresh water');
+  near(rare(salt), 0.050, 0.001, 'rare band in shallow salt');
+  near(rare(deep), 0.115, 0.001, 'rare band in deep salt');
+  near(rare(storm), 0.238, 0.001, 'rare band on Tempest');
+  ok(rare(storm) > rare(deep) * 2, 'the storm doubles the best rare band anywhere else');
+  near(share(storm, 0, 0.25), 0.429, 0.001, 'common band on Tempest');
+  near(share(storm, 0.25, 0.58), 0.332, 0.001, 'uncommon band on Tempest');
+
+  const of = (t, n) => t.find((f) => f.name === n)?.p ?? 0;
+  near(of(deep, 'goblinshark'), 0.0172, 0.0002, 'goblin shark off a deep cast');
+  near(of(storm, 'goblinshark'), 0.0409, 0.0002, 'goblin shark on Tempest');
+  ok(of(storm, 'goblinshark') > of(deep, 'goblinshark') * 2.3, 'and it is 2.4x likelier there');
+  // No other water moved. The storm is a third argument, not a rebalance.
+  near(of(deep, 'clownfish'), 0.274, 0.001, 'the deep table is untouched');
+  near(of(fresh, 'tetra'), 0.305 / 0.78, 0.002, 'and so is the fresh one');
 }
 
 console.log(`${pass} passed, ${fail} failed`);

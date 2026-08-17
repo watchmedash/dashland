@@ -882,14 +882,39 @@ export const fishPrice = (r) => Math.round(3 + 16 * r + 3 * r ** 3);
 export const fishHard = (r) => 0.04 + 0.76 * r;
 
 /**
- * How often the rod produces one, as a relative weight inside its own water.
+ * How steeply the odds fall away up the ladder, as the exponent of a halving.
  *
- * `2 ** (-4.2 * r)`, so the rarest fish in the game turns up about a nineteenth
- * as often as the commonest one in the same water. Halving every 0.238 of rarity
- * is what makes the ladder above read as a ladder in play rather than only on
- * paper — see the measured shares in the note on `_rollCatch`.
+ * 4.2 is every water in the world except one: the rarest fish turns up about a
+ * nineteenth as often as the commonest one beside it, halving every 0.238 of
+ * rarity, which is what makes the ladder above read as a ladder in play rather
+ * than only on paper — see the measured shares in the note on `_rollCatch`.
  */
-export const fishWeight = (r) => 2 ** (-4.2 * r);
+export const FISH_FALLOFF = 4.2;
+/**
+ * Tempest, and it is the whole of the face's reward.
+ *
+ * 1.2 halves every 0.833 of rarity instead of every 0.238, so the ladder is
+ * still a ladder — a goblin shark is still the least likely thing in the water
+ * and a tetra the most — it is merely nothing like as steep. That is the knob
+ * the storm buys and it is deliberately the only one: no species is added, no
+ * price moves, and no other water changes by a single point.
+ *
+ * Computed against the shipped tables, per fish landed:
+ *
+ *     band              fresh    salt   salt+deep   Tempest
+ *     common  r<0.25    67.4%   67.6%      63.0%      42.9%
+ *     uncommon          27.8%   27.4%      25.5%      33.2%
+ *     rare    r>=0.58    4.8%    5.0%      11.5%      23.9%
+ *     goblin shark        -       -         1.7%       4.1%
+ *
+ * So the rare band is 2.1x the best water anywhere else and the rarest fish in
+ * the game 2.4x, and the three abyss species come out of ankle-deep storm water
+ * that would produce none of them anywhere else. Against a face with a 20-point
+ * bar and permanent lightning over it, that is the trade.
+ */
+export const TEMPEST_FALLOFF = 1.2;
+/** How often the rod produces one, as a relative weight inside its own water. */
+export const fishWeight = (r, falloff = FISH_FALLOFF) => 2 ** (-falloff * r);
 
 /**
  * The species, sorted by rarity, which is the order everything else reads them
@@ -1266,17 +1291,27 @@ export const FISH_ITEMS = FISH_SPECIES.map((f) => f.name);
  * into that roll carries straight through to the species, with no second table
  * to keep in step and no second roll.
  *
+ * **Tempest is one water, and it is every water.** The face is a drowned grey
+ * plain that is 44% standing storm water, and there is no sea, no lake and no
+ * drop-off on it to tell apart — so the third argument overrides the first two
+ * rather than joining them, and the storm draws from all fifteen species at
+ * TEMPEST_FALLOFF. A salt/deep test on a face with one kind of water would be
+ * asking a question the ground cannot answer.
+ *
  * @param {boolean} salt sea rather than lake
  * @param {boolean} deep eight or more cells of water under the float
+ * @param {boolean} tempest the storm face, where the two above do not apply
  * @returns {Array<{name:string, rarity:number, upTo:number}>}
  */
-export function fishTable(salt, deep) {
-  const want = salt ? (deep ? ['salt', 'deep'] : ['salt']) : ['fresh'];
+export function fishTable(salt, deep, tempest = false) {
+  const want = tempest ? ['fresh', 'salt', 'deep']
+    : salt ? (deep ? ['salt', 'deep'] : ['salt']) : ['fresh'];
+  const falloff = tempest ? TEMPEST_FALLOFF : FISH_FALLOFF;
   const rows = FISH_SPECIES.filter((f) => want.includes(f.water));
-  const total = rows.reduce((a, f) => a + fishWeight(f.rarity), 0);
+  const total = rows.reduce((a, f) => a + fishWeight(f.rarity, falloff), 0);
   let run = 0;
   return rows.map((f) => {
-    run += fishWeight(f.rarity) / total;
+    run += fishWeight(f.rarity, falloff) / total;
     return { name: f.name, rarity: f.rarity, upTo: run };
   });
 }

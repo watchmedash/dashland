@@ -9925,6 +9925,26 @@ class Game {
       voxelUniforms.uBreakStage.value = -1;
       this.mining.key = null;
       this.mining.progress = 0;
+      /**
+       * ...and you can still eat with a creature in front of you.
+       *
+       * This branch returned unconditionally, and the eating branch is below
+       * it, so a creature nearer than the block under the crosshair made food
+       * impossible to eat. Reported as "I was holding a berry and I tried
+       * eating it but nothing happened" - on a face with animals wandering
+       * over it, which is most of them, that is most of the time.
+       *
+       * Feeding still wins the button, and keeps winning it, because it is
+       * edge triggered and this is not: a click offers the animal a berry, and
+       * only a hold with nothing left to offer becomes a meal. `FEEDS` is a
+       * set of items rather than a fact about the creature, so the test is
+       * "could this feed anything", which is the same question the branch
+       * above already asked.
+       */
+      if (input.buttons[2] && input.locked && !drawing
+        && heldItem?.food && !this.mobs.canFeed(heldSlot.item)) {
+        this._tickEating(dt, heldSlot, heldItem);
+      } else if (!this.mobs.canFeed(heldSlot.item)) this.eating = 0;
       return;
     }
     this.placeCooldown = Math.max(0, this.placeCooldown - dt);

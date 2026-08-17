@@ -6,7 +6,10 @@
 <title>Mojazer</title>
 <link rel="stylesheet" href="/src/ui/style.css" />
 <link rel="manifest" href="./manifest.webmanifest" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪐</text></svg>" />
+<!-- The same 3x3 as the loading screen's mark, drawn small enough to read in a
+     tab: four sealed corners in their own colours, the plus in land, and the
+     violet seal between them. It was a ringed-planet emoji. -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9'><rect width='9' height='9' fill='%23120c06'/><g><rect x='3' width='3' height='3' fill='%234d6d33'/><rect y='3' width='3' height='3' fill='%234d6d33'/><rect x='3' y='3' width='3' height='3' fill='%236f8f45'/><rect x='6' y='3' width='3' height='3' fill='%234d6d33'/><rect x='3' y='6' width='3' height='3' fill='%234d6d33'/><rect width='3' height='3' fill='%23a8d2e8'/><rect x='6' width='3' height='3' fill='%234a4d78'/><rect y='6' width='3' height='3' fill='%233a8f45'/><rect x='6' y='6' width='3' height='3' fill='%238f2a12'/></g><path d='M3 0v3H0M6 0v3h3M3 9V6H0M6 9V6h3' fill='none' stroke='%23c450ff' stroke-width='.6'/></svg>" />
 </head>
 <body>
   <!-- Everything the game draws lives in here, and on a desktop this element is
@@ -22,7 +25,18 @@
   <!-- ── loading ─────────────────────────────────────────── -->
   <div id="loader">
     <div class="loader-inner">
-      <div class="planet-mark"><span></span><span></span><span></span></div>
+      <!-- The mark. Nine tiles in a 3x3, because that is what the world is:
+           five continuous faces in a plus, four sealed corners, and a violet
+           seal round each of them. The light that crosses it leaves the right
+           edge and comes back in on the left, which is the other thing the map
+           does. It replaces a spinning globe with two orbital rings, drawn for
+           a tiny planet that no longer exists. Nine elements and no image. -->
+      <div class="world-mark" aria-hidden="true">
+        <i></i><i></i><i></i>
+        <i></i><i></i><i></i>
+        <i></i><i></i><i></i>
+        <b></b>
+      </div>
       <h1>MOJA<em>ZER</em></h1>
       <p class="tagline">A world, entirely yours.</p>
       <div class="bar"><div class="bar-fill" id="load-fill"></div></div>

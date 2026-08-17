@@ -718,36 +718,153 @@ button.ghost:active:not(:disabled) {
 
 /* ── loader ────────────────────────────────────────────── */
 
+/* The first thing anyone sees, and it is on screen for several seconds, so it
+   is built rather than filled: a dark ground lit by the only two lights this
+   game actually has - the violet of a portal plane and the brass of everything
+   made by hand - with the map itself standing in the middle of them. */
 #loader {
   position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
-  background: radial-gradient(70% 55% at 50% 42%, #16203c 0%, #0a0e1c 48%, #04060d 100%);
+  background:
+    /* the portal bloom, behind the mark */
+    radial-gradient(26% 26% at 50% 39%, rgba(126, 34, 214, .34), rgba(126, 34, 214, 0) 72%),
+    /* a brass warmth along the floor, so the frame has a top and a bottom */
+    radial-gradient(120% 46% at 50% 108%, rgba(190, 112, 34, .22), rgba(190, 112, 34, 0) 72%),
+    radial-gradient(78% 62% at 50% 40%, #141a30 0%, #090c18 46%, #04050b 100%);
 }
 #loader.done { animation: fadeout .55s ease forwards; }
 @keyframes fadeout { to { opacity: 0; visibility: hidden } }
 .loader-inner { width: min(400px, 84vw); text-align: center; }
-.planet-mark { width: 92px; height: 92px; margin: 0 auto 26px; position: relative; }
-.planet-mark span { position: absolute; inset: 0; border-radius: 50%; }
-.planet-mark span:nth-child(1) {
-  background: radial-gradient(circle at 34% 30%, #7fd4c2, #2f7d78 46%, #1b3f52 78%, #101f33);
-  box-shadow: 0 0 42px -6px rgba(110, 200, 190, .55), inset -10px -14px 26px rgba(0, 0, 0, .5);
-  animation: spin 18s linear infinite;
+
+/* THE MARK. Nine tiles in a 3x3 and no image file.
+   It says the three things the front end had stopped saying. The five faces of
+   the plus carry ONE gradient, sized to the whole mark and offset per cell, so
+   they read as ground that carries on across its joins rather than as five
+   tiles that happen to match - that is the continuous world. The four corners
+   are their own colour and are ringed in violet, which is the sealed four and
+   the plane you cross to reach them. And the light crossing the mark leaves the
+   right edge and comes back in on the left, which is the wrap.
+   The `--mk` sizes it once; the loader is the only place it is used. */
+.world-mark {
+  --mk: clamp(88px, 24vh, 132px);
+  width: var(--mk); height: var(--mk); margin: 0 auto 30px;
+  position: relative; display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  border-radius: var(--r-md); overflow: hidden;
+  /* The ink line every made object in this game stands on, then the portal's
+     own halo outside it. */
+  box-shadow:
+    0 0 0 1px rgba(8, 5, 2, .95),
+    0 0 0 2px rgba(160, 70, 220, .16),
+    0 0 44px -10px rgba(140, 50, 220, .5),
+    0 20px 44px -16px rgba(0, 0, 0, .9);
+  animation: mark-in .7s var(--ease) both;
 }
-.planet-mark span:nth-child(2) { inset: -14px -30px; border: 1.5px solid rgba(242, 180, 92, .5); border-radius: 50%; transform: rotate(-22deg) scaleY(.34); }
-.planet-mark span:nth-child(3) { inset: -22px -42px; border: 1px solid rgba(242, 180, 92, .22); border-radius: 50%; transform: rotate(-22deg) scaleY(.3); }
-@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes mark-in { from { opacity: 0; transform: scale(.9) } to { opacity: 1; transform: none } }
+.world-mark i { position: relative; }
+.world-mark i::after { content: ''; position: absolute; inset: 0; }
+
+/* The plus: one piece of ground. `300%` is the whole mark, and the position is
+   `col/2` by `row/2`, which is the only pair of numbers that lands each cell on
+   its own third of a single image. */
+.world-mark i:nth-child(2), .world-mark i:nth-child(4),
+.world-mark i:nth-child(5), .world-mark i:nth-child(6),
+.world-mark i:nth-child(8) {
+  background-image:
+    /* a lit ridge and a shaded flank, so the plus is land and not a green swatch */
+    radial-gradient(58% 46% at 32% 24%, rgba(255, 244, 200, .34), rgba(255, 244, 200, 0) 68%),
+    radial-gradient(64% 54% at 76% 88%, rgba(6, 22, 12, .5), rgba(6, 22, 12, 0) 70%),
+    /* water, low and to one side, because there is a sea on this map */
+    radial-gradient(40% 30% at 84% 30%, rgba(58, 128, 150, .75), rgba(58, 128, 150, 0) 72%),
+    linear-gradient(146deg, #8fae58 0%, #5e8038 38%, #3d5f2c 68%, #2a4626 100%);
+  background-size: 300% 300%;
+}
+.world-mark i:nth-child(2) { background-position: 50% 0; }
+.world-mark i:nth-child(4) { background-position: 0 50%; }
+.world-mark i:nth-child(5) { background-position: 50% 50%; }
+.world-mark i:nth-child(6) { background-position: 100% 50%; }
+.world-mark i:nth-child(8) { background-position: 50% 100%; }
+/* Where you start. A lit patch, not a border: a line here would cut the plus
+   back into tiles, which is the one thing this shape is for. */
+.world-mark i:nth-child(5)::after {
+  background: radial-gradient(22% 22% at 50% 50%, rgba(255, 236, 186, .95), rgba(255, 200, 110, .3) 46%, rgba(255, 200, 110, 0) 76%);
+}
+
+/* The sealed four, each in its own weather, ringed by the plane that seals it.
+   Rime, Tempest, Verdant, Pyre, in the order the map has them. */
+.world-mark i:nth-child(1) { background: linear-gradient(155deg, #dceefa, #9dc6de 52%, #6a95b3); }
+.world-mark i:nth-child(3) { background: linear-gradient(155deg, #71769f, #3f4369 52%, #23253e); }
+.world-mark i:nth-child(7) { background: linear-gradient(155deg, #63bd58, #2e8039 52%, #17491f); }
+.world-mark i:nth-child(9) { background: linear-gradient(155deg, #94301a, #4d1408 52%, #1b0503); }
+.world-mark i:nth-child(1), .world-mark i:nth-child(3),
+.world-mark i:nth-child(7), .world-mark i:nth-child(9) {
+  box-shadow:
+    inset 0 0 0 1.5px rgba(198, 84, 255, .9),
+    inset 0 0 12px -1px rgba(150, 36, 232, .65);
+}
+/* One signature each, and each is one gradient. Rime has a cold sheen, Tempest
+   blinks, Verdant breathes, Pyre burns. */
+.world-mark i:nth-child(1)::after {
+  background: linear-gradient(150deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, 0) 52%);
+}
+.world-mark i:nth-child(3)::after {
+  background: radial-gradient(70% 60% at 46% 34%, rgba(214, 226, 255, .95), rgba(214, 226, 255, 0) 68%);
+  opacity: 0; animation: mark-flash 5.2s ease-out infinite;
+}
+.world-mark i:nth-child(7)::after {
+  background: radial-gradient(70% 70% at 54% 60%, rgba(158, 255, 150, .38), rgba(158, 255, 150, 0) 70%);
+  animation: mark-breathe 6.4s ease-in-out infinite;
+}
+.world-mark i:nth-child(9)::after {
+  background: radial-gradient(72% 62% at 50% 78%, rgba(255, 152, 44, .8), rgba(255, 60, 12, .16) 56%, rgba(255, 60, 12, 0) 78%);
+  animation: mark-ember 3.6s ease-in-out infinite;
+}
+@keyframes mark-flash {
+  0%, 84%, 100% { opacity: 0 }
+  86% { opacity: .95 } 88% { opacity: .1 } 90% { opacity: .7 } 94% { opacity: 0 }
+}
+@keyframes mark-breathe { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
+@keyframes mark-ember { 0%, 100% { opacity: .55 } 50% { opacity: 1 } }
+
+/* The wrap. It leaves one edge and arrives at the other, forever. */
+.world-mark b {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 24%;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    rgba(255, 246, 224, 0), rgba(255, 246, 224, .26) 50%, rgba(255, 246, 224, 0));
+  animation: mark-wrap 5.4s linear infinite;
+}
+@keyframes mark-wrap { from { transform: translateX(-110%) } to { transform: translateX(420%) } }
+
+@media (prefers-reduced-motion: reduce) {
+  .world-mark, .world-mark i::after, .world-mark b { animation: none; }
+  .world-mark b { opacity: .5; transform: translateX(160%); }
+}
+
+/* The bar is a slot cut in the dark with a brass fill running up it, and the
+   head of the fill is the violet the mark is ringed in - the same two lights,
+   in the same order, as everything above it. */
 .bar {
-  height: 4px; border-radius: 99px; margin: 24px 0 10px;
-  background: rgba(255, 255, 255, .08);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06);
+  height: 6px; border-radius: var(--r-sm); margin: 26px 0 12px;
+  background: linear-gradient(180deg, rgba(2, 3, 8, .9), rgba(34, 26, 16, .55));
+  box-shadow:
+    inset 0 0 0 1px rgba(6, 4, 1, .95),
+    inset 0 2px 4px rgba(0, 0, 0, .7),
+    0 1px 0 rgba(255, 240, 214, .09);
   overflow: hidden;
 }
 .bar-fill {
-  height: 100%; width: 0%; border-radius: 99px;
-  background: linear-gradient(90deg, var(--teal), var(--accent-2));
-  box-shadow: 0 0 12px rgba(242, 180, 92, .55);
+  height: 100%; width: 0%; border-radius: 1px;
+  background: linear-gradient(90deg, #7d31c8 0%, #b8532c 34%, var(--accent) 62%, var(--accent-2) 88%, #ffe8bc 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 248, 230, .5),
+    0 0 12px rgba(242, 180, 92, .55);
   transition: width .3s cubic-bezier(.3, .9, .3, 1);
 }
-.status { color: rgba(247, 238, 222, .42); }
+.status { color: rgba(247, 238, 222, .55); }
+/* The loader's own status sits under the bar and is the one line on the screen
+   that changes, so it is given the room to change in without the layout
+   twitching under it. */
+#load-status { min-height: 1.2em; }
 
 /* ── save slots ────────────────────────────────────────── */
 

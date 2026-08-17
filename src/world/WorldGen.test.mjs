@@ -23,8 +23,7 @@ import { WorldGen } from './WorldGen.js';
 import { Periodic, surfScale, periodFor, GAIN, UNIT } from './Periodic.js';
 import { Noise } from '../util/Noise.js';
 import {
-  W, D, F, G, faceOrigin, faceAt, isWall, SEALED, CROSS, wrap, gateAt,
-  allPortals, DIR_STEP,
+  W, D, F, G, faceOrigin, faceAt, isWall, SEALED, CROSS, wrap, portalAxis,
 } from './Grid.js';
 import {
   CELLS, BIOME, FACE_ROLE, GEN_VERSION, SEA_K, K_TERRAIN_MAX,
@@ -161,8 +160,7 @@ eq(colHeight.length, W * W, 'one height per column of one map');
   let wallCols = 0, crossCols = 0, notWall = 0, crossWall = 0;
   // Two counters, not one. These shared a variable, so the cross check below
   // inherited the wall check's count and could never have failed on its own.
-  let wallBad = 0, crossBad = 0, tooShort = 0, tooTall = 0;
-  let gateCols = 0, gateBad = 0, gateShut = 0, gateDark = 0;
+  let wallBad = 0, crossBad = 0, notFull = 0;
 
   // Every wall column of every sealed face, on a stride that still visits all
   // four sides of all four rings.
@@ -177,74 +175,26 @@ eq(colHeight.length, W * W, 'one height per column of one map');
         wallCols++;
         const col = wrap(x) * W + wrap(y);
         gen.terrainColumn(blocks, col);
-        // A gate column is the one place a wall is deliberately not solid.
-        if (gateAt(x, y)) {
-          gateCols++;
-          let gap = 0, lintel = 0;
-          for (let k = 0; k < D; k++) {
-            const b = blocks[col * D + k];
-            if (b === 0) gap++;
-            else if (b === ID.glowstone) lintel++;
-            else if (b !== ID.edgestone) gateBad++;
-          }
-          if (gap < 4) gateShut++;          // you have to fit through it
-          if (lintel !== 1) gateDark++;     // and be able to find it
-          continue;
-        }
-        // Solid from bedrock to its top, air above it, and nothing but those two.
-        let top = 0;
-        while (top < D && blocks[col * D + top] === ID.edgestone) top++;
-        for (let k = top; k < D; k++) if (blocks[col * D + k] !== 0) wallBad++;
-        // It has to out-top the ground on both sides, or it is a step.
-        let ground = 0;
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = wrap(x + dx), ny = wrap(y + dy);
-          if (isWall(nx, ny)) continue;
-          const h = gen.colHeight[wrap(nx) * W + wrap(ny)];
-          if (h > ground) ground = h;
-        }
-        if (top < ground + 8) tooShort++;
-        if (top >= D) tooTall++;
+        // Portal from layer 0 to layer D and NOTHING else in it. This is the
+        // assertion the two gate cuts before it both failed on, in both cases
+        // because the height a divider was built to was taken from `colHeight`
+        // and the ground a player stands on is whatever the surface pass laid
+        // on top of that. There is no height to get wrong now, and this is what
+        // says so: not "tall enough", but "all of it".
+        let depth = 0;
+        while (depth < D && blocks[col * D + depth] === ID.portal) depth++;
+        if (depth !== D) notFull++;
+        for (let k = 0; k < D; k++) if (blocks[col * D + k] !== ID.portal) wallBad++;
       }
     }
   }
-  ok(wallCols > 200, `the sample really visited the walls (${wallCols} columns)`);
-  eq(notWall, 0, 'every column of a sealed face perimeter is a wall column');
-  eq(wallBad, 0, 'a wall column is solid edgestone then air, with nothing else in it');
-  eq(tooShort, 0, 'every wall clears the ground it divides');
-  eq(tooTall, 0, 'and no wall reaches the ceiling any more');
-  ok(gateCols > 0, `the sample found some gates (${gateCols} columns)`);
-  eq(gateBad, 0, 'a gate column holds nothing but edgestone, air and its lintel');
-  eq(gateShut, 0, 'every gate is open enough to walk through');
-  eq(gateDark, 0, 'and every gate has exactly one sunstone lintel');
+  ok(wallCols > 200, `the sample really visited the dividers (${wallCols} columns)`);
+  eq(notWall, 0, 'every column of a sealed face perimeter is a divider column');
+  eq(notFull, 0, 'every divider column is portal from layer 0 to layer D');
+  eq(wallBad, 0, 'and holds nothing else at any layer - no rock, no air, no water');
 
-  // And the thing that actually matters: can you get in. Measured on the two
-  // columns a gate joins, from BOTH sides - four of the eight were unreachable
-  // from one side on the first cut, the worst by seven layers, because the
-  // sill was taken from the higher neighbour.
-  {
-    let shut = 0;
-    for (const p of allPortals()) {
-      const col = wrap(p.x) * W + wrap(p.y);
-      gen.terrainColumn(blocks, col);
-      let sill = -1, head = -1;
-      for (let k = 0; k < D; k++) {
-        const b = blocks[col * D + k];
-        if (b === 0 && sill < 0) sill = k;
-        else if (sill >= 0 && b !== 0) { head = k; break; }
-      }
-      const [dx, dy] = DIR_STEP[p.dir];
-      const gnd = (ax, ay) => gen.colHeight[wrap(ax) * W + wrap(ay)];
-      const a = gnd(p.x + dx, p.y + dy), b2 = gnd(p.x - dx, p.y - dy);
-      // step in from no more than a layer below, and stand up once inside
-      const from = (g0) => sill <= g0 + 1 && head >= g0 + 3;
-      if (!(sill >= 0 && from(a) && from(b2))) shut++;
-    }
-    eq(shut, 0, 'every gate can be walked through from both sides');
-  }
-
-  // The other direction: nothing inside the cross is ever wall, and nothing
-  // inside the cross ever generates edgestone.
+  // The other direction: nothing inside the cross is ever a divider, and
+  // nothing inside the cross ever generates a portal block.
   for (const f of CROSS) {
     const o = faceOrigin(f);
     for (let i = 0; i < F; i += 23) {
@@ -254,20 +204,37 @@ eq(colHeight.length, W * W, 'one height per column of one map');
         if (isWall(x, y)) { crossWall++; continue; }
         const col = x * W + y;
         gen.terrainColumn(blocks, col);
-        for (let k = 0; k < D; k++) if (blocks[col * D + k] === ID.edgestone) crossBad++;
+        for (let k = 0; k < D; k++) if (blocks[col * D + k] === ID.portal) crossBad++;
       }
     }
   }
   ok(crossCols > 1500, `the cross sample is real (${crossCols} columns)`);
   eq(crossWall, 0, 'no column of the connected world is a divider');
-  eq(crossBad, 0, 'and no column of the connected world contains edgestone');
+  eq(crossBad, 0, 'and no column of the connected world contains a portal block');
 
   // The divider is unbreakable and cannot be obtained, which is what makes it
   // unplaceable: a block that never enters an inventory cannot come out of one.
-  const eb = BLOCKS[ID.edgestone];
-  ok(eb.hardness < 0, 'edgestone is unbreakable');
-  eq(eb.drop, null, 'edgestone drops nothing, so it can never be placed');
-  ok(eb.solid && eb.opaque, 'edgestone is a solid opaque cube');
+  const eb = BLOCKS[ID.portal];
+  ok(eb.hardness < 0, 'the portal is unbreakable');
+  eq(eb.drop, null, 'the portal drops nothing, so it can never be placed');
+  // The pair the whole feature rests on, asserted rather than assumed: a body
+  // can enter it, and you cannot see the far face through it.
+  ok(!eb.solid, 'the portal is not solid, so a body can enter it');
+  ok(eb.opaque, 'and it is opaque, so the sealed face stays unseen');
+  ok(eb.light > 0, 'and it lights itself');
+
+  // Which way through, from `Grid.portalAxis`. A sealed-to-cross edge is
+  // passable on exactly one axis; a corner and a sealed-to-sealed run are not
+  // passable at all.
+  {
+    const o1 = faceOrigin(1);
+    const east = portalAxis(o1.x + F - 1, o1.y + 200);   // face 1 against face 2
+    ok(east && east.axis === 0, 'the divider between Rime and Aurora is crossed on x');
+    const north = portalAxis(o1.x + 200, o1.y);          // face 1 against face 7
+    eq(north, null, 'and the one between Rime and Verdant is not crossed at all');
+    eq(portalAxis(o1.x, o1.y), null, 'nor is a corner of the ring');
+    eq(portalAxis(o1.x + 200, o1.y + 200), null, 'and open ground is not a divider');
+  }
 
   // The height field agrees, so every pass that tests altitude or ground
   // refuses a wall column without having to know walls exist.

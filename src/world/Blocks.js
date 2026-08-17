@@ -205,11 +205,11 @@ export const TILES = [
   'amethyst_block', 'ruby_block', 'sapphire_block', 'emerald_block', 'void_block',
 
   // --- the world's edge -----------------------------------------------------
-  // The divider that seals the four corner faces. It wants to read as the end
-  // of the map rather than as a material, so it is its own tile and not a
-  // second use of obsidian: a wall made of something a player builds with looks
-  // like somebody's build. `TextureGen.js` owns what it looks like.
-  'edgestone',
+  // The divider that seals the four corner faces, and it is the portal itself.
+  // A violet swirl rather than any kind of rock: the whole point is that it does
+  // not read as a material you could build with or mine, it reads as a way
+  // through that shows you nothing but itself. `TextureGen.js` owns the look.
+  'portal',
 ];
 
 export const TILE_INDEX = Object.fromEntries(TILES.map((t, i) => [t, i]));
@@ -1482,14 +1482,41 @@ export const BLOCKS = [
   }),
 
   /**
-   * The divider: the edge of the world, standing in a wall.
+   * The divider, and it IS the portal. Not a wall with a door in it.
    *
    * NINE-FACES.md section 5. The four corner faces are sealed rooms, and what
-   * seals them is a one-column ring of this from bedrock to above the maximum
-   * build height — the full depth as well as the full height, which is the
-   * owner's requirement and is what makes the rule readable: now that some joins
-   * between faces are genuinely open, a boundary you can see from inside a cave
-   * is the only way to tell which kind of join you are standing next to.
+   * seals them is a one-column ring of this from layer 0 to layer D — sky to
+   * bedrock, so it is there underground as well as above the build ceiling, and
+   * there is no top to climb over and no gap to walk round.
+   *
+   * ### Opaque, and not solid, which is the unusual pair
+   *
+   * Every other block in the table has these two together. Here they are split
+   * on purpose and each one carries a requirement:
+   *
+   *  - **not solid**, because a body has to be able to enter it. That is the
+   *    whole feature: walking into the boundary is how you travel, and
+   *    `IS_SOLID` is what the player's box, the mob footprint and the arrow
+   *    march all read. Nothing in the mesher consults `solid`, so the block is
+   *    still drawn as a full cube.
+   *  - **opaque**, because you must not see the far face through it. `opaque`
+   *    is what `SKY_ATTEN` and `ATTEN` in `Lighting.js` are built from and what
+   *    `SEALS_FACES` gives the mesher, so a run of these seals the light and
+   *    culls against itself exactly as a stone wall does. What you see is the
+   *    swirl and nothing else, which is the point: you step into the unknown.
+   *
+   * The one thing to know about the pair is that the camera CAN end up inside
+   * an opaque cell here, which is otherwise only true of powder snow. It is
+   * covered by the transit being instantaneous — see `Player._portalTransit` —
+   * so the eye is never inside a portal at the end of a frame.
+   *
+   * ### Lit
+   *
+   * Full block light in violet. Eight boundaries on a 1248-wide map is a lot of
+   * world to find your way around, and a divider that only shows up inside the
+   * draw distance is no use as a landmark. At 15 it lights its own column, the
+   * ground either side of it and anything standing near it, and it reads at
+   * night from as far as the terrain lets you see.
    *
    * `hardness: -1` is what makes it unbreakable, and it is the same mechanism
    * water and lava use: `breakTime` returns Infinity, `computeDrops` returns
@@ -1497,15 +1524,12 @@ export const BLOCKS = [
    * of that means no path exists by which one could reach an inventory, and a
    * block that cannot be held cannot be placed — so unplaceable falls out of
    * unbreakable rather than needing a rule of its own.
-   *
-   * It is deliberately not obsidian, not stone and not any of the coloured
-   * bricks: every one of those is something a player builds with, and a wall
-   * made of a building material reads as somebody's build rather than as the
-   * end of the map.
    */
   block({
-    name: 'edgestone', label: 'Edgestone', all: 'edgestone',
-    hardness: -1, drop: null, particle: [0.13, 0.12, 0.17], sound: 'stone',
+    name: 'portal', label: 'Portal', all: 'portal',
+    solid: false, opaque: true,
+    light: 15, lightColor: [0.78, 0.36, 1.0],
+    hardness: -1, drop: null, particle: [0.72, 0.34, 0.98], sound: 'glass',
   }),
 ];
 

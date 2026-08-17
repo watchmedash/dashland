@@ -814,46 +814,79 @@ G.snow = (s) => {
 };
 
 /**
- * The divider around a sealed face. See NINE-FACES.md.
+ * The divider around a sealed face, which is the portal itself. See
+ * NINE-FACES.md.
  *
- * This one is deliberately NOT a material. Every other rock in the atlas is
- * trying to look like something you could mine; this is trying to look like the
- * end of the map, so the whole brief is "dead". Near black, matte enough to
- * take no highlight at all, and almost flat, so a wall of it reads as an
- * absence rather than as a surface with weather on it.
+ * The owner's reference is a Rick and Morty portal in purple, and the one thing
+ * that has to survive is the **swirl**: a logarithmic spiral wound about the
+ * middle of the tile, not a surface with a pattern on it. Everything else in
+ * this atlas is trying to look like something you could mine; this is trying to
+ * look like a hole in the world that shows you nothing but itself.
  *
- * Three deliberate choices, since "just make it black" would be worse:
+ * How it is built, and why each part is there:
  *
- *  - Not pure black. A flat 0 would band against the fog and would vanish
- *    entirely on a dark face, which is where most of this is: Pyre is
- *    permanently unlit. The mottle keeps it readable at 2 or 3 levels above
- *    black without ever suggesting grain.
- *  - Cool, not violet. Obsidian in this atlas is already near black with a
- *    violet cast, and two near-black rocks that read the same is a bug report
- *    waiting to happen. This one goes slightly blue-grey.
- *  - A faint darkening at the tile border. Not decoration: with no texture at
- *    all a run of these is one undifferentiated slab and a player cannot see
- *    where they are or judge distance along it. The seam is what makes it a
- *    wall of blocks.
+ *  - **Logarithmic spiral.** `ARMS * angle + TWIST * log(r)` is the one form
+ *    that keeps winding all the way to the centre, so the arms crowd together
+ *    at the eye the way a vortex does. A plain `sin(ARMS * angle)` is a
+ *    pinwheel: same number of arms, no rotation implied, and it reads as a
+ *    flower.
+ *  - **Warped, twice.** A clean spiral is a logo. Two fbm fields at different
+ *    scales are added into the spiral's phase, so the arms wobble and fray and
+ *    the thing reads as turbulent rather than printed.
+ *  - **Dark eye, hot rim.** Brightness ramps outward, so the middle is a deep
+ *    violet and the outside is near-blown-out lilac. That is the reference's
+ *    strongest cue after the swirl, and it is also what makes a wall of these
+ *    legible: the cell boundaries are the bright part, so a run of them reads
+ *    as a grid of eyes rather than as one lilac sheet.
+ *  - **The rim lift rides the arms**, deliberately. Lifting every pixel at the
+ *    edge would blow the shape out exactly where it is doing the most work.
+ *
+ * Measured over the finished 128x128 tile: rgb min 17/3/35, max 243/138/253,
+ * mean 145/63/186, and luma at the 5th/50th/95th percentiles 27.2 / 85.5 /
+ * 161.0. Both ends of that matter. The mean sits far above the fog-banding
+ * floor `edgestone` had to worry about, and the spread from 27 to 161 is what
+ * says the tile still has a shape in it rather than having flattened into one
+ * bright lilac wash.
  */
-G.edgestone = (s) => {
-  const mottle = fbm(s.size, 9, 3, 907);
-  const fleck = fbm(s.size, 41, 2, 911);
+const PORTAL_ARMS = 5;
+const PORTAL_TWIST = 5.2;
+
+G.portal = (s) => {
+  const coarse = fbm(s.size, 4, 4, 1811);
+  const fine = fbm(s.size, 13, 3, 1823);
+  const grit = fbm(s.size, 37, 2, 1831);
   s.each((i, x, y, u, v) => {
-    const n = mottle[i] * 0.72 + fleck[i] * 0.28;
-    const border = Math.min(u, 1 - u, v, 1 - v);
-    const seam = smoothstep(0.10, 0.02, border);
-    const c = mixc(px([17, 18, 24]), px([31, 33, 42]), n);
-    setRGB(s, i, mixc(c, px([10, 11, 15]), seam * 0.75));
+    const dx = u - 0.5, dy = v - 0.5;
+    const r = Math.hypot(dx, dy);
+    const ang = Math.atan2(dy, dx);
+    // The phase of the spiral at this pixel, wobbled by two scales of noise.
+    const warp = (coarse[i] - 0.5) * 3.4 + (fine[i] - 0.5) * 1.5;
+    const phase = PORTAL_ARMS * ang + PORTAL_TWIST * Math.log(Math.max(r, 0.03)) + warp;
+    // Sharpened off a plain sine: arms with gaps between them, not a ripple.
+    const arm = clamp(0.5 + 0.5 * Math.sin(phase), 0, 1) ** 0.85;
+    // Outward ramp. `r` reaches 0.707 at a corner, so 0.50 is comfortably
+    // inside the tile and the corners are all rim.
+    const out = smoothstep(0.04, 0.50, r);
+    const eye = smoothstep(0.13, 0.02, r);          // the pupil, darkest of all
+
+    const core = mixc(px([28, 4, 58]), px([96, 22, 168]), arm);
+    const mid = mixc(px([70, 14, 132]), px([188, 46, 250]), arm);
+    let c = mixc(core, mid, out);
+    // Hot rim, and only along the arms - see the note above.
+    c = mixc(c, px([255, 156, 255]), out * arm * 0.86);
+    c = mixc(c, px([12, 2, 26]), eye * 0.85);
+    // A little grain so the gradients do not band on an 8-bit atlas.
+    c = mixc(c, px([146, 60, 210]), (grit[i] - 0.5) * 0.10 + 0.05);
+    setRGB(s, i, c);
     s.a[i] = 1;
-    s.h[i] = 0.5 + (n - 0.5) * 0.18 - seam * 0.35;
-    s.ao[i] = 1 - seam * 0.30;
-    // No sheen anywhere. Metal 0 and roughness at the ceiling, so it never
-    // catches the sun on the ordinary faces or the lava glow on Pyre.
-    s.rough[i] = 0.97;
+    // Barely any relief. The arms are light, not rock, so the normal map is
+    // there only to stop the surface reading as a printed decal head-on.
+    s.h[i] = 0.45 + arm * 0.22 - eye * 0.25;
+    s.ao[i] = 1;
+    s.rough[i] = 0.42 + (1 - arm) * 0.30;
     s.metal[i] = 0;
   });
-  s.normalStrength = 0.35;
+  s.normalStrength = 0.45;
   return s;
 };
 

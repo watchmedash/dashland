@@ -22,7 +22,6 @@ import {
 } from './Constants.js';
 import {
   wrap, faceAt, isWall, delta, START_FACE, faceOrigin, colIndex, F,
-  gateAt, GATE_H, DIR_STEP,
 } from './Grid.js';
 import { Periodic, surfScale, MAXA } from './Periodic.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
@@ -1439,7 +1438,7 @@ export const DECOR_MARGIN = 6;
  * carrying on, so the generator does NOTHING there — that is the whole of the
  * change, and the test asserts it by measuring neighbour height steps at a join
  * against steps mid-tile. A join that is a divider is not a join at all: there
- * is unbreakable rock in the way, and `fillWall` puts it there.
+ * a portal in the way, and `fillWall` puts it there.
  */
 /**
  * How much easier every ore vein is to hit on the cinderlands.
@@ -1470,84 +1469,33 @@ const GLOW_CINDER_FREQ = 11;
 const GLOW_CINDER_THR = 0.84;
 
 /**
- * The divider: what a sealed face's wall is made of.
+ * The divider, which is one unbroken column of portal.
  *
  * `Grid.isWall` says which columns, and they are the outermost ring of each
- * corner face, which gives all twelve sealed joins a wall for free and leaves
- * the connected cross entirely untouched.
+ * corner face, which gives all twelve sealed joins a divider for free and
+ * leaves the connected cross entirely untouched.
  *
- * Full depth, from layer 0: the owner asked for a boundary visible from inside
- * a cave, and that half is unchanged.
+ * **Layer 0 to layer D, every column, nothing else in it.** The owner's words:
+ * "portal is the divider for faces, portals go up to the sky and to the bottom
+ * of the world." So there is no height to compute here and nothing for the
+ * terrain either side to influence - which is why this takes no `colHeight` any
+ * more and is four lines long.
  *
- * The TOP is not the top of the array, and that was a mistake worth recording.
- * Filling to D read the requirement "higher than max build height" literally,
- * and max build height is 86 while the ground beside a wall is a measured
- * median of 35 and a maximum of 65. So every divider stood 53 layers over the
- * terrain it divided: one column thick, four hundred long, and seen through a
- * 150-unit draw distance it read as a black monolith rather than as a wall.
- * "It's literally a huge cube made of edgestones."
+ * That is a deliberate reversal of the thing this function used to do. It was a
+ * solid `edgestone` wall whose top followed the ground, with eight five-column
+ * gates cut through it, and the height rule existed because a wall standing 53
+ * layers over the terrain read as a monolith. A portal has the opposite
+ * problem: a boundary you can walk over the top of is not a boundary, and one
+ * that stops at the ground is not visible from inside a cave. Full height is
+ * right for this block precisely because it is right for nothing else.
  *
- * It follows the ground now, WALL_RISE over the highest of its four terrain
- * neighbours. That is unjumpable and unclimbable without deliberately building
- * a tower, which is a different thing from unclimbable in principle - and worth
- * the trade, because a wall you can see the top of is a wall, and one you
- * cannot is scenery.
- *
- * `edgestone` is unbreakable (hardness below zero) and drops nothing, so it can
- * never enter an inventory and therefore can never be placed. See Blocks.js.
+ * `portal` is unbreakable (hardness below zero) and drops nothing, so it can
+ * never enter an inventory and therefore can never be placed. It is *not*
+ * solid, which is the whole feature - see Blocks.js and `Player._portalTransit`.
  */
-const WALL_RISE = 14;
-
-function fillWall(blocks, col, colHeight) {
-  // Follow the ground rather than the sky. The four neighbours are the terrain
-  // this wall is dividing; a wall column's own `colHeight` is a placeholder set
-  // to K_TERRAIN_MAX so that slope and altitude tests refuse it, so reading it
-  // here would give the flat 86 that made this a monolith.
-  const p = _wallXY;
-  colXY(col, p);
-  let ground = SEA_K;
-  for (let d = 0; d < 4; d++) {
-    const dx = d === 2 ? -1 : d === 3 ? 1 : 0;
-    const dy = d === 0 ? -1 : d === 1 ? 1 : 0;
-    const nx = wrap(p.x + dx), ny = wrap(p.y + dy);
-    if (isWall(nx, ny)) continue;
-    const h = colHeight[colIndex(nx, ny)];
-    if (h > ground) ground = h;
-  }
-  let top = Math.min(D, Math.round(ground) + WALL_RISE);
-  // A gate column has to be tall enough to hold its own opening and a lintel.
-  if (gateAt(p.x, p.y, _gate)) top = Math.min(D, Math.max(top, Math.round(ground) + GATE_H + 3));
-  for (let k = 0; k < top; k++) blocks[cellAt(col, k)] = ID.edgestone;
-
-  // The way through. See `Grid.gateAt`: a hole, not a teleport, because the
-  // sealed face is already touching the cross on the other side of this column.
-  if (!gateAt(p.x, p.y, _gate)) return;
-  // Cut it against the two columns the gate actually joins, not against the
-  // four neighbours: the wall's height uses the HIGHEST of its neighbours, and
-  // a sill at that height is a doorway partway up a cliff on the lower side.
-  // Measured before this, four of the eight gates were unreachable from one
-  // side, the worst by seven layers. Floor to the lower ground so both sides
-  // can step in, ceiling to the higher one so both have headroom.
-  const [gdx, gdy] = DIR_STEP[_gate.dir];
-  const hOut = colHeight[colIndex(wrap(p.x + gdx), wrap(p.y + gdy))];
-  const hIn = colHeight[colIndex(wrap(p.x - gdx), wrap(p.y - gdy))];
-  // Generous on both ends. `colHeight` is the height FIELD, and the ground a
-  // player actually stands on is whatever the surface pass put on top of it -
-  // snow, a plant, a shore - so a gate cut exactly to the field is a layer or
-  // two out on one side and becomes a crawl. One under and three over absorbs
-  // that.
-  const sill = Math.max(0, Math.floor(Math.min(hOut, hIn)) - 1);
-  const head = Math.min(D - 1, Math.ceil(Math.max(hOut, hIn)) + GATE_H + 3);
-  for (let k = sill; k < head; k++) blocks[cellAt(col, k)] = 0;
-  // A lintel of sunstone over it, and it is not decoration: eight gates on a
-  // 1248-column map, each five columns wide in a wall four hundred long, is a
-  // needle in a haystack. This is the only part of a divider that emits light,
-  // so a gate is a warm line visible from well outside the draw distance the
-  // wall itself resolves at.
-  if (head < top) blocks[cellAt(col, head)] = ID.glowstone;
+function fillWall(blocks, col) {
+  for (let k = 0; k < D; k++) blocks[cellAt(col, k)] = ID.portal;
 }
-const _gate = { x: 0, y: 0, dir: 0 };
-const _wallXY = { x: 0, y: 0 };
 
 export class WorldGen {
   constructor(seed = 20260805) {
@@ -2460,7 +2408,7 @@ export class WorldGen {
     this._xyOf(col, p);
     // The dividers, first and unconditionally: a wall column is not terrain and
     // has nothing else decided about it. See `fillWall`.
-    if (isWall(p.x, p.y)) { fillWall(blocks, col, colHeight); return; }
+    if (isWall(p.x, p.y)) { fillWall(blocks, col); return; }
     const h = colHeight[col];
     const bi = colBiome[col];
     const rime = FACE_ROLE[faceAt(p.x, p.y)] === FACE_RIME;

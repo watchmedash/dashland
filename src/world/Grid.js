@@ -164,44 +164,42 @@ export function allPortals() {
 }
 
 /**
- * How wide a gate is either side of its middle, and how tall its opening is.
+ * Which way a divider column is thin, and what is on either side of it.
  *
- * Five columns across and five layers of headroom: wide enough to find and to
- * walk through without catching a shoulder, narrow enough against a 416-column
- * wall to still read as a door in it.
+ * **The divider IS the portal.** There is no hole in it and no door through it:
+ * every column of it is a portal block from layer 0 to layer D, and entering
+ * one puts you out on the far side. So the only question a traveller has is the
+ * geometric one - a divider is one column thick, and the columns either side of
+ * it are the two faces it joins, so "through" is the column one step further
+ * along the axis the wall is thin on.
+ *
+ * That axis is found by measuring rather than by unpacking the face's edge,
+ * because the outer ring of a sealed face has corners and has stretches that
+ * run wall-to-wall against another sealed face, and neither of those is
+ * anything you can pass through. The rule that covers all three cases at once:
+ * **a divider is passable along an axis exactly when BOTH of its neighbours on
+ * that axis are open ground.**
+ *
+ *  - A sealed-to-cross edge: one side is the face's own interior, the other is
+ *    the cross. Both open, so it is passable, and on one axis only - the other
+ *    axis's neighbours are the rest of the same ring.
+ *  - A sealed-to-sealed edge (face 1's north against face 7's south): the two
+ *    rings are back to back, so one neighbour is another wall column. Refused,
+ *    which is the spec's "you do not travel from Rime to Tempest directly".
+ *  - A ring corner: walled on both axes. Refused.
+ *
+ * @returns {{axis:number, dx:number, dy:number}|null} `axis` 0 for x and 1 for
+ *   y, and the unit step along it. Null when this column is not a wall, or is
+ *   a wall you cannot pass through.
  */
-export const GATE_HALF = 2;
-export const GATE_H = 5;
-
-/**
- * Is this column part of a gate through a divider?
- *
- * A GATE, not a teleport, and that is the whole design decision of this
- * feature. The spec called these portals because the nine faces were first
- * imagined as separate regions that would have to be travelled between. They
- * are not: the map is one flat sheet and a sealed face is geometrically
- * touching the cross it borders, so a hole in the wall IS the way through. A
- * teleport would be code, an arrival-safety problem and a loading seam, all to
- * reproduce what one column of missing rock already does - and you can see
- * through a hole, which is worth more here than any effect.
- *
- * Returns the portal record so a caller knows which way the gate faces, or null.
- */
-export function gateAt(x, y, out = { x: 0, y: 0, dir: 0 }) {
-  const f = faceAt(x, y);
-  if (!IS_SEALED[f]) return null;
-  const wx = wrap(x), wy = wrap(y);
-  for (const p of portalsOf(f)) {
-    // A gate sits in one edge of the ring, so it must match on the axis the
-    // wall is thin along and be within half a gate on the axis it runs along.
-    if (p.dir === NORTH || p.dir === SOUTH) {
-      if (wy !== p.y) continue;
-      if (Math.abs(delta(p.x, wx)) > GATE_HALF) continue;
-    } else {
-      if (wx !== p.x) continue;
-      if (Math.abs(delta(p.y, wy)) > GATE_HALF) continue;
-    }
-    out.x = p.x; out.y = p.y; out.dir = p.dir;
+export function portalAxis(x, y, out = { axis: 0, dx: 0, dy: 0 }) {
+  if (!isWall(x, y)) return null;
+  if (!isWall(x - 1, y) && !isWall(x + 1, y)) {
+    out.axis = 0; out.dx = 1; out.dy = 0;
+    return out;
+  }
+  if (!isWall(x, y - 1) && !isWall(x, y + 1)) {
+    out.axis = 1; out.dx = 0; out.dy = 1;
     return out;
   }
   return null;

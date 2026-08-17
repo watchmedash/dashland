@@ -2320,6 +2320,28 @@ class Game {
   }
 
   _bindPlayerEvents() {
+    /**
+     * Whether a sealed face will have you yet, and what to say when it will not.
+     *
+     * The gate is asked at the far side of a portal, so a refusal happens with
+     * your nose against the thing you cannot have rather than as a wall out on
+     * the approach. `FACE_UNLOCK` names one mark per sealed face and the five of
+     * the cross are not in it, so this returns null for them without a test.
+     *
+     * The message names the mark rather than the face, because "Rime is shut" is
+     * a fact and "Survive a night in the open" is a thing to go and do.
+     */
+    this.player.faceGate = (face) => {
+      const key = FACE_UNLOCK[face];
+      if (!key) return null;
+      const mark = this.achievements.progress().find((m) => m.key === key);
+      if (!mark || mark.done) return null;
+      return mark.note;
+    };
+    this.player.onFaceShut = (why) => {
+      this.ui.toast(why, null, 2600);
+      this.audio.ui(220);
+    };
     this.player.onStep = (blockId) => {
       const b = BLOCKS[blockId] || BLOCKS[1];
       this.audio.step(b.sound);
@@ -2666,7 +2688,22 @@ class Game {
    */
   _setDeathRule(rule) {
     this.deathRule = normalizeDeathRule(rule);
-    this.skills.onDeath = skillDeathMode(this.deathRule, ON_DEATH);
+    /**
+     * ...and the tree is not part of the deal any more.
+     *
+     * The world's death rule used to decide the ladder as well as the bag, so a
+     * losing world took your levels. The owner: "make skills learned permanent
+     * like even if you die it stays."
+     *
+     * `deathRule` still governs the BAG, which is the part a death is supposed
+     * to cost - you lose what you were carrying and you can go back for it. What
+     * it no longer governs is what you have learned, and the distinction is
+     * worth stating: an inventory is a thing that was in your hands, and a skill
+     * is a thing that happened to you. `skillDeathMode` and `ON_DEATH` stay in
+     * `Skills.js`, unread, because they are the whole harshness mechanic and a
+     * future world type may want it back.
+     */
+    this.skills.onDeath = 'keep';
   }
 
   _resetWorld() {

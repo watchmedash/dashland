@@ -2187,7 +2187,62 @@ export class WorldGen {
    * dry ground, and the main thread refines the answer against real blocks once
    * that neighbourhood has actually been built.
    */
+  /**
+   * Is this column somewhere a body can wake up and walk away from?
+   *
+   * The tests the scored spawn search applies, lifted out so the ring above and
+   * the search below cannot drift apart. Height field only - no voxel exists
+   * yet when this runs, which is the whole reason `pickSpawn` reads the field
+   * rather than the blocks.
+   */
+  _spawnUsable(col) {
+    const y = col % W;
+    const f = faceAt((col - y) / W, y);
+    if (FACE_ROLE[f] !== FACE_NORMAL) return false;
+    const bi = this.colBiome[col];
+    if (bi === BIOME.OCEAN || bi === BIOME.BEACH) return false;
+    if (this.canyonNear[col] < CANYON_NEAR_MAX) return false;
+    if (this.lakeKind[col]) return false;
+    const h = this.colHeight[col];
+    if (h < SEA_K + 1.5 || h > K_SURFACE + 3.0) return false;
+    // Not on a slope you would slide off, which is the "can move, not stuck"
+    // half of the ask.
+    if (this.colSlope[col] > 0.9) return false;
+    return true;
+  }
+
   pickSpawn() {
+    /**
+     * The middle of Solace, and the nearest thing to it that will hold you.
+     *
+     * The owner: "I want every new spawn to start directly in middle of that
+     * face as long as not obstructed and player can move not stuck."
+     *
+     * So this is a search outward from one column rather than a search over the
+     * face. It walks a growing ring and takes the first column that passes the
+     * same tests the scored search below uses, which means the answer is the
+     * CLOSEST habitable column to the centre rather than the best one anywhere
+     * - a spawn twenty columns out is still "the middle of the face" to a player
+     * and one four hundred columns out is not.
+     *
+     * The scored search is kept underneath as the fallback. It cannot normally
+     * be reached: the ring would have to find nothing habitable within 120
+     * columns of the centre of an ordinary face, which is most of that face.
+     */
+    {
+      const o = faceOrigin(START_FACE);
+      const cx = o.x + (F >> 1), cy = o.y + (F >> 1);
+      for (let r = 0; r <= 120; r++) {
+        for (let dx = -r; dx <= r; dx++) {
+          for (let dy = -r; dy <= r; dy++) {
+            // the ring only, so the first hit at each radius really is nearest
+            if (r > 0 && Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+            const col = colIndex(cx + dx, cy + dy);
+            if (this._spawnUsable(col)) return col;
+          }
+        }
+      }
+    }
     const rng = makeRng(this.seed ^ 0x1d5b3f11);
     let best = -1, bestScore = -1, pass = 0;
     for (let n = 0; n < 40000; n++) {

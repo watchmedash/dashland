@@ -546,6 +546,10 @@ export class Player {
     this._freeX = 0; this._freeZ = 0;
     /** Fired on a transit, so the Game can play it. */
     this.onPortal = null;
+    /** Asked before a transit lands: a reason string shuts the face, null opens it. */
+    this.faceGate = null;
+    /** Fired when `faceGate` refused, with its reason. */
+    this.onFaceShut = null;
 
     this._updateForward();
     this._sync();
@@ -1185,6 +1189,25 @@ export class Player {
     // Two steps from the near side: through the divider, and out the far side.
     const fx = ax.axis === 0 ? wrap(cx - s) : cx;
     const fz = ax.axis === 0 ? cz : wrap(cz - s);
+    /**
+     * ...unless that face is still shut to you.
+     *
+     * The four sealed faces open one at a time, each behind a mark. The Game
+     * owns the question because it owns the record; this only asks it and
+     * refuses. A null gate, which is what a test harness gets, lets everything
+     * through.
+     *
+     * Refused at the FAR side rather than at the near one, deliberately: you
+     * have to reach a portal and step into it to be told, which means the
+     * refusal happens where the thing you cannot have is, and not as an
+     * invisible wall somewhere out on the approach.
+     */
+    const shut = this.faceGate?.(faceAt(fx, fz));
+    if (shut) {
+      this._ejectFromPortal(height);
+      this.onFaceShut?.(shut);
+      return false;
+    }
     // Only the thin axis moves. Keeping the coordinate along the divider means
     // you come out where you went in rather than being snapped to the middle of
     // a cell you were walking past.

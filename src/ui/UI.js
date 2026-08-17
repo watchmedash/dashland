@@ -427,12 +427,17 @@ function worldSigil(seed, num) {
   if (seed == null) {
     return `<span class="slot-mark"><span class="slot-sigil empty"></span><b>${num}</b></span>`;
   }
-  // Mixed before it is taken modulo: consecutive seeds are a real case (the
-  // debug worlds, and anything seeded off a counter) and `seed % 92` on those
-  // walks the arc one degree at a time, so ten saves come out the same green.
-  const mix = ((Math.abs(seed | 0) * 2654435761) >>> 0) % 92;
+  // Avalanched before it is taken modulo, with murmur3's finalizer, because
+  // consecutive seeds are a real case - the debug worlds, and anything seeded
+  // off a counter - and anything short of a real mix stays affine through the
+  // modulo: `seed + 37` then walks the arc seven degrees at a time and ten
+  // saves come out as one long fade from green to green.
+  let h = (Math.abs(seed | 0)) >>> 0;
+  h ^= h >>> 16; h = Math.imul(h, 2246822507) >>> 0;
+  h ^= h >>> 13; h = Math.imul(h, 3266489909) >>> 0;
+  h = (h ^ (h >>> 16)) >>> 0;
   return `<span class="slot-mark">`
-    + `<span class="world-mark slot-sigil" style="--sig-rot:${mix - 46}deg">`
+    + `<span class="world-mark slot-sigil" style="--sig-rot:${(h % 92) - 46}deg">`
     + '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>'
     + `</span><b>${num}</b></span>`;
 }

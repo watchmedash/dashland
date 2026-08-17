@@ -3099,6 +3099,9 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    top edge with no way to scroll back to them. */
 #slots .panel-body { display: flex; }
 #slots .slot-list { width: 100%; max-width: 1180px; margin: auto; }
+/* The header goes with it, or the rule under "Continue" runs the width of the
+   monitor while the thing it is the header of is a column down the middle. */
+#slots > .panel > header { width: 100%; max-width: 1180px; margin-left: auto; margin-right: auto; }
 /* Three trunks side by side. 248 is a branch name, its segments and its price
    on one line with the blurb under it, and three of them fit a phone held
    sideways, which is what turns the whole tree into one look instead of two

@@ -3168,6 +3168,14 @@ body.touch {
    comes in and the buttons tighten rather than the layout reflowing. */
 @media (orientation: landscape) and (max-height: 500px) {
   body.touch { --tc-btn: 62px; --tc-sm: 54px; --tc-chip: 40px; --tc-band: 128px; --hud-scale: .62; }
+  /* The pause card is capped at the window height and gained a row for Camera
+     and the map, which at 375px put Save & Quit below the fold. The row is
+     worth more than the air around it, so the air pays for it: at 667x375 the
+     card comes back inside the cap with room over, and every key on it is
+     still a comfortable thumb tall. */
+  body.touch #pause .menu-actions,
+  body.touch #pause .menu-pair { gap: 6px; }
+  body.touch #pause .menu-actions button { padding: 8px 14px; }
 }
 
 /* No page scroll, no rubber band, no pinch, no double-tap zoom, no text
@@ -3473,6 +3481,11 @@ body.touch .recipe-row.lp {
    than revealed on desktop, so a new one is invisible until it is asked for. */
 .touch-only { display: none; }
 body.touch .touch-only { display: block; }
+/* Two keys on one row of a menu that is otherwise one key per row. `flex` and
+   `min-width: 0` together are what stop the longer label pushing the pair wider
+   than the card, which is the same rule the character sheet's foot uses. */
+body.touch .menu-pair { display: flex; gap: 9px; }
+.menu-pair button { flex: 1; min-width: 0; }
 
 /* ── the Controls screen swaps sides ───────────────────── */
 /* The keyboard rows are hidden rather than removed, and the touch block is

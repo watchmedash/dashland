@@ -256,9 +256,16 @@
              because the thumb layer is already the size it can afford to be and
              both of these are opened rather than played: the world is still
              drawn behind this card, so a camera cycled from here is visible
-             while you cycle it. Hidden on desktop, which has the keys. -->
-        <button id="pz-camera" class="touch-only">Camera</button>
-        <button id="pz-map" class="touch-only">Hide Map</button>
+             while you cycle it. Hidden on desktop, which has the keys.
+
+             Side by side, and one row rather than two: this card is capped at
+             the window height and on a 375px phone it was one button short of
+             needing a scroll. They are a pair anyway, both about what you can
+             see. -->
+        <div class="menu-pair touch-only">
+          <button id="pz-camera">Camera</button>
+          <button id="pz-map">Hide Map</button>
+        </div>
         <button id="pz-settings">Settings</button>
         <button id="pz-controls">Controls</button>
         <button id="pz-achievements">Achievements</button>

@@ -233,7 +233,11 @@ export const MARKS = [
   { key: 'fished', kind: 'count', need: 250, label: 'Angler', note: 'Land 250 catches.' },
   { key: 'kills', kind: 'count', need: 500, label: 'Hunter', note: 'Fell 500 creatures.' },
   { key: 'play', kind: 'count', need: 24 * 3600, label: 'Long Haul', note: '24 hours played.', time: true },
-  { key: 'core', kind: 'flag', need: 1, label: 'Core', note: 'Reach the planet core.' },
+  { key: 'core', kind: 'flag', need: 1, label: 'Core', note: 'Reach the worldcore.' },
+  // Nine faces, and four of them are behind a portal. This is the one mark
+  // that is a record of having been somewhere rather than of having done
+  // something, which is what a world you can walk all the way round wants.
+  { key: 'face', kind: 'set', need: 9, label: 'Nine Lands', note: 'Set foot on every face.' },
   { key: 'night', kind: 'flag', need: 1, label: 'First Light', note: 'Survive a night in the open.' },
   { key: 'endgame', kind: 'flag', need: 1, label: 'The Sixteen', note: 'Fell every boss.' },
 ];
@@ -242,7 +246,7 @@ export const MARKS = [
 const COUNTERS = ['mined', 'placed', 'crafted', 'fished', 'kills'];
 
 const blank = () => ({
-  v: 1, ore: [], item: [],
+  v: 1, ore: [], item: [], face: [],
   n: { mined: 0, placed: 0, crafted: 0, fished: 0, kills: 0, play: 0 },
   f: { core: 0, night: 0, endgame: 0 },
 });
@@ -261,6 +265,7 @@ export class Achievements {
     this._prev = null;
     this._ore = new Set();
     this._item = new Set();
+    this._face = new Set();
   }
 
   /**
@@ -290,12 +295,14 @@ export class Achievements {
     if (raw && typeof raw === 'object') {
       if (Array.isArray(raw.ore)) rec.ore = raw.ore.filter(Number.isInteger);
       if (Array.isArray(raw.item)) rec.item = raw.item.filter(Number.isInteger);
+      if (Array.isArray(raw.face)) rec.face = raw.face.filter((f) => f >= 1 && f <= 9);
       for (const k of Object.keys(rec.n)) rec.n[k] = Math.max(0, raw.n?.[k] | 0);
       for (const k of Object.keys(rec.f)) rec.f[k] = raw.f?.[k] ? 1 : 0;
     }
     this.rec = rec;
     this._ore = new Set(rec.ore);
     this._item = new Set(rec.item);
+    this._face = new Set(rec.face);
     this._prev = null;
   }
 
@@ -306,7 +313,10 @@ export class Achievements {
    * asynchronously and the sets keep filling while it is in flight.
    */
   toJSON() {
-    return { v: 1, ore: [...this._ore], item: [...this._item], n: { ...this.rec.n }, f: { ...this.rec.f } };
+    return {
+      v: 1, ore: [...this._ore], item: [...this._item], face: [...this._face],
+      n: { ...this.rec.n }, f: { ...this.rec.f },
+    };
   }
 
   /** Throw the whole record away. A new planet has none of it. */
@@ -329,6 +339,17 @@ export class Achievements {
   mined(blockId) {
     if (!ORE_BLOCKS.includes(blockId) || this._ore.has(blockId)) return;
     this._ore.add(blockId);
+  }
+
+  /**
+   * Stood on a face. 1..9, and only the standing counts.
+   *
+   * Called every frame from the HUD tick, so the `has` test is the whole of the
+   * cost on all but nine frames of a world.
+   */
+  stoodOn(face) {
+    if (!(face >= 1 && face <= 9) || this._face.has(face)) return;
+    this._face.add(face);
   }
 
   /**
@@ -383,6 +404,7 @@ export class Achievements {
       case 'set':
         if (mark.key === 'ore') return this._ore.size;
         if (mark.key === 'item') return this._item.size;
+        if (mark.key === 'face') return this._face.size;
         if (mark.key === 'fish') return count(this._item, FISH_SET);
         if (mark.key === 'dish') return count(this._item, DISH_SET);
         return 0;

@@ -11359,6 +11359,9 @@ class Game {
   _updateHud() {
     this.ui.updateVitals(this.player.health, this.player.maxHealth, this.breath, this.player.stamina, this.energy);
     const face = this.player.face;
+    // Where you have been, for the Nine Lands mark. Grounded only: falling past
+    // a face on the way down is not having been there.
+    if (this.player.grounded) this.achievements.stoodOn(face);
     this.ui.updateStatus(this.timeOfDay(), FACE_NAME[face],
       FACE_ROLE[face] !== FACE_PYRE, this.player.cell);
     // Both read the planet's own tables and the player's tangent frame, and

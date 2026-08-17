@@ -1397,7 +1397,7 @@ export class PlayerCharacter {
     // ridiculous at the rate people jump in this game. It takes either real
     // airtime or real downward speed, which between them mean "this is not
     // going to end in a step".
-    const falling = this._airT > AIR_DELAY || player.vel.k < -AIR_SPEED;
+    const falling = this._airT > AIR_DELAY || player.vel.y < -AIR_SPEED;
     const wantPose = swimming ? 'swim'
       : !player.grounded && falling ? 'air'
       : player.crouching ? 'crouch'
@@ -1576,7 +1576,7 @@ export class PlayerCharacter {
     // their own scales because the physics is not symmetric: the swim-up key
     // buys 2.60 and the dive key 3.95, so one number would have made rising
     // read as weaker than sinking when both are the player leaning on a key.
-    const vk = player.vel.k;
+    const vk = player.vel.y;
     const climb = vk > 0 ? Math.min(vk / RISE_FULL, 1)
       : vk < -SINK_FREE ? -Math.min((-vk - SINK_FREE) / (SINK_FULL - SINK_FREE), 1)
         : 0;

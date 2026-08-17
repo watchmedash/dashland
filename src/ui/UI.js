@@ -1768,14 +1768,21 @@ export class UI {
      * on press, which at well under 150ms is not perceptible — the same trade
      * `_tapHoldBtn` makes for the bag button.
      */
-    const act = (mod) => {
+    const act = (mod, dropRight = mod === 'split') => {
       const carried = !this.game.inventory.cursor.empty;
       this._slotAction(getSlot, opts, mod);
       // A press that filled an empty hand is the start of a possible drag. A
       // press that put something down is not, or letting go over the next slot
       // would pick it straight back up.
+      //
+      // `dropRight` is what the *release* means, and it is not always what the
+      // press meant. A mouse held on the right button distributes one item per
+      // slot, which is the right answer for a mouse and the wrong one for a
+      // thumb: the whole of the touch gesture is "take half of this and put it
+      // there", and dropping one of the twenty you are visibly carrying reads
+      // as the game refusing.
       this._drag = (!carried && !this.game.inventory.cursor.empty)
-        ? { el, right: mod === 'split' } : null;
+        ? { el, right: dropRight } : null;
     };
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -1793,7 +1800,7 @@ export class UI {
       // takes half. Not on the output cell: there a "split" would have to mean
       // craft-one-and-carry, and the gesture that already means that is a tap.
       this._clearHold(true);
-      if (!opts.output) act('split');
+      if (!opts.output) act('split', false);
     });
     el.addEventListener('pointerup', () => {
       const h = this._hold;

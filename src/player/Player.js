@@ -1,16 +1,26 @@
-// Player controller. Movement and collision happen in cubesphere cell space,
-// where the grid is aligned to gravity — so it is exactly as solid as a flat
-// voxel world, with no sinking or staircase artefacts.
+// Player controller.
+//
+// One gravity, everywhere. See NINE-FACES.md section 3. The map is flat and
+// wraps on x and y, so a cell is a unit cube, world space IS cell space, and
+// the whole per-face frame machinery the cube needed is gone: no `viewUp`, no
+// tangent frame, no velocity rotation, no crossing, no normalisation. Up is
+// `(0, 1, 0)` and it is a constant.
+//
+// The axis convention is Grid.js's and only Grid.js's:
+//
+//   map x  -> world X
+//   layer k -> world Y, up is +Y
+//   map y  -> world Z
+//
+// `this.position` is the authoritative body position, in world space, at the
+// FEET, with X and Z wrapped onto the map. `this.cell` is the integer cell it
+// is in and is derived from it every frame - see `_sync`.
 
 import * as THREE from 'three';
+import { GRAVITY, FACE_PHYSICS } from '../world/Constants.js';
+import { W, D, wrap, delta, colIndex, faceAt, cellOf } from '../world/Grid.js';
 import {
-  GRAVITY, F, D, R_MIN, cidx, FACE_ROLE, FACE_PHYSICS,
-} from '../world/Constants.js';
-import {
-  cellToWorld, tangentFrame, stepColumn, normalizeCell, colParts,
-} from '../world/Sphere.js';
-import {
-  RENDER_TYPE, R_LIQUID, IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
+  IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
   CONTACT_HURT, CONTACT_POISON, SINK, SINK_BUOYANT, GRIP,
 } from '../world/Blocks.js';
 // Imported rather than re-declared so there is exactly one "how much slower is
@@ -22,6 +32,22 @@ import { UNDERWATER_MINING } from '../game/Items.js';
 /** The extent of an ordinary full block, so the shaped path stays branch-free. */
 const FULL_BOX = [[0, 0, 0, 1, 1, 1]];
 
+/**
+ * Which `FACE_PHYSICS` row each of the nine faces uses, indexed by face number
+ * 1..9 with slot 0 unused.
+ *
+ * Keyed by the face LABEL from `Grid.faceAt`, not by a cube role, because there
+ * is no cube and a face is now a region of one flat map. Rime (1) keeps the old
+ * cap's heavy going and Pyre (9) the cinderlands' light step; the other seven
+ * are ordinary. Tempest (3) and Verdant (7) are not built yet and are ordinary
+ * until they are.
+ *
+ * It lives here rather than in Constants.js only because that file belongs to
+ * the world stages; it wants moving there once they have settled.
+ */
+const FACE_ROW = [0, 1, 0, 0, 0, 0, 0, 0, 0, 2];
+const physicsAt = (x, y) => FACE_PHYSICS[FACE_ROW[faceAt(x, y)]] || FACE_PHYSICS[0];
+
 const EYE = 1.62;
 /**
  * Standing height of the collision box, in cells. Exported because the player's
@@ -30,15 +56,12 @@ const EYE = 1.62;
  */
 export const HEIGHT = 1.8;
 /**
- * Half-width of the collision box, in CELL units.
+ * Half-width of the collision box, in cells.
  *
- * Everything in the solver lives in cell space, where a block is exactly one
- * cell wide and one layer tall at every radius. The box must therefore be a
- * constant there too. Deriving it from a world radius (RADIUS / frame.arcA)
- * made it *shrink as the player climbed* — cells are wider in world units the
- * further out you are — so a player resting against a wall crept a little
- * closer on the way up and came back down already inside it. 0.34 matches the
- * old world-space width at the surface almost exactly.
+ * A cell is a unit cube everywhere now, so this is a plain constant and there
+ * is nothing left to derive it from. It was one on the cube too, for a reason
+ * worth keeping: deriving it from a world radius made the box shrink as the
+ * player climbed.
  */
 const HALF_W = 0.34;
 const CROUCH_EYE = 1.32;
@@ -50,7 +73,6 @@ const FOOT = 0.002;    // ground tolerance, so resting on a surface is stable
  * contact, and small enough that the cell next door is not. See contactHurt.
  */
 const TOUCH = 0.015;
-/** Blocks of fall you walk away from, and half-hearts per block beyond it. */
 /** Stamina you need back before a spent sprint can start again — about 1.2s. */
 const SPRINT_RESUME = 0.15;
 
@@ -140,20 +162,6 @@ const SINK_MOVE = 0.32;
  * noticed, the way out is immediate rather than a wait.
  */
 const SINK_CALM = 0.9;
-
-/**
- * How a seam crossing's leftover position correction is spent by the camera.
- *
- * RATE is the exponential decay: about a quarter of a second to become
- * invisible, which is slow enough not to be a pop and fast enough that the view
- * is not lagging the body when something is chasing you.
- *
- * MAX is a sanity gate. Only the small corrections are worth hiding; anything
- * larger is a teleport the player SHOULD see, and smoothing it would drag the
- * camera through the ground instead.
- */
-const CROSS_SMOOTH_RATE = 14;
-const CROSS_SMOOTH_MAX = 16;
 /**
  * Cells per second you rise while you hold still in a *buoyant* sink block.
  *
@@ -229,10 +237,6 @@ const THIRD_DIST = 3.6;
  * How far above the eye and to the player's right the boom is anchored, in
  * cells.
  *
- * Both are measured in the *tangent frame* — `this.up` and `forward x up` —
- * and not in world +Y, which on a sphere is only "up" at one point on the
- * planet.
- *
  * The side offset is the whole of the fix for "the held pickaxe is behind the
  * body". A camera on the look axis sees the back of a torso and nothing else,
  * because the torso is exactly what is between it and the right hand. 0.55 puts
@@ -249,16 +253,10 @@ const CAM_SIDE = 0.55;
  *
  * Without it the boom is the exact reverse of the look direction, so looking
  * *up* drives the camera *down* — and on flat ground it is underground well
- * before the pitch limit. Measured against the real terrain march: at 30 degrees
- * of up-pitch the pull-in already had the camera at 2.97 cells, at 40 at 2.25
- * and at 60 at 1.57, i.e. a player who merely looked up at a hilltop got the
- * back of their own head. This is not the ground being hit "too aggressively";
- * the boom was pointed into it.
- *
- * 0.35 rad (20 degrees) keeps the camera 0.74 cells above the feet at full
- * extension, which clears flat ground with the pad to spare. Rising is not
- * clamped — a boom that swings *up* when you look down is the ordinary
- * over-the-head view, and a ceiling is what the pull-in is for.
+ * before the pitch limit. 0.35 rad (20 degrees) keeps the camera 0.74 cells
+ * above the feet at full extension, which clears flat ground with the pad to
+ * spare. Rising is not clamped — a boom that swings *up* when you look down is
+ * the ordinary over-the-head view, and a ceiling is what the pull-in is for.
  */
 const CAM_DEPRESS = 0.35;
 /**
@@ -274,31 +272,16 @@ const CAM_PAD = 0.32;
  * The most of the frame's height a 1.8-cell body may occupy before third person
  * stops being worth having.
  *
- * This is the number the old `THIRD_MIN = 0.55` should always have been. A
- * distance floor cannot answer the question on its own, because how large the
- * body draws is set by the distance *and* the fov, and the fov is now composed
- * from the base setting, the sprint kick, the bow's 16% narrowing and the zoom.
- * Inverting "how much of the screen is the body" gives a floor that moves with
- * all four: 1.8 / (2 d tan(fov/2)) = BODY_MAX_FRAC.
- *
- * At the default 75 degrees that is 1.89 cells. The measured failure was a
- * camera resting at 1.17 with the body drawn — 1.01 of the frame height, a head
- * and nothing else — because the only two thresholds in the file were 0.55
- * (give up) and Character.js's 0.9 (stop drawing the body), and everything
- * between 0.9 and roughly 2.0 is the band where the body fills the screen.
- * Nothing occupied that band deliberately; it was simply never named.
+ * How large the body draws is set by the distance *and* the fov, and the fov is
+ * composed from the base setting, the sprint kick, the bow's 16% narrowing and
+ * the zoom. Inverting "how much of the screen is the body" gives a floor that
+ * moves with all four: 1.8 / (2 d tan(fov/2)) = BODY_MAX_FRAC. At the default
+ * 75 degrees that is 1.89 cells.
  */
 const BODY_MAX_FRAC = 0.65;
 /**
  * A floor under the floor, in cells, so a very wide fov cannot decide that a
  * camera all but touching the player's back is fine.
- *
- * There is deliberately no ceiling to match it. If the fov narrows far enough
- * that no reachable distance would keep the body small — full zoom is 22
- * degrees, which wants nine cells of boom — the floor simply exceeds anything
- * the boom can offer and the view collapses to first person, which is the right
- * answer and needs no special case. (`main.js` only lets the zoom key run in
- * first person today, so this is a guard rather than a behaviour.)
  */
 const CAM_MIN_LO = 1.6;
 /**
@@ -307,11 +290,8 @@ const CAM_MIN_LO = 1.6;
  *
  * Hysteresis, and it is the whole of the anti-jitter argument: without it the
  * obstacle distance wandering by a hair would flip the view between third and
- * first person at frame rate, which is worse than either. A ratio rather than a
- * fixed gap so that it stays hysteresis when the fov moves the floor: drawing a
- * bow narrows the view and so raises the floor, and a fixed gap measured
- * against the *narrow* floor could sit above the distance that was fine a
- * moment ago — leaving the view stuck in first person after the shot.
+ * first person at frame rate. A ratio rather than a fixed gap so that it stays
+ * hysteresis when the fov moves the floor.
  */
 const CAM_RESUME_K = 1.18;
 /**
@@ -369,8 +349,7 @@ export function stepZoom(zoom, want, dt) {
  * worth is how far it drags the image, and the image lives on the tangent
  * plane. The angle ratio is the version that looks obviously right and is not:
  * measured against "does the same flick sweep the same fraction of the screen",
- * it comes out 15% fast at full zoom, where this comes out 0.5% — and 15% is
- * enough to make aiming feel broken rather than merely mistuned. At 22 against
+ * it comes out 15% fast at full zoom, where this comes out 0.5%. At 22 against
  * 75 this is 0.2533.
  */
 export function lookScaleFor(fov, baseFov) {
@@ -378,62 +357,49 @@ export function lookScaleFor(fov, baseFov) {
   return t(fov) / t(baseFov);
 }
 
-const _a = new THREE.Vector3();
-const _b = new THREE.Vector3();
-const _c = new THREE.Vector3();
-const _crossFrom = new THREE.Vector3();
+/** The one up vector, shared and never written to. */
+const UP = new THREE.Vector3(0, 1, 0);
 
-/**
- * A neighbouring column, or -1 when that neighbour is on another face.
- *
- * Every box test in here works in the player's own (i, j, k) frame, and across
- * a seam that frame does not apply: the neighbouring column measures k along a
- * different normal, so "the cell next door at my k" is a cell deep inside the
- * next face's ground. Reading it as a wall is what made every edge impassable -
- * you walked into solid rock that was ten blocks away and perpendicular to you.
- * The owner, twice: "I am glitching like an invisible block is blocking me",
- * then "damn man I can't cross over faces".
- *
- * Skipping is the honest answer rather than a workaround. There is no correct
- * box to test - the blocks over there stand at ninety degrees to these - and
- * the one step where it matters is the step the fold is about to take anyway.
- */
-const _sfs = { f: 0, i: 0, j: 0 };
-function sameFaceStep(baseCol, di, dj) {
-  const col = stepColumn(baseCol, di, dj);
-  colParts(col, _sfs);
-  return _sfs.f === ((baseCol / (F * F)) | 0) ? col : -1;
-}
+const _a = new THREE.Vector3();
+const _c = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
-const _q = new THREE.Quaternion();
 const _aim = new THREE.Vector3();
-const _p = [0, 0, 0];
-const _nc = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
 const _hit = { depth: 0, axis: -1, push: 0 };
 
 export class Player {
   constructor(planet) {
     this.planet = planet;
-    /** authoritative position, in cell space */
-    this.cell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
-    /** cell-space velocity: cells/s tangentially, layers/s radially */
-    this.vel = { i: 0, j: 0, k: 0 };
-    /** decaying shove from the last blow, in cell space */
-    this.knockI = 0; this.knockJ = 0; this.knockT = 0;
+    /**
+     * Authoritative position: the FEET, in world space, X and Z wrapped onto
+     * the map. World space is cell space, so this is also the continuous cell
+     * coordinate and there is no second copy of it to disagree.
+     */
     this.position = new THREE.Vector3();
+    /** World-space velocity, cells/s on every axis. */
+    this.vel = { x: 0, y: 0, z: 0 };
+    /** The integer cell the feet are in. Derived - see `_sync`. */
+    this.cell = { x: 0, y: 0, k: 0 };
+    /** Which of the nine faces that cell is labelled with, 1..9. */
+    this.face = 1;
+    /** decaying shove from the last blow, on the horizontal axes */
+    this.knockX = 0; this.knockZ = 0; this.knockT = 0;
+    /**
+     * Up. A constant, on every face, forever.
+     *
+     * Its own vector rather than the shared `UP` because half the game reads it
+     * (`particles.footDust`, `sky.setSolarTime`, the body model's basis) and a
+     * shared instance would hand every one of them the same object to scribble
+     * on by accident.
+     */
     this.up = new THREE.Vector3(0, 1, 0);
-    // Physics up snaps 90 degrees at a cube edge; the camera must not. This
-    // chases it so the horizon rolls over a fraction of a second instead.
-    this.viewUp = new THREE.Vector3(0, 1, 0);
-    /** Un-spent part of a seam crossing's position correction. */
-    this._crossOffset = new THREE.Vector3();
-    this._frameF = -1;
-    this.forward = new THREE.Vector3(0, 0, -1);
-    this.frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
 
+    /** Heading, radians. `forward` is derived from it and stays horizontal. */
+    this.yaw = 0;
     this.pitch = 0;
+    this.forward = new THREE.Vector3(0, 0, -1);
+
     this.grounded = false;
     this.inWater = false;
     this.inLava = false;
@@ -469,7 +435,7 @@ export class Player {
     this.sinkTop = false;
     /**
      * Downward drag from a whirlpool, in cells/s², written by the Game each
-     * frame and 0 everywhere else on the planet.
+     * frame and 0 everywhere else on the map.
      *
      * A field set from outside rather than something this class works out, for
      * the same reason `energy`, `water` and `skills` are: a Player built with
@@ -477,9 +443,9 @@ export class Player {
      * whirlpools are is not a question about a body. See `game/Whirlpool.js`.
      */
     this.whirlPull = 0;
-    /** The funnel's horizontal drag, on the column axes. See WHIRL_SUCK. */
-    this.whirlI = 0;
-    this.whirlJ = 0;
+    /** The funnel's horizontal drag, on the map axes. See WHIRL_SUCK. */
+    this.whirlX = 0;
+    this.whirlZ = 0;
     this.whirlSpin = 0;
     /**
      * Eye inside a sink block: buried, and the one state in the game where the
@@ -523,11 +489,11 @@ export class Player {
     this.fallStart = null;
     this.onLadder = false;
     /**
-     * Cell-space direction you must push to be leaning on the ladder you are
+     * World-space direction you must push to be leaning on the ladder you are
      * touching, written by `_touchingLadder` and read by the climb. Zero when
      * there is no ladder.
      */
-    this._climbI = 0; this._climbJ = 0;
+    this._climbX = 0; this._climbZ = 0;
     this.eyeHeight = EYE;
     this.stepOffset = 0;         // smooths the camera over 1-block step-ups
     this.autoJump = false;       // walk up a one-block ledge without jumping
@@ -556,9 +522,7 @@ export class Player {
      * It is 0 from the *instant* the view gives up rather than when the camera
      * finishes sliding home, because the two questions are different: where to
      * put the camera is a position that may be eased, and whether the body can
-     * be drawn is a decision that has already been taken. Easing the published
-     * distance instead would draw the body for the tenth of a second the
-     * collapse takes, at exactly the range where it is nothing but a head.
+     * be drawn is a decision that has already been taken.
      */
     this.cameraDist = 0;
     /**
@@ -571,18 +535,24 @@ export class Player {
     this._camGive = false;
     /** Set by main once Mobs exists, so the box can be kept out of bodies. */
     this.mobs = null;
+
+    this._updateForward();
+    this._sync();
   }
 
   // --- placement ------------------------------------------------------------
 
+  /**
+   * Stand the body on top of layer `k` of a column.
+   *
+   * `col` is a `Grid.colIndex`, so there is no face to unpack out of it any
+   * more and no chance of unpacking it the wrong way round.
+   */
   spawnAtColumn(col, k) {
-    const f = (col / (F * F)) | 0;
-    const rem = col - f * F * F;
-    this.cell.f = f;
-    this.cell.ci = ((rem / F) | 0) + 0.5;
-    this.cell.cj = (rem % F) + 0.5;
-    this.cell.ck = k + 1.02;
-    this.vel.i = 0; this.vel.j = 0; this.vel.k = 0;
+    const y = col % W;
+    const x = (col - y) / W;
+    this.position.set(x + 0.5, k + 1.02, y + 0.5);
+    this.vel.x = 0; this.vel.y = 0; this.vel.z = 0;
     // Arriving somewhere is not falling. `fallStart` is only ever cleared
     // inside `update`, and `update` does not run while you are dead — so it
     // froze at whatever it held when you died and was still there on the
@@ -591,64 +561,61 @@ export class Player {
     // difference: enough to kill you again on arrival and spill the inventory
     // you had just come back for.
     this.fallStart = null;
-    this._frameF = -1;
-    this._sync();
-    // Arrive upright. Without this the roll above plays out from wherever the
-    // camera was, which on a respawn across the planet is a long cinematic.
-    this.viewUp.copy(this.up);
-    const ref = Math.abs(this.up.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    this.forward.copy(ref).sub(_a.copy(this.up).multiplyScalar(ref.dot(this.up))).normalize();
     this.pitch = -0.08;
+    this._sync();
+  }
+
+  /** Put the body at a world point. Wrapping is `_sync`'s job. */
+  setPosition(wx, wy, wz) {
+    this.position.set(wx, wy, wz);
+    this._sync();
   }
 
   /**
    * Is the player's box overlapping a ladder cell?
    *
-   * Deliberately generous on the tangential axes — the plate is a seventh of a
+   * Deliberately generous on the horizontal axes — the plate is a seventh of a
    * cell thick, and requiring the box to actually touch it would mean losing
    * your grip every time you nudged the stick.
    *
-   * It also records, in `_climbI`/`_climbJ`, the cell-space direction you have
-   * to push to be leaning ON the ladder rather than away from it. That is what
-   * lets forward climb: without a direction, "am I holding W into it" cannot be
+   * It also records, in `_climbX`/`_climbZ`, the direction you have to push to
+   * be leaning ON the ladder rather than away from it. That is what lets
+   * forward climb: without a direction, "am I holding W into it" cannot be
    * asked at all, and Space was the only way up. The directions of every ladder
    * in contact are summed, so a body in the inside corner of two ladders climbs
    * on either of the two ways of pressing into the corner.
    */
   _touchingLadder(height) {
-    const c = this.cell;
     const p = this.planet;
-    this._climbI = 0; this._climbJ = 0;
-    const baseI = Math.floor(c.ci), baseJ = Math.floor(c.cj);
-    if (baseI < 0 || baseI >= F || baseJ < 0 || baseJ >= F) return false;
-    const baseCol = cidx(c.f, baseI, baseJ);
-    const k0 = Math.floor(c.ck + FOOT);
-    const k1 = Math.floor(c.ck + height - FOOT);
+    this._climbX = 0; this._climbZ = 0;
+    const px = this.position.x, pz = this.position.z, py = this.position.y;
+    const baseX = Math.floor(px), baseZ = Math.floor(pz);
+    const k0 = Math.floor(py + FOOT);
+    const k1 = Math.floor(py + height - FOOT);
     let found = false;
-    const fi = c.ci - baseI, fj = c.cj - baseJ;
-    for (let di = -1; di <= 1; di++) {
-      for (let dj = -1; dj <= 1; dj++) {
-        if (Math.abs(di) + Math.abs(dj) > 1) continue;      // no diagonals
-        const col = sameFaceStep(baseCol, di, dj);
-        if (col < 0) continue;
+    const fx = px - baseX, fz = pz - baseZ;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (Math.abs(dx) + Math.abs(dz) > 1) continue;      // no diagonals
+        const col = colIndex(baseX + dx, baseZ + dz);
         for (let k = k0; k <= k1; k++) {
           if (!IS_LADDER[p.at(col, k)]) continue;
-          if (di === 0 && dj === 0) {
+          if (dx === 0 && dz === 0) {
             // Standing inside the ladder's own cell: the way to push is at the
             // wall it is nailed to, which is what its facing byte names.
-            // 0:+i 1:-i 2:+j 3:-j, the order blockBoxes reads it in.
+            // 0:+x 1:-x 2:+z 3:-z, the order blockBoxes reads it in.
             const dir = p.facingAt(col, k) & 3;
-            this._climbI += dir === 0 ? 1 : dir === 1 ? -1 : 0;
-            this._climbJ += dir === 2 ? 1 : dir === 3 ? -1 : 0;
+            this._climbX += dir === 0 ? 1 : dir === 1 ? -1 : 0;
+            this._climbZ += dir === 2 ? 1 : dir === 3 ? -1 : 0;
             found = true;
             break;
           }
           // A ladder in the next cell only holds you if you are pressed up
           // against that side of your own cell — and the way to push is simply
           // towards it.
-          if ((di === 1 && fi > 1 - LADDER_GRIP) || (di === -1 && fi < LADDER_GRIP)
-            || (dj === 1 && fj > 1 - LADDER_GRIP) || (dj === -1 && fj < LADDER_GRIP)) {
-            this._climbI += di; this._climbJ += dj;
+          if ((dx === 1 && fx > 1 - LADDER_GRIP) || (dx === -1 && fx < LADDER_GRIP)
+            || (dz === 1 && fz > 1 - LADDER_GRIP) || (dz === -1 && fz < LADDER_GRIP)) {
+            this._climbX += dx; this._climbZ += dz;
             found = true;
           }
           break;
@@ -670,8 +637,8 @@ export class Player {
    * rather than the block table, and the climb works against every one of them
    * without naming any.
    *
-   * Asked with the wish velocity (wi, wj) rather than the actual velocity, for
-   * the reason the ladder gives: pressing into a wall is exactly the case where
+   * Asked with the wish velocity rather than the actual velocity, for the
+   * reason the ladder gives: pressing into a wall is exactly the case where
    * collision has already zeroed the velocity you would be reading.
    *
    * The probe is 0.35 cells ahead of the box, a shade over HALF_W. Generous on
@@ -682,68 +649,57 @@ export class Player {
    * open snow — 0.35 is less than half a cell, so there is nothing to catch on
    * inside a drift's own interior.
    */
-  _pressingWall(height, wi, wj) {
-    const n = Math.hypot(wi, wj);
+  _pressingWall(height, wx, wz) {
+    const n = Math.hypot(wx, wz);
     if (n < 1e-3) return false;
-    const c = this.cell;
     const s = 0.35 / n;
-    return this._blocked(c.ci + wi * s, c.cj + wj * s, c.ck, height);
+    return this._blocked(
+      this.position.x + wx * s, this.position.z + wz * s, this.position.y, height,
+    );
   }
 
   /**
    * Keep the player's box out of animal bodies.
    *
-   * Until now the player collided with blocks and nothing else, and the only
-   * body-vs-body resolution in the game was the animals' own sidestep — which
-   * is deliberately one-sided, because being shoved around by livestock is
-   * worse than walking through it. That worked while every animal was about
-   * player-sized. It stopped working when a giraffe arrived: an animal backed
-   * against a wall has nowhere to yield to, so you walked straight in, your eye
-   * ended up inside the barrel, and because the art is double-sided you got a
-   * clear view of the far flank from the inside.
-   *
    * A circle and not the oriented footprint. The footprint is a rectangle
    * turned to face the animal's heading, and resolving a box against a rotated
    * box for something this small is a lot of maths to make a cow feel very
    * slightly more cow-shaped. `radius` is the longer half-axis, so this is the
-   * footprint's circumscribed circle — generous by up to the difference between
-   * halfW and halfL, which for everything but the two giants is under 0.35 of a
-   * cell.
+   * footprint's circumscribed circle.
    *
    * The wall wins. The push is only taken if the destination is legal, so an
    * animal cannot press you into geometry — you simply stay put and it is the
    * animal's own separation that has to give.
+   *
+   * Separation goes through `Grid.delta`, not through raw subtraction: a cow
+   * standing across the map's wrap is a cow one step away, and a raw difference
+   * would call it 1247 cells off and quietly stop pushing at the seam.
    */
   _pushOutOfMobs(height) {
     const mobs = this.mobs;
     if (!mobs) return;
-    const c = this.cell;
+    const pos = this.position;
     for (const m of mobs.list) {
-      // Cell coordinates on two different cube faces are not comparable, and a
-      // player and an animal within a metre of each other are on the same face
-      // everywhere except exactly on a seam. Not worth the frame conversion.
-      if (m.cell.f !== c.f) continue;
-      if (c.ck >= m.cell.ck + m.tall || c.ck + height <= m.cell.ck) continue;
-      const di = c.ci - m.cell.ci, dj = c.cj - m.cell.cj;
+      const mx = m.position.x, my = m.position.y, mz = m.position.z;
+      if (pos.y >= my + m.tall || pos.y + height <= my) continue;
+      const dx = delta(mx, pos.x), dz = delta(mz, pos.z);
       const need = m.radius + HALF_W;
-      const d2 = di * di + dj * dj;
+      const d2 = dx * dx + dz * dz;
       if (d2 >= need * need) continue;
-      let ux, uj;
+      let ux, uz;
       if (d2 > 1e-6) {
         const d = Math.sqrt(d2);
-        ux = di / d; uj = dj / d;
+        ux = dx / d; uz = dz / d;
       } else {
         // Dead centre — a body that spawned on top of us. Any direction will
         // do; forward is the one the player is already looking at.
-        const fwd = this._toCellVelocity(this.forward.x, this.forward.y, this.forward.z);
-        const l = Math.hypot(fwd.i, fwd.j) || 1;
-        ux = fwd.i / l; uj = fwd.j / l;
+        ux = this.forward.x; uz = this.forward.z;
       }
-      const ni = m.cell.ci + ux * need, nj = m.cell.cj + uj * need;
-      if (ni < 0 || ni >= F || nj < 0 || nj >= F) continue;
-      if (this._blocked(ni, nj, c.ck, height)) continue;
-      c.ci = ni; c.cj = nj;
+      const nx = mx + ux * need, nz = mz + uz * need;
+      if (this._blocked(nx, nz, pos.y, height)) continue;
+      pos.x = nx; pos.z = nz;
     }
+    this._sync();
   }
 
   /**
@@ -752,77 +708,54 @@ export class Player {
    * The small upward pop matters as much as the push: without it you are shoved
    * along the ground and friction eats it immediately, and being knocked
    * backwards off a ledge is the whole reason not to fight beside one.
+   *
+   * The horizontal offset goes through `Grid.delta` so a blow landed across the
+   * wrap shoves you away from the thing that hit you rather than straight into
+   * it.
    */
   knockback(x, y, z, strength = 5.0) {
-    const dx = this.position.x - x, dy = this.position.y - y, dz = this.position.z - z;
+    const dx = delta(x, this.position.x);
+    const dy = this.position.y - y;
+    const dz = delta(z, this.position.z);
     const l = Math.hypot(dx, dy, dz);
     if (l < 1e-5) return;
-    const v = this._toCellVelocity((dx / l) * strength, (dy / l) * strength, (dz / l) * strength);
-    this.knockI = v.i;
-    this.knockJ = v.j;
+    this.knockX = (dx / l) * strength;
+    this.knockZ = (dz / l) * strength;
     this.knockT = KNOCK_TIME;
     // A token lift, not a hop. Airborne damping is a twelfth of ground friction,
     // so any real pop turns the shove ballistic: at 3.1 a single blow carried
     // the player four blocks, and how far depended mostly on which way the hill
-    // sloped — 0.8 blocks on one measurement and 3.5 on the next. This is just
-    // enough to break friction for a moment so the push reads.
-    if (this.grounded) { this.vel.k = Math.max(this.vel.k, 0.9); this.grounded = false; }
+    // sloped. This is just enough to break friction for a moment so the push
+    // reads.
+    if (this.grounded) { this.vel.y = Math.max(this.vel.y, 0.9); this.grounded = false; }
   }
 
-  /** Refresh world position, tangent frame and up from the cell coordinates. */
+  /**
+   * Wrap the body onto the map and refresh the cell it is in.
+   *
+   * All that is left of what used to rebuild a tangent frame, rotate the
+   * velocity into it and roll the camera. Gravity does not turn, so nothing
+   * about the body depends on where on the map it stands.
+   */
   _sync() {
-    const c = this.cell;
-    cellToWorld(c.f, c.ci, c.cj, c.ck, _p);
-    this.position.set(_p[0], _p[1], _p[2]);
-    // Walking over a cube edge swaps which world axes i and j mean. Velocity is
-    // held in that frame, so without this the momentum you had is reinterpreted
-    // in the new face's axes: a jump at an edge comes back to where it started.
-    // Carried through world space, which is the only frame both faces agree in.
-    const changed = c.f !== this._frameF;
-    // Where the body was before the crossing moved it, so the camera can be
-    // given the difference back and spend it smoothly. See `_crossOffset`.
-    if (changed && this._frameF >= 0) _crossFrom.copy(this.position);
-    if (changed && this._frameF >= 0) {
-      const o = this.frame;
-      const vx = o.ea[0] * this.vel.i + o.eb[0] * this.vel.j + o.up[0] * this.vel.k;
-      const vy = o.ea[1] * this.vel.i + o.eb[1] * this.vel.j + o.up[1] * this.vel.k;
-      const vz = o.ea[2] * this.vel.i + o.eb[2] * this.vel.j + o.up[2] * this.vel.k;
-      tangentFrame(c.f, c.ci, c.cj, c.ck, this.frame);
-      const n = this.frame;
-      this.vel.i = vx * n.ea[0] + vy * n.ea[1] + vz * n.ea[2];
-      this.vel.j = vx * n.eb[0] + vy * n.eb[1] + vz * n.eb[2];
-      this.vel.k = vx * n.up[0] + vy * n.up[1] + vz * n.up[2];
-    } else {
-      tangentFrame(c.f, c.ci, c.cj, c.ck, this.frame);
-    }
-    if (changed && this._frameF >= 0) {
-      // A seam crossing cannot always land the body exactly where it was - see
-      // EDGE_SLACK - so the leftover is handed to the camera as an offset that
-      // decays instead of being applied to the view in one frame. The physics
-      // body is where it is; only the picture catches up.
-      _crossFrom.sub(this.position);
-      if (_crossFrom.lengthSq() < CROSS_SMOOTH_MAX * CROSS_SMOOTH_MAX) {
-        this._crossOffset.add(_crossFrom);
-      }
-    }
-    this._frameF = c.f;
-    const nu = _a.set(this.frame.up[0], this.frame.up[1], this.frame.up[2]);
-    if (this.up.lengthSq() > 0.5) {
-      _q.setFromUnitVectors(this.up, nu);
-      this.forward.applyQuaternion(_q);
-    }
-    this.up.copy(nu);
-    this.forward.sub(_b.copy(this.up).multiplyScalar(this.forward.dot(this.up)));
-    if (this.forward.lengthSq() < 1e-6) {
-      const ref = Math.abs(this.up.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-      this.forward.copy(ref).sub(_b.copy(this.up).multiplyScalar(ref.dot(this.up)));
-    }
-    this.forward.normalize();
+    this.position.x = wrap(this.position.x);
+    this.position.z = wrap(this.position.z);
+    cellOf(this.position.x, this.position.y, this.position.z, this.cell);
+    this.face = faceAt(this.cell.x, this.cell.y);
+  }
+
+  /** Rebuild `forward` from `yaw`. Horizontal, unit, and yaw 0 is -Z. */
+  _updateForward() {
+    this.forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
   }
 
   look(dx, dy, sensitivity, invertY) {
-    _q.setFromAxisAngle(this.up, -dx * sensitivity);
-    this.forward.applyQuaternion(_q);
+    this.yaw -= dx * sensitivity;
+    // Kept in a turn of itself so a long session cannot drift the angle into
+    // the range where the sine loses digits.
+    const TAU = Math.PI * 2;
+    this.yaw = ((this.yaw % TAU) + TAU) % TAU;
+    this._updateForward();
     this.pitch = THREE.MathUtils.clamp(
       this.pitch + (invertY ? dy : -dy) * sensitivity,
       -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02,
@@ -831,9 +764,9 @@ export class Player {
 
   // --- collision ------------------------------------------------------------
 
-  /** Does the AABB at these cell coordinates overlap solid geometry? */
-  _blocked(ci, cj, ck, height) {
-    return this._overlap(ci, cj, ck, height, null);
+  /** Does the AABB at this world position overlap solid geometry? */
+  _blocked(x, z, y, height) {
+    return this._overlap(x, z, y, height, null);
   }
 
   /**
@@ -841,39 +774,18 @@ export class Player {
    *
    * When `hit` is supplied it comes back describing the deepest overlapping
    * cell and the *shallowest* way out of it, so a caller can push the player
-   * out the short way. Only meaningful when ci/cj are already on this.cell.f
-   * (i.e. after normalizeCell), which is the case everywhere it is used.
+   * out the short way.
+   *
+   * There is no seam case and no off-face case. `colIndex` wraps, so a box
+   * straddling x = 0 tests the columns at W-1 exactly as it tests any other
+   * neighbour, and the arithmetic below stays in unwrapped local coordinates
+   * where the overlaps are ordinary subtractions.
    */
-  _overlap(ci, cj, ck, height, hit) {
+  _overlap(x, z, y, height, hit) {
     const p = this.planet;
-    // A move can leave the face before normalizeCell runs. Re-anchor rather
-    // than bailing out: returning "not solid" for an off-face address opened a
-    // hole in the collision every time the player crossed a cube edge.
-    // An address past the edge of this face is NOT tested against the
-    // neighbour, and this is the line that decides whether a seam can be walked
-    // over at all.
-    //
-    // It used to re-anchor onto the next face and test there at the same layer
-    // number - but a layer means something different on each face, so if the
-    // ground over there stood any higher the probe landed inside it, came back
-    // solid, and the body was stopped a hair short of the edge. The crossing
-    // could then never trigger, and the owner had to jump a block that was one
-    // higher: "I should just be teleported to the other side top of block no
-    // matter the height".
-    //
-    // Reporting it clear is safe now in a way it was not when this re-anchor
-    // was written. Back then crossing was geometric and a body could genuinely
-    // linger out here; now the movement step converts an off-face address into
-    // a crossing on the same tick and seats the body on the far ground, so this
-    // space is never occupied - it is only ever passed through.
-    if (ci < 0 || ci >= F || cj < 0 || cj >= F) return false;
-    const f = this.cell.f, ai = ci, aj = cj;
-    const baseI = Math.floor(ai), baseJ = Math.floor(aj);
-    // Still off the grid: fail solid, never as air.
-    if (baseI < 0 || baseI >= F || baseJ < 0 || baseJ >= F) return true;
-    const baseCol = cidx(f, baseI, baseJ);
-    const k0 = Math.floor(ck + FOOT);
-    const k1 = Math.floor(ck + height - FOOT);
+    const baseX = Math.floor(x), baseZ = Math.floor(z);
+    const k0 = Math.floor(y + FOOT);
+    const k1 = Math.floor(y + height - FOOT);
     // A fence is the one block taller than its own cell, so the cell below the
     // feet can still hold something the body is standing inside. Without this
     // extra layer you could jump a fence by clearing one block instead of the
@@ -882,16 +794,15 @@ export class Player {
     if (hit) { hit.depth = 0; hit.axis = -1; hit.push = 0; }
     let found = false;
 
-    for (let di = -1; di <= 1; di++) {
-      const lo = baseI + di, hi = lo + 1;
-      const ovI = Math.min(ai + HALF_W, hi) - Math.max(ai - HALF_W, lo);
-      if (ovI <= 0) continue;
-      for (let dj = -1; dj <= 1; dj++) {
-        const loj = baseJ + dj, hij = loj + 1;
-        const ovJ = Math.min(aj + HALF_W, hij) - Math.max(aj - HALF_W, loj);
-        if (ovJ <= 0) continue;
-        const col = sameFaceStep(baseCol, di, dj);
-        if (col < 0) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const lo = baseX + dx, hi = lo + 1;
+      const ovX = Math.min(x + HALF_W, hi) - Math.max(x - HALF_W, lo);
+      if (ovX <= 0) continue;
+      for (let dz = -1; dz <= 1; dz++) {
+        const loz = baseZ + dz, hiz = loz + 1;
+        const ovZ = Math.min(z + HALF_W, hiz) - Math.max(z - HALF_W, loz);
+        if (ovZ <= 0) continue;
+        const col = colIndex(lo, loz);
         for (let k = kLow; k <= k1; k++) {
           const bid = p.at(col, k);
           if (!IS_SOLID[bid]) continue;
@@ -914,31 +825,31 @@ export class Player {
           const boxes = IS_SHAPED[bid]
             ? collisionBoxes(bid, p.facingAt(col, k))
             : FULL_BOX;
-          for (let bx = 0; bx < boxes.length; bx++) {
-            const [bi0, bj0, bk0, bi1, bj1, bk1] = boxes[bx];
-            const bLoI = lo + bi0, bHiI = lo + bi1;
-            const bLoJ = loj + bj0, bHiJ = loj + bj1;
-            const bOvI = Math.min(ai + HALF_W, bHiI) - Math.max(ai - HALF_W, bLoI);
-            if (bOvI <= 0) continue;
-            const bOvJ = Math.min(aj + HALF_W, bHiJ) - Math.max(aj - HALF_W, bLoJ);
-            if (bOvJ <= 0) continue;
+          for (let b = 0; b < boxes.length; b++) {
+            const [bx0, bz0, bk0, bx1, bz1, bk1] = boxes[b];
+            const bLoX = lo + bx0, bHiX = lo + bx1;
+            const bLoZ = loz + bz0, bHiZ = loz + bz1;
+            const bOvX = Math.min(x + HALF_W, bHiX) - Math.max(x - HALF_W, bLoX);
+            if (bOvX <= 0) continue;
+            const bOvZ = Math.min(z + HALF_W, bHiZ) - Math.max(z - HALF_W, bLoZ);
+            if (bOvZ <= 0) continue;
             const kLo = k + bk0, kHi = k + bk1;
-            const ovK = Math.min(ck + height, kHi) - Math.max(ck, kLo);
+            const ovK = Math.min(y + height, kHi) - Math.max(y, kLo);
             if (ovK <= 0) continue;
             found = true;
             if (!hit) return true;
-            const depth = Math.min(bOvI, bOvJ, ovK);
+            const depth = Math.min(bOvX, bOvZ, ovK);
             if (depth <= hit.depth) continue;
             hit.depth = depth;
-            if (depth === bOvI) {
+            if (depth === bOvX) {
               hit.axis = 0;
-              hit.push = (ai < (bLoI + bHiI) * 0.5 ? -1 : 1) * (bOvI + SKIN);
-            } else if (depth === bOvJ) {
+              hit.push = (x < (bLoX + bHiX) * 0.5 ? -1 : 1) * (bOvX + SKIN);
+            } else if (depth === bOvZ) {
               hit.axis = 1;
-              hit.push = (aj < (bLoJ + bHiJ) * 0.5 ? -1 : 1) * (bOvJ + SKIN);
+              hit.push = (z < (bLoZ + bHiZ) * 0.5 ? -1 : 1) * (bOvZ + SKIN);
             } else {
               hit.axis = 2;
-              hit.push = (ck + height * 0.5 < (kLo + kHi) * 0.5 ? -1 : 1) * (ovK + SKIN);
+              hit.push = (y + height * 0.5 < (kLo + kHi) * 0.5 ? -1 : 1) * (ovK + SKIN);
             }
           }
         }
@@ -954,7 +865,7 @@ export class Player {
    * "Touching" has to mean touching. Collision leaves the box flush against
    * whatever stopped it with only SKIN (1e-4 of a cell) to spare, so the test is
    * the ordinary box overlap grown by TOUCH — a centimetre and a half, wide
-   * enough to survive the bisection in _contactI leaving you a hair short of the
+   * enough to survive the bisection in _contactX leaving you a hair short of the
    * wall, far too narrow to reach a cactus you are merely standing near. A whole
    * cell of slack was the other option and it is wrong: it charges you for
    * walking down the aisle *between* two cacti without brushing either.
@@ -962,40 +873,27 @@ export class Player {
    * Grown on all six sides, so standing on top of one counts. That is the
    * Minecraft behaviour and it is the one that matches what you can see — your
    * feet are in the spines.
-   *
-   * The caller decides how often to ask; this is a query about right now and it
-   * has no timer of its own. Mobs can use it the same way once something wants
-   * to: nothing here is about the player except the box it reads.
    */
   contactHurt(height = this.crouching ? HEIGHT - 0.35 : HEIGHT) {
-    // Cleared up front rather than at each `return`, so the two bail-outs below
-    // cannot leave last frame's answer standing. A stale `true` here is a player
-    // being poisoned by a mushroom they have already walked away from.
+    // Cleared up front rather than at each `return`, so a bail-out cannot leave
+    // last frame's answer standing. A stale `true` here is a player being
+    // poisoned by a mushroom they have already walked away from.
     this.contactPoison = false;
     const p = this.planet;
-    const c = this.cell;
-    let f = c.f, ai = c.ci, aj = c.cj;
-    if (ai < 0 || ai >= F || aj < 0 || aj >= F) {
-      _nc.f = f; _nc.ci = ai; _nc.cj = aj; _nc.ck = c.ck;
-      normalizeCell(_nc);
-      f = _nc.f; ai = _nc.ci; aj = _nc.cj;
-    }
-    const baseI = Math.floor(ai), baseJ = Math.floor(aj);
-    if (baseI < 0 || baseI >= F || baseJ < 0 || baseJ >= F) return 0;
-    const baseCol = cidx(f, baseI, baseJ);
-    const lo = ai - HALF_W - TOUCH, hi = ai + HALF_W + TOUCH;
-    const loJ = aj - HALF_W - TOUCH, hiJ = aj + HALF_W + TOUCH;
-    const loK = c.ck - TOUCH, hiK = c.ck + height + TOUCH;
+    const px = this.position.x, py = this.position.y, pz = this.position.z;
+    const baseX = Math.floor(px), baseZ = Math.floor(pz);
+    const lo = px - HALF_W - TOUCH, hi = px + HALF_W + TOUCH;
+    const loZ = pz - HALF_W - TOUCH, hiZ = pz + HALF_W + TOUCH;
+    const loK = py - TOUCH, hiK = py + height + TOUCH;
     let worst = 0;
     let poison = false;
-    for (let di = -1; di <= 1; di++) {
-      const cLo = baseI + di;
+    for (let dx = -1; dx <= 1; dx++) {
+      const cLo = baseX + dx;
       if (Math.min(hi, cLo + 1) - Math.max(lo, cLo) <= 0) continue;
-      for (let dj = -1; dj <= 1; dj++) {
-        const cLoJ = baseJ + dj;
-        if (Math.min(hiJ, cLoJ + 1) - Math.max(loJ, cLoJ) <= 0) continue;
-        const col = sameFaceStep(baseCol, di, dj);
-        if (col < 0) continue;
+      for (let dz = -1; dz <= 1; dz++) {
+        const cLoZ = baseZ + dz;
+        if (Math.min(hiZ, cLoZ + 1) - Math.max(loZ, cLoZ) <= 0) continue;
+        const col = colIndex(cLo, cLoZ);
         // One layer below the feet and one above the head: the grown box can
         // reach into either, and being stood on top of a cactus is the case
         // that lives in the layer below.
@@ -1013,9 +911,9 @@ export class Player {
             ? collisionBoxes(bid, p.facingAt(col, k))
             : FULL_BOX;
           for (let b = 0; b < boxes.length; b++) {
-            const [bi0, bj0, bk0, bi1, bj1, bk1] = boxes[b];
-            if (Math.min(hi, cLo + bi1) - Math.max(lo, cLo + bi0) <= 0) continue;
-            if (Math.min(hiJ, cLoJ + bj1) - Math.max(loJ, cLoJ + bj0) <= 0) continue;
+            const [bx0, bz0, bk0, bx1, bz1, bk1] = boxes[b];
+            if (Math.min(hi, cLo + bx1) - Math.max(lo, cLo + bx0) <= 0) continue;
+            if (Math.min(hiZ, cLoZ + bz1) - Math.max(loZ, cLoZ + bz0) <= 0) continue;
             if (Math.min(hiK, k + bk1) - Math.max(loK, k + bk0) <= 0) continue;
             if (hurt > worst) worst = hurt;
             if (pois) poison = true;
@@ -1035,54 +933,6 @@ export class Player {
   }
 
   /**
-   * Put the body on top of the ground it just arrived on.
-   *
-   * Crossing a seam re-measures height against the NEW face, and the two faces
-   * do not agree about where the ground is: every border is lifted to a low dry
-   * ridge a couple of blocks over the waterline, so the corner is a lip, and
-   * arriving at the height the crossing computes drops you a block or two
-   * INSIDE it. Collision then shoved the body straight back where it came from,
-   * which is why a seam read as impassable: "damn man I can't cross over faces".
-   *
-   * Measured on the case that failed: leave face 5 standing on ground at layer
-   * 34, arrive on face 1 at 33.4 with the ground there also at 34 - feet and
-   * head both in solid rock.
-   *
-   * Bounded, because this must never become a general climbing aid. Six layers
-   * covers the ridge either side plus the fade; anything deeper than that is
-   * not a seam lip and is left to `_escape` and to gravity.
-   */
-  _standOnArrival(lift) {
-    const c = this.cell;
-    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-    const col = cidx(c.f, i, j);
-    const surf = this.planet.surfaceK(col);
-    // Straight onto the top of whatever is over there, high or low. Anything
-    // cleverer - keeping your old layer, keeping your height above the old
-    // ground - makes the crossing depend on the two sides agreeing about where
-    // the ground is, and they do not have to.
-    if (surf >= 0) c.ck = surf + 1 + Math.max(0, lift);
-    // Belt and braces for the case there is no ground to read - an ungenerated
-    // column, or a crossing into open air. Bounded so it can never become a
-    // climbing aid.
-    for (let n = 0; n < 6; n++) {
-      const k = Math.floor(c.ck);
-      if (!this.planet.solidAt(col, k) && !this.planet.solidAt(col, k + 1)) break;
-      c.ck = k + 1;
-    }
-  }
-
-  /** How far the feet are above the ground of the column they are over. */
-  _heightAboveGround() {
-    const c = this.cell;
-    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-    const surf = this.planet.surfaceK(cidx(c.f, i, j));
-    return surf < 0 ? 0 : Math.max(0, c.ck - (surf + 1));
-  }
-
-  /**
    * Push the box out of anything it is inside, along the shallowest axis.
    *
    * The old safety net only ever pushed *upward* by whole layers, so a hair of
@@ -1091,45 +941,39 @@ export class Player {
    * the player to the top of that wall.
    */
   _escape(height) {
-    const c = this.cell;
+    const pos = this.position;
     let moved = false;
     for (let n = 0; n < 8; n++) {
-      if (!this._overlap(c.ci, c.cj, c.ck, height, _hit) || _hit.axis < 0) break;
+      if (!this._overlap(pos.x, pos.z, pos.y, height, _hit) || _hit.axis < 0) break;
       moved = true;
       if (_hit.axis === 0) {
-        c.ci += _hit.push;
-        if (this.vel.i * _hit.push < 0) this.vel.i = 0;
+        pos.x += _hit.push;
+        if (this.vel.x * _hit.push < 0) this.vel.x = 0;
       } else if (_hit.axis === 1) {
-        c.cj += _hit.push;
-        if (this.vel.j * _hit.push < 0) this.vel.j = 0;
+        pos.z += _hit.push;
+        if (this.vel.z * _hit.push < 0) this.vel.z = 0;
       } else {
-        c.ck += _hit.push;
-        if (_hit.push > 0) { this.grounded = true; this.vel.k = Math.max(0, this.vel.k); }
-        else this.vel.k = Math.min(0, this.vel.k);
+        pos.y += _hit.push;
+        if (_hit.push > 0) { this.grounded = true; this.vel.y = Math.max(0, this.vel.y); }
+        else this.vel.y = Math.min(0, this.vel.y);
       }
-      // `_escape` only ever pushes a stuck box out; the seam crossing belongs
-      // in the movement step, not here.
-      if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) {
-        normalizeCell(c);
-        this._sync();
-      }
-      if (!this._blocked(c.ci, c.cj, c.ck, height)) return true;
+      if (!this._blocked(pos.x, pos.z, pos.y, height)) return true;
     }
     // Eight pushes and still inside: there is no legal position nearby — a gap
     // too small to occupy at all. Lift out through the top as a last resort so
     // the player can never be sealed inside the world.
-    for (let n = 0; n < 6 && this._blocked(c.ci, c.cj, c.ck, height); n++) {
-      c.ck = Math.floor(c.ck + FOOT) + 1 + SKIN;
-      this.vel.k = Math.max(0, this.vel.k);
+    for (let n = 0; n < 6 && this._blocked(pos.x, pos.z, pos.y, height); n++) {
+      pos.y = Math.floor(pos.y + FOOT) + 1 + SKIN;
+      this.vel.y = Math.max(0, this.vel.y);
       this.grounded = true;
     }
     return moved;
   }
 
   /**
-   * The highest solid surface at or just below `ck` under the box's footprint.
+   * The highest solid surface at or just below `y` under the box's footprint.
    *
-   * The landing correction used to be `Math.floor(ck) + SKIN`, which assumes
+   * The landing correction used to be `Math.floor(y) + SKIN`, which assumes
    * every floor sits on a layer boundary. A slab's top is at k + 0.5, so on one
    * the player either hovered half a block up or sank into it, and `grounded`
    * never latched — which also meant no jumping. Ask the blocks where their
@@ -1137,33 +981,30 @@ export class Player {
    *
    * @returns {number} rest height, or -1 if there is nothing to stand on
    */
-  _surfaceBelow(ci, cj, ck) {
+  _surfaceBelow(x, z, y) {
     const p = this.planet;
-    const baseI = Math.floor(ci), baseJ = Math.floor(cj);
-    if (baseI < 0 || baseI >= F || baseJ < 0 || baseJ >= F) return -1;
-    const baseCol = cidx(this.cell.f, baseI, baseJ);
+    const baseX = Math.floor(x), baseZ = Math.floor(z);
     // The feet can overlap up to four columns; the floor is the highest of them.
     let best = -1;
-    for (let di = -1; di <= 1; di++) {
-      if (Math.min(ci + HALF_W, baseI + di + 1) - Math.max(ci - HALF_W, baseI + di) <= 0) continue;
-      for (let dj = -1; dj <= 1; dj++) {
-        if (Math.min(cj + HALF_W, baseJ + dj + 1) - Math.max(cj - HALF_W, baseJ + dj) <= 0) continue;
-        const col = sameFaceStep(baseCol, di, dj);
-        if (col < 0) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      if (Math.min(x + HALF_W, baseX + dx + 1) - Math.max(x - HALF_W, baseX + dx) <= 0) continue;
+      for (let dz = -1; dz <= 1; dz++) {
+        if (Math.min(z + HALF_W, baseZ + dz + 1) - Math.max(z - HALF_W, baseZ + dz) <= 0) continue;
+        const col = colIndex(baseX + dx, baseZ + dz);
         // Only the cell the feet are in and the one under it can hold the floor.
-        for (let k = Math.floor(ck + FOOT); k >= Math.floor(ck + FOOT) - 1; k--) {
+        for (let k = Math.floor(y + FOOT); k >= Math.floor(y + FOOT) - 1; k--) {
           const id = p.at(col, k);
           if (!IS_SOLID[id]) continue;
           const boxes = IS_SHAPED[id] ? collisionBoxes(id, p.facingAt(col, k)) : FULL_BOX;
           for (let b = 0; b < boxes.length; b++) {
-            const [bi0, bj0, , bi1, bj1, bk1] = boxes[b];
+            const [bx0, bz0, , bx1, bz1, bk1] = boxes[b];
             // Only a box actually under the feet counts. A stair's riser is at
             // the back of its cell, so standing on the low half must not snap
             // you up to the riser's top.
-            if (Math.min(ci + HALF_W, baseI + di + bi1) - Math.max(ci - HALF_W, baseI + di + bi0) <= 0) continue;
-            if (Math.min(cj + HALF_W, baseJ + dj + bj1) - Math.max(cj - HALF_W, baseJ + dj + bj0) <= 0) continue;
+            if (Math.min(x + HALF_W, baseX + dx + bx1) - Math.max(x - HALF_W, baseX + dx + bx0) <= 0) continue;
+            if (Math.min(z + HALF_W, baseZ + dz + bz1) - Math.max(z - HALF_W, baseZ + dz + bz0) <= 0) continue;
             const surface = k + bk1;
-            if (surface <= ck + FOOT + SKIN && surface > best) best = surface;
+            if (surface <= y + FOOT + SKIN && surface > best) best = surface;
           }
         }
       }
@@ -1172,27 +1013,27 @@ export class Player {
   }
 
   /**
-   * Bisect along i between a free position and a blocked one so the player
+   * Bisect along x between a free position and a blocked one so the player
    * stops *touching* the wall instead of a whole sub-step short of it. Always
    * returns a position that tested clear.
    */
-  _contactI(from, to, cj, ck, height) {
-    if (this._blocked(from, cj, ck, height)) return from;
+  _contactX(from, to, z, y, height) {
+    if (this._blocked(from, z, y, height)) return from;
     let lo = from, hi = to;
     for (let n = 0; n < 6; n++) {
       const mid = (lo + hi) * 0.5;
-      if (this._blocked(mid, cj, ck, height)) hi = mid; else lo = mid;
+      if (this._blocked(mid, z, y, height)) hi = mid; else lo = mid;
     }
     return lo;
   }
 
-  /** As _contactI, along j. */
-  _contactJ(from, to, ci, ck, height) {
-    if (this._blocked(ci, from, ck, height)) return from;
+  /** As _contactX, along z. */
+  _contactZ(from, to, x, y, height) {
+    if (this._blocked(x, from, y, height)) return from;
     let lo = from, hi = to;
     for (let n = 0; n < 6; n++) {
       const mid = (lo + hi) * 0.5;
-      if (this._blocked(ci, mid, ck, height)) hi = mid; else lo = mid;
+      if (this._blocked(x, mid, y, height)) hi = mid; else lo = mid;
     }
     return lo;
   }
@@ -1205,10 +1046,7 @@ export class Player {
    *
    * Smoothstep rather than a straight line because a line has a corner at the
    * threshold: you would feel the exact frame you crossed 50%, which is a
-   * switch flipping, and the point is to feel yourself tiring. The curve is
-   * flat at both ends, so the first 0.02 of the bar past the threshold costs
-   * you 0.14% and the last of it costs almost nothing new either — the loss is
-   * spent in the middle, moving you from "something is off" to "I am slow".
+   * switch flipping, and the point is to feel yourself tiring.
    *
    * Measured, walking speed in cells/s beside the multiplier:
    *   energy 0.50 -> 1.000  (4.40 walk)   nothing has happened yet
@@ -1217,12 +1055,6 @@ export class Player {
    *   energy 0.25 -> 0.850  (3.74 walk)   unmistakable
    *   energy 0.15 -> 0.765  (3.37 walk)   sprint cuts out here, 24% down already
    *   energy 0.00 -> 0.700  (3.08 walk)
-   *
-   * Against main's drain (0.0022/s times 0.7 walking, 1.6 sprinting):
-   * Crossing 0.50 to losing the sprint is 0.35 of the bar: 227s of walking or
-   * 99s of sprinting. So the slowest way to find out is nearly four minutes of
-   * warning, and even a player sprinting the whole way gets a minute and a half
-   * of visibly degrading speed before the sprint is taken away.
    */
   _energyScale() {
     const e = this.energy;
@@ -1232,10 +1064,14 @@ export class Player {
     return 1 - (1 - ENERGY_FLOOR) * s;
   }
 
+  /** The column the feet are over. */
+  _col() {
+    return colIndex(Math.floor(this.position.x), Math.floor(this.position.z));
+  }
+
   update(dt, input) {
     const p = this.planet;
-    const c = this.cell;
-    const fr = this.frame;
+    const pos = this.position;
 
     // ---- intent ----
     let ix = 0, iz = 0;
@@ -1250,7 +1086,7 @@ export class Player {
     this.crouching = input.down('ControlLeft') || input.down('ControlRight');
     // No headroom to stand back up: stay crouched. Growing the box into a
     // ceiling and then shoving it out is how you end up on top of the ceiling.
-    if (!this.crouching && this._blocked(c.ci, c.cj, c.ck, HEIGHT)) this.crouching = true;
+    if (!this.crouching && this._blocked(pos.x, pos.z, pos.y, HEIGHT)) this.crouching = true;
     // Sprinting needs a reserve to *start* and only stops at empty.
     //
     // The gate used to be a single `stamina > 0.02` on both, and that is a
@@ -1261,10 +1097,6 @@ export class Player {
     // rate, and since sprinting also pulls the view model's arm back by 5cm,
     // what the player actually saw was the hand shaking at 2% stamina.
     //
-    // Two different numbers break the loop, and they also read better: you jog
-    // to a stop when you are spent, and you have to get some wind back before
-    // you can go again rather than stuttering along at zero.
-    //
     // Nourishment is a second, independent veto on top of that. Being spent and
     // being starving are different states and they are allowed to stack: an
     // empty stamina bar refills in 8s and an empty energy bar takes a meal.
@@ -1274,15 +1106,20 @@ export class Player {
       && this.energy > ENERGY_NO_SPRINT;
 
     // ---- environment ----
-    const feet = p.cellAt(this.position.x, this.position.y, this.position.z);
-    const headP = _b.copy(this.position).addScaledVector(this.up, EYE);
+    //
+    // Feet and head share a column: the head is directly above the feet, and on
+    // a flat map "directly above" is the same (x, z) rather than a different
+    // cell on a different normal. So one column read answers both.
+    const col = this._col();
+    const feetK = Math.floor(pos.y);
+    const headK = Math.floor(pos.y + EYE);
     // liquidAt is true for lava as well, which is what gives lava its wading
     // physics for free — but it is also why lava went unnoticed by everything
     // that asked "am I in water?". The block id is the only way to tell.
-    const feetId = feet ? p.at(feet.col, feet.k) : 0;
-    this.inWater = feet ? p.liquidAt(feet.col, feet.k) : false;
+    const feetId = p.at(col, feetK);
+    this.inWater = p.liquidAt(col, feetK);
     this.inLava = feetId === ID.lava;
-    this.headInWater = p.isLiquidWorld(headP.x, headP.y, headP.z) && !this.inLava;
+    this.headInWater = p.liquidAt(col, headK) && !this.inLava;
 
     // Ground that is not ground. Read off the feet cell exactly as `inWater`
     // is, so the two answer the same question about the same cell and cannot
@@ -1295,64 +1132,54 @@ export class Player {
     // the more forgiving of the two and the one the player can see.
     this.inSink = this.inWater ? 0 : (SINK[feetId] > 0 ? feetId : 0);
     this.sinkRate = SINK[this.inSink];
-    this.headInSink = !this.inWater
-      && SINK[p.blockAtWorld(headP.x, headP.y, headP.z)] > 0;
+    this.headInSink = !this.inWater && SINK[p.at(col, headK)] > 0;
     /**
      * Feet still in the pool's top layer: there is open air directly over them.
      *
      * This is what a jump is allowed to push off, and the window is deliberately
      * about ONE cell rather than about a distance. A body sinking at quicksand's
      * 0.9 cells/s crosses that layer in a little over a second, so falling into
-     * a pool gives you a second to get back out of it and no more — react and
-     * you were only ever knee deep, dither and you have to float back up before
-     * you can leave. A drift is faster (1.6, so two thirds of a second) and it
-     * is also the only chance the drift gives you, because there is no floating
-     * back up in snow: miss the window and you are going to the bottom and
-     * climbing out. Nothing about it needs explaining and it does not need
-     * aiming; it is simply that you cannot kick off from something you are
-     * already under.
+     * a pool gives you a second to get back out of it and no more. A drift is
+     * faster (1.6, so two thirds of a second) and it is also the only chance the
+     * drift gives you, because there is no floating back up in snow.
      */
-    this.sinkTop = !!this.inSink && SINK[p.at(feet.col, feet.k + 1)] === 0;
+    this.sinkTop = !!this.inSink && SINK[p.at(col, feetK + 1)] === 0;
 
-    // A hot spring is the only water on the planet with tuff under it: the four
+    // A hot spring is the only water on the map with tuff under it: the four
     // lake beds are mud/peat/clay/sand/gravel/slate/basalt and the seabed is
     // sand and gravel, so three block reads identify a pool without the worker
-    // having to ship the per-column water style (1.3 MB) to the main thread.
+    // having to ship the per-column water style to the main thread.
     //
     // Two reads down rather than one because the pool is two deep in the middle
-    // and one on the shelf, and `feet` sits at a different k in each. One read
+    // and one on the shelf, and the feet sit at a different k in each. One read
     // up because the *other* water that can rest on tuff is a deep aquifer lens
     // inside the granite band, where `stratum` also returns tuff — but a spring
     // is built exactly two deep, so air within two of the feet excludes it.
-    // This is the same predicate `_tickSteam` uses to place the steam, which is
-    // what stops the visible cue and the effect ever disagreeing.
-    this.inSpring = !!feet && this.inWater && !this.inLava
-      && (p.at(feet.col, feet.k - 1) === ID.tuff || p.at(feet.col, feet.k - 2) === ID.tuff)
-      && p.at(feet.col, feet.k + 2) === 0;
+    this.inSpring = this.inWater && !this.inLava
+      && (p.at(col, feetK - 1) === ID.tuff || p.at(col, feetK - 2) === ID.tuff)
+      && p.at(col, feetK + 2) === 0;
 
-    // ---- desired tangential velocity, expressed in cells/second ----
+    // ---- desired horizontal velocity, in cells/second ----
     // Agility scales all three gaits by the same small factor rather than only
     // the sprint. A branch that made sprinting faster and walking no faster
     // would be a branch that punishes you for being in a cave, where there is
     // nowhere to sprint; and the crouch has to keep its ratio to the walk or
     // sneaking along a ledge stops feeling like the same action.
     //
-    // Nourishment scales all three the same way and for the same reason. It is
-    // a multiplier rather than a subtraction so it composes with `speedScale`
-    // and the 0.62 wading factor instead of fighting them, and so that a fully
-    // fed Agility player and a fully fed one with no tree are slowed by the
-    // same *proportion* rather than the same absolute cells/s.
-    // What the ground you are standing on does to you. See FACE_PHYSICS.
-    const face = FACE_PHYSICS[FACE_ROLE[this.cell.f]] || FACE_PHYSICS[0];
+    // What the face you are standing on does to you. Keyed by the face LABEL
+    // from `Grid.faceAt` - see FACE_ROW - because a face is a region of the map
+    // now and not a side of a solid.
+    const face = physicsAt(this.cell.x, this.cell.y);
     let speed = (this.crouching ? 2.0 : this.sprinting ? 6.8 : 4.4)
       * (this.skills?.speedScale ?? 1) * this._energyScale() * face.speed;
     if (this.inWater) speed *= 0.62;
     if (this.inSink) speed *= SINK_MOVE;
 
-    const right = _c.copy(this.forward).cross(this.up).normalize();
-    const wish = _a.set(0, 0, 0).addScaledVector(this.forward, iz).addScaledVector(right, ix);
-    const w2 = this._toCellVelocity(wish.x * speed, wish.y * speed, wish.z * speed);
-    const wi = w2.i, wj = w2.j;
+    // Forward is horizontal and up is +Y, so the steering basis is two
+    // constants of the yaw and there is nothing to project out.
+    const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);   // forward x up
+    const wx = (this.forward.x * iz + rx * ix) * speed;
+    const wz = (this.forward.z * iz + rz * ix) * speed;
 
     // Footing. Ice gives you almost none of the ground's grip, so you build
     // speed slowly and keep it far too long - which is what sliding is. Held to
@@ -1362,8 +1189,8 @@ export class Player {
     const accel = this.grounded ? Math.max(11, 42 * grip) : 11;
     if (moving) {
       const t = Math.min(1, accel * dt);
-      this.vel.i += (wi - this.vel.i) * t;
-      this.vel.j += (wj - this.vel.j) * t;
+      this.vel.x += (wx - this.vel.x) * t;
+      this.vel.z += (wz - this.vel.z) * t;
     } else {
       // A sink block damps harder than water and harder than the ground. Let go
       // of the keys in one and the body stops where it is rather than coasting,
@@ -1371,51 +1198,48 @@ export class Player {
       // clean, unambiguous input rather than a slow drift you have to wait out.
       const damp = this.inSink ? 18 : this.grounded ? Math.max(1.2, 14 * grip) : this.inWater ? 4 : 1.2;
       const f2 = Math.max(0, 1 - damp * dt);
-      this.vel.i *= f2; this.vel.j *= f2;
+      this.vel.x *= f2; this.vel.z *= f2;
     }
 
     // Being hit shoves you, and the shove wins over steering for a moment
     // before handing control back. It blends *over* the velocity rather than
     // adding to it, which is what makes it predictable: added, the result was
     // decided by how long the token upward pop kept you off the ground, and
-    // airborne damping is a twelfth of ground friction — so the same blow moved
-    // the player anywhere from 0.01 to 3.5 blocks depending on the hillside.
-    // Blended, displacement is simply strength × KNOCK_TIME / 2.
+    // airborne damping is a twelfth of ground friction. Blended, displacement is
+    // simply strength × KNOCK_TIME / 2.
     if (this.knockT > 0) {
       const d = this.knockT / KNOCK_TIME;
-      this.vel.i += (this.knockI - this.vel.i) * d;
-      this.vel.j += (this.knockJ - this.vel.j) * d;
+      this.vel.x += (this.knockX - this.vel.x) * d;
+      this.vel.z += (this.knockZ - this.vel.z) * d;
       this.knockT = Math.max(0, this.knockT - dt);
     }
 
     // Being carried by a current.
     //
-    // Water.flowAt answers in the *feet column's own* (i, j) frame, which is
-    // the same frame vel.i/vel.j are already in — the player's cell address and
-    // the cell being asked about are the same column. So there is deliberately
-    // no conversion here, and therefore nothing to get wrong on a cube seam.
-    // (Drops have to go the long way round through tangentFrame, because they
-    // live in world space.)
+    // `Water.flowAt` answers in the feet column's own two axes, `i` and `j`,
+    // which ARE the map's x and y and therefore world X and Z. There is one
+    // frame in the world now, so there is nothing to convert and nothing to get
+    // wrong at a seam.
     //
     // Added to the velocity rather than blended over it, unlike a blow: a blow
     // is a moment and should override you, a river is a condition you swim
     // against. Blending would have pinned you to the current's speed and made
     // swimming upstream impossible, which is the exact failure this is trying
     // to avoid.
-    if (this.inWater && this.water && feet) {
-      const fl = this.water.flowAt(feet.col, feet.k);
+    if (this.inWater && this.water) {
+      const fl = this.water.flowAt(col, feetK);
       if (fl) {
         const push = FLOW_PUSH * fl.s * dt;
-        this.vel.i += fl.i * push;
-        this.vel.j += fl.j * push;
+        this.vel.x += fl.i * push;
+        this.vel.z += fl.j * push;
         // fl.k — the plunge of a waterfall — is deliberately ignored. Dragging
         // the player down inside a falling column fights the swim-up key at the
         // bottom of the shaft, and gravity is already taking you over the lip
-        // with all the tangential speed the run-up gave you.
+        // with all the horizontal speed the run-up gave you.
       }
     }
 
-    // ---- radial velocity ----
+    // ---- vertical velocity ----
     // Declared here rather than at the integrate step below, because the ladder
     // test needs it first and `const` does not hoist.
     const height = this.crouching ? HEIGHT - 0.35 : HEIGHT;
@@ -1424,49 +1248,34 @@ export class Player {
       // Holding forward *into* the ladder climbs it, which is the whole of how
       // anyone expects a ladder to work and was the one way it did not: Space
       // was the only lift, so going up a shaft meant tapping jump all the way.
-      // The test is on the steering you asked for (wi, wj) rather than on the
-      // velocity you got, because pressing into a wall is exactly the case
-      // where collision has already zeroed the velocity you would be reading.
+      // The test is on the steering you asked for rather than on the velocity
+      // you got, because pressing into a wall is exactly the case where
+      // collision has already zeroed the velocity you would be reading.
       //
       // Space still lifts, and still lifts on its own: you climb a ladder in a
       // one-block shaft by facing any of the four walls, and there is no reason
       // to make the player face the right one. Ctrl goes down, and holding
       // nothing holds you where you are — a ladder you slide off the moment you
       // stop pressing something is a rope, not a ladder.
-      //
-      // Stepping *away* is still how you let go, and it needs no case of its
-      // own: the grip already requires the body to be against that side of the
-      // cell, so backing off drops you at the bottom and walks you off at the
-      // top. Nothing is added to carry you over the lip either — the climb is
-      // still running at 3.2 cells/s when the last rung leaves the box, and 26
-      // of gravity turns that into a fifth of a cell of coast, which is enough
-      // to clear a floor level with the top rung and not enough to launch you.
-      const into = wi * this._climbI + wj * this._climbJ;
+      const into = wx * this._climbX + wz * this._climbZ;
       const up = input.down('Space') || into > 0.01;
       const climb = up ? CLIMB_SPEED : this.crouching ? -CLIMB_SPEED * 0.8 : 0;
-      this.vel.k += (climb - this.vel.k) * Math.min(1, 14 * dt);
+      this.vel.y += (climb - this.vel.y) * Math.min(1, 14 * dt);
       if (this.grounded && up) this.grounded = false;
     } else if (this.inWater) {
-      this.vel.k -= GRAVITY * 0.22 * dt;
-      if (input.down('Space')) this.vel.k += 15 * dt;
-      if (this.crouching) this.vel.k -= 9 * dt;
+      this.vel.y -= GRAVITY * 0.22 * dt;
+      if (input.down('Space')) this.vel.y += 15 * dt;
+      if (this.crouching) this.vel.y -= 9 * dt;
       // A whirlpool, and the reason it is here rather than blended over the
       // velocity is the reason a river's current is added rather than blended
       // (see FLOW_PUSH): a blow is a moment and should override you, a body of
       // water doing something is a condition you swim against. Added, the swim
       // key still works and simply loses; blended, holding Space would do
       // literally nothing, which is a wall rather than a hazard.
-      //
-      // It used to touch the normal axis and nothing else, which was the whole
-      // escape argument and also why the funnel did not pull you anywhere: you
-      // swam out in a straight line at full speed. The horizontal half is added
-      // the same way, so the swim key still works and simply loses ground. See
-      // WHIRL_SUCK for what it costs the escape, which is still inside a
-      // breath.
-      if (this.whirlPull > 0 && !this.inLava) this.vel.k -= this.whirlPull * dt;
-      if (!this.inLava && (this.whirlI || this.whirlJ)) {
-        this.vel.i += this.whirlI * dt;
-        this.vel.j += this.whirlJ * dt;
+      if (this.whirlPull > 0 && !this.inLava) this.vel.y -= this.whirlPull * dt;
+      if (!this.inLava && (this.whirlX || this.whirlZ)) {
+        this.vel.x += this.whirlX * dt;
+        this.vel.z += this.whirlZ * dt;
       }
       // The swirl, as a rotation of the horizontal velocity rather than a
       // tangential force. A force pumps energy in and slings you OUT - measured,
@@ -1475,20 +1284,19 @@ export class Player {
       if (!this.inLava && this.whirlSpin) {
         const a = this.whirlSpin * dt;
         const cs = Math.cos(a), sn = Math.sin(a);
-        const vi = this.vel.i, vj = this.vel.j;
-        this.vel.i = vi * cs - vj * sn;
-        this.vel.j = vi * sn + vj * cs;
+        const vx = this.vel.x, vz = this.vel.z;
+        this.vel.x = vx * cs - vz * sn;
+        this.vel.z = vx * sn + vz * cs;
       }
-      this.vel.k *= Math.max(0, 1 - 3.2 * dt);
-      this.vel.k = Math.max(this.vel.k, -5);
+      this.vel.y *= Math.max(0, 1 - 3.2 * dt);
+      this.vel.y = Math.max(this.vel.y, -5);
     } else if (this.inSink) {
       /*
        * Two hazards out of one field, and they are deliberate opposites. Which
        * one this cell is comes from SINK_BUOYANT, not from a block id.
        *
        *   - **Quicksand — struggle and you go down, hold still and you come
-       *     up.** Unchanged, and everything below about the jump, the rim and
-       *     the shuffle is about the pool.
+       *     up.**
        *   - **Powder snow — you go down whatever you do.** A drift has no
        *     buoyancy to hold still for. You sink at 1.6 until the floor of the
        *     drift stops you, head under, and the way out is to wade to the side
@@ -1509,35 +1317,10 @@ export class Player {
        * top first, then push off*, and it teaches it by having the reflex fail
        * in a way you can immediately undo.
        *
-       * The jump was not in the first version of this and the measurement is
-       * why it is here. Without it a pool is inescapable, and not obviously so:
-       * floating to the surface puts the feet level with the rim, so walking
-       * off the edge LOOKS like the way out — but a step is movement, movement
-       * sinks you, and half a second of walking drops the feet below the top of
-       * the rim block, which is then a wall. Driven unequipped in a five-wide
-       * two-deep pool: ten shuffle cycles over sixty seconds and the body never
-       * once left. A hazard with no exit is not a hazard.
-       *
-       * The impulse is the ordinary 8.4, which clears 1.36 cells against this
-       * planet's gravity — more than the one cell a lip ever stands proud of
-       * the surface you are floating at. It is the same jump in both blocks and
-       * it means the same thing in both: **at the top of either, Space gets you
-       * out.** That matters more than it looks. Space is the only input the two
-       * hazards share, and it had to be given one meaning across them or the
-       * pool and the drift would be teaching opposite reflexes with the same
-       * key. It is not the drift's escape — the climb below is — and it is
-       * never a way *down* in the drift, so nothing a snowed-in player does
-       * with it can cost them anything.
-       *
        * **The drift's escape is the climb, and it is one condition: your
        * steering is pressed into something you cannot walk through.** It reuses
        * the collision the body is already doing (`_pressingWall`), so it is not
-       * a new input, not a new key and not something to aim — it is what a
-       * player does anyway. Buried at the bottom of a drift, you hold a
-       * direction; within about three cells in any direction that direction
-       * ends in the wall of the hole; and holding it there hauls you up the
-       * wall at SINK_CLIMB. Reaching the drift's one-layer rim, the neighbour
-       * stops being a wall and you simply walk out over it.
+       * a new input, not a new key and not something to aim.
        *
        * The obvious alternative was to let Space climb, and it is the one thing
        * that must not: Space deep in quicksand counts as struggling and drives
@@ -1549,39 +1332,36 @@ export class Player {
       // Stillness is the mechanic, so stillness has to be what buys the exit.
       // The jump used to be available the instant the feet were in the top
       // layer, which meant you could walk into a pool and hop straight back out
-      // without the hazard ever happening: "I can jump out of quicksand I
-      // thought not moving is way to escape it". Now the pool has to let go of
-      // you first - hold still, float up, and the push-off arrives a beat
-      // later. Any struggle spends it.
+      // without the hazard ever happening. Now the pool has to let go of you
+      // first - hold still, float up, and the push-off arrives a beat later.
       //
       // Snow keeps the old rule and must: it has no buoyancy to wait for, so a
-      // calm timer there would be a hazard with no exit, which the note above
-      // records as the thing this must never become.
+      // calm timer there would be a hazard with no exit.
       this._sinkCalm = buoyant
         ? (struggling ? 0 : this._sinkCalm + dt)
         : SINK_CALM;
       if (this.sinkTop && input.down('Space') && this._sinkCalm >= SINK_CALM) {
-        this.vel.k = 8.4;
+        this.vel.y = 8.4;
       } else if (buoyant) {
         const target = struggling ? -this.sinkRate : SINK_RISE;
-        this.vel.k += (target - this.vel.k) * Math.min(1, SINK_RATE_LERP * dt);
+        this.vel.y += (target - this.vel.y) * Math.min(1, SINK_RATE_LERP * dt);
       } else {
         // Snow. Down at the block's rate unless you have hold of a side, and
         // there is no third case: holding still is the same as anything else
         // that is not a wall, which is what "it swallows you" has to mean.
-        const climbing = moving && this._pressingWall(height, wi, wj);
+        const climbing = moving && this._pressingWall(height, wx, wz);
         const target = climbing ? SINK_CLIMB : -this.sinkRate;
-        this.vel.k += (target - this.vel.k) * Math.min(1, SINK_RATE_LERP * dt);
+        this.vel.y += (target - this.vel.y) * Math.min(1, SINK_RATE_LERP * dt);
       }
     } else {
-      this.vel.k -= GRAVITY * dt;
+      this.vel.y -= GRAVITY * dt;
       if (this.grounded && input.down('Space')) {
         // sqrt of the height multiplier: height goes with the square of the
         // take-off speed. See FACE_PHYSICS.
-        this.vel.k = 8.4 * Math.sqrt((FACE_PHYSICS[FACE_ROLE[this.cell.f]] || FACE_PHYSICS[0]).jump);
+        this.vel.y = 8.4 * Math.sqrt(face.jump);
         this.grounded = false;
       }
-      this.vel.k = Math.max(this.vel.k, -58);
+      this.vel.y = Math.max(this.vel.y, -58);
     }
 
     // ---- integrate with axis-separated collision ----
@@ -1595,80 +1375,50 @@ export class Player {
 
     // sub-step so fast falls can't tunnel through a block: no sub-step may
     // advance more than 0.4 cells along any axis.
-    const speedCells = Math.hypot(this.vel.i, this.vel.j, this.vel.k);
+    const speedCells = Math.hypot(this.vel.x, this.vel.y, this.vel.z);
     const steps = Math.max(1, Math.min(16, Math.ceil(speedCells * dt / 0.4)));
     const sdt = dt / steps;
 
     for (let s = 0; s < steps; s++) {
-      // i axis
-      const ni = c.ci + this.vel.i * sdt;
-      if (this._blocked(ni, c.cj, c.ck, height)) {
-        if (this._tryStepUp(ni, c.cj, height, wasGrounded)) c.ci = ni;
-        else { c.ci = this._contactI(c.ci, ni, c.cj, c.ck, height); this.vel.i = 0; }
-      } else c.ci = ni;
+      // x axis
+      const nx = pos.x + this.vel.x * sdt;
+      if (this._blocked(nx, pos.z, pos.y, height)) {
+        if (this._tryStepUp(nx, pos.z, height, wasGrounded)) pos.x = nx;
+        else { pos.x = this._contactX(pos.x, nx, pos.z, pos.y, height); this.vel.x = 0; }
+      } else pos.x = nx;
 
-      // j axis
-      const nj = c.cj + this.vel.j * sdt;
-      if (this._blocked(c.ci, nj, c.ck, height)) {
-        if (this._tryStepUp(c.ci, nj, height, wasGrounded)) c.cj = nj;
-        else { c.cj = this._contactJ(c.cj, nj, c.ci, c.ck, height); this.vel.j = 0; }
-      } else c.cj = nj;
+      // z axis
+      const nz = pos.z + this.vel.z * sdt;
+      if (this._blocked(pos.x, nz, pos.y, height)) {
+        if (this._tryStepUp(pos.x, nz, height, wasGrounded)) pos.z = nz;
+        else { pos.z = this._contactZ(pos.z, nz, pos.x, pos.y, height); this.vel.z = 0; }
+      } else pos.z = nz;
 
-      // k axis. Both rest positions are derived from the *pre-move* height,
+      // y axis. Both rest positions are derived from the *pre-move* height,
       // which is known clear, and are re-tested before being taken — so a
       // sideways overlap can never be mistaken for a floor and answered by
       // launching the player up to the top of it. If neither rest position is
       // usable we are embedded; _escape resolves that properly below.
-      const nk = c.ck + this.vel.k * sdt;
-      if (this._blocked(c.ci, c.cj, nk, height)) {
-        if (this.vel.k <= 0) {
+      const ny = pos.y + this.vel.y * sdt;
+      if (this._blocked(pos.x, pos.z, ny, height)) {
+        if (this.vel.y <= 0) {
           // Landing may correct upward by at most the foot tolerance — never by
           // a whole layer, which is what let a wall hoist the player onto it.
           // The clamp has to allow the correction SKIN past FOOT: the rest
-          // position is floor(ck + FOOT) + SKIN, which is exactly FOOT + SKIN
-          // above ck when the feet sit a hair under a layer boundary. Comparing
-          // against FOOT alone rejected the only legal rest position there, so
-          // the player stood embedded 0.002 deep with grounded never set — and
-          // therefore could not jump at all.
-          const rest = this._surfaceBelow(c.ci, c.cj, c.ck);
-          if (rest >= 0 && rest <= c.ck + FOOT + SKIN && !this._blocked(c.ci, c.cj, rest, height)) {
-            c.ck = rest;
+          // position is floor(y + FOOT) + SKIN, which is exactly FOOT + SKIN
+          // above y when the feet sit a hair under a layer boundary.
+          const rest = this._surfaceBelow(pos.x, pos.z, pos.y);
+          if (rest >= 0 && rest <= pos.y + FOOT + SKIN && !this._blocked(pos.x, pos.z, rest, height)) {
+            pos.y = rest;
             this.grounded = true;
           }
         } else {
-          const rest = Math.ceil(c.ck + height) - height - SKIN;
-          if (rest >= c.ck - FOOT && rest <= nk && !this._blocked(c.ci, c.cj, rest, height)) c.ck = rest;
+          const rest = Math.ceil(pos.y + height) - height - SKIN;
+          if (rest >= pos.y - FOOT && rest <= ny && !this._blocked(pos.x, pos.z, rest, height)) pos.y = rest;
         }
-        this.vel.k = 0;
+        this.vel.y = 0;
       } else {
-        c.ck = nk;
-      }
-
-      // Cross when the BODY reaches the edge, not when its centre has passed
-      // it. Waiting for the centre means walking the last half cell THROUGH
-      // whatever stands on the neighbouring face, so a block one higher over
-      // there had to be jumped first: "I still have to be in same level on
-      // other side or higher to cross over". The owner's rule is that reaching
-      // the edge is enough, whatever the height, so the edge is the trigger.
-      if (c.ci + HALF_W >= F && this.vel.i > 0) c.ci = F + 1e-3;
-      else if (c.ci - HALF_W < 0 && this.vel.i < 0) c.ci = -1e-3;
-      if (c.cj + HALF_W >= F && this.vel.j > 0) c.cj = F + 1e-3;
-      else if (c.cj - HALF_W < 0 && this.vel.j < 0) c.cj = -1e-3;
-
-      // crossing a cube edge re-anchors us onto the neighbouring face
-      if (c.ci < 0 || c.ci >= F || c.cj < 0 || c.cj >= F) {
-        const wasF = c.f;
-        // Only what you were carrying in the air comes across. On foot the
-        // answer is simply "the top of the block over there".
-        const lift = this.grounded ? 0 : this._heightAboveGround();
-        // carry the velocity through the seam in world space, so strafing and
-        // running keep their true heading across a cube edge
-        const worldV = _v4.copy(this._toWorldVelocity(_v3));
-        normalizeCell(c);
-        if (c.f !== wasF) this._standOnArrival(lift);
-        this._sync();
-        const re = this._toCellVelocity(worldV.x, worldV.y, worldV.z);
-        this.vel.i = re.i; this.vel.j = re.j;
+        pos.y = ny;
       }
     }
 
@@ -1677,17 +1427,17 @@ export class Player {
     // a player standing still is already resting, so nothing fires and the flag
     // decays to false. Probe just under the feet instead: that is stable at
     // rest, and it also recovers a box that ended up a hair inside the floor.
-    if (!this.grounded && this.vel.k <= 0 &&
-        this._blocked(c.ci, c.cj, c.ck - FOOT * 2, height)) {
+    if (!this.grounded && this.vel.y <= 0 &&
+        this._blocked(pos.x, pos.z, pos.y - FOOT * 2, height)) {
       this.grounded = true;
-      const rest = this._surfaceBelow(c.ci, c.cj, c.ck);
-      if (rest > c.ck && rest <= c.ck + FOOT + SKIN &&
-          !this._blocked(c.ci, c.cj, rest, height)) c.ck = rest;
-      if (this.vel.k < 0) this.vel.k = 0;
+      const rest = this._surfaceBelow(pos.x, pos.z, pos.y);
+      if (rest > pos.y && rest <= pos.y + FOOT + SKIN &&
+          !this._blocked(pos.x, pos.z, rest, height)) pos.y = rest;
+      if (this.vel.y < 0) this.vel.y = 0;
     }
 
-    if (c.ck < SKIN) { c.ck = SKIN; this.vel.k = 0; this.grounded = true; }
-    if (c.ck > D - 2) { c.ck = D - 2; this.vel.k = Math.min(0, this.vel.k); }
+    if (pos.y < SKIN) { pos.y = SKIN; this.vel.y = 0; this.grounded = true; }
+    if (pos.y > D - 2) { pos.y = D - 2; this.vel.y = Math.min(0, this.vel.y); }
 
     // Safety net: never end a frame with the box inside geometry.
     this._escape(height);
@@ -1700,12 +1450,14 @@ export class Player {
     // ---- fall damage ----
     //
     // Minecraft's curve, near enough: three blocks are free, and past that it
-    // is one half-heart per block. The old numbers were both softer and flatter
-    // — 4.2 free and 1.1 per block after — which meant nothing under five
-    // blocks registered at all and a genuinely lethal drop still left you
-    // walking. Height should be the thing you respect before hostiles exist,
-    // and the fall you can survive should be the one you chose to take.
-    const r = this.position.length();
+    // is one half-heart per block. Height should be the thing you respect before
+    // hostiles exist, and the fall you can survive should be the one you chose
+    // to take.
+    //
+    // Height is simply the world Y of the feet. On the cube it was the distance
+    // from the planet's centre, which is exactly the kind of "position as a
+    // radius" reading this conversion is about.
+    const y = pos.y;
     // Catching a ladder ends the fall, the same as landing does — otherwise
     // climbing down a long shaft charges you for the whole descent the moment
     // you step off at the bottom.
@@ -1714,17 +1466,17 @@ export class Player {
     // — it is the difference between a hazard and a hidden instant death. A
     // drift of powder snow in a mountain hollow is precisely the thing a player
     // lands in at speed after missing a ledge, and charging for the drop as
-    // well as the burial would make the softest surface on the planet the most
+    // well as the burial would make the softest surface on the map the most
     // lethal. It is also Minecraft's rule for the same block.
     if (this.inSink) this.fallStart = null;
     if (!this.grounded && !this.inWater && !this.inSink && !this.onLadder) {
-      if (this.fallStart === null && this.vel.k < -0.2) this.fallStart = r;
+      if (this.fallStart === null && this.vel.y < -0.2) this.fallStart = y;
       // Track the highest point, not the point where the descent began: a jump
       // off a ledge starts the clock *after* the arc has already peaked, so a
       // running leap into a ravine was charged for less than it should be.
-      else if (this.fallStart !== null && r > this.fallStart) this.fallStart = r;
+      else if (this.fallStart !== null && y > this.fallStart) this.fallStart = y;
     } else if (this.fallStart !== null) {
-      const drop = this.fallStart - r;
+      const drop = this.fallStart - y;
       // Agility buys the blocks you fall for free; tolerance softens what is
       // left of the ones you do not. Both are read through `skills`, and with
       // no tree attached this is exactly the arithmetic it always was.
@@ -1732,13 +1484,6 @@ export class Player {
       if (drop > free && !this.inWater) {
         // Soaked *before* rounding, so a level of tolerance can turn a 1-point
         // scrape into nothing rather than being rounded straight back up.
-        //
-        // Still applied here rather than routed out to main's `_takeHit`, which
-        // was the other way to soak it. `_takeHit` exists to give a blow its
-        // immunity window, its knockback and its named killer, and a fall wants
-        // none of the three — it cannot gang up, it already shoved you, and
-        // `onHurt` below is what names it. What it was actually missing was the
-        // damage reduction, and that is what it now has.
         const raw = (drop - free) * FALL_PER_BLOCK;
         const dmg = Math.round(this.skills ? this.skills.soak(raw, 'fall') : raw);
         if (dmg > 0) { this.health = Math.max(0, this.health - dmg); this.onHurt?.(dmg); }
@@ -1748,7 +1493,7 @@ export class Player {
     }
 
     // ---- gait ----
-    const tanSpeed = Math.hypot(this.vel.i * fr.arcA, this.vel.j * fr.arcB);
+    const tanSpeed = Math.hypot(this.vel.x, this.vel.z);
     this.moveAmount = tanSpeed;
     if (this.grounded && tanSpeed > 0.6) {
       this.walkTimer += dt * tanSpeed * (this.sprinting ? 1.35 : 1.15);
@@ -1770,8 +1515,7 @@ export class Player {
     // keep going, and 8% a level off the drain already says that.
     if (this.sprinting && tanSpeed > 3) {
       this.stamina = Math.max(0, this.stamina - dt * 0.055
-        * (this.skills?.staminaScale ?? 1)
-        * (FACE_PHYSICS[FACE_ROLE[this.cell.f]] || FACE_PHYSICS[0]).staminaDrain);
+        * (this.skills?.staminaScale ?? 1) * face.staminaDrain);
     } else this.stamina = Math.min(1, this.stamina + dt * 0.12);
 
     // The arm labours when the water does. A penalty the player cannot see is
@@ -1779,99 +1523,53 @@ export class Player {
     // that costs nothing to read: main.js re-swings the moment this reaches 1,
     // so the whole cadence of digging — arm, particles, the dig sound — slows
     // together with the timer.
-    //
-    // The square root, not the drag itself: at 9× a full swing would take two
-    // and a half seconds and read as the animation having frozen. √9 = 3 gives
-    // a stroke about every nine tenths of a second, which is roughly one swing
-    // per block of wet sand — laboured, and still obviously alive.
     if (this.swingT < 1) {
       this.swingT = Math.min(1, this.swingT + dt * 3.4 / Math.sqrt(this.miningDrag));
     }
   }
 
   /**
-   * Climb a single block if there is headroom. `grounded` is reset before the
-   * horizontal axes resolve, so eligibility comes from last frame's state.
-   */
-  /**
    * Auto-step onto a one-block ledge without jumping.
    *
    * Off by default. It is a convenience, not a physics rule — it lets you walk
    * up terrain you never asked to climb, which makes precise movement along a
    * ledge or around a build harder rather than easier. `autoJump` in settings
-   * turns it back on.
+   * turns it back on. `grounded` is reset before the horizontal axes resolve,
+   * so eligibility comes from last frame's state.
    */
-  _tryStepUp(ci, cj, height, wasGrounded) {
+  _tryStepUp(x, z, height, wasGrounded) {
     if (!this.autoJump) return false;
     if (!(wasGrounded || this.grounded)) return false;
     // Never step while rising: mid-jump the box must be stopped by a wall, not
     // hoisted over it.
-    if (this.vel.k > 0.1) return false;
-    const c = this.cell;
-    const lifted = Math.floor(c.ck + FOOT) + 1 + SKIN;
-    const rise = lifted - c.ck;
+    if (this.vel.y > 0.1) return false;
+    const pos = this.position;
+    const lifted = Math.floor(pos.y + FOOT) + 1 + SKIN;
+    const rise = lifted - pos.y;
     if (rise <= 0 || rise > 1.06) return false;
-    if (this._blocked(ci, cj, lifted, height)) return false;
+    if (this._blocked(x, z, lifted, height)) return false;
     this.stepOffset = Math.min(0.55, this.stepOffset + rise);
-    c.ck = lifted;
+    pos.y = lifted;
     this.grounded = true;
     return true;
   }
 
   /**
-   * Decompose a world-space tangential vector into cell-space rates.
-   * ea and eb are NOT orthogonal away from a face centre, so a plain pair of
-   * dot products skews the result — solve the 2x2 Gram system instead.
-   */
-  _toCellVelocity(vx, vy, vz, out = { i: 0, j: 0 }) {
-    const fr = this.frame;
-    const A = vx * fr.ea[0] + vy * fr.ea[1] + vz * fr.ea[2];
-    const B = vx * fr.eb[0] + vy * fr.eb[1] + vz * fr.eb[2];
-    const c = fr.ea[0] * fr.eb[0] + fr.ea[1] * fr.eb[1] + fr.ea[2] * fr.eb[2];
-    const det = 1 - c * c;
-    let alpha, beta;
-    if (det < 1e-6) { alpha = A; beta = B; }
-    else { alpha = (A - c * B) / det; beta = (B - c * A) / det; }
-    out.i = alpha / fr.arcA;
-    out.j = beta / fr.arcB;
-    return out;
-  }
-
-  /**
-   * A world tangential vector as (i, j) components in this frame — the public
-   * face of the solve above.
+   * A world direction as map-axis components, for the minimap.
    *
-   * The minimap needs it. That map is drawn on a grid of column offsets, i.e.
-   * in cell space, so "which way on the map is the player facing" and "where on
-   * its rim does north sit" are both this question. Going through the Gram
-   * solve rather than a pair of dot products matters here for the same reason
-   * it matters for movement: ea and eb are not orthogonal away from a face
-   * centre, and a plain projection skews the answer by up to a few degrees near
-   * a cube corner — visible as a map that is subtly rotated off the way you are
-   * looking, which is worse than no map.
+   * The identity, now: map x IS world X and map y IS world Z. It stays a named
+   * method rather than being inlined at the call site because the caller is
+   * asking a question about the map, and the answer would be silently wrong if
+   * anyone ever mixed up which of world Y and Z the map's second axis is.
    */
-  tangentToCell(v, out = { i: 0, j: 0 }) {
-    return this._toCellVelocity(v.x, v.y, v.z, out);
-  }
-
-  /** Cell-space tangential velocity back into world space. */
-  _toWorldVelocity(out = _v3) {
-    const fr = this.frame;
-    const a = this.vel.i * fr.arcA, b = this.vel.j * fr.arcB;
-    out.set(
-      fr.ea[0] * a + fr.eb[0] * b,
-      fr.ea[1] * a + fr.eb[1] * b,
-      fr.ea[2] * a + fr.eb[2] * b,
-    );
+  tangentToCell(v, out = { x: 0, y: 0 }) {
+    out.x = v.x; out.y = v.z;
     return out;
   }
 
+  /** The block directly under the feet. */
   groundBlock() {
-    const c = this.cell;
-    const baseI = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-    const baseJ = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-    const col = cidx(c.f, baseI, baseJ);
-    return this.planet.at(col, Math.floor(c.ck - 0.2));
+    return this.planet.at(this._col(), Math.floor(this.position.y - 0.2));
   }
 
   /**
@@ -1887,22 +1585,17 @@ export class Player {
    * it is 9×. Minecraft's are 5 and 5 for a total of 25; three is the number
    * Items.js already chose for water and the reasoning there holds for both
    * halves — 25 puts a single block of stone past a whole lungful, which stops
-   * being a rule and starts being a wall. Nine leaves a breath at the seabed
-   * worth roughly four blocks of stone with a stone pick standing, or one
-   * floating, which is exactly the decision this is for: sink, or drain it.
+   * being a rule and starts being a wall.
    *
    * The float half is deliberately gated on being *in water* rather than on
    * `grounded` alone. A jump lasts about four tenths of a second and you take
    * your weight into the swing with you; buoyancy lasts as long as you like and
-   * does not. Taxing a jumping builder on dry land would be a different game.
+   * does not.
    *
-   * Lungs is the aqua-affinity node and it did not need inventing: it is
-   * already the diver branch, already behind agility, and its own note in
-   * Skills.js says it exists to make the seabed "a place you can work". Each
-   * level takes a quarter off the water half only, 3.0 down to 2.0 at lungs 4.
-   * It never touches the float half, so standing on the bed stays worth its
-   * full 3× no matter how deep the tree goes — the skill buys you a better
-   * swing, not permission to stop diving.
+   * Lungs is the aqua-affinity node: each level takes a quarter off the water
+   * half only, 3.0 down to 2.0 at lungs 4. It never touches the float half, so
+   * standing on the bed stays worth its full 3× no matter how deep the tree
+   * goes — the skill buys you a better swing, not permission to stop diving.
    */
   get miningDrag() {
     let d = 1;
@@ -1931,37 +1624,21 @@ export class Player {
     const targetEye = this.crouching ? CROUCH_EYE : EYE;
     this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, 12 * dt);
 
-    // Roll the view-up toward the physics up. The antipodal nudge is not
-    // optional: lerping straight at the opposite vector stays collinear and
-    // normalize pins it back, which leaves a player who arrived on the far side
-    // of the planet rendered upside down for good.
-    // Spend the crossing correction. Exponential, so it is quickest at the
-    // moment it is largest and has no discontinuity at either end.
-    if (this._crossOffset.lengthSq() > 1e-8) {
-      this._crossOffset.multiplyScalar(Math.exp(-CROSS_SMOOTH_RATE * dt));
-    } else {
-      this._crossOffset.set(0, 0, 0);
-    }
+    // Up is +Y and never moves, so there is no view-up to chase and no roll to
+    // play out. Everything below is the ordinary flat-world camera.
+    const right = _c.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    this.lookDir.copy(this.forward).multiplyScalar(Math.cos(this.pitch));
+    this.lookDir.y = Math.sin(this.pitch);
+    this.lookDir.normalize();
 
-    if (this.viewUp.dot(this.up) < -0.9) {
-      this.viewUp.addScaledVector(_c.set(this.frame.eb[0], this.frame.eb[1], this.frame.eb[2]), 0.25).normalize();
-    }
-    // 6 -> 4.2. The roll is the only thing smoothing a 90 degree change of
-    // gravity, and at 6 it was over in about a third of a second, which reads
-    // as a snap with a hint of ease rather than as turning a corner.
-    this.viewUp.lerp(this.up, 1 - Math.exp(-4.2 * dt)).normalize();
-
-    const right = _c.copy(this.forward).cross(this.up).normalize();
-    this.lookDir.copy(this.forward).multiplyScalar(Math.cos(this.pitch))
-      .addScaledVector(this.up, Math.sin(this.pitch)).normalize();
-
-    this.eye.copy(this.position).add(this._crossOffset).addScaledVector(this.up, this.eyeHeight - this.stepOffset);
+    this.eye.copy(this.position);
+    this.eye.y += this.eyeHeight - this.stepOffset;
     // Head bob is a first-person effect and only a first-person effect. Applied
     // to a camera three and a half cells out it stops reading as footfalls and
     // starts reading as a handheld shot of someone else walking.
     const b = allowBob && view === VIEW_FIRST ? this.bobAmount : 0;
     if (b > 0.001) {
-      this.eye.addScaledVector(this.up, Math.sin(this.bob * 2) * 0.042 * b);
+      this.eye.y += Math.sin(this.bob * 2) * 0.042 * b;
       this.eye.addScaledVector(right, Math.cos(this.bob) * 0.05 * b);
     }
 
@@ -1981,12 +1658,6 @@ export class Player {
     }
 
     const camPos = _a.copy(this.eye);
-    // Where the camera would like to be, as an offset from the eye — and where
-    // it is allowed to be, after the world has had its say.
-    //
-    // Everything below is built in the player's own tangent frame: `this.up`
-    // and `right`. On a sphere those are the only "up" and "sideways" there
-    // are, and world +Y is up at exactly one point on the planet.
     this.cameraDist = 0;
     if (view === VIEW_FIRST) {
       this._camD = 0;
@@ -1997,26 +1668,24 @@ export class Player {
       // The boom's own elevation, which is the look pitch only until the look
       // pitch would bury it. See CAM_DEPRESS.
       const elev = back ? Math.min(this.pitch, CAM_DEPRESS) : Math.max(this.pitch, -CAM_DEPRESS);
-      _v3.copy(this.forward).multiplyScalar(Math.cos(elev))
-        .addScaledVector(this.up, Math.sin(elev))
-        .multiplyScalar(back ? -1 : 1);
+      _v3.copy(this.forward).multiplyScalar(Math.cos(elev));
+      _v3.y = Math.sin(elev);
+      _v3.multiplyScalar(back ? -1 : 1);
       // The whole offset, boom and shoulder together, as one vector. Marching
       // *it* rather than the boom alone is what keeps the pull-in honest: the
       // camera slides along this line toward the eye, so the lift and the side
       // step shrink with the distance and cannot push it into the wall the
       // boom just backed away from.
-      _v4.copy(_v3).multiplyScalar(THIRD_DIST)
-        .addScaledVector(this.up, CAM_LIFT)
-        .addScaledVector(right, CAM_SIDE);
+      _v4.copy(_v3).multiplyScalar(THIRD_DIST).addScaledVector(right, CAM_SIDE);
+      _v4.y += CAM_LIFT;
       const len = _v4.length();
       _v4.multiplyScalar(1 / len);
       // March the world and stop short of the first solid thing. Without this
       // the camera happily sits inside the hillside you are standing against
-      // and you are looking at the inside of the terrain — the standard failure
-      // of a fixed-offset third-person camera, and `planet.raycast` is exactly
-      // the tool for it. Liquids are deliberately not hit: swimming would
-      // otherwise slam the camera to the surface every stroke, and the
-      // underwater post pass already sells being submerged.
+      // and you are looking at the inside of the terrain. Liquids are
+      // deliberately not hit: swimming would otherwise slam the camera to the
+      // surface every stroke, and the underwater post pass already sells being
+      // submerged.
       const hit = this.planet.raycast(this.eye, _v4, len + CAM_PAD);
       const avail = hit ? Math.max(0, Math.min(len, hit.dist - CAM_PAD)) : len;
 
@@ -2044,13 +1713,11 @@ export class Player {
       // that axis the two are identical — which is what they were before the
       // shoulder offset existed — but once it is off the axis, aiming at the
       // head swings the whole picture toward the body every time the camera
-      // pulls in, and what you are looking at slides off the screen. A fixed
-      // point out along the look direction keeps the view pointing where the
-      // player is pointing, whatever the boom had to do.
+      // pulls in, and what you are looking at slides off the screen.
       _aim.copy(this.eye).addScaledVector(this.lookDir, back ? THIRD_DIST : -THIRD_DIST);
     }
     camera.position.copy(camPos);
-    _m.lookAt(camPos, _aim, this.viewUp);
+    _m.lookAt(camPos, _aim, UP);
     camera.quaternion.setFromRotationMatrix(_m);
     if (b > 0.001) camera.rotateZ(Math.cos(this.bob) * 0.011 * b);
   }

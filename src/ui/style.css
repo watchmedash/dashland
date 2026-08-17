@@ -2711,29 +2711,33 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    badge in the corner, and they are the same anatomy as the level bar on the
    Growth screen — a ticked groove and a lit fill. A player who has read one
    has read the other. */
-.ach-tally { font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint); }
-/* A WELL: what is in it is writing, so it stays parchment. Same tray as the
-   save slots, for the same reason. See the rule at `.inv-section`. */
-.ach-list {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 7px; border-radius: var(--r-lg);
-  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
-}
+/* How much of the screen is finished, said once, at the top. The numbers are
+   the ones the header always carried; the bar is what they mean. */
+.ach-tally { display: flex; align-items: center; gap: 10px; min-width: 130px; }
+.ach-tally b { font: 700 var(--fs-xs) var(--mono); color: var(--ink-soft); }
+.ach-tally .xp-bar { flex: 1; height: 6px; }
+/* NO WELL, and no card under each row. The list was a tray holding thirteen
+   embossed plates inside a panel, which is three frames deep to say one thing,
+   and the frames were what made a finished mark look like an unfinished one:
+   every row had the same edge round it. A hairline between rows groups them
+   for free and leaves the ink to carry the state. */
+.ach-list { display: flex; flex-direction: column; }
 /* Two columns and two rows: the name over its line on the left, the meter
-   spanning both on the right. 190px is what "10,000 / 10,000" needs in mono
+   spanning both on the right. 168px is what "10,000 / 10,000" needs in mono
    with a bar under it. */
 .ach-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 190px;
-  align-items: center; gap: 3px 14px;
-  padding: 9px 11px; border-radius: var(--r-md);
-  background: var(--paper-cell); box-shadow: var(--emboss);
+  display: grid; grid-template-columns: minmax(0, 1fr) 168px;
+  align-items: center; gap: 2px 16px;
+  padding: 9px 2px;
+  border-bottom: 1px dotted rgba(96, 66, 28, .35);
 }
 .ach-name {
   grid-column: 1;
   font: var(--fw-disp) var(--fs-md)/1.2 var(--font);
   color: var(--ink); text-shadow: var(--carved);
 }
-.ach-note { grid-column: 1; font-size: var(--fs-sm); color: var(--ink-soft); }
+/* Indented past the stud, so the two lines of the left column share an edge. */
+.ach-note { grid-column: 1; padding-left: 15px; font-size: var(--fs-sm); color: var(--ink-soft); }
 .ach-meter { grid-column: 2; grid-row: 1 / span 2; }
 .ach-count {
   display: block; margin-bottom: 5px; text-align: right;
@@ -2743,11 +2747,27 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    fill exists. Here it must not: eleven brass slivers on a fresh record read
    as eleven marks already begun. */
 .ach-meter .xp-bar i { min-width: 0; }
-/* Finished. The same lit sheet a maxed branch gets on the Growth screen, and
-   the count comes forward out of the annotation grey — no tick, no medal, no
-   second vocabulary for a state the bar already shows full. */
-.ach-row.done { background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7)); }
-.ach-row.done .ach-count { color: var(--ink); }
+/* A flag has no scale and so has no bar. The word is the whole meter. */
+.ach-row.flag .ach-count { margin-bottom: 0; }
+/* Finished, said in ink rather than in a frame. The name lights to the accent
+   and takes a brass stud, which is the mark this palette already uses for a
+   heading; the count comes forward out of the annotation grey. No tick and no
+   medal: the bar is already full. */
+/* The stud sits on every row so the names align down the column, and only a
+   finished one is struck. */
+.ach-name::before {
+  content: ''; display: inline-block; vertical-align: middle;
+  width: 7px; height: 7px; margin-right: 8px; border-radius: 50%;
+  background: rgba(122, 94, 54, .18);
+}
+.ach-row.done .ach-name { color: var(--accent-deep); }
+.ach-row.done .ach-name::before {
+  background: var(--stud); box-shadow: 0 1px 0 rgba(255, 255, 255, .7);
+}
+.ach-row.done .ach-note, .ach-row.done .ach-count { color: var(--ink); }
+/* The unstarted end of the list sits back, so the eye stops where the
+   progress does rather than running to the bottom every time. */
+.ach-row:not(.done) .ach-name { color: var(--ink-soft); }
 
 /* ══════════════════════════════════════════════════════════
    SCREENS, NOT WINDOWS
@@ -2834,16 +2854,21 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 .set-head, .settings details.credits { grid-column: 1 / -1; }
 /* The controls screen gains columns of whole GROUPS rather than of rows; see
    `.ctl-groups`. Its rows stay one to a line at every width. */
-/* 520 is what a name, its line and a 190px meter need before the name starts
-   wrapping; 460 is a save row with its index chip, day and age. */
-.ach-list { grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); }
+/* 372 is what a name, its line and a 168px meter need before the name starts
+   wrapping, now that the row has no card round it to pay for, and it is what
+   puts two columns on a phone held sideways; 460 is a save row with its index
+   chip, day and age. */
+.ach-list { grid-template-columns: repeat(auto-fit, minmax(372px, 1fr)); }
 .slot-list { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); }
 .skill-tree { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
 .settings, .ach-list, .slot-list, .skill-tree {
   display: grid; align-content: start; align-items: start;
 }
 .settings { column-gap: 26px; row-gap: 0; }
-.ach-list, .slot-list { gap: 6px; }
+.slot-list { gap: 6px; }
+/* Rows are ruled rather than boxed, so they need no gap between them down the
+   column; the gap between columns is what keeps two lists apart. */
+.ach-list { column-gap: 38px; row-gap: 0; }
 .skill-tree { gap: 8px; }
 /* Prose, capped where it is set rather than where it sits. */
 .credit-list { max-width: 78ch; }

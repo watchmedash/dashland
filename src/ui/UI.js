@@ -1565,19 +1565,36 @@ export class UI {
     const a = this.game?.achievements;
     if (!a) return;
     const t = a.tally();
-    this.el.achTally.textContent = `${t.done} / ${t.total}`;
-    this.el.achList.innerHTML = a.progress().map((r) => {
-      const count = r.kind === 'flag'
+    // The same two numbers the header always carried, now with the bar they
+    // describe. It is the one figure on the screen about the screen.
+    const all = Math.max(0, Math.min(100, (100 * t.done) / t.total));
+    this.el.achTally.innerHTML = `<b>${t.done} / ${t.total}</b>`
+      + `<div class="xp-bar"><i style="width:${all.toFixed(1)}%"></i></div>`;
+
+    // Sorted by how far along it is, which is the order the screen is read in:
+    // what is finished, then what is nearly there, then what has not started.
+    // The authored order put a done mark, a near miss and an untouched one on
+    // three consecutive rows and left the player to sort thirteen of them.
+    const rows = a.progress()
+      .map((r) => ({ r, pct: Math.max(0, Math.min(100, (100 * r.have) / r.need)) }))
+      .sort((x, y) => y.pct - x.pct);
+
+    this.el.achList.innerHTML = rows.map(({ r, pct }) => {
+      const flag = r.kind === 'flag';
+      const count = flag
         ? (r.done ? 'Done' : 'Not yet')
         : r.time
           ? `${playedFor(r.have)} / ${Math.round(r.need / 3600)}h`
           : `${r.have.toLocaleString('en-GB')} / ${r.need.toLocaleString('en-GB')}`;
-      const pct = Math.max(0, Math.min(100, (100 * r.have) / r.need));
-      return `<div class="ach-row${r.done ? ' done' : ''}">`
+      // A flag has no scale, so it gets no bar. Thirteen grooves of which four
+      // could only ever be empty or full is a scale drawn for a thing that has
+      // none, and it made a finished flag look like a finished count.
+      const bar = flag ? ''
+        : `<div class="xp-bar"><i style="width:${pct.toFixed(1)}%"></i></div>`;
+      return `<div class="ach-row${r.done ? ' done' : ''}${flag ? ' flag' : ''}">`
         + `<div class="ach-name">${r.label}</div>`
         + `<div class="ach-note">${r.note}</div>`
-        + `<div class="ach-meter"><b class="ach-count">${count}</b>`
-        + `<div class="xp-bar"><i style="width:${pct.toFixed(1)}%"></i></div></div>`
+        + `<div class="ach-meter"><b class="ach-count">${count}</b>${bar}</div>`
         + '</div>';
     }).join('');
   }

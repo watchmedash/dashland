@@ -6763,11 +6763,21 @@ class Game {
     // which is what the block's own particle colour already is. Powder snow
     // rides the same path, being a sink block, so it is covered too.
     //
-    // Faster in than out, so the cover closes as the head goes under rather
-    // than fading in behind it, and still eases on the way out.
+    // INSTANT in, eased out, and the asymmetry is the whole fix.
+    //
+    // This was already once reported and once fixed, by taking the cover from
+    // 0.9 to a full 1. That closed the steady state and left the transition,
+    // which is what came back as "sinking on quicksand can let see through the
+    // world briefly": an exponential approach at 16/s is only 0.23 after one
+    // frame and needs about a fifth of a second to cover the screen, and a
+    // fifth of a second of looking through the planet at the ore is a fifth of
+    // a second too many. There is nothing to ease IN to - your head is either
+    // under or it is not - so the ramp bought nothing and cost exactly the bug.
+    // Easing OUT still matters, because that one is a reveal and wants to feel
+    // like surfacing.
     const wantBuried = p.headInSink ? 1 : 0;
-    const rate = wantBuried > this._buried ? 16 : 9;
-    this._buried += (wantBuried - this._buried) * Math.min(1, rate * dt);
+    if (wantBuried > this._buried) this._buried = 1;
+    else this._buried += (wantBuried - this._buried) * Math.min(1, 9 * dt);
   }
 
   /**
@@ -6799,6 +6809,8 @@ class Game {
   _tickWhirl(dt) {
     const p = this.player;
     p.whirlPull = 0;
+    p.whirlI = 0; p.whirlJ = 0; p.whirlSpin = 0;
+    this._whirlDrag ||= { i: 0, j: 0, spin: 0 };
     if (this.spectating) { this._whirlT = 0; return; }
     const c = p.cell;
     const ci = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
@@ -6808,7 +6820,11 @@ class Game {
     // The drag. Gated on being in water and not on being near one, because
     // `pullAt` is already the narrower test and asking it twice would be two
     // places that have to agree about where the funnel is.
-    if (p.inWater && !p.inLava) p.whirlPull = this.whirlpools.pullAt(col, Math.floor(c.ck));
+    if (p.inWater && !p.inLava) {
+      p.whirlPull = this.whirlpools.pullAt(col, Math.floor(c.ck));
+      const d = this.whirlpools.dragAt(col, Math.floor(c.ck), this._whirlDrag);
+      p.whirlI = d.i; p.whirlJ = d.j; p.whirlSpin = d.spin;
+    }
 
     const eye = this.whirlpools.centreWithin(col, WHIRL_CUE);
     if (eye < 0) { this._whirlT = 0; return; }
@@ -6833,7 +6849,11 @@ class Game {
       const rr = Math.random() * WHIRL_R;
       const at = stepColumn(eye, Math.round(Math.cos(a) * rr), Math.round(Math.sin(a) * rr));
       const pos = this.planet.centerOf(at, K_SEA, _v1);
-      _v2.copy(pos).normalize();
+      // The face's own normal, NOT `pos.normalize()`. The radial answer is the
+      // sphere one and it is only right in the middle of a face: out towards a
+      // seam it leans away by up to 45 degrees, which tilted every ring off the
+      // water and is what "whirlpool is diagonal" was looking at.
+      _v2.fromArray(FACE_N[colParts(at).f]);
       this.particles.ripple(pos, _v2, 2.0 + Math.random() * 3.0, 1);
       // A quarter of the rings get spray with them. Any more and the general
       // particle pool is a fountain that starves the dig crumbs and the embers;

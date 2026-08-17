@@ -477,6 +477,10 @@ export class Player {
      * whirlpools are is not a question about a body. See `game/Whirlpool.js`.
      */
     this.whirlPull = 0;
+    /** The funnel's horizontal drag, on the column axes. See WHIRL_SUCK. */
+    this.whirlI = 0;
+    this.whirlJ = 0;
+    this.whirlSpin = 0;
     /**
      * Eye inside a sink block: buried, and the one state in the game where the
      * camera is inside opaque geometry on purpose. The Game turns it into a
@@ -1453,10 +1457,28 @@ export class Player {
       // key still works and simply loses; blended, holding Space would do
       // literally nothing, which is a wall rather than a hazard.
       //
-      // It touches the radial axis and only the radial axis. Horizontal speed
-      // is untouched anywhere in the funnel, which is the whole of the escape
-      // and the whole of the promise that this cannot drown a player who acts.
+      // It used to touch the normal axis and nothing else, which was the whole
+      // escape argument and also why the funnel did not pull you anywhere: you
+      // swam out in a straight line at full speed. The horizontal half is added
+      // the same way, so the swim key still works and simply loses ground. See
+      // WHIRL_SUCK for what it costs the escape, which is still inside a
+      // breath.
       if (this.whirlPull > 0 && !this.inLava) this.vel.k -= this.whirlPull * dt;
+      if (!this.inLava && (this.whirlI || this.whirlJ)) {
+        this.vel.i += this.whirlI * dt;
+        this.vel.j += this.whirlJ * dt;
+      }
+      // The swirl, as a rotation of the horizontal velocity rather than a
+      // tangential force. A force pumps energy in and slings you OUT - measured,
+      // it made the escape faster - where a rotation keeps the speed you have
+      // and only bends it. See WHIRL_SPIN.
+      if (!this.inLava && this.whirlSpin) {
+        const a = this.whirlSpin * dt;
+        const cs = Math.cos(a), sn = Math.sin(a);
+        const vi = this.vel.i, vj = this.vel.j;
+        this.vel.i = vi * cs - vj * sn;
+        this.vel.j = vi * sn + vj * cs;
+      }
       this.vel.k *= Math.max(0, 1 - 3.2 * dt);
       this.vel.k = Math.max(this.vel.k, -5);
     } else if (this.inSink) {

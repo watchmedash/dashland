@@ -92,6 +92,55 @@ const WHIRL_MIN_DEPTH = 14;
  */
 const WHIRL_PULL = 13;
 /**
+ * The horizontal half, and the reason this stopped reading as a whirlpool.
+ *
+ * The funnel used to be purely downward. That was a deliberate safety argument
+ * - horizontal speed untouched means the crossing is always 5 / 2.73 = 1.83
+ * seconds against a nine-second breath - but it also meant the water never
+ * pulled you anywhere. You swam out in a straight line at full speed, which is
+ * "not strong at all, I can swim away easily", and it is exactly what the old
+ * numbers promised.
+ *
+ * So the fix is not a bigger number on the drag. It is the two components a
+ * vortex actually has:
+ *
+ *   SUCK  inward, toward the eye. This is the one that costs something, and it
+ *         is priced off the horizontal model rather than guessed: `Player`
+ *         blends velocity toward the swim at accel 11 when not grounded, so a
+ *         steady inward push of S leaves you making way outward at
+ *         2.73 - S/11. The falloff then means every cell you win makes the next
+ *         one cheaper, so the fight eases as you get out.
+ *
+ *         Swept against the crossing from the dead centre, which is the worst
+ *         case, with a nine-second breath as the wall:
+ *
+ *            S=0   1.92s   2.73 cells/s at the eye   (what it used to be)
+ *            S=16  2.83s   1.28
+ *            S=24  4.22s   0.55                       <- this
+ *            S=28  6.50s   0.18
+ *            S=30 11.47s   0.00                       drowns you
+ *
+ *         24 makes the middle a crawl and the escape a real 4 seconds of work,
+ *         and still leaves more than half the breath spare from the worst spot
+ *         on the map, for a player with no equipment and no skills.
+ *   SPIN  a ROTATION of your horizontal velocity, in radians per second, and
+ *         not a tangential force. This was measured before it was believed: as
+ *         an added acceleration the spin makes the funnel EASIER to leave, not
+ *         harder - it pumps energy in and slings you out, and the escape came
+ *         out at 1.47s against the old 1.85s, i.e. the swirl was helping. A
+ *         rotation preserves the speed you already have, so it curves your path
+ *         without lengthening or shortening it. It cannot drown anybody and it
+ *         is most of what makes the thing read as a whirlpool rather than as a
+ *         lift going down.
+ *
+ * SUCK is added to velocity rather than blended over it, for the reason the
+ * river current is (see FLOW_PUSH in Player.js): a condition you swim against,
+ * not a blow that overrides you.
+ */
+const WHIRL_SUCK = 24.0;
+/** Radians per second at the eye: about one turn every three seconds. */
+const WHIRL_SPIN = 2.2;
+/**
  * How far below the surface the funnel reaches, in layers, and the whole of why
  * this cannot drown a player who does anything at all.
  *
@@ -267,5 +316,42 @@ export class Whirlpools {
     const radial = 1 - d2 / r2;
     const depth = below <= 0 ? 1 : 1 - below / WHIRL_THROAT;
     return WHIRL_PULL * radial * depth;
+  }
+
+  /**
+   * The horizontal drag, in cells per second squared, on the column axes.
+   *
+   * Written into `out.i`/`out.j` and zeroed when there is no funnel here, so a
+   * caller can hand the same object back every frame. See WHIRL_SUCK.
+   *
+   * The eye is a column and so is the body, so the direction is just the step
+   * between them; at the dead centre there is no direction and the suction is
+   * zero anyway, which is also where a real vortex has nothing to pull towards.
+   */
+  dragAt(col, k, out) {
+    out.i = 0; out.j = 0; out.spin = 0;
+    const c = this.centreNear(col);
+    if (c < 0) return out;
+    const a = colParts(col, _parts);
+    const ai = a.i, aj = a.j, af = a.f;
+    const b = colParts(c, _parts);
+    // Different faces cannot be compared as (i, j) at all - a layer number is
+    // only meaningful with its face - and a whirlpool sits in open ocean well
+    // inside one, so the honest answer at a seam is no drag rather than a
+    // wrong one.
+    if (b.f !== af) return out;
+    const di = b.i - ai, dj = b.j - aj;
+    const d2 = di * di + dj * dj;
+    const r2 = WHIRL_R * WHIRL_R;
+    if (d2 >= r2 || d2 < 1e-6) return out;
+    const below = K_SEA - k;
+    if (below >= WHIRL_THROAT) return out;
+    const inv = 1 / Math.sqrt(d2);
+    const ui = di * inv, uj = dj * inv;
+    const fall = (1 - d2 / r2) * (below <= 0 ? 1 : 1 - below / WHIRL_THROAT);
+    out.i = ui * WHIRL_SUCK * fall;
+    out.j = uj * WHIRL_SUCK * fall;
+    out.spin = WHIRL_SPIN * fall;
+    return out;
   }
 }

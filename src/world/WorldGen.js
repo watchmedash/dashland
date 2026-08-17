@@ -1399,6 +1399,26 @@ const SEAM_WALK_BAND = 56;
  */
 const BORDER_FLAT = 24;
 /**
+ * The lowest the ground may sit at `border` columns from a seam.
+ *
+ * The mirror of the cone in `height()`, and it exists because the cone alone
+ * never stopped water reaching an edge. The cap only ever pushes ground DOWN,
+ * so an ocean basin was free to come right up against the flat shelf; the seam
+ * slope limiter, which runs last and also only ever lowers, then cut the shelf
+ * down a block a column to meet it, and the sea re-flood filled what it had
+ * cut. Measured on seed 4242 that put sea within 11 columns of a seam and made
+ * 10% of the shelf itself water - the canal the owner reported, back by a route
+ * that did not exist when it was first fixed in `height()`.
+ *
+ * So the band gets a floor as well as a ceiling: at `border` columns out the
+ * ground may sit at most `border - BORDER_FLAT` blocks BELOW the shelf. The
+ * shelf stays dry, the sea gets a one-block-a-column beach to climb instead of
+ * a cliff for the limiter to file down, and past about twenty columns the floor
+ * is under the seabed and does nothing.
+ */
+const seamFloor = (border) =>
+  R_SEA + BORDER_LIFT - Math.max(0, border - BORDER_FLAT) * SEAM_MAX_STEP;
+/**
  * How much easier every ore vein is to hit on the cinderlands.
  *
  * Subtracted from each vein's noise threshold, so the seams that already exist
@@ -1557,6 +1577,8 @@ export class WorldGen {
     if (border < BORDER_FLAT) return R_SEA + BORDER_LIFT;
     const cap = R_SEA + BORDER_LIFT + (border - BORDER_FLAT) * SEAM_MAX_STEP;
     if (h > cap) h = cap;
+    const floor = seamFloor(border);
+    if (h < floor) h = floor;
     return clamp(h, R_MIN + 6, R_TERRAIN_MAX);
   }
 
@@ -1969,6 +1991,22 @@ export class WorldGen {
       }
     }
 
+    // ...and the seabed pass is not allowed to dig under the seam apron either.
+    // `height()` sets the floor, but the relaxation, the ocean depth pass and
+    // the lakes all move ground after it, so it is re-asserted here, on the
+    // finished field and just before the limiter that has to respect it.
+    for (let col = 0; col < COLUMNS; col++) {
+      const d = colBorderDist(col);
+      if (d > SEAM_WALK_BAND) continue;
+      const f = seamFloor(d);
+      if (colHeight[col] < f) colHeight[col] = f;
+      // Ground that has just come up out of the water is not seabed any more.
+      // The mirror of the re-flood below: that grows the sea into what dropped,
+      // this drops what rose, and leaving the flag set would surface a dry
+      // shelf as sea floor and let fish and coral be placed inside it.
+      if (submerged[col] && colHeight[col] >= R_SEA - 0.5) submerged[col] = 0;
+    }
+
     {
       const MAX_STEP = 1.0;
       // Gathered once. The band is a few percent of the planet, so iterating a
@@ -1986,7 +2024,9 @@ export class WorldGen {
             const h = colHeight[colNeighbor(col, d)];
             if (h < lowest) lowest = h;
           }
-          const cap = lowest + MAX_STEP;
+          // Never below the band's own floor, or the limiter walks the shelf
+          // down into the sea one column at a time. See seamFloor.
+          const cap = Math.max(lowest + MAX_STEP, seamFloor(colBorderDist(col)));
           if (colHeight[col] > cap) { colHeight[col] = cap; cut++; }
         }
         if (cut === 0) break;

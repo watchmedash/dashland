@@ -1792,8 +1792,12 @@ body.fighting #toasts { top: 172px; }
 #screen.snug .inv-panel { width: fit-content; max-width: min(830px, 100%); }
 #screen-top { margin-bottom: 16px; }
 
-.inv-body { display: flex; gap: 18px; align-items: flex-start; }
-.inv-left { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Bag and craft list as one group in the middle of the sheet, rather than one
+   pinned to each edge of it. The left column used to take all the slack, which
+   on a wide monitor left 350px of blank parchment between the bag and the rule
+   the sidebar hangs off, and the two halves stopped looking like one screen. */
+.inv-body { display: flex; gap: 26px; align-items: flex-start; justify-content: center; }
+.inv-left { flex: 0 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
 
 /* ── craftable sidebar ─────────────────────────────────── */
 
@@ -1827,11 +1831,12 @@ body.fighting #toasts { top: 172px; }
    an empty shop drew two four-pixel slivers of sunk parchment with "Nothing"
    marooned underneath each. Same fault, same answer, one selector. */
 #recipe-list:empty, .shop-list:empty { display: none; }
+/* No well under the list. A recipe row is a button, and a button is a thing
+   you press, so IT is the one frame this column is allowed: a tray under a
+   stack of buttons is a box round a box for nothing. */
 #recipe-list {
   display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
   max-height: min(330px, 34vh);
-  padding: 5px; border-radius: var(--r-md);
-  background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
 }
 .recipe-row {
   position: relative; overflow: hidden;
@@ -1869,7 +1874,7 @@ body.fighting #toasts { top: 172px; }
 .recipe-row .ryield { font: 700 var(--fs-xs) var(--mono); color: var(--accent); flex: none; }
 .recipe-empty { font-size: var(--fs-sm); color: var(--ink-faint); line-height: 1.5; }
 
-.craft-area { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.craft-area { display: flex; align-items: center; justify-content: flex-start; gap: 14px; }
 /* The bench, in its own well: the cells you put things into are a different
    object to the cell the thing comes out of, and the well is what says so
    without a caption on either. */
@@ -2262,9 +2267,13 @@ body.fighting #toasts { top: 172px; }
    inside it, leaving a hand of bare wood at each end that read as missing
    columns. Worst on the crate, which hides the sidebar and so has the most
    width to spare. */
+/* The bench above and the bag below share a left edge. They were each centred
+   in the column, and since one is 230px wide and the other 585px, neither of
+   them lined up with anything: two objects floating over a sheet rather than
+   one bag with its bench on top. */
 .inv-section {
-  display: flex; flex-direction: column; gap: 5px; align-items: center;
-  align-self: center;
+  display: flex; flex-direction: column; gap: 5px; align-items: flex-start;
+  align-self: flex-start;
   padding: 6px; border-radius: var(--r-lg);
   background: var(--wood-end);
   box-shadow:
@@ -2875,7 +2884,10 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
   .inv-grid { gap: 6px; }
   .inv-section { padding: 8px; }
   .recipe-panel { width: clamp(236px, 24vw, 420px); }
-  #recipe-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 5px; }
+  /* Two or three across and as tall as the bag beside it. The 34vh cap was
+     set for a strip and left the column two thirds empty next to a bag that
+     had grown. */
+  #recipe-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 5px; align-content: start; max-height: min(620px, 62vh); }
 }
 @media (min-width: 1500px) {
   .islot { width: 66px; height: 66px; }
@@ -3067,6 +3079,20 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
   /* Pushed to the foot of the column so Back and Begin sit level with the
      bottom of the stage rather than floating under the difficulty row. */
   .chargen-foot { align-self: end; margin-top: 0; }
+}
+
+/* A phone held sideways has 390px of height and the bag wants 380 of it before
+   the header. The pockets come down one step so the whole bag lands on the
+   screen, which is the point of the screen: you are looking for a thing in it.
+   The second half of the condition is the portrait phone the last block in this
+   file turns on its side, as everywhere else here. */
+@media (max-height: 440px),
+       (orientation: portrait) and (pointer: coarse) and (max-width: 440px) {
+  .islot { width: 34px; height: 34px; }
+  .islot img { width: 29px; height: 29px; }
+  .craft-out .islot { width: 42px; height: 42px; }
+  .craft-out .islot img { width: 36px; height: 36px; }
+  #screen-top { margin-bottom: 10px; }
 }
 
 ::-webkit-scrollbar { width: 9px; }

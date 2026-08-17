@@ -11236,9 +11236,8 @@ class Game {
   }
 
   _updateAudio(biomeId) {
-    // Listener rides the camera. On a sphere the up vector is the player's own
-    // local up — feeding world +Y here would swing the stereo image as you walk
-    // round the planet.
+    // Listener rides the camera. `player.up` is +Y everywhere now, and is read
+    // through the body rather than written out so there is one up in the file.
     const cam = this.camera;
     cam.getWorldDirection(_v1);
     _v2.copy(this.player.up);

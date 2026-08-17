@@ -17,56 +17,35 @@
 // crate is the marker; breaking it uncovers the prize.
 
 import { makeRng } from '../util/Noise.js';
-import {
-  F, D, R_MIN, COLUMNS, cidx, BIOME,
-} from './Constants.js';
-import {
-  colParts, centerDir, patchColumn, cellIndex, cellWrite,
-} from './Sphere.js';
+import { D, COLUMNS, BIOME } from './Constants.js';
+import { stepColumn } from './Layout.js';
 import { ID } from './Blocks.js';
 
 // ---------------------------------------------------------------------------
-// Local frames on a cubesphere
+// NOT WIRED UP. `WorldGen` does not import this file.
 // ---------------------------------------------------------------------------
-
-/**
- * A structure's footprint: the block of columns around a centre column, indexed
- * by signed (di, dj) offsets in the centre's own face frame.
- *
- * The obvious way to build this is repeated `colNeighbor`/`stepColumn`. It is
- * wrong for anything wider than a couple of columns near a cube edge, and the
- * failure is not a crash — it is a building that visibly bends. `colNeighbor`
- * answers in the *destination* column's face frame, so the moment a walk steps
- * over a seam the meaning of "+j" rotates by ninety degrees and the rest of the
- * row peels off sideways. A hall straddling a cube edge came out as two halves
- * at right angles to each other.
- *
- * So the patch is resolved the way the adjacency table itself is built: extend
- * the centre's face coordinates past +-1, which `faceDir` accepts and maps onto
- * the neighbouring face through the same tangent warp, then read the result
- * back with `dirToFace`. The local frame stays the centre's frame the whole way
- * across the seam, so nothing folds.
- *
- * It still does not survive the crossing cleanly. The centre's extended
- * coordinates and the neighbouring face's own coordinates are different
- * parameterisations of the same sphere, and they diverge with distance past
- * the edge: measured on a 35x35 patch, a footprint whose centre sits on a cube
- * edge collapses 68 of its 1 225 cells onto a column some other cell already
- * claimed — walls come out with holes in them and one side of the building is
- * a third narrower than the other. Eight columns in it is still 20 cells. So
- * `placeStructures` refuses any site whose footprint would leave its face, and
- * this mapping only ever has to be exact, which within one face it is.
- */
-const _parts = { f: 0, i: 0, j: 0 };
-
-/**
- * One column of a local patch, without building the whole patch.
- *
- * This lives in Sphere.js now: worldgen stamps tree canopies three and four
- * columns wide and was walking the grid to do it, which put a bite out of every
- * canopy near a seam. Two copies of a mapping this subtle is one too many.
- */
-const patchCol = patchColumn;
+//
+// The coordinate maths below is ported to the flat map and the file builds, but
+// nothing calls `placeStructures` and turning it back on is a separate job with
+// two real decisions in it:
+//
+//   - `GEN_VERSION`. Structures move ground, so re-enabling them changes terrain
+//     for a given seed and the stamp has to move with it. Nothing else in this
+//     conversion may bump it, so this file cannot be the thing that does.
+//   - Where they are allowed to stand. The cube rejected any site whose
+//     footprint would leave its face, because the local frame stopped being 1:1
+//     across a seam. That whole failure is gone - the map is flat and wraps, so
+//     a footprint is `stepColumn` and is exact anywhere - but two placement
+//     rules that rode on it are now unanswered: `kind.polar`, which put frozen
+//     structures near a sphere's poles and has no meaning on a map with no
+//     poles, and the dividers, which a footprint must not straddle or a ruin
+//     will be built through a world wall. `kind.polar` is read nowhere below and
+//     the catalogue entries carrying it are left as they are, so whoever wires
+//     this up decides what they meant on nine faces rather than inheriting a
+//     silent reinterpretation.
+//
+// Everything else - the catalogue, the builders, the loot - is untouched and
+// works in local (dx, dy, k) offsets, which the flat map supports directly.
 
 class Site {
   /**
@@ -82,11 +61,9 @@ class Site {
     this.n = rad * 2 + 1;
     this.cols = new Int32Array(this.n * this.n);
 
-    const p = colParts(col, _parts);
-    const f = p.f, pi = p.i, pj = p.j;
-    for (let di = -rad; di <= rad; di++) {
-      for (let dj = -rad; dj <= rad; dj++) {
-        this.cols[(di + rad) * this.n + (dj + rad)] = patchCol(f, pi, pj, di, dj);
+    for (let dx = -rad; dx <= rad; dx++) {
+      for (let dy = -rad; dy <= rad; dy++) {
+        this.cols[(dx + rad) * this.n + (dy + rad)] = stepColumn(col, dx, dy);
       }
     }
   }
@@ -106,21 +83,21 @@ class Site {
   get(di, dj, k) {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return ID.stone;
-    return this.blocks[cellIndex(c, k)];
+    return this.blocks[c * D + k];
   }
 
   set(di, dj, k, id) {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return;
-    this.blocks[cellWrite(c, k)] = id;
+    this.blocks[c * D + k] = id;
   }
 
   /** Write only where the cell is currently empty — for props over rubble. */
   setIfAir(di, dj, k, id) {
     const c = this.col(di, dj);
     if (c < 0 || k < 0 || k >= D) return;
-    const cur = this.blocks[cellIndex(c, k)];
-    if (cur === ID.air || cur === ID.water) this.blocks[cellWrite(c, k)] = id;
+    const cur = this.blocks[c * D + k];
+    if (cur === ID.air || cur === ID.water) this.blocks[c * D + k] = id;
   }
 
   /** Clear a vertical run to air. Inclusive of both ends. */
@@ -944,7 +921,7 @@ export function placeStructures(blocks, colHeight, colBiome, colSlope, seed) {
   // scan would put a hall's floor on top of a canopy.
   const groundK = new Int16Array(COLUMNS);
   for (let col = 0; col < COLUMNS; col++) {
-    groundK[col] = Math.max(0, Math.min(D - 1, Math.floor(colHeight[col] - R_MIN - 0.5)));
+    groundK[col] = Math.max(0, Math.min(D - 1, Math.floor(colHeight[col] - 0.5)));
   }
 
   // Two claim masks. A crypt's stairwell surfaces, so it claims both; a geode
@@ -952,8 +929,6 @@ export function placeStructures(blocks, colHeight, colBiome, colSlope, seed) {
   const claimSurf = new Uint8Array(COLUMNS);
   const claimDeep = new Uint8Array(COLUMNS);
   const counts = {};
-  const dir = [0, 0, 0];
-  const parts = { f: 0, i: 0, j: 0 };
 
   for (const kind of KINDS) {
     let placed = 0;
@@ -973,17 +948,8 @@ export function placeStructures(blocks, colHeight, colBiome, colSlope, seed) {
       if (claimSurf[col] && (!kind.deep || kind.name === 'crypt')) continue;
       if (claimDeep[col] && kind.deep) continue;
 
-      colParts(col, parts);
-      // Keep the whole footprint on one cube face. See the note on `Site`:
-      // across a seam the local frame stays unfolded but stops being 1:1, and
-      // a building loses cells out of its walls. Excluding a band `rad` wide
-      // along each face edge costs a third of the planet for the largest
-      // structures and nothing measurable in the counts — placement is
-      // rejection sampling with two thousand tries per structure.
-      if (parts.i < kind.rad || parts.i >= F - kind.rad
-        || parts.j < kind.rad || parts.j >= F - kind.rad) continue;
-      centerDir(parts.f, parts.i, parts.j, dir);
-      if (kind.polar && Math.abs(dir[1]) < kind.polar) continue;
+      // No face-edge band and no polar test. The first was a seam defence and
+      // there are no seams; the second wants a decision, see the header.
       if (kind.biomes && !kind.biomes.includes(bi)) continue;
       // Steep ground: a hall terraced into a cliff is a retaining wall, not a
       // ruin, and the levelling pass only reaches four blocks down.
@@ -997,10 +963,10 @@ export function placeStructures(blocks, colHeight, colBiome, colSlope, seed) {
       const mask = kind.deep ? claimDeep : claimSurf;
       let clash = false;
       for (let d = -cl; d <= cl && !clash; d += 4) {
-        if (mask[patchCol(parts.f, parts.i, parts.j, d, 0)]
-          || mask[patchCol(parts.f, parts.i, parts.j, 0, d)]
-          || mask[patchCol(parts.f, parts.i, parts.j, d, d)]
-          || mask[patchCol(parts.f, parts.i, parts.j, d, -d)]) clash = true;
+        if (mask[stepColumn(col, d, 0)]
+          || mask[stepColumn(col, 0, d)]
+          || mask[stepColumn(col, d, d)]
+          || mask[stepColumn(col, d, -d)]) clash = true;
       }
       if (clash) continue;
 
@@ -1008,9 +974,9 @@ export function placeStructures(blocks, colHeight, colBiome, colSlope, seed) {
       if (!kind.deep) {
         const step = Math.max(1, kind.rad >> 2);
         let lo = 99, hi = -99, wet = 0, n = 0;
-        for (let di = -kind.rad; di <= kind.rad; di += step) {
-          for (let dj = -kind.rad; dj <= kind.rad; dj += step) {
-            const c = patchCol(parts.f, parts.i, parts.j, di, dj);
+        for (let dx = -kind.rad; dx <= kind.rad; dx += step) {
+          for (let dy = -kind.rad; dy <= kind.rad; dy += step) {
+            const c = stepColumn(col, dx, dy);
             const gg = groundK[c];
             if (gg < lo) lo = gg;
             if (gg > hi) hi = gg;
@@ -1038,10 +1004,10 @@ export function placeStructures(blocks, colHeight, colBiome, colSlope, seed) {
       };
       if (!kind.build(site, ctx)) continue;
 
-      for (let di = -cl; di <= cl; di++) {
-        for (let dj = -cl; dj <= cl; dj++) {
-          if (di * di + dj * dj > cl * cl) continue;
-          const c = patchCol(parts.f, parts.i, parts.j, di, dj);
+      for (let dx = -cl; dx <= cl; dx++) {
+        for (let dy = -cl; dy <= cl; dy++) {
+          if (dx * dx + dy * dy > cl * cl) continue;
+          const c = stepColumn(col, dx, dy);
           mask[c] = 1;
           // A crypt breaks the surface, so it has to hold ground on both masks
           // or a ruin will be dropped straight on top of its stairwell.

@@ -21,9 +21,9 @@
 // rather than returning a number that reads as a finding.
 
 import { ITEMS, itemIdOf } from '../game/Items.js';
-import { colParts, stepColumn, cellCenterPos, colNeighbor } from '../world/Sphere.js';
+import { stepColumn, colNeighbor } from '../world/Layout.js';
 import { ID } from '../world/Blocks.js';
-import { F } from '../world/Constants.js';
+import { COLUMNS, colIndex } from '../world/Grid.js';
 
 class HarnessError extends Error {}
 
@@ -44,7 +44,7 @@ class Harness {
   /** The column the player is standing in. */
   get baseCol() {
     const c = this.g.player.cell;
-    return ((c.f * F + Math.floor(c.ci)) * F) + Math.floor(c.cj);
+    return colIndex(c.x, c.y);
   }
 
   /** Ground level under a column. */
@@ -53,22 +53,20 @@ class Harness {
   }
 
   /**
-   * Check the column adjacency graph over the whole planet.
+   * Check the column adjacency graph over the whole map.
    *
-   * This is not a sampled observation — it is every one of the 259,584 columns,
-   * and it takes about a second. Worth running after anything that touches
-   * Sphere.js, because the failures it catches are invisible in play: a body's
-   * nine-sample footprint quietly sampling eight cells reads as "the collision
-   * is a bit sticky near that ridge", if it is noticed at all.
-   *
-   * `cornersCollapsed` is expected to be non-zero and small. Only three cells
-   * meet at each of the cube's eight corners, so the fourth diagonal genuinely
-   * does not exist there and no implementation can conjure one.
+   * This is not a sampled observation — it is every one of the 1,557,504
+   * columns, and it takes a few seconds. It should now be boring, and that is
+   * the point of keeping it: the cube's graph had eight corners where only
+   * three cells met and a nine-sample footprint genuinely collapsed to eight,
+   * and every count below was written to tell that apart from a bug. A flat map
+   * that wraps has no such place, so `clean` means all zeros with nothing
+   * excused.
    */
   topology() {
-    const N = 6 * F * F;
+    const N = COLUMNS;
     const r = { columns: N, notReciprocal: 0, duplicateNeighbours: 0, outOfRange: 0,
-                footprintCollapsed: 0, cornersCollapsed: 0, offEdge: [] };
+                footprintCollapsed: 0 };
     for (let col = 0; col < N; col++) {
       const nb = [colNeighbor(col, 0), colNeighbor(col, 1), colNeighbor(col, 2), colNeighbor(col, 3)];
       if (nb.some((n) => n < 0 || n >= N)) r.outOfRange++;
@@ -79,16 +77,11 @@ class Harness {
         if (!back.includes(col)) r.notReciprocal++;
       }
       const nine = new Set();
-      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) nine.add(stepColumn(col, di, dj));
-      if (nine.size === 9) continue;
-      r.footprintCollapsed++;
-      const p = colParts(col);
-      const atCorner = (p.i === 0 || p.i === F - 1) && (p.j === 0 || p.j === F - 1);
-      if (atCorner) r.cornersCollapsed++;
-      else if (r.offEdge.length < 8) r.offEdge.push(`f${p.f} ${p.i},${p.j}`);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) nine.add(stepColumn(col, dx, dy));
+      if (nine.size !== 9) r.footprintCollapsed++;
     }
     r.clean = r.notReciprocal === 0 && r.duplicateNeighbours === 0 && r.outOfRange === 0
-      && r.footprintCollapsed === r.cornersCollapsed;
+      && r.footprintCollapsed === 0;
     return r;
   }
 
@@ -234,21 +227,16 @@ class Harness {
     const base = this.baseCol;
     const k = this.surfaceOf(base);
     const edits = [];
-    for (let di = -radius; di <= radius; di++) {
-      for (let dj = -radius; dj <= radius; dj++) {
-        const col = stepColumn(base, di, dj);
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        const col = stepColumn(base, dx, dy);
         edits.push({ col, k, id: floor });
         for (let dk = 1; dk <= clearHeight; dk++) edits.push({ col, k: k + dk, id: 0 });
       }
     }
     g._applyEdits(edits);
     await sleep(900);
-    const parts = colParts(base);
-    const p = g.player;
-    p.cell.f = parts.f; p.cell.ci = parts.i + 0.5; p.cell.cj = parts.j + 0.5;
-    p.cell.ck = k + 1.05;
-    p.vel.i = 0; p.vel.j = 0; p.vel.k = 0;
-    p._sync();
+    g.player.spawnAtColumn(base, k);
     await sleep(400);
     return { col: base, k };
   }
@@ -269,13 +257,13 @@ class Harness {
    * the game's own spawner can be far outside aggro range. Either way you get
    * a mob that was never going to do the thing you are about to measure.
    */
-  async spawnAt(type, cells, { dj = 0, requireAggro = true } = {}) {
+  async spawnAt(type, cells, { dy = 0, requireAggro = true } = {}) {
     const g = this.g;
     const base = this.baseCol;
     const k = this.surfaceOf(base);
     let mob = null;
     for (let n = 0; n < 12 && !mob; n++) {
-      mob = g.mobs.spawn(type, stepColumn(base, cells, dj + (n % 3) - 1), k);
+      mob = g.mobs.spawn(type, stepColumn(base, cells, dy + (n % 3) - 1), k);
     }
     if (!mob) throw new HarnessError(`could not place a ${type} ${cells} cells out`);
     await sleep(400);

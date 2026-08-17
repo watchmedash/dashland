@@ -442,6 +442,28 @@ const MAX_MONSTERS = 13;
  * gated on fairness - you can always leave.
  */
 const MAX_MONSTERS_HOSTILE_FACE = 24;
+/**
+ * How far out a monster may be placed on one of those faces.
+ *
+ * The cap is not what was keeping the cinderlands empty-looking, and neither
+ * was the placement. Measured on seed 4242, standing on Pyre: `_findSpawnColumn`
+ * returned a spot on 3000 of 3000 calls (4044 draws, rejected 442 on ground,
+ * 589 submerged, 13 on range, nothing else), the cap filled to 24 inside a
+ * hundred seconds, and `_spawnMonster` refused nothing at all. What the player
+ * gets is the DENSITY: `spawnDist` fills the 20..120 ring evenly by area, so
+ * 24 bodies over 14,000 units² of ground is one per 580, and walking a minute
+ * across the face with all 24 alive left the nearest one a median 43.5 units
+ * away, nothing within 30 for 63% of the seconds and nothing within 45 for
+ * 47%. On the four ordinary faces that is fine - it is daylight and the ring
+ * is full of wildlife you can see across it. Pyre has no daylight, no wildlife
+ * and a monster's aggro range is 13, so everything past a torch is a body the
+ * player will never learn is there.
+ *
+ * So the same 24 are given a smaller ring rather than more of them: 3.1x the
+ * density, on the one face where the population IS the reason to go. The cap,
+ * the roll, the aggro ranges and the four ordinary faces are all untouched.
+ */
+const MONSTER_FAR_HOSTILE_FACE = 70;
 
 /**
  * How many magma slimes of any size may be abroad at once.
@@ -4646,8 +4668,13 @@ export class Mobs {
     return col;
   }
 
-  /** Grass column with headroom, or null. */
-  _findSpawnColumn(nearCol, playerPos) {
+  /**
+   * Grass column with headroom, or null.
+   *
+   * `far` is the outer edge of the ring and defaults to the horizon every other
+   * caller wants. Only the monster path passes one - see MONSTER_FAR_HOSTILE_FACE.
+   */
+  _findSpawnColumn(nearCol, playerPos, far = this.spawnFar) {
     const p = this.planet;
     for (let tries = 0; tries < 40; tries++) {
       // Without a player to keep clear of, this is world start.
@@ -4661,8 +4688,8 @@ export class Mobs {
       // of the session: 24% of it used to land inside twenty units of where
       // they woke up, and that clearing is where they then build.
       const col = this._walkTo(nearCol, playerPos
-        ? spawnDist(SPAWN_MIN_DIST, this.spawnFar)
-        : spawnDist(SEED_NEAR, this.spawnFar));
+        ? spawnDist(SPAWN_MIN_DIST, far)
+        : spawnDist(SEED_NEAR, far));
       const k = p.surfaceK(col);
       if (k < 0 || k > D - 6) continue;
       const surf = p.at(col, k);
@@ -4678,7 +4705,7 @@ export class Mobs {
         const { f, i, j } = colParts(col);
         cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
         const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
-        if (d < SPAWN_MIN_DIST || d > this.spawnFar) continue;
+        if (d < SPAWN_MIN_DIST || d > far) continue;
       }
       return { col, k };
     }
@@ -5260,6 +5287,12 @@ export class Mobs {
   _monsterCap(col) {
     return FACE_ROLE[(col / (F * F)) | 0] === FACE_NORMAL
       ? MAX_MONSTERS : MAX_MONSTERS_HOSTILE_FACE;
+  }
+
+  /** ...and the ring that cap is spread over. See MONSTER_FAR_HOSTILE_FACE. */
+  _monsterFar(col) {
+    return FACE_ROLE[(col / (F * F)) | 0] === FACE_NORMAL
+      ? this.spawnFar : Math.min(this.spawnFar, MONSTER_FAR_HOSTILE_FACE);
   }
 
   /**
@@ -10184,7 +10217,7 @@ export class Mobs {
       // where this belongs.
       if (!this.spawnGrace && this._countMonsters() < this._monsterCap(playerCol)
           && Math.random() < MONSTER_CHANCE) {
-        const spot = this._findSpawnColumn(playerCol, player.position);
+        const spot = this._findSpawnColumn(playerCol, player.position, this._monsterFar(playerCol));
         if (spot) this._spawnMonster(spot.col, spot.k);
       }
       // The stalker. One at a time, on his own clock, and rolled against a

@@ -1,0 +1,9 @@
+{
+  "appId": "com.watchmedash.dashland",
+  "appName": "Mojazer",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  }
+}

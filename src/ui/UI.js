@@ -832,7 +832,8 @@ export class UI {
     $('mm-new').onclick = () => this.openSlots('new');
     $('mm-settings').onclick = () => this.openSettings();
     $('mm-controls').onclick = () => this.openControls();
-    $('mm-achievements').onclick = () => this.openAchievements();
+    // No Achievements entry here, unlike the pause menu: the record belongs to
+    // a world now, and at the menu there is no world to show one for.
     document.querySelector('[data-close-slots]').onclick = () => this.closeSlots();
 
     // The id first, so today's `beginWorld(id)` is untouched, and the whole

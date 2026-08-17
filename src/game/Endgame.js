@@ -31,10 +31,10 @@
 //   held count only ever goes up. A lifetime counter would make all of that
 //   care pointless.
 //
-//   Nothing else in this game keeps a per-world lifetime tally. `game.stats` is
-//   three counters for the slot summary and `Achievements.js` is explicitly per
-//   *player* rather than per planet. A new number in the save that only this
-//   feature reads would be a fourth kind of progress record.
+//   Nothing else in this game keeps a running tally of what has been *spent*.
+//   `game.stats` is three counters for the slot summary and `Achievements.js`
+//   counts what was found, never what was used up. A new number in the save
+//   that only this feature reads would be a fourth kind of progress record.
 //
 // Held is also the only version a player can check: the answer to "how far am I
 // through this" is the stack in the bag. Once the door has been opened it stays

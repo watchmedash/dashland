@@ -1744,10 +1744,9 @@ class Game {
     /**
      * What you have done, as opposed to what you have become.
      *
-     * Made once and never replaced. The record is the *player's*, not the
-     * planet's — it lives in localStorage beside the settings rather than in the
-     * world payload — so a new planet inherits it and `_newWorld` below only
-     * rebases the counters. See the head of `Achievements.js`.
+     * Made once and never replaced, but the record inside it is the planet's:
+     * it rides in the world payload, `_resetWorld` empties it and the load path
+     * fills it. See the head of `Achievements.js`.
      */
     this.achievements = new Achievements();
     /** Seconds until the next `skills.observe`. See `_tickSkills`. */
@@ -2296,12 +2295,9 @@ class Game {
     window.addEventListener('resize', () => this._resize());
     window.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('beforeunload', () => {
+      // The marks ride in that payload now, so this is the only thing that
+      // writes them and there is nothing separate left to flush.
       if (this.state === 'playing' || this.state === 'paused') this.saveGame(false);
-      // Unconditionally, and unlike the world write above it this one lands:
-      // the record is a synchronous localStorage string rather than seconds of
-      // IndexedDB. See `Achievements.flush` for what the ten-second flush timer
-      // was costing.
-      this.achievements.flush();
     });
     // Click the world to get the mouse back. This is the *only* way a pointer
     // lock the browser refused can ever be recovered, which is why it has to
@@ -2353,11 +2349,8 @@ class Game {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         this.audio.ctx?.suspend?.();
+        // Which carries the marks with it, now that they are part of the world.
         this._saveOnHide();
-        // Outside `_saveOnHide`, which is gated on being in a world and rate
-        // limited to one write in fifteen seconds. Neither applies to a 2 KB
-        // string, and the marks are earned on a screen as well as in a world.
-        this.achievements.flush();
       }
       else this.audio.resume();
     });
@@ -2771,11 +2764,13 @@ class Game {
     this.inventory.onChange = () => this.ui.refresh();
     this.stats = { mined: 0, placed: 0, crafted: 0 };
     this.playtime = 0;
-    // The marks survive the planet; only the baseline the deltas are measured
-    // from is thrown away. Without this the first scan on a fresh world would
-    // read `mined` falling from thousands to zero, or a load would read it
-    // jumping to thousands, and neither is a thing the player just did.
-    this.achievements.rebase();
+    // The marks belong to the planet, so a new one has none of them. `clear`
+    // also drops the baseline the counter deltas are measured from, without
+    // which the first scan on a fresh world would read `mined` falling from
+    // thousands to zero, or a load would read it jumping to thousands, and
+    // neither is a thing the player just did. `continueGame` fills the record
+    // back in from the save afterwards.
+    this.achievements.clear();
     // A new person, not just a new planet. `fromJSON(null)` is the module's own
     // "nothing spent, nothing marked, nothing converted" — the same state a
     // fresh `Skills` is in — and going through it rather than through `reset()`
@@ -3529,9 +3524,22 @@ class Game {
       this.seasons.fromJSON(save.season);
       this._pushSeason();
       this.stats = { ...this.stats, ...(save.stats || {}) };
-      // Same reason as in `_newWorld`: the counters that follow belong to this
-      // planet, and the lifetime totals must not swallow them whole.
-      this.achievements.rebase();
+      /*
+       * This planet's marks, and the one place the old shared record is still
+       * read.
+       *
+       * A world saved before the record moved into the payload has no
+       * `achievements` key, and for those `legacy()` hands back whatever the
+       * browser-wide record held so that a planet in progress keeps what it
+       * earned. It is a copy: from the first save onwards this world owns its
+       * own, and every other world gets the same one-time copy on its first
+       * open and then diverges. A world made after this change never sees it.
+       *
+       * After `stats` and `playtime`, and it has to be: `fromJSON` drops the
+       * baseline the counter deltas are read against, so the first scan after a
+       * load is a no-op rather than a jump of nine thousand blocks.
+       */
+      this.achievements.fromJSON(save.achievements ?? Achievements.legacy());
       // After `stats`, `playtime` and the inventory, and it has to be: the tree
       // counts the first two and converts the armour in the third. See the
       // ordering note on `_loadSkills`. `player.health` was assigned from the
@@ -3768,7 +3776,7 @@ class Game {
     // On the same timer and for the same reason it is on one: walking forty
     // slots and six counters once a second is free, and once a frame is not.
     // Before the early return below, which only concerns the skill tree.
-    this.achievements.scan(this, 1);
+    this.achievements.scan(this);
     if (!this.skills.observe(this.stats, this.playtime)) return;
     // Earning a point is the only progression event in the game and it was
     // announced by a toast and nothing else. `levelUp` is the only fanfare
@@ -4463,6 +4471,11 @@ class Game {
       // has to be true of whoever loads it. `Save.write` copies it into the slot
       // summary so the menu can say so without opening the world.
       difficulty: this.difficulty,
+      // What has been done on this planet. Beside `stats` for the same reason
+      // and under the same convention as `endgame` above: absent in every world
+      // written before the record moved out of localStorage, and defaulted on
+      // the way back in, so no version bump goes with it.
+      achievements: this.achievements.toJSON(),
       loadout: this.loadout,
       // Beside difficulty and for the same reason: what dying costs is a rule of
       // this planet and has to be true of whoever loads it. Not inside `player`,

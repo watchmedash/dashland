@@ -1,5 +1,4 @@
-// Achievements: a record of what a player has done, kept for the player rather
-// than for the planet.
+// Achievements: a record of what has been done on this planet.
 //
 // --- what this file will not do ---------------------------------------------
 //
@@ -9,24 +8,25 @@
 // beside the one that was deliberately made hard. A mark is a record of
 // something you already did. That is the whole contract.
 //
-// --- per player, not per world ----------------------------------------------
+// --- per world, not per player ----------------------------------------------
 //
-// Every set below is stored in localStorage under one key, beside the settings
-// and the slot index, and *not* in the world payload. The argument is the fish:
-// there are fifteen species, the rare end of the table is a long throw into
-// deep salt water, and a per-world record would throw all fifteen away the
-// moment you started a new planet. The same goes twice over for the item set,
-// which is three hundred and seventy-two things. A save slot is a place; a
-// record of what you have caught, cooked and dug up is a fact about the person
-// holding the mouse, and it should follow them onto the next planet.
+// The record is written into the world payload, beside `stats` and `endgame`,
+// and read back out of it. Every slot keeps its own marks and its own census, a
+// new planet starts with none of either, and nothing crosses between slots.
 //
-// Nothing in `Save.js` moves for this. The world payload is untouched, the slot
-// index is untouched, and `repairIndex` has nothing new to recover — this is a
-// third key in localStorage that neither of them reads.
+// It used to be the other way round: one localStorage key for the whole
+// browser. See `legacy`, which is the only thing left of that and exists so
+// that a planet begun under the old rule keeps what it earned.
 //
-// The counters are the awkward half of that decision and are handled in `scan`:
-// `game.stats` counts *this planet's* blocks, so the lifetime totals here are
-// accumulated from the per-frame delta rather than copied. See `rebase`.
+// `Save.js` needs nothing new for this. The record is a key in the world
+// payload like any other, absent on older saves and defaulted when it is — the
+// same convention `endgame` and `deathRule` are read under, and the reason no
+// version is bumped for it.
+//
+// The counters are still accumulated rather than copied, and now that is only a
+// safety rail: `game.stats` counts this planet, and so does this, but a load
+// hands `stats` back all at once and the delta must not read that as work. See
+// `rebase`.
 //
 // --- everything here is derived ---------------------------------------------
 //
@@ -41,7 +41,8 @@ import { BLOCKS } from '../world/Blocks.js';
 import { RECIPES, SMELTING } from './Recipes.js';
 import { canBuy } from './Trade.js';
 
-const KEY = 'dashcraft.achievements.v1';
+/** Where the one shared record used to live. Read once per old world, never written. */
+const LEGACY_KEY = 'dashcraft.achievements.v1';
 
 /**
  * Every seam in the ground, and the same test the drop rule uses.
@@ -247,31 +248,44 @@ const blank = () => ({
 });
 
 /**
- * The player's record.
+ * This planet's record.
  *
- * One instance, made at boot and never replaced — starting a new planet does
- * not start a new record, which is the entire point of the per-player decision
- * at the head of this file. `rebase` is what a world change costs.
+ * One instance, made at boot and never replaced, but its contents belong to
+ * whatever world is loaded: `clear` for a new planet, `fromJSON` for a saved
+ * one, `toJSON` on the way into the save file.
  */
 export class Achievements {
   constructor() {
-    this.rec = Achievements.load();
-    /** Last seen values of the per-world counters, for the delta. */
+    this.rec = blank();
+    /** Last seen values of the counters, for the delta. */
     this._prev = null;
-    this._ore = new Set(this.rec.ore);
-    this._item = new Set(this.rec.item);
-    this._dirty = false;
-    /** Seconds until the next flush. Writing 2 KB of JSON per frame is not free. */
-    this._flush = 0;
+    this._ore = new Set();
+    this._item = new Set();
   }
 
-  static load() {
-    let raw = null;
-    try { raw = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { raw = null; }
-    // Every field is defaulted rather than trusted. This is a localStorage
-    // string and localStorage strings can be anything; a record that has been
-    // hand-edited to nonsense should cost the player their marks, not their
-    // ability to open the screen.
+  /**
+   * The record the browser kept back when there was one for all ten slots, or
+   * null if there never was.
+   *
+   * Handed to `fromJSON` by the load path for a world saved before the record
+   * moved into the payload — see the head of this file. Nothing writes this key
+   * any more and nothing deletes it: an old world adopts a copy on its first
+   * open and owns it from then on, so the key is read at most once per world
+   * and a failed save simply means it is read again next time. Deleting it
+   * would be the one way to leave a half-migrated player with nothing.
+   */
+  static legacy() {
+    try { return JSON.parse(localStorage.getItem(LEGACY_KEY) || 'null'); } catch { return null; }
+  }
+
+  /**
+   * Adopt a saved record, or start empty if there is none.
+   *
+   * Every field is defaulted rather than trusted. A save file can be anything;
+   * a record that has been hand-edited to nonsense should cost the player their
+   * marks, not their ability to open the screen.
+   */
+  fromJSON(raw) {
     const rec = blank();
     if (raw && typeof raw === 'object') {
       if (Array.isArray(raw.ore)) rec.ore = raw.ore.filter(Number.isInteger);
@@ -279,49 +293,35 @@ export class Achievements {
       for (const k of Object.keys(rec.n)) rec.n[k] = Math.max(0, raw.n?.[k] | 0);
       for (const k of Object.keys(rec.f)) rec.f[k] = raw.f?.[k] ? 1 : 0;
     }
-    return rec;
-  }
-
-  save() {
-    this.rec.ore = [...this._ore];
-    this.rec.item = [...this._item];
-    try { localStorage.setItem(KEY, JSON.stringify(this.rec)); } catch { /* quota, private mode */ }
-    this._dirty = false;
-  }
-
-  /**
-   * Write the record now, whatever the flush timer says.
-   *
-   * The timer is a rate limit on writing 2 KB of JSON, and a rate limit is a
-   * window in which the last thing you did is only in memory. Measured: clear
-   * the record, mine a seam through `mined`, run one `scan`, and the tab goes
-   * away with `_flush` at 7 seconds — the set held the seam and localStorage
-   * held an empty array. Up to ten seconds of marks died with the page every
-   * time, and the marks are the one thing here that is not in the world file.
-   *
-   * Cheap enough to call on the way out of anything: `save` is a synchronous
-   * `localStorage.setItem`, which is the reason it can run in `beforeunload` at
-   * all while the world write cannot.
-   */
-  flush() { if (this._dirty) this.save(); }
-
-  /** Throw the whole record away. The settings screen's reset button. */
-  clear() {
-    this.rec = blank();
-    this._ore = new Set(); this._item = new Set();
+    this.rec = rec;
+    this._ore = new Set(rec.ore);
+    this._item = new Set(rec.item);
     this._prev = null;
-    this.save();
   }
 
   /**
-   * Forget the per-world counters, without forgetting the lifetime totals.
+   * The record, for the world payload.
+   *
+   * A copy rather than the live object, because the payload is written
+   * asynchronously and the sets keep filling while it is in flight.
+   */
+  toJSON() {
+    return { v: 1, ore: [...this._ore], item: [...this._item], n: { ...this.rec.n }, f: { ...this.rec.f } };
+  }
+
+  /** Throw the whole record away. A new planet has none of it. */
+  clear() { this.fromJSON(null); }
+
+  /**
+   * Forget the baseline the counters are diffed against, without forgetting the
+   * totals.
    *
    * Called whenever the world under the player changes — a new planet, a load,
-   * a return to the menu. `game.stats.mined` counts *this* planet, so a load
-   * that drops it from 9,000 to 0 must not be read as negative progress, and a
-   * load that raises it to 9,000 must not be read as nine thousand blocks
-   * broken in one frame. Clearing the baseline makes the next scan a no-op and
-   * the one after it an honest delta.
+   * a return to the menu. `game.stats.mined` is handed back whole by a load, so
+   * a jump from 0 to 9,000 must not be read as nine thousand blocks broken in
+   * one frame, and a drop the other way must not be read as negative progress.
+   * Clearing the baseline makes the next scan a no-op and the one after it an
+   * honest delta.
    */
   rebase() { this._prev = null; }
 
@@ -329,7 +329,6 @@ export class Achievements {
   mined(blockId) {
     if (!ORE_BLOCKS.includes(blockId) || this._ore.has(blockId)) return;
     this._ore.add(blockId);
-    this._dirty = true;
   }
 
   /**
@@ -341,16 +340,15 @@ export class Achievements {
    * craft, a crate, the cursor mid-drag — because a hook is a place to forget
    * and this cannot be. Forty-odd slots is nothing on a one-second timer.
    *
-   * @param {number} dt seconds since the last call, for the flush timer
    */
-  scan(game, dt = 1) {
+  scan(game) {
     if (!game) return;
     const inv = game.inventory;
     if (inv) {
       const seen = (s) => {
         if (!s || !s.item || this._item.has(s.item)) return;
         if (!OBTAINABLE.has(s.item)) return;   // a cheat, a legacy piece, a stray
-        this._item.add(s.item); this._dirty = true;
+        this._item.add(s.item);
       };
       for (const s of inv.slots) seen(s);
       for (const s of inv.craft) seen(s);
@@ -365,24 +363,18 @@ export class Achievements {
     if (this._prev) {
       for (const k of COUNTERS) {
         const d = now[k] - this._prev[k];
-        if (d > 0) { this.rec.n[k] += d; this._dirty = true; }
+        if (d > 0) this.rec.n[k] += d;
       }
       const dp = now.play - this._prev.play;
-      if (dp > 0) { this.rec.n.play += dp; this._dirty = true; }
+      if (dp > 0) this.rec.n.play += dp;
     }
     this._prev = now;
 
-    if (game.coreFound && !this.rec.f.core) { this.rec.f.core = 1; this._dirty = true; }
-    // Per player rather than per planet, like every other mark on this page: a
-    // world is finished once, and finishing one is a fact about the person who
-    // did it. See the head of this file.
-    if (game.endgame?.won && !this.rec.f.endgame) { this.rec.f.endgame = 1; this._dirty = true; }
-    if ((game._nightOut ?? 0) >= NIGHT_SECONDS && !this.rec.f.night) {
-      this.rec.f.night = 1; this._dirty = true;
-    }
-
-    this._flush -= dt;
-    if (this._dirty && this._flush <= 0) { this._flush = 10; this.save(); }
+    if (game.coreFound) this.rec.f.core = 1;
+    // This planet's sixteen. The flag was already per world by construction —
+    // `endgame` is world state — and now the mark it sets is too.
+    if (game.endgame?.won) this.rec.f.endgame = 1;
+    if ((game._nightOut ?? 0) >= NIGHT_SECONDS) this.rec.f.night = 1;
   }
 
   /** Where one mark stands. */

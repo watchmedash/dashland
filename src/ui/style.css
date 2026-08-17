@@ -3459,6 +3459,16 @@ body.touch .slot.tc-drop {
     0 0 12px -2px rgba(207, 70, 48, .8);
 }
 
+/* The cell or the recipe held long enough to mean "all of it". Brass, not the
+   drop's red: this one moves a stack rather than throwing it away, and brass is
+   what every other "taken" state in the panels is made of. It lasts 180ms and
+   is gone - the grid repainting behind it is the real answer, and this only has
+   to cover the moment before that lands. */
+body.touch .islot.lp,
+body.touch .recipe-row.lp {
+  box-shadow: 0 0 0 2px #e2a052, 0 0 14px -2px rgba(226, 160, 82, .85);
+}
+
 /* ── the Controls screen swaps sides ───────────────────── */
 /* The keyboard rows are hidden rather than removed, and the touch block is
    revealed, so one screen serves both and neither is a fork of the other. The

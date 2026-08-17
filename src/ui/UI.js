@@ -25,6 +25,14 @@ import { normalizeDifficulty, EXTREME } from '../game/NewGame.js';
 // between the two and stays here.
 export const BIOME_NAMES = ['Ocean', 'Shore', 'Plains', 'Woodland', 'Taiga', 'Desert', 'Savanna', 'Tundra', 'Snowfield', 'Highlands', 'Meadow', 'Badlands', 'Cinderlands'];
 
+/** How long a thumb has to sit still on a slot or a recipe before the press
+ *  means "all of it". The same 420ms and the same 16px of slop `TouchControls`
+ *  gives the hotbar drop and the bag, deliberately: a hold that lasted a
+ *  different length on each screen would not read as one gesture. Both numbers
+ *  are far enough from a tap, which is under 150ms and barely moves. */
+const HOLD_MS = 420;
+const HOLD_SLOP = 16;
+
 /**
  * Who the fifteen are, if `Character.js` has not said yet.
  *
@@ -468,6 +476,8 @@ export class UI {
     this._wired = new WeakMap();
     /** The slot a drag started from, while the pointer is still down. */
     this._drag = null;
+    /** The slot a thumb is holding down, while the long-press is still open. */
+    this._hold = null;
     window.addEventListener('pointerup', (e) => this._endDrag(e));
     window.addEventListener('pointercancel', () => { this._drag = null; });
 
@@ -1731,26 +1741,137 @@ export class UI {
    */
   _wireSlot(el, getSlot, opts = {}) {
     this._wired.set(el, { getSlot, opts });
-    el.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
+    /**
+     * One press, three meanings, and the same three on both platforms.
+     *
+     *   plain  the whole stack, or put down what you are carrying
+     *   split  half of it (a right button, or a thumb dragged off the slot)
+     *   bulk   all of it, somewhere else (Shift, or a thumb held still)
+     *
+     * A mouse says which at the moment it goes down. A thumb cannot: the three
+     * gestures are only told apart by what the finger does *next*, so on touch
+     * nothing happens on `pointerdown` at all and the decision is taken on the
+     * move or on the release. The cost is that a tap acts on lift rather than
+     * on press, which at well under 150ms is not perceptible — the same trade
+     * `_tapHoldBtn` makes for the bag button.
+     */
+    const act = (mod) => {
       const carried = !this.game.inventory.cursor.empty;
-      if (opts.output) this._takeOutput(e.button === 2 || e.shiftKey);
-      // Shift-click moves a whole stack between the hotbar and storage without
-      // picking it up — the standard way players bulk-move items.
-      else if (e.shiftKey && opts.index !== undefined
-               && this.game.inventory.cursor.empty) this._shiftMove(opts.index);
-      else if (e.shiftKey && opts.container
-               && this.game.inventory.cursor.empty) this._shiftTake(getSlot());
-      else this._slotClick(getSlot(), e.button === 2, opts.accepts);
+      this._slotAction(getSlot, opts, mod);
       // A press that filled an empty hand is the start of a possible drag. A
       // press that put something down is not, or letting go over the next slot
       // would pick it straight back up.
       this._drag = (!carried && !this.game.inventory.cursor.empty)
-        ? { el, right: e.button === 2 } : null;
+        ? { el, right: mod === 'split' } : null;
+    };
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (e.pointerType === 'touch') { this._armHold(el, opts, act, e); return; }
+      act(e.shiftKey ? 'bulk' : e.button === 2 ? 'split' : 'plain');
     });
+    // Touch only, and per-element rather than on the window: a touch pointer is
+    // implicitly captured by whatever it went down on, so these keep firing
+    // once the finger has slid off the cell, which is most of a drag.
+    el.addEventListener('pointermove', (e) => {
+      const h = this._hold;
+      if (!h || h.el !== el || h.done) return;
+      if (Math.hypot(e.clientX - h.x, e.clientY - h.y) <= HOLD_SLOP) return;
+      // Past a finger's width the press is a drag, and a drag out of a slot
+      // takes half. Not on the output cell: there a "split" would have to mean
+      // craft-one-and-carry, and the gesture that already means that is a tap.
+      this._clearHold(true);
+      if (!opts.output) act('split');
+    });
+    el.addEventListener('pointerup', () => {
+      const h = this._hold;
+      if (!h || h.el !== el) return;
+      const held = h.done;
+      this._clearHold();
+      if (!held) act('plain');
+    });
+    el.addEventListener('pointercancel', () => { if (this._hold?.el === el) this._clearHold(); });
     el.addEventListener('mouseenter', () => this._showTooltip(getSlot()));
     el.addEventListener('mouseleave', () => this._hideTooltip());
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /**
+   * Arm the long-press. There is no Shift on a phone, so a held slot is what
+   * stands in for it, at the same HOLD_MS the thumb layer already uses for the
+   * hotbar drop and the bag — one hold length across the game is what makes a
+   * hold read as a gesture rather than a per-widget quirk.
+   *
+   * It has to say when it has fired, because the thing it does is invisible
+   * until the grid repaints: a short buzz and a lit cell, which are the two
+   * signals every other hold in the game gives.
+   */
+  _armHold(el, opts, act, e) {
+    this._clearHold();
+    this._hold = {
+      el, x: e.clientX, y: e.clientY, done: false,
+      timer: setTimeout(() => {
+        this._hold.done = true;
+        el.classList.add('lp');
+        navigator.vibrate?.(12);
+        act('bulk');
+        setTimeout(() => el.classList.remove('lp'), 180);
+      }, HOLD_MS),
+    };
+  }
+
+  /** Drop the armed hold. `keep` leaves the record standing, marked spent, so
+   *  the release that follows a drag knows not to tap as well. */
+  _clearHold(keep = false) {
+    if (!this._hold) return;
+    clearTimeout(this._hold.timer);
+    if (keep) this._hold.done = true;
+    else this._hold = null;
+  }
+
+  /**
+   * A long-press on something that is otherwise driven by `click`.
+   *
+   * Its own closure rather than `this._hold`, because the two never overlap and
+   * the row needs one thing the slot does not: the browser's click still
+   * arrives after the finger lifts, and left alone it would craft a sixty-fifth
+   * of whatever the hold just made. Swallowed in the capture phase, once.
+   */
+  _holdRow(el, fire) {
+    let timer = null, sx = 0, sy = 0, fired = false;
+    const stop = () => { clearTimeout(timer); timer = null; };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch') return;
+      fired = false; sx = e.clientX; sy = e.clientY;
+      timer = setTimeout(() => {
+        fired = true; timer = null;
+        el.classList.add('lp');
+        navigator.vibrate?.(12);
+        fire();
+        setTimeout(() => el.classList.remove('lp'), 180);
+      }, HOLD_MS);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > HOLD_SLOP) stop();
+    });
+    el.addEventListener('pointerup', stop);
+    el.addEventListener('pointercancel', () => { stop(); fired = false; });
+    el.addEventListener('click', (e) => {
+      if (!fired) return;
+      fired = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
+
+  /** What a press on a slot does, once its meaning is known. */
+  _slotAction(getSlot, opts, mod) {
+    if (opts.output) { this._takeOutput(mod !== 'plain'); return; }
+    // Both bulk moves want an empty hand: with a stack on the cursor the press
+    // means "put this down", which is what the last line does.
+    const bulk = mod === 'bulk' && this.game.inventory.cursor.empty;
+    if (bulk && opts.index !== undefined) { this._shiftMove(opts.index); return; }
+    if (bulk && opts.container) { this._shiftTake(getSlot()); return; }
+    this._slotClick(getSlot(), mod === 'split', opts.accepts);
   }
 
   /**
@@ -2004,8 +2125,7 @@ export class UI {
       }
 
       row.append(img, name, yield_, costEl);
-      row.addEventListener('click', (e) => {
-        const times = e.shiftKey ? 64 : 1;
+      const craft = (times) => {
         const made = craftFromInventory(this.game.inventory, recipe, times);
         if (made) {
           this.game.audio.craft();
@@ -2014,7 +2134,12 @@ export class UI {
           this.game.audio.deny();
         }
         this.refresh();
-      });
+      };
+      row.addEventListener('click', (e) => craft(e.shiftKey ? 64 : 1));
+      // The row is the other half of the bulk craft, and the one a thumb is
+      // likelier to find: the output cell only exists once the grid is laid
+      // out, while this list is the whole of crafting on a phone.
+      this._holdRow(row, () => craft(64));
       list.appendChild(row);
     }
 

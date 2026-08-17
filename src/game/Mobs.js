@@ -1,6 +1,14 @@
 // Wildlife, and the one thing on the planet that wants you dead. Mobs live in
-// cubesphere cell space like the player, so they walk upright anywhere on the
-// surface.
+// the flat map's cell space like the player: `mob.cell` is `{ x, y, k }` with x
+// and y wrapping and k a layer, `mob.position` is the world point that names,
+// and up is +Y for every body on the map.
+//
+// THE AXIS CONVENTION is Grid's and is not restated here beyond the one line
+// that matters to this file: a heading is an angle in the world's XZ plane,
+// `cos(heading)` is the step on map x and `sin(heading)` the step on map y.
+// Every distance between two bodies goes through `Wrap.js`, never through
+// `distanceTo`, because the map wraps and a raw difference is a full turn wrong
+// half the time.
 //
 // Presentation is entirely GLB: each species is a Kenney model carrying its own
 // animation clips, and this file picks which clip to play. It used to build
@@ -15,13 +23,12 @@
 
 import * as THREE from 'three';
 import {
-  F, D, GRAVITY, R_SEA, R_MIN, BIOME, cidx, CHUNK_LOAD_DIST, FACE_ROLE, FACE_NORMAL, FACE_CINDER,
-  FACE_POLAR,
+  D, GRAVITY, BIOME, CHUNK_LOAD_DIST, FACE_ROLE, FACE_NORMAL,
+  FACE_RIME, FACE_TEMPEST, FACE_VERDANT, FACE_PYRE,
 } from '../world/Constants.js';
-import {
-  cellToWorld, tangentFrame, normalizeCell, colParts, colNeighbor, stepColumn, walkColumns,
-  centerDir,
-} from '../world/Sphere.js';
+import { W, wrap, delta, dist2, faceAt, colIndex } from '../world/Grid.js';
+import { colParts, colNeighbor, stepColumn, colX, colY } from '../world/Layout.js';
+import { relTo, wrapDist, wrapDist2 } from './Wrap.js';
 import {
   ID, IS_SHAPED, IS_LEAF, IS_TREE, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
   isPassable, CONTACT_HURT, SINK,
@@ -353,15 +360,12 @@ const FLIER_PER_TICK = 6;
 // arrive in numbers or it stops being a threat at all. More of them, each one
 // individually escapable, is a night you can walk home through if you keep
 // moving — and cannot stand still in.
-/**
- * How far inside its own face a mob is held, in columns.
- *
- * The owner's rule: only the player crosses a seam, not an animal, not a husk,
- * not a monster. Three rather than zero so the turn happens on open ground -
- * clamping hard against the last column leaves a body jittering on the
- * boundary every frame the steering pushes it outward.
- */
-const FACE_BOUND = 3;
+/* FACE_BOUND is gone, and with it the clamp that produced the pile of bodies
+   along every cube border. The cross - faces 2, 4, 5, 6 and 8 - is one
+   continuous world and animals walk across its joins freely, which is the
+   owner's call; a sealed face needs no rule at all, because its divider is
+   solid rock and the ordinary collision already turns a body round. See
+   NINE-FACES.md section 5. */
 
 const MAX_HOSTILE_SURFACE = 8;
 /**
@@ -853,8 +857,24 @@ const PATH_PER_FRAME = 2;
 const PATH_MAX_DROP = MOB_STEP_DOWN;
 /** How many waypoints ahead a mob steers. See _pathBearing. */
 const PATH_LOOKAHEAD = 3;
-const _pp = { f: 0, i: 0, j: 0 };
-const _wp = { f: 0, i: 0, j: 0 };
+const _pp = { x: 0, y: 0 };
+const _wp = { x: 0, y: 0 };
+
+/** Which of the nine faces a column is on. */
+const faceOfCol = (col) => faceAt(colX(col), colY(col));
+
+/**
+ * The world point a body standing on top of cell (col, k) occupies.
+ *
+ * The cube spelled this `colParts` then `cellToWorld` then a hypot, in eleven
+ * places. One map, one line: map x is world X, map y is world Z, and a layer
+ * index IS the height.
+ */
+function colTop(col, k, out) {
+  const y = col % W;
+  out.x = (col - y) / W + 0.5; out.y = k + 1; out.z = y + 0.5;
+  return out;
+}
 
 /**
  * A binary min-heap keyed on score.
@@ -1063,16 +1083,16 @@ const TURN_MARGIN = 1.6;
  * whole population piled into the near third — one animal per 85 square units,
  * four times the density the MAX_WILDLIFE comment is written against.
  *
- * CELL_SIZE comes off the planet rather than being written down, so the ring
- * keeps its size in metres when F and R_SEA move; that is the whole reason it
- * is derived. WALK_YIELD is the measured efficiency of _walkOut: it holds a
- * heading, but it veers, so a step of one cell nets about 0.6 of a cell of
- * displacement. See the note on _walkOut for why the walk is not simply a
- * straight line — and for the earlier, worse version of this same bug.
+ * A cell is one unit across, everywhere, so the conversion that used to sit
+ * here is the identity. The cube's CELL_SIZE was the AVERAGE width of a
+ * gnomonic cell and was right in exactly one place on each face; on a flat map
+ * a column IS a unit of distance and the two units have stopped being two.
+ * WALK_YIELD is what remains: the measured efficiency of _walkOut, which holds
+ * a heading but veers, so a step of one cell nets about 0.6 of a cell of
+ * displacement.
  */
-const CELL_SIZE = (R_SEA * Math.PI / 2) / F;
 const WALK_YIELD = 0.6;
-const stepsFor = (units) => Math.max(1, Math.round(units / (CELL_SIZE * WALK_YIELD)));
+const stepsFor = (units) => Math.max(1, Math.round(units / WALK_YIELD));
 /* The far edge of the band a travelling spawn may land in was a const here.
    It is `this.spawnFar` now, because it moves with the horizon — see
    `horizonScale`. The 25 units of margin are unchanged and are what keeps a
@@ -1495,10 +1515,7 @@ const _lit = new THREE.Vector3();
 const _blockL = { r: 0, g: 0, b: 0 };
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
-const _p = [0, 0, 0];
-const _probe = { f: 0, ci: 0, cj: 0, ck: 0 };
-/** Two more of the same, for _walkTo's aim-measure-correct. */
-const _wa = [0, 0, 0], _wb = [0, 0, 0];
+const _p = { x: 0, y: 0, z: 0 };
 /** The stalker's own scratch: view-projection, the point it puts on screen, and
  * the marching head of the line-of-sight walk. */
 const _vpm = new THREE.Matrix4();
@@ -1986,7 +2003,7 @@ const pet = (file, o) => ({
   ...(o.hops ? { hops: true, hopImpulse: o.hopImpulse ?? 3.8 } : null),
   ...(o.cold ? { cold: true } : null),
   // "Cold" is a coat; "polar" is an address. A snowy MOUNTAIN top is cold, and
-  // it is not the Antarctic — see the note on POLAR_SIN_LAT.
+  // it is not the Antarctic — see `_isPolarColumn`.
   ...(o.polar ? { polar: true } : null),
   ...(o.aquatic ? { aquatic: true } : null),
   // Aquatic is "water is the only place I will go"; amphibious is "water is not
@@ -2357,7 +2374,7 @@ const SPECIES = {
     label: 'Penguin', h: 0.80, hp: 6, spd: 1.10, shy: 0.6, turn: 3.2, accel: 5.5,
     drops: [['poultry', 1, 1], ['feather', 1, 2], ['egg', 1, 1]], cold: true,
     // Not merely cold-blooded-proof: it has to be at the bottom (or top) of the
-    // world. See POLAR_SIN_LAT and _isPolarColumn.
+    // world. See `_isPolarColumn`.
     polar: true,
   }),
 
@@ -2859,6 +2876,22 @@ const SPECIES = {
    * the planet is finished. They never respawn and neither does anything they
    * kill.
    *
+   * ---- where they stand ----------------------------------------------------
+   *
+   * Four each on the four sealed faces, where the cube split them eight and
+   * eight over its two. `face` is a FACE_ROLE and the endgame turns it into a
+   * face number; the grouping is thematic and is the only thing that decides
+   * it:
+   *
+   *   Rime      Hoarfang, Palecowl, Thumpjaw, Rimewing - the white ones, and
+   *             nothing that burns or grows
+   *   Tempest   Wraithflame, Bonehelm, Voidspawn, and the Deepmaw, which is
+   *             `aquatic` and needs a face with a sea in it
+   *   Verdant   Croakmaw, Bramblehorn, Blightcrown, Emberthorn - everything
+   *             with roots, a frog and a fungus, none of which belongs on the
+   *             fire face whatever its name sounds like
+   *   Pyre      Ashlord, Slagbrute, Magmaw, Ashchief
+   *
    * ---- where the numbers come from -----------------------------------------
    *
    * Measured, not chosen. Every model in the Big set is on the same rig at the
@@ -2894,73 +2927,73 @@ const SPECIES = {
    * rather than from the length.
    */
   boss_frog: boss('frog', {
-    label: 'Croakmaw', face: FACE_POLAR,
+    label: 'Croakmaw', face: FACE_VERDANT,
     h: 3.10, hp: 50, spd: 1.45, shy: 0, turn: 2.80, accel: 7.00,
     dmg: 10, reach: 1.80, swing: 1.40, aggro: 22,
     drops: [['hide', 1, 2], ['emerald', 1, 1]],
   }),
   boss_yeti: boss('yeti', {
-    label: 'Hoarfang', face: FACE_POLAR,
+    label: 'Hoarfang', face: FACE_RIME,
     h: 3.21, hp: 55, spd: 1.41, shy: 0, turn: 2.73, accel: 6.82,
     dmg: 11, reach: 1.92, swing: 1.46, aggro: 23,
     drops: [['hide', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_bluedemon: boss('bluedemon', {
-    label: 'Wraithflame', face: FACE_CINDER,
+    label: 'Wraithflame', face: FACE_TEMPEST,
     h: 3.23, hp: 56, spd: 1.40, shy: 0, turn: 2.71, accel: 6.78,
     dmg: 11, reach: 1.94, swing: 1.47, aggro: 23,
     drops: [['cinder', 1, 2], ['amethyst', 1, 1]],
   }),
   boss_monkroose: boss('monkroose', {
-    label: 'Bramblehorn', face: FACE_POLAR,
+    label: 'Bramblehorn', face: FACE_VERDANT,
     h: 3.37, hp: 62, spd: 1.34, shy: 0, turn: 2.61, accel: 6.53,
     dmg: 12, reach: 2.11, swing: 1.56, aggro: 24,
     drops: [['hide', 1, 2], ['meat', 1, 2], ['emerald', 1, 1]],
   }),
   boss_demon: boss('demon', {
-    label: 'Ashlord', face: FACE_CINDER,
+    label: 'Ashlord', face: FACE_PYRE,
     h: 3.39, hp: 63, spd: 1.33, shy: 0, turn: 2.60, accel: 6.51,
     dmg: 12, reach: 2.13, swing: 1.56, aggro: 25,
     drops: [['cinder', 1, 2], ['ruby', 1, 1]],
   }),
   boss_orc: boss('orc', {
-    label: 'Slagbrute', face: FACE_CINDER,
+    label: 'Slagbrute', face: FACE_PYRE,
     h: 3.47, hp: 67, spd: 1.30, shy: 0, turn: 2.55, accel: 6.37,
     dmg: 12, reach: 2.22, swing: 1.61, aggro: 25,
     drops: [['iron_ingot', 1, 2], ['ruby', 1, 1]],
   }),
   boss_dino: boss('dino', {
-    label: 'Magmaw', face: FACE_CINDER,
+    label: 'Magmaw', face: FACE_PYRE,
     h: 3.49, hp: 68, spd: 1.30, shy: 0, turn: 2.54, accel: 6.34,
     dmg: 12, reach: 2.24, swing: 1.62, aggro: 26,
     drops: [['hide', 1, 2], ['cinder', 1, 2], ['ruby', 1, 1]],
   }),
   boss_ninja: boss('ninja', {
-    label: 'Palecowl', face: FACE_POLAR,
+    label: 'Palecowl', face: FACE_RIME,
     h: 3.52, hp: 69, spd: 1.28, shy: 0, turn: 2.51, accel: 6.28,
     dmg: 12, reach: 2.28, swing: 1.64, aggro: 26,
     drops: [['flint', 1, 2], ['silver_ingot', 1, 1]],
   }),
   boss_orc_skull: boss('orc_skull', {
-    label: 'Bonehelm', face: FACE_CINDER,
+    label: 'Bonehelm', face: FACE_TEMPEST,
     h: 3.53, hp: 70, spd: 1.28, shy: 0, turn: 2.51, accel: 6.27,
     dmg: 12, reach: 2.29, swing: 1.64, aggro: 26,
     drops: [['flint', 1, 2], ['sulfur', 1, 2], ['ruby', 1, 1]],
   }),
   boss_bunny: boss('bunny', {
-    label: 'Thumpjaw', face: FACE_POLAR,
+    label: 'Thumpjaw', face: FACE_RIME,
     h: 3.53, hp: 70, spd: 1.28, shy: 0, turn: 2.50, accel: 6.26,
     dmg: 12, reach: 2.29, swing: 1.65, aggro: 26,
     drops: [['hide', 1, 2], ['meat', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_alien: boss('alien', {
-    label: 'Voidspawn', face: FACE_CINDER,
+    label: 'Voidspawn', face: FACE_TEMPEST,
     h: 3.62, hp: 74, spd: 1.24, shy: 0, turn: 2.44, accel: 6.11,
     dmg: 13, reach: 2.39, swing: 1.70, aggro: 27,
     drops: [['crystal', 1, 2], ['void_shard', 1, 1]],
   }),
   boss_birb: boss('birb', {
-    label: 'Rimewing', face: FACE_POLAR,
+    label: 'Rimewing', face: FACE_RIME,
     // It has wings and it does not use them. `flies` puts a body on the flier
     // budget, the hover clamp and the flying steering, and this rig has no
     // Flying clip at all - it would glide at you in its rest pose. A bird that
@@ -2970,13 +3003,13 @@ const SPECIES = {
     drops: [['feather', 1, 2], ['poultry', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_mushroomking: boss('mushroomking', {
-    label: 'Blightcrown', face: FACE_POLAR,
+    label: 'Blightcrown', face: FACE_VERDANT,
     h: 3.74, hp: 79, spd: 1.19, shy: 0, turn: 2.36, accel: 5.90,
     dmg: 14, reach: 2.53, swing: 1.77, aggro: 28,
     drops: [['mushroom', 1, 2], ['emerald', 1, 1], ['void_shard', 1, 1]],
   }),
   boss_tribal: boss('tribal', {
-    label: 'Ashchief', face: FACE_CINDER,
+    label: 'Ashchief', face: FACE_PYRE,
     h: 3.86, hp: 85, spd: 1.15, shy: 0, turn: 2.28, accel: 5.70,
     dmg: 14, reach: 2.67, swing: 1.83, aggro: 29,
     drops: [['gold_ingot', 1, 2], ['cinder', 1, 2], ['ruby', 1, 1]],
@@ -2993,13 +3026,13 @@ const SPECIES = {
    * them.
    */
   boss_fish: boss('fish', {
-    label: 'Deepmaw', face: FACE_POLAR, aquatic: true, eatsFish: true,
+    label: 'Deepmaw', face: FACE_TEMPEST, aquatic: true, eatsFish: true,
     h: 3.97, hp: 89, spd: 1.11, shy: 0, turn: 2.21, accel: 5.52,
     dmg: 15, reach: 2.78, swing: 1.89, aggro: 30,
     drops: [['fish', 1, 2], ['pearl', 1, 2], ['sapphire', 1, 1]],
   }),
   boss_cactoro: boss('cactoro', {
-    label: 'Emberthorn', face: FACE_CINDER,
+    label: 'Emberthorn', face: FACE_VERDANT,
     h: 3.98, hp: 90, spd: 1.10, shy: 0, turn: 2.20, accel: 5.50,
     dmg: 15, reach: 2.80, swing: 1.90, aggro: 30,
     drops: [['cactus', 1, 2], ['emerald', 1, 1], ['ruby', 1, 1]],
@@ -4190,36 +4223,12 @@ const MONSTER_BY_BIOME = {
   // MEADOW is missing on purpose — see above.
 };
 
-/**
- * How far from the equator a column has to be before a `polar` species will
- * spawn on it: |sin(latitude)| >= this, i.e. about 42 degrees.
- *
- * The report was "penguins are spawning in places not in pole", and the biome
- * table alone cannot answer it. Penguins are drawn from `SPAWN_BY_BIOME.SNOW`,
- * and SNOW is a *temperature* verdict — temperature falls with altitude as well
- * as with latitude, so every snow-capped peak on the planet is snow, including
- * tropical ones. Measured on seed 4242: 12,247 SNOW columns lie within 30
- * degrees of the equator and 9,809 of those sit in patches whose four
- * neighbours are snow too, so they are standable ground rather than specks. On
- * the most equatorial of them — **latitude 3.46 degrees**, 35 units above sea
- * level — `_pickWildlife` returned penguin in **43.7% of 4,000 draws**.
- *
- * 0.667 keeps 79% of the planet's snow as penguin ground (the |sin| >= 0.667
- * bands hold 154,335 of 194,228 snow columns) while removing the tropical
- * mountaintops entirely, so this costs the polar regions almost nothing.
- *
- * A latitude rule rather than a "not MOUNTAIN" one on purpose: the biome is the
- * wrong instrument twice over, because a genuinely polar peak is MOUNTAIN too
- * and would lose its penguins for the same bad reason.
- *
- * Only the penguin carries `polar` today. The polar bear is the obvious second
- * candidate and is deliberately left alone — it is the owner's call whether a
- * bear on a high cold mountain reads as wrong the way a penguin does.
- */
-const POLAR_SIN_LAT = 0.667;
-/** Scratch for _isPolarColumn, which runs on every wildlife draw. */
-const _polarParts = { f: 0, i: 0, j: 0 };
-const _polarDir = [0, 0, 0];
+/* POLAR_SIN_LAT is gone with the sphere it measured. A `polar` species asks
+   `_isPolarColumn`, which is now a face test, and the note that used to live
+   here is worth keeping in one sentence: the report was "penguins are spawning
+   in places not in pole", and the cause was that SNOW is a TEMPERATURE verdict
+   which every tropical mountaintop also passes. A face is an address and cannot
+   make that mistake. Only the penguin carries `polar` today. */
 
 const COMMON = ['bunny', 'bunny', 'bee', 'caterpillar', 'fox'];
 const SPAWN_BY_BIOME = {
@@ -4587,13 +4596,16 @@ export class Mobs {
 
   // --- spawning -------------------------------------------------------------
 
-  /** Column index for possibly out-of-range continuous cell coords, cross-face safe. */
-  _colOf(f, ci, cj) {
-    _probe.f = f; _probe.ci = ci; _probe.cj = cj; _probe.ck = 0;
-    if (ci < 0 || ci >= F || cj < 0 || cj >= F) normalizeCell(_probe);
-    const i = Math.min(F - 1, Math.max(0, Math.floor(_probe.ci)));
-    const j = Math.min(F - 1, Math.max(0, Math.floor(_probe.cj)));
-    return cidx(_probe.f, i, j);
+  /**
+   * Column index for continuous cell coordinates, wrapped.
+   *
+   * The whole of what `normalizeCell` and its clamp used to do. Nothing here can
+   * be out of range: the map wraps, so a body a fraction past the last column is
+   * simply at the first one, and there is no face to fold onto and no border to
+   * clamp against.
+   */
+  _colOf(ci, cj) {
+    return colIndex(Math.floor(ci), Math.floor(cj));
   }
 
   /**
@@ -4623,64 +4635,31 @@ export class Mobs {
    * candidate was thrown out on distance before any of the interesting tests
    * ran, which is most of why he was never seen.
    *
-   * `walkColumns` goes straight and turns only at a seam, so the distance is
-   * the number asked for. Variety comes from the bearing, which is what it
-   * should have come from all along.
+   * `stepColumn` goes straight and wraps, so the distance is the number asked
+   * for. Variety comes from the bearing, which is what it should have come from
+   * all along.
    */
   _walkOut(nearCol, steps) {
     const a = Math.random() * TAU;
-    return walkColumns(nearCol, Math.round(Math.cos(a) * steps), Math.round(Math.sin(a) * steps));
+    return stepColumn(nearCol, Math.round(Math.cos(a) * steps), Math.round(Math.sin(a) * steps));
   }
 
 
   /**
    * Go `units` of world distance from `nearCol` on a random bearing.
    *
-   * The difference from _walkOut is that this one ARRIVES. _walkOut holds a
-   * heading but veers, so the distance it covers for a given step count is a
-   * broad distribution that mostly falls short — which is fine for "somewhere
-   * over there" and useless for "fill this band". Here the bearing is drawn
-   * once and the whole offset is handed to stepColumn, which walks the seams
-   * itself; nothing in this function does arithmetic on a column index.
-   *
-   * Aimed, measured, then corrected once, rather than converted with
-   * CELL_SIZE and hoped for. CELL_SIZE is the planet's AVERAGE cell width, and
-   * a cubesphere is a gnomonic projection, so a real cell is that wide in only
-   * one place. Measured on the real planet, 200 draws per site, horizontal
-   * displacement (both ends read at the same layer — reading each at its own
-   * surface height instead measures the hill and not the walk, which is how
-   * the first version of this table came out backwards):
-   *
-   *   realised / asked        D=40   60    80   100   120
-   *   one pass, at a face centre    1.000 0.995 0.990 0.986 0.981
-   *   one pass, at the world spawn  0.948 0.942 0.943 0.935 0.906
-   *   one pass, near a face edge    0.772 0.780 0.815 0.809 0.852
-   *   corrected, worst of the three 1.002 1.005 1.006 1.008 1.012
-   *
-   * So a ring asked for at 120 units was a ring of 93 for a player standing
-   * near a face edge and 118 for one at a face centre: the size of the world's
-   * inhabited disc depended on where on the planet you happened to be. The
-   * second pass costs one more stepColumn walk — a few hundred array lookups,
-   * a handful of times per two-second spawn tick — and removes the whole of it
-   * without needing a model of the projection.
+   * One line, and the arithmetic behind it is the whole of what the flat map
+   * buys here. The cube's version aimed, measured what it actually got, and
+   * corrected once, because a cubesphere is a gnomonic projection and a cell is
+   * the average width in exactly one place on each face: a ring asked for at
+   * 120 units came out at 93 near a face edge and 118 at a face centre, so the
+   * size of the inhabited disc depended on where on the planet you stood. A
+   * column is one unit across everywhere now, so asked and realised are the
+   * same number by construction and there is nothing to correct.
    */
   _walkTo(nearCol, units) {
     const th = Math.random() * Math.PI * 2;
-    const ca = Math.cos(th), sa = Math.sin(th);
-    const a = colParts(nearCol);
-    // Both ends read at the same layer, so this is horizontal displacement and
-    // not a hill. The layer itself is arbitrary; only the difference is used.
-    cellToWorld(a.f, a.i + 0.5, a.j + 0.5, R_SEA - R_MIN, _wa);
-    let n = units / CELL_SIZE;
-    let col = walkColumns(nearCol, Math.round(ca * n), Math.round(sa * n));
-    const b = colParts(col);
-    cellToWorld(b.f, b.i + 0.5, b.j + 0.5, R_SEA - R_MIN, _wb);
-    const got = Math.hypot(_wb[0] - _wa[0], _wb[1] - _wa[1], _wb[2] - _wa[2]);
-    if (got > 1) {
-      n *= units / got;
-      col = walkColumns(nearCol, Math.round(ca * n), Math.round(sa * n));
-    }
-    return col;
+    return stepColumn(nearCol, Math.round(Math.cos(th) * units), Math.round(Math.sin(th) * units));
   }
 
   /**
@@ -4717,9 +4696,7 @@ export class Mobs {
       if (playerPos) {
         // don't materialise inside the player's view, and don't drop one just
         // outside the despawn ring where it would be culled again next second
-        const { f, i, j } = colParts(col);
-        cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
-        const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
+        const d = wrapDist(colTop(col, k, _p), playerPos);
         if (d < SPAWN_MIN_DIST || d > far) continue;
       }
       return { col, k };
@@ -4758,7 +4735,7 @@ export class Mobs {
     // SLIME_CAP is only there so a face full of them cannot compound.
     for (const off of [-1, 1]) {
       if (this._countSlimes() >= SLIME_CAP) break;
-      const col = this._colOf(c.f, c.ci + off, c.cj);
+      const col = this._colOf(c.x + off, c.y);
       const k = this.planet.surfaceK(col);
       if (k < 0) continue;
       this.spawn(type, col, k + 1);
@@ -4799,7 +4776,7 @@ export class Mobs {
     // failed to appear because a shoal was in the way would be a boss the
     // player is asked to kill and can never find.
     if (!spec || (this.list.length >= MAX_MOBS && !spec.boss)) return null;
-    const { f, i, j } = colParts(col);
+    const { x: cx, y: cy } = colParts(col);
 
     const s = (seed === undefined || seed === null) ? ((Math.random() * 0x7fffffff) | 0) : (seed | 0);
     const rng = makeRng(s || 1);
@@ -4987,9 +4964,9 @@ export class Mobs {
       kindG: kind ? kind.tint[1] : (spec.tint ? spec.tint[1] : 1),
       kindB: kind ? kind.tint[2] : (spec.tint ? spec.tint[2] : 1),
       scale, sizeJitter,
-      cell: { f, ci: i + 0.5, cj: j + 0.5, ck: k + 1.02 },
-      vel: { i: 0, j: 0, k: 0 },
-      pos: new THREE.Vector3(),
+      cell: { x: cx + 0.5, y: cy + 0.5, k: k + 1.02 },
+      vel: { x: 0, y: 0, z: 0 },
+      position: new THREE.Vector3(),
       prevPos: new THREE.Vector3(),
       up: new THREE.Vector3(0, 1, 0),
       heading: rng() * TAU,
@@ -5017,7 +4994,7 @@ export class Mobs {
        */
       gait: 0,
       hurtT: 0,
-      knockA: 0, knockB: 0, knockT: 0,   // decaying shove from the last blow
+      knockX: 0, knockZ: 0, knockT: 0,   // decaying shove from the last blow
       // Being thrown rather than walking: the walking rules are suspended
       // until it is back on its feet. See the tumble in update().
       tumbling: false,
@@ -5193,7 +5170,6 @@ export class Mobs {
       breedCooldown: 0,    // rest before breeding again
       baby: 0,             // seconds left as a calf; 0 means fully grown
       placed: false,
-      frame: { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 },
     };
     mob.want = mob.heading;
     if (spec.trader) {
@@ -5248,8 +5224,8 @@ export class Mobs {
     }
     this.list.push(mob);
     this._sync(mob);
-    mob.prevPos.copy(mob.pos);
-    mob.progAt.copy(mob.pos);
+    mob.prevPos.copy(mob.position);
+    mob.progAt.copy(mob.position);
     this._animate(mob, 0);   // place the model now; never render at the origin
     return mob;
   }
@@ -5296,11 +5272,11 @@ export class Mobs {
    * and at three the owner could cross the whole cinderlands without meeting
    * the creature it was built around: "I never met a cinderling".
    *
-   * So the cap is per-face rather than global. The four ordinary faces are
-   * untouched; the cap and the cinderlands carry enough to feel inhabited.
+   * So the cap is per-face rather than global. The five faces of the cross are
+   * untouched; the four sealed ones carry enough to feel inhabited.
    */
   _monsterCap(col) {
-    return FACE_ROLE[(col / (F * F)) | 0] === FACE_NORMAL
+    return FACE_ROLE[faceOfCol(col)] === FACE_NORMAL
       ? MAX_MONSTERS : MAX_MONSTERS_HOSTILE_FACE;
   }
 
@@ -5313,7 +5289,7 @@ export class Mobs {
    * daylight and a wildlife budget of its own.
    */
   _monsterFar(col) {
-    return FACE_ROLE[(col / (F * F)) | 0] === FACE_CINDER
+    return FACE_ROLE[faceOfCol(col)] === FACE_PYRE
       ? Math.min(this.spawnFar, MONSTER_FAR_CINDER) : this.spawnFar;
   }
 
@@ -5323,18 +5299,18 @@ export class Mobs {
    * No, once a boss has stood on this face, and no again forever after — see
    * `hostileShut`, which the endgame owns. The rule is deliberately about the
    * *column being spawned into* rather than about where the player is standing:
-   * a search started from a player on one face can walk over a seam, and the
+   * a search started from a player on one face can walk over a join, and the
    * face that has been shut is the face the monsters must stop appearing on.
    *
    * Only what is hostile. Animals go on spawning normally, which is the whole
-   * of "so the face never becomes a dead rock" - the cap and the cinderlands
-   * are meant to be quieter after the endgame, not empty. What is already
+   * of "so the face never becomes a dead rock" - a sealed face is meant to be
+   * quieter after the endgame, not empty. What is already
    * standing is left alone too: a husk on a shut face lives until something
    * kills it, and is then gone for good, because this refuses the replacement
    * rather than the body.
    */
   _hostileHere(col) {
-    return !(this.hostileShut && this.hostileShut.has((col / (F * F)) | 0));
+    return !(this.hostileShut && this.hostileShut.has(faceOfCol(col)));
   }
 
   /**
@@ -5348,13 +5324,13 @@ export class Mobs {
    *
    * `capPolar` is the snow face's own number. The face rather than the biome,
    * because SNOW is a temperature verdict and every snow-capped peak in the
-   * world reads as one - see POLAR_SIN_LAT for the same trap caught in the
+   * world reads as one - see `_isPolarColumn` for the same trap caught in the
    * wildlife draw.
    */
   _underTypeCap(type, col) {
     const spec = SPECIES[type];
     if (!spec || !spec.cap) return true;
-    const cap = FACE_ROLE[(col / (F * F)) | 0] === FACE_POLAR ? spec.capPolar : spec.cap;
+    const cap = FACE_ROLE[faceOfCol(col)] === FACE_RIME ? spec.capPolar : spec.cap;
     let n = 0;
     for (const m of this.list) if (m.type === type && ++n >= cap) return false;
     return true;
@@ -5429,20 +5405,16 @@ export class Mobs {
   }
 
   /**
-   * Is this column far enough from the equator to count as polar ground?
+   * Is this column polar ground?
    *
-   * Read off the column's own direction rather than from anything the biome
-   * pass stored, for the reason POLAR_SIN_LAT gives: the biome knows the
-   * temperature, and temperature is not latitude. `centerDir` is a lookup into
-   * a table built once at startup, so this is three array reads and an abs.
-   *
-   * The pole axis is +Y, which is the axis `colHeight`'s climate falls off
-   * along and the one the sky rotates about.
+   * An address, and now literally one: Rime is a sealed face and is the only
+   * place on the map that is the pole. The cube had to ask for a latitude,
+   * because a sphere's snow is a temperature verdict that every tropical peak
+   * also passes, which is what a penguin on a warm mountain cost. There is no latitude on a flat map and no such
+   * mistake available: the face either is Rime or is not.
    */
   _isPolarColumn(col) {
-    const q = colParts(col, _polarParts);
-    centerDir(q.f, q.i, q.j, _polarDir);
-    return Math.abs(_polarDir[1]) >= POLAR_SIN_LAT;
+    return FACE_ROLE[faceOfCol(col)] === FACE_RIME;
   }
 
   /**
@@ -5566,7 +5538,7 @@ export class Mobs {
         // nothing at all.
         if (m.dying > 0 || m.baby > 0) continue;
         if (m.state === 'flee' || m.state === 'chase' || m.target) continue;
-        const d = m.pos.distanceTo(player.position);
+        const d = wrapDist(m.position, player.position);
         if (d > farD) { farD = d; far = n; farFlier = flier; }
       }
       if (far < 0) return;         // nothing far enough; try again next tick
@@ -5621,16 +5593,16 @@ export class Mobs {
     const idx = this.list.indexOf(mob);
     if (idx < 0) return null;
     const c = mob.cell;
-    const col = this._colOf(c.f, c.ci, c.cj);
-    const k = Math.floor(c.ck) - 1;
-    const ci = c.ci, cj = c.cj, ck = c.ck, heading = mob.heading;
+    const col = this._colOf(c.x, c.y);
+    const k = Math.floor(c.k) - 1;
+    const ci = c.x, cj = c.y, ck = c.k, heading = mob.heading;
     // Off the list first, so the arrival can never be refused by MAX_MOBS: the
     // swap is one body for one body and must not be able to fail halfway.
     this._release(mob);
     this.list.splice(idx, 1);
     const next = this.spawn(type, col, k, seed);
     if (!next) return null;
-    next.cell.ci = ci; next.cell.cj = cj; next.cell.ck = ck;
+    next.cell.x = ci; next.cell.y = cj; next.cell.k = ck;
     // Facing the way the old body faced. A swap that also spun the body on the
     // spot would be visible from further off than the swap itself is.
     next.heading = heading;
@@ -5640,8 +5612,8 @@ export class Mobs {
     next.fromCave = false;
     next.revert = revert || null;
     this._sync(next);
-    next.prevPos.copy(next.pos);
-    next.progAt.copy(next.pos);
+    next.prevPos.copy(next.position);
+    next.progAt.copy(next.position);
     this._animate(next, 0);
     return next;
   }
@@ -5693,9 +5665,9 @@ export class Mobs {
       if (s.aquatic || s.flies) continue;
       if (m.dying > 0 || m.baby > 0) continue;
       if (m.state === 'flee' || m.state === 'chase' || m.target) continue;
-      if (!this._unseenSwap(m, m.pos.distanceTo(player.position))) continue;
-      const col = this._colOf(m.cell.f, m.cell.ci, m.cell.cj);
-      if (this._warded(col, Math.floor(m.cell.ck) - 1)) continue;
+      if (!this._unseenSwap(m, wrapDist(m.position, player.position))) continue;
+      const col = this._colOf(m.cell.x, m.cell.y);
+      if (this._warded(col, Math.floor(m.cell.k) - 1)) continue;
       // A shut face makes no husks either, and this is the door that would have
       // been forgotten: it is not a spawn search, it is the herd turning where
       // it stands. See `_hostileHere`.
@@ -5733,7 +5705,7 @@ export class Mobs {
     for (const m of this.list) {
       if (taken.length >= TURN_BACK_PER_TICK) break;
       if (!m.revert || m.dying > 0) continue;
-      if (!this._unseenSwap(m, m.pos.distanceTo(player.position))) continue;
+      if (!this._unseenSwap(m, wrapDist(m.position, player.position))) continue;
       taken.push(m);
     }
     let n = 0;
@@ -5837,7 +5809,7 @@ export class Mobs {
    * he is deleted.
    */
   _headOf(mob, out) {
-    return out.copy(mob.pos).addScaledVector(mob.up, mob.spec.height * 0.85);
+    return out.copy(mob.position).addScaledVector(mob.up, mob.spec.height * 0.85);
   }
 
   /**
@@ -5875,7 +5847,7 @@ export class Mobs {
    * @param {number} skip how far short of `to` to stop.
    */
   _lineOfSight(from, to, step = LOS_STEP, skip = 0.4) {
-    _los.copy(to).sub(from);
+    relTo(_los, from, to);
     const len = _los.length();
     if (len < 1e-3) return true;
     _los.multiplyScalar(1 / len);
@@ -5948,7 +5920,7 @@ export class Mobs {
   _blowClear(mob, pos, up, th, step = BLOW_STEP, skip = BLOW_SKIP) {
     const sh = mob.spec.height;
     for (let n = 0; n < BLOW_RAYS.length; n += 2) {
-      _ptA.copy(mob.pos).addScaledVector(mob.up, sh * BLOW_RAYS[n]);
+      _ptA.copy(mob.position).addScaledVector(mob.up, sh * BLOW_RAYS[n]);
       _ptB.copy(pos).addScaledVector(up, th * BLOW_RAYS[n + 1]);
       if (this._lineOfSight(_ptA, _ptB, step, skip)) return true;
     }
@@ -6007,7 +5979,7 @@ export class Mobs {
     // is the single test that stops "turn around" being the one direction he
     // survives.
     _seen.set(-e[8], -e[9], -e[10]);
-    if (_los.copy(_eye).sub(cam.position).dot(_seen) <= 0) return false;
+    if (relTo(_los, cam.position, _eye).dot(_seen) <= 0) return false;
     _vpm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
     _ndc.copy(_eye).applyMatrix4(_vpm);
     if (Math.abs(_ndc.x) > margin || Math.abs(_ndc.y) > margin) return false;
@@ -6074,10 +6046,9 @@ export class Mobs {
       // is not something that stands in the firelight.
       if (this._warded(col, k)) continue;
       if (this._nearHome(col, k)) continue;
-      const { f, i, j } = colParts(col);
-      cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
-      _eye.set(_p[0], _p[1], _p[2]);
-      const d = _eye.distanceTo(playerPos);
+      colTop(col, k, _p);
+      _eye.set(_p.x, _p.y, _p.z);
+      const d = wrapDist(_eye, playerPos);
       if (d < STALKER_NEAR || d > STALKER_FAR) continue;
       // Where his head will be, which is what has to clear the terrain and
       // what has to be on screen — his feet are behind the ridge by design.
@@ -6087,7 +6058,7 @@ export class Mobs {
       const cam = this.camera;
       const e = cam.matrixWorld.elements;
       _seen.set(-e[8], -e[9], -e[10]);
-      if (_los.copy(_eye).sub(cam.position).dot(_seen) <= 0) continue;
+      if (relTo(_los, cam.position, _eye).dot(_seen) <= 0) continue;
       _vpm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
       _ndc.copy(_eye).applyMatrix4(_vpm);
       const ax = Math.abs(_ndc.x);
@@ -6120,11 +6091,11 @@ export class Mobs {
    * better than fine. He is not supposed to escape convincingly. He is supposed
    * to not be there.
    */
-  _haunt(mob, dt, dist, player, fr) {
+  _haunt(mob, dt, dist, player) {
     mob.hauntT -= dt;
-    _rel.copy(player.position).sub(mob.pos);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    relTo(_rel, mob.position, player.position);
+    const ra = _rel.x;
+    const rb = _rel.z;
     const toPlayer = Math.atan2(rb, ra);
     if (dist < STALKER_RUN) {
       // Close enough to be walked up to, so he leaves. `flee` rather than
@@ -6193,9 +6164,7 @@ export class Mobs {
         if (Math.random() < 1 / seen) k = pockets[n];   // reservoir sample
       }
       if (k < 0) continue;
-      const { f, i, j } = colParts(col);
-      cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
-      const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
+      const d = wrapDist(colTop(col, k, _p), playerPos);
       if (d < CAVE_MIN_DIST || d > this.spawnFar) continue;
       // Light keeps them out. This is checked last because it is the most
       // expensive test and the cheap ones reject most candidates first.
@@ -6219,12 +6188,12 @@ export class Mobs {
    *
    * @returns {number|null} a heading to steer to, or null if every way is barred
    */
-  _probeAround(mob, c, here, fr, player, aim) {
+  _probeAround(mob, c, here, player, aim) {
     let toTarget = aim;
     if (toTarget === undefined) {
-      _rel.copy(player.position).sub(mob.pos);
-      const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-      const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+      relTo(_rel, mob.position, player.position);
+      const ra = _rel.x;
+      const rb = _rel.z;
       toTarget = Math.atan2(rb, ra);
     }
     const reach = mob.halfL * 2 + PROBE_AHEAD;
@@ -6234,9 +6203,9 @@ export class Mobs {
       const turn = PROBE_ANGLES[n];
       if (Math.abs(turn) >= bestTurn) continue;      // already have a straighter one
       const h = wrapAngle(toTarget + turn);
-      const ni = c.ci + Math.cos(h) * reach;
-      const nj = c.cj + Math.sin(h) * reach;
-      if (this._footprintCost(c.f, ni, nj, here, mob, h) !== 0) continue;
+      const ni = c.x + Math.cos(h) * reach;
+      const nj = c.y + Math.sin(h) * reach;
+      if (this._footprintCost(ni, nj, here, mob, h) !== 0) continue;
       best = h;
       bestTurn = Math.abs(turn);
     }
@@ -6270,12 +6239,10 @@ export class Mobs {
   _warded(col, k) {
     const wards = this.wards;
     if (!wards || !wards.length) return false;
-    const { f, i, j } = colParts(col, _wp);
-    cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
+    colTop(col, k, _p);
     const r = this.wardRadius || 0;
     for (let n = 0; n < wards.length; n++) {
-      const w = wards[n];
-      if (Math.hypot(_p[0] - w.x, _p[1] - w.y, _p[2] - w.z) < r) return true;
+      if (wrapDist(_p, wards[n]) < r) return true;
     }
     return false;
   }
@@ -6298,9 +6265,7 @@ export class Mobs {
   _nearHome(col, k) {
     const h = this.homePos;
     if (!h) return false;
-    const { f, i, j } = colParts(col, _wp);
-    cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
-    return Math.hypot(_p[0] - h.x, _p[1] - h.y, _p[2] - h.z) < CALM_RADIUS;
+    return wrapDist(colTop(col, k, _p), h) < CALM_RADIUS;
   }
 
   _litNear(col, k) {
@@ -6345,9 +6310,7 @@ export class Mobs {
       if (!SPAWNABLE_GROUND.has(surf)) continue;
       if (p.solidAt(col, k + 1) || p.solidAt(col, k + 2)) continue;
       if (p.liquidAt(col, k + 1) || p.liquidAt(col, k + 2)) continue;
-      const { f, i, j } = colParts(col);
-      cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
-      const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
+      const d = wrapDist(colTop(col, k, _p), playerPos);
       if (d < SPAWN_MIN_DIST || d > this.despawnRadius - 30) continue;
       return { col, k };
     }
@@ -6381,8 +6344,8 @@ export class Mobs {
    * Which way the water is, for an animal that wants to stay near it.
    *
    * Eight compass directions sampled outward until one of them hits water, and
-   * the answer is a heading because that is what the steering wants: `vel.i` is
-   * cos(heading) and `vel.j` is sin(heading), so a column offset of (di, dj) is
+   * the answer is a heading because that is what the steering wants: `vel.x` is
+   * cos(heading) and `vel.z` is sin(heading), so a column offset of (di, dj) is
    * simply atan2(dj, di) in the animal's own tangent frame — no world-space
    * round trip and nothing to get wrong at a cube seam.
    *
@@ -6396,7 +6359,7 @@ export class Mobs {
    * few seconds per crab.
    */
   _shoreBearing(mob) {
-    const col = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
+    const col = this._colOf(mob.cell.x, mob.cell.y);
     for (let s = SHORE_STEP; s <= SHORE_PULL; s += SHORE_STEP) {
       for (let n = 0; n < 8; n++) {
         const di = RING8[n * 2] * s, dj = RING8[n * 2 + 1] * s;
@@ -6517,9 +6480,7 @@ export class Mobs {
       const k = this._waterLayer(col);
       if (k < 0) continue;
       if (playerPos) {
-        const { f, i, j } = colParts(col);
-        cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
-        const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
+        const d = wrapDist(colTop(col, k, _p), playerPos);
         if (d < SPAWN_MIN_DIST || d > this.spawnFar) continue;
       }
       return { col, k };
@@ -6546,9 +6507,7 @@ export class Mobs {
       const k = this._waterLayer(col);
       if (k < 0) continue;
       if (this._waterDepth(col) < DROWNED_DEPTH) continue;
-      const { f, i, j } = colParts(col);
-      cellToWorld(f, i + 0.5, j + 0.5, k + 1, _p);
-      const d = Math.hypot(_p[0] - playerPos.x, _p[1] - playerPos.y, _p[2] - playerPos.z);
+      const d = wrapDist(colTop(col, k, _p), playerPos);
       if (d < SPAWN_MIN_DIST || d > this.spawnFar) continue;
       return { col, k };
     }
@@ -6590,7 +6549,8 @@ export class Mobs {
    * the player's, because everything else is about what the player can see.
    */
   _dayFor(mob) {
-    return FACE_ROLE[mob.cell.f] === FACE_CINDER ? -1 : this.daylight;
+    return FACE_ROLE[faceOfCol(this._colOf(mob.cell.x, mob.cell.y))] === FACE_PYRE
+      ? -1 : this.daylight;
   }
 
   _dawnCull(player, dt) {
@@ -6602,7 +6562,7 @@ export class Mobs {
       if (this._dayFor(m) < 0.02) continue;
       m.dawnT = (m.dawnT || 0) + dt;
       if (m.dawnT > DROWNED_LINGER) { this._release(m); this.list.splice(n, 1); continue; }
-      const d = m.pos.distanceTo(player.position);
+      const d = wrapDist(m.position, player.position);
       if (d > farD) { farD = d; far = n; }
     }
     // One a tick from the far end, exactly as _bedDown takes the herd. The
@@ -6752,7 +6712,7 @@ export class Mobs {
    */
   populate(player, count = Math.round(MAX_WILDLIFE * 0.65 * this.crowdScale)) {
     const c = player.cell;
-    const startCol = cidx(c.f, Math.floor(c.ci), Math.floor(c.cj));
+    const startCol = this._colOf(c.x, c.y);
     // Where the world began, so the opening clearing stays where the player
     // woke up instead of travelling with them. A plain object rather than the
     // player's own Vector3: this is a fixed point on the planet and holding a
@@ -6790,10 +6750,12 @@ export class Mobs {
 
   _sync(mob) {
     const c = mob.cell;
-    cellToWorld(c.f, c.ci, c.cj, c.ck, _p);
-    mob.pos.set(_p[0], _p[1], _p[2]);
-    tangentFrame(c.f, c.ci, c.cj, c.ck, mob.frame);
-    mob.up.set(mob.frame.up[0], mob.frame.up[1], mob.frame.up[2]);
+    // Map x is world X, map y is world Z, and the layer IS the height. What
+    // used to be a fold, a tangent frame and a per-body up vector is three
+    // assignments; `up` stays a field because callers read it, and it is the one
+    // up there is.
+    c.x = wrap(c.x); c.y = wrap(c.y);
+    mob.position.set(c.x, c.k, c.y);
   }
 
   /**
@@ -6816,11 +6778,11 @@ export class Mobs {
   _refLayer(mob) {
     const c = mob.cell;
     const p = this.planet;
-    const feetK = Math.floor(c.ck);
-    const col = this._colOf(c.f, c.ci, c.cj);
+    const feetK = Math.floor(c.k);
+    const col = this._colOf(c.x, c.y);
     const surfK = (mob.wading || (mob.swimming && !mob.spec.aquatic))
       ? this._waterTop(col, feetK) : -1;
-    if (surfK >= 0 && c.ck > surfK - 1) return surfK;
+    if (surfK >= 0 && c.k > surfK - 1) return surfK;
     // A block whose top is inside its own layer — a slab, a stair tread — holds
     // the feet up from *within* the layer they are standing in, not from the
     // layer below. `floor(ck) - 1` is the layer under the feet and is right for
@@ -6835,10 +6797,10 @@ export class Mobs {
     // escape rule in `_walkStep` then admits *every* move, because everything
     // ties at 9 — including walking into stone. Half-height blocks are the one
     // shape on which an animal could leave the world.
-    if (c.ck - feetK > 0.02 && p.solidAt(col, feetK)
+    if (c.k - feetK > 0.02 && p.solidAt(col, feetK)
         && !isPassable(p.at(col, feetK), p.facingAt(col, feetK))
-        && feetK + this._topOf(col, feetK) <= c.ck + 0.02) return feetK;
-    return Math.floor(c.ck + 0.02) - 1;
+        && feetK + this._topOf(col, feetK) <= c.k + 0.02) return feetK;
+    return Math.floor(c.k + 0.02) - 1;
   }
 
   /** Highest solid layer at or below `fromK` in `col`. */
@@ -6851,7 +6813,7 @@ export class Mobs {
    * woolly ended up 0.29 cells inside solid stone and stayed there. Sampling
    * the footprint's extremes keeps the body out of the wall.
    */
-  _footprintCost(f, ci, cj, hereK, mob, hdg) {
+  _footprintCost(ci, cj, hereK, mob, hdg) {
     let cost = 0;
     // Nine samples over the animal's own oriented footprint: centre, the four
     // corners and the four edge midpoints. Sampling only the axis-aligned
@@ -6882,7 +6844,7 @@ export class Mobs {
       const ll = FOOT_OFF[n * 2 + 1] * hl;  // along the body
       const oi = cw * ll - sw * lw;
       const oj = sw * ll + cw * lw;
-      cost += this._colCost(this._colOf(f, ci + oi, cj + oj), hereK, mob,
+      cost += this._colCost(this._colOf(ci + oi, cj + oj), hereK, mob,
         afloat, aquaticBody, flier, wade);
     }
     return cost;
@@ -6896,13 +6858,13 @@ export class Mobs {
    * _walkStep. It is the centre sample of _footprintCost and nothing else, so it
    * goes through the same per-column rule rather than a second copy of it.
    */
-  _centreCost(f, ci, cj, hereK, mob) {
+  _centreCost(ci, cj, hereK, mob) {
     const afloat = !!mob.spec.aquatic || !!mob.swimming || !!mob.wading;
     const aquaticBody = !!mob.spec.aquatic;
     const flier = !!mob.spec.flies;
     const wade = (aquaticBody || flier || mob.spec.amphibious || afloat)
       ? 0 : this._wadeDepth(mob);
-    return this._colCost(this._colOf(f, ci, cj), hereK, mob,
+    return this._colCost(this._colOf(ci, cj), hereK, mob,
       afloat, aquaticBody, flier, wade);
   }
 
@@ -7059,7 +7021,7 @@ export class Mobs {
       // cannot disagree, which is the whole point: a body is allowed over
       // ground exactly when it is allowed onto it.
       if (afloat) {
-        if (gk + this._topOf(col, gk) > mob.cell.ck + this._haulReach(mob)) return 1;
+        if (gk + this._topOf(col, gk) > mob.cell.k + this._haulReach(mob)) return 1;
         // Headroom still applies — see the loop at the end.
         for (let h = 1; h <= tall; h++) {
           const above = p.at(col, gk + h);
@@ -7121,7 +7083,7 @@ export class Mobs {
    * The vertical half of a swimmer's collision, which did not exist.
    *
    * Horizontal movement goes through _walkStep and is tested; the rise and
-   * fall is `c.ck += vel.k * dt` and was tested by nothing but the centre-
+   * fall is `c.k += vel.y * dt` and was tested by nothing but the centre-
    * column ceiling probe below it, which asks about one column out of the nine
    * the body covers. A fish rising under the lip of an overhang, or through a
    * gap narrower than itself, went in side-first with its centre in clear
@@ -7145,7 +7107,7 @@ export class Mobs {
       for (let i = 0; i < 9; i++) {
         const lw = FOOT_OFF[i * 2] * mob.halfW;
         const ll = FOOT_OFF[i * 2 + 1] * mob.halfL;
-        const col = this._colOf(c.f, c.ci + (cw * ll - sw * lw), c.cj + (sw * ll + cw * lw));
+        const col = this._colOf(c.x + (cw * ll - sw * lw), c.y + (sw * ll + cw * lw));
         n += this._aquaticCost(col, kLo, kHi);
       }
       return n;
@@ -7181,7 +7143,7 @@ export class Mobs {
     for (let n = 0; n < 9; n++) {
       const lw = FOOT_OFF[n * 2] * mob.halfW;
       const ll = FOOT_OFF[n * 2 + 1] * mob.halfL;
-      const col = this._colOf(mob.cell.f, ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
+      const col = this._colOf(ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
       const gk = this._groundK(col, hereK + reach, !!mob.spec.climbs);
       const rise = gk - hereK;
       if (rise < 1 || rise > reach) continue;      // not a rise it could take
@@ -7246,14 +7208,14 @@ export class Mobs {
    *
    * @returns {number} surface height, or -1 if there is no ground below
    */
-  _groundUnder(mob, f, ci, cj, fromK) {
+  _groundUnder(mob, ci, cj, fromK) {
     const p = this.planet;
     const cw = Math.cos(mob.heading), sw = Math.sin(mob.heading);
     let best = -1;
     for (let n = 0; n < 9; n++) {
       const lw = FOOT_OFF[n * 2] * mob.halfW;
       const ll = FOOT_OFF[n * 2 + 1] * mob.halfL;
-      const col = this._colOf(f, ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
+      const col = this._colOf(ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
       const gk = this._groundK(col, fromK, !!mob.spec.climbs);
       if (gk < 0) continue;
       if (n > 0) {
@@ -7290,10 +7252,10 @@ export class Mobs {
   /**
    * The top of the tallest thing a flier is about to fly into, or -1.
    *
-   * Two probes along the heading, in the same cell-space units the integrator
-   * moves in — `fr.arcA`/`fr.arcB` convert cells-per-second into cell indices,
-   * so a probe written in world cells stays the same distance ahead wherever on
-   * the cube face the body is. See FLY_LOOK_NEAR.
+   * Two probes along the heading, in cells, which are the units the integrator
+   * moves in and the units the world is measured in - the cube needed a
+   * conversion here because a gnomonic cell's width varied across a face. See
+   * FLY_LOOK_NEAR.
    *
    * Only obstacles that actually intrude on the body's own layers count. A hill
    * a metre below it is not in its way, and treating it as one would have every
@@ -7301,12 +7263,12 @@ export class Mobs {
    *
    * @returns {number} the surface height to clear, or -1 for open air
    */
-  _flyAhead(mob, fr) {
+  _flyAhead(mob) {
     const p = this.planet;
     const c = mob.cell;
     const ch = Math.cos(mob.heading), sh = Math.sin(mob.heading);
-    const kLo = Math.floor(c.ck + 0.02);
-    const kHi = Math.floor(c.ck + mob.tall);
+    const kLo = Math.floor(c.k + 0.02);
+    const kHi = Math.floor(c.k + mob.tall);
     let best = -1;
     // Across the body as well as ahead of it. Two probes on the centreline is
     // the right question for something one cell wide and the wrong one for a
@@ -7327,9 +7289,8 @@ export class Mobs {
       // covered half the ground they used to until this term was added.
       const d = mob.halfL + (n < 3 ? FLY_LOOK_NEAR : FLY_LOOK_FAR);
       const off = ((n % 3) - 1) * mob.halfW;         // -1 left, 0 nose, 1 right
-      const col = this._colOf(c.f,
-        c.ci + (ch * d - sh * off) / fr.arcA,
-        c.cj + (sh * d + ch * off) / fr.arcB);
+      const col = this._colOf(c.x + (ch * d - sh * off) ,
+        c.y + (sh * d + ch * off) );
       // Downward from the head, so the *top* of the obstacle is what comes back
       // — a wall reports its parapet, not the block the body happens to be
       // level with, and one climb clears it instead of sixty.
@@ -7366,7 +7327,7 @@ export class Mobs {
    * What is left is the one thing that is true whether it likes it or not —
    * two things cannot be in the same place.
    */
-  _bodyBlocked(f, ci, cj, ck, mob) {
+  _bodyBlocked(ci, cj, ck, mob) {
     const p = this.planet;
     const cw = Math.cos(mob.heading), sw = Math.sin(mob.heading);
     // Rounded up, not down: a body standing on a slab or a stair tread has its
@@ -7377,7 +7338,7 @@ export class Mobs {
     for (let n = 0; n < 9; n++) {
       const lw = FOOT_OFF[n * 2] * mob.halfW;
       const ll = FOOT_OFF[n * 2 + 1] * mob.halfL;
-      const col = this._colOf(f, ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
+      const col = this._colOf(ci + (cw * ll - sw * lw), cj + (sw * ll + cw * lw));
       for (let h = 0; h < mob.tall; h++) {
         const id = p.at(col, k0 + h);
         if (IS_SOLID[id] && !isPassable(id, p.facingAt(col, k0 + h))) return true;
@@ -7406,10 +7367,10 @@ export class Mobs {
     const steps = Math.max(1, Math.ceil(Math.hypot(di, dj) / 0.35));
     const si = di / steps, sj = dj / steps;
     for (let n = 0; n < steps; n++) {
-      if (!this._bodyBlocked(c.f, c.ci + si, c.cj, c.ck, mob)) c.ci += si;
-      else mob.knockA = 0;
-      if (!this._bodyBlocked(c.f, c.ci, c.cj + sj, c.ck, mob)) c.cj += sj;
-      else mob.knockB = 0;
+      if (!this._bodyBlocked(c.x + si, c.y, c.k, mob)) c.x += si;
+      else mob.knockX = 0;
+      if (!this._bodyBlocked(c.x, c.y + sj, c.k, mob)) c.y += sj;
+      else mob.knockZ = 0;
     }
   }
 
@@ -7433,9 +7394,9 @@ export class Mobs {
    * a wall could swap one blocked sample for another and slide onward into the
    * stone at no cost, which is what kept bodies sunk into blocks.
    */
-  _walkStep(mob, ni, nj, here, fr, player) {
+  _walkStep(mob, ni, nj, here, player) {
     const c = mob.cell;
-    const costHere = this._footprintCost(c.f, c.ci, c.cj, here, mob, mob.heading);
+    const costHere = this._footprintCost(c.x, c.y, here, mob, mob.heading);
     /**
      * May the body take a move that costs this much?
      *
@@ -7487,14 +7448,14 @@ export class Mobs {
      * equal-cost branch is actually reached, which is a body already overlapping
      * something. An ordinary animal on open ground never pays for it.
      */
-    const centreHere = costHere > 0 && this._centreCost(c.f, c.ci, c.cj, here, mob);
+    const centreHere = costHere > 0 && this._centreCost(c.x, c.y, here, mob);
     const ok = (cost, ci, cj) => cost === 0 || cost < costHere
       || (costHere > 0 && cost === costHere
-        && (centreHere || !this._centreCost(c.f, ci, cj, here, mob)));
-    const costI = this._footprintCost(c.f, ni, c.cj, here, mob, mob.heading);
-    const costJ = this._footprintCost(c.f, c.ci, nj, here, mob, mob.heading);
-    let okI = ok(costI, ni, c.cj);
-    let okJ = ok(costJ, c.ci, nj);
+        && (centreHere || !this._centreCost(ci, cj, here, mob)));
+    const costI = this._footprintCost(ni, c.y, here, mob, mob.heading);
+    const costJ = this._footprintCost(c.x, nj, here, mob, mob.heading);
+    let okI = ok(costI, ni, c.y);
+    let okJ = ok(costJ, c.x, nj);
     // The corner. Resolving the axes separately is what lets a body slide along
     // a wall instead of stopping dead, and the cost of it is that the diagonal
     // the two moves add up to is never tested: at an inside corner each axis
@@ -7513,13 +7474,13 @@ export class Mobs {
     // standing on anything. Without this a bee rounds an inside corner through
     // the stone.
     if (okI && okJ && (mob.spec.aquatic || mob.spec.flies)
-      && !ok(this._footprintCost(c.f, ni, nj, here, mob, mob.heading), ni, nj)) {
+      && !ok(this._footprintCost(ni, nj, here, mob, mob.heading), ni, nj)) {
       // Keep the axis that is cheaper on its own, so the body still slides
       // along the corner rather than stopping in front of it.
       if (costI <= costJ) okJ = false; else okI = false;
     }
-    if (okI) c.ci = ni;
-    if (okJ) c.cj = nj;
+    if (okI) c.x = ni;
+    if (okJ) c.y = nj;
     // Hop when the way *forward* is barred, not only when both axes are.
     // Gating on "moved nowhere" meant an animal still sliding along the wall
     // on its other axis never jumped — it just shuffled sideways forever
@@ -7545,7 +7506,7 @@ export class Mobs {
       // move stays refused until the animal is genuinely above the step, at
       // which point the footprint clears on its own and it walks on in mid-air.
       // Real arc, and the body is never inside the block.
-      mob.vel.k = Math.sqrt(2 * GRAVITY * (rise + 0.30));
+      mob.vel.y = Math.sqrt(2 * GRAVITY * (rise + 0.30));
       mob.grounded = false;
     } else if (!moved) {
       // veer, don't spin: nudge the desired heading and let the turn-rate
@@ -7576,7 +7537,7 @@ export class Mobs {
         // to a wall-slide in a random direction that no longer has anything to
         // do with where the player is. Aiming at the player keeps the slide
         // biased toward the goal, which is what actually finds gaps.
-        const probed = this._probeAround(mob, c, here, fr, player);
+        const probed = this._probeAround(mob, c, here, player);
         if (probed !== null) {
           mob.want = probed;
           mob.slideT = 0;              // a way through beats going round
@@ -7627,7 +7588,7 @@ export class Mobs {
    */
   _landBearing(mob, col) {
     const p = this.planet;
-    const topK = this._waterTop(col, Math.floor(mob.cell.ck));
+    const topK = this._waterTop(col, Math.floor(mob.cell.k));
     // Eight rays rather than eight rings, and the difference is a `blocked`
     // flag per direction.
     //
@@ -7688,7 +7649,7 @@ export class Mobs {
    */
   _shoreTangent(mob, col) {
     const p = this.planet;
-    const topK = this._waterTop(col, Math.floor(mob.cell.ck));
+    const topK = this._waterTop(col, Math.floor(mob.cell.k));
     for (let s = 1; s <= SWIM_LOOK; s++) {
       // Every bank at this range, summed, and not the first one found. In a
       // corner two walls are the same distance away, and taking either one of
@@ -7746,7 +7707,7 @@ export class Mobs {
    *
    * @returns {number|null} a heading to hold this frame, or null
    */
-  _unstick(mob, dt, dist, fr) {
+  _unstick(mob, dt, dist) {
     if (mob.spec.phantom || mob.dying > 0 || mob.tumbling) return null;
     mob.progT += dt;
     if (mob.progT >= STALL_PERIOD) {
@@ -7763,11 +7724,11 @@ export class Mobs {
       // speed, going nowhere, and all three are behaving exactly as intended.
       const busy = (mob.love > 0)
         || (mob.target === 'player' && dist < 4)
-        || (mob.prey && !mob.prey.released && mob.pos.distanceTo(mob.prey.pos) < 4);
+        || (mob.prey && !mob.prey.released && wrapDist(mob.position, mob.prey.position) < 4);
       const trying = !busy && mob.speedNow > 0.25
         && (mob.state === 'walk' || mob.state === 'flee' || mob.state === 'chase');
-      if (mob.pos.distanceTo(mob.progAt) >= STALL_RANGE) {
-        mob.progAt.copy(mob.pos);
+      if (wrapDist(mob.position, mob.progAt) >= STALL_RANGE) {
+        mob.progAt.copy(mob.position);
         mob.progN = 0;
         mob.escapeFails = 0;
       } else if (trying) mob.progN++;
@@ -7800,7 +7761,7 @@ export class Mobs {
     mob.escapeT -= dt;
     if (mob.escapeCol < 0) return null;
     const c = mob.cell;
-    if (this._colOf(c.f, c.ci, c.cj) === mob.escapeCol) {
+    if (this._colOf(c.x, c.y) === mob.escapeCol) {
       // Arrived. Nothing more to prove.
       mob.escapeT = 0;
       mob.escapeCol = -1;
@@ -7808,10 +7769,8 @@ export class Mobs {
       return null;
     }
     const g = colParts(mob.escapeCol, _pp);
-    cellToWorld(g.f, g.i + 0.5, g.j + 0.5, c.ck, _p);
-    _rel.set(_p[0] - mob.pos.x, _p[1] - mob.pos.y, _p[2] - mob.pos.z);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    const ra = delta(mob.position.x, g.x + 0.5);
+    const rb = delta(mob.position.z, g.y + 0.5);
     if (Math.abs(ra) < 1e-5 && Math.abs(rb) < 1e-5) return null;
     return Math.atan2(rb, ra);
   }
@@ -7832,7 +7791,7 @@ export class Mobs {
   _escapeGoal(mob) {
     const p = this.planet;
     const climbs = !!mob.spec.climbs;
-    const start = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
+    const start = this._colOf(mob.cell.x, mob.cell.y);
     const from0 = Math.max(0, this._refLayer(mob));
     /** The layer this body would end up on in `col`, or -1. */
     const reach = (col, from) => {
@@ -7908,11 +7867,11 @@ export class Mobs {
   _relocate(mob, col) {
     const gk = this._groundK(col, D - 1, !!mob.spec.climbs);
     if (gk < 0) return;
-    const { f, i, j } = colParts(col);
+    const q = colParts(col);
     const c = mob.cell;
-    c.f = f; c.ci = i + 0.5; c.cj = j + 0.5;
-    c.ck = gk + this._topOf(col, gk) + 0.02 + (mob.spec.aquatic ? mob.belly : 0);
-    mob.vel.i = 0; mob.vel.j = 0; mob.vel.k = 0;
+    c.x = q.x + 0.5; c.y = q.y + 0.5;
+    c.k = gk + this._topOf(col, gk) + 0.02 + (mob.spec.aquatic ? mob.belly : 0);
+    mob.vel.x = 0; mob.vel.z = 0; mob.vel.y = 0;
     // Not a fall, not a shove, and not still holding a tree it is no longer
     // beside: everything the old spot had done to this body is over.
     mob.fallFrom = null;
@@ -7921,7 +7880,7 @@ export class Mobs {
     mob.climbTo = null;
     mob.progN = 0;
     this._sync(mob);
-    mob.progAt.copy(mob.pos);
+    mob.progAt.copy(mob.position);
   }
 
   /**
@@ -8060,7 +8019,7 @@ export class Mobs {
     if (dist > VOX_NEAR) {
       const look = player.lookDir;
       if (!look) return;
-      _vox.copy(mob.pos).sub(player.eye || player.position);
+      relTo(_vox, player.eye || player.position, mob.position);
       if (_vox.lengthSq() < 1e-6) return;
       if (_vox.normalize().dot(look) < VOX_FACING) return;
     }
@@ -8127,7 +8086,7 @@ export class Mobs {
    *
    * The pairs are visited in exactly the order the all-pairs loop visited them:
    * ascending `a`, and ascending `b` within each. That is not tidiness, it is
-   * required. _nudge writes mob.cell.ci/cj and the next _footprintCost reads
+   * required. _nudge writes mob.cell.x/cj and the next _footprintCost reads
    * them, so two pushes applied to one body in the other order settle it
    * somewhere else. Proven equal over 2,000 frames against the old loop, on the
    * exact sequence of (body, direction, amount) triples, to the bit.
@@ -8157,7 +8116,12 @@ export class Mobs {
       // He is not a body (see below), and nor is anything else phantom: leaving
       // them out of the grid is the same exemption the old loop spelled twice.
       if (m.spec.phantom) continue;
-      const p = m.pos;
+      // Bucketed on raw world coordinates, so the one band the grid cannot pair
+      // across is the map's wrap itself: two bodies a cell apart either side of
+      // x = 0 land in buckets at opposite ends and are not tested. The overlap
+      // that leaves is at most a body's width, in a band one bucket wide, and it
+      // resolves itself the moment either one walks off it.
+      const p = m.position;
       const gx = Math.floor(p.x * inv), gy = Math.floor(p.y * inv), gz = Math.floor(p.z * inv);
       cx[i] = gx; cy[i] = gy; cz[i] = gz;
       const h = gridHash(gx, gy, gz) & mask;
@@ -8179,7 +8143,7 @@ export class Mobs {
       // and is covered by the same line, which is where it belongs.
       if (m.spec.phantom) continue;
       // --- against the player ---
-      _rel.copy(m.pos).sub(player.position);
+      relTo(_rel, player.position, m.position);
       const up = m.up;
       // flatten into the animal's tangent plane so nobody gets shoved skyward
       _rel.addScaledVector(up, -_rel.dot(up));
@@ -8227,8 +8191,8 @@ export class Mobs {
       for (let c = 0; c < nc; c++) {
         const o = list[cand[c]];
         const reach = m.radius + o.radius;
-        if (m.pos.distanceToSquared(o.pos) >= reach * reach) continue;
-        _rel.copy(m.pos).sub(o.pos);
+        if (wrapDist2(m.position, o.position) >= reach * reach) continue;
+        relTo(_rel, o.position, m.position);
         _rel.addScaledVector(up, -_rel.dot(up));
         let d2 = _rel.length();
         if (d2 >= reach) continue;
@@ -8246,9 +8210,8 @@ export class Mobs {
 
   /** Shift a mob by `amount` along a world-space tangent direction. */
   _nudge(mob, dir, amount) {
-    const fr = mob.frame;
-    const di = (dir.x * fr.ea[0] + dir.y * fr.ea[1] + dir.z * fr.ea[2]) / fr.arcA;
-    const dj = (dir.x * fr.eb[0] + dir.y * fr.eb[1] + dir.z * fr.eb[2]) / fr.arcB;
+    const di = dir.x;
+    const dj = dir.z;
     // A layer index, not a height. This read `_groundUnder(...)`, which returns
     // the *height* of the surface — one more than the layer under the feet on
     // flat ground, and a fraction on anything shaped. `_footprintCost` passes
@@ -8261,19 +8224,19 @@ export class Mobs {
     // with nowhere to go. The whole-block case was merely off by one, which let
     // a shove climb a step the animal could not have walked up.
     const here = this._refLayer(mob);
-    const ni = mob.cell.ci + di * amount;
-    const nj = mob.cell.cj + dj * amount;
+    const ni = mob.cell.x + di * amount;
+    const nj = mob.cell.y + dj * amount;
     // never let a shove put an animal somewhere it could not have walked
-    const cost = this._footprintCost(mob.cell.f, mob.cell.ci, mob.cell.cj, here, mob, mob.heading);
+    const cost = this._footprintCost(mob.cell.x, mob.cell.y, here, mob, mob.heading);
     const ok = (c2) => c2 === 0 || c2 < cost;
-    if (ok(this._footprintCost(mob.cell.f, ni, mob.cell.cj, here, mob, mob.heading))) mob.cell.ci = ni;
-    if (ok(this._footprintCost(mob.cell.f, mob.cell.ci, nj, here, mob, mob.heading))) mob.cell.cj = nj;
+    if (ok(this._footprintCost(ni, mob.cell.y, here, mob, mob.heading))) mob.cell.x = ni;
+    if (ok(this._footprintCost(mob.cell.x, nj, here, mob, mob.heading))) mob.cell.y = nj;
   }
 
   /** Does open sky reach this mob? Cheap column probe — see _findDarkColumn. */
   _skyLit(mob) {
-    const col = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
-    return !this._roofed(col, Math.floor(mob.cell.ck));
+    const col = this._colOf(mob.cell.x, mob.cell.y);
+    return !this._roofed(col, Math.floor(mob.cell.k));
   }
 
   /**
@@ -8282,7 +8245,7 @@ export class Mobs {
    *
    * @returns {boolean} true if it is hunting, so the wander logic stands down
    */
-  _hunt(mob, dt, dist, player, fr) {
+  _hunt(mob, dt, dist, player) {
     const spec = mob.spec;
     // Aggro now needs a sight line to start (see ACQUIRE BY SIGHT below) but
     // still has no notion of whether the player can actually be *reached* — seen
@@ -8464,9 +8427,9 @@ export class Mobs {
 
     // Face the player, in the husk's own tangent frame so it stays correct
     // across a cube seam.
-    _rel.copy(player.position).sub(mob.pos);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    relTo(_rel, mob.position, player.position);
+    const ra = _rel.x;
+    const rb = _rel.z;
     mob.want = Math.atan2(rb, ra);
 
     // --- and the player has taken to the water ----------------------------
@@ -8546,7 +8509,7 @@ export class Mobs {
     if (spec.nightOnly
       && !(player.inWater
         && (!player.grounded
-          || this._waterDepth(this._colOf(player.cell.f, player.cell.ci, player.cell.cj))
+          || this._waterDepth(this._colOf(player.cell.x, player.cell.y))
              >= DROWNED_DEPTH))) {
       mob.state = 'idle';
       mob.stateT = 0.5;
@@ -8568,7 +8531,7 @@ export class Mobs {
     // boulder but has no idea a wall has a door in it twelve cells to the left;
     // it turns toward whichever whisker is clear and, against a long obstacle,
     // slides along it forever. A path knows about the door.
-    const via = this._pathBearing(mob, dt, player, fr);
+    const via = this._pathBearing(mob, dt, player);
     if (via !== null) mob.want = via;
 
     // Close the distance, then stop and swing. Walking into the player would
@@ -8607,7 +8570,7 @@ export class Mobs {
     if (spec.leap && mob.enraged && mob.grounded && !mob.leaping
       && mob.leapCool <= 0 && dist > reach && dist < spec.leap
       && this._blowClearPlayer(mob, player)) {
-      this._leap(mob, dist, ra, rb, fr);
+      this._leap(mob, dist, ra, rb);
       mob.state = 'chase';
       mob.stateT = 0.5;
       return true;
@@ -8671,8 +8634,8 @@ export class Mobs {
    * microseconds a second. Between searches the mob walks its existing path,
    * which is what stops it dithering when the player moves a step.
    */
-  _pathBearing(mob, dt, player, fr) {
-    const goal = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
+  _pathBearing(mob, dt, player) {
+    const goal = this._colOf(player.cell.x, player.cell.y);
     /*
      * Measured now, on the real planet, and the note that used to stand here
      * had the wrong suspect.
@@ -8732,7 +8695,7 @@ export class Mobs {
     // Advance through waypoints we have already reached — after a jump or a
     // shove a mob can skip one, and steering back to it walks it backwards.
     const c = mob.cell;
-    const here = this._colOf(c.f, c.ci, c.cj);
+    const here = this._colOf(c.x, c.y);
     for (let n = mob.pathI; n < Math.min(path.length, mob.pathI + 3); n++) {
       if (path[n] === here) mob.pathI = n + 1;
     }
@@ -8747,10 +8710,8 @@ export class Mobs {
     // corners still get taken because the waypoints are consumed in order.
     const aimAt = Math.min(mob.pathI + PATH_LOOKAHEAD, path.length - 1);
     const p = colParts(path[aimAt], _pp);
-    cellToWorld(p.f, p.i + 0.5, p.j + 0.5, c.ck, _p);
-    _rel.set(_p[0] - mob.pos.x, _p[1] - mob.pos.y, _p[2] - mob.pos.z);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    const ra = delta(mob.position.x, p.x + 0.5);
+    const rb = delta(mob.position.z, p.y + 0.5);
     if (Math.abs(ra) < 1e-5 && Math.abs(rb) < 1e-5) return null;
     mob.onPath = true;
     return Math.atan2(rb, ra);
@@ -8768,9 +8729,9 @@ export class Mobs {
    * @returns {number[]|null} columns from the first step to the goal
    */
   _findPath(mob, goal) {
-    const start = this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj);
+    const start = this._colOf(mob.cell.x, mob.cell.y);
     if (start === goal) return null;
-    const startK = this._groundK(start, Math.floor(mob.cell.ck) + 1, !!mob.spec.climbs);
+    const startK = this._groundK(start, Math.floor(mob.cell.k) + 1, !!mob.spec.climbs);
     if (startK < 0) return null;
 
     const gScore = new Map([[start, 0]]);
@@ -8828,14 +8789,18 @@ export class Mobs {
     return gk;
   }
 
-  /** Straight-line distance between two column centres, in world units. */
+  /**
+   * Straight-line distance between two column centres, in world units.
+   *
+   * `Grid.dist2` and nothing else: a column is a unit across, so the map
+   * distance IS the world distance, and it takes the short way round the wrap -
+   * without which the A* heuristic would send a husk the long way round the
+   * planet the moment the player was over the seam from it.
+   */
   _colDist(a, b) {
-    const pa = colParts(a, _pp);
-    cellToWorld(pa.f, pa.i + 0.5, pa.j + 0.5, R_SEA - R_MIN, _p);
-    const ax = _p[0], ay = _p[1], az = _p[2];
-    const pb = colParts(b, _pp);
-    cellToWorld(pb.f, pb.i + 0.5, pb.j + 0.5, R_SEA - R_MIN, _p);
-    return Math.hypot(ax - _p[0], ay - _p[1], az - _p[2]);
+    const pa = colParts(a, _pp), ax = pa.x, ay = pa.y;
+    const pb = colParts(b, _wp);
+    return Math.sqrt(dist2(ax, ay, pb.x, pb.y));
   }
 
   _unwind(came, end) {
@@ -8857,22 +8822,22 @@ export class Mobs {
    *
    * @returns {boolean} true if it is walking to a mate, so wandering stands down
    */
-  _court(mob, fr) {
+  _court(mob) {
     if (mob.love <= 0 || mob.baby > 0 || mob.breedCooldown > 0) return false;
     let best = null, bestD = COURT_RANGE * COURT_RANGE;
     for (const o of this.list) {
       if (o === mob || o.type !== mob.type) continue;
       if (o.love <= 0 || o.baby > 0 || o.breedCooldown > 0) continue;
-      const d = mob.pos.distanceToSquared(o.pos);
+      const d = wrapDist2(mob.position, o.position);
       if (d < bestD) { bestD = d; best = o; }
     }
     if (!best) return false;
     // Close enough for _tickBreeding to pair them this frame; stop and let it.
     if (bestD <= BREED_RANGE * BREED_RANGE) { mob.state = 'idle'; mob.stateT = 0.4; return true; }
 
-    _rel.copy(best.pos).sub(mob.pos);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    relTo(_rel, mob.position, best.position);
+    const ra = _rel.x;
+    const rb = _rel.z;
     mob.want = Math.atan2(rb, ra);
     mob.state = 'chase';
     mob.stateT = 0.5;
@@ -8913,7 +8878,7 @@ export class Mobs {
    * what keeps `_tumble`'s substepping, which is the thing that stops something
    * moving fifteen cells a second from straddling a wall.
    *
-   * Its own velocity, in `leapI`/`leapJ`, because `vel.i`/`vel.j` are rebuilt
+   * Its own velocity, in `leapX`/`leapZ`, because `vel.x`/`vel.z` are rebuilt
    * from the heading every frame by the steering (see the integrate block in
    * `update`) and a heading that keeps turning toward the player would home the
    * jump in mid-air - which is the one thing the attack must not do.
@@ -8923,7 +8888,7 @@ export class Mobs {
    * with no lead at all, so a second of flight against a walk of 4.4 is most of
    * the dodge on its own. Standing still is what gets you hit.
    */
-  _leap(mob, dist, ra, rb, fr) {
+  _leap(mob, dist, ra, rb) {
     // 45 degrees: up as much as along. `LEAP_UP` bounds it at both ends, so the
     // shortest hop still leaves the ground and the longest is still a jump.
     const vUp = clamp(Math.sqrt(GRAVITY * dist * 0.5), LEAP_UP_MIN, LEAP_UP_MAX);
@@ -8931,15 +8896,15 @@ export class Mobs {
     const aim = Math.atan2(rb, ra) + (Math.random() - 0.5) * 2 * LEAP_SPREAD;
     const range = dist * (1 - Math.random() * LEAP_SHORT);
     const speed = range / flight;
-    mob.leapI = Math.cos(aim) * speed / fr.arcA;
-    mob.leapJ = Math.sin(aim) * speed / fr.arcB;
+    mob.leapX = Math.cos(aim) * speed ;
+    mob.leapZ = Math.sin(aim) * speed ;
     mob.heading = aim;
     mob.want = aim;
-    mob.vel.k = vUp;
+    mob.vel.y = vUp;
     mob.grounded = false;
     mob.tumbling = true;
     mob.leaping = true;
-    mob.leapPeak = mob.cell.ck;
+    mob.leapPeak = mob.cell.k;
     // It is not falling, it is attacking. `climbGrace` is the existing "do not
     // charge this body for the height it is losing" flag, and an animal hurting
     // itself with its own attack every time is not a mechanic.
@@ -8971,12 +8936,12 @@ export class Mobs {
     mob.leaping = false;
     mob.climbGrace = 0;
     mob.leapCool = LEAP_COOLDOWN;
-    const drop = Math.max(0, mob.leapPeak - mob.cell.ck);
+    const drop = Math.max(0, mob.leapPeak - mob.cell.k);
     const impact = Math.sqrt(2 * GRAVITY * drop);
     const dmg = Math.max(1, Math.round(mob.spec.damage
       * (0.5 * impact / LEAP_REF_V + 0.5 * drop / LEAP_REF_H)));
     const reach = mob.spec.reach + mob.radius + LEAP_SPLASH;
-    if (mob.pos.distanceTo(player.position) > reach) return;
+    if (wrapDist(mob.position, player.position) > reach) return;
     if (!this._blowClearPlayer(mob, player)) return;
     if (this.onAttack) this.onAttack(dmg, mob);
   }
@@ -9204,7 +9169,7 @@ export class Mobs {
       // the ground. Nothing stops a hunter taking the same monkey once it comes
       // down, which is the outcome the water and air rules also produce.
       if ((o.climbTo !== null || o.perchT > 0) && !mob.spec.climbs) continue;
-      const d = mob.pos.distanceToSquared(o.pos);
+      const d = wrapDist2(mob.position, o.position);
       if (d >= bestD) continue;
       // And terrain is the fourth wall, the one the three above are all
       // instances of. Water, air and a canopy were each written down because a
@@ -9225,7 +9190,7 @@ export class Mobs {
       // exactly as `_hunt` keeps a target it has committed to: prey that breaks
       // line of sight behind a boulder should be chased round it, and the bite
       // at the end of that chase is refused by `_blowClear` in `_stalk` anyway.
-      if (!this._sightClear(mob, o.pos, o.up, o.spec.height)) continue;
+      if (!this._sightClear(mob, o.position, o.up, o.spec.height)) continue;
       bestD = d; best = o;
     }
     return best;
@@ -9324,10 +9289,9 @@ export class Mobs {
       mob.stateT = Math.max(mob.stateT, 0.6);
       return;
     }
-    const fr = mob.frame;
-    _rel.copy(mob.pos).sub(from);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    relTo(_rel, from, mob.position);
+    const ra = _rel.x;
+    const rb = _rel.z;
     mob.want = wrapAngle(Math.atan2(rb, ra) + jitter);
     mob.state = 'flee';
     // Long enough that the wander cannot take the state back between looks, and
@@ -9360,7 +9324,7 @@ export class Mobs {
       const alive = !!t && !t.taken && !t.released && t.dying <= 0 && t.health > 0;
       if (alive) {
         const comfort = this._comfort(t, mob);
-        const d = mob.pos.distanceTo(t.pos);
+        const d = wrapDist(mob.position, t.position);
         if (comfort <= 0 || d > comfort * SPOOK_CLEAR) {
           // Clear of it, with the hysteresis margin. A short breather rather
           // than none, so it does not immediately re-arm on the way back in.
@@ -9381,7 +9345,7 @@ export class Mobs {
             return false;
           }
         }
-        this._boltAway(mob, t.pos, 0);
+        this._boltAway(mob, t.position, 0);
         return true;
       }
       // Running from a remembered place — an alarm bolt, or a threat that died
@@ -9406,7 +9370,7 @@ export class Mobs {
       if (t === mob || t.taken || t.dying > 0 || t.health <= 0) continue;
       const comfort = this._comfort(t, mob);
       if (comfort <= 0) continue;
-      const d2 = mob.pos.distanceToSquared(t.pos);
+      const d2 = wrapDist2(mob.position, t.position);
       if (d2 >= comfort * comfort) continue;
       // How far inside the ring, 0 at the edge and 1 on top of it. The worst
       // threat is the one that has come furthest in, not the nearest — a fox at
@@ -9427,7 +9391,7 @@ export class Mobs {
       //
       // `depth` drives the panic override as well as the choice, so a threat
       // behind a wall correctly contributes no panic either.
-      if (!this._sightClear(mob, t.pos, t.up, t.spec.height)) continue;
+      if (!this._sightClear(mob, t.position, t.up, t.spec.height)) continue;
       depth = u; worst = t;
     }
 
@@ -9443,7 +9407,7 @@ export class Mobs {
     if (!worst && this._alarms.length) {
       for (const a of this._alarms) {
         if (a.mob === mob) continue;
-        if (mob.pos.distanceToSquared(a.pos) > ALARM_RANGE * ALARM_RANGE) continue;
+        if (wrapDist2(mob.position, a.position) > ALARM_RANGE * ALARM_RANGE) continue;
         mob.spook += ALARM_WEIGHT;
         alarm = a;
         break;
@@ -9464,19 +9428,19 @@ export class Mobs {
     if (worst) {
       mob.bolt = SPOOK_HOLD;
       mob.boltFrom = worst;
-      mob.boltAt.copy(worst.pos);
+      mob.boltAt.copy(worst.position);
       // Only a first-hand sighting raises the alarm. An alarm bolt that raised
       // one of its own is a chain reaction with no damping in it, and the far
       // side of the meadow would be running from a rumour.
       if (this._alarms.length < ALARM_MAX) {
-        this._alarms.push({ pos: mob.pos.clone(), mob, t: ALARM_LIFE });
+        this._alarms.push({ position: mob.position.clone(), mob, t: ALARM_LIFE });
       }
     } else if (alarm) {
       // Off a neighbour's word alone: a short break in the same direction it
       // went, not a committed escape from something it has not seen.
       mob.bolt = ALARM_BOLT;
       mob.boltFrom = null;
-      mob.boltAt.copy(alarm.pos);
+      mob.boltAt.copy(alarm.position);
     } else {
       return false;
     }
@@ -9512,7 +9476,7 @@ export class Mobs {
    * idea, and the two would only get in each other's way: a stalk that started
    * would *slow the cat down*, holding it at PROWL_HOLD while _hunt stood down.
    */
-  _prowl(mob, dt, dist, player, fr) {
+  _prowl(mob, dt, dist, player) {
     const spec = mob.spec;
     if (!spec.stalks) return false;
     // Already committed — _hunt owns the chase from here, and this is only
@@ -9615,9 +9579,9 @@ export class Mobs {
     // The visible half: face you, and close at half a walk rather than a run,
     // stopping a few cells short. A charge at this range would be over before
     // the telegraph meant anything.
-    _rel.copy(player.position).sub(mob.pos);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    relTo(_rel, mob.position, player.position);
+    const ra = _rel.x;
+    const rb = _rel.z;
     mob.want = Math.atan2(rb, ra);
     mob.creep = true;
     mob.state = dist > PROWL_HOLD ? 'walk' : 'idle';
@@ -9696,7 +9660,7 @@ export class Mobs {
     const prey = mob.prey;
     if (!prey) return false;
 
-    const d = mob.pos.distanceTo(prey.pos);
+    const d = wrapDist(mob.position, prey.position);
     if (d > PREY_RANGE * 1.6) { mob.prey = null; return false; }
     mob.preyChase += dt;
     if (mob.preyChase > PREY_GIVE_UP) {
@@ -9713,28 +9677,26 @@ export class Mobs {
     // than left to find out with a scan of its own: the hunter already knows
     // who it is chasing, so this costs nothing, and the flee state it sets is
     // the same one a swung axe sets.
-    const pf = prey.frame;
     if (d < PREY_RANGE * 0.55 && prey.state !== 'flee' && !prey.spec.trader) {
-      _rel.copy(prey.pos).sub(mob.pos);
+      relTo(_rel, mob.position, prey.position);
       prey.state = 'flee';
       prey.stateT = 1.4 + Math.random();
       prey.want = Math.atan2(
-        _rel.x * pf.eb[0] + _rel.y * pf.eb[1] + _rel.z * pf.eb[2],
-        _rel.x * pf.ea[0] + _rel.y * pf.ea[1] + _rel.z * pf.ea[2],
+        _rel.z,
+        _rel.x,
       );
     }
 
-    const fr = mob.frame;
     const reach = (spec.reach ?? 1.0) + mob.radius + prey.radius;
     // The body-to-body half of the same bug, and the one that was actually
     // measured: a fox reaches 1.26, a rabbit half a cell the other side of one
     // block is 1.0 away, so foxes ate through walls. Blocked counts as out of
     // reach — the hunter keeps chasing, and if there is a door it will find it.
-    if (d > reach || !this._blowClear(mob, prey.pos, prey.up, prey.spec.height)) {
-      _rel.copy(prey.pos).sub(mob.pos);
+    if (d > reach || !this._blowClear(mob, prey.position, prey.up, prey.spec.height)) {
+      relTo(_rel, mob.position, prey.position);
       mob.want = Math.atan2(
-        _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2],
-        _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2],
+        _rel.z,
+        _rel.x,
       );
       mob.state = 'chase';
       mob.stateT = 0.5;
@@ -9840,7 +9802,7 @@ export class Mobs {
       // The mob may have died or been knocked away between swing and contact.
       if (h.mob.health <= 0 || h.mob.dying > 0) continue;
       const reach = h.mob.spec.reach + h.mob.radius + 0.35;
-      if (h.mob.pos.distanceTo(player.position) > reach) continue;
+      if (wrapDist(h.mob.position, player.position) > reach) continue;
       // Asked again at the contact frame rather than trusted from the decision
       // to swing, because 0.28s is long enough to step behind a block — and
       // because this is the one door every blow on the player comes through, so
@@ -9869,10 +9831,10 @@ export class Mobs {
    */
   _contactHurtAt(mob) {
     const c = mob.cell;
-    const col = this._colOf(c.f, c.ci, c.cj);
+    const col = this._colOf(c.x, c.y);
     if (col < 0) return 0;
     const reach = mob.radius + CONTACT_TOUCH;
-    const k0 = Math.floor(c.ck);
+    const k0 = Math.floor(c.k);
     // Height in cells. Two traps here, both of which fail *quietly* rather than
     // loudly, which is why they are written down:
     //
@@ -9887,7 +9849,7 @@ export class Mobs {
     // half a layer. The individual variation is the jitter; the growth from
     // kills is `grown`.
     const bodyH = (mob.spec.height ?? 1) * (mob.sizeJitter ?? 1) * (mob.grown ?? 1);
-    const k1 = Math.floor(c.ck + Math.max(0.5, bodyH));
+    const k1 = Math.floor(c.k + Math.max(0.5, bodyH));
     let worst = 0;
     for (let di = -1; di <= 1; di++) {
       for (let dj = -1; dj <= 1; dj++) {
@@ -9897,8 +9859,8 @@ export class Mobs {
         // centre instead would let an animal stand half inside a cactus
         // unharmed, since a cactus fills its column rather than sitting at a
         // point in it.
-        const fi = c.ci - Math.floor(c.ci);
-        const fj = c.cj - Math.floor(c.cj);
+        const fi = c.x - Math.floor(c.x);
+        const fj = c.y - Math.floor(c.y);
         const dx = di === 0 ? 0 : (di > 0 ? 1 - fi : fi);
         const dy = dj === 0 ? 0 : (dj > 0 ? 1 - fj : fj);
         if (Math.hypot(dx, dy) > reach) continue;
@@ -10001,9 +9963,9 @@ export class Mobs {
       // nudge, and at the equator it pushed loot straight into the hillside.
       if (count > 0) {
         this.drops.spawn(
-          mob.pos.x + mob.up.x * 0.3,
-          mob.pos.y + mob.up.y * 0.3,
-          mob.pos.z + mob.up.z * 0.3,
+          mob.position.x + mob.up.x * 0.3,
+          mob.position.y + mob.up.y * 0.3,
+          mob.position.z + mob.up.z * 0.3,
           id, count,
         );
       }
@@ -10039,7 +10001,7 @@ export class Mobs {
     // The cinderlands are permanent night, and everything that keys off the
     // hour has to agree with the sky about that: husks spawn, monsters prowl,
     // and nothing there burns at dawn because dawn does not come.
-    if (FACE_ROLE[player.cell.f] === FACE_CINDER) this.daylight = -1;
+    if (FACE_ROLE[player.face] === FACE_PYRE) this.daylight = -1;
     const night = this.daylight < 0.02;
 
     // The night stalk's two clocks, ticked once for the planet rather than once
@@ -10072,7 +10034,7 @@ export class Mobs {
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       this.spawnTimer = SPAWN_PERIOD;
-      const playerCol = this._colOf(player.cell.f, player.cell.ci, player.cell.cj);
+      const playerCol = this._colOf(player.cell.x, player.cell.y);
       const have = this._census();
       // Night budgets. The daytime numbers stay the source of truth and this
       // scales them, so raising a population is still a one-line change in one
@@ -10267,11 +10229,10 @@ export class Mobs {
           // Facing you from the first frame. `_haunt` would turn him round over
           // the next second anyway, and a figure caught mid-turn on the frame
           // he is noticed reads as one that walked there.
-          _rel.copy(player.position).sub(seen.pos);
-          const fr0 = seen.frame;
+          relTo(_rel, seen.position, player.position);
           seen.heading = Math.atan2(
-            _rel.x * fr0.eb[0] + _rel.y * fr0.eb[1] + _rel.z * fr0.eb[2],
-            _rel.x * fr0.ea[0] + _rel.y * fr0.ea[1] + _rel.z * fr0.ea[2],
+            _rel.z,
+            _rel.x,
           );
           seen.want = seen.heading;
           seen.placed = false;      // adopt that heading outright, do not slerp
@@ -10295,9 +10256,9 @@ export class Mobs {
 
     for (let n = this.list.length - 1; n >= 0; n--) {
       const mob = this.list[n];
-      const c = mob.cell, spec = mob.spec, fr = mob.frame;
+      const c = mob.cell, spec = mob.spec;
 
-      const dist = mob.pos.distanceTo(player.position);
+      const dist = wrapDist(mob.position, player.position);
       if (dist > this.despawnRadius) {
         if (spec.trader) this._retireMerchant(mob, n);
         else { this._release(mob); this.list.splice(n, 1); }
@@ -10409,18 +10370,18 @@ export class Mobs {
       // `stalks`, no `hostile`/`monster`/`predator`, no `preyOn`, no `love` —
       // so each of them would refuse him on its own; `haunting` is not there to
       // stop them running, it is there to stop the *wander* underneath them.
-      const haunting = spec.phantom && this._haunt(mob, dt, dist, player, fr);
-      const prowling = !haunting && this._prowl(mob, dt, dist, player, fr);
+      const haunting = spec.phantom && this._haunt(mob, dt, dist, player);
+      const prowling = !haunting && this._prowl(mob, dt, dist, player);
       const hunting = !prowling && !haunting
         && (spec.hostile || spec.monster || spec.predator)
-        && this._hunt(mob, dt, dist, player, fr);
+        && this._hunt(mob, dt, dist, player);
       // Then the herd. Hunting the player wins over hunting dinner: something
       // that has decided on you should not wander off after a rabbit mid-fight.
       const stalking = !hunting && !prowling && this._stalk(mob, dt);
       // Courtship steers the same way hunting does, and for the same reason:
       // wandering will not reliably bring two animals together inside the love
       // window. Fleeing still wins — a spooked animal has other priorities.
-      const courting = !hunting && !prowling && !stalking && this._court(mob, fr);
+      const courting = !hunting && !prowling && !stalking && this._court(mob);
       // And the prey's side of the ecology. Last of the five, so it overrides
       // the courtship above it — "fleeing still wins", the same rule that
       // comment already states — and gated out of the three that mean this
@@ -10485,9 +10446,9 @@ export class Mobs {
         // an approaching player would otherwise be re-aimed into it every time
         // this re-triggers, and the way round it had found is thrown away.
         if (mob.slideT <= 0) {
-          _rel.copy(mob.pos).sub(player.position);
-          const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-          const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+          relTo(_rel, player.position, mob.position);
+          const ra = _rel.x;
+          const rb = _rel.z;
           mob.want = Math.atan2(rb, ra);
         }
       }
@@ -10510,14 +10471,14 @@ export class Mobs {
       //
       // `mob.wading` is set at the bottom of this loop, from the block the body
       // is actually in, so it is one frame old here. That is the same lag every
-      // other decision in this section runs on — they all read `mob.pos` — and
+      // other decision in this section runs on — they all read `mob.position` — and
       // a sixtieth of a second of swimming in the wrong direction is not
       // something anyone can see.
       if (mob.wading) {
         mob.swimT -= dt;
         if (mob.swimT <= 0) {
           mob.swimT = SWIM_PERIOD;
-          const wcol = this._colOf(c.f, c.ci, c.cj);
+          const wcol = this._colOf(c.x, c.y);
           mob.swimWant = this._landBearing(mob, wcol);
           if (mob.swimWant !== null) { mob.swimFail = 0; mob.swimAlong = null; } else {
             // No bank it may climb. After SWIM_GIVE_UP of those in a row, stop
@@ -10568,7 +10529,7 @@ export class Mobs {
       // steer a deer out of a river, and the watchdog exists for the case where
       // all of that has visibly failed. It only ever overrides a heading it has
       // already watched not work for three seconds. See _unstick.
-      const escape = this._unstick(mob, dt, dist, fr);
+      const escape = this._unstick(mob, dt, dist);
       if (escape !== null) {
         mob.want = escape;
         mob.state = 'walk';
@@ -10619,7 +10580,7 @@ export class Mobs {
       // It sits above `here` rather than beside the buoyancy where it was
       // written, because `here` now depends on it — a floating body's reference
       // is the water holding it up, not the bed twenty layers down. Nothing
-      // between the old position and this one touches c.ci, c.cj or c.ck, so
+      // between the old position and this one touches c.x, c.y or c.k, so
       // the readings are the same ones; they are simply taken before they are
       // needed rather than after. It also quietly settles the caveat on the
       // turn check below, which used to be comparing costs computed under the
@@ -10629,8 +10590,8 @@ export class Mobs {
       // distinction the swimming rules care about — an animal that fell in a
       // river should strike out for the bank, an animal that fell in lava has a
       // different problem and one second to solve it.
-      const bodyCol = this._colOf(c.f, c.ci, c.cj);
-      const feetK = Math.floor(c.ck);
+      const bodyCol = this._colOf(c.x, c.y);
+      const feetK = Math.floor(c.k);
       const inLiquid = this.planet.liquidAt(bodyCol, feetK);
       const inLava = inLiquid && this.planet.at(bodyCol, feetK) === ID.lava;
       const inWater = inLiquid && !inLava;
@@ -10772,8 +10733,8 @@ export class Mobs {
       if (turned !== mob.heading) {
         if (mob.stuck) mob.heading = turned;
         else {
-          const held = this._footprintCost(c.f, c.ci, c.cj, here, mob, mob.heading);
-          const swept = this._footprintCost(c.f, c.ci, c.cj, here, mob, turned);
+          const held = this._footprintCost(c.x, c.y, here, mob, mob.heading);
+          const swept = this._footprintCost(c.x, c.y, here, mob, turned);
           if (swept <= held) mob.heading = turned;
         }
       }
@@ -10784,8 +10745,8 @@ export class Mobs {
 
       // --- integrate in cell space ------------------------------------------
       const ch = Math.cos(mob.heading), sh = Math.sin(mob.heading);
-      mob.vel.i = ch * mob.speedNow / fr.arcA;
-      mob.vel.j = sh * mob.speedNow / fr.arcB;
+      mob.vel.x = ch * mob.speedNow ;
+      mob.vel.z = sh * mob.speedNow ;
 
       // Knockback rides on top of steering rather than replacing it, so a husk
       // is shoved back while still facing you and closes again the moment it
@@ -10795,8 +10756,8 @@ export class Mobs {
       // fell over. This is the beat that makes a fight a fight.
       if (mob.knockT > 0) {
         const decay = mob.knockT / KNOCK_TIME;
-        mob.vel.i += mob.knockA * decay / fr.arcA;
-        mob.vel.j += mob.knockB * decay / fr.arcB;
+        mob.vel.x += mob.knockX * decay ;
+        mob.vel.z += mob.knockZ * decay ;
         mob.knockT = Math.max(0, mob.knockT - dt);
       }
 
@@ -10824,7 +10785,7 @@ export class Mobs {
          * of this file's life that was enough, because everything that chased
          * the player walked on ground the player was also standing on. A
          * swimmer is the first hunter with a third axis, and without this line
-         * it does not have it: the only thing setting a swimmer's `vel.k` was
+         * it does not have it: the only thing setting a swimmer's `vel.y` was
          * the sine below, a wander with an amplitude of 0.45 and no idea the
          * player exists.
          *
@@ -10848,10 +10809,10 @@ export class Mobs {
          * can dive into rock.
          */
         const want = (spec.hostile && mob.target === 'player')
-          ? clamp((player.cell.ck - c.ck) * 2.0, -1.6, 1.6)
+          ? clamp((player.cell.k - c.k) * 2.0, -1.6, 1.6)
           : Math.sin(mob.idleT * 0.6 + mob.seed) * 0.45;
-        mob.vel.k += (want - mob.vel.k) * Math.min(1, dt * 3);
-        if (c.ck > ceilK - 0.6) mob.vel.k = Math.min(mob.vel.k, -0.2);
+        mob.vel.y += (want - mob.vel.y) * Math.min(1, dt * 3);
+        if (c.k > ceilK - 0.6) mob.vel.y = Math.min(mob.vel.y, -0.2);
       } else if (wading) {
         // The opposite of the fish: it wants the *surface*, not a depth. Chase
         // the gap the way the flier does, so a body that went in hard sinks a
@@ -10859,13 +10820,13 @@ export class Mobs {
         // it touches the water. In water only a block deep the want lands
         // barely above the bed, so a puddle still reads as a puddle.
         const want = this._waterTop(bodyCol, feetK) + WADE_RIDE;
-        const climb = clamp((want - c.ck) * 3.0, -1.4, 2.6);
-        mob.vel.k += (climb - mob.vel.k) * Math.min(1, dt * 6);
+        const climb = clamp((want - c.k) * 3.0, -1.4, 2.6);
+        mob.vel.y += (climb - mob.vel.y) * Math.min(1, dt * 6);
       } else if (flying) {
         // Seek hover height above whatever is underneath, with a slow wander so
         // it never holds a dead-flat line. Chase the *gap* rather than setting a
         // velocity outright, so it eases in and out instead of snapping.
-        const under = this._groundUnder(mob, c.f, c.ci, c.cj, Math.floor(c.ck + 0.02));
+        const under = this._groundUnder(mob, c.x, c.y, Math.floor(c.k + 0.02));
         const bob = Math.sin(mob.idleT * 1.9 + mob.seed) * 0.22
           + Math.sin(mob.idleT * 0.7 + mob.seed * 1.7) * 0.30;
         // ...and over whatever it is about to meet. The height seek reads the
@@ -10875,8 +10836,8 @@ export class Mobs {
         // refused by that canopy (see the flier branch in _footprintCost), a
         // seek with no look-ahead is a bird parked at the treeline. See
         // FLY_LOOK_NEAR.
-        const ahead = this._flyAhead(mob, fr);
-        const hold = under >= 0 ? under + spec.hover : c.ck;
+        const ahead = this._flyAhead(mob);
+        const hold = under >= 0 ? under + spec.hover : c.k;
         let want = (ahead >= 0 ? Math.max(hold, ahead + mob.tall + FLY_CLEAR) : hold) + bob;
         // ...but not into the roof. Under an overhang or in a cave mouth the
         // wall ahead is also a wall the body cannot climb over, and a lift it
@@ -10885,9 +10846,9 @@ export class Mobs {
         // pinned in the rock before this clamp existed, against 1.2s for the
         // same species with it. Where there is no room, there is no lift, and
         // the veer in _walkStep is the way out — which is what it is for.
-        if (want > c.ck) {
+        if (want > c.k) {
           const kTop = Math.ceil(want + mob.tall);
-          for (let k = Math.floor(c.ck + mob.tall); k <= kTop; k++) {
+          for (let k = Math.floor(c.k + mob.tall); k <= kTop; k++) {
             const id = this.planet.at(bodyCol, k);
             if (IS_SOLID[id] && !isPassable(id, this.planet.facingAt(bodyCol, k))) {
               want = Math.min(want, k - mob.tall);
@@ -10895,14 +10856,14 @@ export class Mobs {
             }
           }
         }
-        const climb = Math.max(-2.2, Math.min(2.2, (want - c.ck) * 2.4));
-        mob.vel.k += (climb - mob.vel.k) * Math.min(1, dt * 4);
+        const climb = Math.max(-2.2, Math.min(2.2, (want - c.k) * 2.4));
+        mob.vel.y += (climb - mob.vel.y) * Math.min(1, dt * 4);
       } else if (mob.climbTo !== null && spec.climbs
-                 && this._climbHold(bodyCol, Math.floor(c.ck))) {
+                 && this._climbHold(bodyCol, Math.floor(c.k))) {
         // Shinning up beside the trunk. Same "chase the gap" shape the flier
         // uses, so it eases in and out instead of snapping to a speed.
-        const rate = clamp((mob.climbTo - c.ck) * 2.4, -CLIMB_SPEED, CLIMB_SPEED);
-        mob.vel.k += (rate - mob.vel.k) * Math.min(1, dt * 5);
+        const rate = clamp((mob.climbTo - c.k) * 2.4, -CLIMB_SPEED, CLIMB_SPEED);
+        mob.vel.y += (rate - mob.vel.y) * Math.min(1, dt * 5);
         // Hold on with both hands — by position, not by persuasion.
         //
         // Damping the velocity was the first attempt and it is not enough: the
@@ -10912,10 +10873,10 @@ export class Mobs {
         // of six climbs ending in a two-damage landing — an animal hurting
         // itself doing the one thing this feature exists to let it do. Easing
         // the body back to the column it set out from cannot be outvoted.
-        c.ci += (mob.climbCi - c.ci) * Math.min(1, dt * 8);
-        c.cj += (mob.climbCj - c.cj) * Math.min(1, dt * 8);
-        mob.vel.i *= 0.02;
-        mob.vel.j *= 0.02;
+        c.x += (mob.climbCi - c.x) * Math.min(1, dt * 8);
+        c.y += (mob.climbCj - c.y) * Math.min(1, dt * 8);
+        mob.vel.x *= 0.02;
+        mob.vel.z *= 0.02;
         // A controlled descent is not a fall. Without this, coming down eight
         // layers under its own power landed as a seven-layer drop and hurt —
         // the animal would have climbed a tree and then injured itself getting
@@ -10925,8 +10886,8 @@ export class Mobs {
         // against an animal hanging in a tree for the rest of the session
         // because something above it turned out to be in the way — the failure
         // this replaced, which cost nothing to detect and everything to miss.
-        if (Math.abs(c.ck - mob.climbLastK) > 0.05) {
-          mob.climbLastK = c.ck;
+        if (Math.abs(c.k - mob.climbLastK) > 0.05) {
+          mob.climbLastK = c.k;
           mob.climbStallT = 0;
         } else if ((mob.climbStallT += dt) > CLIMB_STALL) {
           mob.climbTo = null;
@@ -10934,7 +10895,7 @@ export class Mobs {
           mob.perchT = 0;
           mob.climbGrace = CLIMB_GRACE;
         }
-        if (mob.climbTo !== null && Math.abs(mob.climbTo - c.ck) < 0.35) {
+        if (mob.climbTo !== null && Math.abs(mob.climbTo - c.k) < 0.35) {
           if (mob.perchT > 0) {
             // Arrived at the top: sit for a while, then head back down.
             mob.perchT -= dt;
@@ -10946,8 +10907,8 @@ export class Mobs {
               // so the "descent" was a climb, it arrived with the perch already
               // spent, and it let go seven layers up. That is where the last of
               // the fall damage was coming from.
-              const down = this._groundK(bodyCol, Math.floor(c.ck) - 1, false);
-              mob.climbTo = (down >= 0 && down < c.ck) ? down : null;
+              const down = this._groundK(bodyCol, Math.floor(c.k) - 1, false);
+              mob.climbTo = (down >= 0 && down < c.k) ? down : null;
               if (mob.climbTo === null) {
                 mob.climbRestT = CLIMB_REST;
                 mob.climbGrace = CLIMB_GRACE;
@@ -10966,7 +10927,7 @@ export class Mobs {
           mob.climbRestT = CLIMB_REST;
           mob.climbGrace = CLIMB_GRACE;
         }
-        mob.vel.k -= GRAVITY * dt;
+        mob.vel.y -= GRAVITY * dt;
       }
 
       /**
@@ -10986,10 +10947,10 @@ export class Mobs {
        * Fish are exempt because a seabed pool is still the sea to them, and
        * anything already swimming is left alone for the same reason.
        */
-      const sinkId = SINK[this.planet.at(this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj),
-        Math.floor(mob.cell.ck))];
+      const sinkId = SINK[this.planet.at(this._colOf(mob.cell.x, mob.cell.y),
+        Math.floor(mob.cell.k))];
       if (sinkId > 0 && !mob.spec.aquatic && !mob.swimming) {
-        mob.vel.k = Math.min(mob.vel.k, -sinkId);
+        mob.vel.y = Math.min(mob.vel.y, -sinkId);
         mob.sinkT = (mob.sinkT || 0) + dt;
         // Under the surface of it, and losing. The test is whether there is
         // MORE of the stuff overhead, not whether the cell above is solid: a
@@ -10997,7 +10958,7 @@ export class Mobs {
         // into it - so `solidAt` was false every time and nothing ever drowned.
         // Slow enough that a body can still wade out of a shallow patch.
         const above = SINK[this.planet.at(
-          this._colOf(mob.cell.f, mob.cell.ci, mob.cell.cj), Math.floor(mob.cell.ck) + 1)];
+          this._colOf(mob.cell.x, mob.cell.y), Math.floor(mob.cell.k) + 1)];
         if (mob.sinkT > SINK_MOB_GRACE && above > 0) {
           if (this._damage(mob, SINK_MOB_DPS * dt)) continue;
         }
@@ -11010,21 +10971,17 @@ export class Mobs {
       // cells/s, which is 0.63 of a cell on the worst frame the engine allows.
       // That is the tightest margin here and it is the thing to check first if
       // any multiplier in the speed ladder is ever pushed past about 4.
-      const ni = c.ci + mob.vel.i * dt;
-      const nj = c.cj + mob.vel.j * dt;
+      const ni = c.x + mob.vel.x * dt;
+      const nj = c.y + mob.vel.z * dt;
       // Where it was, so the gait can be read off the ground it actually covers
       // rather than off what it meant to cover. Taken before the fork below and
       // compared after the clamps, i.e. across every way a body can be moved or
       // refused — and before the seam wrap, which is a change of coordinates
       // rather than a movement.
-      const fromI = c.ci, fromJ = c.cj;
+      const fromI = c.x, fromJ = c.y;
 
-      // Cross-face-safe column lookups. The old code did cidx(c.f, floor(ci),
-      // floor(cj)) with the indices merely clamped, so at a cube seam it probed
-      // a column on the WRONG face; the ground snap below then teleported the
-      // animal to that column's height.
-      // (`here`, the layer under the feet, is now worked out above the steering
-      // — the turn check needs it too.)
+      // (`here`, the layer under the feet, is worked out above the steering —
+      // the turn check needs it too.)
 
       // Walking, or being thrown. They are not the same move and this is the
       // fork between them.
@@ -11049,42 +11006,42 @@ export class Mobs {
       // fork so that nothing - not the wander, not a shove, not a knockback -
       // moves a merchant whose shop is open. `main.js` owns the flag.
       if (mob.trading) {
-        mob.vel.i = 0; mob.vel.j = 0;
+        mob.vel.x = 0; mob.vel.z = 0;
         mob.tumbling = false;
       } else if (tumbling) {
         // A leap carries its own horizontal velocity rather than the steering's:
-        // `vel.i`/`vel.j` are rebuilt from the heading every frame, so a jump
+        // `vel.x`/`vel.z` are rebuilt from the heading every frame, so a jump
         // that used them would curve toward the player in mid-air. See `_leap`.
         this._tumble(mob,
-          (mob.leaping ? mob.leapI : mob.vel.i) * dt,
-          (mob.leaping ? mob.leapJ : mob.vel.j) * dt);
+          (mob.leaping ? mob.leapX : mob.vel.x) * dt,
+          (mob.leaping ? mob.leapZ : mob.vel.z) * dt);
         // A thrown body does not get its rotation policed either, for the same
         // reason it does not get the footprint test: it has stopped choosing.
         // Leaving the flag at whatever the last walking frame set would have a
         // struck animal's heading held by terrain it is no longer negotiating
         // with.
         mob.stuck = true;
-      } else this._walkStep(mob, ni, nj, here, fr, player);
+      } else this._walkStep(mob, ni, nj, here, player);
 
-      const prevCk = c.ck;
+      const prevCk = c.k;
       // A swimmer's rise and fall is checked against the terrain, and it was
       // not — see _swimBlocked. Only `aquatic` pays for this: a flier has open
       // sky above it and a wading animal is held at the water line by
       // buoyancy, so neither has ever had a way to climb into rock.
-      if (spec.aquatic && mob.vel.k !== 0) {
-        const nk = c.ck + mob.vel.k * dt;
-        if (this._swimBlocked(mob, nk, c.ck)) mob.vel.k = 0;
-        else c.ck = nk;
-      } else c.ck += mob.vel.k * dt;
-      const col = this._colOf(c.f, c.ci, c.cj);
+      if (spec.aquatic && mob.vel.y !== 0) {
+        const nk = c.k + mob.vel.y * dt;
+        if (this._swimBlocked(mob, nk, c.k)) mob.vel.y = 0;
+        else c.k = nk;
+      } else c.k += mob.vel.y * dt;
+      const col = this._colOf(c.x, c.y);
 
       // Ceiling. There was none at all, so an animal under an overhang pushed
       // its head into the block above and nothing ever stopped it rising.
-      if (mob.vel.k > 0) {
-        const headK = Math.floor(c.ck + mob.tall);
+      if (mob.vel.y > 0) {
+        const headK = Math.floor(c.k + mob.tall);
         if (this.planet.solidAt(col, headK)) {
-          c.ck = Math.min(c.ck, headK - mob.tall);
-          mob.vel.k = 0;
+          c.k = Math.min(c.k, headK - mob.tall);
+          mob.vel.y = 0;
         }
       }
 
@@ -11099,13 +11056,13 @@ export class Mobs {
       //
       // `here + 1` rather than `floor(prevCk + 0.02)`, which is the same number
       // for everything that walks, flies or swims: `here` is that expression
-      // minus one and nothing since has touched c.ck. It differs for exactly
+      // minus one and nothing since has touched c.k. It differs for exactly
       // one case, the one it is written for — a body floating at the water
       // line, whose reference layer is the surface holding it up. Starting the
       // scan a layer low is why a bank a block proud of the water was invisible
       // to the clamp as well as to the footprint test, so the pair of them are
       // now asking about the same ground.
-      const floor = this._groundUnder(mob, c.f, c.ci, c.cj, here + 1);
+      const floor = this._groundUnder(mob, c.x, c.y, here + 1);
 
       // Did the body come down *through* the surface during this frame? That is
       // unambiguously a landing rather than a step up, and it has to be allowed
@@ -11114,7 +11071,7 @@ export class Mobs {
       // cross far more than a block in a frame. At the 0.1s frame main.js
       // allows, terminal velocity is two cells — so before this, an animal that
       // fell any real distance passed straight through the ground it should
-      // have landed on and rode the c.ck < 1 bedrock clamp down to the mantle.
+      // have landed on and rode the c.k < 1 bedrock clamp down to the mantle.
       // Nothing ever fell far enough for that to show until knockback started
       // pushing them off things.
       const crossed = prevCk >= floor;
@@ -11153,7 +11110,7 @@ export class Mobs {
         //
         // Neither of the cases this branch exists for is touched. A fish rising
         // through deep water and a bee climbing to clear a tree both do it with
-        // vel.k; the clamp only ever pushes a body up off ground it is already
+        // vel.y; the clamp only ever pushes a body up off ground it is already
         // below, and in open water or open air there is no such ground within
         // reach of the scan. The third case, a wading land animal being lifted
         // onto a bank, is deliberately not in this branch at all — see the note
@@ -11192,13 +11149,13 @@ export class Mobs {
         // and `_aquaticCost` already hold it.
         const bed = spec.aquatic ? this._groundOwn(mob, col, here + 1) : floor;
         const rest = bed + mob.belly;
-        if (bed >= 0 && c.ck < rest) {
-          c.ck = crossed ? rest : Math.min(rest, c.ck + MOB_MAX_RISE);
-          mob.vel.k = Math.max(0, mob.vel.k);
+        if (bed >= 0 && c.k < rest) {
+          c.k = crossed ? rest : Math.min(rest, c.k + MOB_MAX_RISE);
+          mob.vel.y = Math.max(0, mob.vel.y);
         }
         mob.grounded = false;
-      } else if (floor >= 0 && c.ck < floor && mob.vel.k <= 0
-        && (crossed || floor - c.ck <= MOB_MAX_RISE
+      } else if (floor >= 0 && c.k < floor && mob.vel.y <= 0
+        && (crossed || floor - c.k <= MOB_MAX_RISE
           // Hauling itself out. A body at the water line sits WADE_RIDE into
           // the top water layer, so a bank one block proud of the water is 1.75
           // above its feet — over MOB_MAX_RISE, and refused, which is why the
@@ -11210,10 +11167,10 @@ export class Mobs {
           // is in the water, the reach it allows is the same WADE_CLIMB the
           // footprint test already used to permit the move, and the frame after
           // it lands the body is standing on the bank and is not wading at all.
-          || (wading && floor - c.ck <= this._haulReach(mob)))) {
-        // The `vel.k <= 0` is a second belt against the escalator described on
+          || (wading && floor - c.k <= this._haulReach(mob)))) {
+        // The `vel.y <= 0` is a second belt against the escalator described on
         // _groundUnder: a body on its way *up* — mid-hop, or shoved by a blow —
-        // is never also stepping up onto something. On the ground vel.k is
+        // is never also stepping up onto something. On the ground vel.y is
         // negative every frame before this runs, gravity having been applied
         // just above, so ordinary walking is unaffected.
         // Climb a step by raising the real position at a bounded rate, not by
@@ -11229,20 +11186,22 @@ export class Mobs {
         // upward leaves it half-inside the step for as long as the ease lasts,
         // because the horizontal move onto the step has already happened. A
         // one-block pop is brief and honest; a body inside a block is not.
-        c.ck = floor;
-        mob.vel.k = 0;
+        c.k = floor;
+        mob.vel.y = 0;
         // hoppers bounce along instead of gliding
-        if (spec.hops && moving && Math.random() < dt * 2.6) mob.vel.k = spec.hopImpulse;
+        if (spec.hops && moving && Math.random() < dt * 2.6) mob.vel.y = spec.hopImpulse;
         mob.grounded = true;
       } else {
         mob.grounded = false;
       }
-      if (c.ck < 1) { c.ck = 1; mob.vel.k = 0; }
+      if (c.k < 1) { c.k = 1; mob.vel.y = 0; }
 
       // How much ground that was, in cells per second, smoothed over about a
       // fifth of a second so a single refused frame does not flicker the clip.
       // Read by _animate, which takes the lesser of this and `speedNow`.
-      const wentI = (c.ci - fromI) * fr.arcA, wentJ = (c.cj - fromJ) * fr.arcB;
+      // `delta`, because a body that crossed the wrap this frame moved one
+      // cell, not twelve hundred and forty-seven.
+      const wentI = delta(fromI, c.x), wentJ = delta(fromJ, c.y);
       const went = Math.hypot(wentI, wentJ) / Math.max(1e-4, dt);
       mob.gait += (went - mob.gait) * Math.min(1, dt * 6);
 
@@ -11255,17 +11214,16 @@ export class Mobs {
       // an animal that gets up unhurt at the bottom makes the throw pointless
       // — and the same clock catches the block mined out from under it.
       //
-      // Measured in layers, which is what c.ck already is: a height above
-      // R_MIN. No radius appears here and none should, so the planet can be
-      // resized under it without a number in this file moving. The peak is
+      // Measured in layers, which is what c.k already is: a height above
+      // bedrock. No radius appears here and none should. The peak is
       // tracked rather than the moment the descent began, for the same reason
       // the player's is: a hopper's arc starts on the way *up*.
       if (mob.climbGrace > 0) { mob.climbGrace -= dt; mob.fallFrom = null; }
       if (!mob.grounded && !swimming && !wading && !flying) {
-        if (mob.climbGrace <= 0 && mob.fallFrom === null && mob.vel.k < -0.2) mob.fallFrom = prevCk;
-        else if (mob.fallFrom !== null && c.ck > mob.fallFrom) mob.fallFrom = c.ck;
+        if (mob.climbGrace <= 0 && mob.fallFrom === null && mob.vel.y < -0.2) mob.fallFrom = prevCk;
+        else if (mob.fallFrom !== null && c.k > mob.fallFrom) mob.fallFrom = c.k;
       } else if (mob.fallFrom !== null) {
-        const drop = mob.fallFrom - c.ck;
+        const drop = mob.fallFrom - c.k;
         mob.fallFrom = null;
         // Water breaks a fall, exactly as it does for the player — which is
         // also what makes shoving something into a river a way of moving it
@@ -11367,14 +11325,14 @@ export class Mobs {
           mob.climbT = CLIMB_PERIOD;
           if (mob.climbTo === null && mob.climbRestT <= 0 && mob.state !== 'flee'
               && Math.random() < CLIMB_CHANCE) {
-            const bc = this._colOf(c.f, c.ci, c.cj);
-            const top = bc >= 0 ? this._canopyAbove(bc, c.ck) : -1;
-            if (top > c.ck && this._climbHold(bc, Math.floor(c.ck))) {
+            const bc = this._colOf(c.x, c.y);
+            const top = bc >= 0 ? this._canopyAbove(bc, c.k) : -1;
+            if (top > c.k && this._climbHold(bc, Math.floor(c.k))) {
               mob.climbTo = top;
               // The column it is holding on to. Kept so the climb cannot drift
               // out of it — see the pin in the climb branch.
-              mob.climbCi = c.ci;
-              mob.climbCj = c.cj;
+              mob.climbCi = c.x;
+              mob.climbCj = c.y;
               mob.perchT = PERCH_MIN + Math.random() * (PERCH_MAX - PERCH_MIN);
               // Stop wandering, or it walks out from under its own climb.
               mob.state = 'idle';
@@ -11390,27 +11348,14 @@ export class Mobs {
         if (spike > 0 && this._damage(mob, spike)) continue;
       }
 
-      // Nothing but the player crosses a seam. The face an animal spawned on
-      // is the face it lives on: it is turned back at the border rather than
-      // folded onto the neighbour.
-      //
-      // Held a little short of the last column, not at it, so the turn happens
-      // on open ground and an animal pressed against the edge by a chase still
-      // has somewhere to stand. It reads as a coastline rather than a wall
-      // because the terrain is already flat and treeless out here.
-      if (c.ci < FACE_BOUND || c.ci > F - FACE_BOUND
-        || c.cj < FACE_BOUND || c.cj > F - FACE_BOUND) {
-        c.ci = Math.min(F - FACE_BOUND, Math.max(FACE_BOUND, c.ci));
-        c.cj = Math.min(F - FACE_BOUND, Math.max(FACE_BOUND, c.cj));
-        // Point it back at the middle of its own face and let the ordinary
-        // steering take over from there.
-        const nh = Math.atan2(F * 0.5 - c.cj, F * 0.5 - c.ci);
-        mob.want = wrapAngle(mob.want + wrapAngle(nh - mob.heading));
-        mob.heading = nh;
-        this._sync(mob);
-      } else {
-        this._sync(mob);
-      }
+      // Animals cross the cross's joins freely, which is the owner's call and
+      // the whole point of five faces being one world. What used to stand here
+      // was the FACE_BOUND clamp: a body within three columns of a face border
+      // was pushed back and turned round, which is why bodies piled up along
+      // every seam. There is nothing to clamp to - `_sync` wraps the cell onto
+      // the map - and a sealed face needs no rule of its own, because its
+      // divider is solid rock and the footprint test already refuses it.
+      this._sync(mob);
 
       // The leap's apex and its landing. After `_sync`, so the blow is measured
       // from where the body actually came down rather than from where it was a
@@ -11419,7 +11364,7 @@ export class Mobs {
       // river is never `grounded` again, and would otherwise stay airborne for
       // the rest of a life the water is already ending.
       if (mob.leaping) {
-        if (c.ck > mob.leapPeak) mob.leapPeak = c.ck;
+        if (c.k > mob.leapPeak) mob.leapPeak = c.k;
         if (mob.grounded || mob.wading || mob.swimming) this._landLeap(mob, player);
       }
 
@@ -11458,19 +11403,18 @@ export class Mobs {
   // --- presentation ---------------------------------------------------------
 
   _animate(mob, dt) {
-    const spec = mob.spec, fr = mob.frame, model = mob.model;
+    const spec = mob.spec, model = mob.model;
 
-    mob.prevPos.copy(mob.pos);
+    mob.prevPos.copy(mob.position);
 
     // --- orientation ---
     // Face the direction of travel, standing on the local up. The head sits at
     // local +Z, so +Z must map to forward — mapping it to -forward walks the
     // animal backwards.
-    _fwd.set(0, 0, 0);
-    _axis.fromArray(fr.ea); _fwd.addScaledVector(_axis, Math.cos(mob.heading));
-    _axis.fromArray(fr.eb); _fwd.addScaledVector(_axis, Math.sin(mob.heading));
-    if (_fwd.lengthSq() < 1e-6) _fwd.fromArray(fr.ea);
-    _fwd.normalize();
+    // A heading is an angle in the world's own XZ plane now, so this is the
+    // angle itself rather than a sum of two basis vectors that had to be looked
+    // up per body.
+    _fwd.set(Math.cos(mob.heading), 0, Math.sin(mob.heading)).normalize();
     // up x fwd keeps the basis right-handed with +Z = forward
     _side.crossVectors(mob.up, _fwd).normalize();
     _m.makeBasis(_side, mob.up, _fwd);
@@ -11480,7 +11424,7 @@ export class Mobs {
     if (!mob.placed) { root.quaternion.copy(_q); mob.placed = true; }
     else root.quaternion.slerp(_q, 1 - Math.exp(-16 * dt));
 
-    _rpos.copy(mob.pos);
+    _rpos.copy(mob.position);
     /**
      * A gait for a model that shipped without one.
      *
@@ -11682,7 +11626,7 @@ export class Mobs {
     if (mob.skyT <= 0) {
       mob.skyT = SKY_PROBE_PERIOD * (0.75 + Math.random() * 0.5);
       const c = mob.cell;
-      const col = this._colOf(c.f, c.ci, c.cj);
+      const col = this._colOf(c.x, c.y);
       // What counts as being over this body is what the *terrain* counts, which
       // is `SKY_ATTEN`, not "anything solid".
       //
@@ -11706,7 +11650,7 @@ export class Mobs {
       // A plank roof, a slab, a stair or a stone overhang is still 255 here, so
       // a body indoors or in a cave darkens exactly as it did.
       let blocked = 0;
-      for (let k = Math.floor(c.ck) + 2; k < D; k++) {
+      for (let k = Math.floor(c.k) + 2; k < D; k++) {
         if (SKY_ATTEN[this.planet.at(col, k)] === 255 && ++blocked >= 3) break;
       }
       const open = 1 - Math.min(3, blocked) / 3;
@@ -11800,7 +11744,7 @@ export class Mobs {
     // exactly where a torch or a lit doorway is, which is where he most needs
     // to stay a shape.
     if (this.blockLightAt && !spec.shade) {
-      _lit.copy(mob.pos).addScaledVector(mob.up, mob.spec.height * 0.5);
+      _lit.copy(mob.position).addScaledVector(mob.up, mob.spec.height * 0.5);
       const bl = this.blockLightAt(_lit, _blockL);
       /**
        * A self-lit body's own light is a FLOOR under this, not something it
@@ -11888,7 +11832,8 @@ export class Mobs {
       // both from `scale`, which was ~1 for every hand-built species but is now
       // a model-specific conversion factor — a husk's is not a cow's.
       const r = mob.radius + 0.20;
-      _ray.copy(mob.pos).addScaledVector(mob.up, mob.spec.height * 0.5).sub(origin);
+      relTo(_ray, origin, mob.position);
+      _ray.y += mob.spec.height * 0.5;
       const t = _ray.dot(dir);
       if (t < 0 || t > bestT) continue;
       const perp = _ray.addScaledVector(dir, -t).length();
@@ -11948,13 +11893,13 @@ export class Mobs {
       for (let b = a + 1; b < list.length; b++) {
         const o = list[b];
         if (o.type !== m.type || o.love <= 0 || o.baby > 0 || o.breedCooldown > 0) continue;
-        if (m.pos.distanceToSquared(o.pos) > BREED_RANGE * BREED_RANGE) continue;
+        if (wrapDist2(m.position, o.position) > BREED_RANGE * BREED_RANGE) continue;
         // pair off: both spend their affection and rest before breeding again
         m.love = 0; o.love = 0;
         m.breedCooldown = BREED_COOLDOWN;
         o.breedCooldown = BREED_COOLDOWN;
-        const calf = this.spawn(m.type, this._colOf(m.cell.f, m.cell.ci, m.cell.cj),
-          Math.floor(m.cell.ck));
+        const calf = this.spawn(m.type, this._colOf(m.cell.x, m.cell.y),
+          Math.floor(m.cell.k));
         if (calf) {
           calf.baby = BABY_SECONDS;
           calf.breedCooldown = BABY_SECONDS + BREED_COOLDOWN;
@@ -11975,10 +11920,9 @@ export class Mobs {
     if (mob.dying > 0) return false;
     mob.health -= damage;
     mob.hurtT = 0.25;
-    const fr = mob.frame;
-    _rel.copy(mob.pos).sub(fromPos);
-    const ra = _rel.x * fr.ea[0] + _rel.y * fr.ea[1] + _rel.z * fr.ea[2];
-    const rb = _rel.x * fr.eb[0] + _rel.y * fr.eb[1] + _rel.z * fr.eb[2];
+    relTo(_rel, fromPos, mob.position);
+    const ra = _rel.x;
+    const rb = _rel.z;
     // Shove it away from whoever swung. `ra`/`rb` are already the offset in the
     // mob's own tangent frame, so normalising them gives the push direction on
     // the curved surface without any further trigonometry.
@@ -11995,8 +11939,8 @@ export class Mobs {
     const push = (mob.spec.hostile || mob.spec.monster || mob.spec.predator ? KNOCK_HOSTILE
       : mob.spec.trader ? KNOCK_HOSTILE * 0.5 : KNOCK_WILDLIFE) * weight * mass;
     if (push > 0) {
-      mob.knockA = (ra / rl) * push;
-      mob.knockB = (rb / rl) * push;
+      mob.knockX = (ra / rl) * push;
+      mob.knockZ = (rb / rl) * push;
       mob.knockT = KNOCK_TIME;
       // The shove is now something that happens *to* the body rather than
       // something it agrees to. Until it lands again the walking rules are off
@@ -12020,7 +11964,7 @@ export class Mobs {
       mob.prey = null;
       mob.state = 'chase';
       mob.stateT = 0.5;
-      mob.vel.k = KNOCK_LIFT * 0.4 * mass;
+      mob.vel.y = KNOCK_LIFT * 0.4 * mass;
       // ...and for the one species that was not hunting anybody until now, the
       // switch that never goes back. `timid` keeps a body out of the acquire
       // test in `_hunt` entirely, so this line is the whole of its aggression:
@@ -12039,7 +11983,7 @@ export class Mobs {
     } else if (mob.spec.trader) {
       // It has seen worse. Bolting would also strand its stock somewhere you
       // cannot follow, and there is only ever one.
-      mob.vel.k = KNOCK_LIFT * 0.35 * mass;
+      mob.vel.y = KNOCK_LIFT * 0.35 * mass;
     } else {
       mob.state = 'flee';
       mob.stateT = 2.5;
@@ -12054,7 +11998,7 @@ export class Mobs {
       // down and the push is spent sliding, and a body in the air keeps every
       // bit of it. This is the difference between a bunny clearing the river
       // bank and a bunny scuffing along it.
-      mob.vel.k = KNOCK_LIFT * mass;
+      mob.vel.y = KNOCK_LIFT * mass;
     }
     // Pain and death are never rate-limited — they are always the player's
     // own doing, and there is at most one per swing.
@@ -12080,7 +12024,7 @@ export class Mobs {
    * cow picked up by a tornado has not been hit by anybody and should not come
    * down hunting the player for it.
    *
-   * What it keeps is the part that matters: `knockA`/`knockB`/`knockT` ride on
+   * What it keeps is the part that matters: `knockX`/`knockZ`/`knockT` ride on
    * top of steering, and `tumbling` is what suspends the walking rules so a body
    * can be put somewhere it would never have chosen to walk. Both already exist
    * and both are already tested by every swing in the game.
@@ -12108,7 +12052,7 @@ export class Mobs {
     let n = 0;
     for (const mob of this.list) {
       if (mob.dying > 0 || mob.spec.phantom) continue;
-      _rel.copy(mob.pos).sub(pos);
+      relTo(_rel, pos, mob.position);
       // Distance from the AXIS, not from the foot. A funnel is a line.
       const h = _rel.dot(up);
       if (h < -3 || h > 40) continue;
@@ -12122,21 +12066,20 @@ export class Mobs {
       // be carried opposite ways round the same funnel.
       _spin.copy(up).cross(_rel).normalize();
       _spin.addScaledVector(_rel, -0.45).normalize();
-      const fr = mob.frame;
-      const ra = _spin.x * fr.ea[0] + _spin.y * fr.ea[1] + _spin.z * fr.ea[2];
-      const rb = _spin.x * fr.eb[0] + _spin.y * fr.eb[1] + _spin.z * fr.eb[2];
+      const ra = _spin.x;
+      const rb = _spin.z;
       const t = Math.max(0, Math.min(1, (pullR - d) / (pullR - coreR)));
       const mass = knockMass(mob.baseHeight ? mob.baseHeight * mob.grown : mob.spec.height);
       const push = KNOCK_HOSTILE * t * t * strength * mass;
       if (push < 0.2) continue;
-      mob.knockA = ra * push;
-      mob.knockB = rb * push;
+      mob.knockX = ra * push;
+      mob.knockZ = rb * push;
       mob.knockT = KNOCK_TIME;
       mob.tumbling = true;
       // Off its feet inside the core, and only there. Outside it the body is
       // dragged along the ground, which is what makes the core read as the part
       // you must not be in.
-      if (d < coreR) mob.vel.k = Math.max(mob.vel.k, KNOCK_LIFT * 1.4 * mass * strength);
+      if (d < coreR) mob.vel.y = Math.max(mob.vel.y, KNOCK_LIFT * 1.4 * mass * strength);
       n++;
     }
     return n;
@@ -12174,7 +12117,7 @@ export class Mobs {
       mobs: this.list.filter((m) => !m.spec.phantom && !m.spec.nightOnly && !m.spec.boss)
         .map((m) => {
         const d = {
-          t: m.type, c: [m.cell.f, m.cell.ci, m.cell.cj, m.cell.ck], h: m.health, s: m.seed,
+          t: m.type, c: [m.cell.x, m.cell.y, m.cell.k], h: m.health, s: m.seed,
           b: +m.baby.toFixed(1), l: +m.love.toFixed(1), d: +m.breedCooldown.toFixed(1),
         };
         // Size eaten for is earned, and it is also worth double loot — losing
@@ -12227,10 +12170,13 @@ export class Mobs {
       : (data?.cooldown ?? MERCHANT_FIRST);
     for (const d of arr) {
       if (!SPECIES[d.t]) continue;
-      const col = cidx(d.c[0], Math.floor(d.c[1]), Math.floor(d.c[2]));
-      const mob = this.spawn(d.t, col, Math.floor(d.c[3]) - 1, d.s);
+      // Three numbers, not four: the face was one of them and a face is a
+      // label on the map now, not a coordinate. Nothing guards the old shape,
+      // because GEN_VERSION 10 refuses every save written before this.
+      const col = this._colOf(d.c[0], d.c[1]);
+      const mob = this.spawn(d.t, col, Math.floor(d.c[2]) - 1, d.s);
       if (mob) {
-        mob.cell.ci = d.c[1]; mob.cell.cj = d.c[2]; mob.cell.ck = d.c[3];
+        mob.cell.x = d.c[0]; mob.cell.y = d.c[1]; mob.cell.k = d.c[2];
         mob.health = d.h;
         // A calf must come back a calf, at the size it had grown to.
         mob.baby = d.b ?? 0;
@@ -12257,7 +12203,7 @@ export class Mobs {
         }
         mobGrow(mob, 0);
         this._sync(mob);
-        mob.prevPos.copy(mob.pos);
+        mob.prevPos.copy(mob.position);
       }
     }
   }

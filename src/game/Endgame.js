@@ -1,6 +1,12 @@
 // The end of the game: sixty-four gold carrots, sixteen bosses, and a planet
 // that stops making monsters.
 //
+// The sixteen are split 4/4/4/4 over the four sealed faces - Rime, Tempest,
+// Verdant and Pyre - rather than 8/8 over the cube's two dedicated ones. The
+// split itself is data and lives on the species rows in `Mobs.js`; what this
+// file reads is `bossFace`, which is a FACE_ROLE, and turns into a face number
+// with one lookup.
+//
 // --- why this is not just sixteen more spawns --------------------------------
 //
 // Everything else in `Mobs.js` exists only inside the despawn ring. The list is
@@ -41,8 +47,9 @@
 // open — `triggered` is written to the save — so spending, dropping or losing
 // the carrots afterwards changes nothing.
 
-import { F, D, R_MIN, R_SEA, cidx, FACE_ROLE } from '../world/Constants.js';
-import { cellToWorld } from '../world/Sphere.js';
+import { D, SEA_K, FACE_ROLE } from '../world/Constants.js';
+import { F, W, WALL_T, colIndex, faceOrigin, dist2 } from '../world/Grid.js';
+import { wrapDist } from './Wrap.js';
 import { BOSS_ROSTER } from './Mobs.js';
 import { itemIdOf } from './Items.js';
 
@@ -57,16 +64,23 @@ const GOLD_CARROT = itemIdOf('gold_carrot');
 /**
  * Cells of clear space between two bosses on the same face.
  *
- * A face is 416 cells across and carries eight of them, so the ground is not
- * short of room. 60 is chosen against the despawn ring rather than against the
- * face: at roughly a unit per cell it is well inside 145, so two neighbours can
- * be up at once and a player can be fighting one while another walks over —
+ * A face is 416 cells across and carries four of them now, so the ground is
+ * emptier than it was. 60 is chosen against the despawn ring rather than
+ * against the face: a cell is a unit, so it is well inside 145, two neighbours
+ * can be up at once and a player can be fighting one while another walks over —
  * which is the whole of the owner's "aggressive to other mobs" if they meet.
  * Much more and the sixteen would be sixteen separate errands.
  */
 const BOSS_SPREAD = 60;
 
-/** Kept off the seams, where a body would spend its life stepping across. */
+/**
+ * Kept off the face's own edge.
+ *
+ * A sealed face's outermost `WALL_T` ring IS the divider, so this is a margin
+ * over solid rock rather than over a seam: a boss placed against it would spend
+ * the fight with its back to an unbreakable wall and half its footprint inside
+ * one.
+ */
 const EDGE_MARGIN = 12;
 
 /** How many columns the placement will look at before it gives up on a face. */
@@ -79,7 +93,7 @@ const PLACE_TRIES = 4000;
  */
 const MATERIALISE_MARGIN = 25;
 
-const _w = [0, 0, 0];
+const _w = { x: 0, y: 0, z: 0 };
 
 export class Endgame {
   /**
@@ -116,9 +130,9 @@ export class Endgame {
     /**
      * Faces whose hostile spawning has been switched off, for good.
      *
-     * A set of face indices rather than a pair of booleans, because `Mobs` asks
-     * it about a column's face and does not care which two faces the endgame
-     * happened to use.
+     * A set of face NUMBERS, 1..9, rather than four booleans, because `Mobs`
+     * asks it about a column's face and does not care which four faces the
+     * endgame happened to use.
      */
     this.shut = new Set();
     this.mobs.hostileShut = this.shut;
@@ -163,10 +177,14 @@ export class Endgame {
       r.dead = false;
       r.live = null;
       // A face with a boss on it is a face that has stopped making monsters.
-      // Both faces are shut even if one boss could not be placed: the shutdown
-      // is a statement about the endgame having started, not about a body.
+      // All four are shut even if one boss could not be placed: the shutdown is
+      // a statement about the endgame having started, not about a body.
+      //
+      // From 1, not 0: index 0 of FACE_ROLE is a deliberate hole, because a
+      // face is numbered 1..9 and reading the hole should be a bug rather than
+      // a silent wrong answer.
       if (r.face !== undefined) {
-        for (let f = 0; f < FACE_ROLE.length; f++) if (FACE_ROLE[f] === r.face) this.shut.add(f);
+        for (let f = 1; f < FACE_ROLE.length; f++) if (FACE_ROLE[f] === r.face) this.shut.add(f);
       }
     }
     this.triggered = true;
@@ -180,7 +198,7 @@ export class Endgame {
    * Two tests and a spacing rule, all three off the height field alone:
    *
    *   ground   above sea level, and not so high it is a peak the body would
-   *            spend its life sliding off. `R_MIN + D` is the top of the array.
+   *            spend its life sliding off. `D` is the top of the array.
    *   water    the Deepmaw, and the opposite test — the column has to be sea
    *            bed with real depth over it, or the "placed on water" rule is a
    *            fish dropped on an ice sheet, which is the thing it forbids.
@@ -194,29 +212,36 @@ export class Endgame {
    */
   _pick(rec) {
     const h = this.planet.colHeight;
+    // Role to face number, 1..9. Each of the four sealed roles appears exactly
+    // once in FACE_ROLE, which is what makes this a lookup rather than a table.
     const f = FACE_ROLE.indexOf(rec.face);
     if (f < 0) return -1;
-    const span = F - EDGE_MARGIN * 2;
+    const o0 = faceOrigin(f);
+    const lo = WALL_T + EDGE_MARGIN;
+    const span = F - lo * 2;
     let fallback = -1;
     for (let t = 0; t < PLACE_TRIES; t++) {
-      const i = EDGE_MARGIN + ((Math.random() * span) | 0);
-      const j = EDGE_MARGIN + ((Math.random() * span) | 0);
-      const col = cidx(f, i, j);
+      const x = o0.x + lo + ((Math.random() * span) | 0);
+      const y = o0.y + lo + ((Math.random() * span) | 0);
+      const col = colIndex(x, y);
+      // A LAYER, not a radius: `colHeight` counts from bedrock now.
       const ground = h[col];
-      if (!(ground > R_MIN + 2) || !(ground < R_MIN + D - 8)) continue;
+      if (!(ground > 2) || !(ground < D - 8)) continue;
       // Eight below the surface rather than three: the Deepmaw is drawn very
       // nearly four cells tall, and a body that size in four layers of water is
       // wedged rather than swimming.
-      if (rec.aquatic ? !(ground < R_SEA - 8) : !(ground > R_SEA + 1)) continue;
+      if (rec.aquatic ? !(ground < SEA_K - 8) : !(ground > SEA_K + 1)) continue;
       if (fallback < 0) fallback = col;
       let clear = true;
       for (const o of this.roster) {
         if (o === rec || o.col < 0) continue;
-        const of = (o.col / (F * F)) | 0;
-        if (of !== f) continue;
-        const rem = o.col - of * F * F;
-        if (Math.abs(((rem / F) | 0) - i) < BOSS_SPREAD
-          && Math.abs((rem % F) - j) < BOSS_SPREAD) { clear = false; break; }
+        const oy = o.col % W, ox = (o.col - oy) / W;
+        // `dist2` rather than two absolute differences, and a disc rather than
+        // a square: it is the wrapped distance, so two bosses either side of the
+        // map's edge are not judged to be a map apart. Every boss on a face is
+        // the same species-set as before, so nothing else about the spacing
+        // moved - only the four faces it is spread over.
+        if (dist2(ox, oy, x, y) < BOSS_SPREAD * BOSS_SPREAD) { clear = false; break; }
       }
       if (clear) return col;
     }
@@ -269,14 +294,19 @@ export class Endgame {
     }
   }
 
-  /** World-space distance from the player to where this boss stands. */
+  /**
+   * World-space distance from the player to where this boss stands.
+   *
+   * Through `wrapDist`, because the map wraps: a boss near the map's edge and a
+   * player the other side of the wrap are neighbours, and a raw difference would
+   * keep the body from ever materialising.
+   */
   _distance(rec, player) {
-    const f = (rec.col / (F * F)) | 0;
-    const rem = rec.col - f * F * F;
-    const k = this.planet.colHeight[rec.col] - R_MIN;
-    cellToWorld(f, ((rem / F) | 0) + 0.5, (rem % F) + 0.5, k, _w);
-    return Math.hypot(_w[0] - player.position.x, _w[1] - player.position.y,
-      _w[2] - player.position.z);
+    const y = rec.col % W;
+    _w.x = (rec.col - y) / W + 0.5;
+    _w.y = this.planet.colHeight[rec.col];
+    _w.z = y + 0.5;
+    return wrapDist(_w, player.position);
   }
 
   /** One of them is down. Idempotent, because `_die` is not the only caller. */

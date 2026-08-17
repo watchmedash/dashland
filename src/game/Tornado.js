@@ -571,24 +571,23 @@ export class Tornado {
     const mag = PLAYER_FORCE * t * t * this.strength;
     if (mag < 0.4) { this._held = false; return; }
 
-    // World-space direction into the player's own cell-space velocity, using the
-    // tangent frame Player already keeps up to date. This is exactly what
-    // `Player._toCellVelocity` does, inlined so nothing here reaches into a
-    // private method.
-    const fr = p.frame;
-    const ea = _dir.x * fr.ea[0] + _dir.y * fr.ea[1] + _dir.z * fr.ea[2];
-    const eb = _dir.x * fr.eb[0] + _dir.y * fr.eb[1] + _dir.z * fr.eb[2];
-    p.knockI = (ea * mag) / fr.arcA;
-    p.knockJ = (eb * mag) / fr.arcB;
+    // Straight into the player's knock channel, which is world X and Z. The
+    // cube had to rotate this into the body's own tangent frame first; there is
+    // one frame now and it is the world's.
+    p.knockX = _dir.x * mag;
+    p.knockZ = _dir.z * mag;
     p.knockT = KNOCK_HOLD;
 
     // The lift, and its cap. `_heldFrom` is recorded on the frame the core first
     // takes you and is the ground you will be measured against when you land.
     if (d < CORE_R && this.strength > 0.3) {
-      const r = p.position.length();
+      // Height, not a radius. `position.length()` was the distance from the
+      // planet's centre and there is no centre; the lift cap is measured in
+      // layers off the world's one up axis.
+      const r = p.position.y;
       if (!this._held) { this._held = true; this._heldFrom = r; }
       if (r < this._heldFrom + LIFT_MAX - LIFT_COAST) {
-        p.vel.k = Math.max(p.vel.k, LIFT_RATE * this.strength);
+        p.vel.y = Math.max(p.vel.y, LIFT_RATE * this.strength);
         p.grounded = false;
       }
     } else {

@@ -88,6 +88,14 @@ const PACKS = {
   // vertices so the merged result is still one geometry and one material.
   // Smooth normals like the fish and unlike WAM — the model ships real ones.
   quest:    { atlas: null, tint: false, bakeColor: true, ext: 'glb' },
+  // The currency, converted out of the supplier's .blend by headless Blender the
+  // way the monsters pack was. GLB with a sibling colour map, and `nearest` for
+  // the same reason the produce atlas has it: the map is flat islands of yellow
+  // on black, so a filtered sample near an island edge is a dark rim on a coin
+  // that is 46px wide most of the time. The pack ships an AO map too and it is
+  // deliberately not here — it is near-white everywhere and there is nothing at
+  // this size for it to shade.
+  coin:     { atlas: 'coin_colortex.png', tint: false, nearest: true, ext: 'glb' },
 };
 const BLANK =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII=';
@@ -747,6 +755,13 @@ export const POSE = {
   // straight: 0.45 is the top of the root, where a hand actually closes on a
   // carrot, and the leaves fall over the fist.
   gold_carrot: { file: 'gold_carrot', pack: 'quest', height: 0.30, grip: 0.45, rot: [0.06, -0.50, 0.24], pos: [0.008, 0.05, -0.016], icon: [0.10, 0.42, -0.18] },
+
+  // The currency. Authored lying on its side — the disc is in the model's YZ
+  // plane and the thin axis is X — so `spin` stands it up facing +Z, which is
+  // what puts a *face* rather than an edge in front of the camera in both the
+  // hand and the icon. No `fitMax`: after the spin the diameter is the height,
+  // and 0.17 is a coin against the coal lump beside it in the registry.
+  coin: { file: 'coin', pack: 'coin', height: 0.17, grip: 0.5, spin: [0, 1.5708, 0], rot: [0.10, -0.55, 0.12], pos: [0.011, 0.062, -0.028], icon: [0.10, 0.50, 0] },
 
   // --- Kenney food kit ------------------------------------------------------
   //

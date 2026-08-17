@@ -2647,20 +2647,43 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 }
 .settings details.credits .credit-list { margin-top: 10px; }
 
-/* Key, then what it does. The key caps carry the meaning, so they get the
-   contrast and the label sits back. */
-/* Key, then what it does, ruled into the sheet rather than sitting on nine
-   cards. The caps carry the meaning, so they get the mass and the label sits
-   back behind them. */
-.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+/* A group is a heading and its rows, and nothing is drawn round it. The
+   grouping is done by the rule under the heading and by the air between the
+   columns, which is enough: a frame here would be a box inside the panel
+   holding boxes, and every edge is one more thing to read past. */
+/* Columns of groups, not columns of rows. Multi-column rather than a grid on
+   purpose: a grid would rule every group in a row to the tallest one in it and
+   leave four ragged holes, and what should decide where a group sits is only
+   whether the one above it has finished. `break-inside` is what keeps a group
+   whole across the fold. */
+.ctl-groups { columns: 260px; column-gap: 38px; }
+.ctl-group { break-inside: avoid; padding-bottom: 18px; }
+.ctl-group .ctl-head { margin-top: 0; margin-bottom: 4px; }
+
+/* Two columns inside the card, both left-aligned: caps down one, what they do
+   down the other. The caps were flush left and the labels flush right with the
+   width of the monitor in between, which is two lists sharing a line rather
+   than a row you can read. 112px is what W A S D and Shift+Click need. */
+.controls-grid { display: grid; grid-template-columns: 1fr; }
 .controls-grid > div {
-  display: flex; align-items: center; gap: 4px;
-  padding: 7px 4px; border-radius: 0;
+  display: grid; grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center; gap: 0 12px;
+  padding: 6px 0; border-radius: 0;
   font-size: var(--fs-md); color: var(--ink-soft);
   background: none;
   border-bottom: 1px dotted rgba(96, 66, 28, .35);
 }
-.controls-grid span { margin-left: auto; padding-left: 10px; text-align: right; color: var(--ink); font-weight: 700; text-shadow: var(--carved); }
+.controls-grid > div:last-child { border-bottom: none; }
+/* The caps of one row, held together so the label beside them starts at the
+   same place on every row. The join words sit between them, faint. */
+.controls-grid .keys {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  font-size: var(--fs-sm); color: var(--ink-soft);
+}
+.controls-grid > div > span + span {
+  color: var(--ink); font-weight: 700; text-shadow: var(--carved);
+  line-height: 1.25;
+}
 /* A real key cap: a face on a 2px edge, with an ink line round it. Same
    anatomy as a button, three sizes down. */
 kbd {
@@ -2809,11 +2832,8 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 /* A heading rules off the whole screen, not one column of it, and the credits
    are prose sitting under all of them. */
 .set-head, .settings details.credits { grid-column: 1 / -1; }
-/* `auto-fill` and not `auto-fit` for this one alone: the controls screen is
-   five separate grids under five headings, and a group of four would size its
-   own tracks wider than the group of seven under it. An empty track holds its
-   width, so every group is ruled to the same columns. */
-.controls-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+/* The controls screen gains columns of whole GROUPS rather than of rows; see
+   `.ctl-groups`. Its rows stay one to a line at every width. */
 /* 520 is what a name, its line and a 190px meter need before the name starts
    wrapping; 460 is a save row with its index chip, day and age. */
 .ach-list { grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); }
@@ -3401,8 +3421,7 @@ body.touch .slot.tc-drop {
    out of the hiding rule: they sit one level deeper. */
 .controls-touch { display: none; }
 body.touch .controls-touch { display: block; }
-body.touch #controls .panel-body > .ctl-head,
-body.touch #controls .panel-body > .controls-grid { display: none; }
+body.touch .ctl-groups > .ctl-group:not(.controls-touch) { display: none; }
 
 /* ══════════════════════════════════════════════════════════
    A PHONE HELD UPRIGHT

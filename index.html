@@ -337,70 +337,123 @@
   <div id="controls" class="overlay hidden">
     <div class="panel">
       <header><h2>Controls</h2><button class="ghost" data-close-controls>Back</button></header>
-      <!-- Keys and what they do, and nothing else. -->
+      <!-- Keys and what they do, and nothing else.
+
+           One group per job, and a group is a heading over its own rows rather
+           than a card: this is a sheet you scan while you are stuck, so what has
+           to be fast is finding one row, and the grouping is what does that. It
+           is done with a rule, a heading and air, not with a frame. The panel is
+           the only box on the screen.
+
+           A whole group is what gains a column on a wide monitor, so a group
+           lands beside its neighbour instead of one group's rows wrapping into
+           the next group's tracks.
+
+           Inside a group the keys are their own column: cap on the left, what it
+           does on the right, both left-aligned, so either column can be read
+           straight down. The keys used to be flush left and the labels flush
+           right with the whole screen between them, which is two lists that
+           happen to share a line rather than a row you can read.
+
+           The screen is written twice, because a phone has no keyboard and half
+           of what is below does not exist on one. See `body.touch` at the foot
+           of the stylesheet: one of the two sets is always hidden. -->
       <div class="panel-body">
-      <!-- On a phone none of the rows below this one exist, so they are hidden
-           and this replaces them. Same grid, same caps, and the cap holds the
-           name of the control instead of the key: there is no key. It is short
-           because most of it is already answered by the glyph on the button —
-           the only two rows that are not discoverable by pressing something are
-           the drag and the sprint. -->
-      <div class="controls-touch">
+      <div class="ctl-groups">
+      <!-- The touch set. The cap holds the name of the button rather than a key,
+           and the names are the ones TouchControls.js gives them, so a row can
+           be matched against the thing on screen. -->
+      <section class="ctl-group controls-touch">
         <h3 class="ctl-head">Thumbs</h3>
         <div class="controls-grid">
-          <div><kbd>Drag</kbd><span>Look</span></div>
-          <div><kbd>Stick</kbd><span>Move</span></div>
-          <div><kbd>Stick</kbd><span>Push to the rim to sprint</span></div>
-          <div><kbd>Tap</kbd><span>A slot, to hold it</span></div>
-          <div><kbd>Hold</kbd><span>A slot, to drop it</span></div>
-          <div><kbd>Hold</kbd><span>The bag, for Growth</span></div>
-          <div><kbd>Tap</kbd><span>The left-hand cell, to swap hands</span></div>
+          <div><span class="keys"><kbd>Drag</kbd></span><span>Look</span></div>
+          <div><span class="keys"><kbd>Stick</kbd></span><span>Move</span></div>
+          <div><span class="keys"><kbd>Stick</kbd></span><span>Push to the rim to sprint</span></div>
         </div>
-      </div>
-      <h3 class="ctl-head">Move</h3>
-      <div class="controls-grid">
-        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>
-        <div><kbd>Space</kbd><span>Jump, or swim up</span></div>
-        <div><kbd>Shift</kbd><span>Sprint</span></div>
-        <div><kbd>Ctrl</kbd><span>Sneak, or swim down</span></div>
-      </div>
+      </section>
 
-      <h3 class="ctl-head">Hands</h3>
-      <div class="controls-grid">
-        <div><kbd>LMB</kbd><span>Mine</span></div>
-        <div><kbd>RMB</kbd><span>Place or use</span></div>
-        <div><kbd>Ctrl</kbd>+<kbd>RMB</kbd><span>Lay a log lengthways</span></div>
-        <!-- "to", not "..". Two full stops between two key caps set at 10px
-             collapse into what reads as one dot, so the row said "1 . 9" and
-             named no range at all. Every other multi-key row on this screen
-             spells its join out (`Ctrl`+`RMB`), and this is the same fix. -->
-        <div><kbd>1</kbd> to <kbd>9</kbd><span>Hotbar</span></div>
-        <div><kbd>Wheel</kbd><span>Cycle hotbar</span></div>
-        <div><kbd>F</kbd><span>Swap hands</span></div>
-        <div><kbd>Q</kbd><span>Drop</span></div>
-      </div>
+      <section class="ctl-group controls-touch">
+        <h3 class="ctl-head">Buttons</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>Mine</kbd></span><span>Hold to break</span></div>
+          <div><span class="keys"><kbd>Place</kbd></span><span>Hold to place or use</span></div>
+          <div><span class="keys"><kbd>Place</kbd></span><span>Food, a door, a bed, a merchant</span></div>
+          <div><span class="keys"><kbd>Jump</kbd></span><span>Jump, or swim up</span></div>
+          <div><span class="keys"><kbd>Sneak</kbd></span><span>Sneak, or swim down. Stays on.</span></div>
+        </div>
+      </section>
 
-      <h3 class="ctl-head">Right click on</h3>
-      <div class="controls-grid">
-        <div><kbd>RMB</kbd><span>Food, to eat</span></div>
-        <div><kbd>RMB</kbd><span>A merchant, to trade</span></div>
-        <div><kbd>RMB</kbd><span>A crate, to open it</span></div>
-        <div><kbd>RMB</kbd><span>A bed, to set home</span></div>
-        <div><kbd>RMB</kbd><span>A door, to swing it</span></div>
-        <div><kbd>RMB</kbd><span>Water with a rod, to cast</span></div>
-      </div>
+      <section class="ctl-group controls-touch">
+        <h3 class="ctl-head">Hotbar</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>Tap</kbd></span><span>A slot, to hold it</span></div>
+          <div><span class="keys"><kbd>Hold</kbd></span><span>A slot, to drop it</span></div>
+          <div><span class="keys"><kbd>Tap</kbd></span><span>The left-hand cell, to swap hands</span></div>
+        </div>
+      </section>
 
-      <h3 class="ctl-head">Screens</h3>
-      <div class="controls-grid">
-        <div><kbd>E</kbd><span>Inventory</span></div>
-        <div><kbd>K</kbd><span>Growth</span></div>
-        <div><kbd>Shift</kbd>+<kbd>Click</kbd><span>Move a whole stack</span></div>
-        <div><kbd>Shift</kbd>+<kbd>Click</kbd><span>Craft as many as you can</span></div>
-        <div><kbd>M</kbd><span>Map</span></div>
-        <div><kbd>V</kbd><span>Camera</span></div>
-        <div><kbd>C</kbd><span>Hold to zoom</span></div>
-        <div><kbd>F3</kbd><span>Debug overlay</span></div>
-        <div><kbd>Esc</kbd><span>Pause</span></div>
+      <section class="ctl-group controls-touch">
+        <h3 class="ctl-head">Screens</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>Bag</kbd></span><span>Inventory</span></div>
+          <div><span class="keys"><kbd>Bag</kbd></span><span>Hold for Growth</span></div>
+          <div><span class="keys"><kbd>Pause</kbd></span><span>Pause</span></div>
+        </div>
+      </section>
+
+      <section class="ctl-group">
+        <h3 class="ctl-head">Move</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Move</span></div>
+          <div><span class="keys"><kbd>Space</kbd></span><span>Jump, or swim up</span></div>
+          <div><span class="keys"><kbd>Shift</kbd></span><span>Sprint</span></div>
+          <div><span class="keys"><kbd>Ctrl</kbd></span><span>Sneak, or swim down</span></div>
+        </div>
+      </section>
+
+      <section class="ctl-group">
+        <h3 class="ctl-head">Hands</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>LMB</kbd></span><span>Mine</span></div>
+          <div><span class="keys"><kbd>RMB</kbd></span><span>Place or use</span></div>
+          <div><span class="keys"><kbd>Ctrl</kbd>+<kbd>RMB</kbd></span><span>Lay a log lengthways</span></div>
+          <!-- "to", not "..". Two full stops between two key caps set at 10px
+               collapse into what reads as one dot, so the row said "1 . 9" and
+               named no range at all. Every other multi-key row on this screen
+               spells its join out (`Ctrl`+`RMB`), and this is the same fix. -->
+          <div><span class="keys"><kbd>1</kbd> to <kbd>9</kbd></span><span>Hotbar</span></div>
+          <div><span class="keys"><kbd>Wheel</kbd></span><span>Cycle hotbar</span></div>
+          <div><span class="keys"><kbd>F</kbd></span><span>Swap hands</span></div>
+          <div><span class="keys"><kbd>Q</kbd></span><span>Drop</span></div>
+        </div>
+      </section>
+
+      <section class="ctl-group">
+        <h3 class="ctl-head">Right click on</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>RMB</kbd></span><span>Food, to eat</span></div>
+          <div><span class="keys"><kbd>RMB</kbd></span><span>A merchant, to trade</span></div>
+          <div><span class="keys"><kbd>RMB</kbd></span><span>A crate, to open it</span></div>
+          <div><span class="keys"><kbd>RMB</kbd></span><span>A bed, to set home</span></div>
+          <div><span class="keys"><kbd>RMB</kbd></span><span>A door, to swing it</span></div>
+          <div><span class="keys"><kbd>RMB</kbd></span><span>Water with a rod, to cast</span></div>
+        </div>
+      </section>
+
+      <section class="ctl-group">
+        <h3 class="ctl-head">Screens</h3>
+        <div class="controls-grid">
+          <div><span class="keys"><kbd>E</kbd></span><span>Inventory</span></div>
+          <div><span class="keys"><kbd>K</kbd></span><span>Growth</span></div>
+          <div><span class="keys"><kbd>Shift</kbd>+<kbd>Click</kbd></span><span>Move a whole stack</span></div>
+          <div><span class="keys"><kbd>Shift</kbd>+<kbd>Click</kbd></span><span>Craft as many as you can</span></div>
+          <div><span class="keys"><kbd>M</kbd></span><span>Map</span></div>
+          <div><span class="keys"><kbd>V</kbd></span><span>Camera</span></div>
+          <div><span class="keys"><kbd>C</kbd></span><span>Hold to zoom</span></div>
+          <div><span class="keys"><kbd>F3</kbd></span><span>Debug overlay</span></div>
+          <div><span class="keys"><kbd>Esc</kbd></span><span>Pause</span></div>
+        </div>
+      </section>
       </div>
       </div>
     </div>

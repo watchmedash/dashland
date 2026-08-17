@@ -1464,11 +1464,12 @@ const _spin = new THREE.Vector3();
  * is that every extra body costs more than the last one did.
  *
  * A flat 3D hash on the world-space position, deliberately, rather than
- * anything in cell space. Bodies are spread over a sphere and the cube-face
- * seams are exactly where column arithmetic goes wrong; world position has no
- * seams in it at all, so the question never comes up. The cost is that the
- * table is keyed on three signed ints instead of one, which is three compares
- * on a candidate and nothing on a miss.
+ * anything in cell space. On the cube that was because column arithmetic went
+ * wrong at a seam; on the flat map world position and cell space are the same
+ * numbers, and the one thing the grid still cannot pair across is the wrap
+ * itself - see the note at the bucketing. The cost is that the table is keyed
+ * on three signed ints instead of one, which is three compares on a candidate
+ * and nothing on a miss.
  *
  * Cell size is the largest reach any pair can have (twice the largest radius in
  * the list, recomputed each frame — a tiger that has eaten its way larger, or
@@ -1857,8 +1858,8 @@ const boss = (file, o) => ({
   clips: BOSS_CLIPS,
   sizeVar: 0,
   boss: true,
-  // Which face it belongs to, as data. The endgame reads it to place them and
-  // to know which faces to shut down.
+  // Which face it belongs to, as a FACE_ROLE. The endgame turns it into a face
+  // number to place them and to know which faces to shut down.
   bossFace: o.face,
   // The one exception to "a boss does not touch fish". Only the Deepmaw carries
   // it, and only the Deepmaw is in the water to use it.

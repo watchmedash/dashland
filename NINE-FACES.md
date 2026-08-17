@@ -296,8 +296,17 @@ other fourteen live here.**
 - **They fight back**, and they are armed. Each carries things - tools, weapons,
   whatever suits them - so attacking one is a real fight rather than a free
   kill.
-- **Attacking one turns all of them**, exactly as mining does. There is no
-  picking off a straggler.
+- **Anger spreads by witness, not by radius.** Only the ones who actually saw
+  the offence turn - whether that is a swing or a pickaxe in the wrong block.
+  Then it propagates: *"if other sees some of them chasing you they should be
+  hostile to you as well."* A neutral who sees an angry one chasing you joins
+  the chase.
+
+  This is worth more than a radius would be, and the reason is what it does to
+  the player. Anger travels with the mob rather than sitting in a circle on the
+  map, so **running through the village is the worst possible escape** - every
+  bystander you pass recruits themselves - while running away from it works.
+  Nobody has to be told that. You do it once and you understand it.
 - **Nothing they hold ever drops**, and **killing them pays nothing** - no
   loot, no XP, not even the weapon out of their hand. Violence here is pure
   loss by construction, which is what makes treating them as people the only

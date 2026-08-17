@@ -3034,7 +3034,81 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
   display: grid; align-content: center;
   overflow-y: auto;
 }
-#menu .menu-actions { width: min(340px, 100%); margin-left: auto; margin-right: auto; }
+/* ── the title screen ──────────────────────────────────────
+   There is a live world running behind this screen and until now nobody could
+   see any of it: the sheet was opaque parchment at full bleed, so the first
+   thing the game showed after the loader was 1920x1080 of flat beige with four
+   keys on it. The GEOMETRY here is untouched - same full-bleed sheet, same
+   centred column, same markup - and only the PAINT changes: the sheet becomes a
+   scrim rather than a surface, so the world is the backdrop and the scrim is
+   what keeps the type legible over whatever the sky happens to be doing.
+
+   The material still has to be here or this is a different game's title screen,
+   so it is where it counts: the four keys sit in a wooden rack, which is the
+   one solid object on the screen and is the thing your hand is aimed at. */
+#menu > .menu-card {
+  background:
+    /* a warm centre, so the wordmark has a ground of its own */
+    radial-gradient(52% 40% at 50% 42%, rgba(34, 20, 8, .32), rgba(34, 20, 8, 0) 74%),
+    /* and a vignette, dark at the top for the type and dark at the foot so the
+       screen has a floor */
+    radial-gradient(96% 76% at 50% 46%, rgba(4, 6, 14, .1) 30%, rgba(2, 3, 9, .92) 100%),
+    linear-gradient(180deg, rgba(5, 7, 16, .6), rgba(4, 5, 12, .26) 44%, rgba(3, 4, 9, .74));
+  /* Allowed here for the same reason `.overlay` allows it: this is painted once
+     over a world nobody is playing, which is the opposite of the HUD's budget. */
+  backdrop-filter: blur(3px) saturate(112%);
+}
+/* The wordmark is on a dark sky now, not on paper, so it is stamped light
+   instead of carved dark - and it is allowed to be the size a title screen's
+   title is, with a floor that keeps it where it was on a phone held sideways. */
+#menu .menu-card h1 {
+  font-size: clamp(var(--fs-3xl), 7vh, 68px);
+  color: var(--parchment);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, .6), 0 4px 34px rgba(0, 0, 0, .9);
+}
+#menu .menu-card h1 em { color: var(--accent-2); }
+#menu .menu-card .tagline {
+  color: rgba(247, 238, 222, .62);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .85);
+}
+/* The rule under it, in the light version. Same brass lozenge on the same line;
+   only the line is lit rather than shaded, because the sheet under it went. */
+#menu .menu-card .tagline::after {
+  background:
+    var(--stud) center / 7px 7px no-repeat,
+    linear-gradient(90deg, rgba(255, 232, 190, 0), rgba(255, 232, 190, .4) 22%, rgba(255, 232, 190, .4) 78%, rgba(255, 232, 190, 0));
+}
+/* THE RACK. Four keys on a board, and the board is the only thing on this
+   screen that is made of anything. It is the same timber as every case in the
+   game, cut with the grain running the long way because it is wider than it is
+   tall, and it stands on the world rather than in a frame. */
+#menu .menu-actions {
+  width: min(340px, 100%); margin-left: auto; margin-right: auto;
+  padding: 11px; border-radius: var(--r-lg);
+  background: var(--wood-long);
+  box-shadow:
+    0 0 0 1px var(--wood-line),
+    inset 0 1px 0 rgba(255, 222, 170, .16),
+    inset 0 -2px 6px rgba(0, 0, 0, .45),
+    0 20px 44px -20px rgba(0, 0, 0, .95);
+}
+/* A key's face is `--paper-cell`, which is a translucent white and reads as
+   parchment because there has always been parchment under it. There is timber
+   under it here, so it has to say parchment itself or the four keys come out
+   the colour of the board they are screwed to. Brass is opaque already and is
+   left alone. */
+#menu .menu-actions button:not(.primary) {
+  background: linear-gradient(180deg, #fffdf6, #f4e9d4 52%, #dfcda9);
+}
+#menu .menu-actions button:not(.primary):hover:not(:disabled) {
+  background: linear-gradient(180deg, #fff, #fbf3e2 55%, #ead9bb);
+}
+#menu .menu-actions button:not(.primary):active:not(:disabled) {
+  background: linear-gradient(180deg, #ddc9a4, #f2e9d5);
+}
+#menu .menu-actions button:disabled {
+  background: linear-gradient(180deg, rgba(30, 18, 6, .72), rgba(58, 38, 16, .58));
+}
 
 /* ── narrow windows ────────────────────────────────────── */
 /* The nine-column grid and the 236px sidebar together need ~760px of viewport.

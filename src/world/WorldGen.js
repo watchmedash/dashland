@@ -284,6 +284,68 @@ for (let k = 0; k < D; k++) {
 }
 
 /**
+ * The cinderlands' own ore, in the layers above every ordinary band.
+ *
+ * The bands in ORES stop well below the ground you walk on — iron ends two
+ * blocks under mean sea level, gold and crystal lower still — so the top of a
+ * cinder cliff carries coal and copper and nothing else, and the only way to
+ * find anything worth the trip is to guess and dig. That is the owner's report.
+ *
+ * Each entry is the *same field* as its counterpart in ORES: same scale, same
+ * seed, so this is not a second set of veins but the existing ones allowed to
+ * keep going upward on one face. `lo` is the ore's own ordinary `hi`, so the
+ * two never overlap and the seam is continuous through the join.
+ *
+ * What keeps it a reward rather than a strip mine is the threshold. Every one
+ * of these sits well above the band it continues (0.66-0.72 against 0.55-0.62),
+ * so only the fat core of a vein survives the climb: the seam thins as it rises
+ * and breaks into pockets near the surface, which is what makes finding one
+ * feel like reading the ground.
+ */
+const ORE_CINDER_SURFACE = [
+  { id: ID.crystal_ore, scale: 0.40, thr: 0.76, lo: band(121), hi: R_TERRAIN_MAX, seed: 219 },
+  { id: ID.gold_ore, scale: 0.34, thr: 0.74, lo: band(125), hi: R_TERRAIN_MAX, seed: 143 },
+  { id: ID.sulfur_ore, scale: 0.34, thr: 0.70, lo: band(118), hi: R_TERRAIN_MAX, seed: 101 },
+  { id: ID.silver_ore, scale: 0.32, thr: 0.72, lo: band(124), hi: R_TERRAIN_MAX, seed: 89 },
+  { id: ID.iron_ore, scale: 0.26, thr: 0.66, lo: R_SURFACE - 2, hi: R_TERRAIN_MAX, seed: 71 },
+];
+
+/** The cinder seams alone, per layer, and the same list folded into ORE_BY_LAYER. */
+const ORE_CINDER_ONLY = [];
+const ORE_CINDER_BY_LAYER = [];
+for (let k = 0; k < D; k++) {
+  const r = R_MIN + k + 0.5;
+  const mine = ORE_CINDER_SURFACE.filter((o) => r >= o.lo && r <= o.hi);
+  ORE_CINDER_ONLY.push(mine);
+  // Rarest first, as in ORES: the loop stops at the first vein that claims a
+  // cell, so a common shallow ore listed above a rare one starves it.
+  ORE_CINDER_BY_LAYER.push(mine.concat(ORE_BY_LAYER[k]));
+}
+
+/**
+ * The skin of a cinder column, which no vein could reach before.
+ *
+ * The other half of "you can only guess and dig", and the bigger half: the top
+ * four blocks of a cinder column are basalt, ash and magma stone, none of which
+ * is an ORE_HOST — so however far a seam climbs it is still capped by rock that
+ * cannot carry it, and the open ground reads as bare everywhere the slope pass
+ * has not already turned it to stone.
+ *
+ * Only ORE_CINDER_SURFACE is allowed through it, and that restriction is the
+ * whole difference between a reward and a strip mine. Let the ordinary bucket
+ * in as well and coal and copper — threshold 0.52 and 0.55 before the cinder
+ * bonus, by far the commonest things in the table — freckle every basalt slab
+ * on the face: measured, 3 100 of them showing in a 200-column patch.
+ *
+ * Magma stone is deliberately not here, for ORE_HOST's own reason: it glows,
+ * and a glowing pocket is a landmark that should not be buried under ore.
+ * Sunstone is not either, for the same reason and more so.
+ */
+const CINDER_SKIN_HOST = new Uint8Array(N_BLOCKS);
+CINDER_SKIN_HOST[ID.basalt] = 1;
+CINDER_SKIN_HOST[ID.ash_stone] = 1;
+
+/**
  * Aquifers: water that lives in the rock rather than on top of it.
  *
  * The band is the limestone one and a little either side of it, because that
@@ -1345,6 +1407,18 @@ const BORDER_FLAT = 24;
  * without making the face the only place worth mining.
  */
 const ORE_CINDER_BONUS = 0.06;
+
+/**
+ * How coarse the sunstone field on the cinderlands is, and how much of it wins.
+ *
+ * The frequency is against a unit direction, so it is the same scale `patch`
+ * (14, "about twenty columns across") is quoted in: 74 is a blob three or four
+ * columns wide, which is an outcrop rather than a plaza. The threshold then
+ * decides how many of them there are, and it is the whole tuning knob for the
+ * face's mood — every 0.02 off it roughly doubles the lit area.
+ */
+const GLOW_CINDER_FREQ = 11;
+const GLOW_CINDER_THR = 0.84;
 
 /** Blocks of rise allowed per column approaching a seam. One is a step. */
 const SEAM_MAX_STEP = 1.0;
@@ -2492,6 +2566,31 @@ export class WorldGen {
      * sandstone under a desert pool — so the floor a body settles on is the
      * floor that column was always going to have.
      */
+    /**
+     * Sunstone outcrops, and the only reason Pyre is walkable.
+     *
+     * The cinderlands take no sun at all, so without a light of their own the
+     * face is a black room: the owner's report is that you cannot see where
+     * you are going or where you have been. Magma stone is already scattered
+     * here but it is `light: 6`, which lights the block and nothing else.
+     *
+     * One low-frequency simplex rather than an fbm, thresholded high: the field
+     * is smooth, so what clears the bar is an isolated round blob a few columns
+     * across, which is an outcrop. An fbm would fray it into speckle.
+     *
+     * Last, with the lake bed and the sink, so nothing above repaints an
+     * outcrop back into basalt — `rocky` in particular turns every steep column
+     * to stone, and a cliff is exactly where a seam should show.
+     *
+     * The darkness is the character of the face and has to survive, so this is
+     * tuned for landmarks to steer by and not for daylight: see GLOW_CINDER_THR.
+     */
+    if (bi === BIOME.CINDER
+      && this.nDetail.simplex3(dir[0] * GLOW_CINDER_FREQ + 91.7, dir[1] * GLOW_CINDER_FREQ,
+        dir[2] * GLOW_CINDER_FREQ + 33.1) > GLOW_CINDER_THR) {
+      top = ID.glowstone; sub = ID.glowstone;
+    }
+
     const sinkD = this.sinkDepthOf(col, dir);
     const sinkId = sinkD ? this.sinkIdOf(col) : 0;
 
@@ -2833,11 +2932,17 @@ export class WorldGen {
     // base folded into cellIndex/cellWrite: storage is not slab-packed
     const dir = _fillDir;
     this._dirOf(col, dir);
-    // The cinderlands are the reason to go there. See ORE_CINDER_BONUS.
-    const oreBonus = this.colBiome[col] === BIOME.CINDER ? ORE_CINDER_BONUS : 0;
+    // The cinderlands are the reason to go there. See ORE_CINDER_BONUS, and
+    // ORE_CINDER_SURFACE / CINDER_SKIN_HOST for the seams that reach daylight.
+    const cinder = this.colBiome[col] === BIOME.CINDER;
+    const oreBonus = cinder ? ORE_CINDER_BONUS : 0;
+    const layers = cinder ? ORE_CINDER_BY_LAYER : ORE_BY_LAYER;
     for (let k = 0; k < D; k++) {
-      if (!ORE_HOST[blocks[cellIndex(col, k)]]) continue;
-      const bucket = ORE_BY_LAYER[k];
+      const cur = blocks[cellIndex(col, k)];
+      let bucket;
+      if (ORE_HOST[cur]) bucket = layers[k];
+      else if (cinder && CINDER_SKIN_HOST[cur]) bucket = ORE_CINDER_ONLY[k];
+      else continue;
       if (bucket.length === 0) continue;
       const r = R_MIN + k + 0.5;
       const px = dir[0] * r, py = dir[1] * r, pz = dir[2] * r;

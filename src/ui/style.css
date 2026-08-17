@@ -2859,6 +2859,11 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    sideways, which is what turns the whole tree into one look instead of two
    screens of scrolling. */
 .skill-tree { grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); }
+/* Capped, because there are three branches and no fourth is coming. Left to
+   fill a 1680px sheet each one is 560px wide and its price ends up half a
+   screen from the segments it is the price of. The head is capped with it, so
+   the balance stays over the tree it is spent on. */
+.skill-tree, .xp-block { max-width: 1080px; }
 .settings, .ach-list, .slot-list, .skill-tree {
   display: grid; align-content: start; align-items: start;
 }

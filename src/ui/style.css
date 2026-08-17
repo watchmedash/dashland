@@ -3636,6 +3636,29 @@ body.touch, body.touch #view, body.touch #touch {
 .ic-arrow { -webkit-mask-image: url(/touch/icon-arrow.svg); mask-image: url(/touch/icon-arrow.svg); }
 .ic-arrow.down { transform: rotate(90deg); }
 
+/* ── the word on the action button ─────────────────────── */
+/* The Place button says what pressing it will do — Trade, Cast, Sleep, Open —
+   and the word goes *inside* it, which is the only place on this screen it can
+   go. Above is Mine, 2px away. To the left is Jump. Below and right is the edge
+   of the phone. The HUD is already the release blocker it is; a verb that took
+   its own strip of screen would be the wrong trade for a word.
+
+   Absolutely positioned rather than laid out, so the button's grid still holds
+   exactly one centred icon and nothing about its size, its hit area or its
+   pressed state depends on whether there is a word today. The icon slides up to
+   make room only when there is. */
+.tc-verb {
+  position: absolute;
+  left: 0; right: 0; bottom: 8px;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  letter-spacing: .05em; text-transform: uppercase; text-align: center;
+  color: var(--accent-hi);
+  text-shadow: 0 1px 0 rgba(20, 10, 2, .85);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.tc-btn.verbed .tc-ico { transform: translateY(-6px); width: 38%; height: 38%; }
+
 /* The cluster, right hand. Nearest the resting thumb are the two the player
    presses every few seconds; the two that are occasional sit further in. */
 #tc-use { right: 16px; bottom: 22px; }

@@ -88,6 +88,29 @@ const DROP_REPEAT = 190;
 /** How far the thumb may wander and still be holding the cell, in CSS px. */
 const DROP_SLOP = 16;
 
+/**
+ * When a press on the look surface is a tap, and a tap is a swing.
+ *
+ * Both are deliberately tighter than the hold numbers above, and in the other
+ * direction: a hold that is missed costs a repeat, a tap that is *invented*
+ * costs a swing at whatever the crosshair happened to be on — a merchant, or
+ * the cow you were breeding. So a slightly sloppy swipe has to fall out of the
+ * tap, not into it.
+ *
+ * TAP_TRAVEL is accumulated path length rather than the straight line from
+ * where the thumb went down. A look drag that wanders out and comes back would
+ * pass a straight-line test with a distance of nearly zero, and it is the one
+ * gesture that must never swing. 8px is under half the 16px of slop the hold
+ * gestures allow and about a third of the thumb-jitter budget a phone actually
+ * produces, measured against `LOOK_GAIN`: 8px of travel is 21px of camera,
+ * which is a couple of degrees and imperceptible.
+ *
+ * TAP_MS is the same shape of number from the other end. A tap is under 150ms,
+ * a look drag is a held thumb; 200ms sits between them with room on both sides.
+ */
+const TAP_TRAVEL = 8;
+const TAP_MS = 200;
+
 export class TouchControls {
   /**
    * Returns true only for a device whose *primary* pointer is a finger.
@@ -132,6 +155,10 @@ export class TouchControls {
 
     this._build();
     this._wire();
+    // The UI paints the verb, because the UI is what the game tells about the
+    // crosshair. Handed the two elements rather than looked up by id there, so
+    // nothing in UI.js has to know that this layer exists at all until it does.
+    game.ui?.bindAction?.(this.buttons.use, this.verb);
 
     // Two words on a screen the player will open once. "Mouse" over a
     // sensitivity slider on a phone is simply wrong, and the slider is the one
@@ -183,7 +210,25 @@ export class TouchControls {
       return b;
     };
     mk('mine', 'mine', 'Mine', 'big');
-    mk('use', 'use', 'Place', 'big');
+    // The action button.
+    //
+    // It is the Place button, and that is the whole design rather than a
+    // shortcut taken to save a button. Every contextual verb the player was
+    // asking for — trade, open, sleep, cast, eat, feed — is the right mouse
+    // button in main.js, the same button Place already is. A second control
+    // that fired button 2 would be two buttons doing one thing, and it would
+    // have to go somewhere, and there is nowhere: the right hand already has
+    // four and the two nearest the thumb are pressed constantly. So nothing is
+    // added to the HUD and nothing is moved. What changes is that the button
+    // now says what pressing it will do, which is the part that was missing —
+    // a hand glyph is a verb the player has to already know.
+    //
+    // The word is painted by `UI.setAction`; see `bindAction` there for why the
+    // vocabulary lives on that side and not here.
+    const use = mk('use', 'use', 'Place', 'big');
+    this.verb = document.createElement('span');
+    this.verb.className = 'tc-verb';
+    use.appendChild(this.verb);
     mk('jump', 'jump', 'Jump');
     mk('sneak', 'arrow down', 'Sneak');
     mk('bag', 'bag', 'Inventory', 'chip');
@@ -250,7 +295,10 @@ export class TouchControls {
 
     // ---- look --------------------------------------------------------------
     this.look.addEventListener('pointerdown', (e) => {
-      this._take(e, { kind: 'look', x: e.clientX, y: e.clientY });
+      this._take(e, {
+        kind: 'look', x: e.clientX, y: e.clientY,
+        t: performance.now(), travel: 0,
+      });
       this.look.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
@@ -264,12 +312,29 @@ export class TouchControls {
       const d = unrotate(e.clientX - c.x, e.clientY - c.y);
       this.input.mouseDX += d.dx * LOOK_GAIN;
       this.input.mouseDY += d.dy * LOOK_GAIN;
+      // Measured before the turn, because a rotation does not change a length,
+      // and accumulated rather than compared: see TAP_TRAVEL.
+      c.travel += Math.hypot(e.clientX - c.x, e.clientY - c.y);
       c.x = e.clientX; c.y = e.clientY;
       e.preventDefault();
     });
-    const endLook = (e) => this._give(e, 'look');
-    this.look.addEventListener('pointerup', endLook);
-    this.look.addEventListener('pointercancel', endLook);
+    // A press that never became a drag is a tap, and a tap swings at whatever
+    // is under the crosshair. Mine stays a hold — a block takes many frames and
+    // this is one — so this adds the *other* half: the thing you do to a husk,
+    // which is one blow and was previously only reachable through a button the
+    // thumb has to leave the world for.
+    //
+    // Resolved here, on release, and not on press: press cannot know yet, which
+    // is the same reason the hotbar and the bag resolve late. `pointercancel`
+    // is emphatically not this handler — a gesture the browser took away is not
+    // a gesture the player finished.
+    this.look.addEventListener('pointerup', (e) => {
+      const c = this.claims.get(e.pointerId);
+      if (c && c.kind === 'look'
+        && c.travel <= TAP_TRAVEL && performance.now() - c.t <= TAP_MS) this._swing();
+      this._give(e, 'look');
+    });
+    this.look.addEventListener('pointercancel', (e) => this._give(e, 'look'));
 
     // ---- stick -------------------------------------------------------------
     this.stick.addEventListener('pointerdown', (e) => {
@@ -396,6 +461,37 @@ export class TouchControls {
     clearInterval(this._drop.timer);
     this._drop.el.classList.remove('tc-drop');
     this._drop = null;
+  }
+
+  /**
+   * One swing, from a tap on the world.
+   *
+   * Written as a real mouse click and not as a special case, which is what
+   * keeps main.js untouched: a click is `clicked[0]` for the frame that reads
+   * it plus `buttons[0]` down in between. `clicked` is what the attack on a
+   * creature and the whoosh at nothing both read, and `endFrame` clears it, so
+   * the edge is delivered exactly once. `buttons[0]` is what makes the arm move
+   * and gives a block the same single frame of dig a fast desktop click gives
+   * it — not enough to break anything that is not already instant.
+   *
+   * Two nested frames before it lifts, not one. The game loop is itself a
+   * `requestAnimationFrame` and there is no promise about which of the two was
+   * registered first; a single frame of delay can therefore land *before* the
+   * loop has read the button rather than after, and the swing would be a
+   * `clicked` with no hold behind it. Two crosses a frame boundary either way.
+   *
+   * The Mine test is the other half: a tap while the Mine button is held must
+   * not lift Mine's own hold out from under it.
+   */
+  _swing() {
+    this.input.buttons[0] = true;
+    this.input.clicked[0] = true;
+    cancelAnimationFrame(this._swingRaf);
+    this._swingRaf = requestAnimationFrame(() => {
+      this._swingRaf = requestAnimationFrame(() => {
+        if (!this.buttons.mine.classList.contains('on')) this.input.buttons[0] = false;
+      });
+    });
   }
 
   /**
@@ -597,6 +693,7 @@ export class TouchControls {
     // the inventory screen, and a stack quietly emptying itself while the
     // player crafts is exactly the class of bug the claims below exist to stop.
     this._cancelDrop();
+    cancelAnimationFrame(this._swingRaf);
     // Through each claim's own release, not by clearing the map: the claim is
     // what knows the button it lit and the field it set.
     for (const c of [...this.claims.values()]) c.release?.();

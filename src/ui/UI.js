@@ -34,6 +34,50 @@ const HOLD_MS = 420;
 const HOLD_SLOP = 16;
 
 /**
+ * What the touch action button says over each block worth pressing it on.
+ *
+ * A station gets its own word rather than "Open". Both are true and only one
+ * of them is worth reading: a player standing at a kiln does not need to be
+ * told it opens, and "Smelt" is the reason they walked over.
+ *
+ * A door and a gate say "Open" whichever way they are currently swung. The
+ * open/closed bit lives in the side-table byte, not in the block id, so this
+ * side cannot see it — and "Open" for both is the smaller lie than a "Close"
+ * that is wrong half the time. See `setAction`.
+ */
+const ACTION_BLOCKS = {
+  bench: 'Craft', kiln: 'Smelt', kiln_lit: 'Smelt', kitchen: 'Cook',
+  crate: 'Open', bed: 'Sleep', door: 'Open', fence_gate: 'Open',
+};
+
+/** Block label back to block name, for the reduced path in `_deriveAction`.
+ *  Built on first use rather than at module scope, because `BLOCKS` is filled
+ *  by the registration pass at the foot of Blocks.js and this file is imported
+ *  while that is still running. */
+let _byLabel = null;
+function BLOCK_BY_LABEL() {
+  if (!_byLabel) {
+    _byLabel = {};
+    for (const b of BLOCKS) if (b?.label) _byLabel[b.label] = b.name;
+  }
+  return _byLabel;
+}
+
+/** The fifteen, by the name a crosshair shows over one. Same reason and same
+ *  lateness as the table above. */
+let _folkLabels = null;
+function FOLK_LABELS() {
+  if (!_folkLabels) _folkLabels = new Set(CHARACTER_IDS.map(characterName));
+  return _folkLabels;
+}
+
+/** What an animal will take, for the word only. This is `FEEDS` in
+ *  `game/Mobs.js`, which is not exported; the copy decides a label and never a
+ *  behaviour, so the worst a drift here can do is say "Eat" where it could have
+ *  said "Feed". Keep the two lists together. */
+const FEEDS_LOOK = new Set(['wheat', 'seeds', 'apple'].map(itemIdOf).filter(Boolean));
+
+/**
  * Who the fifteen are, if `Character.js` has not said yet.
  *
  * The names belong to the character module and are imported from it through
@@ -2143,6 +2187,11 @@ export class UI {
     if (this.screen === 'shop') this._refreshShop();
     else if (this.screenOpen) this._refreshRecipes();
     this._paintCursor();
+    // The word on the action button is half a fact about the hand, so it is
+    // stale the moment the hand changes. `setLookAt` is the other half and
+    // catches the crosshair moving; this catches the slot changing under a
+    // still one.
+    if (this._actVerbEl && !this._actDriven) this._paintAction(this._deriveAction());
   }
 
   /** Sidebar listing everything the current materials allow. */
@@ -2931,11 +2980,128 @@ export class UI {
    * behind the crosshair is describing something you have stopped looking at.
    */
   setLookAt(text) {
-    if (text === this._lookAt) return;
-    this._lookAt = text;
-    if (!text) { this.el.lookAt.classList.remove('show'); return; }
-    this.el.lookAt.textContent = text;
-    this.el.lookAt.classList.add('show');
+    if (text !== this._lookAt) {
+      this._lookAt = text;
+      if (!text) this.el.lookAt.classList.remove('show');
+      else {
+        this.el.lookAt.textContent = text;
+        this.el.lookAt.classList.add('show');
+      }
+    }
+    // One null check per frame on a mouse, because `bindAction` is only ever
+    // called by the touch layer. See `_deriveAction` for why this hangs off the
+    // look-at call rather than off a call of its own.
+    if (this._actVerbEl && !this._actDriven) this._paintAction(this._deriveAction());
+  }
+
+  // --- the action button ------------------------------------------------------
+
+  /**
+   * The touch layer handing over its Place button and the word on it.
+   *
+   * The vocabulary lives here rather than in `TouchControls` because this is
+   * the side the game already talks to about the crosshair: `setLookAt` is
+   * called every frame with the name of whatever is under it, `BLOCKS` and
+   * `ITEMS` are already imported, and none of that is true of a file whose job
+   * is pointer ids.
+   */
+  bindAction(btn, verbEl) {
+    this._actBtn = btn;
+    this._actVerbEl = verbEl;
+    this._actVerb = undefined;
+    this._paintAction(this._deriveAction());
+  }
+
+  /**
+   * What pressing the action button will do, from what the game has told us.
+   *
+   * The authoritative call, and the one `_interact` should make: it is the only
+   * place in the game that knows the aimed block, the aimed creature and the
+   * hand that is acting, all resolved the same way the button itself will
+   * resolve them a frame later. Everything here is a lookup, so it is safe to
+   * call every frame; `_paintAction` is what refuses to touch the DOM.
+   *
+   * Until that line lands, `_deriveAction` reads the same answer back out of
+   * the label `setLookAt` was given. That is a genuinely reduced set — a door
+   * and a bed are recognisable by name, an open door and a closed one are not —
+   * and it is a fallback rather than a second implementation: both ends meet at
+   * `_verbFor`, so the vocabulary cannot drift.
+   *
+   * @param {number} blockId  block under the crosshair, 0 for none
+   * @param {object|null} mob creature under the crosshair, if one is nearer
+   * @param {string} itemId   what the acting hand holds
+   */
+  setAction(blockId, mob, itemId) {
+    this._actDriven = true;
+    if (!this._actVerbEl) return;
+    this._paintAction(this._verbFor(BLOCKS[blockId]?.name || null, mob, itemId));
+  }
+
+  /**
+   * The vocabulary. One word each, and the station's own word where it has one:
+   * "Open" on a workbench is true and says nothing, and the player already
+   * knows what a bench is for the moment they are told it is a bench.
+   */
+  _verbFor(blockName, mob, itemId) {
+    const item = ITEMS[itemId];
+    if (mob) {
+      if (mob.spec?.trader || mob.spec?.folk) return 'Trade';
+      if (item && FEEDS_LOOK.has(itemId)) return 'Feed';
+      return item?.food ? 'Eat' : null;
+    }
+    if (blockName === 'water' && item?.tool?.kind === 'rod') return 'Cast';
+    const station = ACTION_BLOCKS[blockName];
+    if (station) return station;
+    if (item?.food) return 'Eat';
+    if (item?.block) return 'Place';
+    return null;
+  }
+
+  /**
+   * The reduced answer, from the label alone. See `setAction`.
+   *
+   * The label is what the player is reading anyway, so matching on it cannot
+   * name something that is not on screen. `BLOCK_BY_LABEL` is built once, and
+   * two blocks sharing a label (a lit kiln and a cold one) share a verb, which
+   * is why a collision there costs nothing.
+   */
+  _deriveAction() {
+    const inv = this.game.inventory;
+    if (!inv) return null;
+    const name = BLOCK_BY_LABEL()[this._lookAt] || null;
+    // Not `held()`: a rod in the left hand still casts, exactly as it does when
+    // the right hand is holding a shovel. This is `actingSlot`'s question asked
+    // with the only test this side can run.
+    const main = inv.held();
+    const rod = (s) => ITEMS[s.item]?.tool?.kind === 'rod';
+    const slot = (name === 'water' && !rod(main) && rod(inv.offhand)) ? inv.offhand
+      : (main.empty ? inv.offhand : main);
+    // Folk are named people, so a folk label is one of the fifteen character
+    // names. The merchant says what he is.
+    const folk = this._lookAt && (this._lookAt === 'Wandering Merchant'
+      || FOLK_LABELS().has(this._lookAt));
+    return this._verbFor(name, folk ? { spec: { folk: true } } : null, slot.item);
+  }
+
+  /**
+   * Paint it. Called every frame and so change-checked, for the reason
+   * `setLookAt` is: this is a class toggle and a `textContent` write, and doing
+   * either sixty times a second to set the same value is a style recalculation
+   * for nothing.
+   *
+   * Nothing is ever hidden or disabled. A verb the game has not worked out is
+   * still a Place button, and a button that vanishes under the resting thumb is
+   * worse than one that is quiet: the player loses the control they were about
+   * to press, and gets no way to find out they were wrong. So "nothing to do"
+   * is the wordless, dimmed state the button has always had, and it still
+   * places.
+   */
+  _paintAction(verb) {
+    if (verb === this._actVerb) return;
+    this._actVerb = verb;
+    this._actVerbEl.textContent = verb || '';
+    this._actBtn.classList.toggle('verbed', !!verb);
+    this._actBtn.setAttribute('aria-label', verb || 'Place');
   }
 
   /**

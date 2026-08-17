@@ -2071,111 +2071,93 @@ body.fighting #toasts { top: 172px; }
 
 .skills-panel { width: min(560px, 100%); }
 
-/* THREE CARDS, NOT SIX ROWS.
-   The model is a root and a leaf, three times over, and the screen used to
-   state that with a 26px indent and a drawn elbow per leaf: a ragged left edge
-   and two pieces of chrome to say what sharing a card says for free. A pair is
-   one object with a hairline through it, and the leaf is the half below the
-   line. Nothing is indented, so the tree has one left margin.
+/* A TREE, DRAWN AS ONE.
+   The model is a root and a leaf, three times over, and the screen used to say
+   so by putting the pair in a shared card. That is a relationship stated by a
+   frame, and a frame is the one thing this screen had too many of: a card round
+   the pair, a card round the head, a sunken plate round the pips, a brass plate
+   round every price. Everything looked equally important because everything was
+   in a box.
 
-   There is no brass key on this screen, and that is the rule kept rather than
-   broken. It had six brass-shaped plates down the right margin, at most two of
-   them ever pressable and the rest grey rectangles reading "Fully learned" or
-   "Needs Hands 3" — a refusal drawn at the size of an offer. The row is the
-   button now and what is left on the right is a price, set in the same dark
-   plate and lit numeral as the balance in the head, because it is the same
-   unit. */
+   So the boxes are gone and the structure is DRAWN. Each pair is a trunk: a
+   line down the left from the root to its leaf, and an elbow into the leaf.
+   That is the prerequisite, said in one stroke instead of a container, and it
+   is the thing the screen is actually about. The three trunks stand side by
+   side rather than end to end, which is what makes the shape of the tree
+   readable in one look. */
 .skill-tree { display: flex; flex-direction: column; gap: 8px; }
-.skill-pair {
-  position: relative; overflow: hidden;
-  border-radius: var(--r-md);
-  background: var(--paper-cell); box-shadow: var(--emboss);
-}
-/* The spine. Every group in the game that can be acted on carries one, and it
-   lights when a live row inside it is under the pointer. */
-.skill-pair::after {
-  content: ''; position: absolute; left: 4px; top: 8px; bottom: 8px; width: 3px;
-  border-radius: 2px; background: rgba(96, 66, 28, .25);
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, .25);
-  pointer-events: none; transition: background var(--t-fast) ease;
-}
-.skill-pair:has(.skill-row:hover:not(:disabled))::after { background: var(--brass); }
+.skill-pair { position: relative; padding-left: 15px; overflow: hidden; }
 
-/* A row inside the card: a button with no button on it. The card carries the
-   material, so the row carries only its own state. */
+/* A row on the trunk: a button with no button on it, and no card under it. */
 .panel .skill-row {
   display: block; width: 100%; text-align: left; cursor: pointer;
-  padding: 10px 13px 11px 16px; border: none; border-radius: 0;
+  position: relative;
+  padding: 8px 2px 10px; border: none; border-radius: var(--r-sm);
   background: none; box-shadow: none; color: var(--ink); font: inherit;
   transition: background var(--t-fast) ease;
 }
-.panel .skill-row:hover:not(:disabled) { background: rgba(255, 253, 247, .7); }
+.panel .skill-row:hover:not(:disabled) { background: rgba(255, 253, 247, .8); }
 .panel .skill-row:active:not(:disabled) { background: rgba(122, 94, 54, .12); }
 .panel .skill-row:disabled { cursor: default; }
-/* The leaf is the half below the line, and set in a little from it. That is
-   the whole of the prerequisite drawing: what is under Agility is behind it. */
-.skill-row.leaf {
-  padding-left: 30px;
-  border-top: 1px solid rgba(122, 94, 54, .22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7);
+/* The leaf hangs off the trunk on an elbow, which is the whole of the
+   prerequisite drawing: what is on the stub is behind what is above it. */
+.skill-row.leaf { padding-left: 13px; }
+/* The trunk and the elbow are one stroke: an L that runs off the top of the
+   pair, where the card's `overflow` cuts it, and turns in under the leaf's
+   name. It lights when a live row on this trunk is under the pointer. */
+.skill-row.leaf::before {
+  content: ''; position: absolute; left: -12px; top: -400px; width: 11px;
+  bottom: calc(100% - 17px);
+  border-left: 2px solid rgba(96, 66, 28, .45);
+  border-bottom: 2px solid rgba(96, 66, 28, .45);
+  border-bottom-left-radius: 7px;
+  pointer-events: none; transition: border-color var(--t-fast) ease;
+}
+.skill-pair:has(.skill-row:hover:not(:disabled)) .skill-row.leaf::before {
+  border-color: var(--brass);
 }
 /* Bought out. Nothing left to do here, so the row goes quiet rather than loud;
-   five lit pips are the announcement and they need no second one. */
-.panel .skill-row.maxed { background: rgba(122, 94, 54, .07); }
+   five lit segments are the announcement and they need no second one. */
+.panel .skill-row.maxed .skill-name { color: var(--ink-soft); }
 .skill-head-row { display: flex; align-items: center; gap: 10px; }
 .skill-name {
   font: 700 var(--fs-md) var(--font); color: var(--ink);
   letter-spacing: .01em;
 }
-/* The pips ride in a groove, so an empty level is a socket with nothing in it
-   rather than a grey dot. */
-.skill-pips {
-  display: flex; gap: 4px; align-items: center;
-  padding: 3px 6px; border-radius: var(--r-sm);
-  background: linear-gradient(180deg, rgba(26, 16, 5, .85), rgba(62, 42, 18, .74));
-  box-shadow:
-    inset 0 0 0 1px rgba(12, 7, 2, .88),
-    inset 0 2px 4px rgba(0, 0, 0, .5),
-    0 1px 0 rgba(255, 255, 255, .6);
-}
+/* One segment per level, lit as they are bought. They were round rivets in a
+   sunken plate: a box inside a row inside a card, three frames to say "three of
+   five". They are bare segments now and they read as a short bar, which is the
+   same thing the level meter at the top of the screen is, so a player who has
+   read one has read the other. */
+.skill-pips { display: flex; gap: 3px; align-items: center; }
 .skill-pips i {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: rgba(0, 0, 0, .5);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7), 0 1px 0 rgba(255, 220, 170, .12);
+  width: 11px; height: 5px; border-radius: 2px;
+  background: rgba(96, 66, 28, .22);
 }
-/* A rivet driven home, and lit. */
+/* Brass, and lit. */
 .skill-pips i.on {
-  background: radial-gradient(circle at 40% 32%, #fff0cd 0 20%, #f3b661 48%, #c47a2a 78%, #8c4d13 100%);
-  box-shadow: 0 0 0 1px rgba(70, 32, 6, .8), 0 0 7px rgba(242, 180, 92, .95);
+  background: var(--brass);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 0 6px rgba(242, 180, 92, .6);
 }
-/* The price: the same plate as the balance in the head, one size down. Same
-   material, same unit, so the comparison the row is asking the player to make
-   is between two objects that look like each other. */
+/* The price, as a numeral and not as a plate. Six brass-plated prices down the
+   right margin were six of the loudest objects on the screen arguing with the
+   one number they should all have been compared against, which is the balance
+   in the head. This is set in the same mono, and what says a price is PAYABLE
+   is that it is in accent ink over a brass rule rather than faint. That rule is
+   the whole affordance and it has to stand still: there is no hover on a phone.
+   */
 .skill-cost {
-  margin-left: auto; min-width: 22px; text-align: center;
-  padding: 4px 7px; border-radius: var(--r-sm);
-  font: var(--fw-disp) var(--fs-sm)/1 var(--mono); letter-spacing: .02em;
-  color: #ffd79a; text-shadow: 0 0 8px rgba(255, 178, 74, .65);
-  background: linear-gradient(180deg, rgba(24, 15, 5, .92), rgba(56, 37, 15, .84));
-  box-shadow:
-    inset 0 0 0 1px rgba(12, 7, 2, .9),
-    inset 0 2px 5px rgba(0, 0, 0, .6),
-    0 1px 0 rgba(255, 255, 255, .6);
+  margin-left: auto; min-width: 20px; text-align: right; padding-bottom: 1px;
+  font: var(--fw-disp) var(--fs-md)/1 var(--mono); letter-spacing: .02em;
+  color: var(--ink-faint);
 }
-/* A price you CAN pay gets a warm ring round the plate. That ring is the whole
-   affordance on this screen: there is no hover on a phone, so the thing that
-   says "this row is a button today" has to be visible standing still. */
 .skill-row:not(:disabled) .skill-cost {
-  box-shadow:
-    inset 0 0 0 1px rgba(12, 7, 2, .9),
-    inset 0 2px 5px rgba(0, 0, 0, .6),
-    0 0 0 1px rgba(216, 152, 72, .9),
-    0 0 8px -1px rgba(242, 180, 92, .7),
-    0 1px 0 rgba(255, 255, 255, .6);
+  color: var(--accent-deep);
+  border-bottom: 2px solid var(--brass-line);
 }
 /* A price you cannot pay is still the price. It goes unlit, the way the
    balance does when it reads zero. */
-.skill-cost.dim { color: rgba(255, 215, 154, .32); text-shadow: none; }
+.skill-cost.dim { color: var(--ink-faint); }
 /* The one refusal worth words, because it names a route rather than a
    shortage. `blockedBy` in Skills.js owns the wording. */
 .skill-lock {
@@ -2201,10 +2183,14 @@ body.fighting #toasts { top: 172px; }
    It is the parchment's version of a vital: the same anatomy as the health bar
    in the HUD — a ticked groove, a lit fill, mono type under it — cut into paper
    instead of laid on a plate. */
+/* Ruled off rather than boxed. It is the top of the sheet, not a card lying on
+   it, and the one thing on this screen still drawn as an object is the balance
+   itself, which is what every row below is a question about. */
 .xp-block {
   flex: none;
-  padding: 11px 13px 10px; border-radius: var(--r-md); margin-bottom: 12px;
-  background: var(--paper-cell); box-shadow: var(--emboss);
+  padding: 0 0 11px; margin-bottom: 14px;
+  border-bottom: 1px solid rgba(58, 38, 16, .3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .85);
 }
 .xp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
 .xp-head b {
@@ -2257,7 +2243,6 @@ body.fighting #toasts { top: 172px; }
   font: 700 var(--fs-xs) var(--mono); color: var(--ink-faint);
 }
 .xp-foot em { text-align: right; color: var(--ink-soft); }
-.xp-block.maxed { background: linear-gradient(180deg, rgba(233, 219, 190, .9), rgba(205, 186, 148, .7)); }
 .xp-block.maxed .xp-bar i { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55); }
 
 /* The tray.
@@ -2860,7 +2845,11 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    chip, day and age. */
 .ach-list { grid-template-columns: repeat(auto-fit, minmax(372px, 1fr)); }
 .slot-list { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); }
-.skill-tree { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
+/* Three trunks side by side. 248 is a branch name, its segments and its price
+   on one line with the blurb under it, and three of them fit a phone held
+   sideways, which is what turns the whole tree into one look instead of two
+   screens of scrolling. */
+.skill-tree { grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); }
 .settings, .ach-list, .slot-list, .skill-tree {
   display: grid; align-content: start; align-items: start;
 }
@@ -2869,7 +2858,7 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 /* Rows are ruled rather than boxed, so they need no gap between them down the
    column; the gap between columns is what keeps two lists apart. */
 .ach-list { column-gap: 38px; row-gap: 0; }
-.skill-tree { gap: 8px; }
+.skill-tree { column-gap: 24px; row-gap: 18px; }
 /* Prose, capped where it is set rather than where it sits. */
 .credit-list { max-width: 78ch; }
 .tagline { max-width: 60ch; margin-left: auto; margin-right: auto; }

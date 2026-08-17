@@ -1928,6 +1928,15 @@ class Game {
     // about mobs. `explode` needs `_applyEdits` and `_takeHit`, so it is handed
     // the game rather than four callbacks.
     this.mobs.onBlast = (mob) => explode(this, mob.position, mob);
+    /**
+     * Dawn on Verdant: the fourteen have been away, so their stock is fresh.
+     *
+     * The second caller of `forgetVisit`, and the same sentence as the first
+     * (`_faceWatch`, when you leave the face). One rule with two doors rather
+     * than two rules, which is what keeps Verdant's memory explainable: it
+     * remembers you for as long as you are there and it is the same day.
+     */
+    this.mobs.onFolkDawn = () => forgetVisit(this.barter);
     this.mobs.onFuse = (mob, secs, armed) => {
       // Once, on arming: `Audio.fuse` schedules the whole swell on the audio
       // clock, so it must not be re-fired per frame.

@@ -17,8 +17,8 @@ import {
   CharacterPicker, CHARACTER_IDS, characterUrl, characterTextureUrl,
 } from '../player/Character.js';
 import { Save } from '../game/Save.js';
-import { BIOME_COLORS, SEA_K } from '../world/Constants.js';
-import { colIndex, delta } from '../world/Grid.js';
+import { BIOME_COLORS, SEA_K, FACE_ROLE, FACE_PYRE } from '../world/Constants.js';
+import { colIndex, delta, faceAt, isSealed, W } from '../world/Grid.js';
 import { compassFrame } from '../render/Sky.js';
 import { normalizeDifficulty, EXTREME } from '../game/NewGame.js';
 
@@ -783,6 +783,23 @@ export class UI {
   updateMinimap(planet, player) {
     const el = this.el.minimap;
     const c = player.cell;
+    /**
+     * No map on Pyre.
+     *
+     * The owner: "minimap should also be disabled in pyre". It is the face that
+     * is permanently dark, and a map is the one thing that gives the dark back
+     * its shape - you can be lost on Pyre only if nothing on screen is drawing
+     * you the ground. What is left to navigate by is what the face itself
+     * offers: the sunstone outcrops, the lava, and the violet standing over the
+     * dividers.
+     *
+     * Hidden rather than blanked, so nothing paints and nothing costs.
+     */
+    if (FACE_ROLE[player.face] === FACE_PYRE) {
+      el.classList.add('hidden');
+      return;
+    }
+    if (this.game.settings?.minimap !== false) el.classList.remove('hidden');
     const col = colIndex(c.x, c.y);
     // colHeight is filled in one go before any voxel arrives, so a zero here
     // means the world has not handed its tables over yet — not sea level.
@@ -858,9 +875,30 @@ export class UI {
     const biomes = planet.colBiome;
     const cols = mapColumns(x, y, this._mmCols);
 
+    /**
+     * You only map what you could walk to.
+     *
+     * The sampler takes a square of columns and knows nothing about dividers,
+     * so standing inside Pyre the map painted Vesper and Umbra straight through
+     * an opaque wall - "inside pyre we shouldn't be able to see other face from
+     * inside pyre", and quite right, because a sealed face is sealed.
+     *
+     * The rule is connectivity, not distance: from a sealed face you see that
+     * face, and from the cross you see the cross. Everything on the far side of
+     * a divider is painted as nothing at all rather than as unknown terrain,
+     * because a blank is honest and a guess is not.
+     */
+    const here = faceAt(x, y);
+    const mine = isSealed(here) ? here : 0;
+
     for (let n = 0; n < cols.length; n++) {
-      H[n] = heights[cols[n]];
-      B[n] = biomes[cols[n]];
+      const c = cols[n];
+      const cy = c % W, cx = (c - cy) / W;
+      const f = faceAt(cx, cy);
+      // `mine` 0 means the cross, which is every face that is not sealed.
+      if (mine ? f !== mine : isSealed(f)) { H[n] = -1e6; B[n] = 0; continue; }
+      H[n] = heights[c];
+      B[n] = biomes[c];
     }
 
     const d = this._mmImage.data;
@@ -870,6 +908,15 @@ export class UI {
         const h = H[n];
         const bc = BIOME_COLORS[B[n]] || BIOME_COLORS[2];
         let r, g, b;
+        if (h <= -1e5) {
+          // Beyond a divider. Not dark ground, no ground: the map has nothing
+          // to say about it, and the relief pass below must not read it either,
+          // which is why the sentinel is far under any real height rather than
+          // a flag beside it.
+          const o0 = n * 4;
+          d[o0] = 0; d[o0 + 1] = 0; d[o0 + 2] = 0; d[o0 + 3] = 0;
+          continue;
+        }
         if (h < SEA_K) {
           // Under the sea. Deeper is darker, which is the only cue on the map
           // that tells a shallow bay you can wade apart from open ocean.

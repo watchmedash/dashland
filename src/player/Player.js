@@ -1148,7 +1148,33 @@ export class Player {
    */
   _portalTransit(height) {
     const pos = this.position;
-    const cx = wrap(Math.floor(pos.x)), cz = wrap(Math.floor(pos.z));
+    /**
+     * On CONTACT, not on the centre crossing over.
+     *
+     * This read the cell the body's centre was in, so you walked HALF_W into an
+     * opaque sheet before it fired: a frame or two with the eye inside the
+     * material, which is the glitch. "TP should be instant when we touch a
+     * portal so no glitch."
+     *
+     * The box is tested instead, so the transit happens on the frame the
+     * shoulder first touches the plane. The near edge is taken rather than the
+     * centre: a body straddling the boundary is touching it, and the far edge
+     * would fire a whole cell early while you were still clear of it.
+     */
+    let cx = wrap(Math.floor(pos.x)), cz = wrap(Math.floor(pos.z));
+    if (portalAxis(cx, cz, _pAxis) === null) {
+      // The four corners of the footprint, nearest first. `Math.floor` of each
+      // edge is the column that edge is in.
+      const xs = [wrap(Math.floor(pos.x - HALF_W)), wrap(Math.floor(pos.x + HALF_W))];
+      const zs = [wrap(Math.floor(pos.z - HALF_W)), wrap(Math.floor(pos.z + HALF_W))];
+      let found = false;
+      for (const tx of xs) {
+        for (const tz of zs) {
+          if (found || (tx === cx && tz === cz)) continue;
+          if (portalAxis(tx, tz, _pAxis) !== null) { cx = tx; cz = tz; found = true; }
+        }
+      }
+    }
     const ax = portalAxis(cx, cz, _pAxis);
     if (ax === null) {
       // Either ordinary ground - the case on almost every frame - or a divider

@@ -1,23 +1,26 @@
-// Owns the authoritative voxel + light data for the cubesphere, generates the
-// planet region by region as it is asked for, and meshes chunks off the main
-// thread.
+// Owns the authoritative voxel + light data for the flat map, generates it
+// region by region as it is asked for, and meshes chunks off the main thread.
 //
-// The planet is not built up front. `WorldGen.generateGlobal` runs once and
-// produces only the per-column tables — height, biome, shore distance, canyon
-// mask, water connectivity, volcano sites — which is about a second and a half
+// The world is not built up front. `WorldGen.generateGlobal` runs once and
+// produces only the per-column tables - height, biome, shore distance, canyon
+// mask, water connectivity, volcano sites - which is about a second and a half
 // of work and a few megabytes. The voxels themselves are built a region at a
-// time, the first time a mesh request needs one. See Constants.js for what a
-// region is and WorldGen's `generateGlobal` for why the split falls where it
-// does.
+// time, the first time a mesh request needs one. See Layout.js for what a region
+// is and WorldGen's `generateGlobal` for why the split falls where it does.
+//
+// Everything here that used to reach for the column adjacency graph now does
+// arithmetic instead. On a cube, walking off the side of a face landed in
+// another face's frame and a rectangle in (i, j) could not find it; on a flat
+// map a neighbour is `stepColumn`, wrapping, and that is the whole of it.
 
 import { WorldGen, APRON, DECOR_MARGIN } from '../world/WorldGen.js';
 import { LightField, MAX_LIGHT } from '../world/Lighting.js';
 import { meshChunk } from '../world/Mesher.js';
 import {
-  F, D, CHUNK_T, CHUNK_K, CT, CK, NUM_REGIONS, REGION_COLS,
-  REGION_VOXELS, COLUMNS, CELLS, chunkIdx, regionOfCol, regionColumns,
-} from '../world/Constants.js';
-import { COL_NB, COL_BASE, COL_STEP, cellIndex } from '../world/Sphere.js';
+  D, CHUNK_T, CHUNK_K, CW, CK, NUM_REGIONS, REGION_COLS,
+  REGION_VOXELS, COLUMNS, CELLS, chunkIdx, chunkDecode, regionOfChunk,
+  regionOfCol, regionColumns, stepColumn,
+} from '../world/Layout.js';
 import {
   IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, IS_FENCE, RENDER_TYPE, R_LIQUID, FACING_DEFAULT,
 } from '../world/Blocks.js';
@@ -98,19 +101,18 @@ function restoreFacing(pairs) {
    * session goes on to use.
    *
    * Restricting it to `hasDecor` is exact rather than a heuristic. Both restore
-   * paths set that flag over precisely the regions they wrote — `restoreRegions`
-   * per region, and the pre-streaming whole-planet path with `hasDecor.fill(1)`
-   * — and air is not a directional block, so every cell this now skips would
-   * have failed `IS_DIRECTIONAL` anyway. The map comes out with the same entries.
+   * paths set that flag over precisely the regions they wrote, and air is not a
+   * directional block, so every cell this now skips would have failed
+   * `IS_DIRECTIONAL` anyway. The map comes out with the same entries.
    */
   const rcols = new Int32Array(REGION_COLS);
   for (let rid = 0; rid < NUM_REGIONS; rid++) {
     if (!hasDecor[rid]) continue;
     regionColumns(rid, rcols);
     for (let c = 0; c < REGION_COLS; c++) {
-      const base = COL_BASE[rcols[c]], step = COL_STEP[rcols[c]];
+      const base = rcols[c] * D;
       for (let k = 0; k < D; k++) {
-        const i = base + k * step;
+        const i = base + k;
         if (IS_DIRECTIONAL[blocks[i]] && !facing.has(i)) facing.set(i, FACING_DEFAULT);
       }
     }
@@ -184,14 +186,14 @@ function meshFingerprint(groups) {
   return h;
 }
 
-function meshAndPost(f, ci, cj, ck) {
+function meshAndPost(cx, cy, ck) {
   const { groups, crossLight } = meshChunk(blocks, colBiome, gen.colWaterStyle,
-    light, facing, f, ci, cj, ck);
+    light, facing, cx, cy, ck);
   // Normal, tangent and crossLight are left out of the fingerprint: the first
-  // two are a function of the face a quad sits on, so they cannot differ
-  // between two meshes whose positions and indices agree, and crossLight is
-  // derived from the same light bytes `blockLight` already covers.
-  const id = chunkIdx(f, ci, cj, ck);
+  // two are a function of which way a quad faces, so they cannot differ between
+  // two meshes whose positions and indices agree, and crossLight is derived from
+  // the same light bytes `blockLight` already covers.
+  const id = chunkIdx(cx, cy, ck);
   const fp = meshFingerprint(groups);
   if (meshHash.get(id) === fp) return;
   meshHash.set(id, fp);
@@ -200,7 +202,7 @@ function meshAndPost(f, ci, cj, ck) {
   // light of blocks this chunk deliberately did *not* mesh, and the main thread
   // keys it by chunk id. Two messages could interleave with an eviction and
   // leave a chunk holding light for flowers it no longer has.
-  self.postMessage({ type: 'chunk', f, ci, cj, ck, groups, crossLight },
+  self.postMessage({ type: 'chunk', cx, cy, ck, groups, crossLight },
     transfers(groups, crossLight));
 }
 
@@ -217,14 +219,11 @@ function meshBatch(ids, withProgress) {
   // Outermost layers first, so the surface appears before the deep rock.
   const order = [...ids].sort((a, b) => (b % CK) - (a % CK));
   let done = 0;
+  const c = { cx: 0, cy: 0, ck: 0 };
   for (const id of order) {
     if (resident.has(id)) continue;
-    const ck = id % CK;
-    const t = (id - ck) / CK;
-    const cj = t % CT;
-    const t2 = (t - cj) / CT;
-    const ci = t2 % CT;
-    meshAndPost((t2 - ci) / CT, ci, cj, ck);
+    chunkDecode(id, c);
+    meshAndPost(c.cx, c.cy, c.ck);
     resident.add(id);
     if (withProgress && (++done & 15) === 0) {
       self.postMessage({ type: 'progress', p: 0.85 + 0.15 * (done / order.length), label: 'Building terrain' });
@@ -236,15 +235,15 @@ function meshBatch(ids, withProgress) {
  * The 21 columns `markChunkAround` reaches — itself, its four neighbours and
  * their four neighbours — reduced to each one's chunk id with `ck` left off.
  *
- * A chunk id is `((f * CT + ci) * CT + cj) * CK + ck`, so everything but the
- * last term depends on the column alone. Caching that here is what makes the
+ * A chunk id is `(cx * CW + cy) * CK + ck`, so everything but the last term
+ * depends on the column alone. Caching that here is what makes the
  * neighbourhood walk cost once per *column* instead of once per cell: all three
  * callers iterate k inside one column — the edge diff walks D layers of one
  * column, and both light callbacks report changed cells column by column — so a
  * single-entry memo hits on 98 of every 99 calls.
  *
- * The list keeps its duplicates. Two graph steps from a column reach itself and
- * its neighbours several times over, and the caller's Set is what removes them;
+ * The list keeps its duplicates. Two steps from a column reach itself and its
+ * neighbours several times over, and the caller's Set is what removes them;
  * pruning here would only move the same work earlier.
  */
 const _naBase = new Int32Array(21);
@@ -254,21 +253,19 @@ function neighborhoodBases(col) {
   if (_naCol === col) return _naBase;
   _naCol = col;
   let n = 0;
-  const put = (c) => {
-    const f = (c / (F * F)) | 0;
-    const rem = c - f * F * F;
-    const ci = ((rem / F) | 0) / CHUNK_T | 0;
-    const cj = (rem % F) / CHUNK_T | 0;
-    _naBase[n++] = ((f * CT + ci) * CT + cj) * CK;
-  };
+  const put = (c) => { _naBase[n++] = regionOfCol(c) * CK; };
   put(col);
   for (let d = 0; d < 4; d++) {
-    const nb = COL_NB[col * 4 + d];
+    const nb = stepColumn(col, DX[d], DY[d]);
     put(nb);
-    for (let e = 0; e < 4; e++) put(COL_NB[nb * 4 + e]);
+    for (let e = 0; e < 4; e++) put(stepColumn(nb, DX[e], DY[e]));
   }
   return _naBase;
 }
+
+/** The four column steps, wrapping. Grid's order: north, south, west, east. */
+const DX = [0, 0, -1, 1];
+const DY = [-1, 1, 0, 0];
 
 /**
  * Which radial chunk a layer falls in, clamped exactly as it always was:
@@ -318,19 +315,17 @@ function markChunkAround(set, col, k) {
 
 // --- region generation -------------------------------------------------------
 
-/** A chunk id names exactly one region: drop its radial index. */
-const regionOfChunk = (id) => (id - (id % CK)) / CK;
-
 const _mark = new Uint8Array(COLUMNS);
 let _dbuf = new Int32Array(1 << 16);
 
 /**
- * Every column within `steps` graph steps of `cols`, including `cols` itself.
+ * Every column within `steps` steps of `cols`, including `cols` itself.
  *
- * Over the column graph rather than over face coordinates, because both callers
- * care about real adjacency and a cube seam is where those two stop agreeing —
- * a region on the edge of a face has neighbours on another face, in another
- * frame, and a rectangle in (i, j) does not find them.
+ * A flood rather than a rectangle, still, even though the map is flat and a
+ * rectangle would now be correct in the middle of it. Two reasons it stays: the
+ * callers hand it arbitrary column sets rather than tiles, and the wrap means a
+ * rectangle written in raw coordinates is wrong at exactly the place a seam
+ * always used to be wrong. `stepColumn` wraps, so this cannot walk off the map.
  */
 function dilate(cols, steps) {
   let buf = _dbuf;
@@ -353,8 +348,8 @@ function dilate(cols, steps) {
     for (let i = start; i < end; i++) {
       const c = buf[i];
       for (let d = 0; d < 4; d++) {
-        const nb = COL_NB[c * 4 + d];
-        if (nb < 0 || _mark[nb]) continue;
+        const nb = stepColumn(c, DX[d], DY[d]);
+        if (_mark[nb]) continue;
         _mark[nb] = 1;
         push(nb);
       }
@@ -413,18 +408,25 @@ function ensureTerrain(rid) {
 /**
  * Which regions a volcano will eventually write into.
  *
- * A site is rejected during selection unless its whole apron fits inside its
- * own face, so this is a rectangle in that face's coordinates and needs no
- * seam handling at all — which is the second reason that rule is worth keeping.
+ * A rectangle of chunk tiles around the site, wrapped. The cube needed the site
+ * selector to reject anything whose apron crossed a face border so that this
+ * could stay a rectangle in one face's coordinates; a wrapped rectangle is
+ * simply a rectangle here, so a cone may straddle the map's join and nothing
+ * has to know.
+ *
+ * `site.x` and `site.y` are map columns. WorldGen integration point: the cube's
+ * sites carried `{f, i, j}`.
  */
 function volcanoRegions(site) {
   const out = [];
-  const i0 = Math.floor((site.i - APRON) / CHUNK_T);
-  const i1 = Math.floor((site.i + APRON) / CHUNK_T);
-  const j0 = Math.floor((site.j - APRON) / CHUNK_T);
-  const j1 = Math.floor((site.j + APRON) / CHUNK_T);
-  for (let ri = i0; ri <= i1; ri++) {
-    for (let rj = j0; rj <= j1; rj++) out.push((site.f * CT + ri) * CT + rj);
+  const x0 = Math.floor((site.x - APRON) / CHUNK_T);
+  const x1 = Math.floor((site.x + APRON) / CHUNK_T);
+  const y0 = Math.floor((site.y - APRON) / CHUNK_T);
+  const y1 = Math.floor((site.y + APRON) / CHUNK_T);
+  for (let rx = x0; rx <= x1; rx++) {
+    for (let ry = y0; ry <= y1; ry++) {
+      out.push((((rx % CW) + CW) % CW) * CW + (((ry % CW) + CW) % CW));
+    }
   }
   return out;
 }
@@ -511,8 +513,8 @@ function ensureRegions(rids, onProgress) {
     const edge = perimeter(cols, 2);
     const edgeWas = new Uint8Array(edge.length * D);
     for (let n = 0; n < edge.length; n++) {
-      const base = COL_BASE[edge[n]], step = COL_STEP[edge[n]], o = n * D;
-      for (let k = 0; k < D; k++) edgeWas[o + k] = blocks[base + k * step];
+      const base = edge[n] * D;
+      edgeWas.set(blocks.subarray(base, base + D), n * D);
     }
 
     // Terrain for the region and for everything a canopy could reach in from.
@@ -557,9 +559,9 @@ function ensureRegions(rids, onProgress) {
     // What a chunk already on screen can now see of this batch. See `edge` and
     // the snapshot above.
     for (let n = 0; n < edge.length; n++) {
-      const base = COL_BASE[edge[n]], step = COL_STEP[edge[n]], o = n * D;
+      const base = edge[n] * D, o = n * D;
       for (let k = 0; k < D; k++) {
-        if (edgeWas[o + k] !== blocks[base + k * step]) markChunkAround(dirty, edge[n], k);
+        if (edgeWas[o + k] !== blocks[base + k]) markChunkAround(dirty, edge[n], k);
       }
     }
   }
@@ -629,15 +631,16 @@ function postRegions(fresh) {
   const ids = new Int32Array(fresh);
   const data = new Uint8Array(fresh.length * REGION_VOXELS);
   const tmp = new Int32Array(REGION_COLS);
+  const RUN = CHUNK_T * D;
   for (let n = 0; n < fresh.length; n++) {
     regionColumns(fresh[n], tmp);
-    let o = n * REGION_VOXELS;
-    // The wire format stays (column, layer) packed; storage does not, so this
-    // is a gather.
-    for (let c = 0; c < REGION_COLS; c++) {
-      const base = COL_BASE[tmp[c]], step = COL_STEP[tmp[c]];
-      for (let k = 0; k < D; k++) data[o + k] = blocks[base + k * step];
-      o += D;
+    const o = n * REGION_VOXELS;
+    // The wire format is (column, layer) packed, which is the order storage
+    // uses, so a region is sixteen contiguous runs rather than a gather. See
+    // `regionColumns`.
+    for (let row = 0; row < CHUNK_T; row++) {
+      const base = tmp[row * CHUNK_T] * D;
+      data.set(blocks.subarray(base, base + RUN), o + row * RUN);
     }
   }
   self.postMessage({ type: 'regions', ids, data }, [ids.buffer, data.buffer]);
@@ -646,14 +649,13 @@ function postRegions(fresh) {
 /** The reverse, for a save being restored. */
 function restoreRegions(ids, data) {
   const tmp = new Int32Array(REGION_COLS);
+  const RUN = CHUNK_T * D;
   for (let n = 0; n < ids.length; n++) {
     const rid = ids[n];
     regionColumns(rid, tmp);
-    let o = n * REGION_VOXELS;
-    for (let c = 0; c < REGION_COLS; c++) {
-      const base = COL_BASE[tmp[c]], step = COL_STEP[tmp[c]];
-      for (let k = 0; k < D; k++) blocks[base + k * step] = data[o + k];
-      o += D;
+    const o = n * REGION_VOXELS;
+    for (let row = 0; row < CHUNK_T; row++) {
+      blocks.set(data.subarray(o + row * RUN, o + row * RUN + RUN), tmp[row * CHUNK_T] * D);
     }
     hasTerrain[rid] = 1;
     hasDecor[rid] = 1;
@@ -750,14 +752,11 @@ self.onmessage = (e) => {
     // Relighting a new region takes light away from its neighbours, and some of
     // those already have a mesh on screen. `meshBatch` has just claimed the new
     // chunks, so anything still in `dirty` and resident is genuinely stale.
+    const c = { cx: 0, cy: 0, ck: 0 };
     for (const id of dirty) {
       if (!resident.has(id) || added.has(id)) continue;
-      const ck = id % CK;
-      const t = (id - ck) / CK;
-      const cj = t % CT;
-      const t2 = (t - cj) / CT;
-      const ci = t2 % CT;
-      meshAndPost((t2 - ci) / CT, ci, cj, ck);
+      chunkDecode(id, c);
+      meshAndPost(c.cx, c.cy, c.ck);
     }
 
     if (msg.initial) self.postMessage({ type: 'ready' });
@@ -769,7 +768,7 @@ self.onmessage = (e) => {
     const dirty = new Set();
     const seeds = [];
     for (const ed of msg.edits) {
-      const idx = cellIndex(ed.col, ed.k);
+      const idx = ed.col * D + ed.k;
       blocks[idx] = ed.id;
       // The main thread resolves the facing and sends it explicitly; a
       // non-directional block clears the entry so it cannot go stale.
@@ -785,8 +784,8 @@ self.onmessage = (e) => {
       seeds.push(ed.col);
       // The edited cell and everything that reads it. That means the *diagonal*
       // columns too, not only the four axis neighbours: the mesher resolves
-      // `nPiPj`/`nPiMj`/`nMiPj`/`nMiMj` and every ambient-occlusion corner
-      // quartet includes one. Edit the +i+j corner column of a chunk and the
+      // `nPxPy`/`nPxMy`/`nMxPy`/`nMxMy` and every ambient-occlusion corner
+      // quartet includes one. Edit the +x+y corner column of a chunk and the
       // cell diagonally across the boundary samples it for both its occlusion
       // and its smooth light, in a chunk nothing had marked.
       //
@@ -802,17 +801,13 @@ self.onmessage = (e) => {
 
     light.relight(blocks, seeds, 17, (col, k) => markChunkAround(dirty, col, k));
 
+    const c = { cx: 0, cy: 0, ck: 0 };
     for (const id of dirty) {
       // Rebuilding a chunk with no mesh would post geometry the main thread
       // immediately discards, and relighting can dirty chunks far out of sight.
       if (!resident.has(id)) continue;
-      const ck = id % CK;
-      const t = (id - ck) / CK;
-      const cj = t % CT;
-      const t2 = (t - cj) / CT;
-      const ci = t2 % CT;
-      const f = (t2 - ci) / CT;
-      meshAndPost(f, ci, cj, ck);
+      chunkDecode(id, c);
+      meshAndPost(c.cx, c.cy, c.ck);
     }
     // No reply. There used to be an `editDone` carrying `msg.id` back, and the
     // main thread has no case for it in `_onWorldMessage` — the id it sends is

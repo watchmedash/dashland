@@ -1857,7 +1857,7 @@ class Game {
     // outlive a world reset holding a reference to a dead herd.
     this.arrows = new Arrows(this.scene, this.planet, itemIdOf('arrow'));
     this.arrows.onHit = (mob, _dmg, killed) => {
-      this.audio.mobHit(mob.pos);
+      this.audio.mobHit(mob.position);
       // An arrow kill has to earn what a sword kill earns, and be worth the
       // same mark. This is the second death path in the game and the melee
       // branch of `_interact` is the other; a bow-only player was earning
@@ -1888,7 +1888,7 @@ class Game {
     this.mobs = new Mobs(this.scene, this.planet, this.drops);
     // Creatures speak for themselves — idle calls, pain and death, all anchored
     // in the world so you can hear which direction the herd is in.
-    this.mobs.onSound = (kind, mob) => this.audio.mob(mob.type, kind, mob.pos);
+    this.mobs.onSound = (kind, mob) => this.audio.mob(mob.type, kind, mob.position);
     // Difficulty lives here, on the one wire every mob blow crosses, and not
     // inside `_takeHit`.
     //
@@ -1905,18 +1905,18 @@ class Game {
     // their tolerance, instead of hard eating the skill or the skill eating
     // hard.
     this.mobs.onAttack = (dmg, mob) => this._takeHit(dmg * this.mobDamageMul, mob);
-    this.mobs.onBurn = (mob) => this.particles.embers(mob.pos, mob.up, 2, 0.55);
+    this.mobs.onBurn = (mob) => this.particles.embers(mob.position, mob.up, 2, 0.55);
     // The crater, and the fuse that precedes it. Two wires, and everything they
     // reach is in `game/Explosion.js` — Mobs owns when a thing goes off and
     // knows nothing about blocks; that module owns the hole and knows nothing
     // about mobs. `explode` needs `_applyEdits` and `_takeHit`, so it is handed
     // the game rather than four callbacks.
-    this.mobs.onBlast = (mob) => explode(this, mob.pos, mob);
+    this.mobs.onBlast = (mob) => explode(this, mob.position, mob);
     this.mobs.onFuse = (mob, secs, armed) => {
       // Once, on arming: `Audio.fuse` schedules the whole swell on the audio
       // clock, so it must not be re-fired per frame.
-      if (armed) this.audio.fuse(mob.pos, secs);
-      if (secs > 0) this.particles.fuse(mob.pos, mob.up, 1 - secs / mob.spec.blast);
+      if (armed) this.audio.fuse(mob.position, secs);
+      if (secs > 0) this.particles.fuse(mob.position, mob.up, 1 - secs / mob.spec.blast);
     };
     // A torch on the ground has to light the animal standing next to it, and
     // nothing in the scene graph can tell it so — see `_entityLight`. Handed
@@ -1961,7 +1961,7 @@ class Game {
     // says it from a direction. If merchants now go unmet, the honest fix is to
     // let him walk toward the player rather than to put the caption back.
     this.mobs.onMerchant = (mob) => {
-      this.audio.mob(mob.type, 'idle', mob.pos);
+      this.audio.mob(mob.type, 'idle', mob.position);
     };
     /**
      * The end of the game. See the head of `Endgame.js`.
@@ -6671,7 +6671,7 @@ class Game {
 
     // `cause` is the mob for a blow and a string for everything else, so this
     // shoves you away from a husk but not away from drowning.
-    if (cause && cause.pos) p.knockback(cause.pos.x, cause.pos.y, cause.pos.z);
+    if (cause && cause.position) p.knockback(cause.position.x, cause.position.y, cause.position.z);
 
     p.health = Math.max(0, p.health - damage);
     this.damageFlash = Math.min(1, 0.32 + damage * 0.1);
@@ -8341,7 +8341,7 @@ class Game {
    *
    * ### The sampling point, and why it is quantised
    *
-   * The probe is handed one position per entity: `mob.pos + up * height/2` for
+   * The probe is handed one position per entity: `mob.position + up * height/2` for
    * an animal, chest height for the player's own body (see the call sites). Mid
    * body is the right end of the ray. Feet sit in the cell the ground occupies
    * and a wall torch is bracketed a block up, so marching from there shadows
@@ -9800,7 +9800,7 @@ class Game {
         // heavier flesh impact, a short bright tick over it, and the spark
         // burst below. `ui()` is the existing blip voice — high and short here,
         // so it reads as the edge going in rather than as a menu.
-        this.audio.mobHit(mobHit.mob.pos, crit > 1 ? 1.5 : 1);
+        this.audio.mobHit(mobHit.mob.position, crit > 1 ? 1.5 : 1);
         if (crit > 1) {
           // Two channels, and deliberately no particles.
           //
@@ -9823,7 +9823,7 @@ class Game {
           // done with the right instrument and, unlike the blip, it comes from
           // the animal, so it lines up with the thump above instead of sitting
           // beside it.
-          this.audio.impact('metal', mobHit.mob.pos);
+          this.audio.impact('metal', mobHit.mob.position);
           this.ui.critHit();
         }
         // Shove scales with the swing, rather than switching on at 85%.

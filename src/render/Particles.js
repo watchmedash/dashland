@@ -92,6 +92,36 @@ const TORNADO_R = 3.0;
 /** Height of the drawn funnel, in cells. Matches FUNNEL_H in Tornado.js. */
 const TORNADO_H = 34;
 
+// --- lightning ---------------------------------------------------------------
+//
+// Lines, not a mesh, and for the reason the tornado's motes give at length:
+// `PostFX` runs a GTAO prepass that swaps the material of every `isMesh` for an
+// unlit normal stand-in, so a transparent depth-write-off ribbon would be drawn
+// into the normal G-buffer as a solid 46-cell slab and paint an AO shadow the
+// shape of a bolt across the sky behind it. Points and lines are already on the
+// right side of that fence.
+//
+// Three strands rather than one. A single 1px polyline is what the hardware
+// gives whatever `linewidth` says, and at 40 cells that is a hair; three strands
+// jittered a third of a cell apart read as one bright forked channel and cost
+// nothing. The bolt is drawn additively and blows out to white at its core,
+// which is what a line width the platform will not give has to be faked with.
+const BOLT_MAX = 4;
+/** Points down one strand, so BOLT_STEPS - 1 segments. */
+const BOLT_STEPS = 15;
+const BOLT_STRANDS = 3;
+/** Cells above the ground the channel comes out of the cloud deck. */
+const BOLT_H = 46;
+/**
+ * Seconds a bolt is on screen.
+ *
+ * Short, and flickered inside that: a real return stroke is under a millisecond
+ * and the after-image is the whole of what a player sees. 0.30 with three
+ * flickers is long enough to be seen out of the corner of an eye and far too
+ * short to look like a drawn object standing in the world.
+ */
+const BOLT_LIFE = 0.30;
+
 export class Particles {
   constructor(scene, planet) {
     this.planet = planet;
@@ -206,6 +236,117 @@ export class Particles {
     this.tornadoMotes = this._buildTornadoMotes(scene);
     /** 1 on the high tier, 0.32 on low. See `setQuality`. */
     this.tornadoScale = 1;
+
+    // --- lightning ---
+    // Same argument as the funnel above: built once and left hidden, because the
+    // storm face strikes every few seconds and a shader compile on the frame one
+    // lands is a hitch in the middle of the event it is drawing.
+    this.boltMesh = this._buildBolts(scene);
+    /** Live bolts, oldest first. At most BOLT_MAX. */
+    this.boltList = [];
+  }
+
+  /**
+   * One additive line soup for every bolt in the air at once.
+   *
+   * Vertex colours rather than a material colour, because each bolt fades on its
+   * own clock and a shared material has one opacity. The colour written per
+   * vertex IS the brightness, which is what lets the flicker be a buffer write
+   * rather than four materials.
+   */
+  _buildBolts(scene) {
+    const verts = BOLT_MAX * BOLT_STRANDS * (BOLT_STEPS - 1) * 2;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts * 3), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(verts * 3), 3));
+    geo.setDrawRange(0, 0);
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const l = new THREE.LineSegments(geo, mat);
+    l.frustumCulled = false;
+    // Above the funnel (13), which is above the rain (12). A bolt is the
+    // brightest thing in the frame and nothing in the weather occludes it.
+    l.renderOrder = 14;
+    l.visible = false;
+    scene.add(l);
+    return l;
+  }
+
+  /**
+   * A strike, from the cloud deck down to `pos`.
+   *
+   * The channel is walked from the ground UP, which is the way it forks: the
+   * lateral wander accumulates with height, so the foot is exactly on the cell
+   * that was struck and the top is allowed to be tens of cells off to one side.
+   * Sited the other way round the foot drifts, and a bolt that visibly lands
+   * eight cells from where the damage was is a bolt the player learns to
+   * distrust.
+   *
+   * @param {{x:number,y:number,z:number}} pos world point the strike lands on,
+   *   already resolved to the copy of itself nearest the camera.
+   */
+  bolt(pos) {
+    if (this.boltList.length >= BOLT_MAX) this.boltList.shift();
+    const pts = [];
+    for (let s = 0; s < BOLT_STRANDS; s++) {
+      const strand = new Float32Array(BOLT_STEPS * 3);
+      let dx = (Math.random() - 0.5) * 0.7, dz = (Math.random() - 0.5) * 0.7;
+      for (let i = 0; i < BOLT_STEPS; i++) {
+        const t = i / (BOLT_STEPS - 1);
+        // Wander grows with height and is shared by the whole bolt only at the
+        // foot, so the three strands separate as they climb.
+        dx += (Math.random() - 0.5) * 2.6 * t;
+        dz += (Math.random() - 0.5) * 2.6 * t;
+        strand[i * 3] = pos.x + dx;
+        strand[i * 3 + 1] = pos.y + t * BOLT_H;
+        strand[i * 3 + 2] = pos.z + dz;
+      }
+      pts.push(strand);
+    }
+    this.boltList.push({ pts, age: 0 });
+  }
+
+  _updateBolts(dt) {
+    for (let i = this.boltList.length - 1; i >= 0; i--) {
+      this.boltList[i].age += dt;
+      if (this.boltList[i].age >= BOLT_LIFE) this.boltList.splice(i, 1);
+    }
+    if (!this.boltList.length) {
+      this.boltMesh.visible = false;
+      this.boltMesh.geometry.setDrawRange(0, 0);
+      return;
+    }
+    const posAttr = this.boltMesh.geometry.attributes.position;
+    const colAttr = this.boltMesh.geometry.attributes.color;
+    const P = posAttr.array, C = colAttr.array;
+    let v = 0;
+    for (const b of this.boltList) {
+      const t = b.age / BOLT_LIFE;
+      // Three flickers over the life, under a falling envelope, so the channel
+      // restrikes twice and dies rather than dimming evenly.
+      const flick = 0.45 + 0.55 * Math.abs(Math.cos(t * Math.PI * 3));
+      const bright = (1 - t * t) * flick * 2.6;
+      for (const strand of b.pts) {
+        for (let i = 0; i < BOLT_STEPS - 1; i++) {
+          for (const j of [i, i + 1]) {
+            P[v * 3] = strand[j * 3];
+            P[v * 3 + 1] = strand[j * 3 + 1];
+            P[v * 3 + 2] = strand[j * 3 + 2];
+            // Cold blue-white, blown out at the core by the additive blend.
+            C[v * 3] = bright * 0.80;
+            C[v * 3 + 1] = bright * 0.88;
+            C[v * 3 + 2] = bright;
+            v++;
+          }
+        }
+      }
+    }
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+    this.boltMesh.geometry.setDrawRange(0, v);
+    this.boltMesh.visible = true;
   }
 
   /**
@@ -1035,6 +1176,7 @@ export class Particles {
 
     this._rainRipples(dt, camera, up, wu.uWaterY.value);
     this._updateRipples(dt);
+    this._updateBolts(dt);
   }
 
   /**

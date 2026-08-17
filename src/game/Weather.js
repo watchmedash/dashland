@@ -82,6 +82,18 @@ const TORNADO_RATE = 0.006;
  */
 const TORNADO_COOLDOWN = 420;
 
+/**
+ * Strikes per second on Tempest, counting the distant ones.
+ *
+ * 0.3 is a bolt somewhere in view every 3.3 seconds. That is far more often than
+ * a real storm and it is meant to be: the face's whole identity is that the sky
+ * is trying to kill you, and a strike a minute reads as ordinary weather. Most
+ * of them land a long way off — `Lightning.js` owns that split — so what this
+ * number actually sets is how loud and how lit the face is, not how much it
+ * hurts.
+ */
+const STRIKE_RATE = 0.30;
+
 export class Weather {
   constructor() {
     this.state = 'fair';
@@ -104,6 +116,16 @@ export class Weather {
      * them.
      */
     this.tornadoCooldown = TORNADO_COOLDOWN;
+    /**
+     * On the storm face, where the sky is not weather any more.
+     *
+     * Written by `update` from the caller's face test rather than owned here,
+     * for the same reason `cold` is: this class is a table and a lerp, and it
+     * has never known where the player is standing.
+     */
+    this.tempest = false;
+    /** The sky the storm face interrupted, so leaving gives it back. */
+    this._held = null;
   }
 
   _pick() {
@@ -127,9 +149,37 @@ export class Weather {
    *   in the tropics; the biome and altitude rules still apply underneath, so
    *   the poles are white all year and only the middle of the world changes.
    */
-  update(dt, biomeId, altitude, chill = 0) {
+  /**
+   * @param {boolean} tempest is the player on the storm face? The whole of the
+   *   permanent-storm override, and it is the same shape as the cinderlands'
+   *   `skyTimeOfDay` in main.js: a face is a region with its own sky, so it
+   *   overrides the global cycle rather than biasing it. Rime's whiteout and
+   *   Pyre's eternal night are the precedent this follows.
+   */
+  update(dt, biomeId, altitude, chill = 0, tempest = false) {
+    if (tempest !== this.tempest) {
+      // Held and given back, rather than re-rolled on the way out. A portal is
+      // instantaneous, so a player who steps out of the storm should find the
+      // weather they left behind, not a fresh draw that happens to be a second
+      // storm — or, worse, a clear noon that makes the face they just left look
+      // like it was never really raining.
+      if (tempest) { this._held = { state: this.state, timer: this.timer }; this.state = 'storm'; }
+      else if (this._held) { this.state = this._held.state; this.timer = this._held.timer; this._held = null; }
+      // Nothing held: the save was written on the storm face, so there is no
+      // sky to give back and the world outside gets a fresh draw rather than
+      // three minutes of a storm it never had.
+      else this.timer = 0;
+      this.tempest = tempest;
+    }
+    // Permanent means the clock never runs out, not that it is paused: the
+    // timer is simply never consulted while the face holds the sky.
+    if (this.tempest) {
+      this.state = 'storm';
+      this.timer = STATES.storm.dur[1];
+    }
+
     this.timer -= dt;
-    if (this.timer <= 0) {
+    if (!this.tempest && this.timer <= 0) {
       this.state = this._pick();
       const d = STATES[this.state].dur;
       this.timer = d[0] + Math.random() * (d[1] - d[0]);
@@ -153,12 +203,23 @@ export class Weather {
     // of it: a cold biome makes it *snow* at any height, which is a fact about
     // the sky, while how much of that snow survives on the ground is the
     // altitude question `snowLine` answers.
-    this.cold = COLD_BIOMES.has(biomeId) || altitude > snowLine(chill) || chill > 0.75;
+    //
+    // Never on Tempest, and not because the arithmetic would come out wrong.
+    // The face sits nine layers either side of the waterline, so the altitude
+    // clause could not fire, but `chill > 0.75` is a whole-planet clause and
+    // would turn the permanent storm into a permanent blizzard for a quarter of
+    // every year. A sealed face does not have a season.
+    this.cold = !this.tempest
+      && (COLD_BIOMES.has(biomeId) || altitude > snowLine(chill) || chill > 0.75);
     this.type = this.cold ? 'snow' : 'rain';
 
     // lightning during storms
+    //
+    // The flash decays here wherever you are; what lights it does not. On
+    // Tempest the strike system owns both the flash and the thunder, because it
+    // knows where the bolt landed and this roll does not — see `wantsStrike`.
     this.lightning = Math.max(0, this.lightning - dt * 3.2);
-    if (this.state === 'storm' && this.precip > 0.6 && Math.random() < dt * 0.09) {
+    if (!this.tempest && this.state === 'storm' && this.precip > 0.6 && Math.random() < dt * 0.09) {
       this.lightning = 1;
       this.onThunder?.();
     }
@@ -187,6 +248,24 @@ export class Weather {
 
   /** Called once a funnel has actually been sited. */
   armedTornado() { this.tornadoCooldown = TORNADO_COOLDOWN; }
+
+  /**
+   * Should a bolt come down this frame?
+   *
+   * Exactly the split `wantsTornado` argues for, and for exactly the reason:
+   * whether the sky strikes is a fact about the sky, while where it lands, what
+   * it hits and how much that costs need a planet and a player this class has
+   * never heard of. Those live in Lightning.js.
+   *
+   * The storm face only. An ordinary storm keeps the flash and the roll of
+   * thunder it has always had and nothing lands out of it — a bolt that can hurt
+   * you in weather that arrives unannounced anywhere in the world is a different
+   * design, and not one that was asked for.
+   */
+  wantsStrike(dt) {
+    if (!this.tempest) return false;
+    return Math.random() < dt * STRIKE_RATE;
+  }
 
   // `raining` and `snowing` used to sit here and were deleted rather than wired
   // up. Both were exported-looking predicates over `precip` and `cold` that

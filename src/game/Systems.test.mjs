@@ -46,6 +46,10 @@ const { Mobs, BOSS_ROSTER } = await import('./Mobs.js');
 const { Endgame } = await import('./Endgame.js');
 const { ID } = await import('../world/Blocks.js');
 const { fishTable } = await import('./Items.js');
+const { Weather } = await import('./Weather.js');
+const { strikeDamage, HURT, AIM_R, FAR_MIN } = await import('./Lightning.js');
+const { BIOME } = await import('../world/Constants.js');
+const BIOME_STORM = BIOME.STORM;
 
 let pass = 0, fail = 0;
 const ok = (cond, what) => { if (cond) pass++; else { fail++; console.log('FAIL', what); } };
@@ -536,6 +540,74 @@ const mobsOn = (planet) => {
   // No other water moved. The storm is a third argument, not a rebalance.
   near(of(deep, 'clownfish'), 0.274, 0.001, 'the deep table is untouched');
   near(of(fresh, 'tetra'), 0.305 / 0.78, 0.002, 'and so is the fresh one');
+}
+
+// --- the storm face: a sky that does not pass -------------------------------
+{
+  const w = new Weather();
+  // Two in-game hours of the ordinary cycle, so the sky has certainly changed
+  // its mind at least once before the face takes it over.
+  for (let i = 0; i < 7200; i++) w.update(1, 2, 0, 0);
+  const before = w.state;
+  ok(!w.tempest, 'the ordinary world is not the storm face');
+
+  for (let i = 0; i < 3600; i++) w.update(1, BIOME_STORM, 0, 0, true);
+  eq(w.state, 'storm', 'an hour on Tempest is an hour of storm');
+  ok(w.precip > 0.99, 'and the rain is fully in');
+  ok(!w.cold, 'and it is rain, not snow');
+  // Deep winter is a whole-planet clause and a sealed face does not have a
+  // season: the permanent storm must not become a permanent blizzard.
+  for (let i = 0; i < 600; i++) w.update(1, BIOME_STORM, 0, 1, true);
+  eq(w.state, 'storm', 'midwinter does not end it');
+  eq(w.cold, false, 'and does not freeze it');
+  eq(w.type, 'rain', 'and it still falls as rain');
+
+  // Stepping back out gives back the sky that was interrupted.
+  w.update(1, 2, 0, 0);
+  eq(w.state, before, 'leaving hands back the weather you left');
+
+  // The roll is the storm face's alone: an ordinary storm keeps the flash and
+  // the thunder it always had and nothing lands out of it.
+  let off = 0;
+  w.state = 'storm';
+  for (let i = 0; i < 2000; i++) if (w.wantsStrike(1)) off++;
+  eq(off, 0, 'no bolt lands off Tempest, storm or not');
+  let on = 0;
+  for (let i = 0; i < 20000; i++) { w.update(1, BIOME_STORM, 0, 0, true); if (w.wantsStrike(1)) on++; }
+  near(on / 20000, 0.30, 0.03, 'and one every 3.3 seconds on it');
+}
+
+// --- the strike ladder ------------------------------------------------------
+{
+  eq(strikeDamage(0), 7, 'a direct hit is a third of the bar');
+  eq(strikeDamage(1.5), 7, 'and the band is inclusive');
+  eq(strikeDamage(1.51), 4, 'just outside it is four');
+  eq(strikeDamage(4), 4, 'and four to the second band');
+  eq(strikeDamage(4.01), 2, 'two beyond that');
+  eq(strikeDamage(7), 2, 'out to seven cells');
+  eq(strikeDamage(7.01), 0, 'and nothing past it');
+  eq(strikeDamage(FAR_MIN), 0, 'so a distant bolt can never reach, at any range');
+
+  // Monotonic, and every band is survivable on its own against a 20-point bar.
+  let last = 99;
+  for (let d = 0; d <= 10; d += 0.25) {
+    ok(strikeDamage(d) <= last, `damage never rises with distance (at ${d})`);
+    last = strikeDamage(d);
+  }
+  ok(HURT[0][1] < 20 / 2, 'no single bolt takes half the bar');
+
+  // The expected cost of one aimed strike, integrated over the disc it is
+  // sited in rather than guessed. This is the number the whole balance section
+  // in Lightning.js is argued from, so it is asserted rather than described.
+  let sum = 0;
+  const N = 200000;
+  for (let i = 0; i < N; i++) sum += strikeDamage(AIM_R * Math.sqrt((i + 0.5) / N));
+  near(sum / N, 3.08, 0.02, 'an aimed strike costs 3.1 in expectation');
+  // Against 1 point regenerated every 4.5s, and one aimed strike every 8.3s in
+  // the open: a net drain, but a slow one.
+  const perMin = (sum / N) * (60 / 8.3);
+  ok(perMin > 60 / 4.5, 'standing in the open outpaces the regeneration');
+  ok(perMin < 40, 'and does not kill a full bar inside a minute');
 }
 
 console.log(`${pass} passed, ${fail} failed`);

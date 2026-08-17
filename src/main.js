@@ -18,7 +18,7 @@ import { BlockModels, CAP as BLOCK_MODEL_CAP } from './render/BlockModels.js';
 import { SignText } from './render/SignText.js';
 import {
   createVoxelMaterials, buildTileTextures, buildCrackTexture, voxelUniforms,
-  occupancyTexture, occupancyData, OCC_NI, OCC_NJ, OCC_NK, OCC_ANG,
+  occupancyTexture, occupancyData, OCC_NI, OCC_NJ, OCC_NK,
 } from './render/VoxelMaterial.js';
 import { loadTileAtlas } from './render/TileAtlas.js';
 import { bobberGeometry } from './render/ItemModels.js';
@@ -67,12 +67,12 @@ import {
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
 } from './world/Blocks.js';
 import {
-  F, D, COLUMNS, GRAVITY, FACES, GEN_VERSION,
+  D, COLUMNS, GRAVITY, GEN_VERSION,
   K_TERRAIN_MAX, CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
   BIOME, FACE_ROLE, FACE_RIME, FACE_PYRE, FACE_PHYSICS, FACE_NAME,
 } from './world/Constants.js';
 import {
-  W, SEA_K, wrap, colIndex, faceAt, delta, dist2,
+  W, SEA_K, colIndex, faceAt, delta,
 } from './world/Grid.js';
 import {
   colParts, colNeighbor, stepColumn, cellIdx, cellCorner,
@@ -95,7 +95,7 @@ import { EntityLightField } from './world/EntityLight.js';
 import { makeRng } from './util/Noise.js';
 // Every world-space distance on this map goes through one of these: X and Z
 // wrap, so `distanceTo` is a full turn out half the time.
-import { wrapDist2, relTo, nearestTo } from './game/Wrap.js';
+import { wrapDist2 } from './game/Wrap.js';
 
 /**
  * Shortest signed distance along a wrapped world axis.
@@ -130,14 +130,12 @@ const CHUNK_CENTER = (() => {
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
-// Owned by the drop-burn callback alone: it fires from inside Drops.update,
-// where the shared scratch vectors above may be mid-use by the caller.
-const _burnUp = new THREE.Vector3();
-// The cast's own three, kept off the shared scratch above because `_castArc`
+// Up, for the two burn-ember callbacks. A constant, because there is one up.
+const _burnUp = new THREE.Vector3(0, 1, 0);
+// The cast's own two, kept off the shared scratch above because `_castArc`
 // runs a whole flight inside one call and its caller is holding `_v1`.
 const _castP = new THREE.Vector3();
 const _castV = new THREE.Vector3();
-const _castU = new THREE.Vector3();
 /** Model up for the float, which is a constant and never anything else. */
 const _bobY = new THREE.Vector3(0, 1, 0);
 
@@ -732,7 +730,6 @@ const FLAT_EA = [1, 0, 0];
 const FLAT_EB = [0, 0, 1];
 const FLAT_UP = [0, 1, 0];
 /** Scratch for the steam emitter, which asks for a cell centre twice a tick. */
-const _steamAt = [0, 0, 0];
 /** Scratch for `_crossLightAt`, which runs once per modelled instance per frame. */
 const _clParts = { x: 0, y: 0 };
 /** Scratch for the player body's own block-light probe. */
@@ -892,7 +889,7 @@ const OCC_ENTITY_NEAR = 1.0;
  */
 const OCC_VIS_SLOTS = 1024;
 /** Scratch for the volume's recentring test; not shared, it is read every frame. */
-const _occCell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
+const _occCell = { cx: 0, cy: 0, ck: 0 };
 const _occLocal = new THREE.Vector3();
 /**
  * A second one, for the moving flames' own cell coordinates.
@@ -1865,7 +1862,6 @@ class Game {
     // An arrow burning up in lava, given the same embers a dropped item gets
     // there — it is the same event and should not read as two different ones.
     this.arrows.onBurn = (pos) => {
-      _burnUp.copy(pos).normalize();
       this.particles.embers(pos, _burnUp, 5, 0.7);
     };
     this.mobs = new Mobs(this.scene, this.planet, this.drops);
@@ -1929,7 +1925,6 @@ class Game {
     // there so there is never a second copy of the tier to drift.
     this.mobs.loadDist = this.quality.loadDist;
     this.drops.onBurn = (pos) => {
-      _burnUp.copy(pos).normalize();
       this.particles.embers(pos, _burnUp, 5, 0.7);
     };
     // A merchant arrives with a bell and nothing else.
@@ -9055,8 +9050,8 @@ class Game {
     u.uDropLightRadius.value += (want - u.uDropLightRadius.value) * Math.min(1, dt * 8);
     // A little above the item, which sits on the ground: a light exactly at
     // floor level lights the floor and nothing else.
-    u.uDropLightPos.value.copy(best.drop.pos).addScaledVector(
-      _v1.copy(best.drop.pos).sub(this.planet.center).normalize(), 0.25);
+    u.uDropLightPos.value.copy(best.drop.pos);
+    u.uDropLightPos.value.y += 0.25;
   }
 
   /**
@@ -9067,15 +9062,14 @@ class Game {
    * nothing here feeds it a coordinate — see flameLight for why that division
    * of labour is the only safe one.
    *
-   * See the OCC_* block in VoxelMaterial.js for what the volume is and why a
-   * cubesphere can have an exact one. This is the cheap half: 2 304 columns
-   * resolved through patchColumn — which is the same extended-face mapping the
-   * shader inverts — and then 73 728 byte reads down them.
+   * See the OCC_* block in VoxelMaterial.js for what the volume is. This is the
+   * cheap half: 2 304 columns resolved through `colIndex` - which wraps, and is
+   * the whole of the mapping now - and then 73 728 byte reads down them.
    *
    * ### When it rebuilds
    *
-   * Only when the player walks OCC_HYST cells out of the middle, or steps onto
-   * another cube face. Rebuilding on every integer cell crossing was the first
+   * Only when the player walks OCC_HYST cells out of the middle. Rebuilding on
+   * every integer cell crossing was the first
    * thought and it is needlessly often: a cell is 0.98 units and a sprinting
    * player crosses several a second, while the volume reaches 24 cells and the
    * furthest thing that can read it is 13 away. Three cells of slack costs three
@@ -9132,20 +9126,18 @@ class Game {
     }
     const p = this.player.position;
     if (!this._occ) {
-      this._occ = { f: 0, i: 0, j: 0, k: 0, gen: 0, ready: false, cols: new Int32Array(OCC_NI * OCC_NJ) };
-      this._rebuildOcclusion(this.planet.cellOf(p.x, p.y, p.z, _occCell));
+      this._occ = { x: 0, y: 0, k: 0, gen: 0, ready: false, cols: new Int32Array(OCC_NI * OCC_NJ) };
+      const c = this.planet.cellOf(p.x, p.y, p.z, _occCell);
+      this._rebuildOcclusion(c.cx, c.cy, c.ck);
     } else {
-      // Asked in the volume's *own* frame rather than in the player's, and that
-      // is what makes cube seams a non-event here. patchColumn extends a face's
-      // coordinates correctly a long way past its edge, so a volume built on one
-      // face stays exactly valid while the player walks onto the next — and
-      // testing the player's face index instead would rebuild every few frames
-      // for as long as they walked along a seam, for no gain at all.
+      // Asked in the volume's own frame rather than in the player's. The map
+      // wraps, so `_worldToOccCell` takes the short way round on both axes.
       const l = this._worldToOccCell(p, _occLocal);
       if (Math.abs(l.x - OCC_NI * 0.5) > OCC_HYST
         || Math.abs(l.y - OCC_NJ * 0.5) > OCC_HYST
         || Math.abs(l.z - OCC_NK * 0.5) > OCC_HYST) {
-        this._rebuildOcclusion(this.planet.cellOf(p.x, p.y, p.z, _occCell));
+        const c = this.planet.cellOf(p.x, p.y, p.z, _occCell);
+        this._rebuildOcclusion(c.cx, c.cy, c.ck);
       }
     }
     // Never on the strength of a build that did not finish: uOccActive is the
@@ -9167,22 +9159,23 @@ class Game {
    * follow was how this was first written, and it is one thrown exception away
    * from exactly that state.
    */
-  _rebuildOcclusion(c) {
+  _rebuildOcclusion(cx, cy, ck) {
     const o = this._occ;
-    const f = c.f;
-    const oi = Math.round(c.ci) - (OCC_NI >> 1);
-    const oj = Math.round(c.cj) - (OCC_NJ >> 1);
+    const ox = Math.round(cx) - (OCC_NI >> 1);
+    const oy = Math.round(cy) - (OCC_NJ >> 1);
     // k is deliberately *not* clamped into the world. A slab that always sits
     // exactly under the player is what makes the shader's origin arithmetic one
     // subtraction; the two rows below cost less than the clamping would.
-    const ok = Math.round(c.ck) - (OCC_NK >> 1);
+    const ok = Math.round(ck) - (OCC_NK >> 1);
 
-    // Columns first, because they depend only on (i, j): 2 304 of these instead
+    // Columns first, because they depend only on (x, y): 2 304 of these instead
     // of one per texel, which is a 32x saving on the only expensive part.
+    // `colIndex` wraps, so a volume that straddles the far edge of the map is
+    // the same volume as any other.
     const cols = o.cols;
     for (let jj = 0; jj < OCC_NJ; jj++) {
       const row = jj * OCC_NI;
-      for (let ii = 0; ii < OCC_NI; ii++) cols[row + ii] = patchColumn(f, oi + ii, oj + jj, 0, 0);
+      for (let ii = 0; ii < OCC_NI; ii++) cols[row + ii] = colIndex(ox + ii, oy + jj);
     }
 
     // Opaque exactly as the light grid means it — ATTEN 255 is IS_OPAQUE — so a
@@ -9206,7 +9199,7 @@ class Game {
       if (k < 0) { data.fill(255, idx, idx + plane); ids.fill(0, idx, idx + plane); idx += plane; continue; }
       if (k >= D) { data.fill(0, idx, idx + plane); ids.fill(0, idx, idx + plane); idx += plane; continue; }
       for (let n = 0; n < plane; n++) {
-        const id = blocks[COL_BASE[cols[n]] + k * COL_STEP[cols[n]]];
+        const id = blocks[cols[n] * D + k];
         ids[idx] = id;
         data[idx++] = IS_OPAQUE[id] ? 255 : 0;
       }
@@ -9216,7 +9209,7 @@ class Game {
     // `gen` is part of the commit for the same reason the rest of it is: it is
     // what tells `_entityLight`'s cache that every shadow answer it is holding
     // was computed against a volume that has since moved.
-    o.f = f; o.i = oi; o.j = oj; o.k = ok; o.gen++; o.ready = true;
+    o.x = ox; o.y = oy; o.k = ok; o.gen++; o.ready = true;
     // The light field is not flooded here. It is flooded on demand, at most
     // once a frame, by the first entity that asks — see `_entityField`. A
     // recentre that lands on a frame where nothing is going to sample the field
@@ -9224,10 +9217,18 @@ class Game {
     this._lfDirty = true;
     occupancyTexture.needsUpdate = true;
     const u = voxelUniforms;
-    u.uOccN.value.fromArray(FACE_N[f]);
-    u.uOccR.value.fromArray(FACE_R[f]);
-    u.uOccU.value.fromArray(FACE_U[f]);
-    u.uOccOrg.value.set(F * 0.5 - oi, F * 0.5 - oj, -(R_MIN + ok));
+    // Minus the world position of the volume's low corner, so a world point
+    // plus this is a volume-local cell coordinate. The face basis is gone.
+    //
+    // TODO(NINE-FACES): VoxelMaterial's `occFrame` reads `cell = wp + uOccOrg`
+    // straight, which makes its second axis world Y. This volume's second axis
+    // is map y (world Z) and its third is the layer - the order EntityLight
+    // floods in and the order `_entityOcc` indexes, and the layer has to be the
+    // axis ATTEN_V is charged on. That shader wants `vec3(wp.x, wp.z, wp.y) +
+    // uOccOrg`, with OCC_NJ and OCC_NK swapped so the footprint is square and
+    // the volume is 32 layers tall. Reported rather than changed: not this
+    // stage's file.
+    u.uOccOrg.value.set(-ox, -oy, -ok);
   }
 
   /**
@@ -9262,9 +9263,7 @@ class Game {
    * The column lookup is a linear scan of the 2 304 already resolved by the last
    * rebuild. A col→index map would be O(1) per edit and is the wrong trade: it
    * would have to be built on every *recentre*, which happens far more often
-   * than an edit, and a column can legitimately appear twice in the table near a
-   * cube corner, where a map would silently keep one of them. The scan is a
-   * couple of microseconds and patches every copy.
+   * than an edit. The scan is a couple of microseconds.
    *
    * This also retires the shader's own lag, so a wall now shadows a carried
    * torch on the frame it is placed rather than three cells later.
@@ -9279,9 +9278,8 @@ class Game {
     // over to a rebuild well before it can — at the *same* origin, so this stays
     // a refresh and never becomes a recentre.
     if (edits.length > 64) {
-      this._rebuildOcclusion({
-        f: o.f, ci: o.i + (OCC_NI >> 1), cj: o.j + (OCC_NJ >> 1), ck: o.k + (OCC_NK >> 1),
-      });
+      this._rebuildOcclusion(
+        o.x + (OCC_NI >> 1), o.y + (OCC_NJ >> 1), o.k + (OCC_NK >> 1));
       return;
     }
     const cols = o.cols;
@@ -9324,17 +9322,13 @@ class Game {
    */
   _worldToOccCell(pos, out) {
     const o = this._occ;
-    const pc = this.planet.center;
-    const x = pos.x - pc.x, y = pos.y - pc.y, z = pos.z - pc.z;
-    const r = Math.hypot(x, y, z) || 1e-6;
-    const N = FACE_N[o.f], R = FACE_R[o.f], U = FACE_U[o.f];
-    const dn = (x * N[0] + y * N[1] + z * N[2]) / r;
-    const da = (x * R[0] + y * R[1] + z * R[2]) / r;
-    const db = (x * U[0] + y * U[1] + z * U[2]) / r;
+    // Measured from the middle of the volume rather than off its corner, so
+    // `delta` can take the short way round a map that wraps: an origin near the
+    // far edge and a point just over it are one step apart, not a whole map.
     return out.set(
-      OCC_ANG * Math.atan2(da, dn) + (F * 0.5 - o.i),
-      OCC_ANG * Math.atan2(db, dn) + (F * 0.5 - o.j),
-      r - (R_MIN + o.k));
+      OCC_NI * 0.5 + delta(o.x + OCC_NI * 0.5, pos.x),
+      OCC_NJ * 0.5 + delta(o.y + OCC_NJ * 0.5, pos.z),
+      pos.y - o.k);
   }
 
   /** Crosshair prompt when you're looking at an animal. */
@@ -10282,16 +10276,12 @@ class Game {
       const dt = FISH_CAST_STEP / speed;
       t += dt;
       p.addScaledVector(v, dt);
-      _castU.copy(p).normalize();
-      v.addScaledVector(_castU, -g * dt);
+      v.y -= g * dt;
       if (path) path.push(p.x, p.y, p.z, t);
 
       if (p.distanceTo(from) > FISH_CAST_RANGE) return null;
       const cell = this.planet.cellAt(p.x, p.y, p.z);
       if (!cell) return null;
-      // The arc crossed onto another face. Its blocks are scenery, so the
-      // water over there is not a target either and the throw simply fails.
-      if (cell.f !== this.player.face) return null;
       const id = this.planet.at(cell.col, cell.k);
       if (id === ID.water) return cell;
       if (id === ID.lava || IS_SOLID[id]) return null;

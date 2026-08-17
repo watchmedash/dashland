@@ -813,6 +813,50 @@ G.snow = (s) => {
   return s;
 };
 
+/**
+ * The divider around a sealed face. See NINE-FACES.md.
+ *
+ * This one is deliberately NOT a material. Every other rock in the atlas is
+ * trying to look like something you could mine; this is trying to look like the
+ * end of the map, so the whole brief is "dead". Near black, matte enough to
+ * take no highlight at all, and almost flat, so a wall of it reads as an
+ * absence rather than as a surface with weather on it.
+ *
+ * Three deliberate choices, since "just make it black" would be worse:
+ *
+ *  - Not pure black. A flat 0 would band against the fog and would vanish
+ *    entirely on a dark face, which is where most of this is: Pyre is
+ *    permanently unlit. The mottle keeps it readable at 2 or 3 levels above
+ *    black without ever suggesting grain.
+ *  - Cool, not violet. Obsidian in this atlas is already near black with a
+ *    violet cast, and two near-black rocks that read the same is a bug report
+ *    waiting to happen. This one goes slightly blue-grey.
+ *  - A faint darkening at the tile border. Not decoration: with no texture at
+ *    all a run of these is one undifferentiated slab and a player cannot see
+ *    where they are or judge distance along it. The seam is what makes it a
+ *    wall of blocks.
+ */
+G.edgestone = (s) => {
+  const mottle = fbm(s.size, 9, 3, 907);
+  const fleck = fbm(s.size, 41, 2, 911);
+  s.each((i, x, y, u, v) => {
+    const n = mottle[i] * 0.72 + fleck[i] * 0.28;
+    const border = Math.min(u, 1 - u, v, 1 - v);
+    const seam = smoothstep(0.10, 0.02, border);
+    const c = mixc(px([17, 18, 24]), px([31, 33, 42]), n);
+    setRGB(s, i, mixc(c, px([10, 11, 15]), seam * 0.75));
+    s.a[i] = 1;
+    s.h[i] = 0.5 + (n - 0.5) * 0.18 - seam * 0.35;
+    s.ao[i] = 1 - seam * 0.30;
+    // No sheen anywhere. Metal 0 and roughness at the ceiling, so it never
+    // catches the sun on the ordinary faces or the lava glow on Pyre.
+    s.rough[i] = 0.97;
+    s.metal[i] = 0;
+  });
+  s.normalStrength = 0.35;
+  return s;
+};
+
 G.glass = (s) => {
   const f = fbm(s.size, 12, 3, 541);
   s.each((i, x, y, u, v) => {

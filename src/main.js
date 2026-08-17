@@ -5806,14 +5806,13 @@ class Game {
    *   if this mob will not talk at all.
    */
   barterOffers(mob) {
-    if (!mob?.spec.folk || mob.angry || mob.health <= 0 || mob.dying > 0) return null;
+    if (!this.mobs.canBarter(mob)) return null;
     return offersLeft(this.barter, this.seed, traderIdOf(mob.spec.folkId));
   }
 
   /** Why one line is greyed out, as a short player-safe phrase, or null. */
   barterRefusal(mob, index) {
-    if (!mob?.spec.folk) return 'not a trade';
-    if (mob.angry) return 'not now';
+    if (!this.mobs.canBarter(mob)) return mob?.spec.folk ? 'not now' : 'not a trade';
     return refusalFor(this.inventory, this.barter, this.seed,
       traderIdOf(mob.spec.folkId), index);
   }

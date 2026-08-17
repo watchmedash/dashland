@@ -4376,6 +4376,16 @@ const FOLK_PER_TICK = 3;
 const MERCHANT_PURSE_MIN = 140;
 const MERCHANT_PURSE_MAX = 460;
 
+/**
+ * One row of the species table, by name.
+ *
+ * Exported for the suite rather than for the game: `spawn` refuses a body whose
+ * GLB has not loaded, so nothing headless can obtain a spec the way the game
+ * does, and the alternative is a test that reimplements the row it is checking.
+ * Read-only by convention, like `BOSS_ROSTER` below.
+ */
+export const specOf = (type) => SPECIES[type] || null;
+
 /** Every model the species table can ask for, for the one-time preload. */
 export const MOB_MODEL_URLS = Object.values(SPECIES).flatMap((s) => s.urls);
 
@@ -6235,6 +6245,18 @@ export class Mobs {
       }
     }
     return n;
+  }
+
+  /**
+   * Will this one trade with you?
+   *
+   * **An angry one does not.** Here rather than in `Barter.js` because anger is
+   * a fact about a body standing on a face and the barter model has no bodies
+   * in it, and here rather than in main.js because it is a rule about the
+   * creature, which is what this file is.
+   */
+  canBarter(mob) {
+    return !!(mob && mob.spec.folk && !mob.angry && mob.health > 0 && mob.dying <= 0);
   }
 
   /**

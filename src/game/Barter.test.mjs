@@ -13,9 +13,11 @@
 //     measured by max-product Floyd-Warshall, under three different prices.
 //     The answer has to be exactly 1.
 //
-// Mutation-checked: twelve deliberate breakages, twelve caught. The numbers are
-// in the report; the point of running them is that a suite which passes against
-// a broken model proves nothing about the working one.
+// Mutation-checked: sixteen deliberate breakages, sixteen caught. Three of them
+// survived the first draft and each named a real hole - a cross-family swap of
+// equal worth, a fairness tolerance loose enough to hide a rounding, and a carry
+// ceiling measured over a pool too narrow to stretch it. The tests that close
+// them say so where they stand.
 
 import { ITEMS, ITEM_ID } from './Items.js';
 import { BLOCKS } from '../world/Blocks.js';
@@ -228,15 +230,63 @@ ok(ALL.length > 10000, `the search has offers to chew on (${ALL.length})`);
     'a thing does not buy itself');
   ok(!isFairExchange({ item: ITEM_ID.iron_ingot, count: 1 }, { item: ITEM_ID.gold_ingot, count: 1 }),
     'ore is not on the table at any quantity');
-  ok(!unitSwap(cobble, ITEM_ID.obsidian) || true, 'a balance beyond a bagful is simply not offered');
   // Anything unbalanceable inside MAX_COUNT must come back null rather than
-  // rounded to something close, which is the shape a tolerance would take.
-  let stretched = 0;
-  for (const a of barterPool(BLOCK)) for (const b of barterPool(BLOCK)) {
-    const s = unitSwap(a, b);
-    if (s && (s.n > MAX_COUNT || s.m > MAX_COUNT)) stretched++;
+  // rounded to something close, which is the shape a tolerance would take. Both
+  // pools, and it has to be both: the block ladder tops out at 19 against a
+  // shovelful of dirt, so nothing in it can stretch past a bagful and a ceiling
+  // that had stopped working would look fine measured over stone alone.
+  let stretched = 0, refused = 0;
+  for (const fam of [FOOD, BLOCK]) {
+    const pool = barterPool(fam);
+    for (const a of pool) for (const b of pool) {
+      if (a === b) continue;
+      const s = unitSwap(a, b);
+      if (!s) { refused++; continue; }
+      if (s.n > MAX_COUNT || s.m > MAX_COUNT) stretched++;
+    }
   }
   eq(stretched, 0, 'no unit swap exceeds what a player can carry');
+  ok(refused > 0, `and the ones that would are refused outright (${refused})`);
+
+  // The two families never touch, asked of the function rather than of the
+  // offers: a stone and a dinner of the same worth is the case a model that had
+  // quietly dropped the like-for-like rule would still get right by accident
+  // everywhere else, because the quantities would balance.
+  let crossFair = [];
+  for (const f of barterPool(FOOD)) {
+    for (const b of barterPool(BLOCK)) {
+      const s = unitSwap(f, b);
+      if (!s) continue;
+      if (isFairExchange({ item: f, count: s.n }, { item: b, count: s.m })) {
+        crossFair.push(`${ITEMS[f].name}->${ITEMS[b].name}`);
+      }
+      if (isFairExchange({ item: b, count: s.m }, { item: f, count: s.n })) {
+        crossFair.push(`${ITEMS[b].name}->${ITEMS[f].name}`);
+      }
+    }
+  }
+  eq(crossFair.length, 0, `no balanced swap crosses the families (${crossFair.slice(0, 4).join(' ')})`);
+
+  // Off by one, everywhere. The fairness claim is *exact*, and the way a model
+  // stops being exact is by growing a tolerance — so every swap the model calls
+  // fair must stop being fair the moment a single item is added to either side,
+  // however small that item is against the pile. The finest of these is one
+  // rung of the food ladder against a grand platter, which is under 5%: a
+  // tolerance loose enough to admit it is caught here and nowhere else.
+  let sloppy = [];
+  for (const fam of [FOOD, BLOCK]) {
+    const pool = barterPool(fam);
+    for (const a of pool) for (const b of pool) {
+      if (a === b) continue;
+      const s = unitSwap(a, b);
+      if (!s) continue;
+      const give = { item: a, count: s.n }, take = { item: b, count: s.m };
+      if (!isFairExchange(give, take)) continue;
+      if (isFairExchange(give, { item: b, count: s.m + 1 })) sloppy.push(`+${ITEMS[b].name}`);
+      if (s.n > 1 && isFairExchange({ item: a, count: s.n - 1 }, take)) sloppy.push(`-${ITEMS[a].name}`);
+    }
+  }
+  eq(sloppy.length, 0, `one item either way is never near enough (${sloppy.slice(0, 4).join(' ')})`);
 }
 
 // --- the arbitrage search ----------------------------------------------------

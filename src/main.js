@@ -39,6 +39,7 @@ import { IconFactory } from './ui/Icons.js';
 import { Inventory, Slot, HOTBAR, useKind } from './game/Inventory.js';
 import { Drops } from './game/Drops.js';
 import { Weather } from './game/Weather.js';
+import { strikeLightning } from './game/Lightning.js';
 import { siteTornado } from './game/Tornado.js';
 import { Seasons, snowLine } from './game/Seasons.js';
 import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
@@ -70,7 +71,7 @@ import {
 import {
   D, COLUMNS, GRAVITY, GEN_VERSION,
   K_TERRAIN_MAX, CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
-  BIOME, FACE_ROLE, FACE_RIME, FACE_PYRE, FACE_PHYSICS, FACE_NAME,
+  BIOME, FACE_ROLE, FACE_RIME, FACE_PYRE, FACE_TEMPEST, FACE_PHYSICS, FACE_NAME,
 } from './world/Constants.js';
 import {
   W, SEA_K, colIndex, faceAt, delta,
@@ -6533,7 +6534,11 @@ class Game {
     const c = this.player.cell;
     const biomeId = this.planet.colBiome[colIndex(c.x, c.y)] ?? 2;
     const altitude = this.player.position.y - SEA_K;
-    this.weather.update(dt, biomeId, altitude, this.seasons.cold);
+    // Tempest overrides the weather cycle the way Pyre overrides the day
+    // cycle: pinned to storm while you are on it, and the sky you had is
+    // handed back when you leave.
+    this.weather.update(dt, biomeId, altitude, this.seasons.cold,
+      FACE_ROLE[this.player.face] === FACE_TEMPEST);
     // A funnel, if the sky wants one and the ground will take one. Weather owns
     // the odds and Tornado.js owns everything else — see the head of that file
     // for why, and for the whole design. Six lines here is the entire footprint
@@ -6565,6 +6570,10 @@ class Game {
     // roof as it does in the open. Fade it out by how much sky is overhead,
     // eased so stepping under a tree dims the rain rather than cutting it.
     this.shelter += (this._skyExposure() - this.shelter) * Math.min(1, dt * 3.5);
+    // After `shelter`, deliberately: a strike is aimed with THIS frame's sky
+    // exposure, so stepping under three layers of rock stops being a target
+    // on the frame you do it rather than on the next one.
+    if (this.weather.wantsStrike(dt)) strikeLightning(this);
     this.particles.setWeather(this.weather.type, this.weather.precip * this.shelter, this.player.headInWater);
 
     // A drawn bow pulls the view in by a sixth. Not a scope — a sixth of 75° is
@@ -10533,7 +10542,8 @@ class Game {
     // reaches the treasure band above. The bias is already in `roll`; nothing
     // here rolls again.
     const t = roll / 0.78;
-    const table = fishTable(!!water.salt, !!water.deep);
+    const table = fishTable(!!water.salt, !!water.deep,
+      FACE_ROLE[this.player.face] === FACE_TEMPEST);
     // `upTo` is cumulative and its last entry is 1, so the fallback is only
     // there for a `t` that floating point has nudged past the end.
     const pick = table.find((f) => t <= f.upTo) ?? table[table.length - 1];

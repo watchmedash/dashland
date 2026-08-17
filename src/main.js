@@ -61,6 +61,10 @@ import {
 } from './game/Items.js';
 import { Arrows } from './game/Arrows.js';
 import { Skills, ON_DEATH } from './game/Skills.js';
+import {
+  offersLeft, refusalFor, accept, newBarterState, forgetVisit,
+} from './game/Barter.js';
+import { traderIdOf } from './game/Folk.js';
 import { Achievements } from './game/Achievements.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
@@ -71,7 +75,8 @@ import {
 import {
   D, COLUMNS, GRAVITY, GEN_VERSION,
   K_TERRAIN_MAX, CHUNK_LOAD_DIST, CHUNK_KEEP_DIST,
-  BIOME, FACE_ROLE, FACE_RIME, FACE_PYRE, FACE_TEMPEST, FACE_PHYSICS, FACE_NAME,
+  BIOME, FACE_ROLE, FACE_RIME, FACE_PYRE, FACE_TEMPEST, FACE_VERDANT,
+  FACE_PHYSICS, FACE_NAME,
 } from './world/Constants.js';
 import {
   W, SEA_K, colIndex, faceAt, delta,
@@ -1586,6 +1591,9 @@ class Game {
     // in daylight rather than dropping you straight into a husk night.
     this.dayT = 8 / 24;
     this.stats = { mined: 0, placed: 0, crafted: 0 };
+    /** See `_resetWorld`, which is the copy of these two that runs per planet. */
+    this.barter = newBarterState();
+    this._lastFace = -1;
     this.kilns = new Map();
     // Crate contents, keyed the same way kilns are. Thirty-six carried slots is
     // nothing against a hundred and seventy block types: without somewhere to
@@ -2813,6 +2821,15 @@ class Game {
     this.inventory = new Inventory();
     this.inventory.onChange = () => this.ui.refresh();
     this.stats = { mined: 0, placed: 0, crafted: 0 };
+    // Verdant's memory, and it is a fresh one per planet. `used` is a count of
+    // swaps taken this visit and nothing else - the offers themselves are
+    // derived from (seed, traderId), so this is the whole of what a save has to
+    // carry. See the head of `Barter.js`.
+    this.barter = newBarterState();
+    // Which face the player was on last frame, for the one edge that matters:
+    // leaving Verdant. -1 rather than undefined so the first frame of a world
+    // is a face nobody can have left.
+    this._lastFace = -1;
     this.playtime = 0;
     // The marks belong to the planet, so a new one has none of them. `clear`
     // also drops the baseline the counter deltas are measured from, without
@@ -3627,6 +3644,13 @@ class Game {
       // have stopped making monsters. Before `_setDifficulty` below only by
       // accident of order: nothing here reads it.
       this.endgame.fromJSON(save.endgame);
+      // How much of Verdant's barter you had used up. Defaulted rather than
+      // versioned, like `endgame` and `achievements` above: a save written
+      // before the face existed comes back with a full set of offers, which is
+      // exactly what walking back through the divider would have given it.
+      this.barter = save.barter && typeof save.barter === 'object'
+        ? { used: { ...(save.barter.used || {}) } }
+        : newBarterState();
       // A world started on hard loads as hard. Saves written before this
       // existed carry no field and `normalizeDifficulty` reads them as normal,
       // which is the game they were played under. The loadout is a record of
@@ -4499,6 +4523,9 @@ class Game {
       // same thing, which is why no version bump goes with this - the save
       // format's convention here is a defaulted key, not a number.
       endgame: this.endgame.toJSON(),
+      // Barter uses, on the same terms. Plain JSON by construction - see
+      // `newBarterState` - so there is nothing to serialise.
+      barter: this.barter,
       // Top level rather than inside `player`: how hard the animals hit is a
       // rule of this planet, not a fact about the person walking on it, and it
       // has to be true of whoever loads it. `Save.write` copies it into the slot
@@ -5468,6 +5495,14 @@ class Game {
     // coal, so the eighteen ores would collapse to twelve if this counted what
     // came out. See `ORE_BLOCKS`.
     this.achievements.mined(hit.id);
+    // The first offence on Verdant: mining anything that is not wood, in sight
+    // of one of the fourteen. Only the ones who saw it turn - `witnessMine`
+    // owns both halves of that, and it answers 0 off `Folk.isTaboo` for a
+    // trunk or a leaf, so this line is unconditional here rather than being a
+    // face test the wrong way round. Placed with the other tallies because
+    // this is the same moment they are: `hit.id` is what was there, before the
+    // cell became air.
+    this.mobs.witnessMine(hit.id, this.player);
     // `this.skills.xpMine(b)` stood here and paid by ore tier. Mining pays no xp
     // at all now: the ladder is fed by kills alone, and the counter above is the
     // only record breaking a block leaves. See the head of `Skills.js`.
@@ -5727,6 +5762,93 @@ class Game {
     this.ui.openScreen(kind, state);
     this.input.exitLock();
     this.audio.ui(560);
+  }
+
+  /**
+   * Leaving a face, and the only edge in the game that has consequences.
+   *
+   * **Verdant forgets you.** Both halves of it, on one event and in one place,
+   * because section 8 states them as one sentence and the player has to be able
+   * to learn them as one: the taboo lifts and the barter counter resets. Two
+   * separately-shaped memories on the same face would be a rule that has to be
+   * explained, and neither `Barter.forgetVisit` nor `Mobs.calmFolk` is allowed
+   * to be called anywhere else.
+   *
+   * The divider IS the portal, so "leaving" is a single frame in which
+   * `player.face` changes, and there is no other way off a sealed face.
+   *
+   * In the simulation and not in `_updateHud`, where `player.face` is otherwise
+   * read: this changes the world rather than reporting on it.
+   */
+  _faceWatch() {
+    const face = this.player.face;
+    if (face === this._lastFace) return;
+    const left = this._lastFace;
+    this._lastFace = face;
+    if (FACE_ROLE[left] !== FACE_VERDANT) return;
+    this.mobs.calmFolk();
+    forgetVisit(this.barter);
+  }
+
+  /**
+   * What one of the fourteen will swap with you, and whether they will.
+   *
+   * The three functions below are the entire creature-side surface of the
+   * barter panel and they are deliberately the whole of it: `Barter.js` owns
+   * the goods, the fairness and the limit, this owns who is asking and whether
+   * they are angry, and the UI owns the drawing. Nothing here touches the DOM.
+   *
+   * An angry one does not trade. That is checked here rather than inside
+   * `Barter.js` because anger is a fact about a body on a face and the barter
+   * model has no bodies in it.
+   *
+   * @returns {Array|null} the offers, each with `left` uses remaining, or null
+   *   if this mob will not talk at all.
+   */
+  barterOffers(mob) {
+    if (!mob?.spec.folk || mob.angry || mob.health <= 0 || mob.dying > 0) return null;
+    return offersLeft(this.barter, this.seed, traderIdOf(mob.spec.folkId));
+  }
+
+  /** Why one line is greyed out, as a short player-safe phrase, or null. */
+  barterRefusal(mob, index) {
+    if (!mob?.spec.folk) return 'not a trade';
+    if (mob.angry) return 'not now';
+    return refusalFor(this.inventory, this.barter, this.seed,
+      traderIdOf(mob.spec.folkId), index);
+  }
+
+  /**
+   * A stand-in for the barter panel, and nothing more.
+   *
+   * It reads the model through the three methods above and says the first
+   * available line out loud. It exists so the whole feature can be seen working
+   * in a running game before the panel is built, and it is meant to be deleted
+   * by whoever builds it.
+   */
+  _barterPeek(mob) {
+    const offers = this.barterOffers(mob);
+    if (!offers) { this.ui.toast('Not now', 0, 1400); return; }
+    for (let i = 0; i < offers.length; i++) {
+      const o = offers[i];
+      if (o.left <= 0) continue;
+      const give = `${o.give.count} ${ITEMS[o.give.item]?.label ?? '?'}`;
+      const take = `${o.take.count} ${ITEMS[o.take.item]?.label ?? '?'}`;
+      const no = this.barterRefusal(mob, i);
+      this.ui.toast(no ? `${give} for ${take}: ${no}` : `${give} for ${take}`,
+        o.take.item, 2600);
+      return;
+    }
+    this.ui.toast('Done trading', 0, 1400);
+  }
+
+  /** Take one swap. False if it could not happen; see `barterRefusal`. */
+  barterAccept(mob, index) {
+    if (this.barterRefusal(mob, index)) return false;
+    const ok = accept(this.inventory, this.barter, this.seed,
+      traderIdOf(mob.spec.folkId), index);
+    if (ok) this.audio.ui(720);
+    return ok;
   }
 
   closeScreen() {
@@ -6473,7 +6595,14 @@ class Game {
     // multiplier from it at spawn — see `worldHardening` — so it has to be
     // current before the spawner inside `update` runs, and it is pushed rather
     // than stored anywhere else so there is only ever one copy of the number.
+    this._faceWatch();
     this.mobs.playtime = this.playtime;
+    // Which body you took, so Verdant can put the other fourteen on the ground.
+    // Pushed here rather than off `onCharacter` for the reason the line above
+    // is pushed: that hook early-returns on an unchanged id, so a world started
+    // on the default character would never have fired it and the village would
+    // have been one short with the player's own twin standing in it.
+    this.mobs.playerCharacter = this.character.id;
     this._safeTick('mobs', () => this.mobs.update(dt, this.player, this.sky));
     // Before the door is checked and after the herd has moved: the reconcile
     // wants this frame's despawns, so a boss the ring has just dropped hands its
@@ -9908,6 +10037,13 @@ class Game {
         // one creature you interact with rather than feed.
         if (mobHit.mob.spec.trader) {
           this.openScreen('shop', mobHit.mob);
+        } else if (mobHit.mob.spec.folk) {
+          // PLACEHOLDER, and the only thing in this feature that is one. The
+          // barter panel lives in `src/ui/`, which another hand owns; this is
+          // the call site it replaces, and `barterOffers`/`barterRefusal`/
+          // `barterAccept` above are the whole of what it needs. Until then a
+          // toast is enough to see the model working in a running game.
+          this._barterPeek(mobHit.mob);
         } else if (!feedSlot.empty && this.mobs.feed(mobHit.mob, feedSlot.item)) {
           this.inventory.consumeHeld(1, feedSlot);
           this.player.swing();

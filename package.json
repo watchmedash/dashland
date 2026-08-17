@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-apk.mjs --no-web",
     "preview": "vite preview",
     "apk": "node scripts/build-apk.mjs",
     "apk:install": "node scripts/build-apk.mjs --install",
     "bake": "node scripts/bake-textures.mjs",
-    "sheet": "node scripts/contact-sheet.mjs"
+    "sheet": "node scripts/contact-sheet.mjs",
+    "build:web": "vite build"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

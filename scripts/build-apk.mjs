@@ -13,7 +13,10 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'build', 'mojazer-debug.apk');
+// The project folder, not build/: the owner wants it where he can see it and
+// drag it onto a phone without going hunting. It is gitignored - a 28 MB binary
+// rewritten on every build would add a copy of itself to the history each time.
+const OUT = join(ROOT, 'Mojazer-debug.apk');
 
 const JDK_CANDIDATES = [
   process.env.JAVA_HOME,

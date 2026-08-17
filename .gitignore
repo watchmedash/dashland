@@ -43,3 +43,8 @@ android/capacitor-cordova-android-plugins/
 # The Lynocs texture pack is not redistributed here — see CREDITS.md. The bake
 # script reads it from a path outside this tree, and the baked atlases it
 # produces (`public/tiles/`) are committed so the game runs without it.
+
+# The debug APK, rebuilt by `npm run build` and left in the project folder.
+# 28 MB of binary that changes every build; committing it would add a fresh
+# copy to the history each time.
+Mojazer-debug.apk

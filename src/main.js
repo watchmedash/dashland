@@ -1006,6 +1006,32 @@ const SCALD_PERIOD = 3.5;
  *  number for "moving", so the game has one definition of it. */
 const SOAK_STILL = 0.6;
 /**
+ * ...and what a spring is on the cinderlands, which is a different thing.
+ *
+ * Springs generate in two places (SPRING_BIOMES): alpine ones on the ordinary
+ * faces, and these. The alpine pool is the arc above - warmth, then steam, then
+ * a sting - and it stays exactly that. This one never turns. It restores all
+ * three bars and cannot scald.
+ *
+ * The asymmetry is the point. The cinderlands cost you: stamina burns half
+ * again as fast (FACE_PHYSICS), the face is permanently dark, everything on it
+ * is made of fire, and now eight of the sixteen bosses stand there. A pool that
+ * also punished you for resting would be a fourth tax on the one face that
+ * already has three, so this is the face's single piece of mercy and it is not
+ * hedged. Reaching one is the price, not sitting in it.
+ *
+ * Stamina is included here although the note above rules it out for the alpine
+ * pool, and that is not a contradiction: there it was imperceptible because
+ * stamina refills on its own in 8.3 seconds. Here it drains 1.5x faster and you
+ * are usually running from something, so arriving at a pool empty is normal and
+ * the refill is felt.
+ *
+ * Both rates are one bar over SOAK_WARM, derived rather than typed, so a full
+ * heal costs the same 28 seconds the alpine pool takes to turn on you.
+ */
+const BALM_HEAL_SECS = SOAK_WARM;
+const BALM_STAMINA = 1 / SOAK_WARM;
+/**
  * How fast a spectator drifts, in cells per second, and how fast with Shift.
  *
  * Faster than walking and slower than the chunk streamer, which is the only
@@ -2097,6 +2123,7 @@ class Game {
     this.breath = 1;
     this.energy = 1;      // nourishment: gates health regeneration
     this.soakT = 0;       // seconds in a hot spring, bled off slowly once out
+    this._balmT = 0;      // change owed toward the next point of a cinderlands heal
     this.eating = 0;      // seconds held on a food item
     this.shelter = 1;     // 0 under cover, 1 in open sky — gates precipitation
     this._hlCol = -1; this._hlK = -1; this._hlSeq = -1;
@@ -7033,9 +7060,30 @@ class Game {
     if (!p.inSpring) {
       this.soakT = Math.max(0, this.soakT - dt * SOAK_COOL);
       this._scaldT = 0;
+      this._balmT = 0;
       return;
     }
     this.soakT += dt;
+
+    // The cinderlands pool. All three bars, no clock, no sting. See BALM_HEAL.
+    if (FACE_ROLE[p.cell.f] === FACE_CINDER) {
+      this._scaldT = 0;
+      if (p.moveAmount <= SOAK_STILL) {
+        this.energy = Math.min(1, this.energy + dt * SOAK_ENERGY);
+        p.stamina = Math.min(1, p.stamina + dt * BALM_STAMINA);
+        // A point at a time, like `_tickVitals` — health is a whole number
+        // everywhere else, and a fractional one would show up in the bar and in
+        // every `health <= 1` test.
+        this._balmT += dt;
+        const per = BALM_HEAL_SECS / p.maxHealth;
+        while (this._balmT >= per && p.health < p.maxHealth) {
+          this._balmT -= per;
+          p.health += 1;
+        }
+        if (p.health >= p.maxHealth) this._balmT = 0;
+      }
+      return;
+    }
 
     if (this.soakT < SOAK_WARM) {
       // Only while you are actually still. Swimming a pool on the way somewhere

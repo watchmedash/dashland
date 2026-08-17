@@ -6884,6 +6884,18 @@ export class Mobs {
   _colCost(col, hereK, mob, afloat, aquaticBody, flier, wade) {
     const p = this.planet;
     const tall = mob.tall;
+    // A divider is a wall to every body but the player's, and it has to be said
+    // here rather than left to the solidity tests below: a portal block is
+    // deliberately NOT solid, because that is how a player walks into one, so
+    // every rule in this method would wave a mob straight through it and out
+    // onto a sealed face. "Nothing at all crosses a divider except a player in
+    // a portal" — NINE-FACES.md section 5 — and a sealed face's population
+    // staying its own is most of what the sealed faces are for.
+    //
+    // Layer 0 because a divider column is portal from 0 to D, so one lookup at
+    // a fixed layer answers for the whole column and this stays the one-array-
+    // read it has to be: nine of these run per body per move.
+    if (p.at(col, 0) === ID.portal) return 1;
     {
       // A fish is asked a different question from everything else here, and it
       // has to be, because every test below this is measured from the *bed*.

@@ -607,6 +607,40 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
       `and puts you on the bed, not through it (y = ${p.position.y.toFixed(2)})`);
   }
 
+  // The far side stands higher than the near side. This is the assertion the
+  // two gate cuts before this both failed on, in the other direction: what a
+  // player stands on is the top of the actual voxels, so an arrival taken from
+  // anything else - the height you walked in at, a height field - buries you in
+  // the far face or leaves you falling down its cliff.
+  {
+    const planet = new FakePlanet().groundTo(GROUND).dividers();
+    for (let x = EAST + 1; x < EAST + 8; x++) {
+      for (let z = 190; z < 215; z++) {
+        for (let k = GROUND; k < GROUND + 6; k++) planet.fill(x, z, k);
+      }
+    }
+    const p = standing(planet, EAST - 2.5, 200.5, GROUND);
+    p.yaw = YAW_EAST; p._updateForward();
+    const f0 = p.face;
+    for (let i = 0; i < 400 && p.face === f0; i++) p.update(1 / 60, keys('KeyW'));
+    eq(inside(p.position.x, p.position.z), 2, 'you cross onto a face that stands six layers higher');
+    near(p.position.y, GROUND + 6.0001, 0.02,
+      `and arrive on top of it (y = ${p.position.y.toFixed(2)})`);
+    ok(!p._blocked(p.position.x, p.position.z, p.position.y, HEIGHT), 'not inside the rock');
+
+    // ...and the transit itself put them there, not the escape hatch that runs
+    // after it. `_escape` would lift a buried box out on the next frame, which
+    // is a safety net and not the answer: it would read as being spat upward
+    // out of the ground. Asked of `_portalTransit` alone, with nothing after it.
+    const q = new Player(planet);
+    q.setPosition(EAST - 1 + 0.5, GROUND + 0.0001, 200.5);
+    q._sync();
+    q.position.x = EAST + 0.5;
+    q._sync();
+    ok(q._portalTransit(HEIGHT), 'the transit fires');
+    near(q.position.y, GROUND + 6.0001, 1e-6, 'and seats the body itself');
+  }
+
   // Momentum survives. You come out of a portal still running.
   {
     const p = walk(EAST - 4.5, 200.5, YAW_EAST, 'KeyW');

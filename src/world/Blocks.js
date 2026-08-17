@@ -1574,6 +1574,27 @@ if (N_BLOCKS > 256) {
 
 export const IS_OPAQUE = new Uint8Array(N_BLOCKS);
 export const IS_SOLID = new Uint8Array(N_BLOCKS);
+/**
+ * 1 for a block that stops something moving through the world, which is
+ * `IS_SOLID` plus the portal.
+ *
+ * **The player is the only thing that may cross a divider**, and the portal
+ * block enforces that by being `solid: false` — that is the whole feature, and
+ * it is what lets a body enter one. But `solid` is read by more than the
+ * player's box: an arrow marches on it, a dropped item bounces on it, a mob
+ * looks along it and an explosion traces damage down it. Every one of those
+ * would sail straight through a divider and into a sealed face's business, and
+ * "nothing goes through except a player in a portal" (NINE-FACES.md section 5)
+ * would be false for everything in the game except the walker it was written
+ * about.
+ *
+ * So the split is: `IS_SOLID` is "does a body stand and collide on this", which
+ * the player and the mob footprint read, and this is "does a *thing in flight*
+ * stop here", which `Planet.isSolidWorld` and everything behind it reads. They
+ * differ for exactly one block, and the one they differ on is the reason both
+ * exist.
+ */
+export const BLOCKS_MOTION = new Uint8Array(N_BLOCKS);
 /** Foliage cubes. The mesher culls leaf-against-leaf faces, "fast leaves" style. */
 /**
  * How much of the ground's grip a block gives, 0..1. 1 is ordinary footing.
@@ -2362,6 +2383,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
   IS_OPAQUE[i] = b.opaque ? 1 : 0;
   IS_SOLID[i] = b.solid ? 1 : 0;
+  BLOCKS_MOTION[i] = (b.solid || b.name === 'portal') ? 1 : 0;
   IS_LEAF[i] = b.name.startsWith('leaves') ? 1 : 0;
   // Packed and blue ice are denser and read as more polished, so they are
   // slicker than a frozen puddle. Snow is not ice: it grips very slightly less

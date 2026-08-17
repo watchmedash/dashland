@@ -19,7 +19,7 @@ import {
 } from './Layout.js';
 import { wrap } from './Grid.js';
 import {
-  IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
+  IS_SOLID, BLOCKS_MOTION, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID } from './Mesher.js';
@@ -368,9 +368,22 @@ export class Planet {
     return a ? this.blocks[a.col * D + a.k] : 0;
   }
 
+  /**
+   * Does a thing travelling through the world stop at this point?
+   *
+   * `BLOCKS_MOTION` rather than `IS_SOLID`, and the difference is the divider:
+   * a portal block is deliberately not solid so that a *player* can walk into
+   * one, and every caller of this is something that may not. An arrow, a
+   * dropped item, a blast line and a mob's line of sight all stop at a divider.
+   * See the note over `BLOCKS_MOTION` in Blocks.js.
+   *
+   * The player's own box does NOT come through here — it reads `IS_SOLID`
+   * directly in `Player._overlap` — which is what keeps the one exception one
+   * exception.
+   */
   isSolidWorld(x, y, z) {
     const a = this.cellAt(x, y, z);
-    return a ? IS_SOLID[this.blocks[a.col * D + a.k]] === 1 : false;
+    return a ? BLOCKS_MOTION[this.blocks[a.col * D + a.k]] === 1 : false;
   }
 
   isLiquidWorld(x, y, z) {

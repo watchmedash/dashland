@@ -264,6 +264,63 @@ const mobsOn = (planet) => {
   ok(north.cell.y < 292, 'and one walking along it is not stopped at all');
 }
 
+// --- ...and a divider is a portal, which is NOT solid, and still stops it -----
+{
+  // The real block, not a stand-in for one. A divider column is `portal` from
+  // layer 0 to layer D, and `portal` is deliberately not solid so a player can
+  // walk into it. Everything in `_footprintCost` that refuses an obstacle reads
+  // solidity, so without the named test at the top of `_colCost` a mob walks
+  // through a divider as if it were open air - and a sealed face's population
+  // stops being its own.
+  //
+  // Asserted by driving the same walk twice over two planets that differ in
+  // nothing but the block the divider is made of, so a footprint test that had
+  // quietly gone back to reading solidity would show up as the two disagreeing.
+  // A FLIER, and that is the case worth testing rather than a chicken. A walker
+  // is already refused by accident: a divider column has no solid block in it at
+  // any layer, so `_groundK` reports no ground and the cost is 1 before the
+  // divider is ever named. A flier skips every one of those rules - it is judged
+  // on "is there rock where my body is", and a portal is not rock - so it is the
+  // one body that flies straight through a divider if nothing says otherwise.
+  // Mutation-checked: deleting the portal test in `_colCost` fails this.
+  const flyAt = (planet) => {
+    const mobs = mobsOn(planet);
+    const o = faceOrigin(1);
+    const mob = fakeMob(o.x + 200.5, o.y + F - WALL_T - 2.5, 44, {
+      heading: Math.PI / 2, grounded: false,
+      spec: { aquatic: false, flies: true, amphibious: false, climbs: false, height: 1, hover: 8 },
+    });
+    for (let n = 0; n < 40; n++) {
+      mobs._walkStep(mob, mob.cell.x, mob.cell.y + 0.34, 43, null);
+      mobs._sync(mob);
+    }
+    return mob;
+  };
+  const { isWall } = await import('../world/Grid.js');
+  // Ground everywhere, and the divider columns holding portal at every layer,
+  // which is what `WorldGen.fillWall` builds.
+  const portalPlanet = {
+    ...fakePlanet(),
+    at(col, k) {
+      if (k < 0 || k >= D) return 0;
+      const y = col % W;
+      if (isWall((col - y) / W, y)) return ID.portal;
+      return k <= 34 ? ID.stone : 0;
+    },
+  };
+  portalPlanet.solidAt = (col, k) => portalPlanet.at(col, k) !== 0;
+  portalPlanet.surfaceK = (col) => {
+    for (let k = D - 1; k >= 0; k--) if (portalPlanet.at(col, k)) return k;
+    return -1;
+  };
+  const { IS_SOLID } = await import('../world/Blocks.js');
+  ok(!IS_SOLID[ID.portal], 'the portal really is not solid, so this test can fail');
+  const mob = flyAt(portalPlanet);
+  eq(faceAt(Math.floor(mob.cell.x), Math.floor(mob.cell.y)), 1, 'a flier does not cross a portal');
+  const o1 = faceOrigin(1);
+  ok(mob.cell.y < o1.y + F - WALL_T, 'and stops short of the divider, as a walker does at a solid one');
+}
+
 // --- distances, rings and headings all take the short way --------------------
 {
   const planet = fakePlanet();

@@ -18,7 +18,9 @@
 
 import * as THREE from 'three';
 import { GRAVITY, FACE_ROLE, FACE_PHYSICS } from '../world/Constants.js';
-import { W, D, wrap, delta, colIndex, faceAt, cellOf } from '../world/Grid.js';
+import {
+  W, D, wrap, delta, colIndex, faceAt, cellOf, isWall, isSealed, portalAxis,
+} from '../world/Grid.js';
 import {
   IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
   CONTACT_HURT, CONTACT_POISON, SINK, SINK_BUOYANT, GRIP,
@@ -31,6 +33,9 @@ import { UNDERWATER_MINING } from '../game/Items.js';
 
 /** The extent of an ordinary full block, so the shaped path stays branch-free. */
 const FULL_BOX = [[0, 0, 0, 1, 1, 1]];
+
+/** Scratch for `Grid.portalAxis`, which is asked every frame. */
+const _pAxis = { axis: 0, dx: 0, dy: 0 };
 
 /**
  * What the face you are standing on does to the body.
@@ -529,6 +534,18 @@ export class Player {
     this._camGive = false;
     /** Set by main once Mobs exists, so the box can be kept out of bodies. */
     this.mobs = null;
+    /**
+     * The last position whose column was NOT a divider.
+     *
+     * The whole of how a portal knows which way to send you. It is a remembered
+     * position rather than a direction on purpose: a heading can be turned
+     * mid-step and an input can be released, but where you were standing a
+     * frame ago cannot be argued with, so walking in backwards works. See
+     * `_portalTransit`.
+     */
+    this._freeX = 0; this._freeZ = 0;
+    /** Fired on a transit, so the Game can play it. */
+    this.onPortal = null;
 
     this._updateForward();
     this._sync();
@@ -736,6 +753,12 @@ export class Player {
     this.position.z = wrap(this.position.z);
     cellOf(this.position.x, this.position.y, this.position.z, this.cell);
     this.face = faceAt(this.cell.x, this.cell.y);
+    // The near side of any divider stepped into next. Written here rather than
+    // at the end of `update` so that a body placed by `setPosition` — a spawn,
+    // a load, a respawn — has one from its first frame.
+    if (!isWall(this.cell.x, this.cell.y)) {
+      this._freeX = this.position.x; this._freeZ = this.position.z;
+    }
   }
 
   /** Rebuild `forward` from `yaw`. Horizontal, unit, and yaw 0 is -Z. */
@@ -1061,6 +1084,135 @@ export class Player {
   /** The column the feet are over. */
   _col() {
     return colIndex(Math.floor(this.position.x), Math.floor(this.position.z));
+  }
+
+  // --- the dividers ----------------------------------------------------------
+
+  /**
+   * Step through a divider.
+   *
+   * **The divider IS the portal**, one column thick and filled with portal from
+   * layer 0 to layer D. It is not solid, so walking at one puts your feet inside
+   * it, and this is what happens next: you come out on the far side, standing on
+   * the ground there, keeping your heading and your momentum.
+   *
+   * Three things this has to get right, and all three have failed a version of
+   * this feature before.
+   *
+   * **Which way through is worked out from where you CAME FROM**, not from where
+   * you are looking and not from where you are walking. Walk in backwards, get
+   * spun round by a mob mid-step, or fall in sideways off a ledge and a rule
+   * written on the yaw or on the input sends you back out the side you entered.
+   * The last column the feet were in that was not a divider is the near side,
+   * full stop, and the far side is the column one step beyond the divider on the
+   * axis the divider is thin on. `Grid.portalAxis` owns that axis.
+   *
+   * **Not every divider column is a way through.** The ring corners and the
+   * back-to-back runs where two sealed faces touch have a wall on both sides of
+   * one axis, and the spec is explicit that you do not travel from Rime to
+   * Tempest directly. `portalAxis` returns null for those, and a body that walks
+   * into one is put back where it came from rather than being let through to
+   * somewhere it should not be.
+   *
+   * **You are never left in rock or in the air.** This replaces falling: the
+   * column you are standing in is empty of anything solid all the way to
+   * bedrock, so a body that entered and was not moved through would drop the
+   * full depth of the world. So the arrival seats you on the far column's real
+   * surface, found by scanning the voxels rather than by trusting a height
+   * field - `colHeight` is the height FIELD, and what a player stands on is
+   * whatever the surface pass laid on top of it, which is a layer or two higher.
+   *
+   * @returns {boolean} whether a transit happened
+   */
+  _portalTransit(height) {
+    const pos = this.position;
+    const cx = wrap(Math.floor(pos.x)), cz = wrap(Math.floor(pos.z));
+    const ax = portalAxis(cx, cz, _pAxis);
+    if (ax === null) {
+      // Either ordinary ground - the case on almost every frame - or a divider
+      // with no way through it. `isWall` is the authority on which.
+      if (!isWall(cx, cz)) return false;
+      this._ejectFromPortal(height);
+      return false;
+    }
+
+    // Where the divider's own coordinate is on the thin axis, and where the
+    // body was standing before it stepped in.
+    const here = ax.axis === 0 ? cx : cz;
+    const from = ax.axis === 0
+      ? wrap(Math.floor(this._freeX))
+      : wrap(Math.floor(this._freeZ));
+    let s = Math.sign(delta(here, from));
+    // The fallbacks, in order of how much they are trusted. A body that was
+    // already inside the divider last frame has no near side to read, which can
+    // only happen if it was put there by something other than walking - a
+    // respawn, a load, a knockback across two columns in a frame.
+    if (Math.abs(delta(here, from)) !== 1 || s === 0) {
+      const v = ax.axis === 0 ? this.vel.x : this.vel.z;
+      s = Math.abs(v) > 0.05 ? -Math.sign(v) : 0;
+    }
+    if (s === 0) {
+      // Nothing to read at all. Put them out into the connected world rather
+      // than into the sealed face: being dropped into Pyre by an ambiguity is
+      // far worse than being dropped into the meadow beside it.
+      const plus = ax.axis === 0 ? wrap(cx + 1) : cx;
+      const plusY = ax.axis === 0 ? cz : wrap(cz + 1);
+      s = isSealed(faceAt(plus, plusY)) ? 1 : -1;
+    }
+
+    // Two steps from the near side: through the divider, and out the far side.
+    const fx = ax.axis === 0 ? wrap(cx - s) : cx;
+    const fz = ax.axis === 0 ? cz : wrap(cz - s);
+    // Only the thin axis moves. Keeping the coordinate along the divider means
+    // you come out where you went in rather than being snapped to the middle of
+    // a cell you were walking past.
+    if (ax.axis === 0) pos.x = fx + 0.5; else pos.z = fz + 0.5;
+    pos.y = this._standingHeightAt(pos.x, pos.z, height);
+    // Arriving is not falling, exactly as `spawnAtColumn` says.
+    this.fallStart = null;
+    this.grounded = true;
+    if (this.vel.y < 0) this.vel.y = 0;
+    this._sync();
+    this._freeX = pos.x; this._freeZ = pos.z;
+    this.onPortal?.();
+    return true;
+  }
+
+  /**
+   * Put a body back out of a divider it may not pass through.
+   *
+   * The last column it stood in that was not a divider, which is one step away
+   * by construction, plus the inward half of the velocity taken off so it does
+   * not simply walk straight back in on the next frame.
+   */
+  _ejectFromPortal(height) {
+    const pos = this.position;
+    pos.x = this._freeX; pos.z = this._freeZ;
+    if (this._blocked(pos.x, pos.z, pos.y, height)) {
+      pos.y = this._standingHeightAt(pos.x, pos.z, height);
+    }
+    this.vel.x *= 0.2; this.vel.z *= 0.2;
+    this._sync();
+  }
+
+  /**
+   * Where the feet rest over a world point, in world Y.
+   *
+   * The voxels, top down, rather than any height field: see the note in
+   * `_portalTransit`. Water is not solid, so this lands you on the bed of a sea
+   * and you swim up, which is the right answer for arriving in one - the far
+   * side of a divider is ordinary world and can be anything.
+   */
+  _standingHeightAt(wx, wz, height) {
+    const p = this.planet;
+    const col = colIndex(Math.floor(wx), Math.floor(wz));
+    let k = D - 1;
+    for (; k >= 0; k--) if (IS_SOLID[p.at(col, k)]) break;
+    let y = k + 1 + SKIN;
+    // Standing on it means fitting above it. A canopy, an overhang or a cave
+    // roof over the arrival column would otherwise leave the head in rock.
+    for (let n = 0; n < D && this._blocked(wx, wz, y, height); n++) y += 1;
+    return Math.min(y, D - 2);
   }
 
   update(dt, input) {
@@ -1432,6 +1584,12 @@ export class Player {
 
     if (pos.y < SKIN) { pos.y = SKIN; this.vel.y = 0; this.grounded = true; }
     if (pos.y > D - 2) { pos.y = D - 2; this.vel.y = Math.min(0, this.vel.y); }
+
+    // The dividers, before the safety nets. A portal column is empty of
+    // anything solid all the way to bedrock, so a body that entered one and was
+    // not moved through would fall the depth of the world — which is why this
+    // runs every frame and not on some interaction. See `_portalTransit`.
+    this._portalTransit(height);
 
     // Safety net: never end a frame with the box inside geometry.
     this._escape(height);

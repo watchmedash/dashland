@@ -478,7 +478,10 @@ export const BLOCKS = [
   // granite and 6.5x cobblestone — plainly the hardest thing you can dig, and
   // still a thing you would build a wall out of.
   block({ name: 'obsidian', label: 'Obsidian', all: 'obsidian', hardness: 28, tool: 'pick', tier: 3, particle: [0.12, 0.1, 0.18], sound: 'stone' }),
-  block({ name: 'core', label: 'Planet Core', all: 'core', hardness: 24, tool: 'pick', tier: 4, drop: null, light: 8, lightColor: [1.0, 0.55, 0.25], particle: [1, 0.6, 0.2], sound: 'stone' }),
+  // The `name` stays `core`: it is a save-format and code identifier, and the
+  // world is not a planet any more, so only the label moves. See the matching
+  // achievement, "Reach the worldcore."
+  block({ name: 'core', label: 'Worldcore', all: 'core', hardness: 24, tool: 'pick', tier: 4, drop: null, light: 8, lightColor: [1.0, 0.55, 0.25], particle: [1, 0.6, 0.2], sound: 'stone' }),
   // What the planet gives you for coming all the way down.
   //
   // Thirty layers of basalt and lava used to end at a wall you cannot break and

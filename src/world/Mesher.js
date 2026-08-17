@@ -77,6 +77,14 @@ export const GROUP = new Uint8Array(N_BLOCKS);
 for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
   if (b.render === R_LIQUID) GROUP[i] = GROUP_LIQUID;
+  // The divider is drawn by the liquid material and by nothing else, which is
+  // the whole of "make the portal look like glass": it is the one material in
+  // the game with a swell, a sky fresnel and world-space sampling, and a wall
+  // wants all three. It is NOT `render: R_LIQUID` — that is a simulation
+  // property (flow, swimming, drowning, placement, the surface-height mesh
+  // path) and a divider is none of those. Only the group moves, so the block is
+  // still meshed as a full cube and still seals, occludes and blocks motion.
+  else if (b.name === 'portal') GROUP[i] = GROUP_LIQUID;
   else if (b.render === R_CROSS) GROUP[i] = GROUP_CUTOUT;
   // A ladder is mostly holes. Drawn in the opaque group its alpha was simply
   // ignored, so the gaps between the rungs came out as solid timber.
@@ -107,6 +115,18 @@ const WAVE_LEAVES = 4;
  * is trying to remove.
  */
 const WAVE_LEAVES_COLD = 5;
+/**
+ * The divider. A liquid in everything the renderer does and a wall in
+ * everything else — see GROUP below.
+ *
+ * Six, and the id is the whole of the risk in this feature. Every test on the
+ * wave id in VoxelMaterial that was written open-ended ("> 3.5 is leaves",
+ * "> 2.5 is lava") swallows a new id silently, which is exactly how a wave-id
+ * collision once lit every leaf on the planet. Both of those are banded now and
+ * this one is banded too; nothing in that file tests a wave id open-ended any
+ * more.
+ */
+const WAVE_PORTAL = 6;
 
 const WAVE = new Uint8Array(N_BLOCKS);
 for (let i = 0; i < N_BLOCKS; i++) {
@@ -114,6 +134,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   if (b.render === R_CROSS) WAVE[i] = 1;
   else if (b.name === 'water') WAVE[i] = 2;
   else if (b.name === 'lava') WAVE[i] = 3;
+  else if (b.name === 'portal') WAVE[i] = WAVE_PORTAL;
   else if (b.name.startsWith('leaves')) WAVE[i] = WAVE_LEAVES;
 }
 
@@ -702,6 +723,13 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, cx, cy, ck)
           // Per column, not per cell, so every quad of one body of water agrees
           // and there is no seam down the middle of a lake.
           liquidStyle = colWater ? colWater[col] : 0;
+        } else if (GROUP[id] === GROUP_LIQUID) {
+          // The divider: in the liquid group without being a liquid, so `emit`
+          // will send the three liquid channels for it. They mean nothing here
+          // and the shader's portal branch reads none of them - but left alone
+          // they would carry whatever the last water cell in this chunk wrote,
+          // which is a per-chunk value on a wall that runs across the map.
+          liquidDepth = 0; liquidShore = 0; liquidStyle = 0;
         }
 
         // A torch is drawn as its own model, close to the player, by BlockModels.

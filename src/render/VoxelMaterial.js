@@ -404,11 +404,52 @@ const COMMON_VERT_BODY = /* glsl */`
     float h = sin(uTime * 0.40 + wp.x * 0.30 + wp.z * 0.23) * 0.6
             + sin(uTime * 0.58 - wp.z * 0.36 + wp.y * 0.18) * 0.4;
     transformed += up * (h * LAVA_SWELL - LAVA_SINK) * wAmt;
-  } else if (wType > 3.5) {
-    // leaves: subtle whole-canopy sway
+  } else if (wType > 3.5 && wType < 5.5) {
+    // leaves (4) and leaves-over-snow (5): subtle whole-canopy sway.
+    //
+    // BANDED. This was "> 3.5" and it was the last open-ended wave test in the
+    // file: wave 6 is the divider and it would have swayed in the wind as a
+    // canopy, which is the same class of bug as the leaf emissive.
     float ph = dot(wp, vec3(0.33, 0.51, 0.27));
     vec3 tang = SWAY_TANG;
     transformed += tang * sin(uTime * 1.35 + ph) * 0.045 * uWind;
+  } else if (wType > 5.5) {
+    /*
+     * The divider: a swell on a VERTICAL plane.
+     *
+     * Water's swell displaces along up, and up is the one direction useless
+     * here — a vertical sheet displaced along up slides along itself and
+     * nothing moves. The plane's own normal is the axis with room in it, so the
+     * sheet breathes in and out instead, which is what a body of liquid held
+     * in a wall would do.
+     *
+     * The raw normal attribute and not vWorldNormal: this runs before that is
+     * of any use in object space, and a chunk model matrix is the identity.
+     *
+     * Biased ENTIRELY NEGATIVE, exactly as water's is and for a sharper reason.
+     * A divider is one column thick with terrain packed against both sides for
+     * eighty-eight layers; a surface that bulged outward would push into the
+     * neighbouring cell and z-fight everything the wall is built into. At
+     * SWELL 0.018 over SINK 0.026 the sheet sits between 8 and 44 mm inside its
+     * own cell and never leaves it.
+     *
+     * The one seam this can open is at the very top of the divider, where the
+     * side faces (moving on ±x/±z) meet the cap (moving on up) and the two take
+     * different directions. Worst case is 44 mm at layer 88, which is above the
+     * build ceiling and only ever seen from the air.
+     *
+     * The phase runs on all three world axes at three wavelengths. The axis
+     * along the wall's normal barely varies over one column, so what is left is
+     * a wave travelling ACROSS the plane — up the sheet and along it — which is
+     * the motion the surface is meant to have. Same argument swellGrad makes
+     * for using world axes rather than arbitrary directions.
+     */
+    const float PORTAL_SWELL = 0.018;
+    const float PORTAL_SINK = 0.026;
+    float h = sin(uTime * 0.85 + wp.y * 0.55) * 0.5
+            + sin(uTime * 1.21 + wp.x * 0.41 + wp.z * 0.39) * 0.3
+            + sin(uTime * 0.53 - wp.y * 0.23) * 0.2;
+    transformed += normal * (h * PORTAL_SWELL - PORTAL_SINK);
   }
   vWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
 `;
@@ -1152,6 +1193,30 @@ vec2 liquidUv(vec3 p) {
 }
 
 /**
+ * World-space uv for a surface at any orientation: the two axes the face
+ * actually lies in.
+ *
+ * liquidUv drops the Y axis, and that is correct for water because water is
+ * horizontal — every interesting face points at the sky. A divider is a
+ * VERTICAL plane, and on one running along x (normal on z) p.xz is (x, const):
+ * the v coordinate does not change over eighty-eight layers of wall, so the
+ * whole sheet is one row of the tile smeared from the ground to the sky. That
+ * is the whole reason this exists.
+ *
+ * Picking by the largest component of the normal is exact rather than a
+ * heuristic here: every quad in this world is axis-aligned, so one component is
+ * 1 and the other two are 0. Both sides of a wall choose the same pair, so the
+ * pattern is continuous through it, and the cap picks xz and meets the sides at
+ * a right angle where a change of parametrisation cannot be seen.
+ */
+vec2 planeUv(vec3 p, vec3 n) {
+  vec3 a = abs(n);
+  if (a.x > a.y && a.x > a.z) return p.zy;
+  if (a.z > a.y) return p.xy;
+  return p.xz;
+}
+
+/**
  * The slope of a long swell, as a world-space gradient.
  *
  * The vertex stage already has a swell and it is deliberately tiny: 14 cm peak
@@ -1540,13 +1605,106 @@ const LIQUID_MAP_FRAG = /* glsl */`
    */
   float wBio = 0.0;
 
-  // Bare "> 2.5" here and a banded "> 2.5 && < 3.5" in LAVA_EMISSIVE, and the
-  // difference is not an oversight. This block is inside LIQUID_MAP_FRAG, which
-  // only ever compiles into the liquid material, and the only wave ids that
-  // reach it are water (2) and lava (3) — leaves (4) are cutout geometry and
-  // never see this shader. LAVA_EMISSIVE is in the SHARED patch, so it does see
-  // leaves, and that one extra id was the canopy self-lighting bug.
-  if (vWave > 2.5) {
+  // Banded, like LAVA_EMISSIVE. This was a bare "> 2.5" on the honest argument
+  // that only water (2) and lava (3) ever reach the liquid material — and that
+  // argument expired the moment the divider (6) joined the liquid group. It is
+  // the same shape as the bug that lit every leaf on the planet, one shader
+  // stage over, so the test now names the id it means.
+  if (vWave > 5.5) {
+    /*
+     * The divider, drawn as one sheet of violet glass.
+     *
+     * ---- why there is no texture fetch in here -----------------------------
+     *
+     * The complaint this answers is that a wall of these read as repeated tiles
+     * rather than as one surface, and the first fix was the water's: keep the
+     * tile, sample it on a world-space coordinate instead of vTexUv so the
+     * pattern stops restarting at every block edge. That works on water and it
+     * does not work here, and the difference is the SHAPE OF THE SURFACE.
+     *
+     * A sea is broken up by shorelines, seen at grazing angles and mostly
+     * covered by its own reflection. A divider is a flat rectangle 416 blocks
+     * long and 88 high with nothing in front of it, seen square-on. Any
+     * repeating sample on it is a visible lattice, and both ends of the scale
+     * were photographed: at one tile per 5.3 blocks the wall was a smooth
+     * gradient with no structure at all up close, and at one per 2.3 blocks the
+     * structure arrived but a shot from 23 blocks back was a regular grid of
+     * swirls again - the same wallpaper the change set out to remove, at a
+     * different pitch.
+     *
+     * So the body is built the way the sea's SHAPE is built rather than the way
+     * its colour is: incommensurate sine fields on the world position, which is
+     * exactly what swellGrad does and for exactly the reason its note gives -
+     * they are continuous everywhere, they have no period a player can find,
+     * and they need no uv set at all. caustic() is the water's own function.
+     *
+     * The tile is left in the atlas: it is still the block's identity, and it is
+     * what the break particles and any future item icon read.
+     *
+     * ---- the two scales ----------------------------------------------------
+     *
+     * Frequencies are per BLOCK, so they can be read as sizes. The bands run at
+     * 0.13 to 0.31 per block, which is a feature every 20 to 48 blocks: that is
+     * the scale that survives at fifty blocks and stops the wall being one flat
+     * colour from across a valley. The filaments run about ten times finer and
+     * are what there is to look at with your nose against it.
+     *
+     * Both drift, and they drift ALONG the plane, which is the whole animation
+     * question a vertical surface asks. Water sinks and swells because its
+     * interesting face points at the sky; a wall has no such face, so the motion
+     * has to travel across it instead.
+     */
+    vec2 q = planeUv(vWorld, vWorldNormal);
+    float pT = uTime;
+    float bands = sin(q.x *  0.23 + q.y * 0.31 + pT * 0.21)
+                + sin(q.x * -0.17 + q.y * 0.44 - pT * 0.16)
+                + sin((q.x + q.y) * 0.13 + pT * 0.11);
+    // A third octave, ten times finer, so there is something to see with your
+    // nose against it. Without it the wall is honestly seamless and honestly
+    // flat: the bands alone vary over twenty blocks, and from three blocks away
+    // twenty blocks of gradient is one colour.
+    float fine = sin(q.x * 1.31 + q.y * 0.97 + pT * 0.60)
+               + sin(q.x * -0.89 + q.y * 1.63 - pT * 0.47);
+    // -3..3 and -2..2 into 0..1, with the ends left unreached on purpose: a
+    // field that clipped would put flat plates of one colour on the wall.
+    float pStruct = clamp(0.5 + bands * 0.155 + fine * 0.075, 0.0, 1.0);
+    /*
+     * The filaments. Two caustics multiplied rather than added, which is the
+     * trick the plankton note in this file argues for at length: one call is a
+     * regular lattice at close range, and the product of two incommensurate
+     * ones is sparse and has no period. The second is on the swapped axes and
+     * offset, so the two cannot be the same field at a different scale.
+     */
+    float fil = caustic(q * 0.55, pT * 0.35) * caustic(q.yx * 0.31 + 11.0, pT * 0.28);
+
+    /*
+     * Dark, and darker than it looks like it should be. The block is light 15
+     * in violet, so vBlock is 1.0 on every fragment of it and LIGHTS_END
+     * multiplies the albedo by an irradiance of about 1.3 before the fresnel
+     * adds more on top - a mid-bright albedo saturates and the wall photographs
+     * as one flat magenta. Measured on the first pass: 186/75/224 across a patch
+     * that should have had the whole range in it. The albedo carries the
+     * contrast and the light provides the brightness.
+     */
+    const vec3 PORTAL_DEEP = vec3(0.022, 0.003, 0.062);
+    const vec3 PORTAL_LIT  = vec3(0.26, 0.055, 0.42);
+    const vec3 PORTAL_HOT  = vec3(0.72, 0.30, 0.95);
+    diffuseColor.rgb = mix(PORTAL_DEEP, PORTAL_LIT, pStruct);
+    // The filaments are added rather than mixed, and only where the bands are
+    // already up: light gathering in the thick of the glass rather than a
+    // second pattern laid over the first.
+    diffuseColor.rgb += PORTAL_HOT * fil * (0.25 + 0.75 * pStruct) * 0.80;
+    /*
+     * OPAQUE, and this is a requirement rather than a look: the divider's job
+     * is that you cannot see the sealed face until you have walked into it. The
+     * block is still opaque in the table - so SEALS_FACES, SKY_ATTEN
+     * and the light solver treat it exactly as a stone wall and there is no
+     * geometry behind it to see anyway — and this keeps the drawn fragment
+     * agreeing with that. The fresnel block after <opaque_fragment> holds it at
+     * 1.0 as well; water's line there deliberately does not.
+     */
+    diffuseColor.a = 1.0;
+  } else if (vWave > 2.5) {
     // Lava shares the liquid pass but wants none of the water treatment: keep
     // the painted crust and stay opaque. What it does want is to look molten,
     // and the crawl was so slow (a fifth of a texel a second) that it read as
@@ -1901,12 +2059,30 @@ const LIQUID_NORMAL_FRAG = /* glsl */`
   // planet. Lava is left exactly as it was -- it has the same grid-locked
   // mosaic and it was not what was reported.
   bool isWater = vWave > 1.5 && vWave < 2.5;
+  // The divider takes no normal map at all, for the reason its colour takes no
+  // albedo sample: a tiled relief on a flat 416-block wall is the same visible
+  // lattice one lighting stage further on. Its whole normal is the analytic
+  // slope below.
+  bool isPortal = vWave > 5.5;
   vec2 nuv = isWater ? liquidUv(vWorld) * 1.13 : vTexUv;
-  vec3 nA = texture(uNormalMap, vec3(nuv * 1.25 + vec2(uTime * 0.020, uTime * 0.016), vLayer)).xyz * 2.0 - 1.0;
-  vec3 nB = texture(uNormalMap, vec3(nuv * 0.65 - vec2(uTime * 0.012, uTime * 0.025), vLayer)).xyz * 2.0 - 1.0;
-  vec3 nT = normalize(nA + nB);
-  nT.xy *= 0.85;
-  if (isWater) {
+  vec3 nT = vec3(0.0, 0.0, 1.0);
+  if (!isPortal) {
+    vec3 nA = texture(uNormalMap, vec3(nuv * 1.25 + vec2(uTime * 0.020, uTime * 0.016), vLayer)).xyz * 2.0 - 1.0;
+    vec3 nB = texture(uNormalMap, vec3(nuv * 0.65 - vec2(uTime * 0.012, uTime * 0.025), vLayer)).xyz * 2.0 - 1.0;
+    nT = normalize(nA + nB);
+    nT.xy *= 0.85;
+  }
+  if (isPortal) {
+    // The same trick the sea uses, on the axes a wall has: a long swell added
+    // as a tangent-space slope, so the fresnel and the violet glint slide
+    // across the sheet instead of sitting still on it. swellGrad is world-axis
+    // aligned, so the axis matching this wall's normal drops out on its own and
+    // what is left runs in the plane - see its note. Halved, because a divider
+    // is glass rather than open water and 8 degrees of slope on a flat vertical
+    // sheet finds grazing angles everywhere.
+    vec3 gr = swellGrad(vWorld * 0.55, uTime * 0.75, uSeaDetail) * 0.5;
+    nT.xy -= vec2(dot(gr, Tv), dot(gr, Bv));
+  } else if (isWater) {
     // The swell, as a tangent-space slope. A height field's normal is
     // normalize(n - grad h), so the gradient is subtracted from the tangential
     // pair after the map has had its say and both perturbations ride the same
@@ -2504,7 +2680,48 @@ function patch(material, opts = {}) {
     if (opts.liquid) {
       fs = fs.replace('#include <opaque_fragment>', /* glsl */`
         #include <opaque_fragment>
-        if (vWave < 2.5) {
+        if (vWave > 5.5) {
+          /*
+           * The divider's fresnel. The same physics as the water's below it and
+           * a different job: water uses it to stop showing you the bed, and a
+           * divider has nothing to show you at all, so here it is the whole of
+           * what makes the sheet read as GLASS rather than as a painted wall.
+           * Head-on you see the violet body; turn along the wall and it goes to
+           * sky, which is the one cue that says a surface is smooth and hard.
+           *
+           * Tinted rather than mirrored. A clean sky reflection on an
+           * eighty-eight block wall is a strip of daylight blue across the
+           * middle of the frame and it stops reading as a portal entirely, so
+           * the reflected sky is dragged most of the way to the divider's own
+           * violet and only the LEVEL of it survives - a bright sky gives a
+           * bright rim, a dusk sky a dim one.
+           */
+          vec3 vDirP = normalize(vWorld - uCamPos);
+          float cosP = clamp(dot(-vDirP, normal), 0.0, 1.0);
+          float fresP = 0.06 + 0.94 * pow(1.0 - cosP, 4.0);
+          vec3 rDirP = reflect(vDirP, normal);
+          vec3 skyP = mix(uSkyHorizon, uSkyZenith,
+                          pow(clamp(dot(rDirP, UP), 0.0, 1.0), 0.42));
+          const vec3 PORTAL_SHEEN = vec3(0.86, 0.52, 1.00);
+          float skyLum = dot(skyP, AERIAL_LUMA);
+          gl_FragColor.rgb = mix(gl_FragColor.rgb,
+                                 PORTAL_SHEEN * clamp(0.35 + skyLum * 1.6, 0.2, 1.5),
+                                 fresP * 0.55);
+
+          // A tight highlight on the swell, on the divider's own colour rather
+          // than the sun's: it is a lit surface, not a wet one, and it has to
+          // glint at midnight as well as at noon. No vSun gate for the same
+          // reason - the block is light 15 and lights itself.
+          vec3 halfP = normalize(uSunDir - vDirP);
+          float ndhP = clamp(dot(normal, halfP), 0.0, 1.0);
+          gl_FragColor.rgb += PORTAL_SHEEN * fresP * pow(ndhP, 60.0) * 0.5;
+
+          // Never see through the divider. Water's line at the bottom of the
+          // block below raises alpha with the fresnel; this one holds it at the
+          // top, because the requirement is not "hard to see through", it is
+          // "sealed".
+          gl_FragColor.a = 1.0;
+        } else if (vWave < 2.5) {
           // What makes water read as water, at distance, is not its own colour
           // — it is that you stop seeing through it and start seeing the sky in
           // it. Straight down, water reflects about 2% and you see the bed. At

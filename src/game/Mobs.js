@@ -6053,9 +6053,9 @@ export class Mobs {
       if (d < STALKER_NEAR || d > STALKER_FAR) continue;
       // Where his head will be, which is what has to clear the terrain and
       // what has to be on screen — his feet are behind the ridge by design.
-      // The local up is the outward radial on a sphere, which is what `_sync`
-      // would give this body once it existed — and it does not exist yet.
-      _eye.addScaledVector(_rel.copy(_eye).normalize(), SPECIES.stalker.height * 0.85);
+      // Straight up: this was the outward radial, a direction times a radius,
+      // and the eighth of that family to be found.
+      _eye.y += SPECIES.stalker.height * 0.85;
       const cam = this.camera;
       const e = cam.matrixWorld.elements;
       _seen.set(-e[8], -e[9], -e[10]);

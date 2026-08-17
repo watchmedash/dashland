@@ -152,6 +152,8 @@ const DROP_CHANCE = 0.30;
 const MAX_DROPS = 30;
 
 const _c = new THREE.Vector3();
+/** The one up. Shared, never written to. */
+const UP = new THREE.Vector3(0, 1, 0);
 const _d = new THREE.Vector3();
 
 /**
@@ -276,8 +278,10 @@ export function explode(game, pos, cause = null) {
   // ...and everything else standing in it. See `blastMobs`.
   blastMobs(game, pos, cause);
 
-  const up = _d.copy(pos).normalize();
-  game.particles?.blast(pos, up, 1);
+  // Up is +Y. This was `pos.normalize()` - the outward radial, i.e. a direction
+  // times a radius - which on a flat map points away from the corner of the
+  // world rather than at the sky.
+  game.particles?.blast(pos, UP, 1);
   game.audio?.blast(pos);
 
   return { cells: edits.length, drops: dropped, ms: performance.now() - t0 };

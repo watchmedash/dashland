@@ -27,9 +27,16 @@
 // because the ways it fails are silent.
 
 import { D } from '../world/Constants.js';
-import { colNeighbor, cellIndex, cellDecode } from '../world/Sphere.js';
+import { colNeighbor, cellIdx } from '../world/Layout.js';
 
 const _kd = { col: 0, k: 0 };
+
+/** A cell key back into its column and layer. `col * D + k`, inverted. */
+function cellDecode(key, out = _kd) {
+  out.k = key % D;
+  out.col = (key - out.k) / D;
+  return out;
+}
 import { ID, RENDER_TYPE, R_LIQUID, DROWNS } from '../world/Blocks.js';
 
 /**
@@ -44,9 +51,16 @@ export const LEVEL_MAX = 7;
 const TICK = 0.22;
 /** Ceiling on cells processed per tick, so a huge breach can't stall a frame. */
 const MAX_PER_TICK = 900;
-/** Tangential offsets for `colNeighbor`'s four directions, in the cell's frame. */
-const DIR_I = [1, -1, 0, 0];
-const DIR_J = [0, 0, 1, -1];
+/**
+ * Map offsets for `colNeighbor`'s four directions, in Grid's order: north,
+ * south, west, east - i.e. y-1, y+1, x-1, x+1.
+ *
+ * The cube's table was in its own (+i, -i, +j, -j) order and does not survive
+ * the move: the direction index means something different now, and reading the
+ * old one would push every river ninety degrees off its channel.
+ */
+const DIR_X = [0, 0, -1, 1];
+const DIR_Y = [-1, 1, 0, 0];
 /** Scratch for flowAt — it is asked every frame and answers nothing worth keeping. */
 const _flow = { i: 0, j: 0, k: 0, s: 0 };
 
@@ -158,7 +172,7 @@ export class Water {
 
   clear() { this.level.clear(); this.sources.clear(); this.active.clear(); this._quenched.clear(); }
 
-  key(col, k) { return cellIndex(col, k); }
+  key(col, k) { return cellIdx(col, k); }
 
   /** Level of the water at a cell, or -1 if there is none. */
   levelAt(col, k) {
@@ -257,12 +271,12 @@ export class Water {
    * itself flows down, so what pushes you is by construction the direction the
    * water is actually going.
    *
-   * The result is in the cell's OWN (i, j) frame — d 0..3 are that column's
-   * +i/-i/+j/-j — plus a radial part. That matters: `colNeighbor` will happily
-   * hand back a column on another cube face, but the *direction index* is
-   * always in the asking column's frame, so nothing has to be rotated and
-   * nothing folds at a seam. Callers working in world space must take it
-   * through that column's tangentFrame.
+   * The result is on the MAP's axes, plus a vertical part: `i` is map x, `j` is
+   * map y, `k` is the layer. Map x is world X and map y is world Z, so a caller
+   * in world space reads `i` as X and `j` as Z and there is nothing to rotate —
+   * the cube's tangent frame is gone with the fold that needed it. The names
+   * `i`/`j` are kept because the player and the drops read them by name and a
+   * silent rename there is NaN velocity, not a compile error.
    *
    * Only cells with a level entry answer — that is, only water that is
    * genuinely flowing. Sources deliberately do not, and the ocean is all
@@ -270,8 +284,8 @@ export class Water {
    * can safely count as "downhill": a still lake never reaches this code, so
    * the only thing an open side means here is somewhere the flow is headed.
    *
-   * @returns {{i:number,j:number,k:number,s:number}|null} unit tangential
-   *   direction, radial k of 0 or -1, and strength s in 0..1.
+   * @returns {{i:number,j:number,k:number,s:number}|null} unit horizontal
+   *   direction, a k of 0 or -1, and strength s in 0..1.
    */
   flowAt(col, k, out = _flow) {
     const mine = this.level.get(this.key(col, k));
@@ -305,8 +319,8 @@ export class Water {
         if (nl >= mine) continue;
         fall = mine - nl;
       }
-      gi += DIR_I[d] * fall;
-      gj += DIR_J[d] * fall;
+      gi += DIR_X[d] * fall;
+      gj += DIR_Y[d] * fall;
     }
     // A cell with the same drop on opposite sides — the middle of a narrow
     // stream, both banks open — cancels to nothing, which is right: it is the

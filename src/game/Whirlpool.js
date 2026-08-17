@@ -23,8 +23,9 @@
 // candidate can ever be in range. What that candidate then costs is one hash
 // and a walk down one column, and only on a frame where the player is in water.
 
-import { F, D, R_MIN, R_SEA, cidx } from '../world/Constants.js';
-import { colParts } from '../world/Sphere.js';
+import { SEA_K } from '../world/Constants.js';
+import { colIndex, delta } from '../world/Grid.js';
+import { colParts } from '../world/Layout.js';
 
 /**
  * Columns between candidate sites, and the residue a site sits at.
@@ -35,12 +36,17 @@ import { colParts } from '../world/Sphere.js';
  * the radius, which is what makes the whole thing O(1) rather than a search
  * over an ocean.
  *
- * 40 against a radius of 5 is a whirlpool roughly every kilometre and a half of
+ * 39 against a radius of 5 is a whirlpool roughly every kilometre and a half of
  * open water. Deliberately sparse: this is a place, not a weather condition,
  * and a sea with one every forty columns would be a minefield rather than an
  * ocean with something in it.
+ *
+ * 39 rather than the cube's 40, and it is not a tuning change: the map wraps
+ * now, so the lattice has to DIVIDE W or the pattern meets a shorter step at
+ * the wrap and two sites land within each other's radius there. W is 1248 =
+ * 2^5 * 3 * 13, and 39 is the divisor next to 40.
  */
-export const WHIRL_LATTICE = 40;
+export const WHIRL_LATTICE = 39;
 const WHIRL_LI = 13;
 const WHIRL_LJ = 29;
 /**
@@ -163,22 +169,24 @@ const WHIRL_SPIN = 2.2;
 const WHIRL_THROAT = 12;
 
 /** The layer the sea's surface sits in. Matches `kWet1` in the cave carve. */
-export const K_SEA = Math.floor(R_SEA - R_MIN - 0.5);
+export const K_SEA = SEA_K;
 /**
  * How far off a whirlpool is seen and heard, in columns.
  *
  * Nearly four times the funnel's own radius, and that ratio is the point. A
  * hazard you find out about by being inside it is a bug report; this one has to
- * be a thing on the horizon you decide whether to swim towards. Nineteen
- * columns of open water is far enough that a swimmer at 2.73 cells/s has seven
- * seconds of looking at broken water before the drag can touch them.
+ * be a thing on the horizon you decide whether to swim towards. Eighteen
+ * columns of open water is far enough that a swimmer at 2.73 cells/s has six
+ * and a half seconds of looking at broken water before the drag can touch them.
  *
  * Capped below half the lattice spacing so the O(1) lookup stays sound — see
- * `centreWithin`.
+ * `centreWithin`. 18 rather than the cube's 19 because the lattice moved to 39
+ * to divide the wrap, and a cue the cap silently trimmed would be a number that
+ * reads as a promise the code does not keep.
  */
-export const WHIRL_CUE = 19;
+export const WHIRL_CUE = 18;
 
-const _parts = { f: 0, i: 0, j: 0 };
+const _parts = { x: 0, y: 0 };
 
 /**
  * A hash of a column and the world seed, on 0..1.
@@ -221,13 +229,13 @@ export class Whirlpools {
    */
   isCentre(col) {
     const p = colParts(col, _parts);
-    if (p.i % WHIRL_LATTICE !== WHIRL_LI || p.j % WHIRL_LATTICE !== WHIRL_LJ) return false;
-    // Kept whole on one cube face, the same rule the springs and the volcanoes
-    // follow: a column across a seam has different face coordinates and would
-    // never find this centre on the lattice, so half the funnel would be
-    // missing from one side and present from the other.
-    const edge = Math.ceil(WHIRL_R) + 1;
-    if (p.i < edge || p.i >= F - edge || p.j < edge || p.j >= F - edge) return false;
+    if (p.x % WHIRL_LATTICE !== WHIRL_LI || p.y % WHIRL_LATTICE !== WHIRL_LJ) return false;
+    // The cube kept every funnel whole inside one face, because a column across
+    // a seam had different face coordinates and would never find the centre on
+    // the lattice. There are no seams to fall down: the lattice divides W, so it
+    // runs through the wrap without a break and a funnel that straddles it is
+    // whole from both sides. The only thing that keeps whirlpools out to sea is
+    // the depth test, which is what the rule was always really about.
     if (hash01(col, this.seed) > WHIRL_CHANCE) return false;
     return this.depthAt(col) >= WHIRL_MIN_DEPTH;
   }
@@ -274,17 +282,19 @@ export class Whirlpools {
   centreWithin(col, range) {
     const r = Math.min(range, WHIRL_LATTICE * 0.5 - 1);
     const p = colParts(col, _parts);
-    const pi = p.i, pj = p.j, pf = p.f;
-    const ri = ((pi - WHIRL_LI) % WHIRL_LATTICE + WHIRL_LATTICE) % WHIRL_LATTICE;
-    const i0 = ri <= r ? pi - ri
-      : (WHIRL_LATTICE - ri <= r ? pi + (WHIRL_LATTICE - ri) : -1);
-    if (i0 < 0 || i0 >= F) return -1;
-    const rj = ((pj - WHIRL_LJ) % WHIRL_LATTICE + WHIRL_LATTICE) % WHIRL_LATTICE;
-    const j0 = rj <= r ? pj - rj
-      : (WHIRL_LATTICE - rj <= r ? pj + (WHIRL_LATTICE - rj) : -1);
-    if (j0 < 0 || j0 >= F) return -1;
-    if (Math.hypot(pi - i0, pj - j0) > r) return -1;
-    const c = cidx(pf, i0, j0);
+    const px = p.x, py = p.y;
+    const rx = ((px - WHIRL_LI) % WHIRL_LATTICE + WHIRL_LATTICE) % WHIRL_LATTICE;
+    const x0 = rx <= r ? px - rx
+      : (WHIRL_LATTICE - rx <= r ? px + (WHIRL_LATTICE - rx) : null);
+    if (x0 === null) return -1;
+    const ry = ((py - WHIRL_LJ) % WHIRL_LATTICE + WHIRL_LATTICE) % WHIRL_LATTICE;
+    const y0 = ry <= r ? py - ry
+      : (WHIRL_LATTICE - ry <= r ? py + (WHIRL_LATTICE - ry) : null);
+    if (y0 === null) return -1;
+    // Off the edge of the map is not a case any more: the candidate is wrapped
+    // back on, which is what makes a funnel at the wrap whole rather than half.
+    if (Math.hypot(px - x0, py - y0) > r) return -1;
+    const c = colIndex(x0, y0);
     return this.isCentre(c) ? c : -1;
   }
 
@@ -306,9 +316,12 @@ export class Whirlpools {
     const c = this.centreNear(col);
     if (c < 0) return 0;
     const a = colParts(col, _parts);
-    const ai = a.i, aj = a.j;
+    const ax = a.x, ay = a.y;
     const b = colParts(c, _parts);
-    const d2 = (ai - b.i) * (ai - b.i) + (aj - b.j) * (aj - b.j);
+    // `delta`, not subtraction: a funnel sitting across the wrap is otherwise a
+    // thousand columns away from half of its own disc.
+    const dx = delta(ax, b.x), dy = delta(ay, b.y);
+    const d2 = dx * dx + dy * dy;
     const r2 = WHIRL_R * WHIRL_R;
     if (d2 >= r2) return 0;
     const below = K_SEA - k;
@@ -327,20 +340,21 @@ export class Whirlpools {
    * The eye is a column and so is the body, so the direction is just the step
    * between them; at the dead centre there is no direction and the suction is
    * zero anyway, which is also where a real vortex has nothing to pull towards.
+   *
+   * `out.i` and `out.j` are world X and world Z, since map x is world X and map
+   * y is world Z. The names are the caller's and are left alone.
    */
   dragAt(col, k, out) {
     out.i = 0; out.j = 0; out.spin = 0;
     const c = this.centreNear(col);
     if (c < 0) return out;
     const a = colParts(col, _parts);
-    const ai = a.i, aj = a.j, af = a.f;
+    const ax = a.x, ay = a.y;
     const b = colParts(c, _parts);
-    // Different faces cannot be compared as (i, j) at all - a layer number is
-    // only meaningful with its face - and a whirlpool sits in open ocean well
-    // inside one, so the honest answer at a seam is no drag rather than a
-    // wrong one.
-    if (b.f !== af) return out;
-    const di = b.i - ai, dj = b.j - aj;
+    // The cube refused to answer across a seam, because two faces' (i, j) could
+    // not be compared at all. One map, one set of axes, and `delta` takes the
+    // short way round the wrap - so there is no case left to refuse.
+    const di = delta(ax, b.x), dj = delta(ay, b.y);
     const d2 = di * di + dj * dj;
     const r2 = WHIRL_R * WHIRL_R;
     if (d2 >= r2 || d2 < 1e-6) return out;

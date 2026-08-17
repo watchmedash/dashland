@@ -19,6 +19,8 @@
 
 import * as THREE from 'three';
 import { GRAVITY } from '../world/Constants.js';
+import { wrap } from '../world/Grid.js';
+import { wrapDist } from './Wrap.js';
 import { ID } from '../world/Blocks.js';
 import { hasModel, worldModel } from '../render/ItemModels.js';
 
@@ -78,7 +80,6 @@ const MAX = 48;
 const PICKUP_RADIUS = 1.5;
 const PICKUP_DELAY = 0.33;
 
-const _up = new THREE.Vector3();
 const _step = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _probe = new THREE.Vector3();
@@ -96,7 +97,6 @@ export class Arrows {
   constructor(scene, planet, itemId) {
     this.planet = planet;
     this.item = itemId;
-    this.center = new THREE.Vector3(0, 0, 0);
     /** @type {Array<object>} */
     this.list = [];
 
@@ -258,7 +258,7 @@ export class Arrows {
   _collect(a, i, player, io) {
     if (!player || !io) return false;
     if (a.age < PICKUP_DELAY) return false;
-    if (a.pos.distanceTo(player.position) > PICKUP_RADIUS) return false;
+    if (wrapDist(a.pos, player.position) > PICKUP_RADIUS) return false;
     if (!io.hasRoom(this.item)) return false;
     if (!(io.collect(this.item, 1) > 0)) return false;
     this._remove(i);
@@ -274,19 +274,14 @@ export class Arrows {
    * in here touches the scene graph or the mob list beyond a raycast.
    */
   step(a, dt, mobs = null) {
-    // Local up, and the only definition of it there is: the outward radial at
-    // the arrow's own position. Recomputed per step rather than per shot,
-    // because an arrow that travels sixty cells has visibly moved around the
-    // curve by the time it lands.
-    _up.copy(a.pos).sub(this.center);
-    const r = _up.length() || 1;
-    _up.multiplyScalar(1 / r);
-
+    // Up is +Y and it is +Y everywhere, so there is no local up to compute and
+    // no radial to take from a centre. What used to be a normalize per step is
+    // one subtraction on one component.
     const cell = this.planet.cellAt?.(a.pos.x, a.pos.y, a.pos.z);
     const here = cell ? this.planet.at(cell.col, cell.k) : 0;
     const wet = here === ID.water;
 
-    a.vel.addScaledVector(_up, -GRAVITY * ARROW_G * dt);
+    a.vel.y -= GRAVITY * ARROW_G * dt;
     a.vel.multiplyScalar(Math.max(0, 1 - (wet ? WATER_DRAG : DRAG) * dt));
 
     _step.copy(a.vel).multiplyScalar(dt);
@@ -346,6 +341,10 @@ export class Arrows {
       }
       a.pos.copy(_probe);
     }
+    // Back onto the map. A shot fired across the wrap otherwise leaves an arrow
+    // whose x is off the end of the world, and every distance measured to it -
+    // the pickup below, the despawn - is a thousand cells out.
+    a.pos.x = wrap(a.pos.x); a.pos.z = wrap(a.pos.z);
   }
 
   /** Point the model along the flight and write its matrix. */

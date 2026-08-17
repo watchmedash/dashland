@@ -3,7 +3,8 @@
 
 import * as THREE from 'three';
 import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
-import { tangentFrame, worldToCell, FACE_N } from '../world/Sphere.js';
+import { wrap } from '../world/Grid.js';
+import { wrapDist, wrapDist2, relTo } from './Wrap.js';
 import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX } from '../world/Blocks.js';
 
 /**
@@ -33,21 +34,14 @@ const _s = new THREE.Vector3();
 const _hover = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _flow = new THREE.Vector3();
-const _frame = { ea: [0, 0, 0], eb: [0, 0, 0], up: [0, 0, 0], arcA: 1, arcB: 1 };
-const _upCell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
-
 /**
  * Which way is up for a dropped thing.
  *
- * The radial direction, `pos - planetCentre`, is only up on a sphere. On a cube
- * it leans away from the face normal by however far round the face you are -
- * nothing at the middle, forty-five degrees at an edge - so a dropped item fell
- * visibly sideways, worst at the seams. Gravity is the face's own normal.
+ * +Y, everywhere. The cube needed the face's own normal here, because a radial
+ * up leaned away from it by up to forty-five degrees at a seam and dropped items
+ * fell visibly sideways; a flat map has one gravity and this is a constant.
  */
-function upAt(pos, out) {
-  const c = worldToCell(pos.x, pos.y, pos.z, _upCell);
-  return out.fromArray(FACE_N[c.f]);
-}
+const UP = new THREE.Vector3(0, 1, 0);
 const _lit = new THREE.Vector3();
 const _bl = { r: 0, g: 0, b: 0 };
 
@@ -252,7 +246,7 @@ export class Drops {
       // of a lava lake would merge into the doomed one beside it and go up with
       // it, which is the game taking something the lava never touched.
       if (d.item === itemId && !d.collected && d.wear === wear && d.burn === undefined) {
-        if (d.pos.distanceToSquared(_v.set(x, y, z)) < MERGE_RADIUS * MERGE_RADIUS) {
+        if (wrapDist2(d.pos, _v.set(x, y, z)) < MERGE_RADIUS * MERGE_RADIUS) {
           const max = ITEMS[itemId]?.stack ?? 64;
           if (d.count + count <= max) {
             d.count += count;
@@ -285,8 +279,8 @@ export class Drops {
     }
     mesh.layers.enable(1);
     this.group.add(mesh);
-    const pos = new THREE.Vector3(x, y, z);
-    const up = upAt(pos, _v);
+    const pos = new THREE.Vector3(wrap(x), y, wrap(z));
+    const up = UP;
     const vel = new THREE.Vector3(
       (Math.random() - 0.5) * 1.7, (Math.random() - 0.5) * 1.7, (Math.random() - 0.5) * 1.7,
     ).addScaledVector(up, 2.1 + Math.random());
@@ -466,10 +460,7 @@ export class Drops {
       // A little above the middle of the item, which hovers over the ground:
       // sampling at the drop's own position puts it in the cell the floor
       // occupies whenever the bob is at its low point.
-      // Its own scratch and nothing else's: `update` is holding the local up in
-      // `_v` while this runs, and borrowing it here flung the drop a fifth of a
-      // planet radius the last time that vector was shared.
-      _lit.copy(upAt(d.pos, _lit)).multiplyScalar(0.25).add(d.pos);
+      _lit.copy(d.pos); _lit.y += 0.25;
       const l = this.blockLightAt(_lit, _bl);
       r = l.r; g = l.g; b = l.b;
     }
@@ -506,43 +497,22 @@ export class Drops {
   /**
    * Add one frame of the local current to a drop's velocity.
    *
-   * Water.flowAt answers in the cell's own (i, j) axes, and a drop lives in
-   * world space, so the answer has to be read through that cell's tangent
-   * frame — the same route the mobs take to turn a heading into a step. Doing
-   * it any other way across a cube seam means the six faces disagree about
-   * which way "+i" points and a river changes direction as it crosses one.
-   *
-   * arcA/arcB are how many world units a cell step covers, and they differ
-   * across a face, so they belong here: without them a flow diagonal to the
-   * grid comes out skewed off the channel.
+   * `Water.flowAt` answers on the map's axes - `i` is map x, `j` is map y - and
+   * map x is world X while map y is world Z, so the read is a copy. The cube
+   * needed the cell's tangent frame here, and arcA/arcB with it, because the six
+   * faces disagreed about which way "+i" pointed and a river changed direction
+   * as it crossed a seam. One map, one answer.
    */
   _flowPush(d, cell, dt) {
     const fl = this.water.flowAt(cell.col, cell.k);
     if (!fl) return;
-    tangentFrame(cell.f, cell.i + 0.5, cell.j + 0.5, cell.k + 0.5, _frame);
-    const a = fl.i * _frame.arcA, b = fl.j * _frame.arcB;
-    _flow.set(
-      _frame.ea[0] * a + _frame.eb[0] * b,
-      _frame.ea[1] * a + _frame.eb[1] * b,
-      _frame.ea[2] * a + _frame.eb[2] * b,
-    );
+    _flow.set(fl.i, 0, fl.j);
     const len = _flow.length();
     if (len > 1e-6) _flow.multiplyScalar(1 / len);
-    // Unlike the player, a drop *does* take the radial part. It is the only
+    // Unlike the player, a drop *does* take the vertical part. It is the only
     // thing that gets a drop over the lip of a waterfall: buoyancy is holding
     // it at the surface, and the surface at the lip is the top of the fall.
-    //
-    // Component-wise, and it has to be: `tangentFrame` hands back `up` as a
-    // plain three-element array, not a Vector3, so `addScaledVector(_frame.up)`
-    // multiplied `undefined` and quietly turned the drop's position into NaN —
-    // which only bit in cells the water is *falling* through, since `fl.k` is
-    // zero everywhere else and the line never ran. The ea/eb reads above were
-    // already indexed by hand for the same reason.
-    if (fl.k) {
-      _flow.x += _frame.up[0] * fl.k;
-      _flow.y += _frame.up[1] * fl.k;
-      _flow.z += _frame.up[2] * fl.k;
-    }
+    if (fl.k) _flow.y += fl.k;
     d.vel.addScaledVector(_flow, FLOW_PUSH * fl.s * dt);
   }
 
@@ -553,14 +523,16 @@ export class Drops {
       d.age += dt;
       d.spin += dt * 1.7;
 
-      const up = upAt(d.pos, _v);
+      const up = UP;
 
       if (d.magnet > 0) {
         // drifting into the player
-        const to = _s.copy(player.eye).addScaledVector(player.up, -0.55).sub(d.pos);
+        _v.copy(player.eye).addScaledVector(player.up, -0.55);
+        const to = relTo(_s, d.pos, _v);
         const dist = to.length();
         d.magnet = Math.min(1, d.magnet + dt * 4.5);
         d.pos.addScaledVector(to.normalize(), Math.min(dist, dt * (5 + 22 * d.magnet)));
+        d.pos.x = wrap(d.pos.x); d.pos.z = wrap(d.pos.z);
         if (dist < COLLECT_RADIUS || d.magnet >= 1) {
           const taken = collect(d.item, d.count, d.wear);
           if (taken > 0) {
@@ -635,11 +607,12 @@ export class Drops {
             d.grounded = true;
           } else {
             d.pos.copy(next);
+            d.pos.x = wrap(d.pos.x); d.pos.z = wrap(d.pos.z);
             d.grounded = false;
           }
         }
         if (d.burn === undefined && d.age > 0.45 && hasRoom(d.item)) {
-          if (d.pos.distanceTo(player.position) < PICKUP_RADIUS) d.magnet = 0.01;
+          if (wrapDist(d.pos, player.position) < PICKUP_RADIUS) d.magnet = 0.01;
         }
       }
 

@@ -216,8 +216,10 @@
 import * as THREE from 'three';
 import { BLOCKS, ID } from '../world/Blocks.js';
 import { computeDrops } from './Items.js';
-import { colParts, patchColumn } from '../world/Sphere.js';
-import { D, BIOME, GRAVITY, cidx } from '../world/Constants.js';
+import { stepColumn } from '../world/Layout.js';
+import { wrap } from '../world/Grid.js';
+import { wrapDist, relTo } from './Wrap.js';
+import { D, BIOME, GRAVITY } from '../world/Constants.js';
 
 /** Cells from the axis inside which you are lifted rather than merely dragged. */
 const CORE_R = 3.0;
@@ -299,13 +301,14 @@ const SPAWN_BIOMES = new Set([
 ]);
 
 const _a = new THREE.Vector3();
-const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _rad = new THREE.Vector3();
 const _tan = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _foot = new THREE.Vector3();
-const _parts = { f: 0, i: 0, j: 0 };
+
+/** The one up. Shared, never written to. */
+const UP = new THREE.Vector3(0, 1, 0);
 
 /**
  * Is this column's surface under water?
@@ -343,18 +346,17 @@ export function siteTornado(game) {
   for (let n = 0; n < 4; n++) {
     const ang = Math.random() * Math.PI * 2;
     const dist = SPAWN_MIN + Math.random() * (SPAWN_MAX - SPAWN_MIN);
-    // Any two vectors perpendicular to up give a bearing; the player's own
-    // tangent frame is already one and is right here.
-    const fr = p.frame;
-    _a.copy(p.position)
-      .addScaledVector(_b.set(fr.ea[0], fr.ea[1], fr.ea[2]), Math.cos(ang) * dist)
-      .addScaledVector(_c.set(fr.eb[0], fr.eb[1], fr.eb[2]), Math.sin(ang) * dist);
+    // One gravity, so a bearing is just an angle in the world's own XZ plane
+    // and the player's tangent frame - which no longer exists - is not needed
+    // to build one. Wrapped, because a funnel sited a hundred cells east of a
+    // player near the map's edge is sited on the other side of the wrap.
+    _a.set(wrap(p.position.x + Math.cos(ang) * dist), p.position.y,
+      wrap(p.position.z + Math.sin(ang) * dist));
     const at = planet.cellAt(_a.x, _a.y, _a.z);
     if (!at) continue;
     const k = planet.surfaceK(at.col);
     if (k < 0) continue;
-    colParts(at.col, _parts);
-    const biome = planet.colBiome[cidx(_parts.f, _parts.i, _parts.j)];
+    const biome = planet.colBiome[at.col];
     if (!SPAWN_BIOMES.has(biome)) continue;
     // Not out of the sea. `surfaceK` returns the *bed* under water, so this is
     // the one test that stops a funnel forming on a lake floor.
@@ -436,14 +438,15 @@ export class Tornado {
     }
     if (k >= 0) this.k = k + 1;
     planet.centerOf(this.col, this.k, _foot);
-    // Half a cell down, so the visible funnel meets the ground rather than
-    // hovering over it.
-    const r = _foot.length() - 0.5;
     // The first seat has no bearing to keep: the constructor hands us a column
     // and nothing else.
     if (this.pos.lengthSq() < 1e-6) this.pos.copy(_foot);
-    this.up.copy(this.pos).normalize();
-    this.pos.copy(this.up).multiplyScalar(r);
+    // Height only, so the track the funnel has walked is kept. Half a cell down,
+    // so the visible funnel meets the ground rather than hovering over it. The
+    // cube did this as a length and a normalize, i.e. as a radius, which is the
+    // one shape of arithmetic that has no meaning on a flat map.
+    this.pos.y = _foot.y - 0.5;
+    this.up.copy(UP);
   }
 
   /**
@@ -465,7 +468,7 @@ export class Tornado {
 
     const p = this.game.player;
     if (p) {
-      const far = p.position.distanceTo(this.pos);
+      const far = wrapDist(p.position, this.pos);
       if (far > LEASH) { this.dead = true; return false; }
       this._pullPlayer(dt, p);
       // The ambience bed and `_updateAudio` both read `weather.wind` already, so
@@ -503,17 +506,11 @@ export class Tornado {
     this._bearing += this._turn * dt;
     if (Math.random() < dt * 0.12) this._turn = (Math.random() - 0.5) * 0.16;
     const planet = this.game.planet;
-    // Move in world space along the surface tangent, then re-seat into whatever
-    // column that landed in. Walking the (i, j) grid directly would be cheaper
-    // and would also peel sideways the moment the track crossed a face seam —
-    // the same trap `patchColumn` exists to avoid in Explosion.js.
-    //
-    // The funnel's own tangent basis: any two axes perpendicular to up.
-    _rad.set(Math.abs(this.up.y) > 0.9 ? 1 : 0, Math.abs(this.up.y) > 0.9 ? 0 : 1, 0);
-    _tan.copy(this.up).cross(_rad).normalize();
-    _rad.copy(_tan).cross(this.up).normalize();
-    _dir.copy(_tan).multiplyScalar(Math.cos(this._bearing))
-      .addScaledVector(_rad, Math.sin(this._bearing));
+    // The ground is a plane and up is +Y, so the bearing is an angle in XZ and
+    // the three cross products that used to build a tangent basis out of it are
+    // gone. Moving in world space rather than on the grid is kept, because the
+    // step is a twentieth of a cell and has to accumulate.
+    _dir.set(Math.cos(this._bearing), 0, Math.sin(this._bearing));
     // Advance the foot itself, not a scratch point beside it. A frame's step is
     // a twentieth of a cell and has to be able to accumulate across frames until
     // it is worth a column; stepping a copy and asking which column it landed in
@@ -521,6 +518,7 @@ export class Tornado {
     // the bearing this builds up — see the note there.
     const step = SPEED * dt * this.strength;
     this.pos.addScaledVector(_dir, step);
+    this.pos.x = wrap(this.pos.x); this.pos.z = wrap(this.pos.z);
     const at = planet.cellAt(this.pos.x, this.pos.y, this.pos.z);
     if (at && at.col !== this.col) {
       if (afloat(planet, at.col)) {
@@ -536,6 +534,7 @@ export class Tornado {
         // the beach, and the drawn funnel would slide away from the ground it is
         // standing on.
         this.pos.addScaledVector(_dir, -step);
+        this.pos.x = wrap(this.pos.x); this.pos.z = wrap(this.pos.z);
         this._bearing += Math.PI * (0.5 + Math.random() * 0.5);
         this._turn = (Math.random() - 0.5) * 0.16;
       } else this.col = at.col;
@@ -553,7 +552,7 @@ export class Tornado {
     // Distance from the AXIS, not from the foot: the funnel is a line, and a
     // player standing eight cells up a hillside beside it is eight cells away
     // horizontally whatever their altitude.
-    _a.copy(p.position).sub(this.pos);
+    relTo(_a, this.pos, p.position);
     const h = _a.dot(this.up);
     if (h < -3 || h > FUNNEL_H) { this._held = false; return; }
     _rad.copy(_a).addScaledVector(this.up, -h);
@@ -600,11 +599,10 @@ export class Tornado {
   /**
    * Tear out everything with roots inside the funnel.
    *
-   * The column sweep is copied from `Explosion.explode` and for the same reason:
-   * `patchColumn` extends the foot's own face coordinates rather than walking
-   * the grid, so a funnel standing on a face seam loses a handful of columns on
-   * one edge instead of folding through the seam and stripping a patch of ground
-   * on the far side of the planet.
+   * The column sweep is copied from `Explosion.explode` and, as there, it is a
+   * plain square of columns now: `stepColumn` wraps, the map has no seam to fold
+   * through, and the offsets cannot collide, so there is nothing left to dedupe
+   * or to extend a face's own coordinates for.
    */
   _shred() {
     if (this.strength < 0.25) return;
@@ -613,13 +611,9 @@ export class Tornado {
     const edits = [];
     const spoil = [];
     const N = Math.ceil(SHRED_R);
-    colParts(this.col, _parts);
-    const seen = new Set();
     for (let di = -N; di <= N; di++) {
       for (let dj = -N; dj <= N; dj++) {
-        const col = patchColumn(_parts.f, _parts.i, _parts.j, di, dj);
-        if (seen.has(col)) continue;
-        seen.add(col);
+        const col = stepColumn(this.col, di, dj);
         for (let dk = -SHRED_DOWN; dk <= SHRED_UP; dk++) {
           const k = this.k + dk;
           if (k < 0 || k >= D) continue;
@@ -630,7 +624,7 @@ export class Tornado {
           if (!b || b.hardness < 0 || b.hardness >= SHRED_HARDNESS) continue;
           if (b.submerged) continue;
           planet.centerOf(col, k, _c);
-          _a.copy(_c).sub(this.pos);
+          relTo(_a, this.pos, _c);
           const hh = _a.dot(this.up);
           if (hh < -SHRED_DOWN || hh > SHRED_UP + 2) continue;
           _rad.copy(_a).addScaledVector(this.up, -hh);

@@ -124,7 +124,8 @@
 import * as THREE from 'three';
 import { BLOCKS, ID, IS_DOOR } from '../world/Blocks.js';
 import { computeDrops } from './Items.js';
-import { colParts, patchColumn, cellIndex } from '../world/Sphere.js';
+import { stepColumn, cellIdx } from '../world/Layout.js';
+import { wrapDist, relTo } from './Wrap.js';
 import { D } from '../world/Constants.js';
 
 /** Cells out to which anything can be destroyed at all. */
@@ -152,7 +153,6 @@ const MAX_DROPS = 30;
 
 const _c = new THREE.Vector3();
 const _d = new THREE.Vector3();
-const _parts = { f: 0, i: 0, j: 0 };
 
 /**
  * Blow a hole in the world at `pos`.
@@ -171,24 +171,17 @@ export function explode(game, pos, cause = null) {
   const spoil = [];
 
   if (at) {
-    // `patchColumn` rather than `stepColumn`, and the reason is in Sphere.js:
-    // walking the grid answers in the *destination* face's frame once it has
-    // crossed a seam, so the far side of a wide patch peels off sideways and
-    // loses up to 23 of 49 columns to duplicates at radius three. Extending the
-    // epicentre's own face coordinates loses 5. A handful of missing columns on
-    // a seam is a crater a few cells shy on one edge, which nobody will ever
-    // see; a crater folded through a seam is a bug report.
-    //
-    // Deduped anyway, because both functions can hand back the same column
-    // twice near a corner and destroying a cell twice would drop it twice.
+    // The cube needed `patchColumn` here, and a paragraph explaining that
+    // walking the grid answers in the destination face's frame once it has
+    // crossed a seam, so a wide patch peeled off sideways and lost up to 23 of
+    // its 49 columns to duplicates. A flat map has one frame: a square of
+    // columns is a square of columns, `stepColumn` wraps, and no two offsets in
+    // the patch can name the same column, so the dedupe set is gone with the
+    // problem it was covering for.
     const N = Math.ceil(BLAST_R);
-    colParts(at.col, _parts);
-    const seen = new Set();
     for (let di = -N; di <= N; di++) {
       for (let dj = -N; dj <= N; dj++) {
-        const col = patchColumn(_parts.f, _parts.i, _parts.j, di, dj);
-        if (seen.has(col)) continue;
-        seen.add(col);
+        const col = stepColumn(at.col, di, dj);
         for (let dk = -N; dk <= N; dk++) {
           const k = at.k + dk;
           if (k < 0 || k >= D) continue;
@@ -199,7 +192,7 @@ export function explode(game, pos, cause = null) {
           // `_breakBlock` opens with, and for the same reason.
           if (!b || b.hardness < 0) continue;
           planet.centerOf(col, k, _c);
-          const dist = _c.distanceTo(pos);
+          const dist = wrapDist(_c, pos);
           if (dist > BLAST_R) continue;
           if (b.hardness > BLAST_POWER * (1 - dist / BLAST_R)) continue;
           edits.push({ col, k, id: 0 });
@@ -225,7 +218,7 @@ export function explode(game, pos, cause = null) {
   // the cells it adds are not in `spoil`, so completing a door never pays for
   // the half that was out of range.
   if (edits.length) {
-    const cell = (col, k) => cellIndex(col, k);
+    const cell = (col, k) => cellIdx(col, k);
     const have = new Set(edits.map((e) => cell(e.col, e.k)));
     for (const e of [...edits]) {
       if (!IS_DOOR[planet.at(e.col, e.k)]) continue;
@@ -302,7 +295,7 @@ export function hurtPlayer(game, pos, cause = null) {
   // the wrong distance by half a body. `eye` is the one the sight line below
   // has to use anyway, so both come off the same point.
   const eye = p.eye ?? p.position;
-  const dist = eye.distanceTo(pos);
+  const dist = wrapDist(eye, pos);
   if (dist >= HURT_R) return 0;
   let dmg = PEAK_DAMAGE * (1 - (dist / HURT_R) ** 2);
   if (!clearLine(game.planet, pos, eye)) dmg *= SHIELDED;
@@ -343,10 +336,10 @@ function blastMobs(game, pos, cause) {
   let hit = 0;
   for (const m of [...mobs.list]) {
     if (m === cause || m.released) continue;
-    const d = m.pos.distanceTo(pos);
+    const d = wrapDist(m.position, pos);
     if (d >= HURT_R) continue;
     let dmg = PEAK_DAMAGE * (1 - (d / HURT_R) ** 2);
-    if (!clearLine(game.planet, pos, m.pos)) dmg *= SHIELDED;
+    if (!clearLine(game.planet, pos, m.position)) dmg *= SHIELDED;
     dmg = Math.max(1, Math.round(dmg));
     mobs._damage(m, dmg);
     hit++;
@@ -364,7 +357,7 @@ function blastMobs(game, pos, cause) {
  * read than one with two callers and a flag.
  */
 function clearLine(planet, from, to) {
-  _d.copy(to).sub(from);
+  relTo(_d, from, to);
   const len = _d.length();
   if (len < 1e-3) return true;
   _d.multiplyScalar(1 / len);

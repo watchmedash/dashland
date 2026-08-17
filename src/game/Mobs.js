@@ -443,27 +443,42 @@ const MAX_MONSTERS = 13;
  */
 const MAX_MONSTERS_HOSTILE_FACE = 24;
 /**
- * How far out a monster may be placed on one of those faces.
+ * How far out a monster may be placed on the cinderlands.
  *
- * The cap is not what was keeping the cinderlands empty-looking, and neither
- * was the placement. Measured on seed 4242, standing on Pyre: `_findSpawnColumn`
- * returned a spot on 3000 of 3000 calls (4044 draws, rejected 442 on ground,
- * 589 submerged, 13 on range, nothing else), the cap filled to 24 inside a
- * hundred seconds, and `_spawnMonster` refused nothing at all. What the player
- * gets is the DENSITY: `spawnDist` fills the 20..120 ring evenly by area, so
- * 24 bodies over 14,000 units² of ground is one per 580, and walking a minute
- * across the face with all 24 alive left the nearest one a median 43.5 units
- * away, nothing within 30 for 63% of the seconds and nothing within 45 for
- * 47%. On the four ordinary faces that is fine - it is daylight and the ring
- * is full of wildlife you can see across it. Pyre has no daylight, no wildlife
- * and a monster's aggro range is 13, so everything past a torch is a body the
- * player will never learn is there.
+ * "What's with the pyre face? most of the times I go there no mobs/monsters
+ * visible" - the second time that has been reported, and NOT the same cause as
+ * the first. The first was the placement: `SPAWNABLE_GROUND` wanted grass, sand
+ * or snow and the face has none, so every attempt was refused. That fix holds.
+ * Measured on seed 4242, standing on Pyre: `_findSpawnColumn` returned a spot on
+ * 3000 of 3000 calls (4044 draws, 442 refused on ground, 589 submerged, 13 on
+ * range, nothing else), `_spawnMonster` refused nothing at all, and the cap
+ * filled to all 24.
  *
- * So the same 24 are given a smaller ring rather than more of them: 3.1x the
- * density, on the one face where the population IS the reason to go. The cap,
- * the roll, the aggro ranges and the four ordinary faces are all untouched.
+ * What is wrong now is the DENSITY. `spawnDist` fills the 20..120 ring evenly by
+ * area, so 24 bodies land over 43,982 units² of ground: 4000 placements had a
+ * median of 87.5 units, 2.1% inside 30 and 9.8% inside 45 - half a monster
+ * within thirty units of the player, at the cap. On the four ordinary faces
+ * that is fine, because it is daylight and the same ring holds 84 animals you
+ * can see across it. Pyre has no daylight and no wildlife at all, and a
+ * monster's aggro range is 13, so every body past torchlight is one the player
+ * never learns is there.
+ *
+ * So the same 24 get a smaller ring rather than more of them, and the radius is
+ * read off an ordinary face rather than picked: 84 animals plus 13 monsters
+ * over 43,982 units² is one walking body per 453, which is the density a
+ * player's sense of "there is something out here" was built on. 24 bodies at
+ * 453 each want 10,876 units², so the outer edge is sqrt(10876/pi + 20²) = 62.
+ *
+ * Measured again at 62, same column, same 4000 placements: median 47.1, 8.6%
+ * inside 30 and 44.9% inside 45. At the cap that is 2.1 monsters within thirty
+ * units instead of 0.5, and 22 of the 24 inside sixty - which is exactly the 22
+ * an ordinary face carries inside sixty by day.
+ *
+ * The cap, the roll, the aggro ranges, the husk and wildlife rings, the endgame
+ * shutoff and the other five faces are all untouched. This moves where the same
+ * 24 stand, and nothing else.
  */
-const MONSTER_FAR_HOSTILE_FACE = 70;
+const MONSTER_FAR_CINDER = 62;
 
 /**
  * How many magma slimes of any size may be abroad at once.
@@ -4672,7 +4687,7 @@ export class Mobs {
    * Grass column with headroom, or null.
    *
    * `far` is the outer edge of the ring and defaults to the horizon every other
-   * caller wants. Only the monster path passes one - see MONSTER_FAR_HOSTILE_FACE.
+   * caller wants. Only the monster path passes one - see MONSTER_FAR_CINDER.
    */
   _findSpawnColumn(nearCol, playerPos, far = this.spawnFar) {
     const p = this.planet;
@@ -5289,10 +5304,17 @@ export class Mobs {
       ? MAX_MONSTERS : MAX_MONSTERS_HOSTILE_FACE;
   }
 
-  /** ...and the ring that cap is spread over. See MONSTER_FAR_HOSTILE_FACE. */
+  /**
+   * ...and the ring that cap is spread over. See MONSTER_FAR_CINDER.
+   *
+   * The cinderlands alone, and deliberately NOT the same face test `_monsterCap`
+   * uses. The cap is about how hostile a dedicated face is and both of them are;
+   * this is about there being nothing else on the ground to see, and the cap has
+   * daylight and a wildlife budget of its own.
+   */
   _monsterFar(col) {
-    return FACE_ROLE[(col / (F * F)) | 0] === FACE_NORMAL
-      ? this.spawnFar : Math.min(this.spawnFar, MONSTER_FAR_HOSTILE_FACE);
+    return FACE_ROLE[(col / (F * F)) | 0] === FACE_CINDER
+      ? Math.min(this.spawnFar, MONSTER_FAR_CINDER) : this.spawnFar;
   }
 
   /**

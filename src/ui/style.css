@@ -941,6 +941,45 @@ button.ghost:active:not(:disabled) {
 .slot-sigil i:nth-child(2), .slot-sigil i:nth-child(4),
 .slot-sigil i:nth-child(5), .slot-sigil i:nth-child(6),
 .slot-sigil i:nth-child(8) { filter: hue-rotate(var(--sig-rot, 0deg)); }
+/* THE FACE, on a mount the colour of its world.
+   A save is a person, so the left column is a likeness rather than a diagram.
+   The portrait is the character's own skin texture, cropped to the front face
+   of the head cube: every authored atlas puts the head cross in the top-left
+   eighth, so the face is cell (1, 1) of an 8x8 grid and the crop is two lines
+   of arithmetic off one variable. Nothing new is loaded that the character
+   models do not already need. See `characterMark` in UI.js. */
+.slot-face {
+  --mk: 46px;
+  position: relative; flex: none;
+  width: var(--mk); height: var(--mk); border-radius: var(--r-md);
+  display: grid; place-items: center; overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(20, 12, 5, .78),
+    inset 0 0 0 1px rgba(255, 255, 255, .12),
+    0 1px 0 rgba(255, 255, 255, .6);
+}
+/* The world, still. The sigil's land gradient and the sigil's seeded hue, kept
+   as the mount rather than dropped with the picture it used to be: the row goes
+   on saying which planet at a glance while the face has the middle. Painted on
+   a layer of its own because the filter belongs to the land and would otherwise
+   run down through the portrait and recolour the character. */
+.slot-face::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(155deg, #63bd58, #2e8039 52%, #17491f);
+  filter: hue-rotate(var(--sig-rot, 0deg));
+}
+.slot-face i {
+  --av: 38px;
+  position: relative;
+  width: var(--av); height: var(--av); border-radius: calc(var(--r-md) - 2px);
+  /* Eight cells across the atlas, and the face is the second of them on the
+     second row. `pixelated`, because this is a flat-shaded skin blown up from
+     128px and smoothing it turns two crisp eyes into a smudge. */
+  background-size: calc(var(--av) * 8) calc(var(--av) * 8);
+  background-position: calc(var(--av) * -1) calc(var(--av) * -1);
+  image-rendering: pixelated;
+  box-shadow: 0 0 0 1px rgba(20, 12, 5, .55), 0 1px 3px rgba(0, 0, 0, .45);
+}
 /* An empty slot is the same square with nothing in it. */
 .slot-sigil.empty {
   width: 46px; height: 46px; border-radius: var(--r-md);
@@ -1006,15 +1045,29 @@ button.ghost:active:not(:disabled) {
    important, so half of what the eye counted down the column was Deletes. It
    is a cut tab now, and it only becomes a red key under the pointer that is
    about to press it. */
+/* The tab is a bin now, and the height is the row's rather than the text's: a
+   full-height cut edge down the side of the card reads as part of the same
+   piece of furniture, where a small centred lozenge floated beside it. Wide
+   enough for a thumb at 44px and no wider, because the width it does not take
+   is width the world's name keeps. */
 .panel .slot-del {
-  align-self: center; padding: 8px 11px; border-radius: var(--r-md);
-  font-size: var(--fs-2xs); font-weight: 700;
-  letter-spacing: var(--ls-cap); text-transform: uppercase;
+  align-self: stretch; flex: none;
+  width: 44px; padding: 0; border-radius: var(--r-md);
+  display: grid; place-items: center;
   color: var(--ink-faint); text-shadow: none;
   background: rgba(122, 94, 54, .08);
   box-shadow:
     inset 0 0 0 1px rgba(58, 38, 16, .3),
     inset 0 1px 0 rgba(255, 255, 255, .45);
+}
+/* Masked, not drawn, so the glyph is whatever colour the button is at the time
+   and the hover state needs no second copy of it. `currentColor` is what makes
+   quiet-ink to white-on-red one line instead of four. */
+.panel .slot-del i {
+  display: block; width: 19px; height: 19px;
+  background: currentColor;
+  -webkit-mask: var(--icon-trash) center / contain no-repeat;
+  mask: var(--icon-trash) center / contain no-repeat;
 }
 .panel .slot-del:hover:not(:disabled) {
   transform: none;

@@ -13,7 +13,9 @@ import {
   COIN_ITEM, buyPriceOf, sellPriceOf, canSell, buyFrom, sellTo, coinsOf, fulfilRequest, valueOf,
 } from '../game/Trade.js';
 import * as Character from '../player/Character.js';
-import { CharacterPicker, CHARACTER_IDS, characterUrl } from '../player/Character.js';
+import {
+  CharacterPicker, CHARACTER_IDS, characterUrl, characterTextureUrl,
+} from '../player/Character.js';
 import { Save } from '../game/Save.js';
 import { BIOME_COLORS, SEA_K } from '../world/Constants.js';
 import { colIndex, delta } from '../world/Grid.js';
@@ -205,6 +207,18 @@ const CRUMB = (on) => pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 
 const BUBBLE = (on) => pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8.6' fill='${on ? '#79c8f0' : '#223040'}' stroke='rgba(0,0,0,.45)' stroke-width='1.4'/><circle cx='9' cy='9' r='2.4' fill='rgba(255,255,255,.6)'/></svg>`);
 // Stamina had no glyph — it was a bare 2px sliver with nothing to name it.
 const STAMINA_ICON = pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13.4 2.2 4.6 13.6h5.3l-1.1 8.2 9-11.6h-5.4l1-8z' fill='#ffcf6b' stroke='rgba(0,0,0,.5)' stroke-width='1.3' stroke-linejoin='round'/></svg>`);
+
+/**
+ * The bin on the slot rows. Drawn, like every other glyph in this file, rather
+ * than typed: an emoji is whichever bin the platform feels like, and at 18px
+ * the difference between a lid and a hat is two pixels.
+ *
+ * Solid white on purpose. It is used as a `mask-image` and not as a picture, so
+ * the button's own colour paints through it and the hover state — quiet ink
+ * going to white on red — needs no second copy of the glyph. Same technique as
+ * the thumb buttons.
+ */
+const TRASH = pip(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M9.4 2.6h5.2a1.2 1.2 0 0 1 1.2 1.2v1.1h4.4a1 1 0 0 1 0 2h-.9l-1 13a2.2 2.2 0 0 1-2.2 2.1H7.9a2.2 2.2 0 0 1-2.2-2.1l-1-13h-.9a1 1 0 0 1 0-2h4.4V3.8a1.2 1.2 0 0 1 1.2-1.2zm.8 2.3h3.6v-.6h-3.6zM6.7 6.9l1 12.9a1 1 0 0 0 1 .9h6.6a1 1 0 0 0 1-.9l1-12.9zM9.9 9a.9.9 0 0 1 .9.9v7.4a.9.9 0 0 1-1.8 0V9.9a.9.9 0 0 1 .9-.9zm4.2 0a.9.9 0 0 1 .9.9v7.4a.9.9 0 0 1-1.8 0V9.9a.9.9 0 0 1 .9-.9z' fill='#fff'/></svg>`);
 
 // --- minimap ----------------------------------------------------------------
 
@@ -473,6 +487,19 @@ function worldSigil(seed, num) {
   if (seed == null) {
     return `<span class="slot-mark"><span class="slot-sigil empty"></span><b>${num}</b></span>`;
   }
+  return `<span class="slot-mark">`
+    + `<span class="world-mark slot-sigil" style="--sig-rot:${seedHue(seed)}deg">`
+    + '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>'
+    + `</span><b>${num}</b></span>`;
+}
+
+/**
+ * The seed, as a hue rotation for the land. Split out of `worldSigil` because
+ * the slot rows now carry it on a different piece of furniture; the comment
+ * above is still the whole argument for the avalanche and for the 92 degree
+ * arc, and there must go on being exactly one of it.
+ */
+function seedHue(seed) {
   // Avalanched before it is taken modulo, with murmur3's finalizer, because
   // consecutive seeds are a real case - the debug worlds, and anything seeded
   // off a counter - and anything short of a real mix stays affine through the
@@ -482,10 +509,42 @@ function worldSigil(seed, num) {
   h ^= h >>> 16; h = Math.imul(h, 2246822507) >>> 0;
   h ^= h >>> 13; h = Math.imul(h, 3266489909) >>> 0;
   h = (h ^ (h >>> 16)) >>> 0;
+  return (h % 92) - 46;
+}
+
+/**
+ * Who the save is, in 46 pixels.
+ *
+ * The sigil that used to sit here was a picture of the *world*, and the owner's
+ * answer to it is the right one: a save is a person. Ten rows of abstract 3x3
+ * plus are ten diagrams to be decoded; ten faces are recognised without being
+ * read, which is the entire job of the left column in a list you scan.
+ *
+ * The likeness is the character's own skin, cropped to the front face of the
+ * head cube. Every one of the eighteen textures is the same authored atlas —
+ * the head cross occupies the top-left eighth, and the face is the cell at
+ * (1, 1) of an 8x8 grid — so one pair of background rules serves all of them
+ * and nothing new is drawn, packaged or downloaded that the game did not
+ * already ship. A rendered 3D head per row was the alternative and it is ten
+ * GLB loads and ten draw calls for a thumbnail; a hand-drawn silhouette per id
+ * was the other, and it would be fifteen new drawings that are less like the
+ * character than the character's own face is.
+ *
+ * The seed hue is not lost with the sigil. It moves to the mount the portrait
+ * sits on, so the row still says which world at a glance and the face still
+ * wins the middle of the square. The hue filter is on the mount's own painted
+ * layer and not on the box, or it would tint the face along with it.
+ *
+ * @param {string} id  the character the save recorded
+ * @param {number} seed the world's seed, for the mount
+ * @param {string} num "Slot 4"
+ */
+function characterMark(id, seed, num) {
+  const key = CHARACTER_IDS.includes(id) ? id : CHARACTER_IDS[0];
   return `<span class="slot-mark">`
-    + `<span class="world-mark slot-sigil" style="--sig-rot:${(h % 92) - 46}deg">`
-    + '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>'
-    + `</span><b>${num}</b></span>`;
+    + `<span class="slot-face" style="--sig-rot:${seedHue(seed)}deg">`
+    + `<i style="background-image:url('${characterTextureUrl(key)}')"></i></span>`
+    + `<b>${num}</b></span>`;
 }
 
 export class UI {
@@ -1175,7 +1234,7 @@ export class UI {
       open.disabled = !meta && !newGame;
       const num = `Slot ${i + 1}`;
       if (meta) {
-        open.innerHTML = worldSigil(meta.seed, num)
+        open.innerHTML = characterMark(meta.character, meta.seed, num)
           + `<span class="slot-who">${characterName(meta.character)}</span>`
           + `<span class="slot-when">Day ${meta.day || 1}, ${playedFor(meta.playtime)} played</span>`
           // The time, and not the word "Saved" in front of it ten times. The
@@ -1202,7 +1261,18 @@ export class UI {
       if (meta) {
         const del = document.createElement('button');
         del.className = 'slot-del';
-        del.textContent = 'Delete';
+        // A glyph, not the word. The word was as wide as a name and stood on
+        // every filled row, so a column of ten worlds read as a column of ten
+        // Deletes. The bin says the same thing in a tenth of the space and in
+        // the one language every list of files already speaks. The confirm
+        // behind it is untouched: this is the same button, said shorter.
+        del.innerHTML = '<i></i>';
+        // The glyph travels as a custom property so the stylesheet keeps the
+        // shape of the button and this file keeps the drawing, which is where
+        // every other drawn glyph in the game already lives.
+        del.style.setProperty('--icon-trash', TRASH);
+        del.setAttribute('aria-label', `Delete slot ${i + 1}`);
+        del.title = 'Delete';
         del.onclick = (e) => { e.stopPropagation(); this._deleteSlot(i, meta); };
         row.appendChild(del);
       }

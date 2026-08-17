@@ -153,14 +153,29 @@ export const VERDANT_LINGER = 20;
 /**
  * The ring the night is placed on, in world units.
  *
- * The near edge is outside a husk's own 34-cell aggro ring on purpose: a body
- * that arrives already hunting you has arrived *at* you, and the jungle's whole
- * contribution is that things reach you before you see them rather than the
- * other way round. The far edge is inside the despawn ring with room to spare,
- * or the fill would spend its budget on bodies the next frame releases.
+ * Both numbers were measured rather than reasoned, and the first draft had them
+ * at 36 and 100 on the argument that a body arriving inside a husk's 34-cell
+ * aggro ring has arrived *at* you. Played, that was a dead night: twenty-one
+ * bodies up, and over seventy-two seconds standing still in the middle of them
+ * the nearest ever came was 51 units and not one of the twenty-one ever
+ * acquired the player at all.
+ *
+ * Two things caused it and the ring is the answer to both. Twenty-one bodies
+ * spread over a disc of radius 100 is one every 1,400 square units, which a
+ * random wander does not close. And the ordinary sight test - unlike the
+ * witnessing in `Folk.js` - counts leaves and trunks as solid, so on the one
+ * face in the game with a canopy the thing that keeps you from seeing a husk
+ * also keeps the husk from seeing you. At 22 to 66 the same twenty-one bodies
+ * sit at four times the density and start inside the aggro ring, which is what
+ * "the most dangerous night in the game" has to mean on a face where nothing
+ * can see anything.
+ *
+ * 22 rather than SPAWN_MIN_DIST's 20 only so it is visibly its own number. What
+ * actually keeps an arrival off the screen is `_placeUnseen`, which is exact;
+ * the distance is a floor under it, not the guarantee.
  */
-export const VERDANT_NIGHT_NEAR = 36;
-export const VERDANT_NIGHT_FAR = 100;
+export const VERDANT_NIGHT_NEAR = 22;
+export const VERDANT_NIGHT_FAR = 66;
 
 /**
  * Candidate columns tried per body. `FOLK_TRIES`' number and for its reason:

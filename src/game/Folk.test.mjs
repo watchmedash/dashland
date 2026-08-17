@@ -457,8 +457,12 @@ const fakePlayer = (x, y) => ({
   // below it, `_unobserved`'s "too close counts as unobserved" branch would
   // reopen and a neighbour could blink out at arm's length.
   ok(VERDANT_HIDE > 24, 'the hide floor is outside the stalker vanish ring');
-  ok(VERDANT_NIGHT_NEAR > 34, 'and the night arrives outside a husk\'s aggro ring');
-  ok(VERDANT_NIGHT_FAR > VERDANT_NIGHT_NEAR, 'on a ring with width to it');
+  // Inside a husk's 34-cell aggro ring, and that is the measured decision
+  // rather than an oversight - see the note on the constant. Outside
+  // SPAWN_MIN_DIST, which is the floor every other spawner in the game keeps.
+  ok(VERDANT_NIGHT_NEAR > 20, 'the night arrives no nearer than any other spawn');
+  ok(VERDANT_NIGHT_NEAR < 34, '...and inside a husk\'s aggro ring, so it comes for you');
+  ok(VERDANT_NIGHT_FAR > VERDANT_NIGHT_NEAR * 2, 'on a ring with real width to it');
 
   // The draw, run out to a full night.
   let husks = 0, cinders = 0, run = 0, worstRun = 0;

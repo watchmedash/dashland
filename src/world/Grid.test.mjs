@@ -10,6 +10,7 @@ import {
   SEALED, CROSS, isSealed, START_FACE, WALL_T,
   wrap, colIndex, cellIndex, colDecode, faceAt, localAt, faceOrigin,
   faceStep, isDivider, isWall, portalsOf, allPortals, delta, dist2,
+  SEA_K, worldOf, cellOf,
 } from './Grid.js';
 
 let pass = 0, fail = 0;
@@ -247,6 +248,28 @@ eq(dist2(1, 1, W - 1, W - 1), 8, 'distance across the wrap is short');
   // the far corner of the map is not far at all, which is the whole point
   const d = Math.sqrt(dist2(0, 0, W - 1, 0));
   ok(d === 1, `west edge to east edge is one step, got ${d}`);
+}
+
+// --- world space -----------------------------------------------------------
+{
+  const w = worldOf(10, 20, 30);
+  ok(w.x === 10.5 && w.y === 30.5 && w.z === 20.5,
+    `map (10,20,k30) is world (${w.x},${w.y},${w.z}); map y must become world Z and k world Y`);
+  const c = cellOf(w.x, w.y, w.z);
+  ok(c.x === 10 && c.y === 20 && c.k === 30, `world round trip: ${c.x},${c.y},${c.k}`);
+  // up is +Y and nothing else
+  const above = cellOf(w.x, w.y + 1, w.z);
+  ok(above.k === 31 && above.x === 10 && above.y === 20, 'one metre up is one layer up');
+  // horizontal wraps, vertical does not
+  const off = cellOf(-0.5, 5.5, -0.5);
+  ok(off.x === W - 1 && off.y === W - 1, 'world position west of the origin wraps');
+  eq(cellOf(0.5, -3.5, 0.5).k, -4, 'below the world stays negative rather than wrapping');
+  // every corner of a cell resolves to that cell
+  for (const dx of [0.01, 0.99]) for (const dy of [0.01, 0.99]) for (const dk of [0.01, 0.99]) {
+    const q = cellOf(7 + dx, 3 + dk, 9 + dy);
+    ok(q.x === 7 && q.y === 9 && q.k === 3, `corner ${dx},${dy},${dk} stays in its cell`);
+  }
+  eq(SEA_K, 33, 'sea level layer');
 }
 
 console.log(`${pass} passed, ${fail} failed`);

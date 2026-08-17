@@ -183,3 +183,38 @@ export function dist2(ax, ay, bx, by) {
   const dx = delta(ax, bx), dy = delta(ay, by);
   return dx * dx + dy * dy;
 }
+
+// --- world space -----------------------------------------------------------
+//
+// THE AXIS CONVENTION, and it is fixed here so that no two files can disagree
+// about it. The cube had six of these and reconciling them was most of the
+// pain; there is exactly one now.
+//
+//   map x  ->  world X
+//   layer k -> world Y, and UP IS +Y, everywhere, on every face
+//   map y  ->  world Z
+//
+// So a cell's centre is `(x + 0.5, k + 0.5, y + 0.5)`. Layer 0 sits at world Y
+// 0.5 and there is no radius, no R_MIN and no direction anywhere in it.
+//
+// Note the deliberate name clash: the map's `y` is world Z, not world Y. It is
+// spelled that way because the map is a map and its axes are x and y on the
+// owner's illustration, while three.js insists up is Y. Every conversion goes
+// through the two helpers below rather than being written out by hand.
+
+/** Sea level, as a layer. The cube's R_SEA 208 against R_MIN 175. */
+export const SEA_K = 33;
+
+/** World-space centre of a cell. */
+export function worldOf(x, y, k, out = { x: 0, y: 0, z: 0 }) {
+  out.x = x + 0.5; out.y = k + 0.5; out.z = y + 0.5;
+  return out;
+}
+
+/** The cell a world-space point is in. Wraps x and z; k is NOT wrapped. */
+export function cellOf(wx, wy, wz, out = { x: 0, y: 0, k: 0 }) {
+  out.x = wrap(Math.floor(wx));
+  out.y = wrap(Math.floor(wz));
+  out.k = Math.floor(wy);
+  return out;
+}

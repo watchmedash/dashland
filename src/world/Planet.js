@@ -1,44 +1,42 @@
-// Main-thread view of the cubesphere: a mirror of the voxel array for physics
-// and raycasting, plus the chunk meshes streamed in from the worker.
+// Main-thread view of the flat map: a mirror of the voxel array for physics and
+// raycasting, plus the chunk meshes streamed in from the worker.
+//
+// THE AXIS CONVENTION lives in Grid.js and is not restated here. In short: map
+// x is world X, layer k is world Y and up is +Y everywhere, map y is world Z, a
+// cell's centre is `(x + 0.5, k + 0.5, y + 0.5)`. Storage is `col * D + k` with
+// `col = x * W + y`, column major, and both map axes wrap.
+//
+// What that deletes, against the cube this replaces: the fold, `normalizeCell`,
+// `cellWrite` and the Chebyshev ownership rule, `COL_BASE`/`COL_STEP` (a column
+// is contiguous now, so the base is `col * D` and the step is 1), the per-face
+// normal used as a ray fallback, and `centerOf` as a direction times a radius.
 
 import * as THREE from 'three';
 import {
-  F, D, R_MIN, COLUMNS, CELLS, cidx, chunkIdx, CHUNK_T, CHUNK_K, CK,
-  NUM_REGIONS, REGION_COLS, REGION_VOXELS, regionOfCol, regionColumns,
-} from './Constants.js';
-import {
-  worldToCell, centerDir, cellCenterPos, cellIndex, COL_BASE, COL_STEP, FACE_N,
-} from './Sphere.js';
+  W, D, COLUMNS, CELLS, CHUNK_T, CHUNK_K, CK,
+  NUM_REGIONS, REGION_COLS, regionOfCol, regionColumns, chunkIdx, contCell,
+} from './Layout.js';
+import { wrap } from './Grid.js';
 import {
   IS_SOLID, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID } from './Mesher.js';
 
-const _cell = { f: 0, ci: 0, cj: 0, ck: 0, r: 0 };
-const _p = [0, 0, 0];
+const _cell = { cx: 0, cy: 0, ck: 0 };
 
 /**
  * Drop a vertex buffer's CPU copy once the driver has taken it.
  *
  * Chunk geometry is written once by the mesher, uploaded once, and never read
- * on this side again: nothing in `src/` touches a chunk's attributes after
- * `applyChunk` builds them (the only `geometry.attributes` reads in the game
- * are the highlight box and the fishing line, neither of which is chunk
- * geometry, and the GTAO cutout proxy asks whether `aux` *exists*, not what is
- * in it). The raycast marches `this.blocks`, not triangles, and a changed chunk
- * is remeshed from scratch rather than patched in place — so the array sitting
- * behind each attribute is a duplicate of what is already in VRAM. Measured on
- * a settled 2 666-mesh view: 21 328 buffers, 90 bytes per vertex (84 of
- * attributes plus 6 of index) over 2 839 896 vertices, 243.8 MiB of main heap
- * that nothing would ever read.
+ * on this side again: the raycast marches `this.blocks`, not triangles, and a
+ * changed chunk is remeshed from scratch rather than patched in place. Measured
+ * on a settled 2 666-mesh view that was 243.8 MiB of main heap that nothing
+ * would ever read.
  *
  * The price is a re-mesh if the WebGL context is ever lost, because the arrays
- * needed to re-upload are gone. Worth being plain about it: this game has no
- * context-loss handling at all today — there is no `webglcontextlost` or
- * `webglcontextrestored` listener anywhere in the source — so a lost context
- * already ends the session, with or without this. It is a cost to pay when
- * somebody writes that handler, not one being incurred now.
+ * needed to re-upload are gone. This game has no context-loss handling at all,
+ * so a lost context already ends the session with or without this.
  */
 function discardArray() { this.array = null; }
 
@@ -46,67 +44,36 @@ function discardArray() { this.array = null; }
  * Half-thickness, in cells, given to a cross plant's quads by the raycast.
  *
  * `emitCross` builds two flat quads through the middle of the cell: one
- * spanning the i axis and standing at the middle of j, the other spanning j and
- * standing at the middle of i, both the full height of the cell. In continuous
- * cell coordinates that is exactly the two planes `frac(ci) = 0.5` and
- * `frac(cj) = 0.5` — which is the whole reason this test lives in cell space
- * rather than world space. The planet is a cubesphere: those "planes" are
- * curved sheets in world space and no world-axis-aligned box describes them,
- * but `worldToCell` has already done that mapping for the marcher, so the test
- * is two subtractions on numbers we are holding anyway.
+ * spanning x and standing at the middle of y, the other spanning y and standing
+ * at the middle of x, both the full height of the cell. In cell coordinates
+ * that is exactly the two planes `frac(cx) = 0.5` and `frac(cy) = 0.5`.
  *
- * A true ray/quad intersection was considered and rejected. The marcher is a
- * sampler, not a DDA — it has no entry and exit point for the cell to solve
- * between, and cell space along the ray is not linear, so an "exact" solve
- * would need its own root-find per plant. This is cast every frame for the
- * crosshair label, so instead the zero-thickness quads are given a thickness
- * and the existing samples are asked whether any of them land in it. At a step
- * of 0.045 and a cell arc near 0.95 world units, 0.15 cells is about six
- * samples deep at the worst (perpendicular) incidence, so a plant is never
- * missed; a grazing ray only spends longer inside.
+ * The marcher enters a cell once and would otherwise never sample either plane,
+ * so a cross cell is the one case where the DDA stops being a DDA and walks the
+ * segment through the cell in small steps. At 0.045 and a cell one unit across,
+ * 0.10 is about four samples deep at the worst (perpendicular) incidence, so a
+ * plant is never missed; a grazing ray only spends longer inside.
  *
  * This is only the *slab*, though, and a slab is not a plant. Two things used
- * to be wrong with stopping here, and both were reported from the field —
- * "those transparent parts is blocking the crosshair", from a player trying to
- * name something behind a tuft of grass:
+ * to be wrong with stopping here, and both were reported from the field -
+ * "those transparent parts is blocking the crosshair":
  *
  *  - The *texture* was ignored, so the transparent gaps within a plant's own
  *    quad counted as the plant. Measured on the baked atlas, `tall_grass` fills
- *    17.6% of its tile and reaches only two thirds of the way up it, so the
- *    picker was claiming most of a cell of empty sky for every tuft. The gaps
- *    are the whole complaint, and they are now read straight off the tile's
- *    alpha — see `setPlantMasks`. This comment used to argue that sampling the
- *    atlas per step was "far past what a per-frame label is worth"; that
- *    judgement was made without measuring either side of it. It is one byte
- *    read off a 1 KB array per step.
+ *    17.6% of its tile and reaches only two thirds of the way up it. The gaps
+ *    are read straight off the tile's alpha now - see `setPlantMasks`.
  *
  *  - Two thirds of the plants on this planet are not billboards at all. The
  *    flowers, the sixteen land flora, the reef and the six modelled crops are
  *    drawn as WAM model instances and the mesher emits no quad for them, so the
- *    plus prism above was never even the right *family* of shape for them: a
- *    clover is a third of a cell tall and a third across, and the whole cell is
- *    eight times its footprint. Those take a cylinder measured off the model
- *    itself instead — see `plantBox`.
+ *    plus prism was never even the right *family* of shape: a clover is a third
+ *    of a cell tall and the whole cell is eight times its footprint. Those take
+ *    a cylinder measured off the model instead - see `plantBox`.
  *
  * Both shapes are optional. Before the atlas has decoded and the models have
- * loaded there is nothing to consult, and the plus prism below is what a plant
- * gets; it is forgiving rather than tight, which is the right way round for a
+ * loaded there is nothing to consult, and the plus prism is what a plant gets;
+ * it is forgiving rather than tight, which is the right way round for a
  * fallback.
- *
- * The half-thickness came down with the texture test, from 0.15 to 0.10. It is
- * now only depth — how far either side of a zero-thickness quad a sample still
- * counts — because the silhouette is the mask's job, and 0.10 is still 4.2
- * samples deep at the worst incidence.
- *
- * What this is worth, measured. Casting one ray per screen pixel over an 80x45
- * grid from standing height, the share of the whole screen that named a plant
- * rather than what was behind it: meadow 21.8% -> 11.2%, plains 33.9% -> 21.8%,
- * tundra 10.7% -> 3.8%, savanna 6.8% -> 5.2%. Against the plant's own drawn
- * silhouette, one plant on cleared ground and the frame diffed against the same
- * frame with the cell set to air, the picker claimed 2.1x the pixels a tuft of
- * grass covers and 8.4x a clover's; it now claims 1.4x and 2.4x. Aimed at the
- * plant instead of past it, every plant tested is still picked and broken from
- * one, two and three cells away, over a two-degree cone of aim error.
  */
 const CROSS_HALF = 0.10;
 
@@ -124,16 +91,16 @@ function maskCol(u, n) {
 }
 
 /** Is this sample point inside the plant that is drawn here? See `CROSS_HALF`. */
-function insideCross(id, c, i, j) {
-  const di = c.ci - i - 0.5, dj = c.cj - j - 0.5;
-  const dk = c.ck - Math.floor(c.ck);
+function insideCross(id, cx, cy, ck, x, y) {
+  const di = cx - x - 0.5, dj = cy - y - 0.5;
+  const dk = ck - Math.floor(ck);
 
   // A modelled plant: its own bounding cylinder, standing on the cell floor.
   const box = plantBox(id);
   if (box) return dk <= box.top && di * di + dj * dj <= box.r2;
 
-  const near_i = Math.abs(di) <= CROSS_HALF;   // near the quad that spans j
-  const near_j = Math.abs(dj) <= CROSS_HALF;   // near the quad that spans i
+  const near_i = Math.abs(di) <= CROSS_HALF;   // near the quad that spans y
+  const near_j = Math.abs(dj) <= CROSS_HALF;   // near the quad that spans x
   if (!near_i && !near_j) return false;
 
   const mask = plantMask(id);
@@ -144,12 +111,18 @@ function insideCross(id, c, i, j) {
   // cell. That is the row a grass tile is empty in.
   let row = ((1 - dk) * N) | 0;
   if (row < 0) row = 0; else if (row >= N) row = N - 1;
-  // The quad spanning i is the one standing at the middle of j, so it is the
-  // one a sample near `dj = 0` is on, and `di` is the distance along it.
   if (near_j && mask[row * N + maskCol(di, N)]) return true;
   if (near_i && mask[row * N + maskCol(dj, N)]) return true;
   return false;
 }
+
+/** How finely a cross plant's cell is sampled. See `CROSS_HALF`. */
+const CROSS_STEP = 0.045;
+
+/** The six axis-aligned face normals, in the DDA's axis order (X, Y, Z). */
+const AXIS_N = [
+  [1, 0, 0], [0, 1, 0], [0, 0, 1],
+];
 
 export class Planet {
   constructor(materials) {
@@ -157,10 +130,9 @@ export class Planet {
     this.colBiome = new Uint8Array(COLUMNS);
     /**
      * Sparse side-table for directional blocks: cell index (`col * D + k`, the
-     * same indexing `blocks` uses) → facing 0..3. Only a handful of cells are
-     * ever in here, so none of the hot paths — mesher, lighting, physics,
-     * raycast — pay for it, and packing facing bits into the block byte (which
-     * would put a mask in all of them) is avoided.
+     * same indexing `blocks` uses) -> facing 0..3. Only a handful of cells are
+     * ever in here, so none of the hot paths pay for it, and packing facing
+     * bits into the block byte would put a mask in all of them.
      */
     this.facing = new Map();
     this.materials = materials;
@@ -174,38 +146,34 @@ export class Planet {
     this.liquidRoot.renderOrder = 6;
     this.root.add(this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot);
     this.meshes = new Map();
+    /**
+     * Kept, and it is a zero vector that means nothing.
+     *
+     * `Sky.update` still takes a planet centre because the cube had one. A flat
+     * map has no centre and no radial anything, so this is the origin and the
+     * sky should stop asking for it. Integration point, in `main.js`.
+     */
     this.center = new THREE.Vector3(0, 0, 0);
     /**
      * The mirror is full-sized from the start but only partly filled.
      *
-     * The worker builds the planet a region at a time and posts each one over
-     * as it is made, so `blocks` is authoritative only where `live` says it is.
-     * Everywhere else it is zeroes, which reads as air — and air is exactly the
+     * The worker builds the world a region at a time and posts each one over as
+     * it is made, so `blocks` is authoritative only where `live` says it is.
+     * Everywhere else it is zeroes, which reads as air - and air is exactly the
      * wrong default for physics, because the player would walk off a cliff into
      * a region that has not been built rather than onto ground that has not
-     * arrived yet. `liveAt` is what the few places that could be asked about
-     * ungenerated ground use to tell the two apart; everything else is safe
-     * because the streamer keeps a hundred and fifty units of built world
-     * around the player at all times and nothing in the game reaches that far.
+     * arrived yet.
      */
     this.live = new Uint8Array(NUM_REGIONS);
     /**
      * Which regions have had a byte written into them, as distinct from `live`,
-     * which is which have been *generated*.
-     *
-     * They are nearly the same set and must not be conflated: `live` is what
-     * physics consults to tell built ground from ground that has not arrived,
-     * and marking a region live because something wrote one voxel into it would
-     * be a lie in exactly the direction that walks the player off a cliff. This
-     * is only ever asked "is any of this region non-zero", which is what
-     * `resetWorld` needs and nothing else does.
-     *
-     * Maintained in the two places that write `blocks` and nowhere else —
-     * `applyRegions` and `setAt`. Nothing outside this file touches the array:
-     * every `planet.blocks[...]` in `src/` is a read.
+     * which is which have been *generated*. They must not be conflated: marking
+     * a region live because something wrote one voxel into it would be a lie in
+     * exactly the direction that walks the player off a cliff. This is only ever
+     * asked "is any of this region non-zero", which is what `resetWorld` needs.
      */
     this._written = new Uint8Array(NUM_REGIONS);
-    /** Height field for the whole planet — cheap, eager, and always complete. */
+    /** Height field for the whole map - cheap, eager, and always complete. */
     this.colHeight = new Float32Array(COLUMNS);
   }
 
@@ -217,22 +185,19 @@ export class Planet {
   }
 
   /**
-   * The lowest worldgen ground radius under each chunk footprint, so the
-   * streamer can tell a buried chunk from one on the skin of the planet.
+   * The lowest worldgen ground layer under each chunk footprint, so the
+   * streamer can tell a buried chunk from one on the surface.
    *
-   * A chunk footprint is exactly a region's footprint — `chunkIdx` is
-   * `regionIdx * CK + ck` — so this is one float per region, 5 046 of them,
-   * built once from a height field that arrives complete before any voxel does.
-   * Taking the *minimum* over the 256 columns rather than the mean is the safe
-   * direction: a footprint that straddles a canyon rim reports the canyon floor,
-   * so the wall the player can see across the gorge is never called buried.
+   * A chunk footprint is exactly a region's footprint, so this is one float per
+   * region, built once from a height field that arrives complete before any
+   * voxel does. Taking the *minimum* over the 256 columns rather than the mean
+   * is the safe direction: a footprint that straddles a canyon rim reports the
+   * canyon floor, so the wall the player can see across the gorge is never
+   * called buried.
    *
-   * `colHeight` is the terrain surface before caves are carved and before
-   * anything is stamped on top of it. Both of those errors point the same, safe
-   * way. Trees, ruins and player builds stand *above* it, so they only make this
-   * an underestimate of where the real surface is, which classifies fewer chunks
-   * as buried. Caves cut *below* it, and cave walls are precisely the geometry
-   * this is here to find.
+   * `colHeight` is a LAYER now, not a radius. It is the terrain surface before
+   * caves are carved and before anything is stamped on top of it, and both of
+   * those errors point the same, safe way.
    */
   _buildFootprintFloor() {
     const floor = this._footFloor || (this._footFloor = new Float32Array(NUM_REGIONS));
@@ -249,43 +214,39 @@ export class Planet {
   /**
    * Is this chunk entirely under the ground of its own footprint?
    *
-   * "Entirely" means its top face, `R_MIN + (ck + 1) * CHUNK_K`, is still a
-   * whole chunk's depth below the lowest column in it — so there is always at
-   * least one fully built chunk of geometry between the lowest worldgen ground
-   * over a footprint and the first chunk this will call buried. The streamer
-   * gives these a much shorter leash; see `_streamChunks`.
+   * "Entirely" means its top face is still a whole chunk's depth below the
+   * lowest column in it, so there is always at least one fully built chunk of
+   * geometry between the lowest ground over a footprint and the first chunk
+   * this will call buried.
    */
   chunkBuried(id) {
     const floor = this._footFloor;
     if (!floor) return false;
     const ck = id % CK;
-    return R_MIN + (ck + 1) * CHUNK_K < floor[(id - ck) / CK] - CHUNK_K;
+    return (ck + 1) * CHUNK_K < floor[(id - ck) / CK] - CHUNK_K;
   }
 
   /**
    * Wipe the mirror between worlds. The arrays are kept; only the data goes.
    *
-   * Region by region rather than `blocks.fill(0)` over the whole array, and the
-   * reason is residency rather than the memset. The mirror is 122 MB of which a
-   * session touches the regions it has actually streamed — about 10 MB after a
-   * first load — and a full-array fill writes every page of it, so the process
-   * holds the whole thing resident for the rest of the run whatever the player
-   * does. Measured on this machine, writing one byte per 4 KB page of an array
-   * this size costs 129 MB of working set. This runs on every new game and every
-   * save load, so it was not an edge case: it was the reason the mirror was
-   * always fully resident.
+   * Region by region rather than `blocks.fill(0)`, and the reason is residency
+   * rather than the memset. The mirror is 137 MB of which a session touches the
+   * regions it has actually streamed, and a full-array fill writes every page of
+   * it, so the process holds the whole thing resident for the rest of the run
+   * whatever the player does.
    *
    * Exact, not an optimisation that mostly holds. `_written` is set by both
    * writers of `blocks` and by nothing else, so a region it does not name has
-   * never been written since the last reset and is still the zeroes the array
-   * was allocated with.
+   * never been written since the last reset.
    */
   resetWorld() {
     const tmp = new Int32Array(REGION_COLS);
     for (let rid = 0; rid < NUM_REGIONS; rid++) {
       if (!this._written[rid]) continue;
       regionColumns(rid, tmp);
-      // Sixteen contiguous runs, not 256, for the reason `applyRegions` gives.
+      // Sixteen contiguous runs, not 256: a region's columns sharing an x are
+      // consecutive and storage is column major, so a run of CHUNK_T columns is
+      // one run of CHUNK_T * D cells.
       for (let row = 0; row < CHUNK_T; row++) {
         const base = tmp[row * CHUNK_T] * D;
         this.blocks.fill(0, base, base + CHUNK_T * D);
@@ -299,24 +260,23 @@ export class Planet {
   /**
    * Copy freshly generated regions into the mirror.
    *
-   * A region's 256 columns are sixteen contiguous runs in the block array — the
-   * ones sharing an `i` are consecutive — so this is sixteen copies per region
-   * rather than 256. Both ends of the wire pack it the same way.
+   * The wire format is `(column, layer)` packed, which is now the same order
+   * storage uses, so each of the sixteen runs is a straight `set` rather than
+   * the scatter the cube needed.
    * @param {(rid:number) => void} onRegion called once per region, after it lands
    */
   applyRegions(ids, data, onRegion) {
     const tmp = new Int32Array(REGION_COLS);
+    const RUN = CHUNK_T * D;
     for (let n = 0; n < ids.length; n++) {
       const rid = ids[n];
       regionColumns(rid, tmp);
-      // The wire format is still (column, layer) packed; storage is not, so
-      // this is a scatter rather than a contiguous set.
-      let o = n * REGION_VOXELS;
-      for (let c = 0; c < REGION_COLS; c++) {
-        const col = tmp[c];
-        const base = COL_BASE[col], step = COL_STEP[col];
-        for (let k = 0; k < D; k++) this.blocks[base + k * step] = data[o + k];
-        o += D;
+      const o = n * REGION_COLS * D;
+      for (let row = 0; row < CHUNK_T; row++) {
+        this.blocks.set(
+          data.subarray(o + row * RUN, o + row * RUN + RUN),
+          tmp[row * CHUNK_T] * D,
+        );
       }
       this.live[rid] = 1;
       this._written[rid] = 1;
@@ -327,22 +287,15 @@ export class Planet {
   /** Has this column been generated? */
   liveCol(col) { return this.live[regionOfCol(col)] === 1; }
 
-  // Two more were deleted from here rather than kept: `liveAt(x, y, z)`, the
-  // world-space spelling of `liveCol` that nothing ever asked in world space,
-  // and `setWorld`, the pre-streaming whole-planet handover. `setWorld` marked
-  // every region live and replaced the facing map wholesale, which is exactly
-  // the state a lazily built planet must never be put into, and it had carried a
-  // "nothing calls it now" note for long enough to prove nothing would.
-
   // --- directional facing ---------------------------------------------------
 
   /**
    * The cell's side-table byte, or 0 when it has none. Zero is the correct
-   * default for every meaning the byte carries — upright log, lower slab,
-   * untouched water — and collision reads this on the hot path, so it must not
+   * default for every meaning the byte carries - upright log, lower slab,
+   * untouched water - and collision reads this on the hot path, so it must not
    * hand back undefined.
    */
-  facingAt(col, k) { return this.facing.get(cellIndex(col, k)) ?? 0; }
+  facingAt(col, k) { return this.facing.get(col * D + k) ?? 0; }
 
   /**
    * Keep the side-table in step with an edit. Directional blocks keep (or take)
@@ -351,16 +304,14 @@ export class Planet {
    * @returns {number} the facing now stored, or -1 if the cell has none
    */
   applyFacing(col, k, id, want) {
-    const idx = cellIndex(col, k);
+    const idx = col * D + k;
     // Logs store an axis here rather than a horizontal facing, water stores its
     // flow level, and a shaped block stores its orientation. Same table,
-    // different meaning per block — a cell is never two of those things at once.
+    // different meaning per block - a cell is never two of those things at once.
     //
     // This asks IS_SHAPED rather than naming slabs alone. Naming them is what
     // dropped stairs: they are neither axis, slab, liquid nor directional, so
-    // every placed stair fell through to the delete below and read back as the
-    // default orientation. The worker's own copy of this test had the identical
-    // gap, so the byte was being discarded at both ends of the wire.
+    // every placed stair fell through to the delete below.
     if (IS_AXIS[id] || IS_SHAPED[id] || RENDER_TYPE[id] === R_LIQUID) {
       const a = want ?? this.facing.get(idx) ?? 0;
       if (a) this.facing.set(idx, a & 7); else this.facing.delete(idx);
@@ -377,104 +328,88 @@ export class Planet {
 
   // --- voxel access ---------------------------------------------------------
 
-  at(col, k) { return (k < 0 || k >= D) ? 0 : this.blocks[COL_BASE[col] + k * COL_STEP[col]]; }
-  // The second of the two writers, so it carries the `_written` mark too. An
-  // edit almost always lands in a region `applyRegions` has already marked; the
-  // mark is here so `resetWorld` stays correct without having to assume that.
+  at(col, k) { return (k < 0 || k >= D) ? 0 : this.blocks[col * D + k]; }
+  // The second of the two writers, so it carries the `_written` mark too.
   setAt(col, k, id) {
     if (k < 0 || k >= D) return;
-    this.blocks[COL_BASE[col] + k * COL_STEP[col]] = id;
+    this.blocks[col * D + k] = id;
     this._written[regionOfCol(col)] = 1;
   }
-  solidAt(col, k) { return (k < 0 || k >= D) ? false : IS_SOLID[this.blocks[COL_BASE[col] + k * COL_STEP[col]]] === 1; }
-  liquidAt(col, k) { return (k < 0 || k >= D) ? false : RENDER_TYPE[this.blocks[COL_BASE[col] + k * COL_STEP[col]]] === R_LIQUID; }
+  solidAt(col, k) { return (k < 0 || k >= D) ? false : IS_SOLID[this.blocks[col * D + k]] === 1; }
+  liquidAt(col, k) { return (k < 0 || k >= D) ? false : RENDER_TYPE[this.blocks[col * D + k]] === R_LIQUID; }
 
-  /** Continuous cell coordinates for a world point. */
-  cellOf(x, y, z, out = _cell) { return worldToCell(x, y, z, out); }
+  /** Continuous cell coordinates for a world point. Wraps x and y. */
+  cellOf(x, y, z, out = _cell) { return contCell(x, y, z, out); }
 
-  /** Integer cell address for a world point, or null if off-world. */
+  /**
+   * Integer cell address for a world point, or null when it is above or below
+   * the world.
+   *
+   * There is no other way to be off-world: x and z wrap, so a horizontal
+   * position always names a column. That is the whole of what the fold and
+   * `normalizeCell` used to do.
+   */
   cellAt(x, y, z) {
-    const c = worldToCell(x, y, z, _cell);
-    const k = Math.floor(c.ck);
+    const k = Math.floor(y);
     if (k < 0 || k >= D) return null;
-    const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-    const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-    return { col: cidx(c.f, i, j), k, f: c.f, i, j };
+    const cx = wrap(Math.floor(x)), cy = wrap(Math.floor(z));
+    return { col: cx * W + cy, k, x: cx, y: cy };
   }
 
   blockAtWorld(x, y, z) {
     const a = this.cellAt(x, y, z);
-    return a ? this.at(a.col, a.k) : 0;
+    return a ? this.blocks[a.col * D + a.k] : 0;
   }
 
   isSolidWorld(x, y, z) {
     const a = this.cellAt(x, y, z);
-    return a ? this.solidAt(a.col, a.k) : false;
+    return a ? IS_SOLID[this.blocks[a.col * D + a.k]] === 1 : false;
   }
 
   isLiquidWorld(x, y, z) {
     const a = this.cellAt(x, y, z);
-    return a ? this.liquidAt(a.col, a.k) : false;
+    return a ? RENDER_TYPE[this.blocks[a.col * D + a.k]] === R_LIQUID : false;
   }
 
-  // `upAt(pos)` and `radiusAt(pos)` lived here and were deleted: on a planet
-  // centred at the origin they are `pos.clone().normalize()` and `pos.length()`,
-  // and every caller in the game writes those directly rather than reaching for
-  // the planet to do it. A method that only restates a vector operation reads
-  // like it knows something about the world, and this one did not.
-
   /**
-   * Highest non-air, non-water layer in a column — the *ground*, not the top of
+   * Highest non-air, non-water layer in a column - the *ground*, not the top of
    * what is standing on it.
    *
    * Read that twice before using it near water. On a lake or a sea this is the
    * bed, and the water is at `surfaceK(col) + 1`; `liquidAt(col, surfaceK(col))`
-   * is therefore the sand, and always false. That has now caused a shipped bug
+   * is therefore the sand, and always false. That has caused a shipped bug
    * (winter ice scanned from the wrong layer and froze nothing) and two
-   * measurements that confidently reported a planet with no water on it, on a
-   * planet that is a fifth water.
+   * measurements that confidently reported a world with no water on it.
    *
-   * Leaves and logs are not air either, so under a tree this is the canopy top
-   * rather than the soil.
+   * Leaves and logs are not air either, so under a tree this is the canopy top.
    */
   surfaceK(col) {
-    const base = COL_BASE[col], step = COL_STEP[col];
+    const base = col * D;
     for (let k = D - 1; k >= 0; k--) {
-      const b = this.blocks[base + k * step];
+      const b = this.blocks[base + k];
       if (b !== 0 && RENDER_TYPE[b] !== R_LIQUID) return k;
     }
     return -1;
   }
 
-  // `surfaceRadiusDir(dir)` was deleted from here: a no-caller helper that took
-  // a direction and returned the radius of the ground under it. It leaned on
-  // `worldToCell` being scale-free in f/i/j by pushing the direction out to
-  // radius 40 — a point 210 units below layer 0, whose `ck` is meaningless and
-  // was duly ignored — which is a thing a reader has to work out before they can
-  // trust the two lines around it. `surfaceK` takes a column and everyone who
-  // wants ground already has one.
-
   /**
-   * Cell centre in world space.
+   * Cell centre in world space. Arithmetic, not a direction times a radius.
    *
-   * A position, not a direction times a radius. The old form was cubesphere
-   * arithmetic and it survived the conversion: it put the centre of every cell
-   * on a sphere inscribed in the cube, up to 17 units from the cell it names.
-   * This is what the selection box is drawn from, so a block highlighted here
-   * and the block a ray actually hit were two different places, and mining
-   * looked like it did nothing.
+   * The cube's version of this line was the single most expensive leftover of
+   * the conversion before it: it put the centre of every cell on a sphere
+   * inscribed in the cube, up to 17 units from the cell it names, so a block
+   * highlighted here and the block a ray actually hit were two different places
+   * and mining looked like it did nothing.
    */
   centerOf(col, k, out = new THREE.Vector3()) {
-    const f = (col / (F * F)) | 0;
-    const rem = col - f * F * F;
-    cellCenterPos(f, (rem / F) | 0, rem % F, k, _p);
-    return out.set(_p[0], _p[1], _p[2]);
+    const y = col % W;
+    return out.set((col - y) / W + 0.5, k + 0.5, y + 0.5);
   }
 
   // --- chunk meshes ---------------------------------------------------------
 
-  applyChunk(f, ci, cj, ck, groups) {
-    const id = chunkIdx(f, ci, cj, ck);
+  applyChunk(cx, cy, ck, groups) {
+    const id = chunkIdx(cx, cy, ck);
     const roots = [this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot];
     const mats = [this.materials.opaque, this.materials.cutout, this.materials.transparent, this.materials.liquid];
 
@@ -515,9 +450,7 @@ export class Planet {
       } else {
         mesh = new THREE.Mesh(geo, mats[gi]);
         mesh.castShadow = gi === GROUP_OPAQUE || gi === GROUP_CUTOUT;
-        // A cutout casts the shape of its art, not the shape of its quad. Without
-        // this the shadow pass uses a plain MeshDepthMaterial, which cannot read
-        // the tile atlas, and a grass tuft lays down two solid slabs.
+        // A cutout casts the shape of its art, not the shape of its quad.
         if (gi === GROUP_CUTOUT && this.materials.cutoutDepth) {
           mesh.customDepthMaterial = this.materials.cutoutDepth;
         }
@@ -553,73 +486,120 @@ export class Planet {
   // --- raycast --------------------------------------------------------------
 
   /**
-   * March a ray through the sphere. Steps are small enough that no cell is
-   * skipped, and the previous cell is remembered so blocks can be placed
-   * against the face that was hit.
+   * March a ray through the map.
    *
-   * Cross plants (tall grass, flowers, wheat) are the one block that is *not*
-   * treated as a full cell: see `CROSS_HALF` below.
+   * A proper DDA now, not the fixed-step sampler the cubesphere needed. Cells
+   * are unit cubes on the world axes, so the exact entry and exit of every cell
+   * along the ray is two subtractions, and three consequences follow that the
+   * sampler could not have:
    *
-   * `opts.face` gates the cast to one cube face: a block owned by any other
-   * face stops the ray dead and reports no hit, so it can be seen but never
-   * mined, built on, used or fished. The fold already hands back the owning
-   * face - the same Chebyshev rule `cellWrite` uses - so there is no second
-   * notion of who a cell belongs to. Casts that only want to look (the
-   * crosshair name, the camera) leave it off.
+   *  - No cell can be skipped and none is visited twice, whatever the step size
+   *    would have been.
+   *  - The hit normal is EXACT. It is the face the ray crossed to enter the
+   *    cell, so there is no fallback normal to get wrong. The cube's version
+   *    subtracted two cell centres and normalised, and fell back to the face's
+   *    own outward normal when there was no previous cell.
+   *  - `prevCol`/`prevK` is genuinely the cell on the other side of the face
+   *    that was hit, which is what a block is placed against.
+   *
+   * The marcher walks UNWRAPPED integer cell coordinates and wraps only when it
+   * turns one into a column. That is deliberate: wrapping the coordinate itself
+   * would put a discontinuity in the middle of the march at the seam, and the
+   * ray does not care that the map joins up there. It cannot escape the map
+   * because there is no edge to escape through - `colIndex` wraps - so the only
+   * way out is up or down, and those are the `k` bounds.
+   *
+   * Cross plants are the one block that is not treated as a full cell: see
+   * `CROSS_HALF`. Their cell is walked in small steps because a billboard has no
+   * volume for a DDA to enter.
+   *
    * @returns {{col,k,prevCol,prevK,id,dist,point:THREE.Vector3,normal:THREE.Vector3}|null}
    */
   raycast(origin, dir, maxDist = 6, opts = {}) {
-    const step = 0.045;
-    let prevCol = -1, prevK = -1;
-    let curCol = -1, curK = -1;
-    let curCross = false;
     const hitLiquid = !!opts.hitLiquid;
-    const gate = opts.face ?? -1;
+    const ox = origin.x, oy = origin.y, oz = origin.z;
+    const dx = dir.x, dy = dir.y, dz = dir.z;
+    if (dx === 0 && dy === 0 && dz === 0) return null;
 
-    for (let t = 0; t <= maxDist; t += step) {
-      const x = origin.x + dir.x * t, y = origin.y + dir.y * t, z = origin.z + dir.z * t;
-      const c = worldToCell(x, y, z, _cell);
-      const k = Math.floor(c.ck);
-      if (k < 0 || k >= D) { prevCol = -1; prevK = -1; curCross = false; continue; }
-      const i = Math.min(F - 1, Math.max(0, Math.floor(c.ci)));
-      const j = Math.min(F - 1, Math.max(0, Math.floor(c.cj)));
-      const col = cidx(c.f, i, j);
-      const id = this.at(col, k);
-      if (col === curCol && k === curK) {
-        // Every other block fills its cell, so entering it once is enough to
-        // decide. A cross plant does not, so keep sampling it — the test below
-        // is per-point, not per-cell.
-        if (!curCross) continue;
-      } else {
-        prevCol = curCol; prevK = curK;
-        curCol = col; curK = k;
-        curCross = RENDER_TYPE[id] === R_CROSS;
-      }
+    // The cell the ray starts in, in unwrapped coordinates.
+    let ix = Math.floor(ox), iy = Math.floor(oy), iz = Math.floor(oz);
+    const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+    const idx = dx !== 0 ? Math.abs(1 / dx) : Infinity;
+    const idy = dy !== 0 ? Math.abs(1 / dy) : Infinity;
+    const idz = dz !== 0 ? Math.abs(1 / dz) : Infinity;
+    let tx = dx !== 0 ? (dx > 0 ? ix + 1 - ox : ox - ix) * idx : Infinity;
+    let ty = dy !== 0 ? (dy > 0 ? iy + 1 - oy : oy - iy) * idy : Infinity;
+    let tz = dz !== 0 ? (dz > 0 ? iz + 1 - oz : oz - iz) * idz : Infinity;
 
-      if (id === 0) continue;
-      if (RENDER_TYPE[id] === R_LIQUID && !hitLiquid) continue;
-      if (curCross && !insideCross(id, c, i, j)) continue;
-      // Another face's block: no hit, and nothing behind it either, or you
-      // could mine straight through the border. `opts.blocked` is filled in for
-      // callers that want to say so — near a cube edge the rock under your feet
-      // passes to the neighbour a block or two down, and silence there reads as
-      // a broken pickaxe rather than the border it is.
-      if (gate >= 0 && c.f !== gate) {
-        if (opts.blocked) { opts.blocked.col = col; opts.blocked.k = k; opts.blocked.hit = true; }
-        return null;
-      }
+    let t = 0;
+    // Which axis the ray crossed to enter the current cell, and in which
+    // direction. -1 for the cell the ray starts inside, which it did not enter.
+    let axis = -1, sign = 0;
+    let prevCol = -1, prevK = -1;
 
-      const point = new THREE.Vector3(x, y, z);
+    const hit = (col, k, id, tHit, hAxis, hSign) => {
+      const point = new THREE.Vector3(ox + dx * tHit, oy + dy * tHit, oz + dz * tHit);
       const normal = new THREE.Vector3();
-      if (prevCol >= 0) {
-        this.centerOf(prevCol, prevK, normal).sub(this.centerOf(col, k, new THREE.Vector3())).normalize();
+      if (hAxis >= 0) {
+        const n = AXIS_N[hAxis];
+        normal.set(-hSign * n[0], -hSign * n[1], -hSign * n[2]);
       } else {
-        // The face's own outward normal. `point.normalize()` was the radial
-        // answer and is only right on a sphere.
-        normal.fromArray(FACE_N[c.f]);
+        // The ray began inside the block it hit, so there is no face to name.
+        // The dominant axis of the ray, reversed, is the honest answer and is
+        // the only case in this function that guesses.
+        const ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+        if (ax >= ay && ax >= az) normal.set(-sx, 0, 0);
+        else if (ay >= az) normal.set(0, -sy, 0);
+        else normal.set(0, 0, -sz);
       }
-      return { col, k, prevCol, prevK, id, dist: t, point, normal };
+      return { col, k, prevCol, prevK, id, dist: tHit, point, normal };
+    };
+
+    // Bounded by geometry, not by trust: a ray of length L crosses at most
+    // L + 1 boundaries per axis.
+    const guard = 3 * (Math.ceil(maxDist) + 2);
+    for (let n = 0; n < guard; n++) {
+      const tExit = Math.min(tx, ty, tz);
+      if (t > maxDist) break;
+
+      if (iy >= 0 && iy < D) {
+        const col = wrap(ix) * W + wrap(iz);
+        const id = this.blocks[col * D + iy];
+        if (id !== 0 && (hitLiquid || RENDER_TYPE[id] !== R_LIQUID)) {
+          if (RENDER_TYPE[id] === R_CROSS) {
+            // No volume to enter: walk the segment inside this cell instead.
+            const end = Math.min(tExit, maxDist);
+            for (let s = t; s <= end; s += CROSS_STEP) {
+              const px = ox + dx * s, py = oy + dy * s, pz = oz + dz * s;
+              contCell(px, py, pz, _cell);
+              if (insideCross(id, _cell.cx, _cell.cy, _cell.ck, wrap(ix), wrap(iz))) {
+                return hit(col, iy, id, s, axis, sign);
+              }
+            }
+          } else if (t <= maxDist) {
+            return hit(col, iy, id, t, axis, sign);
+          }
+        }
+        prevCol = col; prevK = iy;
+      } else {
+        // Above or below the world: nothing to place against either.
+        prevCol = -1; prevK = -1;
+      }
+
+      if (tExit > maxDist) break;
+      t = tExit;
+      if (tx <= ty && tx <= tz) { ix += sx; tx += idx; axis = 0; sign = sx; }
+      else if (ty <= tz) { iy += sy; ty += idy; axis = 1; sign = sy; }
+      else { iz += sz; tz += idz; axis = 2; sign = sz; }
     }
     return null;
   }
 }
+
+// `opts.face` and `opts.blocked` are gone from `raycast`, and nothing replaces
+// them. They gated a cast to one cube face so that a block belonging to another
+// face could be seen but never mined, built on, used or fished - the whole
+// cross-face interaction gate, and the outline that had to be invented to
+// explain it. There are no shared cells to arbitrate now: a divider is solid
+// unbreakable rock and stops a ray by being a block, which is a rule that needs
+// no explaining. Callers passing `face` are harmless; the option is ignored.

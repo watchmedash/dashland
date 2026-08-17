@@ -1,17 +1,29 @@
-// Cubesphere chunk mesher. Each cell face becomes a quad whose four corners
-// come from the exact sphere mapping, so neighbouring chunks share vertices and
-// the surface curves smoothly with no cracks. Radial (side) faces merge along
-// the column axis, which is perfectly straight, so merging introduces no error.
+// Chunk mesher for the flat wrapped map.
+//
+// Every cell face is a quad on one of six world-axis directions, everywhere.
+// There is no per-face basis, no tangent frame, no curved corner and no
+// handedness question left to answer at runtime - the six windings are worked
+// out once, below, and each one's normal falls out of its own vertex order.
+//
+// The one thing worth knowing before reading: THE MAP FRAME IS LEFT HANDED
+// against world space. `Grid.js` fixes map x -> world X, map y -> world Z and
+// layer k -> world Y, and X cross Z is MINUS Y, so a quad wound the obvious way
+// round the map's (x, y) faces backwards. Each of the six orders below is
+// therefore the mirror of what the (i, j) cube used, and the top and bottom caps
+// carry u along the map's y with v along its x rather than the other way about.
+// Getting that backwards renders half the world inside out, which is why it is
+// spelled out here rather than inferred.
+//
+// Neighbour lookups WRAP. A chunk at x = 0 has neighbours at x = W - 1; treating
+// the edge as empty would put a wall of faces round the map.
 
+import { BIOME, BIOME_COLORS } from './Constants.js';
+import { faceAt, worldOf } from './Grid.js';
 import {
-  F, D, CHUNK_T, CHUNK_K, R_MIN, vidx, cidx, BIOME, BIOME_COLORS, FACE_ROLE, FACE_POLAR,
-} from './Constants.js';
+  W, D, CHUNK_T, CHUNK_K, cellCorner, stepColumn,
+} from './Layout.js';
 import {
-  CORNER_DIR, CENTER_DIR, COL_NB, stepColumn, cellIndex, cellWrite, cubeCorner, cubeCenter,
-  FACE_N, FACE_R, FACE_U, STEP_A, STEP_B,
-} from './Sphere.js';
-import {
-  BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_TOP, TILE_SIDE, TILE_BOTTOM,
+  BLOCKS, N_BLOCKS, IS_OPAQUE, IS_LEAF, RENDER_TYPE, TILE_SIDE,
   TINT_ID, R_CROSS, R_LIQUID, R_GLASS, R_LADDER, R_TORCH, R_MODEL, SEALS_FACES,
   IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
   IS_SUBMERGED,
@@ -27,31 +39,32 @@ import {
  */
 const LEVEL_SOURCE = 7;
 
+/** Rime: the ice face. A leaf standing on it is snowed on all year. */
+const FACE_RIME = 1;
+
 /**
  * Quarter-turns of UV so a lying log's grain runs along its axis.
  *
  * `sideTile` already puts the rings on the two faces the trunk runs through and
  * bark on the other four, which is the half of the job you notice first. The
  * half you notice second is that the bark is *directional*: its grain runs up
- * the texture, and up the texture is up the world on every face, so a log laid
- * on its side kept vertical grain and read as an upright log wearing the wrong
- * end caps. Rotating the bark faces a quarter turn is what actually lays it
- * down.
+ * the texture, so a log laid on its side kept vertical grain and read as an
+ * upright log wearing the wrong end caps.
  *
- * Which faces need it falls out of the UV conventions and is not symmetric.
- * On a side face u runs tangentially and v runs along +k; on the top face u
- * runs along i and v along j. So for a log along i the bark is on the j faces
- * (grain currently along k, wants i) *and* on the caps of the cell (grain along
- * j, wants i) — both turn. For a log along j the bark on the i faces turns, but
- * the top and bottom already have their v along j and must be left alone.
+ * Which faces need it falls out of the UV conventions and is not symmetric, and
+ * the CAPS are inverted against the cube's version of this function. On a side
+ * face u runs horizontally and v runs along +k, as before. On a cap, u now runs
+ * along the map's y and v along its x - see the header - so a log along x
+ * already has its grain along the cap's v and is the one that must be left
+ * alone, where on the cube it was the one that turned.
  *
- * `dir` is 0:+i 1:-i 2:+j 3:-j 4:top 5:bottom.
+ * `dir` is 0:+x 1:-x 2:+y 3:-y 4:top 5:bottom.
  */
 function grainRot(id, facing, dir) {
   const ax = axisOf(id, facing);
   if (!ax) return 0;
-  if (ax === 1) return (dir === 2 || dir === 3 || dir >= 4) ? 1 : 0;
-  return (dir === 0 || dir === 1) ? 1 : 0;
+  if (ax === 1) return (dir === 2 || dir === 3) ? 1 : 0;
+  return (dir === 0 || dir === 1 || dir >= 4) ? 1 : 0;
 }
 
 export const GROUP_OPAQUE = 0;
@@ -66,9 +79,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   if (b.render === R_LIQUID) GROUP[i] = GROUP_LIQUID;
   else if (b.render === R_CROSS) GROUP[i] = GROUP_CUTOUT;
   // A ladder is mostly holes. Drawn in the opaque group its alpha was simply
-  // ignored, so the gaps between the rungs came out as solid timber and the
-  // whole thing read as a plank with a ladder painted on it — on the wall and
-  // in the inventory both.
+  // ignored, so the gaps between the rungs came out as solid timber.
   else if (b.render === R_LADDER) GROUP[i] = GROUP_CUTOUT;
   else if (b.render === R_GLASS) GROUP[i] = b.name.startsWith('leaves') ? GROUP_CUTOUT : GROUP_TRANSPARENT;
   else GROUP[i] = GROUP_OPAQUE;
@@ -78,31 +89,22 @@ for (let i = 0; i < N_BLOCKS; i++) {
 const WAVE_LEAVES = 4;
 /**
  * Leaves whose COLUMN is a snowfield, which is the same wave in every respect
- * the vertex shader cares about — the leaf branch there is `wType > 3.5` and
- * takes both — and a different one in the only respect the fragment shader
- * does: LEAF_SNOW_FRAG holds this one white all year instead of only in winter.
+ * the vertex shader cares about and a different one in the only respect the
+ * fragment shader does: LEAF_SNOW_FRAG holds this one white all year instead of
+ * only in winter.
  *
  * This exists because the ground a tree grew from is the one thing a leaf
  * fragment cannot work out for itself. It knows its own altitude, which is five
  * to twelve blocks above that ground, so an altitude gate whitens every
- * sea-level forest in July; it cannot know the biome, because a snowfield is
- * `1 - 1.35*|lat|` plus three octaves of fbm minus an altitude term, relaxed,
- * de-speckled and then grown into by the beach pass, none of which is a
- * closed-form function of a world position. The column knows, the mesher is
- * already holding the column, and the wave id is the one channel that reaches
- * the fragment with a whole integer to spare in it.
- *
- * Cost is one comparison in `emit`, no new attribute, no new byte per vertex,
- * and nothing at all in the save: a wave id is meshed, never stored.
+ * sea-level forest in July; it cannot know the biome either. The column knows,
+ * the mesher is already holding the column, and the wave id is the one channel
+ * that reaches the fragment with a whole integer to spare in it.
  *
  * BIOME.SNOW and not COLD_BIOMES, which would add TUNDRA. A snowfield's top
  * block is `ID.snow` for every column of it, so the ground under those trees is
- * white by construction at any latitude and in any season. Tundra's is drifted
- * — snow, gravel and coarse dirt by a noise threshold — so it is a brown and
- * white mottle in July and a canopy laid solid white over it would be the
- * inconsistency this is trying to remove. Weather.js puts tundra in COLD_BIOMES
- * to decide that falling precipitation there is snow rather than rain, which is
- * a question about the sky and not about the ground.
+ * white by construction. Tundra's is drifted, so it is a brown and white mottle
+ * in July and a canopy laid solid white over it would be the inconsistency this
+ * is trying to remove.
  */
 const WAVE_LEAVES_COLD = 5;
 
@@ -115,13 +117,12 @@ for (let i = 0; i < N_BLOCKS; i++) {
   else if (b.name.startsWith('leaves')) WAVE[i] = WAVE_LEAVES;
 }
 
-
 /**
  * Cross blocks that are drawn as real geometry instead, and so must not also be
  * drawn as a billboard here.
  *
- * The flowers are modelled — `render/BlockModels.js` instances a WAM model at
- * every one near the player — and a cross quad is a full cell wide, so no model
+ * The flowers are modelled - `render/BlockModels.js` instances a WAM model at
+ * every one near the player - and a cross quad is a full cell wide, so no model
  * small enough to be a flower can hide one. It is this or two of everything.
  *
  * Grass, saplings, mushrooms and wheat are *not* in this set and should stay
@@ -133,42 +134,26 @@ const MODELLED_CROSS = new Uint8Array(N_BLOCKS);
 // `sapling` sits here rather than with the flowers because it was the one
 // block whose three pictures disagreed after the icon audit: it has a WAM
 // model, so your fist, the ground drop and the inventory slot all showed it,
-// while the planted block was still the mesher's tinted billboard. This entry
-// and its MODELLED_PLANTS height go together, or the block is a model inside a
-// billboard, or an empty cell.
+// while the planted block was still the mesher's tinted billboard.
 for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom', 'sapling',
-  // The reef. Unlike the flowers these have no billboard to fall back on —
-  // they were authored as models and carry no tile of their own — so this list
-  // and `MODELLED_PLANTS` in `main.js` have to agree or the seabed is empty:
-  // a name here and not there draws nothing at all.
+  // The reef. Unlike the flowers these have no billboard to fall back on - they
+  // were authored as models and carry no tile of their own - so this list and
+  // `MODELLED_PLANTS` in `main.js` have to agree or the seabed is empty.
   'coral_branch', 'coral_fan', 'coral_brain', 'coral_dead',
   'kelp', 'sea_grass', 'sea_sponge', 'sea_shell',
-  // The two edible plants and the deep light, on exactly the same footing.
   'sea_lettuce', 'sea_grape', 'abyss_anemone',
-  // The land flora and the cave floor, on exactly the same footing again: no
-  // tile, no billboard, the model is all there is. The tile atlas is baked from
-  // a texture pack that is not in this tree, so for these sixteen the model was
-  // never one of two options — it was the only one available.
+  // The land flora and the cave floor, on exactly the same footing: no tile, no
+  // billboard, the model is all there is.
   'thornbrush', 'aloe', 'golden_grass', 'firebloom',
   'cotton_grass', 'snowbell', 'alpine_aster', 'marram',
   'lavender', 'clover', 'fern', 'lingonberry',
   'cave_mushroom', 'shelf_fungus', 'crystal_cluster', 'driftwood',
-  // The wild harvest. Same footing as the rest: authored as models, no tile and
-  // no billboard, so a name here and not in MODELLED_PLANTS draws nothing at
-  // all - and one missing from here draws a flat card instead of the model.
   'cactusfruit', 'agave', 'stonecrop', 'icecapmoss',
   'swampreed', 'mireroot', 'lotus', 'truffle',
-  // The one plant here that is not harvest. Same footing all the same: no tile,
-  // no billboard, and a name missing from either this list or `MODELLED_PLANTS`
-  // leaves the forest floor empty where the generator put one.
   'deathcap',
-  // The farm. Wheat stays out of this set and keeps its billboard because it
-  // has four authored tiles in the atlas and they read fine; these seven have no
-  // tile at all, so a name missing from here draws an untextured card and a
-  // name missing from `MODELLED_PLANTS` draws nothing whatsoever. All four
-  // stages of each, because a crop's stages are four separate block ids and
-  // this array is indexed by id - listing only the ripe rung would leave a
-  // field invisible for the whole time it is worth watching.
+  // The farm. Wheat stays out and keeps its billboard because it has four
+  // authored tiles in the atlas; these seven have no tile at all. All four
+  // stages of each, because a crop's stages are four separate block ids.
   'strawberry_0', 'strawberry_1', 'strawberry_2', 'strawberry_3',
   'squash_0', 'squash_1', 'squash_2', 'squash_3',
   'greenbean_0', 'greenbean_1', 'greenbean_2', 'greenbean_3',
@@ -188,15 +173,10 @@ const AO_CURVE = [0.36, 0.60, 0.80, 1.0];
 // emit geometry for, and losing the geometry lost the light with it: a modelled
 // flower is an InstancedMesh built on the main thread, which holds `blocks` and
 // nothing else, so it had no cell to sample and a flower beside a torch stayed
-// unlit by it. (See the header of `render/BlockModels.js`, which recorded that
-// as unreachable.)
+// unlit by it.
 //
-// It is reachable, because the sample is *right here*. `emitCross` reads
-// `light.sun/r/g/b` at exactly this cell for exactly this kind of block, at
-// exactly the moment the chunk is meshed — and then the MODELLED_CROSS test
-// throws it away. So keep it: one word per modelled-cross cell, shipped
-// alongside the geometry as a transferable, looked up per instance by
-// `BlockModels`.
+// It is reachable, because the sample is *right here*. So keep it: one word per
+// modelled-cross cell, shipped alongside the geometry as a transferable.
 //
 // ### The word
 //
@@ -204,43 +184,30 @@ const AO_CURVE = [0.36, 0.60, 0.80, 1.0];
 //   bits  4.. 7  block light g   0..15
 //   bits  8..11  block light b   0..15
 //   bits 12..15  skylight        0..15
-//   bits 16..27  address within the chunk, ((di * CHUNK_T) + dj) * CHUNK_K + dk
+//   bits 16..27  address within the chunk, ((dx * CHUNK_T) + dy) * CHUNK_K + dk
 //
 // 28 bits, so one Uint32 and no packing games. The address is chunk-*local* on
-// purpose: a global cell index (col * D + k) needs 27 bits on its own — the
-// planet has 85 million voxels — and would have forced a second array or a
-// 64-bit split. A chunk is 16 x 16 x 11 = 2816 cells, which is 12 bits, and the
-// receiver already knows which chunk it is unpacking because the message says
-// so. Nothing smaller is honest: dropping skylight would fit 16 bits of payload
-// into a Uint16 pair, but that is the same four bytes in two buffers.
+// purpose: a global cell index needs 27 bits on its own. A chunk is 16 x 16 x 11
+// = 2816 cells, which is 12 bits, and the receiver already knows which chunk it
+// is unpacking because the message says so.
 //
-// Cost is four bytes per modelled-cross cell and nothing at all for a chunk
-// with none — the buffer is only allocated on the first hit and a chunk with no
-// flowers ships `null`, which is the overwhelming majority of them. A surface
-// chunk over a meadow at the flora generator's densest is ~4% of 256 columns,
-// so ten to twenty cells: 40-80 bytes against the ~200 KB of vertex data that
-// chunk is already sending.
+// Entries come out sorted by address, for free, because the emit loop walks x
+// then y then k ascending and the address is that same odometer. The main thread
+// binary-searches it and relies on that; if this loop is ever reordered, sort.
 //
-// Entries come out sorted by address, for free, because the emit loop walks i
-// then j then k ascending and the address is that same odometer. The main
-// thread binary-searches it and relies on that; if this loop is ever reordered,
-// sort here.
 // Modelled *blocks* (`R_MODEL`) ride the same buffer, for the same reason and
 // with the same word. The only difference is where the sample is taken: a
-// flower's own cell holds light and a workbench's cell is opaque and holds
-// none, so a modelled block samples its brightest neighbour instead. See the
-// `R_MODEL` branch in the mesh loop.
+// flower's own cell holds light and a workbench's cell is opaque and holds none,
+// so a modelled block samples its brightest neighbour instead.
 export const CROSS_LIGHT_ADDR_SHIFT = 16;
 
 /**
  * Unpack one word's block light into `out` as three 0..1 floats.
  *
  * Skylight is deliberately not returned. It is shipped because it is four spare
- * bits in a word we are sending anyway and because the sun half of this problem
- * will eventually want it, but nothing consumes it today: a modelled flower
- * already gets the sun through the shadow map and the entity fill (see
- * `BlockModels._fit`), and feeding it voxel skylight as well would be counting
- * the sky twice on every flower in the open.
+ * bits in a word we are sending anyway, but nothing consumes it today: a
+ * modelled flower already gets the sun through the shadow map and the entity
+ * fill, and feeding it voxel skylight as well would count the sky twice.
  */
 export function crossLightRGB(w, out) {
   out[0] = (w & 15) / 15;
@@ -250,8 +217,8 @@ export function crossLightRGB(w, out) {
 }
 
 /**
- * Growable Uint32 list, allocated lazily so a chunk with no flowers in it —
- * which is nearly all of them, including every chunk of solid rock — pays
+ * Growable Uint32 list, allocated lazily so a chunk with no flowers in it -
+ * which is nearly all of them, including every chunk of solid rock - pays
  * nothing at all, not even an empty typed array.
  */
 class CrossLightBuf {
@@ -326,31 +293,18 @@ class Group {
 /**
  * The four groups, allocated once and reused by every `meshChunk` call.
  *
- * A `Group` is eight `Buf`s and an `IBuf`, and a fresh one costs 2048 entries
- * per stride however small the chunk turns out to be: 23 floats of stride plus
- * the index buffer is about 205 KB, and `meshChunk` was building four of them —
- * 820 KB — on entry and dropping all four on exit. A first load meshes ~3 150
- * chunks, so that is roughly 2.6 GB allocated, zeroed by the VM and handed
- * straight back to the collector. Measured in the worker's own profile it was
- * 438 ms in the `Buf` constructor and 217 ms in the garbage collector, against
- * 7.5 s of total worker CPU.
+ * A fresh `Group` costs 2048 entries per stride however small the chunk turns
+ * out to be - about 205 KB, and `meshChunk` was building four of them on entry
+ * and dropping all four on exit. A first load meshes thousands of chunks, so
+ * that was gigabytes allocated, zeroed by the VM and handed straight back.
+ * Measured in the worker's own profile it was 438 ms in the `Buf` constructor
+ * and 217 ms in the garbage collector against 7.5 s of total worker CPU.
  *
- * Three of the four are usually the wasteful ones: a chunk of solid rock emits
- * nothing at all into the cutout, transparent and liquid groups, and
- * `serialize` is never even called on them — `groups.map` ships `null` for an
- * empty group — so their 615 KB was allocated purely to be thrown away.
- *
- * Reuse is safe here because nothing a group holds outlives the call. `out()`
- * is `data.slice(0, len)`, a copy, so every array that leaves in the payload is
- * already the mesher's own fresh allocation and none of them alias the pool.
- * The one thing to keep true is that `meshChunk` must not overlap itself: it is
- * a straight-line synchronous function in a single-threaded worker with no
- * await in it, and the only caller is `meshAndPost`, which posts and returns.
- *
- * The pool keeps whatever high-water mark the biggest chunk needed and does not
- * shrink, which is the point — after the first few chunks `need` never grows
- * again and the steady state is zero allocation per mesh. A chunk is 16x16x11
- * cells, so the ceiling is bounded by geometry rather than by session length.
+ * Reuse is safe because nothing a group holds outlives the call: `out()` is
+ * `data.slice`, a copy, so every array that leaves in the payload is already a
+ * fresh allocation and none of them alias the pool. The one thing to keep true
+ * is that `meshChunk` must not overlap itself, and it is a straight-line
+ * synchronous function in a single-threaded worker with no await in it.
  */
 const _pool = [];
 
@@ -358,9 +312,8 @@ const _pool = [];
 
 /**
  * For liquids the tint attribute is repurposed: x carries normalised water
- * depth, y a shoreline flag, and z the body of water's identity — a marsh, a
- * tarn, a hot spring, a waterfall or the ocean. See WATER_OCEAN in WorldGen for
- * why that rides here rather than in a block id of its own.
+ * depth, y a shoreline flag, and z the body of water's identity - a marsh, a
+ * tarn, a hot spring, a waterfall or the ocean.
  */
 function tintOf(id, biomeId) {
   const t = TINT_ID[id];
@@ -379,18 +332,12 @@ function tintOf(id, biomeId) {
  * Layers that must never take a block's biome tint, whatever block they land on.
  *
  * The tint is a property of the *block* and multiplies every fragment of it, so
- * a grass block's bottom face — which is the plain `dirt` tile — came out
- * multiplied by the biome grass colour. Measured on the baked atlas, the tile
- * itself is exact: grass_side's lower 70% and `dirt` agree to a mean 0.03 counts
- * per channel. Measured in a plains biome, the tint is [0.55, 0.78, 0.40], so
- * the same soil rendered 140/102/70 on a dirt block and 77/80/28 on the grass
- * block beside it — a different, olive earth, which is what the playtest called
- * out ("grass block also uses different dirt color").
+ * a grass block's bottom face - which is the plain `dirt` tile - came out
+ * multiplied by the biome grass colour. Measured in a plains biome the same soil
+ * rendered 140/102/70 on a dirt block and 77/80/28 on the grass block beside it.
  *
- * The face's *layer* is what says "this texel is soil, not foliage", and it is
- * already threaded into `emit`. Only whole faces can be settled here; the side
- * face is soil and foliage in one tile and is masked per texel instead, see the
- * arm-alpha tint mask in scripts/bake-textures.mjs and VoxelMaterial's MAP_FRAG.
+ * Only whole faces can be settled here; the side face is soil and foliage in one
+ * tile and is masked per texel instead.
  */
 const WHITE = [1, 1, 1];
 const UNTINTED_LAYER = new Uint8Array(TILES.length);
@@ -400,108 +347,57 @@ function faceVisible(a, b) {
   if (a === 0) return false;
   // `SEALS_FACES` and not `IS_OPAQUE`, and the difference is one class of block:
   // a modelled one is opaque to the light and draws no triangles, so there is
-  // nothing there to hide this face behind. Cull against it and a workbench set
-  // against a wall shows daylight through the wall between its legs.
+  // nothing there to hide this face behind.
   if (SEALS_FACES[b]) return false;
   const ga = GROUP[a];
   // "Fast leaves": a face between two leaf blocks is never seen, only its own
-  // dark interior, so a canopy used to read as a stack of hollow crates. Culling
-  // leaf-against-leaf (any species, like Minecraft) leaves the canopy as a solid
-  // shell and removes the majority of foliage triangles.
+  // dark interior, so a canopy used to read as a stack of hollow crates.
   if (IS_LEAF[a] && IS_LEAF[b]) return false;
   if (ga === GROUP_TRANSPARENT && b === a) return false;
   // `b === a`, like the line above it. Testing only the *group* culled the face
-  // between water and lava as well, and those two genuinely do end up touching:
-  // the flow sim refuses to let water enter a lava cell, so a bucket poured near
-  // a mantle pool leaves them side by side. Neither cell drew the shared quad,
-  // which left a hole straight through into the inside of the pool.
+  // between water and lava as well, and those two genuinely do end up touching.
   if (ga === GROUP_LIQUID && GROUP[b] === GROUP_LIQUID && b === a) return false;
   // Reef life is *inside* the water, so the water has no face there either.
-  //
-  // Without this every coral is a cell-sized bubble: the ocean draws its own
-  // underside all round the plant's cell and you swim through a reef looking at
-  // the inside surface of the sea. A kelp stalk, being a run of them up one
-  // column, is a chimney of it. The cell genuinely does not hold water — a
-  // voxel is one id — but nothing about that is worth showing the player, and
-  // the honest picture is the one where the water carries on through.
-  //
-  // One-way on purpose. This asks "should the *liquid* draw a wall against a
-  // submerged plant", and the answer is no; the plant is a cross block and
-  // never reaches this test at all, so there is no matching case for `a` being
-  // the plant. The cost of the rule is at the boundary of a water body, where a
-  // coral placed against open air would leave the sea's flank open — which is
-  // why worldgen is asked to keep the reef under a covering cell of water, and
-  // why `_placeBlock` refuses to plant one anywhere else.
+  // Without this every coral is a cell-sized bubble and a kelp stalk is a
+  // chimney of it. One-way on purpose: the plant is a cross block and never
+  // reaches this test at all.
   if (ga === GROUP_LIQUID && IS_SUBMERGED[b]) return false;
   return true;
 }
 
 const _c0 = [0, 0, 0], _c1 = [0, 0, 0], _c2 = [0, 0, 0], _c3 = [0, 0, 0];
-const _cc = [0, 0, 0];
+const _cc = { x: 0, y: 0, z: 0 };
 const _n = [0, 0, 0], _t = [0, 0, 0];
-
-function cornerAt(f, i, j, k, out) {
-  return cubeCorner(f, i, j, k, out);
-}
-
-/**
- * As cornerAt, but `i` and `j` may fall between grid corners.
- *
- * On a cube this is exact rather than approximate: a face is a plane, so a
- * point between four corners is a plain linear blend of the in-face
- * coordinates. The old version blended four unit direction vectors and
- * renormalised, because on a sphere a blend of unit vectors is not itself one.
- * There is nothing to renormalise here, and nothing to pull toward the centre.
- */
-function cornerLerp(f, i, j, k, out) {
-  return cubeCorner(f, i, j, k, out);
-}
 
 /**
  * Mesh one chunk.
- * @param {Uint8Array} blocks
+ * @param {Uint8Array} blocks  `blocks[col * D + k]`
  * @param {Uint8Array} colBiome  per-column biome
- * @param {Uint8Array} colWater  per-column water identity — see WATER_OCEAN in
- *   WorldGen. Absent on a world built before it existed, which reads as 0 for
- *   every column and is the ocean, so nothing has to test for it.
+ * @param {Uint8Array} colWater  per-column water identity
  * @param {{sun,r,g,b}} light
- * @param {Map<number,number>} facing sparse cell index —  facing 0..3; only
- *   directional blocks have an entry, so this is never touched for ordinary
- *   terrain.
- * @returns {{groups: Array, crossLight: Uint32Array|null}} the four render
- *   groups as before, plus the baked light of every modelled-cross cell in this
- *   chunk (null when there are none). See CROSS_LIGHT_ADDR_SHIFT.
+ * @param {Map<number,number>} facing sparse cell index -> facing 0..3
+ * @param {number} cx chunk coordinate on the map's x
+ * @param {number} cy chunk coordinate on the map's y
+ * @param {number} ck chunk coordinate on the layer axis
+ * @returns {{groups: Array, crossLight: Uint32Array|null}}
  */
-export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, ck) {
-  // One Group per draw group, from GROUP_COUNT rather than from four literal
-  // constructors: the count was already declared next to the group ids and a
-  // fifth group added there would otherwise silently index past the end here.
-  // Reused rather than rebuilt; see `_pool`.
+export function meshChunk(blocks, colBiome, colWater, light, facing, cx, cy, ck) {
   const groups = _pool;
   for (let g = 0; g < GROUP_COUNT; g++) {
     if (groups[g]) groups[g].reset(); else groups[g] = new Group();
   }
   const crossLight = new CrossLightBuf();
-  const i0 = ci * CHUNK_T, j0 = cj * CHUNK_T, k0 = ck * CHUNK_K;
-  const i1 = Math.min(F, i0 + CHUNK_T), j1 = Math.min(F, j0 + CHUNK_T), k1 = Math.min(D, k0 + CHUNK_K);
+  const x0 = cx * CHUNK_T, y0 = cy * CHUNK_T, kBase = ck * CHUNK_K;
+  const x1 = x0 + CHUNK_T, y1 = y0 + CHUNK_T, k1 = Math.min(D, kBase + CHUNK_K);
   const { sun, r: lr, g: lg, b: lb } = light;
 
-  // sample a voxel's block id through the adjacency graph
-  const at = (col, k) => (k < 0 || k >= D ? 0 : blocks[cellIndex(col, k)]);
-  // ...and the physically adjacent block, one stride away in the flat array.
-  // Correct across a cube seam, where the neighbouring COLUMN at the same k is
-  // a different cell entirely because the two faces measure k along different
-  // normals. Culling against that column is what opened holes in the terrain.
-  const stepA = STEP_A[f], stepB = STEP_B[f];
-  const rel = (col, k, d) => {
-    const x = cellIndex(col, k);
-    return x < 0 ? 0 : (blocks[x + d] || 0);
-  };
+  // A cell's block id. Storage is `col * D + k`, so this is the whole of it -
+  // no COL_BASE, no COL_STEP and no sign that depends on which face you are on.
+  const at = (col, k) => (k < 0 || k >= D ? 0 : blocks[col * D + k]);
   // Ambient occlusion, and only ambient occlusion: does the cell next door have
   // geometry in it that would shade this corner? `SEALS_FACES` rather than
-  // `IS_OPAQUE` because a modelled block has no geometry to shade with — see the
-  // note over `SEALS_FACES` in Blocks.js.
-  const sealsAt = (col, k) => (k < 0 || k >= D ? 0 : SEALS_FACES[blocks[cellIndex(col, k)]]);
+  // `IS_OPAQUE` because a modelled block has no geometry to shade with.
+  const sealsAt = (col, k) => (k < 0 || k >= D ? 0 : SEALS_FACES[blocks[col * D + k]]);
 
   /** Smooth light at a corner shared by up to 4 open cells. */
   const cornerLight = (cols, ks, outv) => {
@@ -510,7 +406,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       const c = cols[q], k = ks[q];
       if (k < 0 || k >= D) { s += 15; n++; continue; }
       const vi = c * D + k;
-      if (IS_OPAQUE[blocks[cellIndex(c, k)]]) continue;
+      if (IS_OPAQUE[blocks[vi]]) continue;
       s += sun[vi]; r += lr[vi]; g += lg[vi]; b += lb[vi]; n++;
     }
     if (!n) n = 1;
@@ -522,7 +418,17 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
   const lv = [0, 0, 0, 0];
   const cornerData = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
   const aoData = [0, 0, 0, 0];
-  // per-corner surface height (fraction of the cell); 1 for everything but water
+  /**
+   * Per-corner surface height, as a fraction of the cell; 1 for everything but
+   * water. Indexed by CORNER IDENTITY and not by vertex order:
+   *
+   *   0 = (x, y)   1 = (x+1, y)   2 = (x+1, y+1)   3 = (x, y+1)
+   *
+   * The six faces below each pick the two or four of these they touch. Keeping
+   * one identity per map corner is what guarantees no seam - every quantity here
+   * is a function of the corner and the level and nothing else, so two faces
+   * meeting at a corner always compute the same number.
+   */
   const cornerTop = [1, 1, 1, 1];
   /**
    * How much of the wave a liquid vertex takes, per corner: 1 on the free
@@ -530,14 +436,7 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
    *
    * The shader used to displace every water vertex equally, which moved the
    * whole body of water through the terrain instead of rippling the top of it.
-   * Hi is the corner at the cell's brim (level k+1), Lo the one at its floor
-   * (level k); the side faces need both because they span the two.
-   *
-   * The four column sets a corner is made of are resolved once into cornerCols
-   * and shared with cornerTop, which is what guarantees the two agree — and
-   * what guarantees no seam. Every quantity here is a function of the corner
-   * and the level and nothing else, so two faces meeting at a corner always
-   * compute the same number, whichever cell they belong to.
+   * Hi is the corner at the cell's brim (level k+1), Lo the one at its floor.
    */
   const cornerWaveHi = [0, 0, 0, 0], cornerWaveLo = [0, 0, 0, 0];
   const cornerCols = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
@@ -548,51 +447,35 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
    * How much cell a liquid surface needs above the floor before it takes the
    * full sink. The shader's swell bottoms out 0.16 of a cell below the brim, so
    * a film of flowing water thinner than that would be pushed through its own
-   * floor and z-fight the block underneath. Scaling by top/0.2 caps the sink at
-   * four fifths of whatever height the film actually has.
+   * floor and z-fight the block underneath.
    */
   const WAVE_HEADROOM = 0.2;
   let liquidDepth = 0, liquidShore = 0, liquidStyle = 0;
+  /** Whether the column being meshed stands on the ice face. See `emit`. */
+  let _rime = false;
   // per-corner water depth, so the shallow-to-deep gradient and the foam band
   // interpolate across the surface instead of stepping block by block
   const liquidCorner = [0, 0, 0, 0];
   /**
-   * Per-corner shoreline, and it is the half of the line above that was claimed
-   * and not delivered.
-   *
-   * The depth has been per corner for a while; the shore flag stayed per CELL, a
-   * flat 0 or 1 for the whole quad, and the shader multiplies the two together
-   * to decide where the foam is. So the foam rim could only ever be a set of
-   * whole-block rectangles: the quad touching land carried the whole rim and its
-   * neighbour one block out carried none of it, however shallow that neighbour
-   * was. Counted on seed 4242 over a beach, recomputing exactly what this file
-   * emits: of 711 water surface quads, 512 had four different corner depths and
-   * a mean corner spread of 0.108 — the gradient is genuinely there — while all
-   * 41 shoreline quads were flat in y, by construction, because a per-cell flag
-   * has nowhere else to go.
-   *
-   * The fraction of the corner's four columns that are land, doubled and clamped,
-   * so a corner *on* a straight waterline (two of its four columns are land)
-   * still reads a full 1 and the foam keeps the strength it was tuned at. What
-   * changes is that the far corner of the same quad reads 0, so the rim now
-   * fades out across the block instead of ending at its edge.
+   * Per-corner shoreline. The depth has been per corner for a while; the shore
+   * flag stayed per CELL, so the foam rim could only ever be a set of whole-block
+   * rectangles. The fraction of the corner's four columns that are land, doubled
+   * and clamped, so a corner *on* a straight waterline still reads a full 1 and
+   * the foam keeps the strength it was tuned at, while the far corner of the same
+   * quad reads 0 and the rim fades out across the block.
    */
   const liquidCornerShore = [0, 0, 0, 0];
   let useCornerDepth = false;
 
   /**
    * Height of the liquid surface inside cell (c, k), as a fraction of the cell.
-   * A source is brim-full; each step the flow loses drops it a little further,
-   * so a thin overflow reads as a thin sheet with a lip rather than a full slab.
-   * Level 0 means "unmarked" — worldgen's oceans and lakes — which are sources.
+   * A source is brim-full; each step the flow loses drops it a little further.
+   * Level 0 means "unmarked" - worldgen's oceans and lakes - which are sources.
    */
   const liquidTop = (c, k) => {
-    const lvl = facing?.get(cellIndex(c, k)) ?? 0;
+    const lvl = facing?.get(c * D + k) ?? 0;
     if (lvl === 0 || lvl === LEVEL_SOURCE) return 1;
-    // Minecraft's ramp: the tail of a flow is a film, not a half block. A ramp
-    // that only reached about a third of a block at the far edge still read as
-    // a slab with a bevel — the thinning has to be dramatic to look like water
-    // running out rather than water stopping.
+    // Minecraft's ramp: the tail of a flow is a film, not a half block.
     return (lvl + 1) / 9;
   };
 
@@ -604,8 +487,6 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
    * between two liquid cells are culled, so neighbouring cells at different flow
    * levels have no wall between them. Flat per-cell tops would leave a gap at
    * every step down and you would see straight into the water body through it.
-   * Shared corners make the surface continuous instead — one connected sheet
-   * that slopes away from the source.
    *
    * Liquid directly above means this cell is submerged, not a surface, so the
    * corner goes to the brim and meets the column above without a seam.
@@ -626,18 +507,10 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
    *
    * A vertex is on the free surface where there is liquid immediately below it
    * and something that is not liquid immediately above: that is the face the
-   * wind acts on, and it is the only water in the world that should move. Of
-   * the up-to-four columns meeting at this corner, only the ones that hold
-   * liquid below the level have an opinion; the fraction of those that are open
-   * above it is the answer. No liquid below at all means this corner is not
-   * water and the value is 0.
-   *
-   * A fraction rather than a flag on purpose. Where a flowing surface steps
-   * down, one column is open above the level and its neighbour is not, and a
-   * flag would move one of the two quads meeting there and not the other. The
-   * average is the same number on both sides, so the sheet stays welded — the
-   * same argument, over the same four columns, that liquidCornerTop is built
-   * on.
+   * wind acts on. A fraction rather than a flag on purpose - where a flowing
+   * surface steps down, one column is open above the level and its neighbour is
+   * not, and a flag would move one of the two quads meeting there and not the
+   * other.
    */
   const liquidCornerWave = (cols4, L) => {
     let below = 0, open = 0;
@@ -663,68 +536,67 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
    *
    * Slabs got by with a single adjusted extent threaded through the existing
    * six-face code. A stair is two boxes, and hand-writing another pair of face
-   * blocks for it would be the third copy of the same thing — so shaped blocks
-   * build out of this instead.
+   * blocks for it would be the third copy of the same thing.
    *
-   * Light and AO come from the cell, not the box: they do not vary within a
-   * cell, and sampling them per box would be six lookups for no visible gain.
-   * `skip` names faces to leave out — the seam where a stair's two boxes meet
-   * is interior and must not be drawn, or it z-fights with itself.
+   * Light and AO come from the cell, not the box: they do not vary within a cell.
+   * `skip` names faces to leave out - the seam where a stair's two boxes meet is
+   * interior and must not be drawn, or it z-fights with itself.
    *
-   * @param {number[]} lo  [i, j, k] box corner within the cell, each 0..1
+   * Windings match the six full-cell faces below, mirrored for the left-handed
+   * map frame; see the file header.
+   *
+   * @param {number[]} lo  [x, y, k] box corner within the cell, each 0..1
    * @param {number[]} hi  opposite corner
    * @param {object}   skip {pi, mi, pj, mj, up, dn} truthy to omit that face
    */
-  const emitBox = (g, id, biomeId, f, i, j, k, lo, hi, dirF, skip, allCap) => {
-    const [i0, j0, k0] = lo, [i1, j1, k1] = hi;
-    // A box may ask for its cap tile on every face — see the torch head in
+  const emitBox = (g, id, biomeId, x, y, k, lo, hi, dirF, skip, allCap) => {
+    const [a0, b0, c0] = lo, [a1, b1, c1] = hi;
+    // A box may ask for its cap tile on every face - see the torch head in
     // blockBoxes. Without it the flame only ever faces the sky.
     const side = allCap ? () => capTile(id, dirF, true)
       : (dir) => sideTile(id, dir, dirF);
-    // Faces are wound so the normal points out of the box, matching the
-    // full-cube path — emit() derives the normal from the winding.
     if (!skip.up) {
       emit(g, id, capTile(id, dirF, true), biomeId,
-        cornerLerp(f, i + i0, j + j0, k + k1, _c0), cornerLerp(f, i + i1, j + j0, k + k1, _c1),
-        cornerLerp(f, i + i1, j + j1, k + k1, _c2), cornerLerp(f, i + i0, j + j1, k + k1, _c3),
-        i1 - i0, j1 - j0);
+        cellCorner(x + a0, y + b0, k + c1, _c0), cellCorner(x + a0, y + b1, k + c1, _c1),
+        cellCorner(x + a1, y + b1, k + c1, _c2), cellCorner(x + a1, y + b0, k + c1, _c3),
+        b1 - b0, a1 - a0);
     }
     if (!skip.dn) {
       emit(g, id, capTile(id, dirF, false), biomeId,
-        cornerLerp(f, i + i0, j + j0, k + k0, _c0), cornerLerp(f, i + i0, j + j1, k + k0, _c1),
-        cornerLerp(f, i + i1, j + j1, k + k0, _c2), cornerLerp(f, i + i1, j + j0, k + k0, _c3),
-        i1 - i0, j1 - j0);
+        cellCorner(x + a0, y + b1, k + c0, _c0), cellCorner(x + a0, y + b0, k + c0, _c1),
+        cellCorner(x + a1, y + b0, k + c0, _c2), cellCorner(x + a1, y + b1, k + c0, _c3),
+        b1 - b0, a1 - a0);
     }
     if (!skip.pi) {
       emit(g, id, side(0), biomeId,
-        cornerLerp(f, i + i1, j + j0, k + k0, _c0), cornerLerp(f, i + i1, j + j1, k + k0, _c1),
-        cornerLerp(f, i + i1, j + j1, k + k1, _c2), cornerLerp(f, i + i1, j + j0, k + k1, _c3),
-        j1 - j0, k1 - k0);
+        cellCorner(x + a1, y + b1, k + c0, _c0), cellCorner(x + a1, y + b0, k + c0, _c1),
+        cellCorner(x + a1, y + b0, k + c1, _c2), cellCorner(x + a1, y + b1, k + c1, _c3),
+        b1 - b0, c1 - c0);
     }
     if (!skip.mi) {
       emit(g, id, side(1), biomeId,
-        cornerLerp(f, i + i0, j + j1, k + k0, _c0), cornerLerp(f, i + i0, j + j0, k + k0, _c1),
-        cornerLerp(f, i + i0, j + j0, k + k1, _c2), cornerLerp(f, i + i0, j + j1, k + k1, _c3),
-        j1 - j0, k1 - k0);
+        cellCorner(x + a0, y + b0, k + c0, _c0), cellCorner(x + a0, y + b1, k + c0, _c1),
+        cellCorner(x + a0, y + b1, k + c1, _c2), cellCorner(x + a0, y + b0, k + c1, _c3),
+        b1 - b0, c1 - c0);
     }
     if (!skip.pj) {
       emit(g, id, side(2), biomeId,
-        cornerLerp(f, i + i1, j + j1, k + k0, _c0), cornerLerp(f, i + i0, j + j1, k + k0, _c1),
-        cornerLerp(f, i + i0, j + j1, k + k1, _c2), cornerLerp(f, i + i1, j + j1, k + k1, _c3),
-        i1 - i0, k1 - k0);
+        cellCorner(x + a0, y + b1, k + c0, _c0), cellCorner(x + a1, y + b1, k + c0, _c1),
+        cellCorner(x + a1, y + b1, k + c1, _c2), cellCorner(x + a0, y + b1, k + c1, _c3),
+        a1 - a0, c1 - c0);
     }
     if (!skip.mj) {
       emit(g, id, side(3), biomeId,
-        cornerLerp(f, i + i0, j + j0, k + k0, _c0), cornerLerp(f, i + i1, j + j0, k + k0, _c1),
-        cornerLerp(f, i + i1, j + j0, k + k1, _c2), cornerLerp(f, i + i0, j + j0, k + k1, _c3),
-        i1 - i0, k1 - k0);
+        cellCorner(x + a1, y + b0, k + c0, _c0), cellCorner(x + a0, y + b0, k + c0, _c1),
+        cellCorner(x + a0, y + b0, k + c1, _c2), cellCorner(x + a1, y + b0, k + c1, _c3),
+        a1 - a0, c1 - c0);
     }
   };
 
   const emit = (g, id, layer, biomeId, p0, p1, p2, p3, uMax, vMax, uvRot = 0) => {
     // normal & tangent from the actual quad
-    let ax = p1[0] - p0[0], ay = p1[1] - p0[1], az = p1[2] - p0[2];
-    let bx = p3[0] - p0[0], by = p3[1] - p0[1], bz = p3[2] - p0[2];
+    const ax = p1[0] - p0[0], ay = p1[1] - p0[1], az = p1[2] - p0[2];
+    const bx = p3[0] - p0[0], by = p3[1] - p0[1], bz = p3[2] - p0[2];
     _n[0] = ay * bz - az * by; _n[1] = az * bx - ax * bz; _n[2] = ax * by - ay * bx;
     const nl = Math.hypot(_n[0], _n[1], _n[2]) || 1;
     _n[0] /= nl; _n[1] /= nl; _n[2] /= nl;
@@ -735,17 +607,13 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       ? [liquidDepth, liquidShore, liquidStyle]
       : (UNTINTED_LAYER[layer] ? WHITE : tintOf(id, biomeId));
     // A leaf standing over a snowfield gets its own wave id, so the shader can
-    // keep it under snow in July as well as in December. See WAVE_LEAVES_COLD.
-    // `biomeId` is the column's, already resolved for the tint on the line
-    // above, so this costs one integer compare on the quads of one block class.
-    // ...or standing anywhere on the cap, whatever the column under it says.
-    // Two thirds of that face is frozen SEA, which is BIOME.OCEAN, so a stand
-    // of pines with some trunks over snow and some over ice had its canopy
-    // split between the two waves - neighbouring leaf blocks shaded as if they
-    // were in different climates, which is what reads as the canopy glitching.
-    // The face is the honest test there: the cap is white by construction.
-    const wave = (WAVE[id] === WAVE_LEAVES
-      && (biomeId === BIOME.SNOW || FACE_ROLE[f] === FACE_POLAR))
+    // keep it under snow in July as well as in December. `biomeId` is the
+    // column's, already resolved for the tint, so this costs one compare on the
+    // quads of one block class. `_rime` is the same test the cube spelled as
+    // FACE_ROLE[f] === FACE_POLAR: the ice face is white by construction, so a
+    // stand of pines with some trunks over snow and some over ice does not get
+    // its canopy split between two waves.
+    const wave = (WAVE[id] === WAVE_LEAVES && (biomeId === BIOME.SNOW || _rime))
       ? WAVE_LEAVES_COLD : WAVE[id];
     const uv = [[0, 0], [uMax, 0], [uMax, vMax], [0, vMax]];
     const pts = [p0, p1, p2, p3];
@@ -756,19 +624,10 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
       g.tan.push3(_t[0], _t[1], _t[2]);
       g.uv.push2(uv[(c + uvRot) & 3][0], uv[(c + uvRot) & 3][1]);
       // The quad's own uv extent, carried per vertex because a fragment cannot
-      // recover it: `uv` above runs 0..uMax by 0..vMax, and those are whole
-      // numbers for a greedy-merged cube face (one unit per cell) but a
-      // FRACTION for a shaped block, whose quad covers only part of its tile.
-      // The mining crack overlay is the only consumer — see BREAK_FRAG. Without
-      // this it samples the crack at fract(uv), which is a clean 0..1 only when
-      // the quad happens to be whole cells, so a slab's side face drew half the
-      // pattern with its centre on the top edge and a stair drew that same half
-      // twice, once per box.
-      //
-      // Not for the torch, which is the test case this was wrongly chased with
-      // twice: `rt === R_TORCH` above skips the voxel path entirely, so a torch
-      // has no quads here at all and is drawn by BlockModels with a material
-      // that never includes BREAK_FRAG. No uv arithmetic can crack one.
+      // recover it: `uv` runs 0..uMax by 0..vMax, and those are whole numbers
+      // for a full cell face but a FRACTION for a shaped block. The mining crack
+      // overlay is the only consumer - see BREAK_FRAG. Without it a slab's side
+      // face drew half the pattern with its centre on the top edge.
       g.qsz.push2(uMax, vMax);
       // The fraction of aux.w is how much of the wave this vertex takes and the
       // integer part is which wave it is, so the amount is scaled by 0.99 and
@@ -792,136 +651,111 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
     useWaveAmt = true;
   };
 
-  for (let i = i0; i < i1; i++) {
-    for (let j = j0; j < j1; j++) {
-      const col = cidx(f, i, j);
+  for (let x = x0; x < x1; x++) {
+    for (let y = y0; y < y1; y++) {
+      const col = x * W + y;
       const biomeId = colBiome[col];
-      // tangential neighbours, resolved once per column
-      const nPi = COL_NB[col * 4 + 0], nMi = COL_NB[col * 4 + 1];
-      const nPj = COL_NB[col * 4 + 2], nMj = COL_NB[col * 4 + 3];
+      _rime = faceAt(x, y) === FACE_RIME;
+      // Neighbour columns, resolved once per column. WRAPPED: a column on the
+      // map's edge has real neighbours on the other side of it, and treating the
+      // edge as empty would ring the world in a wall of faces.
+      const nPx = stepColumn(col, 1, 0), nMx = stepColumn(col, -1, 0);
+      const nPy = stepColumn(col, 0, 1), nMy = stepColumn(col, 0, -1);
       // diagonals for AO
-      const nPiPj = COL_NB[nPi * 4 + 2], nPiMj = COL_NB[nPi * 4 + 3];
-      const nMiPj = COL_NB[nMi * 4 + 2], nMiMj = COL_NB[nMi * 4 + 3];
+      const nPxPy = stepColumn(nPx, 0, 1), nPxMy = stepColumn(nPx, 0, -1);
+      const nMxPy = stepColumn(nMx, 0, 1), nMxMy = stepColumn(nMx, 0, -1);
 
-      for (let k = k0; k < k1; k++) {
-        const id = blocks[cellIndex(col, k)];
+      for (let k = kBase; k < k1; k++) {
+        const id = blocks[col * D + k];
         if (id === 0) continue;
-        // Near an edge two faces address the same cells. If both mesh them the
-        // quads land on top of each other and flicker. Only the owner draws.
-        if (cellWrite(col, k) < 0) continue;
         const rt = RENDER_TYPE[id];
         if (rt === R_CROSS) {
-          if (!MODELLED_CROSS[id]) emitCross(groups[GROUP_CUTOUT], f, i, j, k, col, id, biomeId, light);
-          // ...and if it *is* modelled, keep the light sample the billboard
-          // would have baked in. This is the only line in the whole mesh loop
-          // that a non-flower cell can reach and it is inside a branch that
-          // already ended in `continue`, so no vertex path is touched and no
-          // block that is not a modelled cross pays for it.
+          if (!MODELLED_CROSS[id]) emitCross(groups[GROUP_CUTOUT], x, y, k, col, id, biomeId, light);
+          // ...and if it *is* modelled, keep the light sample the billboard would
+          // have baked in. This is the only line in the whole mesh loop that a
+          // non-flower cell can reach and it is inside a branch that already
+          // ended in `continue`.
           else {
             const vi = col * D + k;
             crossLight.push(
-              (((i - i0) * CHUNK_T + (j - j0)) * CHUNK_K + (k - k0)) << CROSS_LIGHT_ADDR_SHIFT
+              (((x - x0) * CHUNK_T + (y - y0)) * CHUNK_K + (k - kBase)) << CROSS_LIGHT_ADDR_SHIFT
               | (sun[vi] & 15) << 12 | (lb[vi] & 15) << 8 | (lg[vi] & 15) << 4 | (lr[vi] & 15),
             );
           }
           continue;
         }
         const grp = groups[GROUP[id]];
-        // -1 for the overwhelming majority of cells: no Map lookup at all.
         // The side-table carries a different meaning per block: a horizontal
-        // facing for a kiln, an axis for a log. -1 for the overwhelming
-        // majority of cells, so no Map lookup at all.
+        // facing for a kiln, an axis for a log. -1 for the overwhelming majority
+        // of cells, so no Map lookup at all.
         const dirF = IS_DIRECTIONAL[id]
-          ? (facing?.get(cellIndex(col, k)) ?? FACING_DEFAULT)
-          : (IS_AXIS[id] ? (facing?.get(cellIndex(col, k)) ?? 0) : -1);
+          ? (facing?.get(col * D + k) ?? FACING_DEFAULT)
+          : (IS_AXIS[id] ? (facing?.get(col * D + k) ?? 0) : -1);
 
         // water depth + shoreline, handed to the liquid shader via `tint`
         if (rt === R_LIQUID) {
           let d = 0;
           while (d < 20 && RENDER_TYPE[at(col, k - d)] === R_LIQUID) d++;
           liquidDepth = Math.min(1, d / 7);
-          liquidShore = (IS_OPAQUE[rel(col, k, stepA)] || IS_OPAQUE[rel(col, k, -stepA)]
-            || IS_OPAQUE[rel(col, k, stepB)] || IS_OPAQUE[rel(col, k, -stepB)]) ? 1 : 0;
+          liquidShore = (IS_OPAQUE[at(nPx, k)] || IS_OPAQUE[at(nMx, k)]
+            || IS_OPAQUE[at(nPy, k)] || IS_OPAQUE[at(nMy, k)]) ? 1 : 0;
           // Per column, not per cell, so every quad of one body of water agrees
-          // and there is no seam down the middle of a lake. Lava takes it too
-          // and ignores it: the shader branches on the wave id long before it
-          // looks at this.
+          // and there is no seam down the middle of a lake.
           liquidStyle = colWater ? colWater[col] : 0;
         }
 
-        // Surface height at each of the cell's four top corners, in corner order
-        // (i,j) (i+1,j) (i+1,j+1) (i,j+1). 1 — the brim — for everything that is
-        // not flowing water, so the ordinary block path is untouched. The side
-        // faces below reuse these, which is what keeps a lowered top welded to
-        // its own walls instead of sinking inside a full-height box.
-        // Shaped blocks — slabs and stairs — are built out of sub-cell boxes
-        // instead of going through the six-face path below. They occupy part of
-        // their cell, so no neighbour can hide any of their faces and the only
-        // ones to drop are the seams where their own boxes meet.
-        // A torch is drawn as its own model, close to the player, by
-        // BlockModels — see _syncBlockModels. Emitting the boxes as well would
-        // put a brown post inside the flame. Everything else about a torch
-        // still comes from the voxel: it lights, it collides, it is mined and
-        // saved exactly as before, and only the picture changes.
+        // A torch is drawn as its own model, close to the player, by BlockModels.
+        // Emitting the boxes as well would put a brown post inside the flame.
+        // Everything else about a torch still comes from the voxel.
         if (rt === R_TORCH) continue;
         /**
-         * A modelled block: no geometry at all, and its light kept for the
-         * model that will stand here. See `R_MODEL` in Blocks.js.
+         * A modelled block: no geometry at all, and its light kept for the model
+         * that will stand here.
          *
          * The sample is the **brightest of the six neighbours**, not the cell
          * itself, and that is forced rather than chosen. A modelled block is
          * opaque, so the light solver never propagates into its cell and every
-         * channel there reads 0 — sample it and every workbench on the planet is
-         * a black bench. A flower has no such problem because a flower's cell is
-         * air, which is why `emitCross` above can simply read `vi`.
-         *
-         * Brightest rather than an average because the question this answers is
-         * "is there a torch on this bench", and a bench with a torch on one side
-         * and rock on the other five is lit. An average would divide that light
-         * by six and read as unlit.
+         * channel there reads 0 - sample it and every workbench on the planet is
+         * a black bench. Brightest rather than an average because the question
+         * this answers is "is there a torch on this bench", and an average would
+         * divide that light by six and read as unlit.
          */
         if (rt === R_MODEL) {
           let ms = 0, mr = 0, mg = 0, mb = 0;
           for (let n = 0; n < 6; n++) {
-            const nc = n === 0 ? nPi : n === 1 ? nMi : n === 2 ? nPj : n === 3 ? nMj : col;
+            const nc = n === 0 ? nPx : n === 1 ? nMx : n === 2 ? nPy : n === 3 ? nMy : col;
             const nk = n === 4 ? k + 1 : n === 5 ? k - 1 : k;
             if (nk < 0 || nk >= D) continue;
             const vn = nc * D + nk;
-            if (IS_OPAQUE[blocks[cellIndex(nc, nk)]]) continue;
+            if (IS_OPAQUE[blocks[vn]]) continue;
             if (sun[vn] > ms) ms = sun[vn];
             if (lr[vn] > mr) mr = lr[vn];
             if (lg[vn] > mg) mg = lg[vn];
             if (lb[vn] > mb) mb = lb[vn];
           }
           crossLight.push(
-            (((i - i0) * CHUNK_T + (j - j0)) * CHUNK_K + (k - k0)) << CROSS_LIGHT_ADDR_SHIFT
+            (((x - x0) * CHUNK_T + (y - y0)) * CHUNK_K + (k - kBase)) << CROSS_LIGHT_ADDR_SHIFT
             | (ms & 15) << 12 | (mb & 15) << 8 | (mg & 15) << 4 | (mr & 15),
           );
           continue;
         }
         if (IS_SHAPED[id]) {
-          const byte = (facing?.get(cellIndex(col, k)) ?? 0) & 7;
+          const byte = (facing?.get(col * D + k) ?? 0) & 7;
           // A fence has no stored orientation: its shape is its neighbours, and
           // those are already resolved for this column.
           const links = IS_FENCE[id]
-            ? fenceLinks(rel(col, k, stepA), rel(col, k, -stepA), rel(col, k, stepB), rel(col, k, -stepB))
+            ? fenceLinks(at(nPx, k), at(nMx, k), at(nPy, k), at(nMy, k))
             : 0;
           const boxes = blockBoxes(id, byte, links);
           // Light comes from the cell: a shaped block sits in open air by
-          // definition, so its own cell is the honest sample, and light does
-          // not vary within one anyway.
-          //
-          // Occlusion cannot be left flat, though. Every other block in the
-          // world gets corner AO, so a slab rendered at a constant 3 reads as
-          // cardboard laid on a shaded floor. There are no sub-cell corners to
-          // sample, so this darkens the whole block by how boxed-in its cell
-          // is — a stair in the open stays bright, one set into a wall picks up
-          // the same contact shadow its neighbours have.
+          // definition. Occlusion cannot be left flat, though - a slab rendered
+          // at a constant 3 reads as cardboard laid on a shaded floor - so this
+          // darkens the whole block by how boxed-in its cell is.
           let walled = 0;
-          if (SEALS_FACES[rel(col, k, stepA)]) walled++;
-          if (SEALS_FACES[rel(col, k, -stepA)]) walled++;
-          if (SEALS_FACES[rel(col, k, stepB)]) walled++;
-          if (SEALS_FACES[rel(col, k, -stepB)]) walled++;
+          if (SEALS_FACES[at(nPx, k)]) walled++;
+          if (SEALS_FACES[at(nMx, k)]) walled++;
+          if (SEALS_FACES[at(nPy, k)]) walled++;
+          if (SEALS_FACES[at(nMy, k)]) walled++;
           if (SEALS_FACES[at(col, k - 1)]) walled++;
           const shade = Math.max(0, 3 - (walled >> 1));
           cornerLight([col, col, col, col], [k, k, k, k], lv);
@@ -935,20 +769,15 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             const skip = {};
             // Drop a face only where another box of the same block covers the
             // WHOLE of it. Touching used to be enough, and touching is not the
-            // same question: a fence post is 0.25 x 0.25 x 1.5 and a rail is
-            // 0.16 x 0.16, so a rail laid against the post covered 13.7% of
-            // that face and took away 100% of it. A post in the middle of a run
-            // lost both its +i and -i faces and you looked straight through the
-            // timber — which is the "sides go transparent at some angles" fault,
-            // and it is angle-dependent precisely because only the faces the
-            // rails link to are lost. A stair had the same hole at 50%: the
-            // riser touches half the tread's top and the whole top went.
+            // same question: a rail laid against a fence post covered 13.7% of
+            // that face and took away 100% of it, so a post in the middle of a
+            // run lost both its x faces and you looked straight through the
+            // timber. A stair had the same hole at 50%.
             //
             // Coverage is tested per box rather than against the union, so a
             // face buried by two boxes that neither covers alone is drawn and
-            // hidden rather than dropped. That is the safe way round — the cost
-            // is a quad, the alternative is a hole — and it costs nothing in
-            // practice: no shape in the table is built that way.
+            // hidden rather than dropped. That is the safe way round - the cost
+            // is a quad, the alternative is a hole.
             for (let o = 0; o < boxes.length; o++) {
               if (o === b) continue;
               const [oi0, oj0, ok0, oi1, oj1, ok1] = boxes[o];
@@ -964,13 +793,13 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             }
             // A face flush with the cell wall can still be hidden by a solid
             // neighbour, exactly as a full cube's would be.
-            if (bi1 === 1 && SEALS_FACES[rel(col, k, stepA)]) skip.pi = 1;
-            if (bi0 === 0 && SEALS_FACES[rel(col, k, -stepA)]) skip.mi = 1;
-            if (bj1 === 1 && SEALS_FACES[rel(col, k, stepB)]) skip.pj = 1;
-            if (bj0 === 0 && SEALS_FACES[rel(col, k, -stepB)]) skip.mj = 1;
+            if (bi1 === 1 && SEALS_FACES[at(nPx, k)]) skip.pi = 1;
+            if (bi0 === 0 && SEALS_FACES[at(nMx, k)]) skip.mi = 1;
+            if (bj1 === 1 && SEALS_FACES[at(nPy, k)]) skip.pj = 1;
+            if (bj0 === 0 && SEALS_FACES[at(nMy, k)]) skip.mj = 1;
             if (bk1 === 1 && SEALS_FACES[at(col, k + 1)]) skip.up = 1;
             if (bk0 === 0 && SEALS_FACES[at(col, k - 1)]) skip.dn = 1;
-            emitBox(grp, id, biomeId, f, i, j, k,
+            emitBox(grp, id, biomeId, x, y, k,
               [bi0, bj0, bk0], [bi1, bj1, bk1], -1, skip, boxes[b][6]);
           }
           continue;
@@ -980,14 +809,12 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
         const cellLo = 0;
 
         if (rt === R_LIQUID) {
-          // corners (i,j) (i+1,j) (i+1,j+1) (i,j+1), each with the four columns
-          // that meet there — the same sets cornerTop has always used, hoisted
-          // so the wave amounts are built from exactly the same geometry.
+          // The four columns meeting at each corner, in corner-identity order.
           const cc = cornerCols;
-          cc[0][0] = col; cc[0][1] = nMi; cc[0][2] = nMj; cc[0][3] = nMiMj;
-          cc[1][0] = col; cc[1][1] = nPi; cc[1][2] = nMj; cc[1][3] = nPiMj;
-          cc[2][0] = col; cc[2][1] = nPi; cc[2][2] = nPj; cc[2][3] = nPiPj;
-          cc[3][0] = col; cc[3][1] = nMi; cc[3][2] = nPj; cc[3][3] = nMiPj;
+          cc[0][0] = col; cc[0][1] = nMx; cc[0][2] = nMy; cc[0][3] = nMxMy;
+          cc[1][0] = col; cc[1][1] = nPx; cc[1][2] = nMy; cc[1][3] = nPxMy;
+          cc[2][0] = col; cc[2][1] = nPx; cc[2][2] = nPy; cc[2][3] = nPxPy;
+          cc[3][0] = col; cc[3][1] = nMx; cc[3][2] = nPy; cc[3][3] = nMxPy;
           for (let c = 0; c < 4; c++) {
             cornerTop[c] = liquidCornerTop(cc[c], k);
             cornerWaveHi[c] = liquidCornerWave(cc[c], k + 1)
@@ -1000,33 +827,29 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
         }
 
         // A flow that does not reach the brim has a real surface even with a
-        // solid block resting on top of it — there is air in the gap. The
-        // ordinary visibility test only asks whether the cell above is opaque,
-        // so water running under an overhang lost its top face entirely and the
-        // flow simply was not there to look at.
-        //
-        // A lower slab has the same problem for the same reason: its top sits
-        // at half height with air above it inside its own cell, so whatever is
-        // in the cell above cannot hide it.
+        // solid block resting on top of it - there is air in the gap - so the
+        // ordinary visibility test would lose its top face entirely and the flow
+        // would simply not be there to look at. A lower slab has the same problem
+        // for the same reason.
         const openSurface = (rt === R_LIQUID
           && (cornerTop[0] < 1 || cornerTop[1] < 1 || cornerTop[2] < 1 || cornerTop[3] < 1))
           || (IS_SLAB[id] && !slabUp);
 
-        // ---- outward (+k) ----
+        // ---- up (+Y) ----
+        // Vertex order (x,y) (x,y+1) (x+1,y+1) (x+1,y), i.e. corners 0 3 2 1.
         if (faceVisible(id, at(col, k + 1)) || openSurface) {
           // kk stays an integer: it addresses cells for the light and occlusion
-          // lookups below. Only the emitted corner heights are lowered.
-          //
-          // Sampling the layer above would be right for an ordinary top face,
-          // but a surface roofed by a solid block would then read its light from
-          // inside that block — every lookup opaque, so the water came out pure
-          // black. Fall back to the water's own layer there.
+          // lookups. Only the emitted corner heights are lowered. Sampling the
+          // layer above would be right for an ordinary top face, but a surface
+          // roofed by a solid block would then read its light from inside that
+          // block - every lookup opaque, so the water came out pure black.
           const kk = ((openSurface && IS_OPAQUE[at(col, k + 1)]) || (IS_SLAB[id] && !slabUp))
             ? k : k + 1;
           const cols = [
-            [col, nMi, nMj, nMiMj], [col, nPi, nMj, nPiMj],
-            [col, nPi, nPj, nPiPj], [col, nMi, nPj, nMiPj],
+            [col, nMx, nMy, nMxMy], [col, nMx, nPy, nMxPy],
+            [col, nPx, nPy, nPxPy], [col, nPx, nMy, nPxMy],
           ];
+          const corner = [0, 3, 2, 1];
           for (let c = 0; c < 4; c++) {
             const s1 = sealsAt(cols[c][1], kk), s2 = sealsAt(cols[c][2], kk), sc = sealsAt(cols[c][3], kk);
             aoData[c] = ao(s1, s2, sc);
@@ -1045,31 +868,31 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
                 if (IS_OPAQUE[at(cols[c][q], k)]) land++;
               }
               // Deliberately /6 while the per-cell value on the sides is /7. The
-              // two have disagreed since corner depth was added and the shader's
-              // own comment documents /7; left alone because every dScale in
-              // LIQUID_MAP_FRAG was tuned by photographing surfaces that came
-              // through this line, so "fixing" it here would quietly re-tune
-              // seven kinds of water. Worth doing deliberately, once, with the
-              // constants in front of you.
+              // two have disagreed since corner depth was added; left alone
+              // because every dScale in LIQUID_MAP_FRAG was tuned by
+              // photographing surfaces that came through this line.
               liquidCorner[c] = Math.min(1, (sum / 4) / 6);
               liquidCornerShore[c] = Math.min(1, land / 2);
             }
-            setWave(cornerWaveHi[0], cornerWaveHi[1], cornerWaveHi[2], cornerWaveHi[3]);
+            setWave(cornerWaveHi[0], cornerWaveHi[3], cornerWaveHi[2], cornerWaveHi[1]);
           }
           emit(grp, id, capTile(id, dirF, true), biomeId,
-            cornerAt(f, i, j, k + cornerTop[0], _c0), cornerAt(f, i + 1, j, k + cornerTop[1], _c1),
-            cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c2), cornerAt(f, i, j + 1, k + cornerTop[3], _c3),
+            cellCorner(x, y, k + cornerTop[corner[0]], _c0),
+            cellCorner(x, y + 1, k + cornerTop[corner[1]], _c1),
+            cellCorner(x + 1, y + 1, k + cornerTop[corner[2]], _c2),
+            cellCorner(x + 1, y, k + cornerTop[corner[3]], _c3),
             1, 1, grainRot(id, dirF, 4));
         }
 
-        // ---- inward (-k) ----
+        // ---- down (-Y) ----
+        // Vertex order (x,y+1) (x,y) (x+1,y) (x+1,y+1), i.e. corners 3 0 1 2.
         // An upper slab's underside floats at half height inside its own cell,
-        // so nothing below can hide it — the mirror of the lower slab's top.
+        // so nothing below can hide it - the mirror of the lower slab's top.
         if (faceVisible(id, at(col, k - 1)) || (IS_SLAB[id] && slabUp)) {
           const kk = k + cellLo;
           const cols = [
-            [col, nMi, nMj, nMiMj], [col, nMi, nPj, nMiPj],
-            [col, nPi, nPj, nPiPj], [col, nPi, nMj, nPiMj],
+            [col, nMx, nPy, nMxPy], [col, nMx, nMy, nMxMy],
+            [col, nPx, nMy, nPxMy], [col, nPx, nPy, nPxPy],
           ];
           // Light an underhung slab from its own cell rather than from the solid
           // one beneath it, which would read as unlit.
@@ -1081,91 +904,95 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           }
           if (rt === R_LIQUID) {
-            setWave(cornerWaveLo[0], cornerWaveLo[3], cornerWaveLo[2], cornerWaveLo[1]);
+            setWave(cornerWaveLo[3], cornerWaveLo[0], cornerWaveLo[1], cornerWaveLo[2]);
           }
           emit(grp, id, capTile(id, dirF, false), biomeId,
-            cornerAt(f, i, j, kk, _c0), cornerAt(f, i, j + 1, kk, _c1),
-            cornerAt(f, i + 1, j + 1, kk, _c2), cornerAt(f, i + 1, j, kk, _c3),
+            cellCorner(x, y + 1, kk, _c0), cellCorner(x, y, kk, _c1),
+            cellCorner(x + 1, y, kk, _c2), cellCorner(x + 1, y + 1, kk, _c3),
             1, 1, grainRot(id, dirF, 5));
         }
 
-        // ---- tangential faces ----
-        // +i: corners vary in j (u) and k (v)
-        if (faceVisible(id, rel(col, k, stepA))) {
-          const nb = nPi;
-          const nbPj = COL_NB[nb * 4 + 2], nbMj = COL_NB[nb * 4 + 3];
+        // ---- +x ----
+        // Vertex order (x+1,y+1,lo) (x+1,y,lo) (x+1,y,hi) (x+1,y+1,hi):
+        // corners 2 1 1 2, u along -y, v along +k.
+        if (faceVisible(id, at(nPx, k))) {
+          const nb = nPx;
+          const nbPy = nPxPy, nbMy = nPxMy;
           const setC = (c, colSide, kSide) => {
             const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
-          setC(0, nbMj, k - 1); setC(1, nbPj, k - 1); setC(2, nbPj, k + 1); setC(3, nbMj, k + 1);
+          setC(0, nbPy, k - 1); setC(1, nbMy, k - 1); setC(2, nbMy, k + 1); setC(3, nbPy, k + 1);
           if (rt === R_LIQUID) {
-            setWave(cornerWaveLo[1], cornerWaveLo[2], cornerWaveHi[2], cornerWaveHi[1]);
+            setWave(cornerWaveLo[2], cornerWaveLo[1], cornerWaveHi[1], cornerWaveHi[2]);
           }
           emit(grp, id, sideTile(id, 0, dirF), biomeId,
-            cornerAt(f, i + 1, j, k + cellLo, _c0), cornerAt(f, i + 1, j + 1, k + cellLo, _c1),
-            cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c2),
-            cornerAt(f, i + 1, j, k + cornerTop[1], _c3), 1, 1, grainRot(id, dirF, 0));
+            cellCorner(x + 1, y + 1, k + cellLo, _c0), cellCorner(x + 1, y, k + cellLo, _c1),
+            cellCorner(x + 1, y, k + cornerTop[1], _c2),
+            cellCorner(x + 1, y + 1, k + cornerTop[2], _c3), 1, 1, grainRot(id, dirF, 0));
         }
-        // -i
-        if (faceVisible(id, rel(col, k, -stepA))) {
-          const nb = nMi;
-          const nbPj = COL_NB[nb * 4 + 2], nbMj = COL_NB[nb * 4 + 3];
+        // ---- -x ----
+        // Vertex order (x,y,lo) (x,y+1,lo) (x,y+1,hi) (x,y,hi): corners 0 3 3 0.
+        if (faceVisible(id, at(nMx, k))) {
+          const nb = nMx;
+          const nbPy = nMxPy, nbMy = nMxMy;
           const setC = (c, colSide, kSide) => {
             const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
-          setC(0, nbPj, k - 1); setC(1, nbMj, k - 1); setC(2, nbMj, k + 1); setC(3, nbPj, k + 1);
+          setC(0, nbMy, k - 1); setC(1, nbPy, k - 1); setC(2, nbPy, k + 1); setC(3, nbMy, k + 1);
           if (rt === R_LIQUID) {
-            setWave(cornerWaveLo[3], cornerWaveLo[0], cornerWaveHi[0], cornerWaveHi[3]);
+            setWave(cornerWaveLo[0], cornerWaveLo[3], cornerWaveHi[3], cornerWaveHi[0]);
           }
           emit(grp, id, sideTile(id, 1, dirF), biomeId,
-            cornerAt(f, i, j + 1, k + cellLo, _c0), cornerAt(f, i, j, k + cellLo, _c1),
-            cornerAt(f, i, j, k + cornerTop[0], _c2),
-            cornerAt(f, i, j + 1, k + cornerTop[3], _c3), 1, 1, grainRot(id, dirF, 1));
+            cellCorner(x, y, k + cellLo, _c0), cellCorner(x, y + 1, k + cellLo, _c1),
+            cellCorner(x, y + 1, k + cornerTop[3], _c2),
+            cellCorner(x, y, k + cornerTop[0], _c3), 1, 1, grainRot(id, dirF, 1));
         }
-        // +j — corners ordered so UV.u stays tangential and UV.v runs along +k,
-        // matching the other side faces (otherwise the texture is rotated 90°).
-        if (faceVisible(id, rel(col, k, stepB))) {
-          const nb = nPj;
-          const nbPi = COL_NB[nb * 4 + 0], nbMi = COL_NB[nb * 4 + 1];
+        // ---- +y ----
+        // Vertex order (x,y+1,lo) (x+1,y+1,lo) (x+1,y+1,hi) (x,y+1,hi):
+        // corners 3 2 2 3, u along +x, v along +k.
+        if (faceVisible(id, at(nPy, k))) {
+          const nb = nPy;
+          const nbPx = nPxPy, nbMx = nMxPy;
           const setC = (c, colSide, kSide) => {
             const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
-          setC(0, nbPi, k - 1); setC(1, nbMi, k - 1); setC(2, nbMi, k + 1); setC(3, nbPi, k + 1);
+          setC(0, nbMx, k - 1); setC(1, nbPx, k - 1); setC(2, nbPx, k + 1); setC(3, nbMx, k + 1);
           if (rt === R_LIQUID) {
-            setWave(cornerWaveLo[2], cornerWaveLo[3], cornerWaveHi[3], cornerWaveHi[2]);
+            setWave(cornerWaveLo[3], cornerWaveLo[2], cornerWaveHi[2], cornerWaveHi[3]);
           }
           emit(grp, id, sideTile(id, 2, dirF), biomeId,
-            cornerAt(f, i + 1, j + 1, k + cellLo, _c0), cornerAt(f, i, j + 1, k + cellLo, _c1),
-            cornerAt(f, i, j + 1, k + cornerTop[3], _c2),
-            cornerAt(f, i + 1, j + 1, k + cornerTop[2], _c3), 1, 1, grainRot(id, dirF, 2));
+            cellCorner(x, y + 1, k + cellLo, _c0), cellCorner(x + 1, y + 1, k + cellLo, _c1),
+            cellCorner(x + 1, y + 1, k + cornerTop[2], _c2),
+            cellCorner(x, y + 1, k + cornerTop[3], _c3), 1, 1, grainRot(id, dirF, 2));
         }
-        // -j
-        if (faceVisible(id, rel(col, k, -stepB))) {
-          const nb = nMj;
-          const nbPi = COL_NB[nb * 4 + 0], nbMi = COL_NB[nb * 4 + 1];
+        // ---- -y ----
+        // Vertex order (x+1,y,lo) (x,y,lo) (x,y,hi) (x+1,y,hi): corners 1 0 0 1.
+        if (faceVisible(id, at(nMy, k))) {
+          const nb = nMy;
+          const nbPx = nPxMy, nbMx = nMxMy;
           const setC = (c, colSide, kSide) => {
             const s1 = sealsAt(colSide, k), s2 = sealsAt(nb, kSide), sc = sealsAt(colSide, kSide);
             aoData[c] = ao(s1, s2, sc);
             cornerLight([nb, colSide, nb, colSide], [k, k, kSide, kSide], lv);
             cornerData[c][0] = lv[0]; cornerData[c][1] = lv[1]; cornerData[c][2] = lv[2]; cornerData[c][3] = lv[3];
           };
-          setC(0, nbMi, k - 1); setC(1, nbPi, k - 1); setC(2, nbPi, k + 1); setC(3, nbMi, k + 1);
+          setC(0, nbPx, k - 1); setC(1, nbMx, k - 1); setC(2, nbMx, k + 1); setC(3, nbPx, k + 1);
           if (rt === R_LIQUID) {
-            setWave(cornerWaveLo[0], cornerWaveLo[1], cornerWaveHi[1], cornerWaveHi[0]);
+            setWave(cornerWaveLo[1], cornerWaveLo[0], cornerWaveHi[0], cornerWaveHi[1]);
           }
           emit(grp, id, sideTile(id, 3, dirF), biomeId,
-            cornerAt(f, i, j, k + cellLo, _c0), cornerAt(f, i + 1, j, k + cellLo, _c1),
-            cornerAt(f, i + 1, j, k + cornerTop[1], _c2),
-            cornerAt(f, i, j, k + cornerTop[0], _c3), 1, 1, grainRot(id, dirF, 3));
+            cellCorner(x + 1, y, k + cellLo, _c0), cellCorner(x, y, k + cellLo, _c1),
+            cellCorner(x, y, k + cornerTop[0], _c2),
+            cellCorner(x + 1, y, k + cornerTop[1], _c3), 1, 1, grainRot(id, dirF, 3));
         }
       }
     }
@@ -1179,15 +1006,12 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, f, ci, cj, 
 
 // --- cross plants -----------------------------------------------------------
 
-function emitCross(g, f, i, j, k, col, id, biomeId, light) {
-  // On a cube the frame is the face's own, constant across the face, and the
-  // centre is a position rather than a direction times a radius.
-  const N = FACE_N[f], A = FACE_R[f], B = FACE_U[f];
-  cubeCenter(f, i, j, k, _cc);
-  const cx = _cc[0], cy = _cc[1], cz = _cc[2];
-  const upx = N[0], upy = N[1], upz = N[2];
-  const t1x = A[0], t1y = A[1], t1z = A[2];
-  const t2x = B[0], t2y = B[1], t2z = B[2];
+function emitCross(g, x, y, k, col, id, biomeId, light) {
+  // Two flat quads through the middle of the cell, on the world axes. The frame
+  // is the same everywhere now, so there is nothing per-face to look up and
+  // nothing to normalise: up is +Y, the two spans are +X and +Z.
+  worldOf(x, y, k, _cc);
+  const cx = _cc.x, cy = _cc.y, cz = _cc.z;
 
   const vi = col * D + k;
   const sl = light.sun[vi] / 15;
@@ -1197,28 +1021,21 @@ function emitCross(g, f, i, j, k, col, id, biomeId, light) {
   const halfW = 0.52, halfH = 0.5;
 
   for (let plane = 0; plane < 2; plane++) {
-    const ax = plane === 0 ? t1x : t2x;
-    const ay = plane === 0 ? t1y : t2y;
-    const az = plane === 0 ? t1z : t2z;
-    // The plane's own normal is deliberately not computed here. A cross plant
-    // is shaded with the COLUMN'S UP as its normal — `g.nrm.push3(upx, upy,
-    // upz)` below — so both quads and both sides of each quad take the same
-    // light and a tuft of grass never has a dark half depending on which way
-    // the sun is round. The true quad normal used to be worked out on every
-    // plane of every plant and then dropped on the floor, which read as if the
-    // shading were about to use it.
+    // plane 0 spans world X, plane 1 spans world Z.
+    const ax = plane === 0 ? 1 : 0;
+    const az = plane === 0 ? 0 : 1;
+    // The plane's own normal is deliberately not computed. A cross plant is
+    // shaded with UP as its normal, so both quads and both sides of each quad
+    // take the same light and a tuft of grass never has a dark half depending on
+    // which way the sun is round.
     const v0 = g.verts;
     const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     const uvp = [[0, 1], [1, 1], [1, 0], [0, 0]];
     for (let c = 0; c < 4; c++) {
       const [su, sv] = pts[c];
-      g.pos.push3(
-        cx + ax * su * halfW + upx * sv * halfH,
-        cy + ay * su * halfW + upy * sv * halfH,
-        cz + az * su * halfW + upz * sv * halfH,
-      );
-      g.nrm.push3(upx, upy, upz);
-      g.tan.push3(ax, ay, az);
+      g.pos.push3(cx + ax * su * halfW, cy + sv * halfH, cz + az * su * halfW);
+      g.nrm.push3(0, 1, 0);
+      g.tan.push3(ax, 0, az);
       g.uv.push2(uvp[c][0], uvp[c][1]);
       // A cross plant's two planes each span their tile exactly once.
       g.qsz.push2(1, 1);

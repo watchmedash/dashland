@@ -50,6 +50,10 @@ import {
   VERDANT_LINGER, VERDANT_NIGHT_NEAR, VERDANT_NIGHT_FAR, VERDANT_TRIES,
   VERDANT_GROUND, verdantNightDraw,
 } from './VerdantNight.js';
+import {
+  VERDANT_DAY_HUSKS, SHADE_SPAN, SHADE_STEP, SHADE_RING, SHADE_MIN, SHADE_PERIOD,
+  FOLK_FLOOR, FOLK_REGEN, folkPrey, leafAbove,
+} from './VerdantDay.js';
 
 /**
  * Bodies alive at once, anywhere.
@@ -6890,6 +6894,17 @@ export class Mobs {
    */
   _verdantNightTick(player, playerCol, dt) {
     this._verdantSendOff(player, dt);
+    // Whatever was standing in the shade at sunset is the first of the night,
+    // and it is promoted rather than replaced. Removing five husks at dusk to
+    // spawn five husks at dusk would be a visible exchange of one creature for
+    // the same creature, and leaving them on their own flag would put them
+    // outside both the night's budget and the dawn cull - which is a population
+    // that survives the morning it was never meant to see.
+    for (const m of this.list) {
+      if (!m.verdantDay) continue;
+      m.verdantDay = false;
+      m.verdantNight = true;
+    }
     let husks = 0, cinders = 0;
     for (const m of this.list) {
       if (!m.verdantNight) continue;
@@ -6913,6 +6928,50 @@ export class Mobs {
       // has no honest way to be in a save file.
       mob.verdantNight = true;
       if (type === 'cinderling') cinders++; else husks++;
+      placed++;
+    }
+    return placed;
+  }
+
+  /**
+   * ...and Verdant's day, on the same clock and in the same place.
+   *
+   * The night's tick with three terms taken out and one put in. The three out
+   * are the roster (there is only one species by day - see
+   * VERDANT_DAY_CINDER), the send-off (the village is home, and its own top-up
+   * is what keeps it standing) and the size of it. The one in is the shade,
+   * which is the entire reason a husk is allowed to be here at all.
+   *
+   * Held down while any of the night is still on the ground. The dawn cull
+   * takes VERDANT_PER_TICK a tick, so the two would otherwise overlap for
+   * several ticks and the face would carry the night's twenty-one plus a fresh
+   * five - a morning briefly worse than the midnight it followed. They key off
+   * different flags so there is no churn either way; this is only about the
+   * headcount the player is standing in.
+   *
+   * @returns {number} bodies placed, for the harness
+   */
+  _verdantDayTick(player, playerCol) {
+    let day = 0, night = 0;
+    for (const m of this.list) {
+      if (m.verdantDay) day++;
+      else if (m.verdantNight) night++;
+    }
+    if (night > 0) return 0;
+    let placed = 0;
+    for (let n = 0; n < VERDANT_PER_TICK; n++) {
+      if (day + placed >= VERDANT_DAY_HUSKS) break;
+      const spot = this._findVerdantColumn(playerCol, player.position, player.face, true);
+      if (!spot) break;
+      // The endgame's shutdown outranks the face, exactly as it does at night.
+      if (!this._hostileHere(spot.col)) break;
+      const mob = this._placeUnseen('husk', spot.col, spot.k);
+      if (!mob) continue;
+      // The mark that makes this body the day's. Read in four places: the count
+      // above, the promotion in `_verdantNightTick`, `_verdantDawnCull` (which
+      // must NOT take one), and `toJSON`, which refuses to write it down for
+      // the reason it refuses a night body.
+      mob.verdantDay = true;
       placed++;
     }
     return placed;
@@ -7025,7 +7084,7 @@ export class Mobs {
    * Verdant readily — a husk spawned into the wall ring by a Verdant night is
    * the exact shape of every seam bug this codebase has had.
    */
-  _findVerdantColumn(nearCol, playerPos, face) {
+  _findVerdantColumn(nearCol, playerPos, face, shaded = false) {
     const p = this.planet;
     const lo = stepsFor(VERDANT_NIGHT_NEAR);
     const hi = Math.max(lo + 1, stepsFor(VERDANT_NIGHT_FAR));
@@ -7040,6 +7099,11 @@ export class Mobs {
       // A hearth is ground the player has made safe, and the night is not an
       // exception to that on any face.
       if (this._warded(col, k)) continue;
+      // ...and by day, the canopy is the whole permission. Last of the terrain
+      // tests on purpose: it is the only one that reads five columns instead of
+      // one, so it is asked once per candidate that has already passed
+      // everything cheaper. See `_shaded`.
+      if (shaded && !this._shaded(col, k)) continue;
       const d = wrapDist(colTop(col, k, _p), playerPos);
       if (d < VERDANT_NIGHT_NEAR || d > Math.min(VERDANT_NIGHT_FAR, this.despawnRadius - 30)) continue;
       return { col, k };
@@ -7429,6 +7493,48 @@ export class Mobs {
       if (IS_SOLID[id]) return true;
     }
     return false;
+  }
+
+  /**
+   * ...and the question `_roofed` deliberately refuses to answer, asked on the
+   * one face where the answer is different.
+   *
+   * `_roofed` says foliage is not shelter, and that is right and stays right -
+   * see the note on it, and the long one in `VerdantDay.js` about why this is a
+   * second question rather than an edit to the first. On a face at 20% tree
+   * cover the jungle floor genuinely is dark, and this is the only place that
+   * is allowed to say so.
+   *
+   * At most five column scans of SHADE_SPAN layers, and it short-circuits on
+   * the third hit. It is asked from two places and neither is per-frame: the
+   * spawn search, which runs at most VERDANT_TRIES times per SPAWN_PERIOD, and
+   * a body already standing, on the SHADE_PERIOD clock.
+   */
+  _shaded(col, k) {
+    const top = Math.min(D - 1, k + SHADE_SPAN);
+    let n = 0;
+    for (let s = 0; s < SHADE_RING.length; s += 2) {
+      const c = (s === 0) ? col
+        : stepColumn(col, SHADE_RING[s] * SHADE_STEP, SHADE_RING[s + 1] * SHADE_STEP);
+      if (leafAbove(this.planet, c, k, top) && ++n >= SHADE_MIN) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The same answer for a body rather than a column, on a clock.
+   *
+   * Cached because the caller is the daylight burn, which runs every frame on
+   * every husk; recomputed because a husk walks, and a husk that walked out of
+   * the trees an hour ago should be on fire. Half a second is well under the
+   * time it takes a husk to cross the five columns the rule samples.
+   */
+  _shadedNow(mob, dt) {
+    mob.shadeT = (mob.shadeT ?? 0) - dt;
+    if (mob.shadeT > 0) return !!mob.shaded;
+    mob.shadeT = SHADE_PERIOD;
+    mob.shaded = this._shaded(this._colOf(mob.cell.x, mob.cell.y), Math.floor(mob.cell.k) - 1);
+    return mob.shaded;
   }
 
   /**
@@ -9869,10 +9975,30 @@ export class Mobs {
     return true;
   }
 
+  /**
+   * ...and the second one, which is the fourteen.
+   *
+   * Deliberately a third predicate at the same door rather than a faction
+   * system, for the reason `_bossPrey` gives: nothing else on the planet fights
+   * anything except its prey list, and this reuses the hunting machinery that
+   * already exists and answers one extra question on the way in. The rule
+   * itself is in `VerdantDay.js` next to the rest of the face's facts, so it
+   * can be asserted without a body.
+   *
+   * A resident's hunt is not hunger. It has no `diet`, it never eats what it
+   * kills and it takes no rest afterwards - `_stalk` and `_feed` each carry one
+   * line for that - because the reason it goes is that a husk is standing in
+   * its jungle, not that it is peckish.
+   */
+  _folkPrey(o) {
+    return folkPrey(o.spec);
+  }
+
   _findPrey(mob) {
     const preyOn = mob.spec.preyOn;
     const isBoss = !!mob.spec.boss;
-    if (!preyOn && !isBoss) return null;
+    const isFolk = !!mob.spec.folk;
+    if (!preyOn && !isBoss && !isFolk) return null;
     let best = null, bestD = PREY_RANGE * PREY_RANGE;
     const ceiling = mob.spec.height * mob.grown * PREY_SIZE;
     for (const o of this.list) {
@@ -9885,6 +10011,8 @@ export class Mobs {
       if (o.spec.phantom) continue;
       if (isBoss) {
         if (!this._bossPrey(mob, o)) continue;
+      } else if (isFolk) {
+        if (!this._folkPrey(o)) continue;
       } else if (!preyOn.has(o.type)) continue;
       // A calf of a listed species is still on the list; the checks below are
       // about what this individual can actually manage and reach.
@@ -10385,8 +10513,12 @@ export class Mobs {
     // reach test, the bite, the give-up window - is the same code a lion uses,
     // which is the point of routing it through here rather than writing a
     // second chase.
-    if (!spec.preyOn && !spec.boss) return false;
-    if (spec.diet !== 'carnivore' && spec.diet !== 'omnivore') return false;
+    // One of the fourteen is the third thing that hunts without a prey list -
+    // see `_folkPrey`. It has no `diet` either, and it should not acquire one:
+    // `diet` drives grazing, the hunger clock and what `_feed` does, and none
+    // of those are true of a person walking at a husk.
+    if (!spec.preyOn && !spec.boss && !spec.folk) return false;
+    if (!spec.folk && spec.diet !== 'carnivore' && spec.diet !== 'omnivore') return false;
     // (The bite cooldown and the hunger clock are ticked in update() now, with
     // the rest of this body's clocks. They were ticked here, which meant they
     // only ran on the frames this function was reached — and it is not reached
@@ -10399,7 +10531,11 @@ export class Mobs {
     // is not a clock.)
     // A cub does not hunt, and a fed animal has other plans.
     if (mob.baby > 0 || mob.love > 0) return false;
-    if (mob.hungerT > 0) { mob.prey = null; return false; }
+    // ...and the hunger gate is the fourteen's second exemption, on the same
+    // grounds. A resident that had "just eaten" would stand and watch the next
+    // husk walk past it, which is neither the ask nor anything a player could
+    // read as a decision.
+    if (!spec.folk && mob.hungerT > 0) { mob.prey = null; return false; }
 
     if (mob.prey && (mob.prey.taken || mob.prey.released
       || mob.prey.dying > 0 || mob.prey.health <= 0)) mob.prey = null;
@@ -10481,6 +10617,9 @@ export class Mobs {
      */
     prey.health -= this._preyBite(mob, prey);
     prey.hurtT = 0.25;
+    // The husk's half of it. Without this the fourteen "fighting" husks is one
+    // body walking through another, and the ask says they fight each other.
+    if (spec.folk) this._folkRiposte(mob, prey);
     if (prey.health > 0) {
       if (this.onSound) this.onSound('hurt', prey);
       // It breaks away. The hunter has to close again, which is what turns a
@@ -10523,9 +10662,37 @@ export class Mobs {
     return true;
   }
 
+  /**
+   * The husk hitting back, and the one place FOLK_FLOOR is enforced.
+   *
+   * Written here rather than as a target the husk acquires, because a husk has
+   * no way to acquire a mob at all - `_hunt` only ever targets the player - and
+   * giving it one would mean husks hunting people on every face, which is a
+   * different feature. What the exchange actually is, is a resident closing on
+   * a husk and the husk swinging as it is hit; that is exactly what this is,
+   * and it costs no second targeting path.
+   *
+   * The floor is not a fudge on the damage. The resident takes the husk's full
+   * blow, wears the wound and shows it; what it cannot do is die of it. See
+   * FOLK_FLOOR for why the guarantee is a floor rather than a stat margin.
+   */
+  _folkRiposte(mob, prey) {
+    const back = prey.spec.damage ?? 0;
+    if (back <= 0) return;
+    mob.health = Math.max(FOLK_FLOOR, mob.health - back);
+    mob.hurtT = 0.25;
+    if (this.onSound) this.onSound('hurt', mob);
+  }
+
   /** A kill: grow a little, and be full for a while. */
   _feed(mob) {
     mob.kills++;
+    // A resident neither eats nor grows nor rests, which is the third of the
+    // three lines that keep "hunting" from becoming "hungry" - see `_folkPrey`.
+    // Growth would also be visible: `sizeVar` is 0 on this species precisely so
+    // that fourteen named people are fourteen the same height, and one that had
+    // eaten its way to GROW_MAX would be a foot taller than its neighbours.
+    if (mob.spec.folk) return;
     // A boss neither eats nor grows. Its drawn height is the number its health,
     // damage, reach and swing were all derived from, so a boss that ate its way
     // to GROW_MAX would be a boss whose stats no longer describe it - and one
@@ -10755,7 +10922,8 @@ export class Mobs {
     // stands down. Measured: leaving Verdant after dark left the flag set and
     // the husk and drowned budgets stood down on every face the player then
     // visited, until morning.
-    const verdantDark = night && FACE_ROLE[player.face] === FACE_VERDANT;
+    const verdantFace = FACE_ROLE[player.face] === FACE_VERDANT;
+    const verdantDark = night && verdantFace;
 
     // The night stalk's two clocks, ticked once for the planet rather than once
     // per cat — see the note where they are declared. They are allowed to run in
@@ -11025,7 +11193,10 @@ export class Mobs {
         if (!night && this.verdantNight) this._verdantDawn();
         this.verdantNight = night;
         if (night) this._verdantNightTick(player, playerCol, SPAWN_PERIOD);
-        else this._verdantDawnCull(player, SPAWN_PERIOD);
+        else {
+          this._verdantDawnCull(player, SPAWN_PERIOD);
+          this._verdantDayTick(player, playerCol);
+        }
       }
       // And the fourteen, on Verdant and nowhere else.
       this._folkTopUp(player, playerCol);
@@ -11099,7 +11270,22 @@ export class Mobs {
       }
 
       // --- daylight burns the undead ---
-      if (spec.burns && this._dayFor(mob) > 0.06 && this._skyLit(mob)) {
+      //
+      // ...except under Verdant's canopy, and that exception is the whole of
+      // "husks spawn in daylight in verdant". `_skyLit` reads `_roofed`, which
+      // reads leaves as no shelter at all, so on the one face with a canopy it
+      // answers "in full sun" for ground the player can barely see their feet
+      // on. Rather than change either - see `_shaded` and the note in
+      // `VerdantDay.js` - the burn asks the face's own question second.
+      //
+      // Off the player's face rather than the body's: Verdant is sealed, so
+      // every body inside the despawn ring is on the face the player is on, and
+      // this way the extra term costs one compare on every other face and the
+      // cached scan only where it can be true. A husk that walks out of the
+      // trees is burning within SHADE_PERIOD, which is the mechanic and not a
+      // leak - the shade is a place, not a permission.
+      if (spec.burns && this._dayFor(mob) > 0.06 && this._skyLit(mob)
+          && !(verdantFace && this._shadedNow(mob, dt))) {
         mob.burnT += dt;
         if (mob.burnT > 0.35 && this.onBurn) this.onBurn(mob);
         if (mob.burnT > BURN_SECONDS) {
@@ -11112,6 +11298,17 @@ export class Mobs {
         }
       } else if (mob.burnT > 0) {
         mob.burnT = Math.max(0, mob.burnT - dt * 2);
+      }
+
+      // --- ...and a resident mends ---
+      //
+      // The other half of FOLK_FLOOR. The fourteen are placed once and stand
+      // all day, so without this every blow any of them ever takes is permanent
+      // and by evening the village is fourteen people on 1 health. `hurtT` is
+      // the out-of-combat gate and it is the same quarter-second every wound in
+      // this file sets, so a body being hit right now never heals through it.
+      if (spec.folk && mob.hurtT <= 0 && mob.health < spec.health) {
+        mob.health = Math.min(spec.health, mob.health + FOLK_REGEN * dt);
       }
 
       // idle vocalisation on the animal's own jittered clock. The clock always
@@ -12915,8 +13112,12 @@ export class Mobs {
       // therefore the only mark it has, and refusing to write one down is what
       // keeps that mark honest — nothing carrying it ever outlives the session,
       // so it can never be missing from a body that has it.
+      // Nor a Verdant *day* body, on precisely the same grounds. It is the same
+      // ordinary husk wearing a different one-face mark, it exists only while
+      // the player is standing on that face in daylight, and `_verdantDayTick`
+      // refills it within one SPAWN_PERIOD of a load that lands there.
       mobs: this.list.filter((m) => !m.spec.phantom && !m.spec.nightOnly
-        && !m.spec.boss && !m.verdantNight)
+        && !m.spec.boss && !m.verdantNight && !m.verdantDay)
         .map((m) => {
         const d = {
           t: m.type, c: [m.cell.x, m.cell.y, m.cell.k], h: m.health, s: m.seed,

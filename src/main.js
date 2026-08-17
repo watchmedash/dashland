@@ -10157,23 +10157,43 @@ class Game {
 
     if (input.clicked[2] && hit && input.locked && this.useCooldown === 0) {
       this.useCooldown = 0.22;
-      if (hit.id === ID.bench) { this.openScreen('bench'); return; }
+      /**
+       * Sneak means "I meant the block, not the thing".
+       *
+       * Right-clicking a bench, a kiln or a crate opened it, always, so there
+       * was no way to build against one: every attempt to stack a block on your
+       * workbench opened the workbench instead. Crouching suppresses the open
+       * so the placement below runs, which is the convention every player of
+       * this genre already has.
+       *
+       * Gated on actually HOLDING something placeable, and that is deliberate
+       * rather than a copy of the convention. Sneak is a LATCH on touch - one
+       * tap and it stays on - so a player who left it latched and walked up to
+       * a chest would find the chest simply refusing to open, with no way to
+       * work out why. Suppressing only when the click has somewhere else to go
+       * keeps the rule invisible until it is useful.
+       */
+      const meansBlock = this.player.crouching
+        && ITEMS[heldSlot.item]?.block !== undefined;
+      if (!meansBlock) {
+        if (hit.id === ID.bench) { this.openScreen('bench'); return; }
       // The cooker. It carries no state object, unlike the kiln and the crate:
       // it works out of `inventory.craft` exactly as the workbench does, so
       // there is nothing to look up here and nothing to save, and closing the
       // screen already spills whatever is left in the grid onto the floor.
-      if (hit.id === ID.kitchen) { this.openScreen('kitchen'); return; }
-      if (hit.id === ID.kiln || hit.id === ID.kiln_lit) {
-        this.openScreen('kiln', this._kilnAt(hit.col, hit.k));
-        return;
+        if (hit.id === ID.kitchen) { this.openScreen('kitchen'); return; }
+        if (hit.id === ID.kiln || hit.id === ID.kiln_lit) {
+          this.openScreen('kiln', this._kilnAt(hit.col, hit.k));
+          return;
+        }
+        if (hit.id === ID.crate) {
+          this.openScreen('crate', this._crateAt(hit.col, hit.k));
+          return;
+        }
+        if (hit.id === ID.bed) { this._useBed(hit.col, hit.k); return; }
+        if (IS_DOOR[hit.id] || IS_GATE[hit.id]) { this._toggleDoor(hit.col, hit.k); return; }
+        if (IS_SIGN[hit.id]) { this._writeSign(hit.col, hit.k); return; }
       }
-      if (hit.id === ID.crate) {
-        this.openScreen('crate', this._crateAt(hit.col, hit.k));
-        return;
-      }
-      if (hit.id === ID.bed) { this._useBed(hit.col, hit.k); return; }
-      if (IS_DOOR[hit.id] || IS_GATE[hit.id]) { this._toggleDoor(hit.col, hit.k); return; }
-      if (IS_SIGN[hit.id]) { this._writeSign(hit.col, hit.k); return; }
       // --- till soil with a shovel ---
       //
       // Soil under a block is refused rather than tilled, and the click still

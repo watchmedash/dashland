@@ -1120,6 +1120,15 @@ button.ghost:active:not(:disabled) {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 36px; height: 52px; padding: 0; border-radius: var(--r-md);
   background: var(--paper-cell); box-shadow: var(--emboss);
+  /* Above the canvas, and this line is the whole of why the arrows worked and
+     then did not. `#cg-canvas` was given `z-index: 1` so the stage's floor
+     shadow would stay under the figure's feet; the arrows are positioned with
+     `z-index: auto`, so from that moment the canvas — which is the full width
+     of the stage — painted over both of them and took every click. They were
+     still in the tree, still bound, still enabled, and `elementFromPoint` at
+     the centre of each returned `cg-canvas`. Anything raised inside this stage
+     from now on has to come back here and pick a storey. */
+  z-index: 2;
 }
 .cg-arrow.prev { left: 8px; }
 .cg-arrow.next { right: 8px; }

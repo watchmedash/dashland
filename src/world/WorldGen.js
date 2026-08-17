@@ -1411,11 +1411,17 @@ const ORE_CINDER_BONUS = 0.06;
 /**
  * How coarse the sunstone field on the cinderlands is, and how much of it wins.
  *
- * The frequency is against a unit direction, so it is the same scale `patch`
- * (14, "about twenty columns across") is quoted in: 74 is a blob three or four
- * columns wide, which is an outcrop rather than a plaza. The threshold then
- * decides how many of them there are, and it is the whole tuning knob for the
- * face's mood — every 0.02 off it roughly doubles the lit area.
+ * The frequency is against a unit direction, the same scale `patch` (14) is
+ * quoted in, and the two knobs do different jobs: the frequency sets how far
+ * apart the outcrops are, the threshold how big each one is. High frequency was
+ * tried first and is wrong — a smooth field cut near its peak leaves single
+ * columns, so 74 gave 874 one-block specks over a 200-column patch rather than
+ * outcrops. Low and steep gives the opposite and correct thing: 32 blobs a
+ * median of four columns across, one per 1225 columns.
+ *
+ * The threshold is what the face's mood hangs on. At 0.84 the median walk to
+ * the nearest light is 19 blocks and a tenth of the face is more than 54 from
+ * one; 0.78 halves both and starts to read as lit rather than as landmarked.
  */
 const GLOW_CINDER_FREQ = 11;
 const GLOW_CINDER_THR = 0.84;

@@ -17,7 +17,7 @@
 // is in and is derived from it every frame - see `_sync`.
 
 import * as THREE from 'three';
-import { GRAVITY, FACE_PHYSICS } from '../world/Constants.js';
+import { GRAVITY, FACE_ROLE, FACE_PHYSICS } from '../world/Constants.js';
 import { W, D, wrap, delta, colIndex, faceAt, cellOf } from '../world/Grid.js';
 import {
   IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
@@ -33,20 +33,14 @@ import { UNDERWATER_MINING } from '../game/Items.js';
 const FULL_BOX = [[0, 0, 0, 1, 1, 1]];
 
 /**
- * Which `FACE_PHYSICS` row each of the nine faces uses, indexed by face number
- * 1..9 with slot 0 unused.
+ * What the face you are standing on does to the body.
  *
- * Keyed by the face LABEL from `Grid.faceAt`, not by a cube role, because there
- * is no cube and a face is now a region of one flat map. Rime (1) keeps the old
- * cap's heavy going and Pyre (9) the cinderlands' light step; the other seven
- * are ordinary. Tempest (3) and Verdant (7) are not built yet and are ordinary
- * until they are.
- *
- * It lives here rather than in Constants.js only because that file belongs to
- * the world stages; it wants moving there once they have settled.
+ * Keyed by the face LABEL from `Grid.faceAt`, which is what `FACE_ROLE` is
+ * indexed by now: a face is a region of one flat map, not a side of a solid,
+ * and nothing about gravity comes out of this table any more. It is speed,
+ * jump height, stamina and fog, which are gameplay and stay.
  */
-const FACE_ROW = [0, 1, 0, 0, 0, 0, 0, 0, 0, 2];
-const physicsAt = (x, y) => FACE_PHYSICS[FACE_ROW[faceAt(x, y)]] || FACE_PHYSICS[0];
+const physicsAt = (x, y) => FACE_PHYSICS[FACE_ROLE[faceAt(x, y)]] || FACE_PHYSICS[0];
 
 const EYE = 1.62;
 /**

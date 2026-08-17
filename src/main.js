@@ -2320,28 +2320,6 @@ class Game {
   }
 
   _bindPlayerEvents() {
-    /**
-     * Whether a sealed face will have you yet, and what to say when it will not.
-     *
-     * The gate is asked at the far side of a portal, so a refusal happens with
-     * your nose against the thing you cannot have rather than as a wall out on
-     * the approach. `FACE_UNLOCK` names one mark per sealed face and the five of
-     * the cross are not in it, so this returns null for them without a test.
-     *
-     * The message names the mark rather than the face, because "Rime is shut" is
-     * a fact and "Survive a night in the open" is a thing to go and do.
-     */
-    this.player.faceGate = (face) => {
-      const key = FACE_UNLOCK[face];
-      if (!key) return null;
-      const mark = this.achievements.progress().find((m) => m.key === key);
-      if (!mark || mark.done) return null;
-      return mark.note;
-    };
-    this.player.onFaceShut = (why) => {
-      this.ui.toast(why, null, 2600);
-      this.audio.ui(220);
-    };
     this.player.onStep = (blockId) => {
       const b = BLOCKS[blockId] || BLOCKS[1];
       this.audio.step(b.sound);

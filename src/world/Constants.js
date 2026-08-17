@@ -193,38 +193,6 @@ export const FACE_ROLE = [
  * going. Solace is the middle and is where you start: the one face with no
  * element on it and nothing arranged to kill you.
  */
-/**
- * What each sealed face wants before it will let you in, as an achievement key.
- *
- * One mark per face, and the four chosen are all COUNTERS you can fill on the
- * ordinary world, which is the only rule that really matters here: a gate the
- * face itself is needed to open is a locked door with the key inside. "Mine
- * every ore" would have been the obvious pick for Pyre and is exactly that
- * mistake, because the cinderlands carry ores nothing else does.
- *
- * They also read as a trade you have already learned before you are shown where
- * it pays:
- *
- *   1 Rime     `night`     survive a night in the open, the earliest mark there
- *                          is. Rime is the gentlest of the four and the first
- *                          you should see.
- *   3 Tempest  `fished`    250 catches. The face IS the fishing, so you prove
- *                          you are an angler and then you are handed the water
- *                          worth angling in.
- *   7 Verdant  `crafted`   500 crafts. You are shown the people who barter for
- *                          made things once you are somebody who makes them.
- *   9 Pyre     `mined`     10 000 blocks. The richest seams in the world, last,
- *                          and only to a miner.
- *
- * A face with no entry here is open. The five of the cross are not in it.
- */
-export const FACE_UNLOCK = [
-  null,
-  'night', null, 'fished',
-  null, null, null,
-  'crafted', null, 'mined',
-];
-
 export const FACE_NAME = [
   '',
   'Rime', 'Aurora', 'Tempest',

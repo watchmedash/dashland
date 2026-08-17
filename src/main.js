@@ -9939,6 +9939,11 @@ class Game {
     // button is emphatically *not* resolved this way — see `_breakBlock`.
     const heldSlot = this.inventory.actingSlot((s) => this._hasUse(s, hit));
     const heldItem = ITEMS[heldSlot.item];
+    // The touch build's action word. Fed from here because this is the one
+    // place that has already resolved the aimed block, the aimed creature and
+    // the acting hand, and a second resolution is a second chance to disagree.
+    this.ui.setAction?.(hit ? this.planet.at(hit.col, hit.k) : 0,
+      mobHit?.mob ?? null, heldSlot.item);
     // A bow that is actually drawing, in whichever hand is drawing it. The right
     // button belongs to it, so nothing else may answer that button this frame —
     // but the left button is untouched, because in Minecraft a bow is still a

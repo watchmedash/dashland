@@ -1030,6 +1030,28 @@ export class Player {
   }
 
   /**
+   * Would a step to (x, z) put the feet over nothing, from a place that has
+   * something under them?
+   *
+   * The sneak rule, and the second half of it is the load-bearing half. A
+   * destination with no support only counts as a step off the edge if where you
+   * are standing right now HAS support - otherwise a body that got over the void
+   * some other way (shoved off, spat out of a collision, standing on a block
+   * that was mined out from under it with Ctrl held) would have every axis
+   * refused and would hang in the air for as long as the key was down.
+   *
+   * Support is `_surfaceBelow` and deliberately nothing new: it is the same
+   * notion of ground the landing uses, and it asks it of the whole footprint, so
+   * any part of the box still over solid counts as standing. That is what lets
+   * you sneak out and hang half off a ledge, which is the thing the mechanic is
+   * for.
+   */
+  _steppingOff(x, z, y) {
+    return this._surfaceBelow(x, z, y) < 0
+      && this._surfaceBelow(this.position.x, this.position.z, y) >= 0;
+  }
+
+  /**
    * Bisect along x between a free position and a blocked one so the player
    * stops *touching* the wall instead of a whole sub-step short of it. Always
    * returns a position that tested clear.
@@ -1525,17 +1547,46 @@ export class Player {
     const steps = Math.max(1, Math.min(16, Math.ceil(speedCells * dt / 0.4)));
     const sdt = dt / steps;
 
+    /*
+     * Sneaking holds the edge, per axis.
+     *
+     * Per axis is the whole of what makes it feel right: refuse the step that
+     * would take you off and take the one that would not, so sidling along a
+     * ledge works. Cancelling both axes together is the version that reads as
+     * being stuck.
+     *
+     * It is a walk that is stopped, not a jump. `wasGrounded` is already false
+     * on the frame Space fires - the jump above clears `grounded` before it is
+     * read here - so a crouched player still leaves the ground, and everything
+     * after take-off is airborne and untouched.
+     *
+     * Off in water, in a sink block and on a ladder, because in none of those
+     * is the floor what is holding you up, and off while a blow is still on you:
+     * being knocked off a ledge is the reason not to fight beside one, and a
+     * shove you can hold Ctrl through is not a shove. A river's push and a
+     * whirlpool's drag need no exemption of their own - both only apply in
+     * water, which is already excluded. Ice does NOT get one: a slide is your
+     * own momentum, and stopping it at the lip is exactly what the player asked
+     * for by crouching.
+     */
+    const sneak = this.crouching && wasGrounded && !this.onLadder
+      && !this.inWater && !this.inSink && this.knockT <= 0;
+
     for (let s = 0; s < steps; s++) {
       // x axis
       const nx = pos.x + this.vel.x * sdt;
-      if (this._blocked(nx, pos.z, pos.y, height)) {
+      if (sneak && this._steppingOff(nx, pos.z, pos.y)) {
+        this.vel.x = 0;
+      } else if (this._blocked(nx, pos.z, pos.y, height)) {
         if (this._tryStepUp(nx, pos.z, height, wasGrounded)) pos.x = nx;
         else { pos.x = this._contactX(pos.x, nx, pos.z, pos.y, height); this.vel.x = 0; }
       } else pos.x = nx;
 
       // z axis
       const nz = pos.z + this.vel.z * sdt;
-      if (this._blocked(pos.x, nz, pos.y, height)) {
+      if (sneak && this._steppingOff(pos.x, nz, pos.y)) {
+        this.vel.z = 0;
+      } else if (this._blocked(pos.x, nz, pos.y, height)) {
         if (this._tryStepUp(pos.x, nz, height, wasGrounded)) pos.z = nz;
         else { pos.z = this._contactZ(pos.z, nz, pos.x, pos.y, height); this.vel.z = 0; }
       } else pos.z = nz;

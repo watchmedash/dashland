@@ -974,5 +974,24 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
   }
 }
 
+// --- a refused crossing must not be a trap ------------------------------------
+//
+// Transit fires on CONTACT, so the centre is still outside the wall when it
+// runs. `_freeX` tested the centre only, so it wrote the touching position down
+// as safe; a refused crossing then ejected the body to where it already was, it
+// touched again next frame, and refused again - pinned against a divider,
+// unable to pass and unable to back away. "I just got stuck inside a portal."
+{
+  // `_touchingWall` is the whole guard, so assert it directly rather than
+  // through a world we would have to build a divider in.
+  const p = new Player(new FakePlanet());
+  const inWall = (x, z) => p._touchingWall(x, z);
+  // Rime's ring: face 1 starts at the map origin, so its west run is x = 0.
+  const wx = 0, wz = 200;
+  ok(inWall(wx + 0.5, wz + 0.5), 'the middle of a divider column counts as touching');
+  ok(inWall(wx + 1.2, wz + 0.5), 'and so does a body a third of a block off it');
+  ok(!inWall(wx + 2.5, wz + 0.5), 'two columns clear does not');
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

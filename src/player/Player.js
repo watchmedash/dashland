@@ -756,7 +756,23 @@ export class Player {
     // The near side of any divider stepped into next. Written here rather than
     // at the end of `update` so that a body placed by `setPosition` — a spawn,
     // a load, a respawn — has one from its first frame.
-    if (!isWall(this.cell.x, this.cell.y)) {
+    /**
+     * The last standing place whose WHOLE FOOTPRINT was clear of a divider.
+     *
+     * This tested the centre cell only, and that is what made a refused
+     * crossing a trap. Transit fires on CONTACT - the frame a shoulder first
+     * touches the plane - so the centre is still outside the wall at that
+     * moment and this kept writing the touching position down as safe. When a
+     * corner or a sealed-to-sealed join then refused, `_ejectFromPortal` put
+     * the body back exactly where it already was, it touched again on the next
+     * frame, and it refused again: a body pinned against a divider it cannot
+     * pass and cannot back away from. "I just got stuck inside a portal."
+     *
+     * Testing the four corners of the box means the remembered spot is always
+     * one the body can stand in with nothing of it in the wall, so an eject
+     * genuinely moves it clear.
+     */
+    if (!this._touchingWall(this.position.x, this.position.z)) {
       this._freeX = this.position.x; this._freeZ = this.position.z;
     }
   }
@@ -1294,10 +1310,48 @@ export class Player {
    * by construction, plus the inward half of the velocity taken off so it does
    * not simply walk straight back in on the next frame.
    */
+  /** Is any corner of the body's footprint in a divider column? */
+  _touchingWall(x, z) {
+    for (const dx of [-HALF_W, HALF_W]) {
+      for (const dz of [-HALF_W, HALF_W]) {
+        if (isWall(Math.floor(x + dx), Math.floor(z + dz))) return true;
+      }
+    }
+    return false;
+  }
+
   _ejectFromPortal(height) {
     const pos = this.position;
     pos.x = this._freeX; pos.z = this._freeZ;
-    if (this._blocked(pos.x, pos.z, pos.y, height)) {
+    /**
+     * ...and if even that is in a divider, walk out until something is not.
+     *
+     * `_freeX` is now only written from footprint-clear ground, so this should
+     * never fire. It exists because the failure it guards against is the one
+     * the player cannot recover from on their own: a body inside a sheet that
+     * is solid to everything except itself, with no floor under it for eighty
+     * layers. A load, a respawn, a teleport or a knockback that lands there
+     * would otherwise leave the game unplayable, and the cost of the guard is
+     * a handful of arithmetic on a frame that was already going wrong.
+     */
+    if (this._touchingWall(pos.x, pos.z)) {
+      let best = null;
+      for (let r = 1; r <= 4 && !best; r++) {
+        for (const [dx, dz] of [[r, 0], [-r, 0], [0, r], [0, -r],
+          [r, r], [-r, r], [r, -r], [-r, -r]]) {
+          const nx = wrap(Math.floor(pos.x) + dx) + 0.5;
+          const nz = wrap(Math.floor(pos.z) + dz) + 0.5;
+          if (this._touchingWall(nx, nz)) continue;
+          best = [nx, nz];
+          break;
+        }
+      }
+      if (best) { pos.x = best[0]; pos.z = best[1]; }
+      pos.y = this._standingHeightAt(pos.x, pos.z, height);
+      this.fallStart = null;
+      this.grounded = true;
+      if (this.vel.y < 0) this.vel.y = 0;
+    } else if (this._blocked(pos.x, pos.z, pos.y, height)) {
       pos.y = this._standingHeightAt(pos.x, pos.z, height);
     }
     this.vel.x *= 0.2; this.vel.z *= 0.2;

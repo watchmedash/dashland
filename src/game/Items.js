@@ -97,11 +97,38 @@ const BLOCK_FOOD = {
   // are priced as such. The truffle is small, rare and worth a torch.
   cactusfruit: 4, agave: 2, stonecrop: 2, icecapmoss: 1,
   swampreed: 1, mireroot: 3, lotus: 2, truffle: 5,
+  // The pumpkin, and the one entry here that is food and NOT a block in the
+  // hand — see `NOT_PLACEABLE` below. Three is the raw band: it is a surface
+  // find rather than a crop, it costs nothing but a walk, and the two things
+  // made of it (roast 6, soup 9) have to beat it by the ladder's own rule.
+  pumpkin: 3,
 };
+
+/**
+ * Blocks whose item is a plain item: it eats, it trades, it cooks, and right
+ * clicking with it puts nothing in the world.
+ *
+ * The pumpkin, and the owner's words are the whole reason: *"what is the
+ * purpose of pumpkins if they can't be eaten or anything, they are just a
+ * block."* A gourd growing on a patch is not building material.
+ *
+ * **Done by dropping `block` from the item and NOT by removing anything.** Both
+ * of the obvious edits renumber ids and eat saves — see the long note on
+ * `NOT_OBTAINABLE` above. Deleting the block from `BLOCKS` shifts every block
+ * id after it, which is what a saved chunk stores; adding the name to
+ * `NOT_OBTAINABLE` instead removes one item from the *middle* of this array and
+ * shifts the coin, every ingot, every tool and all fifteen fish down by one,
+ * which is what a saved bag stores. This keeps both: the block id still exists
+ * so worldgen still grows pumpkin patches and old saves still load, and the
+ * item id is untouched so `pumpkin_soup`, the pie, the roast smelt and the
+ * merchant's stock all still name the same number.
+ */
+const NOT_PLACEABLE = new Set(['pumpkin']);
 
 for (const b of BLOCKS) {
   if (NOT_OBTAINABLE.has(b.name)) continue;
-  const def = { name: b.name, label: b.label, block: ID[b.name], sound: b.sound };
+  const def = { name: b.name, label: b.label, sound: b.sound };
+  if (!NOT_PLACEABLE.has(b.name)) def.block = ID[b.name];
   if (BLOCK_FOOD[b.name]) def.food = BLOCK_FOOD[b.name];
   add(def);
 }

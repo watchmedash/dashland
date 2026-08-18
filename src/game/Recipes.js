@@ -810,8 +810,10 @@ export function smeltingFor(itemId) {
  * mushrooms is not worth zero to the arithmetic below. Every value is at least
  * 1, which is what makes the tier-1 gate reachable by any two slots at all.
  */
+// The pumpkin has left this list: it is food now (`BLOCK_FOOD` in Items.js) and
+// so comes through the door above on its own, at the same 3 it was worth here.
 const PANTRY = {
-  wheat: 2, mushroom: 2, cave_mushroom: 2, pumpkin: 3, ice: 1, stick: 1, lingonberry: 1,
+  wheat: 2, mushroom: 2, cave_mushroom: 2, ice: 1, stick: 1, lingonberry: 1,
 };
 const PANTRY_FOOD = new Map();
 for (const [name, n] of Object.entries(PANTRY)) {

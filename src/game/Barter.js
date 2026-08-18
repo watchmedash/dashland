@@ -178,10 +178,25 @@ let _built = false;
  *                            from off the planet. The merchant being their only
  *                            source is the point of them.
  */
+/**
+ * Food the "no plants" rule bars that the derived test above no longer catches.
+ *
+ * One name, and it is here because the pumpkin changed shape rather than
+ * because the rule did. It used to be excluded by `def.block === undefined`,
+ * along with the kelp and the cactus fruit — it was a block that happened to be
+ * edible. It is a plain vegetable item now (see `NOT_PLACEABLE` in Items.js) and
+ * that test stopped seeing it, but it still grows wild out of the ground, which
+ * is the whole of what the owner's rule is about. Same reason `NOT_MATERIAL`
+ * above lists it: the derived tests cannot tell a plant wearing a cube from a
+ * cube, and now they cannot tell a plant wearing an item either.
+ */
+const NOT_FOOD_FAMILY = new Set(['pumpkin']);
+
 function isFoodFamily(def) {
   return !!(
     def.food &&
     def.block === undefined &&
+    !NOT_FOOD_FAMILY.has(def.name) &&
     !def.tool && !def.armour &&
     !def.wild && !def.improvised && !def.shopOnly
   );

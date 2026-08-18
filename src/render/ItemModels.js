@@ -749,6 +749,25 @@ export const POSE = {
   // rather than at a handle, so it turns in the fist instead of orbiting it.
   apple:  { file: 'applered01', pack: 'produce', height: 0.24, grip: 0.5, rot: [0.10, -0.50, 0.10], pos: [0.017, 0.104, -0.052] },
   roast:  { file: 'pumpkin01',  pack: 'produce', height: 0.28, grip: 0.5, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
+  // The gourd itself, now that it is a vegetable rather than a block (see
+  // `pumpkin` in Items.js). Same model as the roast above and deliberately
+  // larger: a raw pumpkin is the whole thing off the patch, and the roast is a
+  // portion of one, so the pair are told apart by size rather than by an art
+  // budget the pack does not have — there is exactly one pumpkin in it.
+  pumpkin: { file: 'pumpkin01',  pack: 'produce', height: 0.34, grip: 0.5, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
+  // The berry. It drew the food kit's cherry bunch until now, which is the same
+  // mesh `cherry` carries — two different foods, one object, and no way to tell
+  // a handful of berries from a handful of cherries in the toolbar.
+  berries: { file: 'raspberry01', pack: 'produce', height: 0.20, grip: 0.5, rot: [0.10, -0.50, 0.10], pos: [0.017, 0.104, -0.052] },
+  // The pod, and the only item in the game that had no model at all — it fell
+  // through to the hand-drawn card. `spin` is the fish's trick and is here for
+  // the fish's reason: the pod is authored lying along Z, so without it `height`
+  // normalises the wrong axis and `grip` indexes the pod's thickness.
+  cooked_greenbean: {
+    file: 'bean01', pack: 'produce', height: 0.26, grip: 0.5,
+    spin: [-Math.PI / 2, 0, 0],
+    rot: [0.06, -0.48, 0.24], pos: [0.013, 0.082, -0.022], icon: [0.20, 0.44, -0.14],
+  },
 
   // The collectible. Authored upright with the root at the bottom and the tuft
   // on top, so `height` fits the long axis without `fitMax` and `grip` reads
@@ -771,7 +790,10 @@ export const POSE = {
   meat:        food('meat-raw', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
   cooked_meat: food('meat-cooked', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
 
-  berries:     food('cherries', 0.22, false, { grip: 0.22, pos: [0.002, 0.015, -0.007] }),
+  // `berries` used to be here on `cherries` and is now a raspberry from the
+  // produce pack, up with the apple. Left as a note rather than deleted quietly:
+  // this table is read top to bottom and a second `berries` key down here would
+  // win, which is exactly how it would come back.
   carrot:      food('carrot', 0.28, false, { grip: 0.02, pos: [0.002, 0.013, -0.006] }),
   cherry:      food('cherries', 0.24, false, { grip: 0.04, pos: [0.002, 0.012, -0.006] }),
   corn:        food('corn', 0.30, false, { pos: [0.011, 0.073, -0.034] }),
@@ -1508,6 +1530,9 @@ export const BY_NAME = {
   lava_bucket: 'bucket',
   apple: 'apple',
   roast: 'roast',
+  // The vegetable, not the block. It kept its item id and lost its `block`, so
+  // it reaches this table by the same route an apple does.
+  pumpkin: 'pumpkin',
   // The WAM materials are one model per item id, so the map is an identity —
   // written out anyway rather than inferred, because this table is also the
   // list of what has a model and what is still hand-drawn.
@@ -1681,6 +1706,8 @@ export const BY_NAME = {
   // through this one.
   squash: 'squash',
   greenbean: 'greenbean',
+  // The cooked half of the pair, and the last item in the game with no model.
+  cooked_greenbean: 'cooked_greenbean',
   snowpea: 'snowpea',
   hops: 'hops',
   grape: 'grape',

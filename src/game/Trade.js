@@ -256,9 +256,14 @@ const OVERRIDE = {
   // costs: a donut is two wheat and a comb, so it sells for more than bread and
   // feeds a good deal less, which is the whole definition of the tier.
   honeycomb: 10,
-  // The pumpkin is a block, so `intrinsic` reaches `blockValue` before it
-  // reaches anything else and prices it at hardness 1 with no tool tier: one
-  // coin, the same as a shovelful of dirt. It is a scattered surface find the
+  // The pumpkin. It was a block, so `intrinsic` reached `blockValue` before it
+  // reached anything else and priced it at hardness 1 with no tool tier: one
+  // coin, the same as a shovelful of dirt. It is a vegetable now (see
+  // `NOT_PLACEABLE` in Items.js) and falls through to `foodValue` instead, which
+  // is a different wrong answer and not a better one — three points of
+  // nourishment do not price a gourd two dishes are built on. The override is
+  // what it always was and it is still the number doing the work. It is a
+  // scattered surface find the
   // merchant stocks in ones and twos, and two things derive straight off it —
   // a roast pumpkin came out at two coins for six points of nourishment, the
   // cheapest food in the game by a factor of three, and a pumpkin pie at seven

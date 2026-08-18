@@ -1,9 +1,42 @@
 // Load the pre-baked tile atlases and slice them into texture-array payloads.
 // Replaces ~10s of runtime procedural synthesis with three image decodes.
 
-import { setPlantMasks } from '../world/Blocks.js';
+import { setPlantMasks, TILES } from '../world/Blocks.js';
 
 const BASE = 'tiles';
+
+/**
+ * Where the baked order stops matching the order the game indexes with, or null.
+ *
+ * Returns a sentence rather than a boolean because the useful thing at 3am is
+ * WHICH tile moved: "slot 51 is pumpkin_side, code wants cactus_side" names the
+ * bug and the fix in one line, where "atlas mismatch" starts an investigation.
+ */
+function tileOrderFault(baked) {
+  if (!Array.isArray(baked)) return 'manifest carries no tile list';
+  if (baked.length !== TILES.length) {
+    // Reported even when the prefix agrees, because a sheet with more layers
+    // than TILES draws correctly and is still the wrong file.
+    const n = Math.min(baked.length, TILES.length);
+    for (let i = 0; i < n; i++) {
+      if (baked[i] !== TILES[i]) return `slot ${i} is ${baked[i]}, code wants ${TILES[i]}`;
+    }
+    return `${baked.length} baked tiles against ${TILES.length} in code`;
+  }
+  for (let i = 0; i < TILES.length; i++) {
+    if (baked[i] !== TILES[i]) return `slot ${i} is ${baked[i]}, code wants ${TILES[i]}`;
+  }
+  return null;
+}
+
+/** A short stable digest of the tile order, for the image cache key. */
+function hashNames(names) {
+  let h = 2166136261;
+  for (const n of names || []) {
+    for (let i = 0; i < n.length; i++) { h ^= n.charCodeAt(i); h = Math.imul(h, 16777619); }
+  }
+  return (h >>> 0).toString(36);
+}
 
 async function loadImage(url, opts) {
   const res = await fetch(url);
@@ -188,20 +221,47 @@ function sliceStrip(rgba, atlasW, size, layers) {
  * @returns {{tiles:{albedo,normal,arm,size,layers}, crack:{data,size,layers}}}
  */
 export async function loadTileAtlas(onProgress = () => {}) {
-  const manifest = await fetch(`${BASE}/manifest.json`).then((r) => {
+  // `no-cache` on the manifest, and a version stamped onto every image URL
+  // below. Both halves are one fix for one bug, and it is worth naming because
+  // it cost a player a broken world:
+  //
+  // A tile is addressed by its POSITION. `TILE_INDEX` in Blocks.js is
+  // `TILES.map((t, i) => [t, i])`, and the baked sheets carry their own copy of
+  // that order in this manifest. Two lists, one of them a file on disk, and
+  // NOTHING in the build checks that they agree. Deleting two tile names from
+  // `TILES` without re-baking shifted a hundred and six blocks by two slots —
+  // the cactus wore the pumpkin, mud wore its neighbour, every ore and brick
+  // and stratum after it was somebody else.
+  //
+  // Re-baking fixed the files. It could not fix a browser holding the previous
+  // `albedo.webp`, because none of these URLs ever changed: a fresh manifest
+  // against a stale sheet reproduces the identical off-by-two, for ever, on a
+  // machine whose files are all correct. That failure is indistinguishable from
+  // the original bug and it is the one that wastes an afternoon.
+  const manifest = await fetch(`${BASE}/manifest.json`, { cache: 'no-cache' }).then((r) => {
     if (!r.ok) throw new Error('no baked atlas');
     return r.json();
   });
+  // And the check itself, which is the part that should have existed all along.
+  // It is a name-by-name comparison against the array the game indexes with, so
+  // a `TILES` edit that ships without a bake fails at load with the first
+  // disagreement named, instead of silently drawing the wrong world.
+  const bad = tileOrderFault(manifest.tiles);
+  if (bad) throw new Error(`stale tile atlas: ${bad}. Run \`npm run bake\`.`);
   onProgress(0.1, 'Loading materials');
 
   const ext = manifest.ext || 'png';
+  // The cache key. Anything that changes the sheets changes their layer count
+  // or their tile order, and both are in this string, so a re-bake is a new URL
+  // and a stale sheet cannot outlive the manifest that describes it.
+  const v = `?v=${manifest.layers}-${hashNames(manifest.tiles)}`;
   const names = ['albedo', 'normal', 'arm'];
   const bitmaps = [];
   for (let i = 0; i < names.length; i++) {
-    bitmaps.push(await loadImage(`${BASE}/${names[i]}.${ext}`));
+    bitmaps.push(await loadImage(`${BASE}/${names[i]}.${ext}${v}`));
     onProgress(0.1 + 0.22 * (i + 1), `Loading ${names[i]}`);
   }
-  const crackBmp = await loadImage(`${BASE}/crack.${ext}`);
+  const crackBmp = await loadImage(`${BASE}/crack.${ext}${v}`);
   onProgress(0.85, 'Unpacking materials');
 
   const { size, cols, layers } = manifest;

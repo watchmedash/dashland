@@ -8,7 +8,10 @@
 // about terrain.
 
 import * as THREE from 'three';
-import { W, D, F, wrap, delta, colIndex, cellIndex, isWall, isSealed, faceAt } from '../world/Grid.js';
+import {
+  W, D, F, wrap, delta, colIndex, cellIndex, isWall, isSealed, faceAt,
+  SEALED, DIR_STEP, faceStep, portalsOf,
+} from '../world/Grid.js';
 import { GRAVITY } from '../world/Constants.js';
 import { ID } from '../world/Blocks.js';
 import { Player, HEIGHT } from './Player.js';
@@ -518,9 +521,10 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
 // has nothing solid in it.
 //
 // Face 1 (Rime) is the sealed face at the map origin. Its EAST edge, x = F - 1,
-// divides it from face 2, which is cross. Its NORTH edge, y = 0, is back to
-// back with face 7's south edge, and the spec says you do not travel corner to
-// corner - so that one is a divider you may not pass.
+// divides it from face 2, which is cross: one wall column between two open
+// ones. Its NORTH edge, y = 0, is back to back with face 7's south edge, so
+// that crossing is two wall columns wide. Both are passable - the owner's call
+// that every side of a sealed face must let you out.
 {
   const EAST = F - 1;               // the divider column between face 1 and 2
   const GROUND = 34;
@@ -647,15 +651,41 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
     ok(p.vel.x > 1, `you keep your momentum through (vel.x = ${p.vel.x.toFixed(2)})`);
   }
 
-  // The divider you may NOT pass: face 1's north edge is back to back with
-  // face 7's south edge, so there is a wall column on both sides of the axis
-  // and `portalAxis` refuses it. Walking at it must not put you in Verdant, and
-  // must not drop you down the column either.
+  // The double wall: face 1's north edge is back to back with face 7's south
+  // edge, so the step is near interior, wall, wall, far interior. It used to be
+  // refused. It carries you now, and it must land you in Verdant's interior -
+  // not on the second wall column, which is a shaft with no floor in it.
   {
     const p = walk(200.5, 2.5, YAW_EAST + Math.PI / 2, 'KeyW');   // north is -z
-    eq(inside(p.position.x, p.position.z), 1, 'a corner-to-corner divider does not let you through');
-    ok(!isWall(p.cell.x, p.cell.y), 'and does not leave you standing inside it');
-    ok(p.position.y >= GROUND - 0.01, `nor drop you down it (y = ${p.position.y.toFixed(2)})`);
+    eq(inside(p.position.x, p.position.z), 7, 'walking north out of Rime lands you in Verdant');
+    ok(!isWall(p.cell.x, p.cell.y), 'and not inside either wall column');
+    near(p.position.z, W - 1.5, 0.6, 'two columns beyond, not one');
+    near(p.position.y, GROUND + 0.0001, 0.02, 'standing on the far surface');
+    ok(p.grounded, 'and grounded');
+  }
+
+  // ...and back the other way through the same pair.
+  {
+    const p = walk(200.5, W - 2.5, YAW_EAST - Math.PI / 2, 'KeyW');   // south is +z
+    eq(inside(p.position.x, p.position.z), 1, 'and south out of Verdant lands you in Rime');
+    ok(!isWall(p.cell.x, p.cell.y), 'and not inside either wall column');
+    near(p.position.z, 1.5, 0.6, 'two columns beyond, not one');
+    near(p.position.y, GROUND + 0.0001, 0.02, 'standing on the far surface');
+  }
+
+  // A double wall reads its near side from the column, not from the traveller,
+  // so a body that was PUT inside one - a load, a knockback - still comes out
+  // the side it was not on, with no velocity and no history to read.
+  {
+    const planet = new FakePlanet().groundTo(GROUND).dividers();
+    const q = new Player(planet);
+    q.setPosition(200.5, GROUND + 0.0001, 0.5);   // Rime's north ring, from nowhere
+    q.vel.x = 0; q.vel.y = 0; q.vel.z = 0;
+    q._freeX = 200.5; q._freeZ = 0.5;             // no near side to read at all
+    q._sync();
+    ok(q._portalTransit(HEIGHT), 'a body inside a double wall is still let through');
+    eq(faceAt(q.cell.x, q.cell.y), 7, 'and out the open side, into Verdant');
+    ok(!isWall(q.cell.x, q.cell.y), 'not left in the wall');
   }
 
   // The corners of a ring. The strict rule refuses them - the ring turns, so
@@ -775,6 +805,40 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
     eq(done, 16, 'sixteen crossings tried');
     eq(stuck, 0, 'every one of them went through');
     eq(bad, 0, 'and every one landed standing on the far face, one column out');
+  }
+
+  // Every sealed-to-sealed join, from both sides. There are four of them - Rime
+  // to Verdant, Rime to Tempest, Verdant to Pyre, Tempest to Pyre - and each is
+  // two wall columns thick, so the landing is TWO columns beyond the one the
+  // body stepped into and never the wall column between.
+  {
+    const planet = new FakePlanet().groundTo(GROUND).dividers();
+    const q = new Player(planet);
+    let done = 0, stuck = 0, bad = 0;
+    for (const f of SEALED) {
+      for (const door of portalsOf(f)) {
+        const to = faceStep(f, door.dir);
+        if (!isSealed(to)) continue;
+        const [dx, dy] = DIR_STEP[door.dir];
+        // Stand one column inside `f`, then step into its own ring column.
+        q.setPosition(wrap(door.x - dx) + 0.5, GROUND + 0.0001, wrap(door.y - dy) + 0.5);
+        q.vel.x = 0; q.vel.y = 0; q.vel.z = 0;
+        q._sync();
+        q.position.x = wrap(door.x) + 0.5;
+        q.position.z = wrap(door.y) + 0.5;
+        q._sync();
+        const moved = q._portalTransit(HEIGHT);
+        done++;
+        if (!moved) { stuck++; continue; }
+        if (isWall(q.cell.x, q.cell.y)) bad++;
+        else if (faceAt(q.cell.x, q.cell.y) !== to) bad++;
+        else if (q.cell.x !== wrap(door.x + dx * 2) || q.cell.y !== wrap(door.y + dy * 2)) bad++;
+        else if (Math.abs(q.position.y - (GROUND + 0.0001)) > 0.02) bad++;
+      }
+    }
+    eq(done, 8, 'eight sealed-to-sealed crossings tried, four joins both ways');
+    eq(stuck, 0, 'every one of them went through');
+    eq(bad, 0, 'and landed two columns out, in the other corner, on its ground');
   }
 }
 

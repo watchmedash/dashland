@@ -130,13 +130,12 @@ export function isWall(x, y) {
 }
 
 /**
- * The portals into a sealed face: one at the middle of each edge that faces the
- * cross.
+ * The portals into a sealed face: one at the middle of every edge.
  *
- * A corner touches two cross faces and two other corners, so this is always two
- * per sealed face, eight in the world. Corner-to-corner joins carry no portal:
- * you do not go from Rime to Tempest directly, you come back out to the world
- * first.
+ * All four, since the owner's call that a sealed face must be passable on every
+ * side. A corner touches two cross faces and two other corners, and a
+ * corner-to-corner join is a door like any other now - the two rings sit back
+ * to back and `portalHop` steps across both of them.
  *
  * Returns the WALL column the portal replaces, plus the direction it faces, so
  * a caller can put the arrival pad one step further in.
@@ -147,7 +146,6 @@ export function portalsOf(face) {
   const mid = F >> 1;
   const out = [];
   for (let dir = 0; dir < 4; dir++) {
-    if (isSealed(faceStep(face, dir))) continue;   // corner to corner: no door
     if (dir === NORTH) out.push({ x: o.x + mid, y: o.y, dir });
     else if (dir === SOUTH) out.push({ x: o.x + mid, y: o.y + F - 1, dir });
     else if (dir === WEST) out.push({ x: o.x, y: o.y + mid, dir });
@@ -184,8 +182,10 @@ export function allPortals() {
  *    the cross. Both open, so it is passable, and on one axis only - the other
  *    axis's neighbours are the rest of the same ring.
  *  - A sealed-to-sealed edge (face 1's north against face 7's south): the two
- *    rings are back to back, so one neighbour is another wall column. Refused,
- *    which is the spec's "you do not travel from Rime to Tempest directly".
+ *    rings are back to back, so one neighbour is another wall column. Refused
+ *    here, because the step across it is not one column but two. `portalHop`
+ *    is the rule that reads that case; this one stays the strict reading of a
+ *    single column so that everything measuring a straight run still can.
  *  - A ring corner: walled on both axes. Refused.
  *
  * @returns {{axis:number, dx:number, dy:number}|null} `axis` 0 for x and 1 for
@@ -201,6 +201,50 @@ export function portalAxis(x, y, out = { axis: 0, dx: 0, dy: 0 }) {
   if (!isWall(x, y - 1) && !isWall(x, y + 1)) {
     out.axis = 1; out.dx = 0; out.dy = 1;
     return out;
+  }
+  return null;
+}
+
+/**
+ * The way through a divider column, counting the double wall.
+ *
+ * `portalAxis` reads one column and asks that both its neighbours be open, so a
+ * straight run is a TWO-column step: near side, wall, far side. Where two
+ * sealed faces touch - Rime's north ring against Verdant's south - the rings
+ * sit back to back and the step is a THREE-column one: near interior, wall,
+ * wall, far interior. The both-open rule cannot see that, and the owner has
+ * decided every side of a sealed face must be passable, so this is the rule
+ * that can.
+ *
+ * A double wall is recognised by its shape rather than by its faces: a wall
+ * column with open ground on ONE side of an axis, another wall on the other,
+ * and open ground one step past that. Which side is open is not a choice, it is
+ * the only side a body can have come from, so `near` is the whole answer to
+ * "which way through" and needs nothing from the traveller.
+ *
+ * A ring CORNER has no open neighbour on either axis - both of its inward
+ * neighbours are ring columns - so it is refused here exactly as it is by the
+ * strict rule, and `wallExit` still owns it. That is what keeps a corner from
+ * ever leading inward.
+ *
+ * @returns {{axis:number, dx:number, dy:number, span:number, near:number}|null}
+ *   `span` is how many wall columns the step crosses, 1 or 2, and `near` is the
+ *   sign along the axis toward the open side, meaningful only when `span` is 2.
+ */
+export function portalHop(x, y, out = { axis: 0, dx: 0, dy: 0, span: 1, near: 0 }) {
+  if (portalAxis(x, y, out) !== null) { out.span = 1; out.near = 0; return out; }
+  if (!isWall(x, y)) return null;
+  for (let axis = 0; axis < 2; axis++) {
+    const ux = axis === 0 ? 1 : 0, uy = axis === 0 ? 0 : 1;
+    for (const s of [1, -1]) {
+      // Open this way and, since `portalAxis` refused, walled the other. Two
+      // columns out on the walled side has to be open ground for the step to
+      // land anywhere a body can stand.
+      if (isWall(x + ux * s, y + uy * s)) continue;
+      if (isWall(x - ux * s * 2, y - uy * s * 2)) continue;
+      out.axis = axis; out.dx = ux; out.dy = uy; out.span = 2; out.near = s;
+      return out;
+    }
   }
   return null;
 }
@@ -225,9 +269,10 @@ export function portalAxis(x, y, out = { axis: 0, dx: 0, dy: 0 }) {
  * that safe is a fact about the geometry rather than a check - **both of a ring
  * corner's inward neighbours are ring columns**, never the face's interior, so
  * the only open side a corner can have is outward. A corner therefore lets you
- * OUT of a sealed face and never into one, and the spec's "you do not travel
- * from Rime to Tempest directly" survives for free: a corner-to-corner join has
- * another ring on every side and is refused on all four.
+ * OUT of a sealed face and never into one. That still holds now the runs are
+ * all passable, because this is a ONE-column step and a sealed face's interior
+ * is never one column from a corner: `portalHop` owns the two-column step, and
+ * it refuses corners for want of an open neighbour.
  */
 export const wallExit = (x, y, dx, dy) => isWall(x, y) && !isWall(x + dx, y + dy);
 

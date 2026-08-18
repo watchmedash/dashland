@@ -19,7 +19,7 @@
 import * as THREE from 'three';
 import { GRAVITY, FACE_ROLE, FACE_PHYSICS } from '../world/Constants.js';
 import {
-  W, D, wrap, delta, colIndex, faceAt, cellOf, isWall, isSealed, portalAxis, wallExit,
+  W, D, wrap, delta, colIndex, faceAt, cellOf, isWall, isSealed, portalHop, wallExit,
 } from '../world/Grid.js';
 import {
   IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
@@ -34,8 +34,8 @@ import { UNDERWATER_MINING } from '../game/Items.js';
 /** The extent of an ordinary full block, so the shaped path stays branch-free. */
 const FULL_BOX = [[0, 0, 0, 1, 1, 1]];
 
-/** Scratch for `Grid.portalAxis`, which is asked every frame. */
-const _pAxis = { axis: 0, dx: 0, dy: 0 };
+/** Scratch for `Grid.portalHop`, which is asked every frame. */
+const _pAxis = { axis: 0, dx: 0, dy: 0, span: 1, near: 0 };
 
 /**
  * What the face you are standing on does to the body.
@@ -1143,12 +1143,18 @@ export class Player {
    * written on the yaw or on the input sends you back out the side you entered.
    * The last column the feet were in that was not a divider is the near side,
    * full stop, and the far side is the column one step beyond the divider on the
-   * axis the divider is thin on. `Grid.portalAxis` owns that axis.
+   * axis the divider is thin on. `Grid.portalHop` owns that axis.
    *
-   * **Not every divider column is a way through.** The back-to-back runs where
-   * two sealed faces touch have a wall on both sides of the thin axis, and the
-   * spec is explicit that you do not travel from Rime to Tempest directly.
-   * `portalAxis` returns null for those, and a body that walks into one is put
+   * **A divider is not always one column thick.** Where two sealed faces touch
+   * their rings sit back to back, so the step is near interior, wall, wall, far
+   * interior - three columns, not two. `portalHop` reports that as a span of
+   * two, and it also reports which side the body must have come from, because a
+   * double wall has open ground on one side only. Those runs used to be refused
+   * outright; all four sides of a sealed face are passable now, by the owner's
+   * call.
+   *
+   * **Not every divider column is a way through.** A ring corner is walled on
+   * every side and `portalHop` refuses it; a body that walks into one is put
    * back where it came from rather than being let through to somewhere it
    * should not be.
    *
@@ -1186,7 +1192,7 @@ export class Player {
      * would fire a whole cell early while you were still clear of it.
      */
     let cx = wrap(Math.floor(pos.x)), cz = wrap(Math.floor(pos.z));
-    if (portalAxis(cx, cz, _pAxis) === null) {
+    if (portalHop(cx, cz, _pAxis) === null) {
       // The four corners of the footprint, nearest first. `Math.floor` of each
       // edge is the column that edge is in.
       const xs = [wrap(Math.floor(pos.x - HALF_W)), wrap(Math.floor(pos.x + HALF_W))];
@@ -1195,7 +1201,7 @@ export class Player {
       for (const tx of xs) {
         for (const tz of zs) {
           if (found || (tx === cx && tz === cz)) continue;
-          if (portalAxis(tx, tz, _pAxis) !== null) { cx = tx; cz = tz; found = true; }
+          if (portalHop(tx, tz, _pAxis) !== null) { cx = tx; cz = tz; found = true; }
         }
       }
       // Second choice, and only ever reached when the body is standing on open
@@ -1211,7 +1217,7 @@ export class Player {
         }
       }
     }
-    const ax = portalAxis(cx, cz, _pAxis);
+    const ax = portalHop(cx, cz, _pAxis);
     if (ax === null) {
       // Either ordinary ground - the case on almost every frame - or a divider
       // the strict rule will not read. `isWall` is the authority on which.
@@ -1231,26 +1237,37 @@ export class Player {
       ? wrap(Math.floor(this._freeX))
       : wrap(Math.floor(this._freeZ));
     let s = Math.sign(delta(here, from));
-    // The fallbacks, in order of how much they are trusted. A body that was
-    // already inside the divider last frame has no near side to read, which can
-    // only happen if it was put there by something other than walking - a
-    // respawn, a load, a knockback across two columns in a frame.
-    if (Math.abs(delta(here, from)) !== 1 || s === 0) {
-      const v = ax.axis === 0 ? this.vel.x : this.vel.z;
-      s = Math.abs(v) > 0.05 ? -Math.sign(v) : 0;
-    }
-    if (s === 0) {
-      // Nothing to read at all. Put them out into the connected world rather
-      // than into the sealed face: being dropped into Pyre by an ambiguity is
-      // far worse than being dropped into the meadow beside it.
-      const plus = ax.axis === 0 ? wrap(cx + 1) : cx;
-      const plusY = ax.axis === 0 ? cz : wrap(cz + 1);
-      s = isSealed(faceAt(plus, plusY)) ? 1 : -1;
+    if (ax.span === 2) {
+      // A double wall reads its own near side and needs nothing from the
+      // traveller: only one of its two sides is open ground, so the side you
+      // came from is a fact about the column rather than a guess about you.
+      // None of the fallbacks below can apply, and none of them should - they
+      // would answer a question that has already been answered exactly.
+      s = ax.near;
+    } else {
+      // The fallbacks, in order of how much they are trusted. A body that was
+      // already inside the divider last frame has no near side to read, which
+      // can only happen if it was put there by something other than walking - a
+      // respawn, a load, a knockback across two columns in a frame.
+      if (Math.abs(delta(here, from)) !== 1 || s === 0) {
+        const v = ax.axis === 0 ? this.vel.x : this.vel.z;
+        s = Math.abs(v) > 0.05 ? -Math.sign(v) : 0;
+      }
+      if (s === 0) {
+        // Nothing to read at all. Put them out into the connected world rather
+        // than into the sealed face: being dropped into Pyre by an ambiguity is
+        // far worse than being dropped into the meadow beside it.
+        const plus = ax.axis === 0 ? wrap(cx + 1) : cx;
+        const plusY = ax.axis === 0 ? cz : wrap(cz + 1);
+        s = isSealed(faceAt(plus, plusY)) ? 1 : -1;
+      }
     }
 
-    // Two steps from the near side: through the divider, and out the far side.
-    const fx = ax.axis === 0 ? wrap(cx - s) : cx;
-    const fz = ax.axis === 0 ? cz : wrap(cz - s);
+    // From the near side: through the divider - one column, or two where two
+    // rings are back to back - and out the far side.
+    const step = s * ax.span;
+    const fx = ax.axis === 0 ? wrap(cx - step) : cx;
+    const fz = ax.axis === 0 ? cz : wrap(cz - step);
     return this._arrive(fx, fz, ax.axis === 0, height);
   }
 

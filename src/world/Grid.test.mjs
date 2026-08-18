@@ -9,7 +9,7 @@ import {
   G, F, W, D, COLUMNS, CELLS, NORTH, SOUTH, WEST, EAST, DIR_STEP,
   SEALED, CROSS, isSealed, START_FACE, WALL_T,
   wrap, colIndex, cellIndex, colDecode, faceAt, localAt, faceOrigin,
-  faceStep, isDivider, isWall, portalsOf, allPortals, portalAxis, wallExit, delta, dist2,
+  faceStep, isDivider, isWall, portalsOf, allPortals, portalAxis, portalHop, wallExit, delta, dist2,
   SEA_K, worldOf, cellOf,
 } from './Grid.js';
 
@@ -218,18 +218,24 @@ eq(START_FACE, 5, 'the start is the middle');
 // --- portals ---------------------------------------------------------------
 {
   const all = allPortals();
-  eq(all.length, 8, 'eight portals: two into each sealed face');
+  eq(all.length, 16, 'sixteen portals: every side of every sealed face');
   for (const f of SEALED) {
     const ps = portalsOf(f);
-    eq(ps.length, 2, `${f} has two doors`);
+    eq(ps.length, 4, `${f} has four doors`);
+    const dirs = new Set(ps.map((p) => p.dir));
+    eq(dirs.size, 4, `${f} has one on each side`);
     for (const p of ps) {
       eq(faceAt(p.x, p.y), f, `${f} portal is on its own face`);
       ok(isWall(p.x, p.y), `${f} portal sits in the wall`);
-      // it faces a cross face, never another corner
-      ok(!isSealed(faceStep(f, p.dir)), `${f} portal faces the world`);
-      // and the column just outside really is that cross face
+      // and the column just outside really is the face it says it leads to
       const [dx, dy] = DIR_STEP[p.dir];
       eq(faceAt(p.x + dx, p.y + dy), faceStep(f, p.dir), `${f} portal leads where it says`);
+      // a door onto another corner is a double wall: the column beyond is the
+      // other face's ring, and the one beyond that is its interior
+      if (isSealed(faceStep(f, p.dir))) {
+        ok(isWall(p.x + dx, p.y + dy), `${f} corner-to-corner door is walled twice`);
+        ok(!isWall(p.x + dx * 2, p.y + dy * 2), `and open on the third column`);
+      }
     }
   }
   eq(portalsOf(5).length, 0, 'the cross has no portals');
@@ -268,12 +274,86 @@ eq(START_FACE, 5, 'the start is the middle');
   eq(none, 4, 'and the four where four rings meet have none');
   eq(inward, 0, 'no corner ever leads into a sealed face');
 
-  // The sealed-to-sealed runs, from the side a body can actually stand on. The
-  // near side is the face's own interior, so the far side is the other ring.
+  // The sealed-to-sealed runs are not a ONE-column step, so `wallExit` says no
+  // to them from either side. That is not the same as being impassable: it is
+  // what makes them `portalHop`'s business rather than the corner rule's, and
+  // it is also what keeps a corner from ever leading inward.
   for (let j = 1; j < F - 1; j += 97) {
-    ok(!wallExit(o1.x + 200, o1.y, 0, -1), 'Rime does not open north into Verdant');
-    ok(!wallExit(o1.x, o1.y + j, -1, 0), 'nor west into Tempest');
+    ok(!wallExit(o1.x + 200, o1.y, 0, -1), 'one step north out of Rime is still ring');
+    ok(!wallExit(o1.x, o1.y + j, -1, 0), 'and one step west is too');
   }
+}
+
+// --- the double wall -------------------------------------------------------
+//
+// Where two sealed faces touch, their rings sit back to back and the step is
+// three columns wide: near interior, wall, wall, far interior. The owner's call
+// is that all four sides of a sealed face are passable, so `portalHop` reads
+// that shape where `portalAxis` cannot.
+{
+  const o1 = faceOrigin(1);                      // Rime at the map origin
+  const north = portalHop(o1.x + 200, o1.y);     // against Verdant's south ring
+  ok(north && north.axis === 1 && north.span === 2, 'Rime opens north on a double wall');
+  eq(north.near, 1, 'and its only open side is Rime, at y + 1');
+  const back = portalHop(o1.x + 200, wrap(o1.y - 1));   // the other half of the pair
+  ok(back && back.span === 2, 'Verdant opens south through the same pair');
+  eq(back.near, -1, 'from its own side');
+
+  const west = portalHop(o1.x, o1.y + 200);      // against Tempest's east ring
+  ok(west && west.axis === 0 && west.span === 2, 'and west on one too');
+
+  // A straight run is unchanged, and still a single-column step.
+  const east = portalHop(o1.x + F - 1, o1.y + 200);
+  ok(east && east.axis === 0 && east.span === 1, 'a sealed-to-cross run is span one');
+  eq(portalHop(o1.x + 200, o1.y + 200), null, 'and open ground is not a way through');
+
+  // Every wall column in the world, and where the step it reports lands.
+  let span1 = 0, span2 = 0, refused = 0, bad = 0, corners = 0;
+  for (const f of SEALED) {
+    const o = faceOrigin(f);
+    for (let i = 0; i < F; i++) {
+      for (let j = 0; j < F; j++) {
+        const x = o.x + i, y = o.y + j;
+        if (!isWall(x, y)) continue;
+        const isCorner = (i === 0 || i === F - 1) && (j === 0 || j === F - 1);
+        const h = portalHop(x, y);
+        if (h === null) { refused++; if (isCorner) corners++; continue; }
+        if (isCorner) bad++;                     // a corner is never read alone
+        if (h.span === 1) { span1++; continue; }
+        span2++;
+        // Near side open, the column between walled, far side open ground in
+        // the other sealed face.
+        const nx = x + h.dx * h.near, ny = y + h.dy * h.near;
+        const mx = x - h.dx * h.near, my = y - h.dy * h.near;
+        const fx = x - h.dx * h.near * 2, fy = y - h.dy * h.near * 2;
+        if (isWall(nx, ny) || !isWall(mx, my) || isWall(fx, fy)) bad++;
+        else if (faceAt(nx, ny) !== f) bad++;
+        else if (!isSealed(faceAt(fx, fy))) bad++;
+        else if (faceAt(fx, fy) === f) bad++;
+      }
+    }
+  }
+  eq(span1, 4 * 2 * (F - 2), 'every sealed-to-cross column is a single-column step');
+  eq(span2, 4 * 2 * (F - 2), 'and every sealed-to-sealed one is a double');
+  eq(refused, 16, 'only the sixteen ring corners are refused');
+  eq(corners, 16, 'and all sixteen of them are');
+  eq(bad, 0, 'every double wall lands in the interior of the face on the other side');
+
+  // The topology this buys: from any sealed face you can now reach the other
+  // three without coming back out to the cross.
+  const reach = (f) => {
+    const seen = new Set([f]), queue = [f];
+    while (queue.length) {
+      const g = queue.pop();
+      for (let d = 0; d < 4; d++) {
+        const n = faceStep(g, d);
+        if (!isSealed(n) || seen.has(n)) continue;
+        seen.add(n); queue.push(n);
+      }
+    }
+    return seen;
+  };
+  for (const f of SEALED) eq(reach(f).size, 4, `${f} reaches all four corners without the cross`);
 }
 
 // --- wrapped distance ------------------------------------------------------

@@ -1515,12 +1515,19 @@ export const BLOCKS = [
    *
    * ### Lit
    *
-   * Full block light, in a cold white rather than the violet it was: see the
-   * palette note over `G.portal`. Eight boundaries on a 1248-wide map is a lot
-   * of world to find your way around, and a divider that only shows up inside the
-   * draw distance is no use as a landmark. At 15 it lights its own column, the
-   * ground either side of it and anything standing near it, and it reads at
-   * night from as far as the terrain lets you see.
+   * Lit, in a cold white rather than the violet it was: see the palette note
+   * over `G.portal`.
+   *
+   * It was 15 - the game's maximum, the sunstone lamp's level - on the argument
+   * that a divider is a landmark and wants to carry. The owner has now asked
+   * twice for the opposite ("portals should emit less glow"), so 7 it is: the
+   * grid flood steps down one per cell, so what used to reach fifteen blocks
+   * out reaches seven, and the surface itself runs at 0.47 of full block light
+   * rather than 1.0. That is under a torch (13) and about the irradiance of
+   * noon on its own face, which is still plainly a lit white wall from close up
+   * on Pyre, where there is no daylight and no map. What it costs is the
+   * lit ground: the pool either side of a divider at night is half as wide and
+   * a good deal dimmer at its edge.
    *
    * `hardness: -1` is what makes it unbreakable, and it is the same mechanism
    * water and lava use: `breakTime` returns Infinity, `computeDrops` returns
@@ -1532,7 +1539,7 @@ export const BLOCKS = [
   block({
     name: 'portal', label: 'Portal', all: 'portal',
     solid: false, opaque: true,
-    light: 15, lightColor: [0.86, 0.92, 1.0],
+    light: 7, lightColor: [0.86, 0.92, 1.0],
     hardness: -1, drop: null, particle: [0.88, 0.93, 1.0], sound: 'glass',
   }),
 ];

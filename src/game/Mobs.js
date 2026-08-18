@@ -6952,6 +6952,9 @@ export class Mobs {
    * @returns {number} bodies placed, for the harness
    */
   _verdantDayTick(player, playerCol) {
+    // One tick, one view of the map. The memo is only sound within a tick, so
+    // it is emptied at the top of the one place that hammers it.
+    this._shadeMemo?.clear();
     let day = 0, night = 0;
     for (const m of this.list) {
       if (m.verdantDay) day++;
@@ -7511,9 +7514,36 @@ export class Mobs {
    * a body already standing, on the SHADE_PERIOD clock.
    */
   _shaded(col, k) {
+    // Memoised on the column, because the spawn search asks sixty times a tick
+    // and walks a lattice that revisits the same columns constantly. The map is
+    // static above the ground for as long as a tick lasts, so the answer cannot
+    // go stale inside one; `_shadeSeen` is cleared each tick by the caller.
+    const memo = this._shadeMemo ||= new Map();
+    const key = col * 128 + k;
+    const hit = memo.get(key);
+    if (hit !== undefined) return hit;
+    const out = this._shadedRaw(col, k);
+    memo.set(key, out);
+    return out;
+  }
+
+  _shadedRaw(col, k) {
     const top = Math.min(D - 1, k + SHADE_SPAN);
+    // Give up as soon as the remaining samples cannot reach SHADE_MIN. The ring
+    // is five samples of fourteen layers and the spawn search asks sixty times
+    // a tick, which measured at 6.05 us a scan and 0.21 ms per second of play,
+    // more than the whole night costs. Almost every rejection is a column with
+    // nothing over it, and those now stop after two reads instead of five.
+    //
+    // A bare centre is NOT on its own a refusal: the ring is five and the
+    // threshold three, so four leafy arms around a gap in the crown still
+    // shade. Short-circuiting on the centre alone would have quietly tightened
+    // the rule, which is why this counts what is left rather than what is here.
+    const total = SHADE_RING.length / 2;
     let n = 0;
     for (let s = 0; s < SHADE_RING.length; s += 2) {
+      const left = total - (s / 2);
+      if (n + left < SHADE_MIN) return false;
       const c = (s === 0) ? col
         : stepColumn(col, SHADE_RING[s] * SHADE_STEP, SHADE_RING[s + 1] * SHADE_STEP);
       if (leafAbove(this.planet, c, k, top) && ++n >= SHADE_MIN) return true;

@@ -132,7 +132,11 @@ export class CombatBars {
       if (mob.health > f.max) f.max = mob.health;
       nearestTo(_head, camera.position, mob.position);
       const up = mob.up;
-      const lift = (mob.tall ?? 1) + 0.32;
+      // `tall` is the body's height rounded UP to whole cells, because it is
+      // there for the collision walk; hanging the bar off it floats a bunny
+      // most of a block over its own ears. `baseHeight * grown` is the height
+      // the model is actually drawn at.
+      const lift = (mob.baseHeight ? mob.baseHeight * (mob.grown ?? 1) : (mob.tall ?? 1)) + 0.3;
       if (up) { _head.x += up.x * lift; _head.y += up.y * lift; _head.z += up.z * lift; }
       else _head.y += lift;
       const dist = _head.distanceTo(camera.position);
@@ -195,10 +199,16 @@ export class CombatBars {
     const bw = Math.round((44 + 13 * Math.sqrt(f.max)) * s);
     const bh = Math.round(7 * s);
     const cx = (d.ndc.x * 0.5 + 0.5) * this._w;
-    let cy = (1 - (d.ndc.y * 0.5 + 0.5)) * this._h;
+    const cy = (1 - (d.ndc.y * 0.5 + 0.5)) * this._h;
 
     const fs = Math.round(11 * s);
     const labelH = fs + Math.round(4 * s);
+    const label = mob.label ?? mob.spec?.label ?? '';
+    ctx.font = `700 ${fs}px ui-sans-serif, system-ui, sans-serif`;
+    // The name is centred on the bar and a long one is wider than a short
+    // creature's trough, so the keep-out below has to be measured against the
+    // whole mark and not against the bar alone.
+    const markW = Math.max(bw, label ? Math.ceil(ctx.measureText(label.toUpperCase()).width) + 6 : 0);
     let top = cy - bh - labelH;
 
     // Never over the sight. The crosshair, its look-at label and whatever is
@@ -206,22 +216,25 @@ export class CombatBars {
     // that lands in it is lifted clear above, and only pushed below if there
     // is no room above the box, which happens when you are looking sharply up.
     const kx = this._w / 2, ky = this._h / 2;
-    const kw = KEEP_OUT_W * s, kh = KEEP_OUT_H * s;
-    if (Math.abs(cx - kx) < kw + bw / 2 && top < ky + kh && top + labelH + bh > ky - kh) {
-      const lifted = ky - kh - labelH - bh;
-      top = lifted > 6 ? lifted : ky + kh;
+    // Not scaled by `s`: the crosshair is 20px on every screen, so the room it
+    // needs is 20px on every screen too. Shrinking the box with the bars is
+    // how a phone ended up with a name across the sight.
+    const kw = KEEP_OUT_W, kh = KEEP_OUT_H;
+    if (Math.abs(cx - kx) < kw + markW / 2 && top < ky + kh && top + labelH + bh > ky - kh) {
+      // The 5 is the name's drop shadow, which spreads past the glyphs and
+      // would otherwise smudge the edge of the box it was just moved out of.
+      const lifted = ky - kh - labelH - bh - 5;
+      top = lifted > 6 ? lifted : ky + kh + 5;
     }
-    top = Math.max(4, Math.min(this._h - labelH - bh - 4, top));
-    const left = Math.round(Math.max(4, Math.min(this._w - bw - 4, cx - bw / 2)));
-    top = Math.round(top);
+    top = Math.round(Math.max(4, Math.min(this._h - labelH - bh - 4, top)));
+    const left = Math.round(Math.max(4 + (markW - bw) / 2,
+      Math.min(this._w - bw - 4 - (markW - bw) / 2, cx - bw / 2)));
 
     // The last three-quarters of a second, spent leaving.
     const a = f.left < FADE ? f.left / FADE : 1;
     ctx.globalAlpha = a;
 
-    const label = mob.spec?.label ?? '';
     if (label) {
-      ctx.font = `700 ${fs}px ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
       ctx.shadowColor = 'rgba(0,0,0,.95)';

@@ -2,7 +2,7 @@
   "size": 256,
   "cols": 12,
   "rows": 14,
-  "layers": 159,
+  "layers": 157,
   "ext": "webp",
   "crack": {
     "size": 64,
@@ -60,8 +60,6 @@
     "wheat_1",
     "wheat_2",
     "wheat_3",
-    "pumpkin_side",
-    "pumpkin_top",
     "cactus_side",
     "cactus_top",
     "iron_block",

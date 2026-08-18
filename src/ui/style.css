@@ -2977,18 +2977,25 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
  * was the clipper that survived four fixes.
  */
 .ctl-groups {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: clamp(20px, 3vh, 40px) clamp(32px, 4vw, 88px);
-  align-content: center;
-  min-height: 100%;
+  /* Multi-column, not a grid, and the reason is the hole a grid leaves.
+     A grid gives every row of cells the same height, so MOVE with four lines
+     sitting beside HANDS with seven left three empty lines under it and the
+     page read as broken. Multicol balances the two columns by HEIGHT and packs
+     the groups, so the columns come out level and there is no hole.
+     `break-inside: avoid` is what makes it safe: a group is never split down
+     the middle, which is the one thing multicol will do if you let it. */
+  column-count: 2;
+  column-gap: clamp(32px, 4vw, 88px);
   width: min(100%, 1180px);
   margin-inline: auto;
   padding-inline: 8px;
   font-size: clamp(15px, 0.34vw + 13.4px, 19px);
 }
-@media (min-width: 880px) { .ctl-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.ctl-group { padding-bottom: 0; }
+@media (max-width: 880px) { .ctl-groups { column-count: 1; } }
+.ctl-group {
+  break-inside: avoid;
+  padding-bottom: clamp(20px, 3vh, 38px);
+}
 .ctl-group .ctl-head { margin-top: 0; margin-bottom: 4px; }
 
 /* Two columns: the caps ranged RIGHT, the action ranged left.
@@ -3016,10 +3023,12 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 /* The caps of one row, held together so the label beside them starts at the
    same place on every row. The join words sit between them, faint. */
 .controls-grid .keys {
-  /* Ranged right: the caps make one clean edge and the actions beside them
-     make another, so the eye runs down either column instead of hunting for
-     where each line starts. */
-  display: flex; align-items: center; justify-content: flex-end;
+  /* Ranged LEFT. Ranging them right was tried and is worse: it lines up the
+     caps' right edges and leaves their LEFT edges ragged, so `W A S D` starts
+     far out and `Ctrl` starts far in and the rows read as randomly indented.
+     The actions still line up, because the track is `max-content` over the
+     whole group - which is the alignment that was actually wanted. */
+  display: flex; align-items: center; justify-content: flex-start;
   gap: 4px; flex-wrap: wrap;
   font-size: var(--fs-sm); color: var(--ink-soft);
 }

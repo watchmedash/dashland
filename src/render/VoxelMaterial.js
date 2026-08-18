@@ -535,6 +535,18 @@ uniform vec4 uBioWake[4];
  * description of foam. Zero in every material that never writes it.
  */
 float gBioLum = 0.0;
+/**
+ * How much of the divider's own glow this fragment is allowed to keep.
+ *
+ * One for everything else in the world, and for a portal fragment a distance
+ * fade written in the albedo branch and read by the block-light term and the
+ * sheen. See PORTAL_GLOW_NEAR: the owner's ask is that a divider be "invisible
+ * from far away and only be visible around 50 blocks away", and a wall that is
+ * only ever lit by its own block light is one the fade can simply take back.
+ * What it must not touch is the alpha or the daylight on it - a divider is
+ * still a wall at any range, and still seals the face behind it.
+ */
+float gPortalGlow = 1.0;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uSkyReflect;
@@ -1699,9 +1711,9 @@ const LIQUID_MAP_FRAG = /* glsl */`
      * painted in that is different.
      *
      * Still darker than it looks like it should be, and for the same reason it
-     * always was. The block is light 15, so vBlock is 1.0 on every fragment of
-     * it and LIGHTS_END multiplies the albedo by an irradiance of about 1.3
-     * before the fresnel adds more on top: an albedo already near white
+     * always was. The block is lit - vBlock is 0.47 on every fragment of it
+     * now that the light is 7, and LIGHTS_END multiplies the albedo by that
+     * irradiance before the fresnel adds more on top: an albedo already white
      * saturates, and a saturated wall is one flat sheet with the swirl gone out
      * of it. The albedo carries the contrast and the light provides the
      * brightness, so DEEP has to stay genuinely dark for the structure to
@@ -1714,10 +1726,27 @@ const LIQUID_MAP_FRAG = /* glsl */`
     const vec3 PORTAL_LIT  = vec3(0.20, 0.23, 0.27);
     const vec3 PORTAL_HOT  = vec3(0.50, 0.54, 0.60);
     diffuseColor.rgb = mix(PORTAL_DEEP, PORTAL_LIT, pStruct);
+    /*
+     * Where the glow stops carrying. Distance to the eye, on the same raw
+     * vWorld the fresnel below uses - the chunks are seated on the copy of
+     * themselves nearest the camera, so this is already the near distance
+     * across a wrap seam.
+     *
+     * The block itself is not dimmed and the wall is not made thinner: what
+     * fades is the light the divider gives off - the filaments here, the
+     * self-lighting in LIGHTS_END and the sheen after opaque_fragment. Past
+     * PORTAL_GLOW_FAR what is left is a pale surface lit by the sky like any
+     * other, which by day is a wall on the horizon and by night is nothing.
+     * Inside PORTAL_GLOW_NEAR nothing has changed at all, so finding a
+     * divider in the dark on Pyre is the same job it was.
+     */
+    const float PORTAL_GLOW_NEAR = 45.0;
+    const float PORTAL_GLOW_FAR = 95.0;
+    gPortalGlow = 1.0 - smoothstep(PORTAL_GLOW_NEAR, PORTAL_GLOW_FAR, distance(vWorld, uCamPos));
     // The filaments are added rather than mixed, and only where the bands are
     // already up: light gathering in the thick of the glass rather than a
     // second pattern laid over the first.
-    diffuseColor.rgb += PORTAL_HOT * fil * (0.25 + 0.75 * pStruct) * 0.80;
+    diffuseColor.rgb += PORTAL_HOT * fil * (0.25 + 0.75 * pStruct) * 0.80 * gPortalGlow;
     /*
      * The base alpha stays at 1 and the frosting is applied once, after
      * <opaque_fragment>, where the fresnel that shapes it is already computed.
@@ -2401,7 +2430,10 @@ const LIGHTS_END = /* glsl */`
   // pair. See BLOCK_KNEE. The AO weighting stays on the grid term only and off
   // the moving one, exactly as before: a flame you are holding is not occluded
   // by the crease it is shining into.
-  vec3 blockRad = (diffuseColor.rgb * vBlock * uBlockIntensity * mix(0.65, 1.0, aoTotal)
+  // gPortalGlow is 1.0 everywhere except on a divider seen from far off, where
+  // it takes the block's own light back out of it. Only the grid term: a torch
+  // you are carrying still lights a portal, because you are standing at it.
+  vec3 blockRad = (diffuseColor.rgb * vBlock * uBlockIntensity * gPortalGlow * mix(0.65, 1.0, aoTotal)
                  + diffuseColor.rgb * moving) * RECIPROCAL_PI;
   // Scaled by the max channel rather than clamped per channel, so the roll-off
   // moves the value and leaves the hue and saturation of firelight alone.
@@ -2732,7 +2764,7 @@ function patch(material, opts = {}) {
           float skyLum = dot(skyP, AERIAL_LUMA);
           gl_FragColor.rgb = mix(gl_FragColor.rgb,
                                  PORTAL_SHEEN * clamp(0.35 + skyLum * 1.6, 0.2, 1.5),
-                                 fresP * 0.55);
+                                 fresP * 0.55 * gPortalGlow);
 
           // A tight highlight on the swell, on the divider's own colour rather
           // than the sun's: it is a lit surface, not a wet one, and it has to
@@ -2740,7 +2772,7 @@ function patch(material, opts = {}) {
           // reason - the block is light 15 and lights itself.
           vec3 halfP = normalize(uSunDir - vDirP);
           float ndhP = clamp(dot(normal, halfP), 0.0, 1.0);
-          gl_FragColor.rgb += PORTAL_SHEEN * fresP * pow(ndhP, 60.0) * 0.5;
+          gl_FragColor.rgb += PORTAL_SHEEN * fresP * pow(ndhP, 60.0) * 0.5 * gPortalGlow;
 
           /*
            * FROSTED, not clear, and the number is a compromise between two

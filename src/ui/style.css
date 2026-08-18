@@ -2910,7 +2910,15 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
   background: linear-gradient(90deg, rgba(96, 66, 28, .3), rgba(96, 66, 28, 0));
 }
 .set-head { margin-bottom: 4px; }
-.ctl-head { margin-top: 18px; margin-bottom: 9px; }
+/* A real heading rather than a tiny cap on a hairline. It is the only thing
+   naming a group, so it is allowed to be the size of one. */
+.ctl-head {
+  margin: 0 0 6px; padding: 0 12px 0 0;
+  font-size: clamp(15px, 0.3vw + 13px, 18px);
+  letter-spacing: .06em;
+}
+.ctl-head::before { display: none; }
+.ctl-head::after { display: none; }
 .ctl-head:first-of-type, .set-head:first-of-type { margin-top: 0; }
 .settings details.credits {
   margin-top: 16px; padding-top: 12px;
@@ -2998,28 +3006,45 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 }
 .ctl-group .ctl-head { margin-top: 0; margin-bottom: 4px; }
 
-/* Two columns: the caps ranged RIGHT, the action ranged left.
+/* A ROW IS A LINE OF TEXT WITH A KEY AT THE END OF IT.
  *
- * The rows are `display: contents` so every row's caps and every row's words
- * land in the SAME two tracks - a per-row grid measures each row on its own
- * and comes out ragged, which is what this was. The dotted rule lives on the
- * spans rather than on the row, so the gap between the columns is padding and
- * the rule stays one continuous line instead of two with a bite out of it.
+ * The old row was a two-track grid: cap on the left, dotted leader, action on
+ * the right. Every complaint about this screen came back to that shape - the
+ * ragged gap between a cap and its words, the leaders, the tracks that would
+ * not shrink and clipped what they could not fit. It has been tuned five times
+ * and the answer was never a better measurement of it.
+ *
+ * So the row is turned around and the grid is gone. The ACTION comes first,
+ * because that is what a player is looking for: you scan for the thing you
+ * want to do, then look right for the key that does it. The key sits at the
+ * end of the line, pushed there by an auto margin, so both edges are clean
+ * without a single fixed width anywhere. Nothing here can overflow a track,
+ * because there are no tracks.
+ *
+ * Rows are separated by a faint tint on every other one rather than by a rule.
+ * A dotted leader is a device for a printed index where the eye has to cross a
+ * page; these lines are short and the tint does the same work without drawing
+ * a line through the middle of the screen.
  */
-.controls-grid {
-  display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-  align-items: center;
+.controls-grid { display: flex; flex-direction: column; }
+.controls-grid > div {
+  display: flex; align-items: center; gap: 18px;
+  padding: clamp(7px, 1vh, 12px) 12px;
+  border-radius: var(--r-sm);
 }
-.controls-grid > div > span:first-child { padding-right: clamp(14px, 1.6vw, 30px); }
-.controls-grid > div { display: contents; }
-.controls-grid > div > span {
-  padding: clamp(6px, 0.9vh, 11px) 0; border-radius: 0;
-  font-size: inherit; color: var(--ink-soft);
-  background: none;
-  border-bottom: 1px dotted rgba(96, 66, 28, .35);
+.controls-grid > div:nth-child(odd) { background: rgba(122, 94, 54, .055); }
+/* The keys, at the end of the line. `margin-left: auto` is what puts them
+   there, so the column of caps lines up on its right edge whatever the words
+   in front of it are doing. */
+.controls-grid > div > span:first-child {
+  order: 2; margin-left: auto; padding-right: 0;
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
 }
-.controls-grid > div:last-child > span { border-bottom: none; }
+/* The action. First, and the loudest thing on the row. */
+.controls-grid > div > span + span {
+  order: 1; min-width: 0;
+  color: var(--ink); font-weight: 600; text-shadow: var(--carved);
+}
 /* The caps of one row, held together so the label beside them starts at the
    same place on every row. The join words sit between them, faint. */
 .controls-grid .keys {

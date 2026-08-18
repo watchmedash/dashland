@@ -21,7 +21,7 @@ import {
   FACE_ROLE, FACE_NORMAL, FACE_RIME, FACE_TEMPEST, FACE_VERDANT, FACE_PYRE,
 } from './Constants.js';
 import {
-  wrap, faceAt, isWall, delta, START_FACE, faceOrigin, colIndex, F,
+  wrap, faceAt, isWall, isSealed, delta, START_FACE, faceOrigin, colIndex, F,
 } from './Grid.js';
 import { Periodic, surfScale, MAXA } from './Periodic.js';
 import { ID, N_BLOCKS, IS_OPAQUE, supports, growsOn } from './Blocks.js';
@@ -1497,6 +1497,33 @@ const GLOW_CINDER_THR = 0.84;
  */
 function fillWall(blocks, col) {
   for (let k = 0; k < D; k++) blocks[cellAt(col, k)] = ID.portal;
+}
+
+/**
+ * May a decoration standing on the column at `fx, fy` write into `tx, ty`?
+ *
+ * The rule the world has to keep is "nothing crosses a divider", and refusing
+ * the wall column alone does NOT keep it. A wall is one column thick and a
+ * crown reaches five, so a tree two columns inside Verdant put nothing in the
+ * wall - correctly refused - and put its outermost leaves in the columns
+ * BEYOND it, where they stand in the open air of the next face over. That is
+ * the reported "tree leaves/blocks still pokes from other side", and it reads
+ * exactly the same from either side: a tree on the cross throws leaves into a
+ * sealed room just as happily.
+ *
+ * So the test is about which side of the wall the target is on rather than
+ * about the wall itself, and the face labels answer that for free. The five
+ * cross faces are one continuous world, so a write between two of them crosses
+ * nothing and the connected world is left completely alone. Any other change
+ * of face - cross to sealed, sealed to cross, or one sealed room to the next -
+ * has a divider between the two columns by construction, because the wall is
+ * the whole outer ring of every sealed face.
+ */
+function crossesDivider(fx, fy, tx, ty) {
+  if (isWall(tx, ty)) return true;
+  const a = faceAt(fx, fy), b = faceAt(tx, ty);
+  if (a === b) return false;
+  return isSealed(a) || isSealed(b);
 }
 
 export class WorldGen {
@@ -4670,6 +4697,14 @@ export class WorldGen {
            * scheme needs and the only one it needs.
            */
           const id = mossy && rng() < 0.5 ? ID.moss_stone : ID.stone;
+          // A boulder is five columns across against a one-column wall, so it
+          // crosses a divider exactly the way a crown does. After the draw and
+          // beside the region clip, for the reason spelled out above: the
+          // stream stays a function of the column alone. Measured, this is rare
+          // next to the trees - two cells on the whole ring against the
+          // canopy's fifteen hundred - but it is the same bug, and a stray
+          // block standing in the air of the next face reads as one.
+          if (crossesDivider(bpx, bpy, bpx + di, bpy + dj)) continue;
           if (rid >= 0 && regionOfCol(c) !== rid) continue;
           if (blocks[cellAt(c, kk)] !== ID.air) continue;
           blocks[cellAt(c, kk)] = id;
@@ -4892,25 +4927,24 @@ export class WorldGen {
   }
 
   stampTree(blocks, kind, col, k0, rng, rid = -1) {
+    // The trunk's own column, read before `set` is ever called and kept as two
+    // plain numbers, because `set` has to know where the tree is STANDING to
+    // decide whether a cell is on the far side of a divider from it.
+    const tp = colXY(col);
+    const tx = tp.x, ty = tp.y;
     const set = (c, k, id, force = false) => {
       if (k < 0 || k >= D) return;
       if (rid >= 0 && regionOfCol(c) !== rid) return;
-      // Nothing grows through a divider. A crown reaches five columns and the
-      // wall is one thick, so a tree near the edge of a sealed face threw its
-      // leaves clean over it and they came out on the next face - "leaves of
-      // trees are sticking out from verdant to other face".
-      //
-      // The `cur === ID.air` test below does not catch it: a portal column is
-      // not air, so the leaf inside the wall is correctly refused, and the ones
-      // BEYOND it land on the far side's air and are kept. Refusing the whole
-      // column is what stops a crown crossing rather than tunnelling.
+      // Nothing grows through a divider, and nothing grows OVER one either.
+      // Refusing the wall column alone was the first version of this and it
+      // left the reported bug standing: the crown reaches five columns, the
+      // wall is one thick, so the leaves inside the wall were dropped and the
+      // ones past it were kept. See `crossesDivider`.
       const cp = colXY(c, _treeXY);
-      if (isWall(cp.x, cp.y)) return;
+      if (crossesDivider(tx, ty, cp.x, cp.y)) return;
       const cur = blocks[cellAt(c, k)];
       if (cur === ID.air || force) blocks[cellAt(c, k)] = id;
     };
-    const tp = colXY(col);
-    const tx = tp.x, ty = tp.y;
     const at = (di, dj) => patchCol(tx, ty, di, dj);
 
     if (kind === 'cactus') {

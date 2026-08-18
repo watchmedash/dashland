@@ -2208,6 +2208,7 @@ class Game {
     this.soakT = 0;       // seconds in a hot spring, bled off slowly once out
     this._balmT = 0;      // change owed toward the next point of a cinderlands heal
     this.eating = 0;      // seconds held on a food item
+    this._eatHand = 'right'; // which fist that food is in — either can eat
     this.shelter = 1;     // 0 under cover, 1 in open sky — gates precipitation
     this._hlCol = -1; this._hlK = -1; this._hlSeq = -1;
     this._hlValue = { r: 0, g: 0, b: 0 };
@@ -6784,6 +6785,10 @@ class Game {
       _v1.copy(this.player.position).addScaledVector(this.player.up, 0.9), _entityL));
     this.viewModel.setHeld(this.inventory.held().item, this.ui.icons);
     this.viewModel.setOffhand(this.inventory.offhand.item, this.ui.icons);
+    // The meal is a level, not an event: `eating` is zeroed from six places when
+    // a meal is abandoned, and sampling it here means none of them has to know
+    // there is an animation to turn off. See `ViewModel.setEating`.
+    this.viewModel.setEating(this.eating > 0, this._eatHand);
     this.viewModel.update(dt, this.player, this.sky, this._handLight());
     // The flicker clock both moving flames read, advanced once, here, before
     // either of them looks at it. See the field's own note for what happened
@@ -10480,6 +10485,10 @@ class Game {
       this.ui.setHint('Not hungry');
       return;
     }
+    // Which arm raises the food. Recorded here rather than at the render call
+    // because this is the only place that knows the slot the meal is charged to,
+    // and food is eaten from the offhand as readily as from the main hand.
+    this._eatHand = this._handOf(heldSlot);
     if (this.eating === 0) this.audio.eat();
     this.eating += dt;
     // Crumbs in the food's own colour, not `footDust(ID.dirt)` - see `crumbs`.

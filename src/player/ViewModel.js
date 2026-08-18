@@ -647,6 +647,88 @@ const WIND_RATE = 11;
 const CAST_RATE = 6;
 
 /**
+ * The meal, and it is `CAST`'s shape rather than a track of its own.
+ *
+ * The report was "no eating animation in hands when eating a food": a berry
+ * left the bag, the crumbs flew and the hand did not move for the whole 1.3
+ * seconds it took. So the food comes up to the mouth and stays there while it
+ * is chewed.
+ *
+ * **An additive shoulder offset on an eased clock, not a `SWINGS` track**, and
+ * the reason is the one property the meal has that no track has: it can be
+ * abandoned. A track is a fixed animation played at the player from t=0 to
+ * t=1, and eating is a pose held for as long as the button is — releasing it a
+ * third of the way through has to put the hand back from wherever it got to,
+ * not run out the rest of a stroke. `CAST` is the same fact and eases the same
+ * way, so this borrows its fact/eased pair (`_eat` / `_eatT`) wholesale and
+ * interruption costs no code at all: main sets the fact to 0 and the arm
+ * travels home from where it is.
+ *
+ * Being additive is also what keeps it out of the swing's way. If the player
+ * attacks mid-meal the jab plays at the same shoulder and the two sum, exactly
+ * as `CAST` and `SWINGS.rod` sum during a throw — and in practice the meal is
+ * over by then anyway, because every path in `main.js` that acts on a button
+ * zeroes `eating` first. The layering is there so that the frame in between is
+ * a hand doing both rather than a hand snapping between two poses.
+ *
+ * The numbers are the fist walked from `REST` to the mouth. `REST` puts it at
+ * view space (0.560, -0.520, -0.720) and the mouth is a little below and in
+ * front of the eye, so the offset is in toward the centre line, up, and a touch
+ * nearer — `p.z` is deliberately the smallest of the three for the reason set
+ * out on `DRAW`: coming at the camera is how a gesture turns into a hand
+ * looming over the thing it is meant to be showing. At these values the fist
+ * lands near view space (0.36, -0.26, -0.62), which is inside the frame and
+ * off to the right of the crosshair rather than over it, so the food is held
+ * where you can see it and the world is not.
+ *
+ * `r` turns the item's head in toward the mouth: pitch raises the far end of
+ * the limb, and the yaw and roll are what tip an apple's top toward the middle
+ * of the screen instead of presenting it side-on. Both of those are the pair
+ * that changes sign for the offhand, by the same rule everything else here
+ * mirrors on.
+ */
+const EAT = {
+  p: [-0.20, 0.26, 0.10],
+  r: [0.36, -0.30, 0.34],
+};
+
+/**
+ * The chewing, laid over the raise.
+ *
+ * A small nod in and down and back out, so the food is worried at rather than
+ * parked in front of the face for a second. It is a continuous oscillation and
+ * not keys, because the meal's length is `main.js`'s to change and a bite count
+ * baked into keyframes would silently retime with it.
+ *
+ * `rate` is in radians per second: 19 puts almost exactly four chews in the
+ * 1.3s meal, which is what `audio.eat()` plays — four wet grains and a swallow
+ * — so the gesture and the sound land on the same beats without either being
+ * told about the other.
+ *
+ * Amplitudes are tiny on purpose. The fist is 0.38 out along the limb and the
+ * food is further still, so 0.07 rad of pitch here is a visible nod; anything
+ * at the scale of the swing tracks would be gnawing rather than eating.
+ * Multiplied by `_eatT`, so the bob fades in with the raise and out with the
+ * settle and there is no frame where a hand at rest twitches.
+ */
+const CHEW = {
+  rate: 19,
+  p: [0, -0.018, 0.014],
+  r: [0.07, 0, 0.025],
+};
+
+/**
+ * How fast the food goes up and comes back, in units per second.
+ *
+ * Faster than `CAST_RATE` because the meal is short: at 12 the raise is
+ * essentially done in a quarter second, which leaves about 0.8s of chewing in
+ * the middle of a 1.3s meal and a quarter second to settle. Slower than this
+ * and a meal is over before the hand arrives; faster and the food teleports to
+ * the mouth, which is the thing being fixed.
+ */
+const EAT_RATE = 12;
+
+/**
  * Where in the rod's swing the float leaves the tip.
  *
  * A fraction of the normalised swing clock, and it is the *end of the flick* —
@@ -1153,6 +1235,18 @@ export class ViewModel {
     this._windT = 0;
     /** Which fist is holding the cast rod, so the other arm is untouched. */
     this._castHand = 'right';
+
+    /**
+     * Whether a meal is in progress, as the same fact/eased pair the cast keeps
+     * — see `EAT`. `_chew` is the chewing bob's own phase, free-running while
+     * the pose is up so that a meal interrupted and restarted does not snap the
+     * nod back to the top of its cycle.
+     */
+    this._eat = 0;
+    this._eatT = 0;
+    this._chew = 0;
+    /** Which fist the food is in. Food can be eaten from either. */
+    this._eatHand = 'right';
 
     this.swing = 1;
     /** Which arm the current swing belongs to. See `punch`. */
@@ -1800,6 +1894,24 @@ export class ViewModel {
   }
 
   /**
+   * A meal is or is not in progress, in the fist that is holding the food.
+   *
+   * Told every frame from `this.eating` rather than started and stopped at the
+   * edges, because `main.js` abandons a meal from six places — a release, a
+   * placement, a full stomach, a bow, a feed that was not one — and an
+   * animation that has to be turned off by name at each of them is one branch
+   * away from a hand stuck at the mouth. A level, sampled where the swing and
+   * the cast are already sampled, cannot get out of step with the fact.
+   *
+   * @param {boolean} on whether the player is chewing this frame
+   * @param {'right'|'left'} [hand] the fist the food is in
+   */
+  setEating(on, hand) {
+    this._eat = on ? 1 : 0;
+    if (on && this.hands[hand]) this._eatHand = hand;
+  }
+
+  /**
    * The hand that would act if nobody says otherwise.
    *
    * **A fallback, and no longer the rule.** It reads the one guess this view can
@@ -1946,9 +2058,24 @@ export class ViewModel {
     const rww = this._castHand === 'left' ? 0 : this._windT;
     const lww = this._windT - rww;
 
-    const px = rest.x + bx + _swingP.x * sw + drawX + CAST.p[0] * rcw + WIND.p[0] * rww;
-    const py = rest.y + by + _swingP.y * sw + equipY + drawY + CAST.p[1] * rcw + WIND.p[1] * rww;
-    const pz = rest.z + _swingP.z * sw + drawZ + CAST.p[2] * rcw + WIND.p[2] * rww;
+    // The meal, on the same one-clock-two-shares split as the draw and the cast.
+    // The chew phase only runs while the pose is up, so a hand at rest holds
+    // whatever phase it settled at instead of counting through a cycle nobody
+    // can see. `chew` already carries `_eatT`, so the bob fades in and out with
+    // the raise and every term below can be written as though it did not.
+    this._eatT += (this._eat - this._eatT) * Math.min(1, dt * EAT_RATE);
+    if (this._eatT < 0.002) this._eatT = 0;
+    if (this._eatT > 0) this._chew += dt * CHEW.rate;
+    const rew = this._eatHand === 'left' ? 0 : this._eatT;
+    const lew = this._eatT - rew;
+    const chew = Math.sin(this._chew) * this._eatT;
+
+    const px = rest.x + bx + _swingP.x * sw + drawX + CAST.p[0] * rcw + WIND.p[0] * rww
+      + (EAT.p[0] + CHEW.p[0] * chew) * rew;
+    const py = rest.y + by + _swingP.y * sw + equipY + drawY + CAST.p[1] * rcw + WIND.p[1] * rww
+      + (EAT.p[1] + CHEW.p[1] * chew) * rew;
+    const pz = rest.z + _swingP.z * sw + drawZ + CAST.p[2] * rcw + WIND.p[2] * rww
+      + (EAT.p[2] + CHEW.p[2] * chew) * rew;
 
     // Shoulder anchor sits low-right, just behind the near plane. Everything —
     // bob, swing, equip dip, sprint — is applied here and nowhere else; the fist
@@ -1967,9 +2094,12 @@ export class ViewModel {
       // end of the limb (a strike), positive raises it (a wind-up or a scoop).
       // The tracks keep their pitch inside ±0.6: the fist is half a unit from
       // the pivot, so a radian here throws the item clean out of frame.
-      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * rdw + CAST.r[0] * rcw + WIND.r[0] * rww,
-      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * rdw + CAST.r[1] * rcw + WIND.r[1] * rww,
-      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * rdw + CAST.r[2] * rcw + WIND.r[2] * rww,
+      ARM_REST_ROT.x + _swingR.x * sw + eq * 0.55 + DRAW.r[0] * rdw + CAST.r[0] * rcw + WIND.r[0] * rww
+        + (EAT.r[0] + CHEW.r[0] * chew) * rew,
+      ARM_REST_ROT.y + _swingR.y * sw + DRAW.r[1] * rdw + CAST.r[1] * rcw + WIND.r[1] * rww
+        + EAT.r[1] * rew,
+      ARM_REST_ROT.z + _swingR.z * sw + DRAW.r[2] * rdw + CAST.r[2] * rcw + WIND.r[2] * rww
+        + (EAT.r[2] + CHEW.r[2] * chew) * rew,
     );
 
     // The offhand arm, on the frames there is one. Everything above has already
@@ -2000,14 +2130,20 @@ export class ViewModel {
       if (this.offEquipT < 1) this.offEquipT = Math.min(1, this.offEquipT + dt * 5.0);
       const oeq = 1 - this.offEquipT;
       this.offArmPivot.position.set(
-        OFF_REST.x - bx - _swingP.x * osw - DRAW.p[0] * ldw - CAST.p[0] * lcw,
-        OFF_REST.y + by + _swingP.y * osw - oeq * 0.42 + DRAW.p[1] * ldw + CAST.p[1] * lcw,
-        OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05 + DRAW.p[2] * ldw + CAST.p[2] * lcw,
+        OFF_REST.x - bx - _swingP.x * osw - DRAW.p[0] * ldw - CAST.p[0] * lcw
+          - (EAT.p[0] + CHEW.p[0] * chew) * lew,
+        OFF_REST.y + by + _swingP.y * osw - oeq * 0.42 + DRAW.p[1] * ldw + CAST.p[1] * lcw
+          + (EAT.p[1] + CHEW.p[1] * chew) * lew,
+        OFF_REST.z + _swingP.z * osw - this._sprintEase * 0.05 + DRAW.p[2] * ldw + CAST.p[2] * lcw
+          + (EAT.p[2] + CHEW.p[2] * chew) * lew,
       );
       this.offArmPivot.rotation.set(
-        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55 + DRAW.r[0] * ldw + CAST.r[0] * lcw + WIND.r[0] * lww,
-        OFF_ARM_REST_ROT.y - _swingR.y * osw - DRAW.r[1] * ldw - CAST.r[1] * lcw,
-        OFF_ARM_REST_ROT.z - _swingR.z * osw - DRAW.r[2] * ldw - CAST.r[2] * lcw,
+        OFF_ARM_REST_ROT.x + _swingR.x * osw + oeq * 0.55 + DRAW.r[0] * ldw + CAST.r[0] * lcw + WIND.r[0] * lww
+          + (EAT.r[0] + CHEW.r[0] * chew) * lew,
+        OFF_ARM_REST_ROT.y - _swingR.y * osw - DRAW.r[1] * ldw - CAST.r[1] * lcw
+          - EAT.r[1] * lew,
+        OFF_ARM_REST_ROT.z - _swingR.z * osw - DRAW.r[2] * ldw - CAST.r[2] * lcw
+          - (EAT.r[2] + CHEW.r[2] * chew) * lew,
       );
     }
 

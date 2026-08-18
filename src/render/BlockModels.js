@@ -74,7 +74,7 @@
 
 import * as THREE from 'three';
 import { worldModel } from './ItemModels.js';
-import { applyInstancedSway, applyInstancedBlockLight } from './VoxelMaterial.js';
+import { applyInstancedSway, applyInstancedBlockLight, applyInstancedCrack } from './VoxelMaterial.js';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, R_CROSS, setPlantBox } from '../world/Blocks.js';
 import { crossLightRGB, crossSky } from '../world/Mesher.js';
@@ -330,10 +330,25 @@ export class BlockModels {
    * Draw calls are untouched either way: still one per kind.
    */
   _skin(k, bb) {
-    if (!k.sway && !k.lit) return k.template.material;
-    const clone = (m) => (k.sway
-      ? applyInstancedSway(m.clone(), bb.min.y, bb.max.y)
-      : applyInstancedBlockLight(m.clone()));
+    // Every kind is cloned now, where it used to be only the swaying and the
+    // lit ones. The crack is why: a modelled block that shares its pack's
+    // material cannot be given a shader, and a block you cannot see breaking is
+    // a block you cannot tell you are breaking — which was true of every flower,
+    // every crop, the whole reef, the flora, the workbench and the torch.
+    //
+    // The extra cost is one THREE.Material per kind, not one shader program per
+    // kind: `customProgramCacheKey` on each of these three patches is a constant
+    // string, so every kind with the same combination compiles once and the
+    // rest reuse it.
+    const clone = (m) => {
+      const out = m.clone();
+      if (k.sway) applyInstancedSway(out, bb.min.y, bb.max.y);
+      else if (k.lit) applyInstancedBlockLight(out);
+      // Last, so it wraps whatever the two above installed — and so the world
+      // position it reads is the SWAYED one, or a crack would sit still on a
+      // plant bending away from underneath it.
+      return applyInstancedCrack(out);
+    };
     // A tinted pack model carries two materials, one per draw group. Flowers
     // are single-material WAM art and take the first branch, but a modelled
     // plant out of a split pack would silently lose its sway without this.

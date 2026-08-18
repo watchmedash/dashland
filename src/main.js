@@ -6710,8 +6710,12 @@ class Game {
     // Tempest overrides the weather cycle the way Pyre overrides the day
     // cycle: pinned to storm while you are on it, and the sky you had is
     // handed back when you leave.
+    // ...and Pyre gets the same override pointed the other way: no rain, and
+    // above all no snow, which a whole-planet `chill` clause used to put over
+    // the lava for a quarter of every year.
     this.weather.update(dt, biomeId, altitude, this.seasons.cold,
-      FACE_ROLE[this.player.face] === FACE_TEMPEST);
+      FACE_ROLE[this.player.face] === FACE_TEMPEST,
+      FACE_ROLE[this.player.face] === FACE_PYRE);
     // A funnel, if the sky wants one and the ground will take one. Weather owns
     // the odds and Tornado.js owns everything else — see the head of that file
     // for why, and for the whole design. Six lines here is the entire footprint

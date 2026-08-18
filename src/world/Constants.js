@@ -231,16 +231,29 @@ export const FACE_NAME = [
  *   Pyre      light and quick to tire. The low gravity is how you get over
  *             lava, and the stamina burn is the clock on being there.
  *
+ * `gravity` and `fallHurt` are Tempest's alone, at a fifth each, on the owner's
+ * call. They are the one entry in this table that changes what the WORLD does
+ * rather than what the body does, and the two go together on purpose: a fifth
+ * of the pull means you fall five times slower and land five times softer, so
+ * scaling the damage as well is not a second gift, it is the first one being
+ * consistent. What it buys is the face reading as a place you are half blown
+ * off: a jump goes five times higher for the same push, a step off a cliff is
+ * a long drift, and nothing about the storm has to be survivable to make the
+ * height worth having.
+ *
+ * It composes with the tree rather than replacing it — `skills.fallFree` still
+ * takes its blocks off the drop first, and this scales what is left.
+ *
  * `jump` is a multiplier on HEIGHT, not on the impulse — height goes with the
  * square of take-off speed, so doubling it is a factor of sqrt(2) on the
  * velocity.
  */
 export const FACE_PHYSICS = [
-  { speed: 1, jump: 1, staminaDrain: 1, fog: 1 },
-  { speed: 1 / 1.5, jump: 1, staminaDrain: 1 / 1.5, fog: 2.1 },
-  { speed: 1.25, jump: 1, staminaDrain: 1.4, fog: 1.8 },
-  { speed: 1 / 1.3, jump: 1, staminaDrain: 1.3, fog: 1.6 },
-  { speed: 1, jump: 2, staminaDrain: 1.5, fog: 1.35 },
+  { speed: 1, jump: 1, staminaDrain: 1, fog: 1, gravity: 1, fallHurt: 1 },
+  { speed: 1 / 1.5, jump: 1, staminaDrain: 1 / 1.5, fog: 2.1, gravity: 1, fallHurt: 1 },
+  { speed: 1.25, jump: 1, staminaDrain: 1.4, fog: 1.8, gravity: 1 / 5, fallHurt: 1 / 5 },
+  { speed: 1 / 1.3, jump: 1, staminaDrain: 1.3, fog: 1.6, gravity: 1, fallHurt: 1 },
+  { speed: 1, jump: 2, staminaDrain: 1.5, fog: 1.35, gravity: 1, fallHurt: 1 },
 ];
 
 /** grass tint, foliage tint, water tint */

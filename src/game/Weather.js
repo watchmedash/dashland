@@ -124,6 +124,16 @@ export class Weather {
      * has never known where the player is standing.
      */
     this.tempest = false;
+    /**
+     * The sealed face's own sky, or null out in the world: 'storm' on
+     * Tempest, 'clear' on Pyre.
+     *
+     * One field for two faces because they need exactly the same machinery -
+     * hold the sky you interrupted, pin a state, never run the timer - and
+     * differ only in which state they pin. `tempest` is kept beside it as the
+     * narrower question `wantsStrike` and the lightning roll actually ask.
+     */
+    this._face = null;
     /** The sky the storm face interrupted, so leaving gives it back. */
     this._held = null;
   }
@@ -156,30 +166,51 @@ export class Weather {
    *   overrides the global cycle rather than biasing it. Rime's whiteout and
    *   Pyre's eternal night are the precedent this follows.
    */
-  update(dt, biomeId, altitude, chill = 0, tempest = false) {
-    if (tempest !== this.tempest) {
+  /**
+   * @param {boolean} dry is the player on the cinderlands? The same override
+   *   pointed the other way, and the owner's question is the whole argument:
+   *   *"why is it snowing/raining in pyre face? it shouldn't"*.
+   *
+   *   It could rain there because the weather cycle is global and Pyre was
+   *   never excused from it, and it could SNOW there because `chill > 0.75` is
+   *   a whole-planet clause — so for a quarter of every year the lava face had
+   *   blizzards over it. Neither is a fact about the cinderlands; both are the
+   *   ordinary world's sky drawn on a sealed face that has no season, no sea to
+   *   evaporate and an eternal night of its own.
+   *
+   *   Pinned to `clear` rather than to a new dry state, because clear already
+   *   means precip 0 and is the sky the face reads best under: coverage 0.62 is
+   *   what lets the ash haze and the lava glow be the only things in it.
+   */
+  update(dt, biomeId, altitude, chill = 0, tempest = false, dry = false) {
+    // A sealed face owns its own sky, and there are two of them now. They are
+    // opposites and they share every line below: one pins the storm on, the
+    // other pins all weather off.
+    const face = tempest ? 'storm' : dry ? 'clear' : null;
+    if (face !== this._face) {
       // Held and given back, rather than re-rolled on the way out. A portal is
       // instantaneous, so a player who steps out of the storm should find the
       // weather they left behind, not a fresh draw that happens to be a second
       // storm — or, worse, a clear noon that makes the face they just left look
       // like it was never really raining.
-      if (tempest) { this._held = { state: this.state, timer: this.timer }; this.state = 'storm'; }
+      if (face) { this._held = { state: this.state, timer: this.timer }; this.state = face; }
       else if (this._held) { this.state = this._held.state; this.timer = this._held.timer; this._held = null; }
       // Nothing held: the save was written on the storm face, so there is no
       // sky to give back and the world outside gets a fresh draw rather than
       // three minutes of a storm it never had.
       else this.timer = 0;
+      this._face = face;
       this.tempest = tempest;
     }
     // Permanent means the clock never runs out, not that it is paused: the
     // timer is simply never consulted while the face holds the sky.
-    if (this.tempest) {
-      this.state = 'storm';
-      this.timer = STATES.storm.dur[1];
+    if (this._face) {
+      this.state = this._face;
+      this.timer = STATES[this._face].dur[1];
     }
 
     this.timer -= dt;
-    if (!this.tempest && this.timer <= 0) {
+    if (!this._face && this.timer <= 0) {
       this.state = this._pick();
       const d = STATES[this.state].dur;
       this.timer = d[0] + Math.random() * (d[1] - d[0]);
@@ -209,7 +240,7 @@ export class Weather {
     // clause could not fire, but `chill > 0.75` is a whole-planet clause and
     // would turn the permanent storm into a permanent blizzard for a quarter of
     // every year. A sealed face does not have a season.
-    this.cold = !this.tempest
+    this.cold = !this._face
       && (COLD_BIOMES.has(biomeId) || altitude > snowLine(chill) || chill > 0.75);
     this.type = this.cold ? 'snow' : 'rain';
 

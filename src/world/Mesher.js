@@ -71,20 +71,33 @@ export const GROUP_OPAQUE = 0;
 export const GROUP_CUTOUT = 1;
 export const GROUP_TRANSPARENT = 2;
 export const GROUP_LIQUID = 3;
-export const GROUP_COUNT = 4;
+/**
+ * The divider, and it is its own pass because it is opaque and water is not.
+ *
+ * It rode in GROUP_LIQUID to borrow that material's swell, fresnel and
+ * world-space sampling. It still borrows all three — `materials.portal` is the
+ * same shader patch — but it no longer borrows `transparent`, `depthWrite:
+ * false` and `DoubleSide` with them, which is what made a full-height wall
+ * flicker as you turned. See the note beside `portal` in VoxelMaterial.js.
+ */
+export const GROUP_PORTAL = 4;
+export const GROUP_COUNT = 5;
 
 export const GROUP = new Uint8Array(N_BLOCKS);
 for (let i = 0; i < N_BLOCKS; i++) {
   const b = BLOCKS[i];
   if (b.render === R_LIQUID) GROUP[i] = GROUP_LIQUID;
-  // The divider is drawn by the liquid material and by nothing else, which is
-  // the whole of "make the portal look like glass": it is the one material in
-  // the game with a swell, a sky fresnel and world-space sampling, and a wall
-  // wants all three. It is NOT `render: R_LIQUID` — that is a simulation
-  // property (flow, swimming, drowning, placement, the surface-height mesh
-  // path) and a divider is none of those. Only the group moves, so the block is
-  // still meshed as a full cube and still seals, occludes and blocks motion.
-  else if (b.name === 'portal') GROUP[i] = GROUP_LIQUID;
+  // The divider gets the liquid SHADER and an opaque BODY, which is what this
+  // group is for: it is the one material in the game with a swell, a sky
+  // fresnel and world-space sampling, and a wall wants all three — but a wall
+  // is also solid, and blending one against itself with no depth is what the
+  // owner saw as lines and glitches along it.
+  //
+  // It is NOT `render: R_LIQUID` — that is a simulation property (flow,
+  // swimming, drowning, placement, the surface-height mesh path) and a divider
+  // is none of those. Only the group moves, so the block is still meshed as a
+  // full cube and still seals, occludes and blocks motion.
+  else if (b.name === 'portal') GROUP[i] = GROUP_PORTAL;
   else if (b.render === R_CROSS) GROUP[i] = GROUP_CUTOUT;
   // A ladder is mostly holes. Drawn in the opaque group its alpha was simply
   // ignored, so the gaps between the rungs came out as solid timber.

@@ -1685,14 +1685,24 @@ export class Player {
         this.vel.y += (target - this.vel.y) * Math.min(1, SINK_RATE_LERP * dt);
       }
     } else {
-      this.vel.y -= GRAVITY * dt;
+      // The face's own pull. One everywhere but Tempest, which is a fifth —
+      // see FACE_PHYSICS, which owns the number and the argument.
+      //
+      // Applied to the fall and NOT to the take-off, which is what makes the
+      // storm face feel the way it does: the jump impulse is unchanged, so the
+      // same push against a fifth of the pull carries five times as high and
+      // takes about 2.2 times as long each way.
+      this.vel.y -= GRAVITY * face.gravity * dt;
       if (this.grounded && input.down('Space')) {
         // sqrt of the height multiplier: height goes with the square of the
         // take-off speed. See FACE_PHYSICS.
         this.vel.y = 8.4 * Math.sqrt(face.jump);
         this.grounded = false;
       }
-      this.vel.y = Math.max(this.vel.y, -58);
+      // Terminal velocity scales with the pull as well, or a long drift under
+      // low gravity would quietly accelerate to the same 58 as anywhere else
+      // and arrive at the bottom exactly as fast.
+      this.vel.y = Math.max(this.vel.y, -58 * face.gravity);
     }
 
     // ---- integrate with axis-separated collision ----
@@ -1850,7 +1860,11 @@ export class Player {
       if (drop > free && !this.inWater) {
         // Soaked *before* rounding, so a level of tolerance can turn a 1-point
         // scrape into nothing rather than being rounded straight back up.
-        const raw = (drop - free) * FALL_PER_BLOCK;
+        // `fallHurt` is the face's, and on Tempest it is a fifth. Read at the
+        // moment of LANDING rather than where the fall began, which is the
+        // honest reading of a drop that crossed a divider: what breaks your
+        // legs is the ground you hit.
+        const raw = (drop - free) * FALL_PER_BLOCK * physicsAt(this.cell.x, this.cell.y).fallHurt;
         const dmg = Math.round(this.skills ? this.skills.soak(raw, 'fall') : raw);
         if (dmg > 0) { this.health = Math.max(0, this.health - dmg); this.onHurt?.(dmg); }
       }

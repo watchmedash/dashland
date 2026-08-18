@@ -22,7 +22,7 @@ import {
   IS_SOLID, BLOCKS_MOTION, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N, ID,
 } from './Blocks.js';
-import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID } from './Mesher.js';
+import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID, GROUP_PORTAL, GROUP_COUNT } from './Mesher.js';
 
 const _cell = { cx: 0, cy: 0, ck: 0 };
 
@@ -146,9 +146,12 @@ export class Planet {
     this.cutoutRoot = new THREE.Group();
     this.transRoot = new THREE.Group();
     this.liquidRoot = new THREE.Group();
+    // The dividers. Opaque, so it sits with the solid roots and takes no
+    // renderOrder of its own - see `portal` in VoxelMaterial.js.
+    this.portalRoot = new THREE.Group();
     this.transRoot.renderOrder = 5;
     this.liquidRoot.renderOrder = 6;
-    this.root.add(this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot);
+    this.root.add(this.opaqueRoot, this.cutoutRoot, this.portalRoot, this.transRoot, this.liquidRoot);
     this.meshes = new Map();
     /**
      * Where the viewer is, in world x and z, so a chunk can be drawn on the
@@ -499,10 +502,14 @@ export class Planet {
     // chunk as a whole; see `_seat`.
     const chunkX = cx * CHUNK_T + CHUNK_T * 0.5;
     const chunkZ = cy * CHUNK_T + CHUNK_T * 0.5;
-    const roots = [this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot];
-    const mats = [this.materials.opaque, this.materials.cutout, this.materials.transparent, this.materials.liquid];
+    const roots = [this.opaqueRoot, this.cutoutRoot, this.transRoot, this.liquidRoot, this.portalRoot];
+    const mats = [this.materials.opaque, this.materials.cutout, this.materials.transparent,
+      this.materials.liquid, this.materials.portal];
 
-    for (let gi = 0; gi < 4; gi++) {
+    // GROUP_COUNT rather than a literal 4: the divider's own group was added
+    // after this loop was written, and a hard-coded bound would have silently
+    // dropped every wall on the planet.
+    for (let gi = 0; gi < GROUP_COUNT; gi++) {
       const key = `${id}:${gi}`;
       const payload = groups[gi];
       let mesh = this.meshes.get(key);
@@ -538,7 +545,10 @@ export class Planet {
         mesh.geometry = geo;
       } else {
         mesh = new THREE.Mesh(geo, mats[gi]);
-        mesh.castShadow = gi === GROUP_OPAQUE || gi === GROUP_CUTOUT;
+        // The divider casts now, and should: it is a solid, unbroken, full-
+        // height wall, and a wall that stops the sky without laying a shadow
+        // on the ground beside it was the last thing reading as a curtain.
+        mesh.castShadow = gi === GROUP_OPAQUE || gi === GROUP_CUTOUT || gi === GROUP_PORTAL;
         // A cutout casts the shape of its art, not the shape of its quad.
         if (gi === GROUP_CUTOUT && this.materials.cutoutDepth) {
           mesh.customDepthMaterial = this.materials.cutoutDepth;

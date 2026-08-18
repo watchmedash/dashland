@@ -2801,8 +2801,21 @@ function patch(material, opts = {}) {
            * along the wall, which is both what glass does and the angle at
            * which the thinnest slice of world would otherwise show the most.
            */
-          const float PORTAL_ALPHA = 0.88;
-          gl_FragColor.a = mix(PORTAL_ALPHA, 1.0, fresP);
+          // ...and it is 1.0 now, on the owner's call: "maybe make the portal
+          // opaque and not transparent". The frosted-glass reasoning above is
+          // kept rather than deleted because it is the record of what the eighth
+          // of far side was worth and what it cost — it was measurable (a patch
+          // of wall photographed from inside Rime moved 14 levels of 255 and
+          // gained texture) and it is exactly that texture, on a surface with no
+          // depth of its own, that read as the wall glitching as you moved.
+          //
+          // Written rather than dropped, because the material this branch now
+          // runs in is not transparent at all: the alpha is ignored on the way
+          // to the framebuffer, and the line stays as the statement of intent
+          // for anyone who patches this shader into a blended body again.
+          // (No backticks in here - this whole shader is a template literal.)
+          const float PORTAL_ALPHA = 1.0;
+          gl_FragColor.a = PORTAL_ALPHA;
         } else if (vWave < 2.5) {
           // What makes water read as water, at distance, is not its own colour
           // — it is that you stop seeing through it and start seeing the sky in
@@ -3076,9 +3089,42 @@ export function createVoxelMaterials() {
   liquid.roughness = 0.08;
   liquid.metalness = 0.0;
 
+  /**
+   * The divider, and it is the water's shader in an opaque body.
+   *
+   * It was drawn by `liquid` itself, which is where the look comes from — the
+   * swell, the sky fresnel and the world-space sampling are all inside the
+   * `opts.liquid` branch, and a wall wants all three. What it also inherited
+   * was the three properties that make water *water*: `transparent`,
+   * `depthWrite: false`, and `DoubleSide`. On a lake those are right. On a
+   * two-cell-thick wall standing the full height of the world they are the
+   * owner's report — *"if I turn around or move the portal will have
+   * line/glitches"* — because a double-sided surface that writes no depth is
+   * blended in whatever order the draw list happens to land in, so the far side
+   * of the wall paints over the near side and back again as you turn.
+   *
+   * So: same patch, same `liquid: true`, and the body of an ordinary solid.
+   * Depth is written, back faces are dropped, nothing is sorted. Combined with
+   * `PORTAL_ALPHA` at 1.0 the wall is now genuinely opaque, which is what was
+   * asked for, and being opaque is also what lets `SEALS_FACES` take it back —
+   * see Blocks.js, where the hole it used to cut in the terrain behind it is
+   * closed by the block simply telling the truth about itself.
+   *
+   * `roughness` stays at the water's 0.08. The fresnel and the glint are the
+   * half of the look that survives being opaque, and they are what keeps a
+   * divider from reading as a painted white wall.
+   */
+  const portal = patch(base(), { liquid: true, noCrack: true });
+  portal.name = 'voxel-portal';
+  portal.transparent = false;
+  portal.depthWrite = true;
+  portal.side = THREE.FrontSide;
+  portal.roughness = 0.08;
+  portal.metalness = 0.0;
+
   // The shadow pass needs its own cutout discard - see createCutoutDepthMaterial.
   const cutoutDepth = createCutoutDepthMaterial(cutout.alphaTest);
-  return { opaque, cutout, transparent, liquid, cutoutDepth, uniforms: voxelUniforms };
+  return { opaque, cutout, transparent, liquid, portal, cutoutDepth, uniforms: voxelUniforms };
 }
 
 /**
@@ -3474,6 +3520,115 @@ export function applyInstancedBlockLight(material) {
       `);
   };
   material.customProgramCacheKey = () => 'ilight|' + prevKey.call(material);
+  material.needsUpdate = true;
+  return material;
+}
+
+/**
+ * The mining crack, on a block that is drawn as a MODEL rather than as voxels.
+ *
+ * The terrain gets its crack inside the voxel material, which every meshed
+ * quad goes through. Two whole classes of block never touch that shader:
+ *
+ *   - the modelled crosses — every flower, the sixteen land flora, the reef,
+ *     the six crops, and now the pumpkin — which the mesher deliberately emits
+ *     no geometry for, so `BlockModels` can instance a model in their place;
+ *   - the modelled solids, which is the workbench today.
+ *
+ * Both were mined in total silence: full swing, full timer, the block breaks at
+ * the end, and nothing whatever happens in between. The owner's report is
+ * exactly that — *"the models that are not blocks breaking/cracking animation
+ * is not really showing on the models themselves"* — and the feedback matters
+ * more on these than on a stone block, because a flower breaks in one hit and a
+ * workbench does not, and there was no way to tell which you were doing.
+ *
+ * Driven by the SAME three uniforms the terrain reads, so there is one source
+ * of truth for what is being mined and how far along it is: `uBreakPos`,
+ * `uBreakStage` and the `uCrack` texture array. Nothing new is pushed from the
+ * CPU and nothing has to be kept in step.
+ *
+ * ### Why the uv is triplanar and not the model's own
+ *
+ * A crop's uv unwraps its leaves; a workbench's unwraps its planks. Stamping a
+ * crack star into either lands it wherever the unwrap happens to put it, in
+ * pieces. The terrain's answer is a per-cell window in TEXTURE space, which
+ * these have no equivalent of, so the crack is projected in WORLD space
+ * instead: the fragment's position within its own cell, on whichever axis its
+ * normal points along most. That gives one centred star per face of the thing,
+ * from any angle, and it costs three fract()s and a compare.
+ *
+ * ### The radius
+ *
+ * 1.9 is the terrain's own, and it is deliberately larger than a cell: a
+ * modelled block is drawn from the cell's centre and a firebloom stands 0.9 of
+ * a cell tall, so a tighter test would crack the bottom of a plant and leave
+ * its head clean.
+ */
+export function applyInstancedCrack(material) {
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prevCompile.call(material, shader, renderer);
+    shader.uniforms.uCrack = voxelUniforms.uCrack;
+    shader.uniforms.uBreakPos = voxelUniforms.uBreakPos;
+    shader.uniforms.uBreakStage = voxelUniforms.uBreakStage;
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        varying vec3 vCrackWorld;
+        varying vec3 vCrackNormal;
+      `)
+      // `#include <worldpos_vertex>` only emits anything when the material
+      // already wanted a world position, so the position is taken here from the
+      // model matrices directly - and through `instanceMatrix` under the same
+      // guard the sway and the block light use, because a non-instanced draw of
+      // this material has no such attribute.
+      .replace('#include <project_vertex>', /* glsl */`
+        #ifdef USE_INSTANCING
+        vCrackWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+        vCrackNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * objectNormal);
+        #else
+        vCrackWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vCrackNormal = normalize(mat3(modelMatrix) * objectNormal);
+        #endif
+        #include <project_vertex>
+      `);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        uniform sampler2DArray uCrack;
+        uniform vec3 uBreakPos;
+        uniform float uBreakStage;
+        varying vec3 vCrackWorld;
+        varying vec3 vCrackNormal;
+        const float CRACK_MAP_W = ${MAP_W}.0;
+      `)
+      // Dead last, after the fog and the tone map, exactly as the terrain's own
+      // crack runs after everything else: a crack is damage drawn ON the world,
+      // not a material property of it, and lighting it would make the deepest
+      // stage of the break the brightest thing on a dark plant.
+      .replace('#include <dithering_fragment>', /* glsl */`
+        #include <dithering_fragment>
+        if (uBreakStage >= 0.0) {
+          // The map wraps and the models do not, so the block being mined may
+          // be a world away in coordinates and a step away on screen.
+          vec3 bp = uBreakPos;
+          vec2 bd = bp.xz - vCrackWorld.xz;
+          bp.xz -= CRACK_MAP_W * floor(bd / CRACK_MAP_W + 0.5);
+          if (distance(vCrackWorld, bp) < 1.9) {
+            vec3 an = abs(vCrackNormal);
+            vec2 cuv = an.y > an.x && an.y > an.z ? vCrackWorld.xz
+                     : an.x > an.z ? vCrackWorld.zy
+                     : vCrackWorld.xy;
+            vec4 cr = texture(uCrack, vec3(fract(cuv), uBreakStage));
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, cr.rgb, cr.a * 0.92);
+          }
+        }
+      `);
+  };
+  material.customProgramCacheKey = () => 'icrack|' + prevKey.call(material);
   material.needsUpdate = true;
   return material;
 }

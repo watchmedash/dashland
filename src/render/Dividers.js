@@ -167,15 +167,17 @@ const FRAG = /* glsl */`
     // worth: a bright emitter carries further through haze than a lit surface
     // does, which is why a city is visible on a night the hills under it are
     // not, and at 1.0 this term deletes the object it is correcting.
-    // Whichever thins it faster, the weather or its own falloff. uFogDensity is
-    // *zero* in clear weather - the world has no aerial haze at all on a clear
-    // day, the term above is then the identity, and the curtain went straight
-    // back to being a wall. It cannot be left depending on the sky being dirty.
     //
-    // BASE_HAZE is the honest floor: exp(-(0.0051*d)^2) is 0.47 at the near edge
-    // of the fade, 0.20 at 250, 0.10 at 300 and 0.016 at 400, which is where it
-    // stops being something you can see. A max rather than a sum, so thick
-    // weather still takes it further down and clear weather does not double up.
+    // BASE_HAZE is the floor under that, and it is not optional: uFogDensity is
+    // *zero* in clear weather - the world has no aerial haze at all on a clear
+    // day - so a curtain that thinned only with the weather went straight back
+    // to being a wall on exactly the days you can see furthest. Measured at 250
+    // units on a clear night, 129 mean against 9.6 in snow. exp(-(0.0051*d)^2)
+    // is 0.47 at the near edge of the fade, 0.20 at 250, 0.10 at 300 and 0.016
+    // at 400, which is where it stops being something you can see.
+    //
+    // A max of the two rather than a sum, so thick weather still takes it
+    // further down and clear weather does not double up.
     float ad = max(uFogDensity * AERIAL_GAIN * AERIAL_PUNCH, BASE_HAZE) * dist;
     float atten = exp(-ad * ad);
 

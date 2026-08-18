@@ -86,7 +86,10 @@ for (let i = 0; i < N_BLOCKS; i++) {
  * question by different routes and must not answer it differently: a dropped
  * item walks its own column (`Drops._probeSky`) and a planted flower reads the
  * mesher's baked skylight (`BlockModels.sync`). They are the same object in the
- * player's eyes and used to be one number apart.
+ * player's eyes, so they share the floor rather than each writing it down.
+ *
+ * `Mobs.js` and `Particles.js` still keep their own copies of the number. They
+ * are not wrong, only unshared, and moving them is a separate edit.
  *
  * 0.55 because a thing indoors should read as indoors without becoming
  * invisible - the terrain around it keeps its own baked light, and the two have

@@ -800,15 +800,15 @@ export class UI {
      *
      * Hidden rather than blanked, so nothing paints and nothing costs.
      */
-    if (isSealed(player.face)) {
-      el.classList.add('hidden');
-      return;
-    }
-    if (this.game.settings?.minimap !== false) el.classList.remove('hidden');
+    const sealed = isSealed(player.face);
     const col = colIndex(c.x, c.y);
     // colHeight is filled in one go before any voxel arrives, so a zero here
     // means the world has not handed its tables over yet — not sea level.
-    const on = this.game.settings.minimap !== false && planet.colHeight[col] > 0;
+    // ...and never on a sealed face. Folded into `on` rather than returned
+    // early above it, which is what the first version did: the early return
+    // skipped the `no-map` toggle below, so the map went away and the vitals
+    // stayed where the map had been, sitting under 160px of nothing.
+    const on = !sealed && this.game.settings.minimap !== false && planet.colHeight[col] > 0;
     el.classList.toggle('hidden', !on);
     // The vitals sit under the map when there is one and in the corner when
     // there is not; #hud carries the flag because the map is display:none and

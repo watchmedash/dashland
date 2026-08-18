@@ -34,6 +34,7 @@
 
 import * as THREE from 'three';
 import { W, D, F, SEALED, faceOrigin, NORTH, SOUTH, WEST } from '../world/Grid.js';
+import { voxelUniforms } from './VoxelMaterial.js';
 
 /**
  * Where the curtain is invisible, and where it is at full strength.
@@ -48,6 +49,21 @@ import { W, D, F, SEALED, faceOrigin, NORTH, SOUTH, WEST } from '../world/Grid.j
  */
 export const FADE_NEAR = 170;
 export const FADE_FAR = 280;
+
+/**
+ * How loud the curtain is, and how much of that it keeps in daylight.
+ *
+ * BRIGHTNESS was 1.15, which put the sheet at very nearly its own full colour
+ * wherever it was drawn - a saturated violet wall standing over the whole
+ * horizon and, once UnrealBloom had it, washing out the frame it was drawn
+ * over. The effect's job is to say "a boundary is that way", and that is a line
+ * on the horizon rather than a light source.
+ *
+ * DAY_GAIN is the daylight share; at night the curtain runs at 1.0. See the
+ * uNight term in FRAG for why the two differ.
+ */
+export const BRIGHTNESS = 0.55;
+export const DAY_GAIN = 0.55;
 
 /** How many wrap copies of each run, per axis. Three: -W, 0, +W. */
 const COPIES = 3;
@@ -64,37 +80,68 @@ const VERT = /* glsl */`
 `;
 
 /**
- * The look: a violet sheet standing from the ground into the sky, brightest at
- * its base and along a few slow vertical streaks.
+ * The look: a violet line lying along the skyline, thinning out a little way
+ * above it, and thinning again with every unit of air or water in front of it.
  *
  * It is deliberately NOT a picture of the swirl. The tile's spiral is a thing
  * you read at arm's length; at four hundred units a run of them is under a
  * pixel per block, so any detail in here is noise. What survives at that range
  * is colour, a vertical gradient and a soft edge, and that is all this draws.
+ *
+ * It is also deliberately not a shaft of light. Three terms used to make it
+ * one - a body reaching to the top of the world, hard vertical streaks 14
+ * blocks wide, and no atmosphere at all - and the owner read the result as sun
+ * rays coming through the terrain. Each is answered where it is written below.
  */
 const FRAG = /* glsl */`
   uniform float uTime;
   uniform vec3 uCam;
   uniform float uNear;
   uniform float uFar;
+  uniform float uNight;
+  uniform float uFogDensity;
+  uniform float uUnderwater;
   varying vec2 vUvL;
   varying vec3 vWorldPos;
 
+  // VoxelMaterial's own numbers, so the curtain thins on the same curve the
+  // terrain does rather than on a second one that has to be kept in step:
+  // AERIAL_GAIN from the aerial-perspective term, and FOG_FRAG's per-channel
+  // water extinction.
+  const float AERIAL_GAIN = 7.0;
+  const float BRIGHTNESS = ${BRIGHTNESS.toFixed(3)};
+  const float DAY_GAIN = ${DAY_GAIN.toFixed(3)};
+  // The fraction of the world's haze density the curtain is worth. See the
+  // atmosphere block in main().
+  const float AERIAL_PUNCH = 0.35;
+  const vec3 WATER_EXT = vec3(0.115, 0.052, 0.035);
+
   void main() {
-    // Up the sheet. Strong from the ground, thinning out toward the top so the
-    // curtain does not end on a hard line at the top of the world. It has to
-    // reach zero and not merely go dim: additive blending makes a 0.12 floor a
-    // visible straight edge against the sky, which is the one thing that would
-    // give away that this is a quad and not a shaft of light.
+    // Up the sheet. Strong at the skyline and gone a little above it.
+    //
+    // The quad is the full world height (D = 88) and up = 0 is bedrock, so sea
+    // level sits at 0.375 and a tall hill at ~0.6. The old ramp only started
+    // fading at 0.22 and did not reach zero until the top of the world, which
+    // left better than half strength standing over the skyline: that is what
+    // made this read as a wall of light rather than as a horizon. It has to
+    // reach zero and not merely go dim - additive blending makes a floor a
+    // visible straight edge against the sky.
     float up = vUvL.y;
-    float body = mix(1.0, 0.0, smoothstep(0.22, 1.0, up));
+    float body = 1.0 - smoothstep(0.30, 0.72, up);
 
     // Slow vertical streaks, so the curtain moves without anything having to be
     // rebuilt. Two frequencies drifting at different rates, which is enough to
     // stop the eye locking onto either.
-    float s1 = sin(vUvL.x * 190.0 + uTime * 0.35);
-    float s2 = sin(vUvL.x * 61.0 - uTime * 0.21);
-    float streak = 0.72 + 0.28 * (s1 * 0.45 + s2 * 0.55);
+    //
+    // Both are much wider and much shallower than they were. At 190 cycles
+    // across a 416-block run a streak is 14 blocks wide, which at 350 units is
+    // a ~20px bar: a picket fence of bright vertical lines standing off the
+    // horizon, and the whole of the owner's "sunrays". What the effect wants
+    // from this term is that the sheet not be flat, which 12% of variation on a
+    // slow frequency gives it.
+    float s1 = sin(vUvL.x * 61.0 + uTime * 0.35);
+    float s2 = sin(vUvL.x * 23.0 - uTime * 0.21);
+    float streak = 0.88 + 0.12 * (s1 * 0.45 + s2 * 0.55);
 
     // Distance fade. Under uNear the real portal blocks are streamed in and
     // drawing this as well would fight them.
@@ -102,8 +149,42 @@ const FRAG = /* glsl */`
     float near = smoothstep(uNear, uFar, dist);
     if (near <= 0.001) discard;
 
+    // Atmosphere, which this used to ignore entirely.
+    //
+    // Terrain 350 units out is fogged to within 0.004% of the sky (see
+    // AERIAL_GAIN: f = 1 - exp(-(density * gain * dist)^2), which is 0.99996 at
+    // clear-weather density) while the curtain came through at full strength.
+    // That is the whole of "it is passing through blocks": the light was not
+    // in front of the geometry, it was the only thing in the frame the distance
+    // had not taken anything away from.
+    //
+    // This is a transmittance rather than the mix toward haze the opaque
+    // surfaces take, because an additive source adds what survives the trip and
+    // nothing else - the in-scattered light is already in the sky drawn behind
+    // it. AERIAL_PUNCH is the fraction of the world's density the curtain is
+    // worth: a bright emitter carries further through haze than a lit surface
+    // does, which is why a city is visible on a night the hills under it are
+    // not, and at 1.0 this term deletes the object it is correcting.
+    float ad = uFogDensity * AERIAL_GAIN * AERIAL_PUNCH * dist;
+    float atten = exp(-ad * ad);
+
+    // Water absorbs, and it absorbs far harder than air. Full extinction, not a
+    // fraction of it: FOG_FRAG's green channel is 0.052 per unit, so the near
+    // edge of the fade at 170 units is exp(-8.8) and the curtain is simply gone
+    // from a dive. It should be. Nothing else in this game is visible through
+    // 170 units of water either, and the curtain being the one thing that was
+    // is the report this is answering.
+    if (uUnderwater > 0.5) atten *= exp(-WATER_EXT.g * dist);
+
+    // Fainter by day, full at night. Daylight is when the curtain is least use
+    // as a landmark - there is a sun, a sky gradient and a lit horizon to steer
+    // by - and when it costs the most, because it is competing with a bright
+    // sky and has to be loud to be seen at all. On Pyre, which is permanently
+    // dark and has no minimap, uNight leaves it at full strength.
+    float lit = mix(DAY_GAIN, 1.0, uNight);
+
     vec3 col = mix(vec3(0.52, 0.04, 0.98), vec3(0.92, 0.26, 1.0), up * 0.6 + 0.2);
-    gl_FragColor = vec4(col * body * streak * near * 1.15, 1.0);
+    gl_FragColor = vec4(col * body * streak * near * atten * lit * BRIGHTNESS, 1.0);
   }
 `;
 
@@ -122,11 +203,19 @@ export class Dividers {
     this.scene = scene;
     const geo = new THREE.PlaneGeometry(1, 1);
     this.material = new THREE.ShaderMaterial({
+      // The last three are the *same uniform objects* the voxel material and
+      // the sky write, taken by reference rather than copied: the atmosphere
+      // the curtain is now attenuated by has to be the atmosphere the terrain
+      // beside it is drawn in, and a second copy updated from a second place is
+      // how those two drift apart. Nothing outside this file has to push them.
       uniforms: {
         uTime: { value: 0 },
         uCam: { value: new THREE.Vector3() },
         uNear: { value: FADE_NEAR },
         uFar: { value: FADE_FAR },
+        uNight: voxelUniforms.uNight,
+        uFogDensity: voxelUniforms.uFogDensity,
+        uUnderwater: voxelUniforms.uUnderwater,
       },
       vertexShader: VERT,
       fragmentShader: FRAG,

@@ -2937,20 +2937,39 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 .ctl-group { break-inside: avoid; padding-bottom: 18px; }
 .ctl-group .ctl-head { margin-top: 0; margin-bottom: 4px; }
 
-/* Two columns inside the card, both left-aligned: caps down one, what they do
+/* Two columns inside the group, both left-aligned: caps down one, what they do
    down the other. The caps were flush left and the labels flush right with the
    width of the monitor in between, which is two lists sharing a line rather
-   than a row you can read. 112px is what W A S D and Shift+Click need. */
-.controls-grid { display: grid; grid-template-columns: 1fr; }
-.controls-grid > div {
-  display: grid; grid-template-columns: 112px minmax(0, 1fr);
-  align-items: center; gap: 0 12px;
+   than a row you can read.
+
+   The caps column is measured, not declared. It was a flat 112px - what W A S D
+   and Shift+Click need - charged to every group whatever was in it, so the six
+   rows that say nothing but "RMB" held a 112px column open and paid for it out
+   of the labels beside them, which are the longest labels on the screen. It is
+   `max-content` now, so each group's column is as wide as the widest cap set in
+   THAT group and no wider, and the width it gives back goes to the words.
+
+   The measuring is why the rows are `display: contents`: a track can only line
+   up items that are in the same grid, and every row used to be a grid of its
+   own, which is a per-row measurement and therefore a ragged one. The rows
+   dissolve into the group's grid and the two spans of each are the items. The
+   rule under a row moves onto the spans with them, so the air between the two
+   columns is PADDING on the first one rather than a grid gap: a gap is a hole
+   in the middle of the rule, and a dotted line with a 14px bite out of it reads
+   as two rules rather than one row. */
+.controls-grid {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+}
+.controls-grid > div > span:first-child { padding-right: 14px; }
+.controls-grid > div { display: contents; }
+.controls-grid > div > span {
   padding: 6px 0; border-radius: 0;
   font-size: var(--fs-md); color: var(--ink-soft);
   background: none;
   border-bottom: 1px dotted rgba(96, 66, 28, .35);
 }
-.controls-grid > div:last-child { border-bottom: none; }
+.controls-grid > div:last-child > span { border-bottom: none; }
 /* The caps of one row, held together so the label beside them starts at the
    same place on every row. The join words sit between them, faint. */
 .controls-grid .keys {
@@ -3105,6 +3124,21 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    are given a wide column rather than the whole monitor. */
 #screen > .panel { --sheet: 1240px; }
 #chargen > .chargen-card { --sheet: 1180px; }
+/* THE RULE HAS TO SIT OVER THE THING IT RULES.
+   Two screens are made of a fixed number of pieces rather than of a list that
+   grows: the growth tree is three trunks and no fourth is coming, and the
+   controls are four groups of keys on a keyboard. Neither can spend 1680px, so
+   both were drawn as a block of type in the top left corner of a sheet whose
+   header rule ran on for another 600px past the end of it. That mismatch is
+   most of what "not laid out" was: a title underlined across the whole monitor,
+   and its screen huddled under one end of the underline.
+
+   So the sheet is cut to the width the screen actually has content for, and
+   everything on it - rule, heading, body - is that one width and centred
+   together. Nothing inside either screen is capped a second time; the sheet is
+   the only measure, which is what stops the two disagreeing again. */
+#skills > .panel { --sheet: 1080px; }
+#controls > .panel { --sheet: 1400px; }
 /* ...and inside that sheet the picker is a column exactly as wide as the window
    the figure stands in. The stage was already capped against the height and the
    furniture under it was not, so on a monitor the difficulty control was a
@@ -3163,16 +3197,22 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 /* The header goes with it, or the rule under "Continue" runs the width of the
    monitor while the thing it is the header of is a column down the middle. */
 #slots > .panel > header { width: 100%; max-width: 1180px; margin-left: auto; margin-right: auto; }
+/* Both of these were tried centred in the leftover height as well, and it is
+   worse: a header is a strong mark at the top of the sheet, and a screen that
+   starts 350px under its own header reads as two things on one page rather than
+   one thing with a title. Spare height at the FOOT of a short screen is what
+   every other screen in this file does with it. Left here so the next pass does
+   not spend an afternoon rediscovering it. */
 /* Three trunks side by side. 248 is a branch name, its segments and its price
    on one line with the blurb under it, and three of them fit a phone held
    sideways, which is what turns the whole tree into one look instead of two
    screens of scrolling. */
 .skill-tree { grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); }
-/* Capped, because there are three branches and no fourth is coming. Left to
-   fill a 1680px sheet each one is 560px wide and its price ends up half a
-   screen from the segments it is the price of. The head is capped with it, so
-   the balance stays over the tree it is spent on. */
-.skill-tree, .xp-block { max-width: 1080px; }
+/* The cap that used to be here - 1080px on the tree and on the head, because
+   three 560px branches put a price half a screen from the segments it prices -
+   is the SHEET's now; see `#skills > .panel` above. Capping the block and not
+   the sheet is what left the rule over the title running 600px past the end of
+   the tree it was ruling. */
 .settings, .ach-list, .slot-list, .skill-tree {
   display: grid; align-content: start; align-items: start;
 }
@@ -3355,8 +3395,10 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 @media (max-width: 560px) {
   /* Two columns of key-and-meaning need about 250px each before the cap and
      the label start colliding. Below that they are one column, which is
-     longer and readable rather than shorter and not. */
-  .controls-grid { grid-template-columns: 1fr; }
+     longer and readable rather than shorter and not. The rule belongs under
+     the pair and not between its halves, so the caps drop theirs. */
+  .controls-grid { grid-template-columns: minmax(0, 1fr); }
+  .controls-grid > div > span:first-child { border-bottom: none; padding-bottom: 0; }
 
   /* An achievement row does the same. At 393px the sheet is 365px wide inside
      its padding and a 190px meter leaves 175px for the name and its line, so

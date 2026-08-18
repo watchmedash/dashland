@@ -1,4 +1,4 @@
-// Mojazer — a voxel tiny planet.
+// Mojazer — a voxel world of nine faces.
 
 import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
@@ -2577,7 +2577,7 @@ class Game {
     Save.repairIndex().then((n) => {
       if (n > 0) {
         this.ui.showMenu();
-        this.ui.toast(n === 1 ? 'Recovered 1 planet the menu had lost'
+        this.ui.toast(n === 1 ? 'Recovered 1 world the menu had lost'
           : `Recovered ${n} planets the menu had lost`, 0, 5200);
       }
     }).catch((err) => console.error(err));
@@ -2628,7 +2628,7 @@ class Game {
     document.getElementById('loader')?.remove();
     this.state = 'menu';
     this.ui.showMenu();
-    this.ui.toast('That planet could not be opened. Nothing has been changed', 0, 5200);
+    this.ui.toast('That world could not be opened. Nothing has been changed', 0, 5200);
   }
 
   /** What a mob's blow is multiplied by before it reaches the player. */
@@ -3010,7 +3010,7 @@ class Game {
     this._setDeathRule(opts.deathRule);
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
-    this.ui.progress(0, 'Igniting the core');
+    this.ui.progress(0, 'Waking the void');
     this._resetWorld();
     // A world you can ask for by name. `opts.seed` is honoured when it is a
     // number and a fresh draw otherwise, so nothing about starting a game from
@@ -3113,7 +3113,7 @@ class Game {
     } catch (err) {
       console.error(err);
       this.ui.showMenu();
-      this.ui.toast('Could not read your planet. Nothing is lost, try again', 0, 5200);
+      this.ui.toast('Could not read your world. Nothing is lost, try again', 0, 5200);
       return;
     }
     if (!data) {
@@ -3123,7 +3123,7 @@ class Game {
       // letting a planet appear to vanish between launches.
       const had = !!Save.slot(slot);
       this.ui.showMenu();
-      if (had) this.ui.toast('That planet is not in this browser any more', 0, 5200);
+      if (had) this.ui.toast('That world is not in this browser any more', 0, 5200);
       return;
     }
     const refusal = this._saveRefusal(data);
@@ -3135,7 +3135,7 @@ class Game {
     this.saveSlot = slot | 0;
     this.ui.hideMenu();
     document.body.appendChild(this._makeLoaderShell());
-    this.ui.progress(0, 'Recalling your planet');
+    this.ui.progress(0, 'Recalling your world');
     this._resetWorld();
     this.seed = data.seed;
     this.whirlpools.reset(this.seed);
@@ -3220,8 +3220,8 @@ class Game {
    *   looking for the wrong fix.
    */
   _saveRefusal(data) {
-    const OLD = 'That planet was made by a different version and cannot be opened';
-    const BAD = 'That planet\'s file is damaged and cannot be opened';
+    const OLD = 'That world was made by a different version and cannot be opened';
+    const BAD = 'That world\'s file is damaged and cannot be opened';
     if (!data?.blocks) return BAD;
     if (data.regions) {
       // A partial save. Its block payload is one region per id and everything
@@ -3304,12 +3304,24 @@ class Game {
     if (el) return el;
     el = document.createElement('div');
     el.id = 'loader';
+    // The same mark and the same words as `index.html`. This is a SECOND copy of
+    // the loader and it went stale: it still built the old spinning globe and
+    // still said "A tiny planet, entirely yours" long after the planet stopped
+    // existing and the game stopped being called that. It was written off as
+    // unreachable - it is not. It is reached on every New Game and every
+    // Continue, because the loader is taken out of the document once a world is
+    // up, so the second visit rebuilds it from here.
     el.innerHTML = `<div class="loader-inner">
-      <div class="planet-mark"><span></span><span></span><span></span></div>
+      <div class="world-mark" aria-hidden="true">
+        <i></i><i></i><i></i>
+        <i></i><i></i><i></i>
+        <i></i><i></i><i></i>
+        <b></b>
+      </div>
       <h1>MOJA<em>ZER</em></h1>
-      <p class="tagline">A tiny planet, entirely yours.</p>
+      <p class="tagline">A world, entirely yours.</p>
       <div class="bar"><div class="bar-fill" id="load-fill"></div></div>
-      <p class="status" id="load-status">Working</p></div>`;
+      <p class="status" id="load-status">Waking the void</p></div>`;
     this.ui.el.loader = el;
     this.ui.el.loadFill = el.querySelector('#load-fill');
     this.ui.el.loadStatus = el.querySelector('#load-status');

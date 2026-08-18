@@ -711,6 +711,8 @@ const QS_CAVE_CLEAR = SINK_DEPTH_SNOW + 2.2;
  * times. These were `[0, 0, 0]` unit directions on the cube; a column's sample
  * point is now just its own map coordinates.
  */
+/** Scratch for the tree stamp's divider test. */
+const _treeXY = { x: 0, y: 0 };
 const _fillXY = { x: 0, y: 0 };
 /** Aquifers and springs get their own, because they run inside the others. */
 const _aqXY = { x: 0, y: 0 };
@@ -4893,6 +4895,17 @@ export class WorldGen {
     const set = (c, k, id, force = false) => {
       if (k < 0 || k >= D) return;
       if (rid >= 0 && regionOfCol(c) !== rid) return;
+      // Nothing grows through a divider. A crown reaches five columns and the
+      // wall is one thick, so a tree near the edge of a sealed face threw its
+      // leaves clean over it and they came out on the next face - "leaves of
+      // trees are sticking out from verdant to other face".
+      //
+      // The `cur === ID.air` test below does not catch it: a portal column is
+      // not air, so the leaf inside the wall is correctly refused, and the ones
+      // BEYOND it land on the far side's air and are kept. Refusing the whole
+      // column is what stops a crown crossing rather than tunnelling.
+      const cp = colXY(c, _treeXY);
+      if (isWall(cp.x, cp.y)) return;
       const cur = blocks[cellAt(c, k)];
       if (cur === ID.air || force) blocks[cellAt(c, k)] = id;
     };

@@ -676,10 +676,25 @@ const CAST_RATE = 6;
  * front of the eye, so the offset is in toward the centre line, up, and a touch
  * nearer — `p.z` is deliberately the smallest of the three for the reason set
  * out on `DRAW`: coming at the camera is how a gesture turns into a hand
- * looming over the thing it is meant to be showing. At these values the fist
- * lands near view space (0.36, -0.26, -0.62), which is inside the frame and
- * off to the right of the crosshair rather than over it, so the food is held
- * where you can see it and the world is not.
+ * looming over the thing it is meant to be showing.
+ *
+ * Measured through the real chain in the running game, right fist, chew phase
+ * zero:
+ *
+ *     fist in view space    fist in NDC
+ *     rest    (0.560, -0.520, -0.720)   (0.694, -1.031)
+ *     eating  (0.359, -0.154, -0.577)   (0.555, -0.381)
+ *
+ * so the fist rises two thirds of the frame and comes a fifth of the way in
+ * from the right edge, landing just below and right of the crosshair. The food
+ * is therefore in shot and the middle of the screen is not covered by it. The
+ * depth costs 0.14 units, which draws the item about a quarter larger — enough
+ * that the meal reads, and well short of the 38% that turned the bow draw into
+ * a hand.
+ *
+ * The offhand mirrors to (-0.555, -0.382) and the right fist does not move by a
+ * ten-thousandth while the left eats, which is what the two shares of one clock
+ * below are for.
  *
  * `r` turns the item's head in toward the mouth: pitch raises the far end of
  * the limb, and the yaw and roll are what tip an apple's top toward the middle
@@ -688,7 +703,7 @@ const CAST_RATE = 6;
  * mirrors on.
  */
 const EAT = {
-  p: [-0.20, 0.26, 0.10],
+  p: [-0.31, 0.26, 0.06],
   r: [0.36, -0.30, 0.34],
 };
 

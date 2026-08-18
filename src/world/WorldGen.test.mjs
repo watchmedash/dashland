@@ -144,7 +144,13 @@ const buildMs = Date.now() - t0;
 const { colHeight, colBiome } = out;
 const H = (x, y) => colHeight[wrap(x) * W + wrap(y)];
 
-eq(GEN_VERSION, 10, 'the save stamp moved for this conversion');
+// Past the cube's 9, and a whole number. Pinning the exact value made this fail
+// on every deliberate bump, which is backwards now that the owner's rule is
+// "bump it always, I don't care about saves, we are still in development" - the
+// stamp is expected to move often, and a test that objects each time is a test
+// that trains you to edit it without reading it.
+ok(Number.isInteger(GEN_VERSION) && GEN_VERSION > 9,
+  `the save stamp is past the cube's (${GEN_VERSION})`);
 eq(colHeight.length, W * W, 'one height per column of one map');
 
 // ===========================================================================

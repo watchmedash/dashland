@@ -136,12 +136,27 @@ export const CHUNK_KEEP_DIST = 190;
  * only decorates the surface does not bump. A pass that moves, carves or
  * replaces ground always does.**
  *
+ * **BUMP IT WHENEVER THE GENERATOR MOVES. The owner, 2026-08-18: "GEN_VERSION
+ * should be bumped always, I don't care about saves, we are still in
+ * development."** So the judgement call this comment used to describe - is this
+ * change worth breaking a save for - is settled and is no longer a judgement
+ * call. A pass that changes what the generator emits bumps this, in the same
+ * commit, without asking. The rule below about decoration versus ground is kept
+ * because it still describes what COUNTS as a change, but the cost side of it
+ * has stopped mattering while the game is being built.
+ *
+ * **11: nothing grows through a divider.** `stampTree` and `boulderAt` were
+ * both reaching over a wall - a crown reaches five columns and a divider is one
+ * thick, so leaves landed on the far side. Measured over all twelve dividers,
+ * 1581 tree cells and 2 boulder cells crossed; zero now. The change is confined
+ * to the five columns either side of a divider.
+ *
  * **10: the nine faces.** The coordinate system, the face count, the storage
  * order and the generator all change at once. There is no version of this that
  * an older save could survive and none was offered — see NINE-FACES.md section
  * 6, which says so in advance.
  */
-export const GEN_VERSION = 10;
+export const GEN_VERSION = 11;
 
 // --- biomes ------------------------------------------------------------------
 

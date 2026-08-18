@@ -1091,8 +1091,11 @@ float tintMask = 1.0;
  * owner: "add fog in all faces like real fog so it's hard to see from
  * distance".
  *
- * Sized against CHUNK_LOAD_DIST (150), which is where meshes end, so the air
- * has to be doing most of the hiding before the world runs out:
+ * Sized against CHUNK_LOAD_DIST, which is where meshes end, so the air has to
+ * be doing most of the hiding before the world runs out. It was tuned when that
+ * was 150 and is UNCHANGED now it is 192 - the extra distance is what took the
+ * edge from 84.5% hidden to 95.3%, which is the whole reason 192 was the number
+ * chosen. See the table over CHUNK_LOAD_DIST in world/Constants.js.
  *
  *            60 cells   100 cells   150 cells   190 cells
  *   3.6          8%        20%         39%         55%

@@ -1530,9 +1530,14 @@ const DEFAULT_SETTINGS = {
  * `buriedDist` is a second horizon, for chunks that are under the ground rather
  * than on it, and unlike the one above it costs no picture at all. See
  * `_streamChunks` and `Planet.chunkBuried` for what it is and how far it was
- * measured to be safe; the short version is that the surface horizon is 150
- * units because that is how far you can see across a planet, and underground
- * you cannot see 22.
+ * measured to be safe; the short version is that the surface horizon is what it
+ * is because that is how far you can see across the map, and underground you
+ * cannot see 22.
+ *
+ * Deliberately NOT scaled when the surface horizon went 150 -> 192. The two
+ * answer different questions: that number is how far the picture reaches, this
+ * one is how long a sight line down a shaft can possibly be, and widening the
+ * view across a valley did not lengthen any corridor.
  */
 const BURIED_LOAD_DIST = 64;
 

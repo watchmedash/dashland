@@ -111,13 +111,50 @@ export function regionColumns(rid, out = new Int32Array(REGION_COLS)) {
  *
  * The horizon argument that set these was a sphere's — sqrt(2*R*h) — and there
  * is no horizon on a flat map, so what these numbers now bound is simply how far
- * you can see. They are left where the cube had them because that is the draw
- * distance the game was tuned and measured at; chunk count grows with the square
- * of the load distance, so this is not a knob to guess high on. The gap up to
- * KEEP is hysteresis, so walking a boundary does not thrash.
+ * you can see. The gap up to KEEP is hysteresis, so walking a boundary does not
+ * thrash.
+ *
+ * ---- 150 to 192, and what it cost ----
+ *
+ * The owner's question was whether the loading screen builds the whole world,
+ * on the theory that if it does there is no reason to hold the view in. It does
+ * not — see `_streamChunks` and the worker's `ensureRegions`: the loading screen
+ * generates the regions around spawn and the rest of the map is generated as you
+ * walk into it, once per session. The full-planet block array IS allocated up
+ * front, but allocating 137 MB of zeroes is not the same as building a world.
+ *
+ * So this is not free, and it was measured rather than guessed. One machine, one
+ * seed, standing still on Solace after the stream settled:
+ *
+ *              live chunks   meshes   heap    fps
+ *     150            2268     1598   529MB   59.1   (vsync capped)
+ *     192            3126     2340   635MB   51.9
+ *     224            4371     2979   652MB   49.0
+ *     288            7264     5015   951MB   30.3
+ *
+ * 192 is the knee. It buys 28% more distance for about 12% of the frame, and
+ * 224 buys the next 17% for as much again. Past that it falls off a cliff:
+ * chunk count grows with the square of the radius, so this is not a knob to
+ * guess high on.
+ *
+ * ---- and why 192 in particular ----
+ *
+ * Because it is where the AIR catches up with the geometry. The aerial haze
+ * (`AERIAL_GAIN` in VoxelMaterial.js) was tuned against the old 150 and hides
+ * 84.5% of the world at that range — which is why the edge was visible at all:
+ * a hillside at the draw limit was still 15% there, standing against the sky,
+ * and 15% of a hillside that simply stops is the "blue wall". At 192 the same
+ * curve is at 95.3%, and what remains is a haze rather than a boundary.
+ *
+ * That is the whole reason not to go further on the fog alone. Thickening the
+ * air to hide a 150-unit edge would have taken the density to where 60 cells is
+ * half-obscured, and a world you cannot see across the valley of is a worse
+ * answer than a world with an edge in it.
+ *
+ * The phone tier is untouched at 96 — see QUALITY in main.js.
  */
-export const CHUNK_LOAD_DIST = 150;
-export const CHUNK_KEEP_DIST = 190;
+export const CHUNK_LOAD_DIST = 192;
+export const CHUNK_KEEP_DIST = 243;
 
 /**
  * Bumped whenever a change to WorldGen would produce different terrain for the

@@ -2320,6 +2320,11 @@ body.fighting #toasts { top: 172px; }
    a stock of thirty is one scroll rather than five. */
 #screen.trading .inv-section { display: none; }
 #screen.trading .shop-list { max-height: min(720px, 70vh); }
+/* The villagers' counter is one list rather than two, and was capped tighter
+   still at 230px. Same rule, same reason: with the bag gone there is a sheet
+   under it to spend. `.barter-list` carries `.shop-list` as well, so this only
+   has to beat the 230 with a later selector of equal weight. */
+#screen.trading .barter-list { max-height: min(720px, 70vh); }
 /* THE WIDTH HAS TO BE HANDED DOWN, EVERY STEP.
    Four elements stand between the sheet and the two counters — `.inv-body`,
    `.inv-left`, `#screen-top`, `.shop-area` — and the first version of this rule

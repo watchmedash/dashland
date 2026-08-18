@@ -2495,7 +2495,11 @@ export class UI {
     // Hiding it is also what pays for the lists: they were capped at 250px
     // against a sheet three times that, because the bag had to fit under them.
     // See '#screen.trading' in style.css.
-    this.el.screenEl.classList.toggle('trading', kind === 'shop');
+    //
+    // Barter is on it too, on the owner's follow-up: the Verdant fourteen
+    // trade by the same rules through a different list, and every word above
+    // was already true of their counter as well.
+    this.el.screenEl.classList.toggle('trading', kind === 'shop' || kind === 'barter');
 
     this.el.screenEl.classList.remove('hidden');
     this.refresh();

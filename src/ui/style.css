@@ -2373,11 +2373,13 @@ body.fighting #toasts { top: 172px; }
 }
 
 .barter-list { max-height: min(230px, 34vh); }
-/* Both sides of the swap share the row evenly and both may ellipsis: a
-   40px basis with `1 1` is a zero floor in flex spelling, and without it
-   "16 Cobblestone" held the row wider than a landscape phone. */
+/* Both sides share the row evenly and either may ellipsis. `min-width: 0` is
+   the zero floor in flex spelling and is what keeps "16 Smooth Sandstone" from
+   holding the row wider than a landscape phone; the basis stays `auto` so that
+   on a wide window the counter is sized by its longest line rather than by a
+   number, which is what shortened every name on a 1920px monitor. */
 .barter-row { gap: 8px; min-height: 44px; }
-.barter-side { display: flex; align-items: center; gap: 7px; flex: 1 1 40px; min-width: 0; }
+.barter-side { display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 0; }
 .barter-row .rname { min-width: 0; }
 .barter-arrow { flex: none; color: var(--ink-faint); font-size: var(--fs-md); }
 .barter-tag { flex: none; font: 700 var(--fs-xs) var(--mono); color: var(--accent); }
@@ -2387,6 +2389,12 @@ body.fighting #toasts { top: 172px; }
 .barter-row.off .barter-tag { color: var(--ink-faint); }
 .barter-row.off:hover { background: var(--paper-cell); transform: none; box-shadow: var(--emboss); }
 .barter-row.off:hover::before { transform: scaleY(0); }
+/* Landscape phone: the sheet already scrolls at this height, and a well that
+   scrolls inside it is a thumb caught between two of them. Let the lines flow
+   and leave the page as the only scroller. */
+@media (max-height: 480px) {
+  .barter-list { max-height: none; }
+}
 
 /* ── growth ────────────────────────────────────────────── */
 /* The tree, and nothing else. The aside that used to sit beside it listed

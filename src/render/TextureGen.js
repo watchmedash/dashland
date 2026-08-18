@@ -1304,37 +1304,10 @@ G.wheat_1 = (s) => wheat(s, 1, 801);
 G.wheat_2 = (s) => wheat(s, 2, 811);
 G.wheat_3 = (s) => wheat(s, 3, 821);
 
-G.pumpkin_side = (s) => {
-  const f = fbm(s.size, 20, 3, 831);
-  s.each((i, x, y, u, v) => {
-    const rib = Math.abs(Math.sin(u * Math.PI * 4));
-    const n = rib * 0.6 + f[i] * 0.4;
-    const c = mixc(px([182, 88, 18]), px([244, 148, 38]), n);
-    setRGB(s, i, c);
-    s.h[i] = n;
-    s.rough[i] = 0.62;
-    s.ao[i] = 0.55 + rib * 0.45;
-  });
-  s.normalStrength = 1.9;
-  return s;
-};
-G.pumpkin_top = (s) => {
-  const f = fbm(s.size, 16, 3, 841);
-  const size = s.size;
-  s.each((i, x, y, u, v) => {
-    const d = Math.hypot(u - 0.5, v - 0.5) * 2;
-    const rib = Math.abs(Math.sin(Math.atan2(v - 0.5, u - 0.5) * 5));
-    const stemMask = smoothstep(0.22, 0.12, d);
-    let c = mixc(px([176, 84, 18]), px([236, 142, 36]), rib * 0.5 + f[i] * 0.5);
-    c = mixc(c, mixc(px([78, 92, 40]), px([124, 138, 62]), f[i]), stemMask);
-    setRGB(s, i, c);
-    s.h[i] = rib * 0.4 + stemMask * 0.6;
-    s.rough[i] = 0.66;
-    s.ao[i] = 0.6 + rib * 0.4;
-  });
-  s.normalStrength = 1.7;
-  return s;
-};
+// `pumpkin_side` and `pumpkin_top` stood here and are gone with the block's
+// cube: the pumpkin is a model now (see its entry in `world/Blocks.js`), so the
+// two tiles had no reader left. Removed rather than left generating, because a
+// generator nothing names is a tile baked into the atlas for nobody.
 
 // A cactus is three things, and the old tile had one and a half of them.
 //

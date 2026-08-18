@@ -4601,6 +4601,21 @@ export class Mobs {
      */
     this.damageScale = 1;
     /**
+     * The player's Vigour, as a multiplier on every hostile's spawn health.
+     *
+     * 1 through 5.5 — see "the catch" at the head of `game/Skills.js`, which
+     * owns the number and the reasoning. Held here by the same arrangement as
+     * `savage` and `damageScale`: this file does not know that a skill tree
+     * exists, it knows that something outside it decides how tough the night
+     * is. main.js pushes it from `skills.mobHealthScale` whenever a level is
+     * bought, and on load.
+     *
+     * Read once, at spawn, in `_spawnHealth`. Nothing already standing in the
+     * world changes when it moves, which is the honest behaviour: you bought a
+     * bigger bar, you did not make the husk in front of you grow.
+     */
+    this.healthScale = 1;
+    /**
      * Faces that have stopped making anything hostile, for good.
      *
      * Owned by `Endgame.js` and held here by reference rather than copied, so
@@ -4915,7 +4930,13 @@ export class Mobs {
    */
   _spawnHealth(spec) {
     if (!spec.hostile && !spec.monster) return spec.health;
-    const mul = worldHardening(this.playtime) * (spec.boss ? bossDifficulty(this.damageScale) : 1);
+    // Three multipliers, and they compose because they answer three different
+    // questions: how old the world is, how hard the player asked it to be, and
+    // how much health the player has bought. Only the last is new, and it goes
+    // last on purpose — it is the one that can move in the middle of a run.
+    const mul = worldHardening(this.playtime)
+      * (spec.boss ? bossDifficulty(this.damageScale) : 1)
+      * this.healthScale;
     return Math.max(spec.health, Math.round(spec.health * mul));
   }
 

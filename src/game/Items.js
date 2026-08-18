@@ -97,6 +97,32 @@ const BLOCK_FOOD = {
   // are priced as such. The truffle is small, rare and worth a torch.
   cactusfruit: 4, agave: 2, stonecrop: 2, icecapmoss: 1,
   swampreed: 1, mireroot: 3, lotus: 2, truffle: 5,
+  // The temperate three, and they are here because of where the list above
+  // *is not*. Read it by biome: prickly pear and agave are desert, stonecrop is
+  // scree, icecap moss is snow, reed and mireroot are swamp, lotus is standing
+  // water, the three greens and the grape are the seabed, and the truffle is a
+  // cave. Every single one of them is somewhere you have to travel to. On the
+  // grass you actually start on, the whole edible flora of the planet was the
+  // pumpkin — which is exactly the report: *"I haven't seen much other plants
+  // that are edible."* You had seen them. None of them were food.
+  //
+  // Clover and fern are the two densest carpets on the planet (WorldGen says
+  // so in as many words) and they blanket meadow, plain and forest, so this is
+  // the change that makes a walk out of Solace's front door feed you. The cave
+  // mushroom is the same fix one layer down: caves had the truffle, which is
+  // rare and worth a torch, and nothing else at all.
+  //
+  // All three sit at 1, the floor of the raw band, beside the moss and the
+  // reed. That is deliberate and it is the whole balance of the change: a
+  // meadow now feeds you *badly*. Three clovers is one apple. It is the
+  // difference between starving and not, not a reason to stop farming, and
+  // nothing here approaches the prickly pear at 4 — the desert is still the
+  // worst place to be hungry, which is what made that number 4.
+  //
+  // They stay placeable, unlike the pumpkin below: a fern is still a plant you
+  // can dig up and put in a garden, and being edible does not stop it being
+  // one. `cactusfruit` and the rest have always worked both ways.
+  clover: 1, fern: 1, cave_mushroom: 1,
   // The pumpkin, and the one entry here that is food and NOT a block in the
   // hand — see `NOT_PLACEABLE` below. Three is the raw band: it is a surface
   // find rather than a crop, it costs nothing but a walk, and the two things

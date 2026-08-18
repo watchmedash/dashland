@@ -69,9 +69,9 @@
 //     ones cannot reach.
 //
 // `_takeHit` is called guarded, so the 0.5s immunity a mob blow sets also eats a
-// bolt, and it is not soaked: tolerance covers blow, fall, fire and lava, and a
-// helmet against a lightning strike would need explaining. The kind is
-// `lightning` precisely so that it falls through `SOAKED` rather than quietly
+// bolt, and it is not soaked. Nothing is any more — the tolerance branch went
+// with the six-branch tree and `Skills.soak` is the identity — but the kind is
+// `lightning` precisely so that it is a kind of its own rather than quietly
 // inheriting the discount.
 //
 // **It starts no fires and edits no blocks.** The ground is wet gravel and mud

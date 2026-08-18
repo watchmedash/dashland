@@ -170,6 +170,9 @@ for (const n of ['flower_red', 'flower_blue', 'flower_gold', 'mushroom', 'saplin
   'lavender', 'clover', 'fern', 'lingonberry',
   'cave_mushroom', 'shelf_fungus', 'crystal_cluster', 'driftwood',
   'cactusfruit', 'agave', 'stonecrop', 'icecapmoss',
+  // The gourd. It was an opaque cube until the produce model was wired to the
+  // planted block; see its entry in Blocks.js, which is where the reasoning is.
+  'pumpkin',
   'swampreed', 'mireroot', 'lotus', 'truffle',
   'deathcap',
   // The farm. Wheat stays out and keeps its billboard because it has four

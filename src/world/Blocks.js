@@ -154,7 +154,7 @@ export const TILES = [
   'farmland', 'farmland_wet', 'dirt_path',
   'flower_red', 'flower_blue', 'flower_gold', 'tall_grass', 'mushroom', 'sapling',
   'wheat_0', 'wheat_1', 'wheat_2', 'wheat_3',
-  'pumpkin_side', 'pumpkin_top', 'cactus_side', 'cactus_top',
+  'cactus_side', 'cactus_top',
   'iron_block', 'gold_block', 'crystal_block', 'lantern', 'crate', 'core', 'hearth',
   'bench_top', 'bench_side', 'kiln_front', 'kiln_front_lit', 'kiln_side', 'kiln_top', 'torch',
   'bed_top', 'bed_side', 'ladder', 'door', 'door_top', 'sign', 'fence',
@@ -542,7 +542,35 @@ export const BLOCKS = [
   block({ name: 'wheat_2', label: 'Wheat', render: R_CROSS, all: 'wheat_2', solid: false, opaque: false, hardness: 0.05, drop: 'seeds', particle: [0.66, 0.64, 0.3], sound: 'grass' }),
   block({ name: 'wheat_3', label: 'Ripe Wheat', render: R_CROSS, all: 'wheat_3', solid: false, opaque: false, hardness: 0.05, drop: 'wheat', dropCount: 2, particle: [0.85, 0.72, 0.3], sound: 'grass' }),
 
-  block({ name: 'pumpkin', label: 'Pumpkin', top: 'pumpkin_top', side: 'pumpkin_side', hardness: 1, tool: 'axe', particle: [0.85, 0.5, 0.15], sound: 'wood' }),
+  // The gourd, and it is a plant rather than masonry.
+  //
+  // It was authored as an opaque cube with two atlas tiles, back when it was
+  // the only thing growing on a meadow and there was no model of anything. The
+  // produce pack has carried a real pumpkin ever since the item became food —
+  // `pumpkin: 'pumpkin'` in `ItemModels.BY_NAME`, which is what your fist, the
+  // ground drop and the inventory slot have all been showing — so the planted
+  // block was the *only* one of its four pictures still drawn as a box, in a
+  // field of modelled ferns, clover and lingonberry bushes.
+  //
+  // It now joins the wild harvest on exactly the terms `cactusfruit` and
+  // `lingonberry` are on: R_CROSS, suppressed by `MODELLED_CROSS` in Mesher.js,
+  // the model instanced by `render/BlockModels.js` off `MODELLED_PLANTS` in
+  // main.js. All three lists have to agree or it is either drawn twice or not
+  // at all.
+  //
+  // No collision, and that is the real gameplay change: you walk through a
+  // pumpkin now instead of onto it. That is what every other thing growing out
+  // of the ground does, and a one-cell orange step in a meadow was never a
+  // platform anyone built with — it is not placeable (`NOT_PLACEABLE` in
+  // Items.js), so nobody ever put one anywhere on purpose.
+  //
+  // `pumpkin_side` and `pumpkin_top` are deleted from `TILES` with it: nothing
+  // else referenced them, and the cactus is now the only crop-shaped cube left.
+  block({
+    name: 'pumpkin', label: 'Pumpkin', render: R_CROSS,
+    solid: false, opaque: false, hardness: 0.3, needsFloor: true,
+    particle: [0.85, 0.5, 0.15], sound: 'wood',
+  }),
   // The spines are the whole point of the plant: it hurts to lean on, and it
   // will not share a wall with anything. It is also a plant rather than masonry,
   // so a segment with nothing under it is not a thing that can stand there.

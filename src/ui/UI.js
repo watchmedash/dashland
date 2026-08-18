@@ -3066,27 +3066,29 @@ export class UI {
 
     const tree = this.el.skTree;
     tree.innerHTML = '';
-    // Three pairs, not six rows. The tree is a root and a leaf three times over
-    // and the old screen said so with a 26px indent and a drawn elbow, which
-    // cost a ragged left edge and two pieces of chrome to state a relationship
-    // that a shared card states for free. A leaf is the second thing in its
-    // root's card; that is the whole of the drawing.
+    // One card per branch, laid out two by two. It used to group a leaf into its
+    // root's card, which is how the prerequisite was drawn; nothing has a
+    // prerequisite now, so grouping is grouping by nothing.
+    //
+    // `needs` is still read, and the branch that has one still lands in the
+    // card above it, because the model still supports the field even though no
+    // branch uses it. That is four lines to keep a future branch from rendering
+    // as an orphan with no visible relationship at all.
     let card = null;
     for (const s of sk.summary()) {
-      const leaf = !!BRANCHES[s.key].needs;
-      if (!leaf || !card) {
+      if (!BRANCHES[s.key].needs || !card) {
         card = document.createElement('div');
         card.className = 'skill-pair';
         tree.appendChild(card);
       }
-      card.appendChild(this._skillRow(s, leaf));
+      card.appendChild(this._skillRow(s));
     }
   }
 
   /**
    * One branch, as a row you press.
    *
-   * The row is the button. It used to carry one 108px brass plate each, six of
+   * The row is the button. It used to carry one 108px brass plate each, one of
    * them down the right margin, and at any moment at most two of those were
    * pressable — the other four were grey rectangles reading "Fully learned" or
    * "Needs Hands 3", which is a refusal drawn at the size of an offer. The row
@@ -3096,16 +3098,16 @@ export class UI {
    * The price is set as the point balance in the head is set, dark plate and
    * lit numeral, because it is the same unit. There is no "Learn" on it: the
    * screen's whole subject is spending points on branches, the number is on the
-   * branch, and a word repeated on six rows is furniture rather than a label.
+   * branch, and a word repeated on every row is furniture rather than a label.
    *
-   * "Fully learned" is gone entirely. Five lit pips already say it, and saying
+   * "Fully learned" is gone entirely. Nine lit pips already say it, and saying
    * it twice on the widest element in the row is how a finished branch ended up
    * shouting louder than an available one.
    */
-  _skillRow(s, leaf) {
+  _skillRow(s) {
     const row = document.createElement('button');
     const maxed = s.level >= s.max;
-    row.className = `skill-row${leaf ? ' leaf' : ''}${maxed ? ' maxed' : ''}`;
+    row.className = `skill-row${maxed ? ' maxed' : ''}`;
     row.disabled = !!s.blocked;
 
     const head = document.createElement('div');

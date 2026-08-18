@@ -110,9 +110,12 @@ const ENERGY_NO_SPRINT = 0.15;
 const ENERGY_FLOOR = 0.70;
 
 /**
- * The *base* free fall, in blocks. Agility adds to it — see `skills.fallFree`,
- * which starts from this same 3.0 — so this constant is now what a player with
- * no tree attached falls for free, and the floor everything else builds on.
+ * Free fall, in blocks. Nothing adds to it any more.
+ *
+ * The Agility branch used to buy 0.4 a level on top of it, through
+ * `skills.fallFree`, which is why that field exists and starts from this same
+ * 3.0. The four-bar tree does not sell it, so `fallFree` is pinned at 3.0 and
+ * this is simply what every player falls for free, tree or no tree.
  */
 const FALL_FREE = 3.0;
 const FALL_PER_BLOCK = 1.0;
@@ -499,11 +502,13 @@ export class Player {
     this.lookDir = new THREE.Vector3(0, 0, -1);
     this.eye = new THREE.Vector3();
     // Overwritten every frame from the skill tree once one exists; this is what
-    // a player with no Skills instance gets. Keep it equal to REACH_BASE in
-    // Skills.js — the two are separate constants and drifting apart would mean
-    // learning the first level of Reach silently changed your arm by more or
-    // less than the half block it advertises.
-    this.reach = 3.0;
+    // a player with no Skills instance gets. Keep it equal to REACH in
+    // Skills.js — the two are separate constants, and now that no branch sells
+    // arm length there is nothing left to hide a disagreement between them: a
+    // body with a Skills instance and one without would simply have different
+    // arms for ever. It was 3.0 while a Reach branch existed to sell the other
+    // 1.5 back.
+    this.reach = 4.5;
     this.walkTimer = 0;
     this.lastStepDist = 0;
     this.swingT = 1;             // arm swing, 0..1
@@ -1954,7 +1959,12 @@ export class Player {
    * does not.
    *
    * Lungs is the aqua-affinity node: each level takes a quarter off the water
-   * half only, 3.0 down to 2.0 at lungs 4. It never touches the float half, so
+   * half only, so the branch's nine levels retire the penalty outright — 3.0 at
+   * lungs 0, 1.0 from lungs 8 up, where the clamp catches it. That the last
+   * rung buys nothing here is deliberate: the branch is sold on breath, this is
+   * the thing that made short breath worth complaining about, and a ninth level
+   * of it would have to invent a *bonus* to have anything left to give.
+   * It never touches the float half, so
    * standing on the bed stays worth its full 3× no matter how deep the tree
    * goes — the skill buys you a better swing, not permission to stop diving.
    */

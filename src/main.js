@@ -1316,6 +1316,12 @@ const MODELLED_PLANTS = {
   // mat-formers stay under 0.35 so a bog or a scree still reads as ground with
   // something growing on it rather than as undergrowth.
   cactusfruit: 0.82, agave: 0.66, swampreed: 0.86, lotus: 0.30,
+  // The gourd, and the only entry in this table that used to be a cube. It is
+  // the widest thing in the harvest — the produce pumpkin measures about 1.3
+  // across for 1.0 tall — so 0.55 of a cell of height arrives a little over
+  // 0.7 of a cell wide, which is a pumpkin sitting in its patch rather than a
+  // pumpkin growing through the fence beside it.
+  pumpkin: 0.55,
   stonecrop: 0.34, icecapmoss: 0.26, mireroot: 0.52, truffle: 0.22,
   // The deathcap, and the number is doing a job the rest of this table is not:
   // it has to stand *above* the fern (0.58) it grows in, or the thing a player
@@ -3855,11 +3861,18 @@ class Game {
   /**
    * Push the tree's numbers onto the body that has to obey them.
    *
-   * Two of the six branches are read by other systems through `player` rather
-   * than through `skills` — the raycasts all take `player.reach`, and the HUD
-   * and every heal clamp against `player.maxHealth` — so those two have to be
-   * copied across whenever a level changes. The other four are read straight
-   * off `skills` at the point of use and need nothing here.
+   * One of the four branches is read by another system through `player` rather
+   * than through `skills` — the HUD and every heal clamp against
+   * `player.maxHealth` — so it has to be copied across whenever a level
+   * changes. Stamina, nourishment and breath are read straight off `skills` at
+   * the point of use and need nothing here. `reach` is copied too and is no
+   * longer a branch at all: it is a constant now, and this line is what keeps a
+   * body that was built before the tree existed agreeing with one that was not.
+   *
+   * The fourth line is the odd one and it is the whole of Vigour's catch: the
+   * health branch is the only thing in the tree that reaches outside the
+   * player's own body, and this is where it reaches. Every hostile that spawns
+   * from now on is built with that multiplier; see `_spawnHealth` in Mobs.js.
    *
    * `health` is only ever clamped *down*, never topped up: buying a heart
    * should give you room to heal into, not heal you. Losing one — which only a
@@ -3869,6 +3882,10 @@ class Game {
     const p = this.player;
     p.maxHealth = this.skills.maxHealth;
     p.reach = this.skills.reach;
+    // Guarded because the constructor calls this before `this.mobs` exists —
+    // the tree is built at 1808 and the spawner a hundred lines later — and the
+    // pass that matters is the one after a level is bought, not that one.
+    if (this.mobs) this.mobs.healthScale = this.skills.mobHealthScale;
     if (p.health > p.maxHealth) p.health = p.maxHealth;
   }
 
@@ -7273,8 +7290,10 @@ class Game {
    * steam and never takes a point of damage, which is the whole tutorial and it
    * is taught by the pool. See the SOAK_* block for the pricing.
    *
-   * No skill soaks 'scald' — it is deliberately not one of Skills' SOAKED kinds
-   * ('blow', 'fall', 'fire', 'lava'). Heat tolerance shaving this to nothing is
+   * No skill soaks 'scald', and no skill soaks anything else either: the
+   * tolerance branch went with the six-branch tree and `Skills.soak` is the
+   * identity. The reasoning is worth keeping anyway, because it is what the
+   * call still exists for: a heat tolerance shaving this to nothing would be
    * the one route by which a late-game player could sit in a pool indefinitely
    * and never cook again, and the ceiling on the whole feature is that you
    * cannot stay. Difficulty is untouched for the same reason the other
@@ -7295,7 +7314,7 @@ class Game {
     if (FACE_ROLE[p.face] === FACE_PYRE) {
       this._scaldT = 0;
       if (p.moveAmount <= SOAK_STILL) {
-        this.energy = Math.min(1, this.energy + dt * SOAK_ENERGY);
+        this.energy = Math.min(1, this.energy + dt * SOAK_ENERGY * this.skills.energyScale);
         p.stamina = Math.min(1, p.stamina + dt * BALM_STAMINA);
         // A point at a time, like `_tickVitals` — health is a whole number
         // everywhere else, and a fractional one would show up in the bar and in
@@ -7316,7 +7335,7 @@ class Game {
       // is not a soak, and gating the *gain* rather than the clock means you
       // cannot wade in circles to dodge the scald either.
       if (p.moveAmount <= SOAK_STILL) {
-        this.energy = Math.min(1, this.energy + dt * SOAK_ENERGY);
+        this.energy = Math.min(1, this.energy + dt * SOAK_ENERGY * this.skills.energyScale);
       }
       return;
     }
@@ -7976,7 +7995,15 @@ class Game {
   _tickVitals(dt) {
     const p = this.player;
     const working = p.sprinting ? 1.6 : (p.moveAmount > 0.6 ? 0.7 : 0.18);
-    this.energy = Math.max(0, this.energy - dt * 0.0022 * working);
+    // `energyScale` is the Stomach branch, and it is a *drain* multiplier
+    // because `this.energy` is a fraction of the bar rather than a count of
+    // units — ten times the stomach is stored as a tenth of the drain, and the
+    // HUD goes on drawing 0..1 without knowing the branch exists. Everything
+    // else that writes this field takes the same multiplier (the two soak
+    // gains, the heal tithe below, and the meal in `_eat`), or the bar would
+    // fill on one scale and empty on another.
+    const stomach = this.skills.energyScale;
+    this.energy = Math.max(0, this.energy - dt * 0.0022 * working * stomach);
     // Movement reads nourishment off the Player rather than the Game, so the
     // gait scale can live beside the gait constants. Mirrored here and only
     // here: eating and a hot spring soak both write `this.energy` from
@@ -7985,12 +8012,28 @@ class Game {
     // default of 1 for ever and the whole taper is dead code.
     p.energy = this.energy;
 
+    // Regeneration is stated as a *whole bar* rather than as a point every 4.5
+    // seconds, and both lines below are that one change.
+    //
+    // The old constants were 4.5s and 0.02 of the stomach per point, which is
+    // 90 seconds and 40% of a meal to heal from nothing to full — correct, and
+    // silently correct only while the bar was always 20. Vigour makes it 200,
+    // and read literally those constants would make a fully-invested player
+    // take fifteen minutes and four whole stomachs to heal up. That is not a
+    // cost the branch advertises; it would be a punishment for buying it, laid
+    // on top of the hostile scaling that IS the branch's advertised cost.
+    //
+    // So both are expressed against `maxHealth` and the wall-clock answer is
+    // the same at every level: ninety seconds, forty percent of one bar. It is
+    // the same shape `_tickSoak` already used for the cinderlands pool
+    // (`BALM_HEAL_SECS / p.maxHealth`), which had to solve this first because a
+    // hot spring heals the whole bar by definition.
     if (this.energy > 0.55 && p.health < p.maxHealth) {
       this._regen = (this._regen || 0) + dt;
-      if (this._regen > 4.5) {
+      if (this._regen > 90 / p.maxHealth) {
         this._regen = 0;
         p.health = Math.min(p.maxHealth, p.health + 1);
-        this.energy = Math.max(0, this.energy - 0.02);
+        this.energy = Math.max(0, this.energy - 0.4 / p.maxHealth * stomach);
       }
     } else this._regen = 0;
 
@@ -10473,7 +10516,13 @@ class Game {
     }
     if (this.eating < 1.3) return;
     this.eating = 0;
-    this.energy = Math.min(1, this.energy + heldItem.food * FOOD_TO_ENERGY);
+    // The meal, scaled by the Stomach branch for the same reason the drain is:
+    // a bar ten times the size that an apple still fills a tenth of would be ten
+    // times the food for free. Scaled, the branch is a pure buffer — the food a
+    // day costs is identical at every level and only the gap between meals
+    // moves. The health the food carries is NOT scaled: that is a heal, not
+    // nourishment, and it is already clamped to `maxHealth`.
+    this.energy = Math.min(1, this.energy + heldItem.food * FOOD_TO_ENERGY * this.skills.energyScale);
     this.player.health = Math.min(this.player.maxHealth,
       this.player.health + Math.ceil(heldItem.food * 0.35));
     this.inventory.consumeHeld(1, heldSlot);

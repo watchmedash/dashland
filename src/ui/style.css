@@ -2404,22 +2404,19 @@ body.fighting #toasts { top: 172px; }
 
 .skills-panel { width: min(560px, 100%); }
 
-/* A TREE, DRAWN AS ONE.
-   The model is a root and a leaf, three times over, and the screen used to say
-   so by putting the pair in a shared card. That is a relationship stated by a
-   frame, and a frame is the one thing this screen had too many of: a card round
-   the pair, a card round the head, a sunken plate round the pips, a brass plate
-   round every price. Everything looked equally important because everything was
-   in a box.
+/* FOUR BARS, AND NO TREE AT ALL.
+   The model was a root and a leaf, three times over, and this screen drew the
+   prerequisite as a stroke: a line down the left of each pair and an elbow into
+   the leaf. That was the right drawing for that model and it is deleted with
+   it. There are four independent branches now, one per bar on the HUD, and
+   nothing hangs off anything — so a trunk line would be a stroke drawn from
+   nowhere to nowhere, and the 15px indent it needed would be an indent for it.
 
-   So the boxes are gone and the structure is DRAWN. Each pair is a trunk: a
-   line down the left from the root to its leaf, and an elbow into the leaf.
-   That is the prerequisite, said in one stroke instead of a container, and it
-   is the thing the screen is actually about. The three trunks stand side by
-   side rather than end to end, which is what makes the shape of the tree
-   readable in one look. */
-.skill-tree { display: flex; flex-direction: column; gap: 8px; }
-.skill-pair { position: relative; padding-left: 15px; overflow: hidden; }
+   What survives is the reason the boxes went: a card round the pair, a card
+   round the head, a sunken plate round the pips and a brass plate round every
+   price made everything look equally important because everything was in a box.
+   A branch is still a row you press, ruled rather than framed. */
+.skill-pair { position: relative; overflow: hidden; }
 
 /* A row on the trunk: a button with no button on it, and no card under it. */
 .panel .skill-row {
@@ -2432,25 +2429,13 @@ body.fighting #toasts { top: 172px; }
 .panel .skill-row:hover:not(:disabled) { background: rgba(255, 253, 247, .8); }
 .panel .skill-row:active:not(:disabled) { background: rgba(122, 94, 54, .12); }
 .panel .skill-row:disabled { cursor: default; }
-/* The leaf hangs off the trunk on an elbow, which is the whole of the
-   prerequisite drawing: what is on the stub is behind what is above it. */
-.skill-row.leaf { padding-left: 13px; }
-/* The trunk and the elbow are one stroke: an L that runs off the top of the
-   pair, where the card's `overflow` cuts it, and turns in under the leaf's
-   name. It lights when a live row on this trunk is under the pointer. */
-.skill-row.leaf::before {
-  content: ''; position: absolute; left: -12px; top: -400px; width: 11px;
-  bottom: calc(100% - 17px);
-  border-left: 2px solid rgba(96, 66, 28, .45);
-  border-bottom: 2px solid rgba(96, 66, 28, .45);
-  border-bottom-left-radius: 7px;
-  pointer-events: none; transition: border-color var(--t-fast) ease;
-}
-.skill-pair:has(.skill-row:hover:not(:disabled)) .skill-row.leaf::before {
-  border-color: var(--brass);
-}
+/* The `.leaf` rules stood here — a 13px indent and an L-shaped elbow drawn in
+   two borders — and are gone with the prerequisites they drew. `_skillRow` no
+   longer emits the class. If a branch ever gets `needs` again, `blockedBy`
+   already says so in words on the row itself, which is what `.skill-lock`
+   below is for; the stroke was the extra. */
 /* Bought out. Nothing left to do here, so the row goes quiet rather than loud;
-   five lit segments are the announcement and they need no second one. */
+   nine lit segments are the announcement and they need no second one. */
 .panel .skill-row.maxed .skill-name { color: var(--ink-soft); }
 .skill-head-row { display: flex; align-items: center; gap: 10px; }
 .skill-name {
@@ -3342,11 +3327,23 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    one thing with a title. Spare height at the FOOT of a short screen is what
    every other screen in this file does with it. Left here so the next pass does
    not spend an afternoon rediscovering it. */
-/* Three trunks side by side. 248 is a branch name, its segments and its price
-   on one line with the blurb under it, and three of them fit a phone held
-   sideways, which is what turns the whole tree into one look instead of two
-   screens of scrolling. */
-.skill-tree { grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); }
+/* Two by two, and stated as two explicit columns rather than as an auto-fit.
+   Four branches is the one count where auto-fit gives the wrong answer at every
+   width that matters: `minmax(248px, 1fr)` puts three across a 1080px sheet and
+   leaves the fourth alone on a second row, and four across gives every card
+   246px to fit a name, nine segments and a price on one line.
+
+   Two columns of ~528px is a row that reads, and 2x2 is a block rather than a
+   ragged list. One column under 680px, which is narrower than a phone held
+   sideways, so the fold only ever happens on a phone held upright.
+
+   `minmax(0, 1fr)` and never a bare `1fr`: `1fr` means `minmax(auto, 1fr)`,
+   whose floor is the content's min-content width, so a long branch name would
+   push the column past its share and the sheet past its own edge. */
+.skill-tree { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 680px) {
+  .skill-tree { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
 /* The cap that used to be here - 1080px on the tree and on the head, because
    three 560px branches put a price half a screen from the segments it prices -
    is the SHEET's now; see `#skills > .panel` above. Capping the block and not
@@ -3360,7 +3357,12 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 /* Rows are ruled rather than boxed, so they need no gap between them down the
    column; the gap between columns is what keeps two lists apart. */
 .ach-list { column-gap: 38px; row-gap: 0; }
-.skill-tree { column-gap: 24px; row-gap: 18px; }
+/* Four rows where there were six, in two columns where there were three, so the
+   block is a third of the height it used to be on the same sheet. The gaps take
+   some of that back rather than leaving four hairlines huddled under the level
+   meter with two thirds of the parchment empty under them. Capped in vh so a
+   phone held sideways does not spend its whole height on the gaps. */
+.skill-tree { column-gap: 40px; row-gap: clamp(18px, 4vh, 40px); }
 /* Prose, capped where it is set rather than where it sits. */
 .credit-list { max-width: 78ch; }
 .tagline { max-width: 60ch; margin-left: auto; margin-right: auto; }

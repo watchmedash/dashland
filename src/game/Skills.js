@@ -16,156 +16,168 @@
 //      sixty lines pricing eight species against each other and a chestplate
 //      flattened all of it.
 //
-// So: points you earn by playing, spent on six branches. Nothing here breaks
+// So: points you earn by playing, spent on four branches. Nothing here breaks
 // and nothing here wears out — but all of it is lost when you die, which is the
 // one thing this file used to promise the opposite of. See `ON_DEATH`. Nothing
 // here is rendered, clicked or saved by this file — it is the model only. It
 // imports nothing, so it can be reasoned about, and tested, on its own.
 //
 // --- the shape ---------------------------------------------------------------
-// Three roots and three leaves, each leaf behind a root:
+// Four branches, one per bar on the HUD, no prerequisites and no leaves:
 //
-//     vigour ──▶ tolerance          how much you can take
-//     agility ──▶ lungs             how far you can go
-//     hands ──▶ reach               how fast you work
+//     vigour     health      20      ->  200
+//     stamina    sprint      1 tank  ->  10 tanks
+//     stomach    nourishment 1 tank  ->  10 tanks
+//     lungs      breath      9s      ->  90s
 //
-// Four independent bars would have been simpler and would also have made the
-// first twenty points a non-decision: you would buy one level of everything.
-// The prerequisites are what turn the early game into a choice of *identity* —
-// a fighter, a diver or a miner — because every leaf costs a detour through a
-// root you might not otherwise have wanted. They are deliberately shallow (two
-// or three levels) so the detour is a commitment, not a wall.
+// Ten times the base of each, at the top, and that is the whole rule of the
+// effect curves below: every branch is nine levels of "+1x what you started
+// with", so level 3 is four times the base and level 9 is ten. No branch has a
+// second effect, a soft cap or a different shape from the others. You can read
+// the number off the bar.
+//
+// It replaced six branches — vigour, tolerance, agility, lungs, hands, reach —
+// arranged as three roots with a leaf behind each. That tree bought damage
+// reduction, walk speed, free fall height, mining speed and arm length as well,
+// and the four things it did *not* touch were the four things a player actually
+// watches while they play. This is the owner's call and it is the sharper
+// design: a skill screen whose every line is a bar you already know.
+//
+// What went with those branches, stated plainly because all four are real
+// losses and none of them are oversights:
+//
+//   tolerance   damage reduction. There is now NO mitigation in the game at
+//               all — armour was deleted for this tree and the tree no longer
+//               sells a replacement, so a blow costs exactly what Mobs.js says
+//               it costs, for ever. Vigour is the only defence there is, which
+//               is the point: one bar, one answer.
+//   agility     walk speed and free fall height. Sprint *endurance* survives
+//               as `stamina`, which is the half of that branch anyone noticed.
+//   hands       mining speed. A tool tier is the only thing that digs faster.
+//   reach       arm length. The base goes back up to 4.5 from the 3.0 it was
+//               cut to *because* the branch existed — see REACH.
+//
+// --- the catch ---------------------------------------------------------------
+//
+// Vigour is not free, and it is the only branch that is not. Every level of it
+// gives every hostile that spawns afterwards another half of its own health:
+//
+//     vigour 0    you 20      husks 21        1.0x
+//     vigour 3    you 80      husks 52.5      2.5x
+//     vigour 6    you 140     husks 84        4.0x
+//     vigour 9    you 200     husks 115.5     5.5x
+//
+// So the bar outruns them — ten times against five and a half — and a fight
+// still gets *longer* at every rung, which is the tension worth having. What
+// you are buying with vigour is not safety, it is the right to be in a longer
+// fight, and the mistake it forgives is the same one it makes more expensive.
+//
+// It is health and not damage, so nothing about the ladder in Mobs.js moves:
+// a tiger still hits for what a tiger hits for, and the species stay in the
+// order that file prices them in. It applies to hostiles and monsters only —
+// `_spawnHealth` returns an animal's health untouched — because a five-times
+// deer is not a harder world, it is a worse dinner.
+//
+// It is applied at spawn, so it does not retro-fit the mobs already standing in
+// your world, and it is NOT applied to xp: `xpForKill` reads the species spec,
+// not the body, so buying vigour cannot inflate its own income.
+//
+// --- why nothing has a prerequisite ------------------------------------------
+//
+// The old leaves existed to stop the first twenty points being a non-decision —
+// with four independent bars you would buy one level of everything. That is
+// still true and it is now handled by price instead: a branch costs 1, 2, 3 ...
+// 9, so its own ladder is what makes going deep expensive, and 45 points for
+// one full branch against a lifetime ceiling of 64 is what makes going deep
+// exclusive. See TOTAL_COST.
 
 /**
- * The branches, in the order a UI should lay them out: root, then its leaf.
+ * The branches, in the order a UI should lay them out.
  *
- * `costs[i]` is what the (i+1)th level costs, so a branch's levels get more
- * expensive as they go — the total for a branch is what it is worth, and the
- * shape of the ladder is what decides whether a player spreads out or commits.
- * `needs` is [branch, level]: the leaf is unbuyable until its root is that deep.
+ * `costs[i]` is what the (i+1)th level costs. It is `i + 1` in all four, which
+ * is the flattest ladder the file has ever had and is deliberate now that the
+ * branches are four copies of one shape: the *effect* is linear, so the price
+ * has to rise or the ninth level would be the best buy in the game. Rising by
+ * one a rung means the first half of a branch (levels 1-4, 10 points) costs
+ * less than its seventh level alone.
+ *
+ * `needs` is gone from every branch. The field is still read by `blockedBy` and
+ * `fromJSON`, so a future branch can have one.
  */
 export const BRANCHES = {
   /**
-   * Maximum health, +2 (one heart) per level: 20 → 30.
+   * Maximum health, 20 -> 200.
    *
-   * Priced against the top of the damage ladder rather than against the bottom.
-   * An elephant hits for 8, so a 20-point bar dies to three blows and always
-   * has; at vigour 5 you survive three and walk away with 6. That is the whole
-   * feel of the branch — one more mistake than you used to be allowed, at every
-   * level of it.
+   * The only branch with a cost outside the point economy — see "the catch"
+   * above, and `mobHealthScale` below, which is the whole of the mechanism.
+   *
+   * 200 is an enormous number against a damage ladder whose worst single blow
+   * is a boss's, and that is what the mob scaling is for. Read the two together
+   * and the fully-invested player takes 5.5 times as many swings to kill what
+   * takes 5.5 times as long to kill them: the *pace* of a fight is unchanged
+   * and only its length moved, which is exactly what a health bar should buy
+   * and exactly what armour never did.
    */
   vigour: {
-    label: 'Vigour', levels: 5, costs: [1, 2, 3, 4, 5],
-    blurb: '+1 heart of maximum health.',
+    label: 'Vigour', levels: 9, costs: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    blurb: 'More health. Every level toughens the hostiles too.',
   },
   /**
-   * Flat damage reduction, 9% per level, capping at 45%.
+   * Sprint, one tank to ten.
    *
-   * This is the branch that inherits armour's job, and the number is the one
-   * balance decision in the file that is worth arguing about, so:
+   * The bar drains at 0.055/s sprinting, so a full tank is 18.2 seconds of run
+   * and nine levels take it to just over three minutes. That is a continent.
    *
-   *   full hide set    27.6%   one evening's work from what animals drop
-   *   full copper      41.4%
-   *   full iron        64.8%
-   *   full astral      73.6%
-   *   full cinder      80.0%   (the hard cap in Items.js)
-   *
-   * 45% sits between copper and iron, which reads as a nerf until you count
-   * what it is bought with. Tolerance never wears through, so it is 45% on the
-   * ten-thousandth blow as well as the first; it survives your own death; and
-   * it stacks with vigour, which armour never did. Fully invested in the body —
-   * vigour 5 and tolerance 5, 41 of the 91 points in the tree — you are 30
-   * health behind 45% reduction, an effective 54.5 against the 57 a full iron
-   * set used to give a 20-point bar. Near enough the same ceiling, reached by a
-   * different road.
-   *
-   * The genuine loss is at the very top: a cinder set was an effective 100, and
-   * that is exactly the state this is meant to remove. Nothing on the planet is
-   * allowed to become harmless.
-   *
-   * At the bottom it is a straight buff. Tolerance 1 costs 2 points behind
-   * vigour 2, so five points buys 24 health behind 9% — a husk's 3 becomes 2.73
-   * and takes 8.8 blows instead of 6.7 — and you can have that inside the first
-   * session without killing a single animal for hide.
+   * **The refill is untouched and stays 8.3 seconds from empty at every level.**
+   * A bigger tank that took ten times as long to fill would make the upgrade
+   * feel *worse* in the case a player is actually in most often — a short
+   * sprint and a top-up — and the branch is sold as "sprint further", not as
+   * "own a bigger battery". It is the one place in the file where capacity and
+   * rate deliberately disagree.
    */
-  tolerance: {
-    label: 'Tolerance', levels: 5, costs: [2, 3, 5, 7, 9], needs: ['vigour', 2],
-    blurb: '9% less damage from blows, falls and fire.',
+  stamina: {
+    label: 'Stamina', levels: 9, costs: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    blurb: 'Sprint for longer before you are spent.',
   },
   /**
-   * Movement: speed, sprint endurance, and how far you can drop.
+   * Nourishment, one tank to ten.
    *
-   * Speed is the dangerous one and is therefore the *smallest* effect here —
-   * 1.5% a level, 7.5% fully invested, sprint 6.8 → 7.31. Mobs.js only recently
-   * gave predators a chase multiplier so that a tiger can close on a player who
-   * strolls at 4.4, and a movement branch that handed out 20% would quietly
-   * undo that whole rebalance. What the branch actually sells is *endurance*:
-   * sprint drain falls 8% a level, so a spent bar goes from 18.2 seconds of
-   * sprint to 30.3. That is the difference between outrunning one tiger and
-   * crossing a continent.
+   * This is a *buffer* and not a discount, and the arithmetic is deliberately
+   * neutral: the bar drains ten times slower and a meal fills ten times less of
+   * it, so the food a day costs is identical at level 0 and level 9. What
+   * changes is how long you can be away from it. At the top, a full stomach is
+   * days rather than an afternoon, which is what makes the corner faces and the
+   * deep caves places you can go rather than places you can visit.
    *
-   * The third effect is the one players will name the branch after: 0.4 blocks
-   * a level on top of Player.js's three free blocks of fall, so at agility 5 a
-   * five-block drop costs nothing. Five is chosen because it is one block above
-   * the height a one-storey build puts you at, not because it is a round number.
+   * Scaling the meal down with the bar is the whole reason this branch is not
+   * simply the best one in the tree. Without it, ten times the buffer for the
+   * same apple is ten times the food, free.
    */
-  agility: {
-    label: 'Agility', levels: 5, costs: [1, 2, 2, 3, 4],
-    blurb: 'Sprint further and longer, and land harder falls unhurt.',
+  stomach: {
+    label: 'Stomach', levels: 9, costs: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    blurb: 'Hold far more nourishment before you have to eat.',
   },
   /**
-   * Breath, ×1.5 per level: 9 seconds under water becomes 27.
+   * Breath, 9 seconds to 90.
    *
-   * Nine seconds is the base and it is brutally short once you notice that
-   * mining underwater is three times slower — a full breath at the seabed is
-   * about one block of stone. Each level is another half of the original lungful.
-   * At lungs 4 you can clear a small chamber, which is the point: the branch
-   * does not make you a better swimmer, it makes the seabed a place you can
-   * work rather than a place you can visit.
+   * Nine seconds is brutally short once you notice that mining underwater is
+   * three times slower — a full breath at the seabed is about one block of
+   * stone. At the top it is a minute and a half, which is the difference
+   * between visiting a wreck and clearing one.
    *
-   * Behind agility rather than vigour because holding your breath is
-   * conditioning, and because it gives the branch that would otherwise be pure
-   * convenience something load-bearing to unlock.
+   * It carries one effect that is not the bar, inherited from the branch of the
+   * same name it replaces: the underwater mining drag falls 0.25 a level, so it
+   * is gone entirely by level 8. Kept because the drag is what made nine
+   * seconds worth complaining about, and because it is the same thing the
+   * branch is already about. See `miningDrag` in Player.js.
    */
   lungs: {
-    label: 'Lungs', levels: 4, costs: [1, 2, 3, 4], needs: ['agility', 2],
-    blurb: 'Hold your breath half as long again.',
-  },
-  /**
-   * Mining speed, 6% off the timer per level, multiplicative: 27% at level 5.
-   *
-   * Deliberately smaller than a single step of the tool ladder. Wood to stone
-   * is 2.4 → 4.2 speed, a 43% cut in the timer, and iron to astral is another
-   * 36% — if five levels of a skill matched a tier of pickaxe then the ore you
-   * dug to get the pickaxe was wasted. This is a thumb on the scale that makes
-   * the tool you already have feel better maintained, not a way to skip a tier.
-   */
-  hands: {
-    label: 'Hands', levels: 5, costs: [1, 2, 3, 4, 6],
-    blurb: 'Break blocks 6% faster.',
-  },
-  /**
-   * Interaction range, +0.5 cells a level from the base 5.0.
-   *
-   * Three levels and no more. Reach is the stat with the worst failure mode in
-   * the game: the same number is used for the block raycast, the placement
-   * raycast and the mob raycast, so every metre of it is also a metre of sword,
-   * and a player who can hit a tiger from seven cells away is not fighting it.
-   * 6.5 is a build convenience — a block and a half of extra head height on a
-   * wall — that a fight can barely feel.
-   *
-   * Carrying capacity was the obvious fourth work branch and is not here on
-   * purpose: the inventory is a fixed 9 + 27, and both the save format and every
-   * slot in the UI index against that constant. A capacity skill is a rebuild of
-   * the inventory screen wearing a skill tree's clothes.
-   */
-  reach: {
-    label: 'Reach', levels: 3, costs: [3, 4, 5], needs: ['hands', 3],
-    blurb: 'Reach half a block further.',
+    label: 'Lungs', levels: 9, costs: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    blurb: 'Hold your breath far longer, and mine underwater freely.',
   },
 };
 
-export const BRANCH_ORDER = ['vigour', 'tolerance', 'agility', 'lungs', 'hands', 'reach'];
+export const BRANCH_ORDER = ['vigour', 'stamina', 'stomach', 'lungs'];
 
 // --- what earns points -------------------------------------------------------
 //
@@ -431,83 +443,75 @@ export const TOTAL_COST = BRANCH_ORDER.reduce(
  */
 export const MAX_POINTS = MAX_LEVEL * POINTS_PER_LEVEL;
 
-// TOTAL_COST is 91 and MAX_POINTS is 64, and the gap is deliberate. A tree you
-// finish is a tree that stops being a decision on the day you finish it; at 70%
-// the last few levels are always a trade of one branch's top rung against
-// another's, however long you play.
+// TOTAL_COST is 180 and MAX_POINTS is 64, and the gap is deliberate. A tree you
+// finish is a tree that stops being a decision on the day you finish it; at 36%
+// every level is always a trade of one bar against another, however long you
+// play.
 //
-// The gap was 15 and is now 27, and the shape survives the widening because the
-// two properties it was chosen for are both still true. No branch is
-// unreachable: the dearest pair is vigour 15 + tolerance 26 = 41, and even
-// three full branches (vigour, tolerance and hands, 57) fit inside 64. And
-// "everything" still never does: a fourth branch takes it to 69 at best.
+// The gap was 27 against a 91-point tree and is now 116 against a 180-point one,
+// which is a far harder ceiling and is the direct cost of the branches getting
+// nine levels each instead of three to five. Read it in whole branches: one full
+// branch is 45 and fits easily, a second takes it to 90 and does not. So the
+// lifetime shape is *one bar taken all the way, and change* — 64 points is a
+// maxed branch plus five levels of another, or two branches at six, or four at
+// four and a half. Nobody ever holds two tens.
 //
-// What actually changed is that the ceiling is now close to theoretical. With
-// death wiping the ladder (see `ON_DEATH`) the number a player holds in practice
-// is what they have earned since they last died, which for most runs is well
-// under 30 — so the branch costs are being read at the *bottom* of the ladder
-// far more often than at the top. They are not adjusted for it, on purpose: the
-// bottom rungs are already the cheap ones (1, 1, 1, 2 across vigour, agility
-// and hands), so a fresh run buys something inside its first ten minutes, and
-// cutting costs at the same moment a wipe is introduced would soften the change
-// in two places at once and make neither measurable.
+// The top of a branch is therefore rare on purpose. 10x is the number the owner
+// asked for and it is meant to read as a ceiling you can see rather than one you
+// pass: the ninth level alone costs 9 points, which is a seventh of everything a
+// character can ever earn.
+//
+// And the ceiling is close to theoretical anyway. With death wiping the ladder
+// (see `ON_DEATH`) the number a player holds in practice is what they have
+// earned since they last died, which for most runs is well under 30 — so these
+// costs are read at the *bottom* far more often than at the top, and the bottom
+// is where they are cheapest: 1 + 2 + 3 buys the fourfold of any bar for six
+// points, inside the first evening.
 
 // --- the effect curves -------------------------------------------------------
-// Each is stated as the whole formula rather than as a per-level constant, so
-// the shape is visible at a glance and the cap is impossible to overshoot.
+//
+// There is one curve, and all four branches are it: a level is worth another
+// whole copy of the base, so the multiplier is `1 + level` and the top of a
+// nine-level branch is ten. Written once, as `TIMES`, rather than as four
+// constants that could drift apart — the promise the screen makes is that every
+// bar works the same way, and this is that promise as code.
 
-/** Health per level of vigour, in half-hearts. Base 20 in Player.js. */
-const HP_PER_VIGOUR = 2;
-/** Fraction of a blow soaked per level of tolerance, and the hard ceiling. */
-const SOAK_PER_LEVEL = 0.09;
-const SOAK_MAX = 0.45;
-/** Movement scale per level of agility — small on purpose; see the branch. */
-const SPEED_PER_AGILITY = 0.015;
-/** Sprint drain removed per level. 5 levels take 0.055/s down to 0.033/s. */
-const STAMINA_PER_AGILITY = 0.08;
-/** Free fall blocks per level, on top of Player.js's FALL_FREE of 3. */
-const FALL_PER_AGILITY = 0.4;
+/** The multiplier a branch level is worth. Level 0 is 1x, level 9 is 10x. */
+const TIMES = (level) => 1 + level;
+
+/** Base maximum health, matching Player.js's own initial `maxHealth`. */
+const HP_BASE = 20;
+
+/**
+ * Extra hostile health per level of vigour, as a fraction of the species' own.
+ *
+ * 0.5, the owner's number, applied additively so it stays legible: at vigour 9
+ * a hostile has 1 + 9 x 0.5 = 5.5 times the health Mobs.js gives it. Additive
+ * rather than compounding on purpose — 1.5^9 is 38x, which is not a longer
+ * fight, it is a wall.
+ */
+const MOB_HP_PER_VIGOUR = 0.5;
+
+/**
+ * Reach, in cells, and it is a constant now rather than a branch.
+ *
+ * It was 5.0, then it was cut to 3.0 *because* a reach branch existed to sell
+ * the rest back — 3.0 + 3 x 0.5 = 4.5, "a normal arm", was the top of that
+ * ladder. The branch is gone, so leaving the base at 3.0 would keep a nerf
+ * whose entire justification has been deleted, and every player would live at
+ * the short end of an arm nothing can lengthen.
+ *
+ * So it lands where the top of that branch landed: 4.5, which is also
+ * Minecraft's default and is longer than a fight can feel but short enough that
+ * a block placed across a gap is still a step you take.
+ *
+ * Must agree with `Player.js`'s own initial `reach`, which is what a body with
+ * no Skills instance at all uses.
+ */
+const REACH = 4.5;
+
+/** Free fall, in blocks, unchanged and no longer bought. See Player.js. */
 const FALL_FREE_BASE = 3.0;
-/** Extra lungfuls per level. Base breath is 9 seconds (main.js: dt / 9). */
-const BREATH_PER_LUNGS = 0.5;
-/** Multiplier on the mining timer per level of hands. */
-const MINE_PER_HANDS = 0.94;
-/**
- * Reach, and where the two numbers come from.
- *
- * The base was 5.0, which is longer than Minecraft's 4.5 and long enough that
- * reach never registered as a limit — you could already touch anything you
- * could see, so the branch bought you nothing you missed. At 3.0 the arm is
- * genuinely short: you step up to what you are working on, and a block placed
- * across a gap is a decision rather than a reflex.
- *
- * That also puts the branch somewhere. Fully learned it is 3.0 + 3 x 0.5 =
- * 4.5, which lands exactly on Minecraft's default — so the top of the tree is
- * "a normal arm", not a superpower, and every level of it is felt.
- *
- * Must agree with `Player.js`'s own initial `reach`, which is what a player
- * with no skills and no Skills instance uses.
- */
-const REACH_PER_LEVEL = 0.5;
-const REACH_BASE = 3.0;
-
-/**
- * Damage kinds tolerance applies to.
- *
- * Copied from what armour did rather than reasoned from scratch, because the
- * player already learned that rule: `_takeHit` in main.js takes an `armoured`
- * flag, and the only things that passed false were the ones where a helmet
- * saving you would need explaining. Drowning and starving still take the full
- * amount — you cannot toughen your way out of not breathing.
- *
- * Fall damage is the one deliberate extension. Armour never reduced it, because
- * Player.js applies it to `health` directly and never went through the hurt
- * path at all; that was an accident of the code rather than a decision, and a
- * tolerance branch that does nothing about the commonest way players die reads
- * as broken. Agility buys the blocks you fall for free, tolerance softens what
- * is left of the ones you do not.
- */
-const SOAKED = new Set(['blow', 'fall', 'fire', 'lava']);
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -568,18 +572,29 @@ export class Skills {
     this.spent = 0;
 
     // Every query below is a plain field, recomputed only when a level changes.
-    // Several of them are read every frame — the mining timer, the walk speed,
-    // the breath drain — and a getter that walks a table of six branches to
-    // answer "how fast do I walk" is a table walk sixty times a second for a
+    // Three of them are read every frame — the stamina drain, the nourishment
+    // drain and the breath drain — and a getter that walks a table of branches
+    // to answer "how fast do I tire" is a table walk sixty times a second for a
     // number that changes about eleven times per save.
-    this.maxHealth = 20;
+    //
+    // Four of the eight are now constants and are kept as fields anyway:
+    // `absorb`, `speedScale`, `fallFree` and `miningScale` are what the deleted
+    // branches used to move, and every one of them still has a reader outside
+    // this file. Keeping them at their neutral value is a one-line promise that
+    // nothing downstream has to change; deleting them would be four crashes in
+    // three files to express a decision that is entirely inside this one.
+    this.maxHealth = HP_BASE;
     this.absorb = 0;
     this.speedScale = 1;
+    /** Drain multipliers, so a bigger tank is a slower-emptying one. */
     this.staminaScale = 1;
+    this.energyScale = 1;
     this.fallFree = FALL_FREE_BASE;
     this.breathScale = 1;
     this.miningScale = 1;
-    this.reach = REACH_BASE;
+    this.reach = REACH;
+    /** What every hostile's spawn health is multiplied by. See "the catch". */
+    this.mobHealthScale = 1;
     this._apply();
   }
 
@@ -856,13 +871,22 @@ export class Skills {
   // --- queries --------------------------------------------------------------
 
   /**
-   * What is left of `damage` after tolerance. Kinds: 'blow', 'fall', 'fire',
-   * 'lava' are reduced; 'drown' and 'starve' — and anything unrecognised — are
-   * not, so a new damage source has to opt in deliberately rather than quietly
-   * inheriting a 45% discount.
+   * What is left of `damage` after mitigation, which is all of it.
+   *
+   * `absorb` is pinned at 0: the tolerance branch that used to move it is gone
+   * with the rest of the six, so a blow now costs exactly what Mobs.js prices
+   * it at, at every level of the tree, for ever. Armour was deleted for a skill
+   * tree and the skill tree no longer sells a replacement — health is the only
+   * defence in the game.
+   *
+   * The method stays, and it stays the single door every damage source in
+   * main.js goes through (`_takeHit` calls it for blows, falls, fire, lava,
+   * drowning and starvation alike). That door is worth more than the branch
+   * was: it is the one place a future mitigation of any kind can be added
+   * without finding six call sites, and it costs one field read per hit.
    */
-  soak(damage, kind = 'blow') {
-    if (!(damage > 0) || !this.absorb || !SOAKED.has(kind)) return damage;
+  soak(damage, _kind = 'blow') {
+    if (!(damage > 0) || !this.absorb) return damage;
     return damage * (1 - this.absorb);
   }
 
@@ -901,14 +925,17 @@ export class Skills {
     this.spent = spent;
 
     const L = this.level;
-    this.maxHealth = 20 + L.vigour * HP_PER_VIGOUR;
-    this.absorb = Math.min(SOAK_MAX, L.tolerance * SOAK_PER_LEVEL);
-    this.speedScale = 1 + L.agility * SPEED_PER_AGILITY;
-    this.staminaScale = Math.max(0.2, 1 - L.agility * STAMINA_PER_AGILITY);
-    this.fallFree = FALL_FREE_BASE + L.agility * FALL_PER_AGILITY;
-    this.breathScale = 1 + L.lungs * BREATH_PER_LUNGS;
-    this.miningScale = MINE_PER_HANDS ** L.hands;
-    this.reach = REACH_BASE + L.reach * REACH_PER_LEVEL;
+    // One shape, four times. `TIMES` is the capacity multiplier; the two drains
+    // take its reciprocal, because the bars they empty are stored as a fraction
+    // of a bar rather than as a number of units — ten times the tank is the same
+    // thing as a tenth of the drain, and the HUD keeps drawing 0..1 either way.
+    this.maxHealth = Math.round(HP_BASE * TIMES(L.vigour));
+    this.staminaScale = 1 / TIMES(L.stamina);
+    this.energyScale = 1 / TIMES(L.stomach);
+    this.breathScale = TIMES(L.lungs);
+    // The catch, and the only thing in this file that reaches outside the
+    // player's own body. main.js hands it to `Mobs.healthScale`.
+    this.mobHealthScale = 1 + L.vigour * MOB_HP_PER_VIGOUR;
   }
 
   // --- persistence ----------------------------------------------------------
@@ -929,16 +956,16 @@ export class Skills {
    * of "that xp no longer exists" rather than a migration that would have to
    * invent a number of kills to convert them into.
    *
-   * Zero levels are omitted, so a fresh character's tree is `{ v: 4 }`.
+   * Zero levels are omitted, so a fresh character's tree is `{ v: 5 }`.
    *
-   * `v: 4` is the build in which kills are the only source of xp. The version
-   * moved because `fromJSON` needs to tell a save whose marks were paid in xp
-   * from one whose marks were paid in nothing.
+   * `v: 5` is the build of the four bars. The version moves with the branch set
+   * because the *names* changed: a v4 save carries `tolerance`, `agility`,
+   * `hands` and `reach`, none of which exist here, and `lv` is read by name.
    */
   toJSON() {
     const lv = {};
     for (const key of BRANCH_ORDER) if (this.level[key]) lv[key] = this.level[key];
-    const out = { v: 4 };
+    const out = { v: 5 };
     if (Object.keys(lv).length) out.lv = lv;
     if (this.bonus) out.bonus = this.bonus;
     if (this.converted) out.converted = 1;
@@ -963,7 +990,15 @@ export class Skills {
    *     they were once worth is not refunded, for the same reason: a mark pays
    *     nothing now, in any tense.
    *
-   *  3. `v: 4` — this build. Everything verbatim.
+   *  3. `v: 4` — the six-branch tree. `xp` and `bonus` come back verbatim;
+   *     `vigour` and `lungs` keep their levels because they kept their names,
+   *     and the four branches that no longer exist are dropped by the unknown-
+   *     key rule below, so their points return as unspent. That is the right
+   *     reading rather than a migration: there is nothing to convert a level of
+   *     Reach *into*, and refusing to invent one hands the player the points
+   *     back to spend on the tree that does exist.
+   *
+   *  4. `v: 5` — this build. Everything verbatim.
    *
    * So the version is no longer read at all, and that is worth stating rather
    * than leaving as an absence: every branch that once turned on it existed to

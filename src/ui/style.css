@@ -2952,100 +2952,63 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
    to do. What a grid costs is that a short group in a row of tall ones leaves
    air under it, which is a hole in the middle of a screen rather than a fifth
    of one dead down the side. */
-/* Two columns at most, and the type grows with the screen.
+/* THE CONTROLS SHEET, rebuilt.
  *
- * Four passes here tuned the WIDTH and every one of them reported success: four
- * columns, full bleed, no overflow, all true. The screen still read badly
- * because the fault was never horizontal. Measured at 1920x1080 with the old
- * rule: 320px of content in a 993px window - a 32% vertical fill, a thin strip
- * of 16px type stretched over 1832px with two thirds of the screen empty
- * parchment underneath it. Filling the width is what MADE that: the more
- * columns it managed, the shorter and wider the strip got.
+ * Five passes tuned this screen and the owner's verdict stayed "it sucks",
+ * then "so ugly, please just redesign it". What each pass fixed was real and
+ * none of it was the problem: the width, the cap, the container, the column
+ * count, the clipping. The screen was still four thin ribbons of small type
+ * stranded in the top corner of a large empty page, with a ragged gap between
+ * every key and the words it belongs to.
  *
- * So the columns are capped at two and the type is sized off the viewport. Half
- * the columns is twice the height; `clamp` on the caps and the labels puts the
- * words at a size a monitor deserves and leaves them exactly where they were on
- * a phone. A reference sheet is meant to be read across a room, not audited.
+ * What it is now: two columns of substantial rows, the block centred in the
+ * page on both axes, and the keys RIGHT-aligned in their column so every
+ * action in a group starts at the same x. That last one is the whole
+ * difference. A reference sheet is read down the action column, and with the
+ * keys flush left the reader's eye has to find a new starting point on every
+ * line - "W A S D" and "Ctrl" are wildly different widths. Ranged right, the
+ * caps make a clean edge, the actions make another, and the eye runs down
+ * either one.
+ *
+ * Every track has a zero floor. `1fr` means `minmax(auto, 1fr)`, whose floor
+ * is min-content, so a track that cannot fit refuses to shrink and the grid
+ * overflows - and a CENTRED overflow spills off both ends, where three
+ * ancestors carrying `overflow: hidden` eat the left half unreachably. That
+ * was the clipper that survived four fixes.
  */
 .ctl-groups {
   display: grid;
-  /* Fixed count, not `auto-fit`. Auto-fit divides the width by a measure and
-     takes whatever count falls out, which is how this screen kept ending up as
-     four short columns with two thirds of the window empty under them, or three
-     with a hole where the fourth group should be. Four groups laid out as
-     `auto-fit` can never be anything but a rag; two columns of two is the only
-     arrangement of four boxes that is a shape. */
-  grid-template-columns: 1fr 1fr;
-  column-gap: clamp(28px, 3.5vw, 90px);
-  /* Space the two rows over the height rather than stacking them at the top.
-     Four groups in two rows leaves most of a 1080 screen empty underneath, and
-     a reference sheet with its content in the top third reads as a fragment of
-     a page. `space-evenly` puts the air between the rows instead of after
-     them; `start` on a short window keeps the old behaviour so nothing is
-     pushed off the bottom of a phone. */
-  align-content: space-evenly;
-  min-height: min(100%, 620px);
-  /* No max-width and no auto margin. A cap here is the invisible container -
-     "they are inside an invisible container clipping some parts on the sides" -
-     and at 1500px on a 1920px screen it left 210px of dead parchment down both
-     edges while the header rule above it ran the full width. The panel's own
-     gutter is the only inset this wants. */
-  font-size: clamp(15px, 0.62vw + 11px, 22px);
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(20px, 3vh, 40px) clamp(32px, 4vw, 88px);
+  align-content: center;
+  min-height: 100%;
+  width: min(100%, 1180px);
+  margin-inline: auto;
+  padding-inline: 8px;
+  font-size: clamp(15px, 0.34vw + 13.4px, 19px);
 }
-@media (max-width: 900px) { .ctl-groups { grid-template-columns: 1fr; } }
-.ctl-group { padding-bottom: clamp(18px, 2.4vh, 40px); }
+@media (min-width: 880px) { .ctl-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ctl-group { padding-bottom: 0; }
 .ctl-group .ctl-head { margin-top: 0; margin-bottom: 4px; }
 
-/* Two columns inside the group, both left-aligned: caps down one, what they do
-   down the other. The caps were flush left and the labels flush right with the
-   width of the monitor in between, which is two lists sharing a line rather
-   than a row you can read.
-
-   The caps column is measured, not declared. It was a flat 112px - what W A S D
-   and Shift+Click need - charged to every group whatever was in it, so the six
-   rows that say nothing but "RMB" held a 112px column open and paid for it out
-   of the labels beside them, which are the longest labels on the screen. It is
-   `max-content` now, so each group's column is as wide as the widest cap set in
-   THAT group and no wider, and the width it gives back goes to the words.
-
-   The measuring is why the rows are `display: contents`: a track can only line
-   up items that are in the same grid, and every row used to be a grid of its
-   own, which is a per-row measurement and therefore a ragged one. The rows
-   dissolve into the group's grid and the two spans of each are the items. The
-   rule under a row moves onto the spans with them, so the air between the two
-   columns is PADDING on the first one rather than a grid gap: a gap is a hole
-   in the middle of the rule, and a dotted line with a 14px bite out of it reads
-   as two rules rather than one row. */
+/* Two columns: the caps ranged RIGHT, the action ranged left.
+ *
+ * The rows are `display: contents` so every row's caps and every row's words
+ * land in the SAME two tracks - a per-row grid measures each row on its own
+ * and comes out ragged, which is what this was. The dotted rule lives on the
+ * spans rather than on the row, so the gap between the columns is padding and
+ * the rule stays one continuous line instead of two with a bite out of it.
+ */
 .controls-grid {
   display: grid;
-  /* `fit-content`, not `max-content`. The key column is one track shared by
-     every row in the group, so `max-content` sizes it to the widest cap set in
-     it - `Shift + Click` - and then charges that width to `Q` and `F` as well.
-     At two wide columns that put a hand's width of nothing between most keys
-     and the words they belong to. `fit-content` takes the same measurement and
-     then refuses to go past the cap, so the wide rows still fit and the narrow
-     ones stop dragging their labels across the screen. */
-  /* 178, not 108. Tighter caps the gap on the narrow rows but wraps
-     `Shift + Click` onto two lines, and a key that breaks in half is worse
-     than a key with air after it. */
-  /* `minmax(0, max-content)`, and the `minmax` is the whole point.
-     A bare `max-content` label cannot shrink below its longest sentence, so
-     under about 540px the row stayed 471px wide inside a narrower box and the
-     three ancestors with `overflow: hidden` ate the difference silently: text
-     cut off at the edge with nothing to scroll and no sign why. That is the
-     invisible container - "left parts of the menu is being cropped". With a
-     zero floor the track gives way instead, the words wrap, and nothing is
-     ever cut. On a wide screen it still measures to the sentence, so the row
-     is as long as it needs to be and the rule ends where the words do. */
-  grid-template-columns: fit-content(178px) minmax(0, max-content);
-  justify-content: start;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   align-items: center;
 }
-.controls-grid > div > span:first-child { padding-right: 14px; }
+.controls-grid > div > span:first-child { padding-right: clamp(14px, 1.6vw, 30px); }
 .controls-grid > div { display: contents; }
 .controls-grid > div > span {
-  padding: 6px 0; border-radius: 0;
-  font-size: var(--fs-md); color: var(--ink-soft);
+  padding: clamp(6px, 0.9vh, 11px) 0; border-radius: 0;
+  font-size: inherit; color: var(--ink-soft);
   background: none;
   border-bottom: 1px dotted rgba(96, 66, 28, .35);
 }
@@ -3053,7 +3016,11 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
 /* The caps of one row, held together so the label beside them starts at the
    same place on every row. The join words sit between them, faint. */
 .controls-grid .keys {
-  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  /* Ranged right: the caps make one clean edge and the actions beside them
+     make another, so the eye runs down either column instead of hunting for
+     where each line starts. */
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 4px; flex-wrap: wrap;
   font-size: var(--fs-sm); color: var(--ink-soft);
 }
 .controls-grid > div > span + span {

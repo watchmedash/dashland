@@ -44,11 +44,18 @@
 // The light comes back in two halves, from two different places, and it is
 // worth being clear about which is which because they do not overlap.
 //
-// The *sun* half is the scene's: the entity fill, which `Sky` already dims by
-// the player's own sky exposure, plus the sun's shadow map, which does know
-// there is a roof. `receiveShadow` is therefore on. That is the mobs' answer,
-// applied to flowers, and it is why a flower under a roof at noon is not in
-// direct sunlight. None of it is going anywhere — see the note on `_fit`.
+// The *sun* half is the scene's: the sun's shadow map, which knows there is a
+// roof, plus the entity fill, which does not. `receiveShadow` is therefore on,
+// and it is why a flower under a roof at noon is not in direct sunlight. That
+// used to be the whole of the answer, because `Sky` dimmed the fill by the
+// *player's* sky exposure and so darkened every entity in the world at once.
+// It no longer does, and the third half below is what replaced it.
+//
+// The *skylight* half is the mesher's, and it is the same word: four bits per
+// cell saying how much sky reaches it, which scale the scene's indirect light
+// and nothing else (`crossSky`, and `aSkyShade` in VoxelMaterial). The sun is
+// left out of it deliberately — the shadow map has already answered for the
+// sun, and taking it twice would black out a flower under a plank.
 //
 // The *block light* half used to be written off here as unreachable, on the
 // grounds that the light field lives in the world worker and the main thread
@@ -70,7 +77,8 @@ import { worldModel } from './ItemModels.js';
 import { applyInstancedSway, applyInstancedBlockLight } from './VoxelMaterial.js';
 import { ITEMS } from '../game/Items.js';
 import { BLOCKS, R_CROSS, setPlantBox } from '../world/Blocks.js';
-import { crossLightRGB } from '../world/Mesher.js';
+import { crossLightRGB, crossSky } from '../world/Mesher.js';
+import { SKY_SHADE_MIN } from '../world/Lighting.js';
 
 /**
  * Instances per kind, hard.
@@ -228,6 +236,7 @@ export class BlockModels {
       const n = Math.min(list.length, CAP);
       const mesh = this._fit(k, n);
       const lit = mesh.geometry.getAttribute('aBlockLight');
+      const shade = mesh.geometry.getAttribute('aSkyShade');
 
       for (let i = 0; i < n; i++) {
         const t = list[i];
@@ -236,6 +245,11 @@ export class BlockModels {
           if (w < 0) { _rgb[0] = 0; _rgb[1] = 0; _rgb[2] = 0; }
           else crossLightRGB(w, _rgb);
           lit.setXYZ(i, _rgb[0], _rgb[1], _rgb[2]);
+          // The same word's skylight nibble, as a shade rather than a factor -
+          // see `_fit` for why zero is the neutral value and `crossSky` for why
+          // this stopped being double counting.
+          if (shade) shade.setX(i, w < 0 ? 0
+            : (1 - SKY_SHADE_MIN) * (1 - crossSky(w)));
         }
         _up.copy(t.up).normalize();
         _lean.copy(_up);
@@ -286,6 +300,7 @@ export class BlockModels {
       mesh.count = n;
       mesh.instanceMatrix.needsUpdate = true;
       if (lit) lit.needsUpdate = true;
+      if (shade) shade.needsUpdate = true;
     }
   }
 
@@ -375,6 +390,11 @@ export class BlockModels {
       const attr = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
       attr.setUsage(THREE.DynamicDrawUsage);
       mesh.geometry.setAttribute('aBlockLight', attr);
+      // And the roof, in the same shape and with the same neutral value: how
+      // much of the scene's indirect light to take away, zero being none.
+      const shade = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+      shade.setUsage(THREE.DynamicDrawUsage);
+      mesh.geometry.setAttribute('aSkyShade', shade);
     }
     // The only piece of the baked voxel light a loose model can still be given.
     //
@@ -386,11 +406,10 @@ export class BlockModels {
     // The sun is the loud half of that, and the sun alone *does* know about
     // roofs, because it casts a shadow map and the terrain writes into it. So
     // receiving is on: a flower under stone at noon is now in shadow, which
-    // leaves it on the ambient and the entity fill, and `Sky` already dims that
-    // fill by the player's own sky exposure. It is the same deal every mob in
-    // the game gets, for the same reason, and it is as far as this layer can
-    // reach — block light would need the worker's light field, which never
-    // crosses to the main thread.
+    // leaves it on the ambient and the entity fill. Those are what `aSkyShade`
+    // is for — the fill used to be dimmed by the player's own sky exposure,
+    // which answered for every entity in the world at once, and each of them
+    // now answers for itself.
     //
     // Casting stays off. The shadow camera spans ~92 cells across a 2048 map,
     // so a flower is about ten texels and its cast shadow is a grey smudge on

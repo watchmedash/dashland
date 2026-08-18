@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { D, GRAVITY, BIOME_COLORS } from '../world/Constants.js';
 // The single authority on what counts as being under a roof - see the probe in
 // `_applyLight`, and the paragraph on leaves in Lighting.js.
-import { SKY_ATTEN } from '../world/Lighting.js';
+import { SKY_ATTEN, SKY_SHADE_MIN } from '../world/Lighting.js';
 import { wrap } from '../world/Grid.js';
 import { wrapDist, wrapDist2, relTo } from './Wrap.js';
 import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX } from '../world/Blocks.js';
@@ -72,19 +72,17 @@ const FLOW_PUSH = 9;
  */
 const BURN_TIME = 0.45;
 /**
- * How often a drop asks what is over it, and how dark that answer can make it.
+ * How often a drop asks what is over it.
  *
- * The same two numbers `Mobs.js` keeps, deliberately: a dropped pickaxe and the
- * cow standing beside it are in the same room and have to be lit as though they
+ * The same number `Mobs.js` keeps, deliberately: a dropped pickaxe and the cow
+ * standing beside it are in the same room and have to be lit as though they
  * are. 0.6 s because a drop mostly lies still and the sky over it changes when
  * it is thrown or the roof above it is broken, neither of which is a per-frame
  * event; jittered at the call site so 260 of them on a floor do not all walk
- * their column on the same frame. 0.55 because a thing indoors should read as
- * indoors without becoming invisible - the terrain around it keeps its own
- * baked light, and the two have to look like they are in the same room.
+ * their column on the same frame. How dark the answer can make it is
+ * `SKY_SHADE_MIN`, which a planted flower now reads too.
  */
 const SKY_PROBE_PERIOD = 0.6;
-const SKY_SHADE_MIN = 0.55;
 
 export class Drops {
   constructor(scene, planet, materials) {

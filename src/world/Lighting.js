@@ -79,6 +79,22 @@ for (let i = 0; i < N_BLOCKS; i++) {
 }
 
 /**
+ * How dark an entity gets from being fully roofed, as a factor on the sky it is
+ * lit by. Nothing in the world drops below it.
+ *
+ * It lives here, beside `SKY_ATTEN`, because two layers now answer the same
+ * question by different routes and must not answer it differently: a dropped
+ * item walks its own column (`Drops._probeSky`) and a planted flower reads the
+ * mesher's baked skylight (`BlockModels.sync`). They are the same object in the
+ * player's eyes and used to be one number apart.
+ *
+ * 0.55 because a thing indoors should read as indoors without becoming
+ * invisible - the terrain around it keeps its own baked light, and the two have
+ * to look like they are in the same room.
+ */
+export const SKY_SHADE_MIN = 0.55;
+
+/**
  * ATTEN for a step taken *up or down* rather than sideways.
  *
  * The seed above is only half of a roof. A slab three cells over the floor also

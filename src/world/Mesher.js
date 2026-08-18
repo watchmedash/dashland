@@ -225,16 +225,36 @@ export const CROSS_LIGHT_ADDR_SHIFT = 16;
 /**
  * Unpack one word's block light into `out` as three 0..1 floats.
  *
- * Skylight is deliberately not returned. It is shipped because it is four spare
- * bits in a word we are sending anyway, but nothing consumes it today: a
- * modelled flower already gets the sun through the shadow map and the entity
- * fill, and feeding it voxel skylight as well would count the sky twice.
+ * Block light only; the skylight nibble is `crossSky`. They are separate calls
+ * because they are separate quantities that land in different places in the
+ * shader - this one is added to the block-light term, that one scales the
+ * scene's indirect light - and every caller of this one hands in a length-3
+ * array.
  */
 export function crossLightRGB(w, out) {
   out[0] = (w & 15) / 15;
   out[1] = ((w >>> 4) & 15) / 15;
   out[2] = ((w >>> 8) & 15) / 15;
   return out;
+}
+
+/**
+ * Unpack one word's skylight as a 0..1 float: how much sky reaches this cell.
+ *
+ * This used to be shipped and thrown away, on the grounds that a modelled
+ * flower already got the sun through the shadow map *and* through the entity
+ * fill, which `Sky` dimmed by the **player's** sky exposure - so consuming it
+ * here would have counted the sky a third time.
+ *
+ * That fill is no longer global. A mob and a dropped item each probe the sky
+ * over themselves now (`Drops._probeSky`), and a planted flower was left as the
+ * one entity in the world with no answer of its own: measured at noon, a
+ * mushroom under three layers of stone read 3% darker than one in the open
+ * while the dropped one beside it read 16%. This nibble is the sample it was
+ * missing, and it was already in the word.
+ */
+export function crossSky(w) {
+  return ((w >>> 12) & 15) / 15;
 }
 
 /**

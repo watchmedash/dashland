@@ -3317,6 +3317,12 @@ export function applyInstancedSway(material, loY, hiY) {
  * and the block under it answer a torch by the same amount for ever. The AO
  * factor the terrain applies is dropped: a model has no per-vertex AO.
  *
+ * It carries the *sky* half of the same mesher word too, as `aSkyShade`. That
+ * rides here rather than in a patch of its own for the reason the block light
+ * stopped riding on the sway patch: they arrive together, in one word, for one
+ * cell, and splitting them would be two attributes fed from one lookup by two
+ * pieces of code that can drift. See the note at the multiply.
+ *
  * @param {THREE.Material} material patched in place; clone first if it is shared
  */
 export function applyInstancedBlockLight(material) {
@@ -3330,8 +3336,10 @@ export function applyInstancedBlockLight(material) {
       .replace('#include <common>', /* glsl */`
         #include <common>
         varying vec3 vInstBlock;
+        varying float vInstSkyShade;
         #ifdef USE_INSTANCING
         attribute vec3 aBlockLight;
+        attribute float aSkyShade;
         #endif
       `)
       // Guarded, and for two reasons: a non-instanced draw has no such
@@ -3341,8 +3349,10 @@ export function applyInstancedBlockLight(material) {
         #include <begin_vertex>
         #ifdef USE_INSTANCING
         vInstBlock = aBlockLight;
+        vInstSkyShade = aSkyShade;
         #else
         vInstBlock = vec3(0.0);
+        vInstSkyShade = 0.0;
         #endif
       `);
 
@@ -3353,6 +3363,7 @@ export function applyInstancedBlockLight(material) {
         const float BLOCK_KNEE = 0.28;
         const float BLOCK_CEIL = 0.58;
         varying vec3 vInstBlock;
+        varying float vInstSkyShade;
       `)
       // After three has finished with the light loop, alongside where the
       // terrain's LIGHTS_END adds its own `vBlock` term, and with the same
@@ -3360,6 +3371,19 @@ export function applyInstancedBlockLight(material) {
       // times brighter than the torch-lit dirt underneath it.
       .replace('#include <lights_fragment_end>', /* glsl */`
         #include <lights_fragment_end>
+        // The roof, on the indirect light only.
+        //
+        // indirectDiffuse is the ambient and the hemisphere fill: the sky
+        // arriving from everywhere, which no shadow map covers. The sun is in
+        // directDiffuse and is left alone, because it is already shadowed by
+        // the terrain, and darkening it here would count the roof twice.
+        //
+        // Shipped as how much to take away rather than how much to keep, so
+        // that - exactly like vInstBlock above - the neutral value is zero and
+        // an instance whose chunk has not arrived renders as it always did.
+        // There is no value of aSkyShade that can turn one black either: it is
+        // written from SKY_SHADE_MIN's complement and tops out at 0.45.
+        reflectedLight.indirectDiffuse *= 1.0 - vInstSkyShade;
         // The same highlight shoulder the terrain applies, for the same reason
         // and with the same constants — see BLOCK_KNEE in the voxel material.
         // Without it a flower beside a torch was lit on a different curve from

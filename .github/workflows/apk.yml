@@ -44,9 +44,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 22, not 20, and it is not a preference: @capacitor/cli 8.5 declares
+      # `engines.node >= 22.0.0` and refuses to run under less. `npm ci` only
+      # warns about that, so the failure lands three steps later on `cap sync`
+      # with nothing to connect it to. The dev machine runs 24, which is why
+      # this only ever broke in CI.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       # The runner image ships an Android SDK but pins its own JDK; Capacitor 8's
       # Gradle plugin wants 21. Named explicitly rather than inherited, so a

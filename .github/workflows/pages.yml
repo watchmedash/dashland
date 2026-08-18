@@ -28,10 +28,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
+      # `build:web`, not `build`. The `build` script ends by running
+      # scripts/build-apk.mjs, which hunts for Android Studio's bundled JDK at a
+      # Windows path and calls process.exit(1) when it cannot find one - so this
+      # job has been failing on every push since the APK step was added to that
+      # script, and the site has been stale for as long. The APK is built and
+      # published by apk.yml next door, which is the right place for it.
+      - run: npm run build:web
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

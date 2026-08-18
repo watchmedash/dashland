@@ -2933,7 +2933,11 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
    leave four ragged holes, and what should decide where a group sits is only
    whether the one above it has finished. `break-inside` is what keeps a group
    whole across the fold. */
-.ctl-groups { columns: 260px; column-gap: 38px; }
+/* 320, not 260. The column width is what decides how many groups stand side by
+   side, and a narrow column wraps a two-word action onto a second line while
+   the monitor beside it is empty. Wider columns, so fewer of them wrap and each
+   one reads as a block rather than as a rag. */
+.ctl-groups { columns: 320px; column-gap: 44px; }
 .ctl-group { break-inside: avoid; padding-bottom: 18px; }
 .ctl-group .ctl-head { margin-top: 0; margin-bottom: 4px; }
 
@@ -3138,7 +3142,17 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    together. Nothing inside either screen is capped a second time; the sheet is
    the only measure, which is what stops the two disagreeing again. */
 #skills > .panel { --sheet: 1080px; }
-#controls > .panel { --sheet: 1400px; }
+/* No cap. 1400 was a guess at "the width its content needs" and it was the
+   wrong instinct: the content is a list of independent groups, so the width it
+   needs is however much there is. "Screen is so wide and yet we are squeezing
+   the contents." A gutter keeps it off the glass; nothing else holds it in.
+
+   100vw rather than `none` because the padding is
+   `max(--gutter, (100% - --sheet) / 2)` and `calc` cannot subtract a keyword -
+   `none` there is an invalid declaration and takes the whole padding with it.
+   At 100vw the second term is zero or negative and the gutter always wins,
+   which is exactly "no cap" expressed in arithmetic the parser accepts. */
+#controls > .panel { --sheet: 100vw; --gutter: 44px; }
 /* ...and inside that sheet the picker is a column exactly as wide as the window
    the figure stands in. The stage was already capped against the height and the
    furniture under it was not, so on a monitor the difficulty control was a
@@ -3329,19 +3343,14 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    half the content box less half the viewport is exactly minus that padding,
    whatever the gutter happens to be at this size, and the band lands on both
    window edges with no number repeated from the rule above. */
+/* No board behind the keys.
+   The card was stripped to a full-bleed band, which took the frame off and left
+   the paint on - and a lit plank across the window is still a window. "Buttons
+   background still have window." The keys are the object; they carry their own
+   material and they are the only thing here that should. */
 #menu .menu-actions {
-  width: auto; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);
-  padding: 14px calc(50vw - 50%); border-radius: 0;
-  /* Scorched at both edges, so a board the width of a monitor settles into the
-     dark it is standing on instead of reading as a lit plank laid over it. */
-  background:
-    linear-gradient(180deg, rgba(6, 4, 1, .5), rgba(6, 4, 1, 0) 26%, rgba(6, 4, 1, 0) 64%, rgba(6, 4, 1, .55)),
-    var(--wood-long);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 222, 170, .16),
-    inset 0 -2px 6px rgba(0, 0, 0, .45),
-    0 -1px 0 rgba(12, 7, 2, .8),
-    0 1px 0 rgba(12, 7, 2, .8);
+  width: auto; margin: 15px 0 0; padding: 0;
+  background: none; box-shadow: none; border-radius: 0;
 }
 /* The keys are the content, so they keep a width a word fits on rather than
    growing to the window with the board under them. */

@@ -1158,8 +1158,13 @@ add({ name: 'deathcap', label: 'Deathcap', block: ID.deathcap, sound: 'grass', p
 // vegetable is worth less than a fire on a fish (3 → 8), and the ladder's one
 // invariant — cooking beats raw — is kept at 2 → 6 with room to spare.
 add({
+  // `art` carried over from the raw bean, which is how every other cooked thing
+  // in this file is drawn: meat and poultry both reuse their own raw art with
+  // the `cooked` flag doing the rest. Without it this was the ONE non-block item
+  // in the game with neither a model nor generated art - measured, 1 of 449 -
+  // so it fell through to the generic blob and drew as nothing in particular.
   name: 'cooked_greenbean', label: 'Cooked Green Beans', food: 6, cooked: true,
-  color: '#5f9c3e', shine: '#96cd72',
+  art: 'wheat', color: '#5f9c3e', shine: '#96cd72',
 });
 
 /**

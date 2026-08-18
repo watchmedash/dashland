@@ -19,7 +19,7 @@
 import * as THREE from 'three';
 import { GRAVITY, FACE_ROLE, FACE_PHYSICS } from '../world/Constants.js';
 import {
-  W, D, wrap, delta, colIndex, faceAt, cellOf, isWall, isSealed, portalAxis,
+  W, D, wrap, delta, colIndex, faceAt, cellOf, isWall, isSealed, portalAxis, wallExit,
 } from '../world/Grid.js';
 import {
   IS_SOLID, IS_SHAPED, IS_LADDER, IS_FENCE, IS_GATE, ID, collisionBoxes, isPassable,
@@ -1129,12 +1129,20 @@ export class Player {
    * full stop, and the far side is the column one step beyond the divider on the
    * axis the divider is thin on. `Grid.portalAxis` owns that axis.
    *
-   * **Not every divider column is a way through.** The ring corners and the
-   * back-to-back runs where two sealed faces touch have a wall on both sides of
-   * one axis, and the spec is explicit that you do not travel from Rime to
-   * Tempest directly. `portalAxis` returns null for those, and a body that walks
-   * into one is put back where it came from rather than being let through to
-   * somewhere it should not be.
+   * **Not every divider column is a way through.** The back-to-back runs where
+   * two sealed faces touch have a wall on both sides of the thin axis, and the
+   * spec is explicit that you do not travel from Rime to Tempest directly.
+   * `portalAxis` returns null for those, and a body that walks into one is put
+   * back where it came from rather than being let through to somewhere it
+   * should not be.
+   *
+   * A RING CORNER is refused by that same rule and should not be: the ring
+   * turns there, so the column is walled on both axes, and the owner's report
+   * is that a portal which works along the whole run stops working at its end.
+   * `_cornerStep` is the second chance, and it reads the same provenance -
+   * leave a corner by the axis whose far side is open ground, which by the
+   * geometry `Grid.wallExit` sets out is always outward into the cross. So a
+   * corner lets you out of a sealed face and never into one.
    *
    * **You are never left in rock or in the air.** This replaces falling: the
    * column you are standing in is empty of anything solid all the way to
@@ -1174,14 +1182,30 @@ export class Player {
           if (portalAxis(tx, tz, _pAxis) !== null) { cx = tx; cz = tz; found = true; }
         }
       }
+      // Second choice, and only ever reached when the body is standing on open
+      // ground with a corner under one shoulder: a run column beside it would
+      // have been taken above, so walking along a divider still goes through
+      // the run rather than being grabbed by the corner at its end.
+      if (!found && !isWall(cx, cz)) {
+        for (const tx of xs) {
+          for (const tz of zs) {
+            if (found || (tx === cx && tz === cz)) continue;
+            if (this._cornerStep(tx, tz) !== null) { cx = tx; cz = tz; found = true; }
+          }
+        }
+      }
     }
     const ax = portalAxis(cx, cz, _pAxis);
     if (ax === null) {
       // Either ordinary ground - the case on almost every frame - or a divider
-      // with no way through it. `isWall` is the authority on which.
+      // the strict rule will not read. `isWall` is the authority on which.
       if (!isWall(cx, cz)) return false;
-      this._ejectFromPortal(height);
-      return false;
+      const corner = this._cornerStep(cx, cz);
+      if (corner === null) {
+        this._ejectFromPortal(height);
+        return false;
+      }
+      return this._arrive(wrap(cx + corner.dx), wrap(cz + corner.dz), corner.dx !== 0, height);
     }
 
     // Where the divider's own coordinate is on the thin axis, and where the
@@ -1211,10 +1235,47 @@ export class Player {
     // Two steps from the near side: through the divider, and out the far side.
     const fx = ax.axis === 0 ? wrap(cx - s) : cx;
     const fz = ax.axis === 0 ? cz : wrap(cz - s);
-    // Only the thin axis moves. Keeping the coordinate along the divider means
-    // you come out where you went in rather than being snapped to the middle of
-    // a cell you were walking past.
-    if (ax.axis === 0) pos.x = fx + 0.5; else pos.z = fz + 0.5;
+    return this._arrive(fx, fz, ax.axis === 0, height);
+  }
+
+  /**
+   * The way out of a divider column the strict rule refuses, or null.
+   *
+   * The corner case, and it is read from the same place the run's direction is:
+   * `_freeX`/`_freeZ`, the last column the feet were in that was not a divider.
+   * That column is the near side, so the far side is the step the other way,
+   * and `Grid.wallExit` says whether it is open ground - which at a corner
+   * means the cross, and at a corner-to-corner join means nothing at all.
+   *
+   * A ring corner whose two runs both face the cross has two ways out. Both are
+   * correct and they land one column apart, so the tie goes to the axis the
+   * body is actually travelling on: you come out ahead of where you were going
+   * rather than being turned through ninety degrees.
+   */
+  _cornerStep(cx, cz) {
+    const sx = Math.sign(delta(cx, wrap(Math.floor(this._freeX))));
+    const sz = Math.sign(delta(cz, wrap(Math.floor(this._freeZ))));
+    const okX = sx !== 0 && wallExit(cx, cz, -sx, 0);
+    const okZ = sz !== 0 && wallExit(cx, cz, 0, -sz);
+    if (okX && okZ) {
+      return Math.abs(this.vel.z) > Math.abs(this.vel.x)
+        ? { dx: 0, dz: -sz } : { dx: -sx, dz: 0 };
+    }
+    if (okX) return { dx: -sx, dz: 0 };
+    if (okZ) return { dx: 0, dz: -sz };
+    return null;
+  }
+
+  /**
+   * Put the body down on the far column, and say a transit happened.
+   *
+   * Only the thin axis moves. Keeping the coordinate along the divider means
+   * you come out where you went in rather than being snapped to the middle of a
+   * cell you were walking past.
+   */
+  _arrive(fx, fz, alongX, height) {
+    const pos = this.position;
+    if (alongX) pos.x = fx + 0.5; else pos.z = fz + 0.5;
     pos.y = this._standingHeightAt(pos.x, pos.z, height);
     // Arriving is not falling, exactly as `spawnAtColumn` says.
     this.fallStart = null;

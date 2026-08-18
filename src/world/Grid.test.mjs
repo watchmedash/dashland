@@ -9,7 +9,7 @@ import {
   G, F, W, D, COLUMNS, CELLS, NORTH, SOUTH, WEST, EAST, DIR_STEP,
   SEALED, CROSS, isSealed, START_FACE, WALL_T,
   wrap, colIndex, cellIndex, colDecode, faceAt, localAt, faceOrigin,
-  faceStep, isDivider, isWall, portalsOf, allPortals, delta, dist2,
+  faceStep, isDivider, isWall, portalsOf, allPortals, portalAxis, wallExit, delta, dist2,
   SEA_K, worldOf, cellOf,
 } from './Grid.js';
 
@@ -233,6 +233,47 @@ eq(START_FACE, 5, 'the start is the middle');
     }
   }
   eq(portalsOf(5).length, 0, 'the cross has no portals');
+}
+
+// --- the way through, run by run and corner by corner ----------------------
+//
+// `portalAxis` reads a straight run from the column alone. A ring corner is
+// walled on both axes and cannot be read that way, so `wallExit` answers the
+// one-sided question instead - and what makes that safe is asserted here rather
+// than only argued in the comment: a corner's open sides are all outward.
+{
+  const o1 = faceOrigin(1);           // Rime, at the map origin
+  ok(portalAxis(o1.x + F - 1, o1.y + 200) !== null, 'the east run is a way through');
+  eq(portalAxis(o1.x + 200, o1.y), null, 'the sealed-to-sealed north run is not');
+  eq(portalAxis(o1.x + F - 1, o1.y + F - 1), null, 'and nor is a ring corner, read alone');
+
+  // Every ring corner in the world. Twelve of the sixteen have a way out and
+  // four - where four rings meet at a corner of the map - have none.
+  let out = 0, none = 0, inward = 0;
+  for (const f of SEALED) {
+    const o = faceOrigin(f);
+    for (const [i, j] of [[0, 0], [F - 1, 0], [0, F - 1], [F - 1, F - 1]]) {
+      const x = o.x + i, y = o.y + j;
+      eq(portalAxis(x, y), null, `face ${f} corner (${i},${j}) is refused by the strict rule`);
+      let n = 0;
+      for (const [dx, dy] of DIR_STEP) {
+        if (!wallExit(x, y, dx, dy)) continue;
+        n++;
+        if (isSealed(faceAt(x + dx, y + dy))) inward++;
+      }
+      if (n > 0) out++; else none++;
+    }
+  }
+  eq(out, 12, 'twelve ring corners have a way out');
+  eq(none, 4, 'and the four where four rings meet have none');
+  eq(inward, 0, 'no corner ever leads into a sealed face');
+
+  // The sealed-to-sealed runs, from the side a body can actually stand on. The
+  // near side is the face's own interior, so the far side is the other ring.
+  for (let j = 1; j < F - 1; j += 97) {
+    ok(!wallExit(o1.x + 200, o1.y, 0, -1), 'Rime does not open north into Verdant');
+    ok(!wallExit(o1.x, o1.y + j, -1, 0), 'nor west into Tempest');
+  }
 }
 
 // --- wrapped distance ------------------------------------------------------

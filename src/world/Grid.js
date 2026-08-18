@@ -206,6 +206,32 @@ export function portalAxis(x, y, out = { axis: 0, dx: 0, dy: 0 }) {
 }
 
 /**
+ * Is stepping out of divider column (x, y) toward (x + dx, y + dy) a way out?
+ *
+ * `portalAxis` is the whole answer along a straight run, where the columns
+ * either side of the wall are the two faces it joins. It is not the answer at a
+ * RING CORNER. The ring turns there, so a corner column has a wall on both
+ * sides of BOTH axes and the both-open rule refuses it - and a body that walks
+ * into the corner of its own face's ring is shoved back out of a portal that
+ * works everywhere else along the same run, which is the report this answers.
+ *
+ * A corner is passable; it just cannot be read from the column alone, because
+ * which of its two open sides you want depends on which way you came in. So the
+ * rule there is one-sided: leave by the axis whose FAR side is open ground, and
+ * let the caller supply the near side from where the body came from.
+ *
+ * The near side does not have to be tested and must not be: at a corner it is
+ * always a wall, which is the whole reason `portalAxis` refuses. What keeps
+ * that safe is a fact about the geometry rather than a check - **both of a ring
+ * corner's inward neighbours are ring columns**, never the face's interior, so
+ * the only open side a corner can have is outward. A corner therefore lets you
+ * OUT of a sealed face and never into one, and the spec's "you do not travel
+ * from Rime to Tempest directly" survives for free: a corner-to-corner join has
+ * another ring on every side and is refused on all four.
+ */
+export const wallExit = (x, y, dx, dy) => isWall(x, y) && !isWall(x + dx, y + dy);
+
+/**
  * Shortest signed distance from a to b on one wrapped axis.
  *
  * The map wraps, so "b - a" is wrong by a full turn half the time, and every

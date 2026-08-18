@@ -8,7 +8,7 @@
 // about terrain.
 
 import * as THREE from 'three';
-import { W, D, F, wrap, delta, colIndex, cellIndex, isWall, faceAt } from '../world/Grid.js';
+import { W, D, F, wrap, delta, colIndex, cellIndex, isWall, isSealed, faceAt } from '../world/Grid.js';
 import { GRAVITY } from '../world/Constants.js';
 import { ID } from '../world/Blocks.js';
 import { Player, HEIGHT } from './Player.js';
@@ -656,6 +656,84 @@ const YAW_SOUTH = Math.PI;        // forward = (0, 0, +1)
     eq(inside(p.position.x, p.position.z), 1, 'a corner-to-corner divider does not let you through');
     ok(!isWall(p.cell.x, p.cell.y), 'and does not leave you standing inside it');
     ok(p.position.y >= GROUND - 0.01, `nor drop you down it (y = ${p.position.y.toFixed(2)})`);
+  }
+
+  // The corners of a ring. The strict rule refuses them - the ring turns, so
+  // the column is walled on both axes - and the owner's report is that a portal
+  // which works all the way along a run stops working at its end. It lets you
+  // OUT of a sealed face by whichever side is open, and never in: both of a
+  // corner's inward neighbours are ring columns, so there is nothing inward to
+  // let anyone through to.
+  {
+    /** Stand at `from`, then step into `to`, and ask the transit alone. */
+    const step = (fromX, fromZ, toX, toZ) => {
+      const planet = new FakePlanet().groundTo(GROUND).dividers();
+      const p = new Player(planet);
+      p.setPosition(fromX, GROUND + 0.0001, fromZ);
+      p.vel.x = 0; p.vel.y = 0; p.vel.z = 0;
+      p._sync();
+      p.position.x = toX; p.position.z = toZ;
+      p._sync();
+      p.moved = p._portalTransit(HEIGHT);
+      return p;
+    };
+
+    // Rime's south-east corner, met on the diagonal from inside. Both ways out
+    // are the cross, and either is a correct answer.
+    {
+      const p = step(F - 2.5, F - 2.5, F - 0.5, F - 0.5);
+      ok(p.moved, 'a ring corner lets you through');
+      ok(inside(p.position.x, p.position.z) !== 1, 'and out of Rime');
+      ok(!isWall(p.cell.x, p.cell.y), 'not left standing in the divider');
+      near(p.position.y, GROUND + 0.0001, 0.02, 'standing on the far surface');
+    }
+
+    // The same corner from the cross side. There is nowhere to put you - the
+    // step inward is the ring turning the corner - so you are pushed back out,
+    // and above all you are not dropped inside Rime.
+    {
+      const p = step(F + 0.5, F - 0.5, F - 0.5, F - 0.5);
+      ok(!p.moved, 'and refuses to let you in at one');
+      eq(inside(p.position.x, p.position.z), 2, 'you stay on the face you came from');
+      ok(!isWall(p.cell.x, p.cell.y), 'and not inside the divider');
+    }
+
+    // The corner where four rings meet: no open side at all, from any of them.
+    {
+      const p = step(1.5, 1.5, 0.5, 0.5);
+      ok(!p.moved, 'the corner of the map is not a way through');
+      eq(inside(p.position.x, p.position.z), 1, 'and leaves you where you were');
+      ok(!isWall(p.cell.x, p.cell.y), 'and not inside the divider');
+      ok(p.position.y >= GROUND - 0.01, 'nor drops you down it');
+    }
+
+    // Every ring corner in the world, walked into from inside its own face on
+    // the diagonal. Twelve of the sixteen open onto the cross; the four at the
+    // corners of the map do not.
+    {
+      let through = 0, blocked = 0, bad = 0;
+      for (const f of [1, 3, 7, 9]) {
+        const o = { x: ((f - 1) % 3) * F, y: (((f - 1) / 3) | 0) * F };
+        for (const [i, j] of [[0, 0], [F - 1, 0], [0, F - 1], [F - 1, F - 1]]) {
+          const ix = i === 0 ? 1 : -1, jz = j === 0 ? 1 : -1;
+          const p = step(
+            o.x + i + ix + 0.5, o.y + j + jz + 0.5,
+            o.x + i + 0.5, o.y + j + 0.5,
+          );
+          if (isWall(p.cell.x, p.cell.y)) bad++;
+          else if (p.moved) {
+            through++;
+            if (isSealed(faceAt(p.cell.x, p.cell.y))) bad++;
+          } else {
+            blocked++;
+            if (faceAt(p.cell.x, p.cell.y) !== f) bad++;
+          }
+        }
+      }
+      eq(through, 12, 'twelve ring corners let you out');
+      eq(blocked, 4, 'and four have nowhere to send you');
+      eq(bad, 0, 'none of them lands you in a wall or in another sealed face');
+    }
   }
 
   // Every crossable divider on the map, from both sides, in one pass. The

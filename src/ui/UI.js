@@ -2485,6 +2485,17 @@ export class UI {
     // fill an 830px sheet, and it sat in the middle of it with the title a hand
     // away to the left. The shop keeps the full width; its two columns want it.
     this.el.screenEl.classList.toggle('snug', kind === 'crate');
+    // Trading is a screen of two lists and nothing else. The bag underneath it
+    // is 36 pockets of dead weight: the owner's words are 'I don't even know
+    // why our inventory grid is there when we should just list items we can buy
+    // and things we can sell', and they are right - nothing on this screen is
+    // dragged. You press a row to buy and you press a row to sell, and what you
+    // own is already the left-hand list with its counts on it.
+    //
+    // Hiding it is also what pays for the lists: they were capped at 250px
+    // against a sheet three times that, because the bag had to fit under them.
+    // See '#screen.trading' in style.css.
+    this.el.screenEl.classList.toggle('trading', kind === 'shop');
 
     this.el.screenEl.classList.remove('hidden');
     this.refresh();

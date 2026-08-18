@@ -2725,6 +2725,16 @@ function patch(material, opts = {}) {
       .replace('#include <common>', '#include <common>\n' + COMMON_FRAG_HEAD)
       .replace('#include <map_fragment>', opts.liquid ? LIQUID_MAP_FRAG : (opts.cutout ? CUTOUT_MAP_FRAG : MAP_FRAG))
       .replace('#include <normal_fragment_maps>', opts.liquid ? LIQUID_NORMAL_FRAG : NORMAL_FRAG)
+      // getShadowMask() is what the water's sun glint asks whether the sun is
+      // actually reaching it. three declares it in a chunk that MeshLambert and
+      // MeshBasic include and MeshStandard does not, so it is added here rather
+      // than hand-written: the loop inside it has to match this version's
+      // getShadow() signature exactly, and the surest way to match it is to use
+      // three's own source for it.
+      .replace('#include <shadowmap_pars_fragment>',
+        opts.liquid
+          ? ['#include <shadowmap_pars_fragment>', '#include <shadowmask_pars_fragment>'].join('\n')
+          : '#include <shadowmap_pars_fragment>')
       .replace('#include <roughnessmap_fragment>', ROUGH_FRAG)
       .replace('#include <metalnessmap_fragment>', METAL_FRAG)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + LAVA_EMISSIVE)
@@ -2893,7 +2903,26 @@ function patch(material, opts = {}) {
           const float SUN_PATH_GAIN = 0.35;
           vec3 half3 = normalize(uSunDir - vDir);
           float ndh = clamp(dot(normal, half3), 0.0, 1.0);
-          gl_FragColor.rgb += uSunColor * fres * vSun * wGloss
+          // ...and IS THE SUN ACTUALLY REACHING THIS WATER.
+          //
+          // vSun is the mesher's baked SKYLIGHT: how much open sky is over
+          // this cell. It is the right gate for a roof - it is what keeps the
+          // glint out of a flooded cave - and it is no gate at all for a
+          // mountain, because a lake at the foot of one has the whole sky above
+          // it and no sun on it. So the water lit a sun path across itself
+          // while standing in shadow, which is the owner's report.
+          //
+          // getShadowMask() is the renderer's own answer, the same one the
+          // direct lighting above already used, and it is available here
+          // because this block runs after the light loop. Two gates, and they
+          // are not redundant: skylight answers "is there a roof", the shadow
+          // map answers "is something in the way", and water wants both.
+          //
+          // The sky REFLECTION above is deliberately left unshadowed. That term
+          // is the sky, not the sun, and a lake in a mountain's shadow still
+          // mirrors the blue over it - shadowing that would turn every shaded
+          // pool into a hole in the world.
+          gl_FragColor.rgb += uSunColor * fres * vSun * wGloss * getShadowMask()
                             * (pow(ndh, 190.0) * 9.0 + pow(ndh, SUN_PATH_POW) * SUN_PATH_GAIN);
 
           // Opacity follows the same curve: grazing water hides its bed.
@@ -3617,7 +3646,24 @@ export function applyInstancedCrack(material) {
           vec3 bp = uBreakPos;
           vec2 bd = bp.xz - vCrackWorld.xz;
           bp.xz -= CRACK_MAP_W * floor(bd / CRACK_MAP_W + 0.5);
-          if (distance(vCrackWorld, bp) < 1.9) {
+          // THE BROKEN CELL, and nothing near it.
+          //
+          // This was a 1.9-unit sphere, copied from the terrain's own test, and
+          // on the terrain that is right: the voxel path narrows to one cell
+          // afterwards, in TEXTURE space, using the per-quad window. A model has
+          // no such window, so the sphere WAS the test, and a sphere nearly two
+          // cells across cracks every plant in the patch. The owner saw exactly
+          // that - "cracking animations on models also shows on nearby
+          // model/block" - and it is the only report so far that confirms the
+          // crack is drawing on models at all.
+          //
+          // A cell-sized box instead, which is exact. Every modelled block is
+          // instanced from its cell's centre and grows upward from the floor, so
+          // the tallest of them (kelp, a full cell) just touches the lid and
+          // everything else is well inside. The 0.5 is half a cell and is not a
+          // tolerance - a fragment outside it belongs to a different block.
+          vec3 rel = abs(vCrackWorld - bp);
+          if (rel.x < 0.5 && rel.y < 0.5 && rel.z < 0.5) {
             vec3 an = abs(vCrackNormal);
             vec2 cuv = an.y > an.x && an.y > an.z ? vCrackWorld.xz
                      : an.x > an.z ? vCrackWorld.zy

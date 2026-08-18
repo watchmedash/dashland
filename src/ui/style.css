@@ -2303,6 +2303,41 @@ body.fighting #toasts { top: 172px; }
   padding: 5px; border-radius: var(--r-md);
   background: rgba(122, 94, 54, .07); box-shadow: var(--sunk);
 }
+/* THE COUNTER, WITH NO BAG UNDER IT.
+   Set by `openScreen` for the merchant only. Two changes and the second is
+   only possible because of the first:
+
+   The 36-pocket grid goes. Nothing on this screen is dragged - a row is a
+   button that buys and a row is a button that sells - and what you own is
+   already the right-hand list, with its counts on it. It was there because
+   every other screen in this panel has a bag under it, which is a reason for
+   the markup and not a reason for the screen.
+
+   And then the lists get the height it was holding. 250px was never a judgement
+   about a list, it was what was left over once 36 pockets and a hotbar had been
+   fitted beneath: on a 900px window the merchant drew two 250px lists and half
+   a sheet of empty parchment. At 62vh they run to the bottom of the panel, so
+   a stock of thirty is one scroll rather than five. */
+#screen.trading .inv-section { display: none; }
+#screen.trading .shop-list { max-height: min(720px, 70vh); }
+/* THE WIDTH HAS TO BE HANDED DOWN, EVERY STEP.
+   Four elements stand between the sheet and the two counters — `.inv-body`,
+   `.inv-left`, `#screen-top`, `.shop-area` — and the first version of this rule
+   set `width: 100%` on the last two only. It did nothing, because `.inv-left`
+   is a flex column with `align-items: flex-start`, so `#screen-top` was already
+   shrink-to-fit and `100%` of a shrunk parent is shrunk. The counters came out
+   460px wide, wrapped one under the other, with half the sheet blank to the
+   right of them: the same wasted space the bag was hiding, moved sideways.
+   `align-items: stretch` is the line that actually does it. */
+#screen.trading .inv-body { align-items: stretch; }
+#screen.trading .inv-left { flex: 1 1 auto; width: 100%; align-items: stretch; }
+#screen.trading #screen-top,
+#screen.trading .shop-area { width: 100%; }
+/* ...and with the width arriving, the two counters can sit side by side to the
+   edges. The 348px basis stays as the wrap point, so a phone still stacks them
+   exactly where it did. */
+#screen.trading .shop-cols { flex-wrap: wrap; }
+#screen.trading .shop-col { flex: 1 1 348px; }
 /* Set by `_refreshShop` and `_refreshRecipes` on the lists that overflow. The
    partial row at the bottom edge is deliberate; the fade is what keeps it from
    reading as a rendering fault.

@@ -553,7 +553,18 @@ export class Planet {
         if (gi === GROUP_CUTOUT && this.materials.cutoutDepth) {
           mesh.customDepthMaterial = this.materials.cutoutDepth;
         }
-        mesh.receiveShadow = gi !== GROUP_LIQUID;
+        // Water receives now, and it has to: its sun glint is gated on
+        // getShadowMask(), and getShadowMask() returns a flat 1 for a mesh
+        // whose receiveShadow is false. That was the whole of the bug the
+        // owner reported - a lake in a mountain's shadow drawing a sun path
+        // across itself - and turning the term on without turning this on
+        // would have changed nothing at all.
+        //
+        // It shadows the water's DIRECT light as well, which is the same
+        // correction stated on the other side: a shaded lake should be a
+        // shaded lake. The reflected sky is unaffected either way, being
+        // added after the light loop.
+        mesh.receiveShadow = true;
         mesh.matrixAutoUpdate = false;
         // Which chunk this is, so `setView` can re-seat it without decoding a
         // string key. The vertices are absolute; the transform is the offset.

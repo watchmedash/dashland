@@ -1292,13 +1292,13 @@ export const POSE = {
   coral_brain:  { file: 'wam/coral_brain',  pack: 'wam', height: 0.24, grip: 0.42, rot: [0.10, -0.45, 0.16],  pos: [0.004, 0.019, -0.007], icon: [0.22, 0.40, -0.10] },
   coral_dead:   { file: 'wam/coral_dead',   pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.08, -0.75, 0.24], pos: [0.015, 0.091, -0.015], icon: [0.10, 0.70, -0.18] },
   kelp:         { file: 'wam/kelp',         pack: 'wam', height: 0.34, grip: 0.3, rot: [-0.12, -0.40, 0.28], pos: [0.0008, 0.0108, -0.0024], icon: [0.08, 0.36, -0.20] },
-  sea_grass:    { file: 'wam/sea_grass',    pack: 'wam', height: 0.24, grip: 0.3, rot: [-0.06, -0.50, 0.26], pos: [0.0006, 0.0081, -0.0018], icon: [0.10, 0.46, -0.16] },
+  sea_grass:    { file: 'wam/sea_grass',    pack: 'wam', height: 0.23, grip: 0.3, rot: [-0.06, -0.50, 0.26], pos: [0.0006, 0.0081, -0.0018], icon: [0.10, 0.46, -0.16] },
   sea_sponge:   { file: 'wam/sea_sponge',   pack: 'wam', height: 0.26, grip: 0.4, rot: [0.06, -0.50, 0.18],  pos: [0.02, 0.11, -0.04], icon: [0.16, 0.46, -0.12] },
   // The clam is the one that has to show its inside. Its mantle — the bright
   // strip between the valves and the only saturated thing on the model — faces
   // straight up, so both rotations pitch it well forward, the food kit's `flat`
   // treatment. Square-on it is two grey shells and nothing else.
-  sea_shell:    { file: 'wam/sea_shell',    pack: 'wam', height: 0.24, grip: 0.36, rot: [0.46, -0.40, 0.16],  pos: [0.016, 0.081, -0.032], icon: [0.72, 0.34, -0.08] },
+  sea_shell:    { file: 'wam/sea_shell',    pack: 'wam', height: 0.22, grip: 0.36, rot: [0.46, -0.40, 0.16],  pos: [0.016, 0.081, -0.032], icon: [0.72, 0.34, -0.08] },
   pearl:        { file: 'wam/pearl',        pack: 'wam', height: 0.22, grip: 0.5, rot: [0.10, -0.30, 0.10],  pos: [0.011, 0.064, -0.027], icon: [0.12, 0.26, 0] },
 
   // The larder and the lamp, on the same three rules as the reef above.
@@ -1316,9 +1316,9 @@ export const POSE = {
   // specks past the rim. Both rotations pitch it forward hard, and the icon
   // nearly all the way, which is the food kit's `flat` treatment used for a
   // block — the crown, seen from above, is the thing worth putting in a slot.
-  sea_lettuce:   { file: 'wam/sea_lettuce',   pack: 'wam', height: 0.26, grip: 0.3, rot: [0.10, -1.10, 0.24], pos: [0.0024, 0.014, -0.0024], icon: [0.42, 1.15, -0.14] },
+  sea_lettuce:   { file: 'wam/sea_lettuce',   pack: 'wam', height: 0.255, grip: 0.3, rot: [0.10, -1.10, 0.24], pos: [0.0024, 0.014, -0.0024], icon: [0.42, 1.15, -0.14] },
   sea_grape:     { file: 'wam/sea_grape',     pack: 'wam', height: 0.30, grip: 0.26, rot: [-0.06, -0.50, 0.26], pos: [0.007, 0.04, -0.007], icon: [0.10, 0.44, -0.18] },
-  abyss_anemone: { file: 'wam/abyss_anemone', pack: 'wam', height: 0.24, grip: 0.36, rot: [0.44, -0.40, 0.16],  pos: [0.005, 0.025, -0.01], icon: [0.70, 0.34, -0.08] },
+  abyss_anemone: { file: 'wam/abyss_anemone', pack: 'wam', height: 0.225, grip: 0.36, rot: [0.44, -0.40, 0.16],  pos: [0.005, 0.025, -0.01], icon: [0.70, 0.34, -0.08] },
   // Dried kelp is item-only and is a stack of flat sheets, so it is held and
   // shown the way the food kit holds anything flat: gripped low at the fold,
   // turned enough that the stepped margins read rather than the back sheet's
@@ -1349,9 +1349,9 @@ export const POSE = {
 
   // Clumps read from a three-quarter view, the flowers' treatment: enough yaw
   // that the clump has depth, not so much that the leader hides the buds.
-  aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.26, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.0022, 0.0146, -0.0105], icon: [0.18, 0.46, -0.14] },
+  aloe:         { file: 'wam/aloe',         pack: 'wam', height: 0.244, grip: 0.34, rot: [0.06, -0.50, 0.22],  pos: [0.0022, 0.0146, -0.0105], icon: [0.18, 0.46, -0.14] },
   snowbell:     { file: 'wam/snowbell',     pack: 'wam', height: 0.26, grip: 0.3, rot: [0.02, -0.45, 0.24],  pos: [0.002, 0.011, -0.002], icon: [0.10, 0.42, -0.16] },
-  lingonberry:  { file: 'wam/lingonberry',  pack: 'wam', height: 0.26, grip: 0.36, rot: [1.04, 0.66, 0.18],   pos: [0.002, -0.01, 0.01], icon: [0.16, 0.44, -0.14] },
+  lingonberry:  { file: 'wam/lingonberry',  pack: 'wam', height: 0.227, grip: 0.36, rot: [1.04, 0.66, 0.18],   pos: [0.002, -0.01, 0.01], icon: [0.16, 0.44, -0.14] },
   // Held low and turned so the volva is in shot. The swollen sack at the foot is
   // the field mark that says deathcap rather than mushroom, and a pose that put
   // the cap between the eye and the base would have thrown away the one thing
@@ -1363,23 +1363,45 @@ export const POSE = {
   // square-on from the side is a line. Both rotations pitch them well forward
   // and the icons nearly onto their backs, because a trefoil and a star are
   // shapes that exist only in plan view.
-  clover:       { file: 'wam/clover',       pack: 'wam', height: 0.24, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.0064, 0.0076, -0.0021], icon: [0.78, 0.46, -0.10] },
-  alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.0026, 0.0031, -0.0009], icon: [0.80, 0.42, -0.10] },
+  clover:       { file: 'wam/clover',       pack: 'wam', height: 0.192, grip: 0.32, rot: [0.42, -0.55, 0.18],  pos: [0.0064, 0.0076, -0.0021], icon: [0.78, 0.46, -0.10] },
+  alpine_aster: { file: 'wam/alpine_aster', pack: 'wam', height: 0.186, grip: 0.32, rot: [0.44, -0.50, 0.18],  pos: [0.0026, 0.0031, -0.0009], icon: [0.80, 0.42, -0.10] },
   // The wild harvest and the orchard. `file` is what `worldModel` resolves, so
   // a modelled block with no entry here plants fine and draws NOTHING - which
   // is exactly what happened the first time these went in.
   //
-  // The held pose numbers are the family defaults rather than individually
-  // measured: these are picked up rarely and what matters first is that they
-  // exist in the world. Worth a pass with the turntable later.
+  // The held pose numbers were the family defaults rather than individually
+  // measured, and one of them was reported: the icecap moss is the joint
+  // smallest plant on the planet (0.26 of a cell) and was held at the same 0.22
+  // as a hops vine that stands three and a half times taller.
+  //
+  // Audited across all seventy modelled plants, the hand was nearly FLAT — held
+  // heights spanned 0.20 to 0.34, a factor of 1.7, against world heights from
+  // 0.22 to 1.0, a factor of 4.5. The hand was compressing the whole range of
+  // the world into almost nothing, and the small end paid for it.
+  //
+  // The heights here now carry a term for how big the thing actually is:
+  // min(1, sqrt(worldHeight / 0.5)), applied to what was already there. The
+  // square root keeps a truffle visible rather than strictly proportional — a
+  // linear term would make it a fifth of a firebloom and unreadable in a slot.
+  //
+  // SHRINK ONLY, which is a deliberate limit rather than the whole idea. The
+  // report was "too big", so the cap at 1 means nothing in the game got larger
+  // than it was and no pose that reads correctly today can have been broken by
+  // it. The cost is that the top of the range is still compressed: a kelp stalk
+  // is a whole cell in the world and is still held at a flower's size. Lifting
+  // that cap to 1.45 is the one change that would finish the job.
+  //
+  // `pos` is deliberately NOT scaled with them. It is the offset between the
+  // fist and the grip point — a fact about the hand, not about the item — so a
+  // model shrinks around the place it is held rather than drifting off it.
   cactusfruit:  { file: 'wam/cactusfruit',  pack: 'wam', height: 0.30, grip: 0.30, rot: [0.10, -0.46, 0.20], pos: [0.0020, 0.0090, -0.0040], icon: [0.30, 0.42, -0.14] },
   agave:        { file: 'wam/agave',        pack: 'wam', height: 0.28, grip: 0.32, rot: [0.10, -0.48, 0.20], pos: [0.0020, 0.0090, -0.0040], icon: [0.30, 0.42, -0.14] },
-  stonecrop:    { file: 'wam/stonecrop',    pack: 'wam', height: 0.24, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
-  icecapmoss:   { file: 'wam/icecapmoss',   pack: 'wam', height: 0.22, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  stonecrop:    { file: 'wam/stonecrop',    pack: 'wam', height: 0.198, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  icecapmoss:   { file: 'wam/icecapmoss',   pack: 'wam', height: 0.159, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
   swampreed:    { file: 'wam/swampreed',    pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.06, -0.44, 0.24], pos: [-0.0003, 0.0067, 0.0009], icon: [0.12, 0.38, -0.16] },
   mireroot:     { file: 'wam/mireroot',     pack: 'wam', height: 0.26, grip: 0.30, rot: [0.10, -0.46, 0.20], pos: [0.0020, 0.0080, -0.0030], icon: [0.30, 0.42, -0.14] },
-  lotus:        { file: 'wam/lotus',        pack: 'wam', height: 0.22, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
-  truffle:      { file: 'wam/truffle',      pack: 'wam', height: 0.20, grip: 0.34, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0030, -0.0010], icon: [0.70, 0.42, -0.10] },
+  lotus:        { file: 'wam/lotus',        pack: 'wam', height: 0.17, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  truffle:      { file: 'wam/truffle',      pack: 'wam', height: 0.133, grip: 0.34, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0030, -0.0010], icon: [0.70, 0.42, -0.10] },
 
   // The farm's produce — what the crop below drops, which is a different object
   // from the crop itself and is modelled separately in `art/wam/items/`. Five
@@ -1438,32 +1460,32 @@ export const POSE = {
   // therefore the flowers' family defaults rather than turntable-measured, and
   // the only ones worth measuring later are the two climbers, whose models are
   // tall enough that a default grip catches them well below the middle.
-  strawberry_0: { file: 'wam/strawberry_0', pack: 'wam', height: 0.22, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
-  strawberry_1: { file: 'wam/strawberry_1', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  strawberry_0: { file: 'wam/strawberry_0', pack: 'wam', height: 0.146, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
+  strawberry_1: { file: 'wam/strawberry_1', pack: 'wam', height: 0.209, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
   strawberry_2: { file: 'wam/strawberry_2', pack: 'wam', height: 0.26, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
   strawberry_3: { file: 'wam/strawberry_3', pack: 'wam', height: 0.28, grip: 0.32, rot: [0.30, -0.50, 0.18], pos: [0.0024, 0.0040, -0.0010], icon: [0.60, 0.42, -0.12] },
-  squash_0:     { file: 'wam/squash_0',     pack: 'wam', height: 0.22, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
-  squash_1:     { file: 'wam/squash_1',     pack: 'wam', height: 0.24, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  squash_0:     { file: 'wam/squash_0',     pack: 'wam', height: 0.146, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  squash_1:     { file: 'wam/squash_1',     pack: 'wam', height: 0.209, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
   squash_2:     { file: 'wam/squash_2',     pack: 'wam', height: 0.26, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
   squash_3:     { file: 'wam/squash_3',     pack: 'wam', height: 0.28, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
-  greenbean_0:  { file: 'wam/greenbean_0',  pack: 'wam', height: 0.22, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
-  greenbean_1:  { file: 'wam/greenbean_1',  pack: 'wam', height: 0.25, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  greenbean_0:  { file: 'wam/greenbean_0',  pack: 'wam', height: 0.146, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  greenbean_1:  { file: 'wam/greenbean_1',  pack: 'wam', height: 0.218, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
   greenbean_2:  { file: 'wam/greenbean_2',  pack: 'wam', height: 0.28, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
   greenbean_3:  { file: 'wam/greenbean_3',  pack: 'wam', height: 0.30, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
-  snowpea_0:    { file: 'wam/snowpea_0',    pack: 'wam', height: 0.22, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
-  snowpea_1:    { file: 'wam/snowpea_1',    pack: 'wam', height: 0.25, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  snowpea_0:    { file: 'wam/snowpea_0',    pack: 'wam', height: 0.146, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
+  snowpea_1:    { file: 'wam/snowpea_1',    pack: 'wam', height: 0.218, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
   snowpea_2:    { file: 'wam/snowpea_2',    pack: 'wam', height: 0.28, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
   snowpea_3:    { file: 'wam/snowpea_3',    pack: 'wam', height: 0.30, grip: 0.30, rot: [0.06, -0.48, 0.22], pos: [0.0020, 0.0080, -0.0030], icon: [0.20, 0.44, -0.14] },
-  hops_0:       { file: 'wam/hops_0',       pack: 'wam', height: 0.22, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
-  hops_1:       { file: 'wam/hops_1',       pack: 'wam', height: 0.26, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  hops_0:       { file: 'wam/hops_0',       pack: 'wam', height: 0.159, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  hops_1:       { file: 'wam/hops_1',       pack: 'wam', height: 0.249, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
   hops_2:       { file: 'wam/hops_2',       pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
   hops_3:       { file: 'wam/hops_3',       pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
-  grape_0:      { file: 'wam/grape_0',      pack: 'wam', height: 0.22, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
-  grape_1:      { file: 'wam/grape_1',      pack: 'wam', height: 0.26, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  grape_0:      { file: 'wam/grape_0',      pack: 'wam', height: 0.159, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
+  grape_1:      { file: 'wam/grape_1',      pack: 'wam', height: 0.249, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
   grape_2:      { file: 'wam/grape_2',      pack: 'wam', height: 0.30, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
   grape_3:      { file: 'wam/grape_3',      pack: 'wam', height: 0.32, grip: 0.28, rot: [-0.04, -0.46, 0.24], pos: [0.0000, 0.0070, 0.0000], icon: [0.12, 0.40, -0.16] },
-  watermelon_0: { file: 'wam/watermelon_0', pack: 'wam', height: 0.22, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
-  watermelon_1: { file: 'wam/watermelon_1', pack: 'wam', height: 0.24, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  watermelon_0: { file: 'wam/watermelon_0', pack: 'wam', height: 0.146, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
+  watermelon_1: { file: 'wam/watermelon_1', pack: 'wam', height: 0.209, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
   watermelon_2: { file: 'wam/watermelon_2', pack: 'wam', height: 0.26, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
   watermelon_3: { file: 'wam/watermelon_3', pack: 'wam', height: 0.28, grip: 0.32, rot: [0.20, -0.48, 0.20], pos: [0.0020, 0.0060, -0.0030], icon: [0.44, 0.42, -0.14] },
 
@@ -1472,8 +1494,8 @@ export const POSE = {
   // the shelf fungus, whose plates only separate when you are not level with
   // them. The crystal cluster takes the gem kit's pose: gripped near the middle
   // of the matrix, turned so the points fan across the slot rather than at it.
-  cave_mushroom:   { file: 'wam/cave_mushroom',   pack: 'wam', height: 0.24, grip: 0.38, rot: [0.02, -0.45, 0.22], pos: [0.006, 0.03, -0.012], icon: [0.04, 0.42, -0.16] },
-  shelf_fungus:    { file: 'wam/shelf_fungus',    pack: 'wam', height: 0.24, grip: 0.38, rot: [0.34, -0.44, 0.18], pos: [0.022, 0.092, -0.037], icon: [0.52, 0.40, -0.12] },
+  cave_mushroom:   { file: 'wam/cave_mushroom',   pack: 'wam', height: 0.22, grip: 0.38, rot: [0.02, -0.45, 0.22], pos: [0.006, 0.03, -0.012], icon: [0.04, 0.42, -0.16] },
+  shelf_fungus:    { file: 'wam/shelf_fungus',    pack: 'wam', height: 0.225, grip: 0.38, rot: [0.34, -0.44, 0.18], pos: [0.022, 0.092, -0.037], icon: [0.52, 0.40, -0.12] },
   crystal_cluster: { file: 'wam/crystal_cluster', pack: 'wam', height: 0.26, grip: 0.4, rot: [0.10, -0.55, 0.20], pos: [0.02, 0.11, -0.04], icon: [0.18, 0.52, -0.14] },
 
   // --- armour ---------------------------------------------------------------
@@ -1516,7 +1538,7 @@ export const POSE = {
   // was 72° out of the screen plane in both poses — a wide tangle drawn end-on,
   // which is the very thing `fitMax` is here to stop it looking like. A shallow
   // yaw keeps the span across the view, where the forks read.
-  driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.34, grip: 0.44, fitMax: true, rot: [0.16, -0.40, 0.22], pos: [0.01, 0.062, -0.016], icon: [0.24, 0.40, -0.10] },
+  driftwood:    { file: 'wam/driftwood',    pack: 'wam', height: 0.28, grip: 0.44, fitMax: true, rot: [0.16, -0.40, 0.22], pos: [0.01, 0.062, -0.016], icon: [0.24, 0.40, -0.10] },
 };
 
 /**

@@ -1,8 +1,12 @@
 // Block debris, footstep dust, splashes, ambient motes and weather.
 
 import * as THREE from 'three';
-import { GRAVITY } from '../world/Constants.js';
+import { D, GRAVITY } from '../world/Constants.js';
 import { BLOCKS, ID } from '../world/Blocks.js';
+// What counts as a roof. The same table the terrain's own skylight is flooded
+// with, so a cube of debris and the wall it was chipped off agree - see the
+// probe below, and the paragraph on leaves in Lighting.js.
+import { SKY_ATTEN } from '../world/Lighting.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -17,6 +21,15 @@ const _t1 = new THREE.Vector3();
 const _t2 = new THREE.Vector3();
 
 const MAX_DEBRIS = 900;
+/**
+ * How dark its own roof is allowed to make a chip of debris.
+ *
+ * The same 0.55 `Mobs` and `Drops` floor at, and one number on purpose: a
+ * broken block, the cubes that fly off it and the animal watching are three
+ * things in one room, and three different floors would be three different
+ * rooms.
+ */
+const SKY_SHADE_MIN = 0.55;
 
 const MAX_BUBBLES = 64;
 
@@ -218,6 +231,8 @@ export class Particles {
         alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(),
         rot: new THREE.Quaternion(), spin: new THREE.Vector3(), life: 0, maxLife: 1, size: 0.1,
         color: new THREE.Color(), buoyant: false, steam: 0, droplet: false,
+        // -1 is "has not asked yet". See `_probeSky`.
+        sky: -1,
       });
     }
 
@@ -668,6 +683,7 @@ export class Particles {
   _spawn() {
     for (let i = 0; i < this.pool.length; i++) {
       if (!this.pool[i].alive) {
+        this.pool[i].sky = -1;          // a reused slot asks again
         this.pool[i].buoyant = false;   // only bubbles opt back in
         this.pool[i].steam = 0;         // and only steam opts back into this
         this.pool[i].droplet = false;   // and only splashes into this
@@ -1054,6 +1070,38 @@ export class Particles {
     return 0;
   }
 
+  /**
+   * How much sky is over one particle, asked once in its life.
+   *
+   * The debris cubes are a MeshStandardMaterial and so are lit by the scene,
+   * and the scene's entity fill used to be dimmed by the *player's* sky
+   * exposure - which was the only thing keeping a spray of chips off a cave
+   * wall from being lit like a spray in a meadow. That term is gone (see
+   * `entityFill.intensity` in Sky.js), so the chips answer for themselves.
+   *
+   * Once, not on a timer. `Mobs` and `Drops` re-probe because a cow walks under
+   * a tree and a stack lies on a floor for minutes; a chip lives about a
+   * second, thrown from a block that has just been broken, and the roof over it
+   * does not change inside that second. One column walk per particle, at the
+   * first frame it is drawn, is the whole cost - and it is a walk that gives up
+   * after three blockers, so the ones in a cave, which is where this matters,
+   * are the cheapest of all.
+   *
+   * `SKY_ATTEN` and not solidity, for the reason Drops.js sets out at length:
+   * leaves are zero in that table, a canopy is a sieve, and reading solidity
+   * instead turns everything under a wood into a silhouette.
+   */
+  _probeSky(p) {
+    p.sky = 1;
+    const cell = this.planet.cellAt(p.pos.x, p.pos.y, p.pos.z);
+    if (!cell) return;
+    let blocked = 0;
+    for (let k = cell.k + 2; k < D; k++) {
+      if (SKY_ATTEN[this.planet.at(cell.col, k)] === 255 && ++blocked >= 3) break;
+    }
+    p.sky = SKY_SHADE_MIN + (1 - SKY_SHADE_MIN) * (1 - Math.min(3, blocked) / 3);
+  }
+
   update(dt, camera, up, sky) {
     // debris
     let count = 0, bub = 0, stm = 0;
@@ -1110,7 +1158,11 @@ export class Particles {
         if (bub < MAX_BUBBLES) { this.bubbleMesh.setMatrixAt(bub, _m); bub++; }
       } else {
         this.debris.setMatrixAt(count, _m);
-        _c.copy(p.color);
+        if (p.sky < 0) this._probeSky(p);
+        // Onto the tint, because that is the only per-instance lever there is:
+        // one material lights all of them, so how much of the scene's light a
+        // chip in a cave gives back is all this layer can say.
+        _c.copy(p.color).multiplyScalar(p.sky);
         this.debrisColors.setXYZ(count, _c.r, _c.g, _c.b);
         count++;
       }

@@ -817,8 +817,10 @@ G.snow = (s) => {
  * The divider around a sealed face, which is the portal itself. See
  * NINE-FACES.md.
  *
- * The owner's reference is a Rick and Morty portal in purple, and the one thing
- * that has to survive is the **swirl**: a logarithmic spiral wound about the
+ * White, not purple: "instead of purple can we make the portals maybe white and
+ * more transparent". What that changes here is the palette and nothing else -
+ * the one thing that has to survive is still the **swirl**: a logarithmic
+ * spiral wound about the
  * middle of the tile, not a surface with a pattern on it. Everything else in
  * this atlas is trying to look like something you could mine; this is trying to
  * look like a hole in the world that shows you nothing but itself.
@@ -833,20 +835,23 @@ G.snow = (s) => {
  *  - **Warped, twice.** A clean spiral is a logo. Two fbm fields at different
  *    scales are added into the spiral's phase, so the arms wobble and fray and
  *    the thing reads as turbulent rather than printed.
- *  - **Dark eye, hot rim.** Brightness ramps outward, so the middle is a deep
- *    violet and the outside is near-blown-out lilac. That is the reference's
- *    strongest cue after the swirl, and it is also what makes a wall of these
+ *  - **Grey eye, white rim.** Brightness ramps outward, so the middle is a
+ *    cold grey and the outside is white. That is what makes a wall of these
  *    legible: the cell boundaries are the bright part, so a run of them reads
- *    as a grid of eyes rather than as one lilac sheet.
+ *    as a grid of eyes rather than as one white sheet - and it is the reason
+ *    the eye did not go white with the rest of it. A tile with no dark end is
+ *    a blank pane, and eighty-eight layers of blank pane is a fog bank.
  *  - **The rim lift rides the arms**, deliberately. Lifting every pixel at the
  *    edge would blow the shape out exactly where it is doing the most work.
  *
- * Measured over the finished 128x128 tile: rgb min 17/3/35, max 243/138/253,
- * mean 145/63/186, and luma at the 5th/50th/95th percentiles 27.2 / 85.5 /
- * 161.0. Both ends of that matter. The mean sits far clear of the floor a
- * near-black tile has to worry about, where the fog bands it, and the spread from 27 to 161 is what
- * says the tile still has a shape in it rather than having flattened into one
- * bright lilac wash.
+ * Kept COLD rather than neutral, about an eighth more blue than red. Dead white
+ * on a surface this large picks up whatever the sky is doing and reads as
+ * cloud; the cast is what keeps it reading as glass. Measured over the finished
+ * 128x128 tile: rgb mean 197/208/222, luma at the 5th/50th/95th percentiles
+ * 148 / 214 / 250. The spread is what says the tile still has a shape in it
+ * rather than having flattened into one white wash, and the first pass at this
+ * palette did flatten - p5 came out at 169 and the swirl was gone from three
+ * blocks away.
  */
 const PORTAL_ARMS = 5;
 const PORTAL_TWIST = 5.2;
@@ -869,14 +874,14 @@ G.portal = (s) => {
     const out = smoothstep(0.04, 0.50, r);
     const eye = smoothstep(0.13, 0.02, r);          // the pupil, darkest of all
 
-    const core = mixc(px([28, 4, 58]), px([96, 22, 168]), arm);
-    const mid = mixc(px([70, 14, 132]), px([188, 46, 250]), arm);
+    const core = mixc(px([104, 124, 152]), px([214, 228, 244]), arm);
+    const mid = mixc(px([150, 170, 196]), px([240, 247, 255]), arm);
     let c = mixc(core, mid, out);
     // Hot rim, and only along the arms - see the note above.
-    c = mixc(c, px([255, 156, 255]), out * arm * 0.86);
-    c = mixc(c, px([12, 2, 26]), eye * 0.85);
+    c = mixc(c, px([255, 255, 255]), out * arm * 0.86);
+    c = mixc(c, px([62, 76, 98]), eye * 0.85);
     // A little grain so the gradients do not band on an 8-bit atlas.
-    c = mixc(c, px([146, 60, 210]), (grit[i] - 0.5) * 0.10 + 0.05);
+    c = mixc(c, px([198, 212, 232]), (grit[i] - 0.5) * 0.10 + 0.05);
     setRGB(s, i, c);
     s.a[i] = 1;
     // Barely any relief. The arms are light, not rock, so the normal map is

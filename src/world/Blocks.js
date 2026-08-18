@@ -206,7 +206,7 @@ export const TILES = [
 
   // --- the world's edge -----------------------------------------------------
   // The divider that seals the four corner faces, and it is the portal itself.
-  // A violet swirl rather than any kind of rock: the whole point is that it does
+  // A white swirl rather than any kind of rock: the whole point is that it does
   // not read as a material you could build with or mine, it reads as a way
   // through that shows you nothing but itself. `TextureGen.js` owns the look.
   'portal',
@@ -1515,8 +1515,9 @@ export const BLOCKS = [
    *
    * ### Lit
    *
-   * Full block light in violet. Eight boundaries on a 1248-wide map is a lot of
-   * world to find your way around, and a divider that only shows up inside the
+   * Full block light, in a cold white rather than the violet it was: see the
+   * palette note over `G.portal`. Eight boundaries on a 1248-wide map is a lot
+   * of world to find your way around, and a divider that only shows up inside the
    * draw distance is no use as a landmark. At 15 it lights its own column, the
    * ground either side of it and anything standing near it, and it reads at
    * night from as far as the terrain lets you see.
@@ -1531,8 +1532,8 @@ export const BLOCKS = [
   block({
     name: 'portal', label: 'Portal', all: 'portal',
     solid: false, opaque: true,
-    light: 15, lightColor: [0.78, 0.36, 1.0],
-    hardness: -1, drop: null, particle: [0.72, 0.34, 0.98], sound: 'glass',
+    light: 15, lightColor: [0.86, 0.92, 1.0],
+    hardness: -1, drop: null, particle: [0.88, 0.93, 1.0], sound: 'glass',
   }),
 ];
 

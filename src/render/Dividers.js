@@ -54,7 +54,7 @@ export const FADE_FAR = 280;
  * How loud the curtain is, and how much of that it keeps in daylight.
  *
  * BRIGHTNESS was 1.15, which put the sheet at very nearly its own full colour
- * wherever it was drawn - a saturated violet wall standing over the whole
+ * wherever it was drawn - a saturated wall standing over the whole
  * horizon and, once UnrealBloom had it, washing out the frame it was drawn
  * over. The effect's job is to say "a boundary is that way", and that is a line
  * on the horizon rather than a light source.
@@ -80,8 +80,11 @@ const VERT = /* glsl */`
 `;
 
 /**
- * The look: a violet line lying along the skyline, thinning out a little way
+ * The look: a pale line lying along the skyline, thinning out a little way
  * above it, and thinning again with every unit of air or water in front of it.
+ *
+ * White, because the portal blocks it stands in for are white: a divider that
+ * was white up close and violet on the horizon would be two different things.
  *
  * It is deliberately NOT a picture of the swirl. The tile's spiral is a thing
  * you read at arm's length; at four hundred units a run of them is under a
@@ -196,7 +199,16 @@ const FRAG = /* glsl */`
     // dark and has no minimap, uNight leaves it at full strength.
     float lit = mix(DAY_GAIN, 1.0, uNight);
 
-    vec3 col = mix(vec3(0.52, 0.04, 0.98), vec3(0.92, 0.26, 1.0), up * 0.6 + 0.2);
+    // White, with the divider itself. WHITE_TRIM is not taste: white is 2.6
+    // times the luminance the violet was at the same numbers, so dropping the
+    // hue and nothing else would have put a curtain back over the horizon three
+    // times as loud as the one that was just tuned down to be subtle. It is the
+    // ratio of the two lumas, so what leaves this shader is as bright as it was
+    // yesterday and only its colour has changed.
+    const vec3 COL_LOW = vec3(0.72, 0.82, 1.00);
+    const vec3 COL_HIGH = vec3(0.95, 0.98, 1.00);
+    const float WHITE_TRIM = 0.38;
+    vec3 col = mix(COL_LOW, COL_HIGH, up * 0.6 + 0.2) * WHITE_TRIM;
     gl_FragColor = vec4(col * body * streak * near * atten * lit * BRIGHTNESS, 1.0);
   }
 `;

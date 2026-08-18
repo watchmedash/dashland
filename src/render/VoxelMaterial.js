@@ -1612,7 +1612,7 @@ const LIQUID_MAP_FRAG = /* glsl */`
   // stage over, so the test now names the id it means.
   if (vWave > 5.5) {
     /*
-     * The divider, drawn as one sheet of violet glass.
+     * The divider, drawn as one sheet of frosted white glass.
      *
      * ---- why there is no texture fetch in here -----------------------------
      *
@@ -1691,30 +1691,42 @@ const LIQUID_MAP_FRAG = /* glsl */`
               * caustic((q.yx - warp) * 0.31 + 11.0, pT * 0.28);
 
     /*
-     * Dark, and darker than it looks like it should be. The block is light 15
-     * in violet, so vBlock is 1.0 on every fragment of it and LIGHTS_END
-     * multiplies the albedo by an irradiance of about 1.3 before the fresnel
-     * adds more on top - a mid-bright albedo saturates and the wall photographs
-     * as one flat magenta. Measured on the first pass: 186/75/224 across a patch
-     * that should have had the whole range in it. The albedo carries the
-     * contrast and the light provides the brightness.
+     * WHITE, and this is the owner's ask: "instead of purple can we make the
+     * portals maybe white and more transparent". Three cold greys running from
+     * near-black to white, where three violets used to run from near-black to
+     * lilac. Nothing else about the field changed - the bands, the filaments and
+     * the drift are the same shape they were, and it is only what they are
+     * painted in that is different.
+     *
+     * Still darker than it looks like it should be, and for the same reason it
+     * always was. The block is light 15, so vBlock is 1.0 on every fragment of
+     * it and LIGHTS_END multiplies the albedo by an irradiance of about 1.3
+     * before the fresnel adds more on top: an albedo already near white
+     * saturates, and a saturated wall is one flat sheet with the swirl gone out
+     * of it. The albedo carries the contrast and the light provides the
+     * brightness, so DEEP has to stay genuinely dark for the structure to
+     * survive - it is the shadow inside the glass.
+     *
+     * Cold rather than neutral, in the same eighth the tile is. Dead grey on a
+     * surface this size reads as concrete.
      */
-    const vec3 PORTAL_DEEP = vec3(0.022, 0.003, 0.062);
-    const vec3 PORTAL_LIT  = vec3(0.26, 0.055, 0.42);
-    const vec3 PORTAL_HOT  = vec3(0.72, 0.30, 0.95);
+    const vec3 PORTAL_DEEP = vec3(0.030, 0.040, 0.055);
+    const vec3 PORTAL_LIT  = vec3(0.20, 0.23, 0.27);
+    const vec3 PORTAL_HOT  = vec3(0.50, 0.54, 0.60);
     diffuseColor.rgb = mix(PORTAL_DEEP, PORTAL_LIT, pStruct);
     // The filaments are added rather than mixed, and only where the bands are
     // already up: light gathering in the thick of the glass rather than a
     // second pattern laid over the first.
     diffuseColor.rgb += PORTAL_HOT * fil * (0.25 + 0.75 * pStruct) * 0.80;
     /*
-     * OPAQUE, and this is a requirement rather than a look: the divider's job
-     * is that you cannot see the sealed face until you have walked into it. The
-     * block is still opaque in the table - so SEALS_FACES, SKY_ATTEN
-     * and the light solver treat it exactly as a stone wall and there is no
-     * geometry behind it to see anyway — and this keeps the drawn fragment
-     * agreeing with that. The fresnel block after <opaque_fragment> holds it at
-     * 1.0 as well; water's line there deliberately does not.
+     * The base alpha stays at 1 and the frosting is applied once, after
+     * <opaque_fragment>, where the fresnel that shapes it is already computed.
+     * See PORTAL_ALPHA there for what "more transparent" was allowed to cost.
+     *
+     * The block is still opaque in the TABLE either way - SEALS_FACES, SKY_ATTEN
+     * and the light solver go on treating it as a stone wall, so a sealed face
+     * is still sealed to the light, to the mesher and to everything in flight.
+     * What changed is only how much of the far side the fragment lets past.
      */
     diffuseColor.a = 1.0;
   } else if (vWave > 2.5) {
@@ -2087,7 +2099,7 @@ const LIQUID_NORMAL_FRAG = /* glsl */`
   }
   if (isPortal) {
     // The same trick the sea uses, on the axes a wall has: a long swell added
-    // as a tangent-space slope, so the fresnel and the violet glint slide
+    // as a tangent-space slope, so the fresnel and the glint slide
     // across the sheet instead of sitting still on it. swellGrad is world-axis
     // aligned, so the axis matching this wall's normal drops out on its own and
     // what is left runs in the plane - see its note. Halved, because a divider
@@ -2697,17 +2709,18 @@ function patch(material, opts = {}) {
           /*
            * The divider's fresnel. The same physics as the water's below it and
            * a different job: water uses it to stop showing you the bed, and a
-           * divider has nothing to show you at all, so here it is the whole of
-           * what makes the sheet read as GLASS rather than as a painted wall.
-           * Head-on you see the violet body; turn along the wall and it goes to
+           * divider is only barely showing you anything, so here it is the whole
+           * of what makes the sheet read as GLASS rather than as a painted wall.
+           * Head-on you see the frosted body; turn along the wall and it goes to
            * sky, which is the one cue that says a surface is smooth and hard.
            *
            * Tinted rather than mirrored. A clean sky reflection on an
            * eighty-eight block wall is a strip of daylight blue across the
-           * middle of the frame and it stops reading as a portal entirely, so
-           * the reflected sky is dragged most of the way to the divider's own
-           * violet and only the LEVEL of it survives - a bright sky gives a
-           * bright rim, a dusk sky a dim one.
+           * middle of the frame, so the reflected sky is dragged most of the way
+           * to the divider's own colour and only the LEVEL of it survives - a
+           * bright sky gives a bright rim, a dusk sky a dim one. That mattered
+           * more when the body was violet and the sky was the wrong hue for it;
+           * on white it is what stops the wall turning blue at noon.
            */
           vec3 vDirP = normalize(vWorld - uCamPos);
           float cosP = clamp(dot(-vDirP, normal), 0.0, 1.0);
@@ -2715,7 +2728,7 @@ function patch(material, opts = {}) {
           vec3 rDirP = reflect(vDirP, normal);
           vec3 skyP = mix(uSkyHorizon, uSkyZenith,
                           pow(clamp(dot(rDirP, UP), 0.0, 1.0), 0.42));
-          const vec3 PORTAL_SHEEN = vec3(0.86, 0.52, 1.00);
+          const vec3 PORTAL_SHEEN = vec3(0.88, 0.94, 1.00);
           float skyLum = dot(skyP, AERIAL_LUMA);
           gl_FragColor.rgb = mix(gl_FragColor.rgb,
                                  PORTAL_SHEEN * clamp(0.35 + skyLum * 1.6, 0.2, 1.5),
@@ -2729,11 +2742,35 @@ function patch(material, opts = {}) {
           float ndhP = clamp(dot(normal, halfP), 0.0, 1.0);
           gl_FragColor.rgb += PORTAL_SHEEN * fresP * pow(ndhP, 60.0) * 0.5;
 
-          // Never see through the divider. Water's line at the bottom of the
-          // block below raises alpha with the fresnel; this one holds it at the
-          // top, because the requirement is not "hard to see through", it is
-          // "sealed".
-          gl_FragColor.a = 1.0;
+          /*
+           * FROSTED, not clear, and the number is a compromise between two
+           * things the owner has asked for at different times.
+           *
+           * "we shouldn't be able to see other face from inside pyre" is why
+           * this line used to read "a = 1.0". "instead of purple can we make the
+           * portals maybe white and more transparent" is why it no longer does.
+           * A sheet of real frosted glass answers both at once because it
+           * SCATTERS: light and gross shape come through, detail does not, and
+           * you cannot tell what is on the other side.
+           *
+           * There is no cheap way to blur what is behind a forward-rendered
+           * surface, so the scattering is faked with the one control there is -
+           * how little of the far side is let through at all. At 0.88 the world
+           * beyond contributes an eighth, under a body that is near-white and
+           * lit to 15. Photographed from inside Rime against the same wall at
+           * 1.0, a 650x310 patch of it goes from a mean of 189 to 175 and its
+           * standard deviation from 15.3 to 19.1: the far side is worth about
+           * fourteen levels of 255 and some texture. It reads as light and
+           * shadow behind glass, and nothing in it is legible - the face 2
+           * hillside three columns behind that patch cannot be found in the
+           * photograph.
+           *
+           * The fresnel takes it the rest of the way to sealed as you turn
+           * along the wall, which is both what glass does and the angle at
+           * which the thinnest slice of world would otherwise show the most.
+           */
+          const float PORTAL_ALPHA = 0.88;
+          gl_FragColor.a = mix(PORTAL_ALPHA, 1.0, fresP);
         } else if (vWave < 2.5) {
           // What makes water read as water, at distance, is not its own colour
           // — it is that you stop seeing through it and start seeing the sky in

@@ -103,6 +103,9 @@ import { makeRng } from './util/Noise.js';
 // Every world-space distance on this map goes through one of these: X and Z
 // wrap, so `distanceTo` is a full turn out half the time.
 import { wrapDist, wrapDist2 } from './game/Wrap.js';
+// Health over what you are fighting. Owns its own canvas and its own styling,
+// so nothing of it is in `index.html` or the stylesheet.
+import { CombatBars } from './hud/CombatBars.js';
 
 /**
  * Shortest signed distance along a wrapped world axis.
@@ -1872,8 +1875,13 @@ class Game {
     // handed to `update` per frame rather than held, so the projectiles cannot
     // outlive a world reset holding a reference to a dead herd.
     this.arrows = new Arrows(this.scene, this.planet, itemIdOf('arrow'));
+    // A bar over whatever is trading blows with the player, and nothing else.
+    // Its three doors are wired below and at the swing in `_interact`; monsters
+    // fighting each other cross none of them and stay unmarked.
+    this.combatBars = new CombatBars();
     this.arrows.onHit = (mob, _dmg, killed) => {
       this.audio.mobHit(mob.position);
+      this.combatBars.engage(mob);
       // An arrow kill has to earn what a sword kill earns, and be worth the
       // same mark. This is the second death path in the game and the melee
       // branch of `_interact` is the other; a bow-only player was earning
@@ -1920,7 +1928,13 @@ class Game {
     // hard is 1.5x the damage a player would otherwise have taken whatever
     // their tolerance, instead of hard eating the skill or the skill eating
     // hard.
-    this.mobs.onAttack = (dmg, mob) => this._takeHit(dmg * this.mobDamageMul, mob);
+    this.mobs.onAttack = (dmg, mob) => {
+      // The other half of the fight. A husk that opens on you earns its bar on
+      // the blow that lands, not on the frame it decides to chase — being
+      // stalked is not yet a decision about whether to run.
+      this.combatBars.engage(mob);
+      this._takeHit(dmg * this.mobDamageMul, mob);
+    };
     this.mobs.onBurn = (mob) => this.particles.embers(mob.position, mob.up, 2, 0.55);
     // The crater, and the fuse that precedes it. Two wires, and everything they
     // reach is in `game/Explosion.js` — Mobs owns when a thing goes off and
@@ -6095,6 +6109,9 @@ class Game {
     // gate in `_syncViewModel` — and this is the second half of the same thing:
     // nothing of the body is drawn over a world it cannot touch.
     if (this.state === 'playing' || this.state === 'paused') this.viewModel.render(this.renderer);
+    // After the camera has settled for the frame, so the bars sit on the heads
+    // they belong to rather than one frame behind them.
+    this.combatBars.update(dt, this.camera, this.state === 'playing');
     this.damageFlash = Math.max(0, this.damageFlash - dt * 1.6);
     // After the update and before the flags are cleared: the layer's visibility
     // is a function of the state this frame just settled on, and anything it
@@ -10035,6 +10052,9 @@ class Game {
         // `hostile` rather than on the husk's name so that whatever else comes
         // out of the dark next patch counts for the same mark — and so that
         // clubbing a cow never does.
+        // Before `hurt`, so the bar's `max` is read off a whole body rather
+        // than off one already down a swing.
+        this.combatBars.engage(mobHit.mob);
         const killed = this.mobs.hurt(mobHit.mob, dmg, this.player.position, charge);
         // Priced from the creature's own health and damage rather than from a
         // per-species table, so anything added later prices itself. Hostiles

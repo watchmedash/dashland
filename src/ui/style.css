@@ -869,15 +869,14 @@ button.ghost:active:not(:disabled) {
 /* ── save slots ────────────────────────────────────────── */
 
 .slots-panel { width: min(520px, 100%); }
-/* The ten rows sit in one tray cut into the sheet, so the list is an object
-   with a shape rather than ten cards floating on a background. Same well as
-   the inventory grid, and for the same reason. */
-/* A WELL, not a pocket tray: what is in it is writing, so it stays parchment.
-   See the rule at `.inv-section`. */
+/* The rows sit ON the sheet, not in a tray cut into it. The tray was a well -
+   padding, a sunk edge and a tint - and on a screen that is already the whole
+   window that well is a card by another name: a bordered block of rows floating
+   in the middle of a page of parchment, which is the modal this file spent a
+   pass removing. The rows are raised keys and they already read as a list; a
+   box round the list only says "list" a second time. */
 .slot-list {
   display: flex; flex-direction: column; gap: 6px;
-  padding: 7px; border-radius: var(--r-lg);
-  background: rgba(122, 94, 54, .1); box-shadow: var(--sunk);
 }
 .slot-row { display: flex; gap: 5px; align-items: stretch; }
 /* The row is a button, so the whole card is the hit target rather than the
@@ -3154,13 +3153,13 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    and the age, and the whole block pinned to the top of a screen of parchment.
    Two columns of five, in the middle of the sheet.
 
-   `margin: auto 0` and not `align-content: center`, and it is the same rule and
-   the same reason as `.overlay > *` at the top of this file: an auto margin
-   resolves to zero when there is no free space, so a list too long for the
-   window pins to the top and scrolls instead of losing its first rows off the
-   top edge with no way to scroll back to them. */
+   The tray is centred across the sheet and pinned to the TOP of it. It used to
+   be centred on both axes, which put a block of rows in the middle of the
+   window with the header rule half a screen above it and nothing between: a
+   card, floating, with only its dropped frame missing. Every other screen in
+   this file starts under its own header, and this one does now too. */
 #slots .panel-body { display: flex; }
-#slots .slot-list { width: 100%; max-width: 1180px; margin: auto; }
+#slots .slot-list { width: 100%; max-width: 1180px; margin: 0 auto; }
 /* The header goes with it, or the rule under "Continue" runs the width of the
    monitor while the thing it is the header of is a column down the middle. */
 #slots > .panel > header { width: 100%; max-width: 1180px; margin-left: auto; margin-right: auto; }
@@ -3274,17 +3273,43 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
 /* THE RACK. Four keys on a board, and the board is the only thing on this
    screen that is made of anything. It is the same timber as every case in the
    game, cut with the grain running the long way because it is wider than it is
-   tall, and it stands on the world rather than in a frame. */
+   tall, and it stands on the world rather than in a frame.
+
+   It is a BAND and not a board. Held at 340px with a corner radius, a keyline
+   and a drop shadow, it was a card floating on a dimmed world with four buttons
+   in it, which is the modal this screen was rebuilt to be rid of - the owner
+   read the home menu as a container again and this is the object he was reading.
+   The timber stays, because it is what the four keys are screwed to and what
+   makes them a fixture rather than links on a page; only the containment goes.
+   So the board runs the full width of the window and the KEYS keep the column,
+   which is the rule this whole section is written to: full-bleed chrome, and
+   content held at a width it can be read at.
+
+   `calc(50% - 50vw)` is the bleed. The card's own padding is the gutter, so
+   half the content box less half the viewport is exactly minus that padding,
+   whatever the gutter happens to be at this size, and the band lands on both
+   window edges with no number repeated from the rule above. */
 #menu .menu-actions {
-  width: min(340px, 100%); margin-left: auto; margin-right: auto;
-  padding: 11px; border-radius: var(--r-lg);
-  background: var(--wood-long);
+  width: auto; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);
+  padding: 14px calc(50vw - 50%); border-radius: 0;
+  /* Scorched at both edges, so a board the width of a monitor settles into the
+     dark it is standing on instead of reading as a lit plank laid over it. */
+  background:
+    linear-gradient(180deg, rgba(6, 4, 1, .5), rgba(6, 4, 1, 0) 26%, rgba(6, 4, 1, 0) 64%, rgba(6, 4, 1, .55)),
+    var(--wood-long);
   box-shadow:
-    0 0 0 1px var(--wood-line),
     inset 0 1px 0 rgba(255, 222, 170, .16),
     inset 0 -2px 6px rgba(0, 0, 0, .45),
-    0 20px 44px -20px rgba(0, 0, 0, .95);
+    0 -1px 0 rgba(12, 7, 2, .8),
+    0 1px 0 rgba(12, 7, 2, .8);
 }
+/* The keys are the content, so they keep a width a word fits on rather than
+   growing to the window with the board under them. */
+#menu .menu-actions button { width: min(340px, 100%); margin-left: auto; margin-right: auto; }
+/* A band that reaches the window edges is one viewport wide, and a card that
+   has to scroll is one scrollbar narrower than that. Clipped, so the two can
+   never disagree into a horizontal scrollbar across the title screen. */
+#menu > .menu-card { overflow-x: clip; }
 /* A key's face is `--paper-cell`, which is a translucent white and reads as
    parchment because there has always been parchment under it. There is timber
    under it here, so it has to say parchment itself or the four keys come out

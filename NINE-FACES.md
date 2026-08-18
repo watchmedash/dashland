@@ -87,6 +87,13 @@ among them and nothing about a join is visible on the ground.
 **The four corner faces are sealed.** 1, 3, 7 and 9 are each closed on all four
 sides and entered only by portal. They are the specials.
 
+**All four of those sides are passable** - the owner's call, made after he
+walked at Rime's north wall and could not get out. Two of a corner's sides face
+the cross and two face another corner, and it used to be that only the first
+two carried a portal. Half of every corner's perimeter was then a wall that did
+nothing, with nothing on screen to say which half. Every divider column is now a
+way through, whichever side of it you are on.
+
 Counted off the wrap table: of the 18 edges, **6 are open and 12 are
 dividers**.
 
@@ -111,11 +118,16 @@ corners the worst possible arrangement, on the grounds that 1, 3, 7 and 9 are
 all adjacent to one another under the wrap.
 
 **That argument does not apply here and the corners are right.** It assumed
-adjacency meant connection. Two sealed regions sharing a divider do not
-interact in any way, so it does not matter that the four corners touch. What
-matters instead is the shape of the part that IS connected, and the corners are
-the only choice that leaves the connected five as a symmetric plus through the
-centre. Any other four would leave the walkable world a lopsided snake.
+adjacency meant connection. What matters instead is the shape of the part that
+IS connected, and the corners are the only choice that leaves the connected five
+as a symmetric plus through the centre. Any other four would leave the walkable
+world a lopsided snake.
+
+The earlier draft's adjacency is now real rather than incidental: the four
+corners do touch, and since every side of a sealed face is passable they form a
+ring of their own. Rime to Tempest to Pyre to Verdant and back to Rime, without
+ever returning to the cross. That is a second loop through the world and it was
+the point of opening the fourth wall, not a side effect of it.
 
 The graph facts in the earlier draft were correct and are kept for the record;
 the conclusion drawn from them was not.
@@ -193,14 +205,32 @@ to.
 They must be unbreakable and unplaceable, and want a material that reads as
 world-edge rather than as somebody's build.
 
-**Portals** are the only way into a sealed face. One at the middle of each
-divider between a corner and the cross gives each special two entrances, from
-the two ordinary faces that flank it. Corner-to-corner dividers carry no portal:
-you do not travel from Rime to Tempest directly, you come back out to the world
-first.
+**Portals** are the only way into a sealed face, and **the divider IS the
+portal**: there is no door in it, every column of it carries you. Each special
+therefore has four ways in and out, one per side - two onto the ordinary faces
+that flank it, two onto the corners it touches.
 
-Stepping through puts you at the matching portal on the far side, facing inward,
-so the map stays learnable.
+That last pair is the owner's call, and it replaces the rule this document used
+to state: *"corner-to-corner dividers carry no portal: you do not travel from
+Rime to Tempest directly, you come back out to the world first."* You do travel
+from Rime to Tempest directly now. The report that changed it was simply that he
+could not cross out of Rime and nothing said why.
+
+**A corner-to-corner join is two wall columns thick.** Each sealed face carries
+its own ring, so where two of them touch the rings sit back to back and the step
+is three columns wide: near interior, wall, wall, far interior. A sealed-to-cross
+join is the ordinary two-column step. `Grid.portalHop` reads which of the two a
+column is, and a double wall has open ground on one side only, which is the only
+side a body can have come from - so it needs nothing from the traveller to know
+which way to put them out.
+
+The corners OF a ring are the exception and stay one-sided: they are walled on
+every side, so `Grid.wallExit` answers them from where the body came from, and
+both of a ring corner's inward neighbours are ring columns. A ring corner
+therefore lets you out of a sealed face and never into one.
+
+Stepping through puts you on the far side at the column you walked in at, so the
+map stays learnable.
 
 Rules that follow from "the cross is one world":
 

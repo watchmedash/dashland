@@ -1,0 +1,100 @@
+# Build the debug APK on every push to main and attach it to a Release, so it
+# can be downloaded onto a phone from the repo instead of being copied off the
+# dev machine by hand.
+#
+# ---- why a Release and not a committed file ----
+#
+# The APK is 34 MB and every build produces a different one. Committing it would
+# put a fresh 34 MB blob in the history each time - ten builds is +340 MB on a
+# repo whose .git is already 306 MB, and every clone pays it for ever. See the
+# note beside `Mojazer-debug.apk` in .gitignore, which has said so all along.
+# Release assets live outside the git object store, so this costs the repo
+# nothing and the download link never changes.
+#
+# ---- the rolling tag ----
+#
+# One release, `debug-latest`, replaced on each push, so there is exactly one
+# link to remember and it is always the newest build:
+#
+#   https://github.com/watchmedash/dashland/releases/latest/download/Mojazer-debug.apk
+#
+# The alternative was a tag per build, which is a tidier history and a worse
+# answer to "where do I get the current one" - the whole point of this file.
+name: Debug APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The only permission it needs, and it needs this one: publishing a release is a
+# write to the repo's contents.
+permissions:
+  contents: write
+
+# Newest wins. A queued APK build for a commit that has already been superseded
+# is 34 MB of nothing, unlike the Pages deploy next door, which is left to
+# finish because a half-deployed site is worse than a stale one.
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      # The runner image ships an Android SDK but pins its own JDK; Capacitor 8's
+      # Gradle plugin wants 21. Named explicitly rather than inherited, so a
+      # change to the runner image cannot quietly break the build.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - run: npm ci
+      # `build:web` and not `build`: the `build` script ends by running
+      # scripts/build-apk.mjs, which looks for Android Studio's bundled JDK at a
+      # Windows path and would die here. The steps below are that script's job,
+      # done the way a Linux runner can do it.
+      - run: npm run build:web
+      - run: npx cap sync android
+
+      - name: Assemble
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - name: Name it what the dev machine names it
+        run: mv android/app/build/outputs/apk/debug/app-debug.apk Mojazer-debug.apk
+
+      # Deleted and recreated rather than edited: `gh release upload --clobber`
+      # leaves the release notes and the tag pointing at whatever commit first
+      # created them, so after a few pushes the page describes a build that is
+      # no longer the one attached to it.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete debug-latest --cleanup-tag --yes || true
+          gh release create debug-latest Mojazer-debug.apk \
+            --title "Mojazer debug build" \
+            --notes "Debug APK built from \`${GITHUB_SHA::7}\` on $(date -u '+%Y-%m-%d %H:%M') UTC.
+
+          Unsigned debug build: Android will ask you to allow installing from an unknown source.
+
+          \`\`\`
+          $(git log -1 --pretty=%s)
+          \`\`\`"
+
+      - name: Say where it went
+        run: |
+          echo "### Debug APK published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/Mojazer-debug.apk>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`$(du -h Mojazer-debug.apk | cut -f1)\`" >> $GITHUB_STEP_SUMMARY

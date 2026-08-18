@@ -998,19 +998,59 @@ const NIGHT_BED_DIST = 62;
 const NIGHT_BED_PER_TICK = 2;
 
 /**
+ * How close a land animal may be and still turn into a husk. 40, not 62.
+ *
+ * The swap used to borrow NIGHT_BED_DIST outright, on the argument that there
+ * should be one rule about changing the population where the player is
+ * standing. That argument does not survive the flat map, and the report that
+ * broke it was the owner's: *"why are there still animals at night?"*
+ *
+ * Measured on a settled night, sixty seconds after dusk: thirteen land animals
+ * left alive and EVERY ONE of them inside 62 units — nearest at 5, then 23, 23,
+ * 27, 29 — with nothing at all left beyond the ring, and 20 of the 32 husks
+ * abroad were converted animals. The mechanic was working perfectly and its own
+ * exclusion zone was exactly the herd the player could see.
+ *
+ * The two rules are protected by different things, which is why they now have
+ * different numbers:
+ *
+ *   `_bedDown` removes a body outright and has NO sight test at all — distance
+ *   is its only guard, so it keeps the 62. Lowering it would pop animals out of
+ *   existence in plain view.
+ *
+ *   `_unseenSwap` has `_inView`: a frustum test with 60% of a screen of slack
+ *   either side, finished with a line-of-sight walk. That is a real answer to
+ *   "did the player see it", and the distance beside it is only a backstop.
+ *
+ * The old note justified 62 as that backstop with a *sphere's* horizon — "the
+ * eye is about 1.7 above a sphere with a sea-level radius of 290, so the
+ * horizon over open ground is sqrt(2 * 290 * 1.7) ~= 31 units... a body
+ * sixty-two units off is below the curve of the planet". There is no curve any
+ * more. On the flat map a body at 62 units on open ground is plainly visible,
+ * so the distance term stopped doing the work that measurement credited it
+ * with, and `_inView` has been carrying it alone ever since regardless.
+ *
+ * 40 keeps the one term of that argument that is still true, and is why it is
+ * not lower: the husk's `aggroRange` is 34 cells, so nothing can turn into a
+ * husk that is already close enough to come straight for you.
+ */
+const NIGHT_TURN_DIST = 40;
+
+/**
  * The dusk swap, and the one rule it is not allowed to break.
  *
  * "just make sure I don't see those transformations" is a requirement, not a
  * polish note, so it is written as a predicate (`_unseenSwap`) with two terms
  * that fail in different ways, and a body has to clear both:
  *
- *   - further off than NIGHT_BED_DIST. Deliberately the number `_bedDown`
- *     already refuses to retire an animal inside, rather than a second distance
- *     of my own. There is one rule on this planet about changing the population
- *     where the player is standing, and it should stay one rule. It also has a
- *     second effect worth having: 62 is well outside the husk's 34-cell aggro
- *     ring, so nothing ever turns into a husk that is already close enough to
- *     come straight for you.
+ *   - further off than NIGHT_TURN_DIST. This was NIGHT_BED_DIST, shared with
+ *     `_bedDown` on the argument that there should be one rule about changing
+ *     the population where the player is standing. It is 40 now and a constant
+ *     of its own — see the note over it for the measurement that separated the
+ *     two, and for why the sphere's horizon the paragraph below leans on is no
+ *     longer there. What survives is the half that is still true: 40 is outside
+ *     the husk's 34-cell aggro ring, so nothing ever turns into a husk that is
+ *     already close enough to come straight for you.
  *   - outside the frame, or behind something. That is `_inView`, the stalker's
  *     own test, which takes the *camera* rather than the player (in third
  *     person they are several units apart and it is the camera that saw the
@@ -5752,7 +5792,7 @@ export class Mobs {
    * needed and why the slack on the second one is as wide as it is.
    */
   _unseenSwap(mob, dist) {
-    if (dist < NIGHT_BED_DIST) return false;
+    if (dist < NIGHT_TURN_DIST) return false;
     return !this._inView(mob, TURN_MARGIN);
   }
 

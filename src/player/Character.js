@@ -783,6 +783,8 @@ export class PlayerCharacter {
      */
     this._kick = 0;
     this._drive = 0;
+    /** How much of a *surface* swimmer this is: 1 head out, 0 fully under. */
+    this._surfaced = 0;
     this._airT = 0;
     /** Resolved per instance, since the model arrives long after construction. */
     this._poseNodes = null;
@@ -1614,6 +1616,37 @@ export class PlayerCharacter {
 
     _pivot.copy(player.up).multiplyScalar(PLAYER_HEIGHT * 0.5);
     this.model.root.position.add(_pivot).sub(_pivot.applyQuaternion(_qp));
+
+    // ...and then down into the water, which is the other half of lying down.
+    //
+    // The pivot above turns the body about its own middle so that tipping over
+    // does not move it. That is right for a diver, who is somewhere in the
+    // water and should stay there. It is wrong at the surface, and the owner
+    // saw why: *"when swimming in the water surface my character is floating
+    // above the water"*.
+    //
+    // The physics is what makes it so. `inWater` is read off the FEET cell, so
+    // buoyancy is a thing that happens while your feet are wet and stops the
+    // moment they are not: a swimmer holding Space settles where their feet are
+    // at the waterline, with all 1.8 cells of body above it. Upright and
+    // treading, that reads as bobbing. Tipped flat by the line above, it is a
+    // man lying on top of the sea.
+    //
+    // Rather than re-cut buoyancy — which owns diving, the whirlpool and three
+    // measured terminal speeds — the body is put where a swimmer's body goes.
+    // The drop is the same half-height the pivot just used, so a fully flat
+    // swimmer lies AT the waterline their feet are at instead of a body's
+    // radius over it, and the surface cuts across their back.
+    //
+    // Gated on the head being dry, because underwater the pivot's answer is the
+    // correct one and this would drive a diver through the seabed. Eased, so
+    // breaking the surface is a body rising through it rather than a jump cut;
+    // `_surfaced` is the only state this adds and it decays to nothing on its
+    // own the moment the pose ends.
+    const wantSurface = player.headInWater ? 0 : 1;
+    this._surfaced += (wantSurface - this._surfaced) * Math.min(1, dt * 5);
+    const sink = PLAYER_HEIGHT * 0.5 * this._surfaced * this._poseW * Math.abs(pitch) / PITCH_MAX;
+    this.model.root.position.addScaledVector(player.up, -sink);
   }
 
   /**

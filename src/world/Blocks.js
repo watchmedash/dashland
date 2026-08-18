@@ -2453,7 +2453,25 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_GATE[i] = b.render === R_GATE ? 1 : 0;
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
   IS_MODEL[i] = b.render === R_MODEL ? 1 : 0;
-  SEALS_FACES[i] = (b.opaque && b.render !== R_MODEL) ? 1 : 0;
+  // The portal joins the modelled blocks in the one class this flag exists to
+  // carve out: opaque to the LIGHT, and not something to hide a face behind.
+  //
+  // It was `opaque: true` and drawn at 0.88 alpha through GROUP_LIQUID, which
+  // is a contradiction the mesher resolved the wrong way: every terrain block
+  // touching a divider had its face culled, and then the thing that culled it
+  // turned out to be see-through. So looking at a divider from a few paces away
+  // showed you the *inside of the ground on the far face* — caves, ore, the
+  // hollow underside of a hill — which is the owner's report, and the same
+  // holes opening and closing as you turn are the "lines/glitches" in it.
+  //
+  // `opaque` itself must stay true: it is what `SKY_ATTEN` in Lighting.js is
+  // built from, and a divider has to go on stopping the sky and the block light
+  // exactly as it does today. Only the culling changes.
+  //
+  // This costs no geometry along the wall itself. A portal face against another
+  // portal is still culled by `faceVisible`'s `GROUP_LIQUID && b === a` rule, so
+  // the double wall stays one shell rather than becoming four.
+  SEALS_FACES[i] = (b.opaque && b.render !== R_MODEL && b.name !== 'portal') ? 1 : 0;
   IS_SUBMERGED[i] = b.submerged ? 1 : 0;
   STACKS[i] = b.stacks ? 1 : 0;
   IS_REPLACEABLE[i] = b.render === R_CROSS ? 1 : 0;

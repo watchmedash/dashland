@@ -20,11 +20,14 @@ import {
 import { wrap } from './Grid.js';
 import {
   IS_SOLID, BLOCKS_MOTION, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
-  plantMask, plantBox, PLANT_MASK_N,
+  plantMask, plantBox, PLANT_MASK_N, ID,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID } from './Mesher.js';
 
 const _cell = { cx: 0, cy: 0, ck: 0 };
+
+/** The divider, hoisted so the raycast's inner loop is an integer compare. */
+const PORTAL_ID = ID.portal;
 
 /**
  * Drop a vertex buffer's CPU copy once the driver has taken it.
@@ -660,6 +663,21 @@ export class Planet {
       if (iy >= 0 && iy < D) {
         const col = wrap(ix) * W + wrap(iz);
         const id = this.blocks[col * D + iy];
+        // A divider is scenery you walk into, not a block you point at.
+        //
+        // It stopped the ray and reported itself, so the crosshair named
+        // "Portal", the highlight box drew on it and every interaction in
+        // main.js was offered a target it can do nothing with. The owner's
+        // words: *"why is portal treated like a block not like water"*. Water
+        // is skipped two lines below for exactly this reason.
+        //
+        // It STOPS rather than being skipped, which is the one way it is not
+        // like water: skipping would hand the ray whatever is on the far side,
+        // and the far side is another face of the world — you would be mining
+        // Rime's hillside from Solace through two metres of wall. Returning
+        // null keeps the wall a wall and simply gives the crosshair nothing,
+        // which is what a doorway made of light should give it.
+        if (id === PORTAL_ID) return null;
         if (id !== 0 && (hitLiquid || RENDER_TYPE[id] !== R_LIQUID)) {
           if (RENDER_TYPE[id] === R_CROSS) {
             // No volume to enter: walk the segment inside this cell instead.

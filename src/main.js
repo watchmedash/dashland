@@ -70,6 +70,7 @@ import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
+  SEALS_FACES,
 } from './world/Blocks.js';
 import {
   D, COLUMNS, GRAVITY, GEN_VERSION,
@@ -6101,7 +6102,7 @@ class Game {
       // already the answer to "what does a handful of this look like" and is
       // what the crumbs and the foot dust are tinted with — so being buried in
       // it and kicking it up match without a second number to keep in step.
-      buried: this._buried > 0.002 ? [...this._buriedColor, this._buried] : null,
+      buried: this._coverAt(this._buried, this._buriedColor),
     });
     // No hands. `viewModel.enabled` is already false for a spectator — see the
     // gate in `_syncViewModel` — and this is the second half of the same thing:
@@ -6971,6 +6972,50 @@ class Game {
    * player's current state, so a body that stops being in a pool for any reason
    * — including dying in one — fades out on its own.
    */
+  /**
+   * What to paint over the whole screen, from where the CAMERA actually is.
+   *
+   * `_tickSink` below is the sink pool's own cover and it is driven off
+   * `headInSink`, which reads the block in the player's eye CELL. That answers
+   * a question about the body, and the thing that must not see through the
+   * world is the camera — which is not at the eye. It carries the view bob, it
+   * carries the boom in third person, and in the frame ordering it settles
+   * after the tick that set `_buried`. Any of those three is enough to put the
+   * near plane inside solid ground for a frame with nothing over it, and one
+   * frame of looking through a hillside at the ore in it is the whole bug:
+   * *"I can see through the ground when sinking in quicksand for a brief
+   * moment"*, still there after the ease-in was removed because the ease-in was
+   * never the only gap.
+   *
+   * So this asks the honest question, at the last possible moment, of the exact
+   * point the frame is about to be rendered from: is the camera inside
+   * something that seals a face? If it is, that block's own particle colour
+   * covers the screen outright. No easing — there is nothing to ease, you are
+   * either inside a block or you are not, and every frame of transition is a
+   * frame of X-ray.
+   *
+   * It takes the sink cover's value rather than replacing it, because the two
+   * are answering different halves. The sink cover survives its own fade-out
+   * when you surface, which is a reveal and wants to feel like one; this one
+   * has no memory at all. `Math.max` of the two lets the pool keep its ease
+   * while nothing can ever see through a wall.
+   *
+   * Glass and water seal no faces, so a head inside either is left alone: the
+   * blocks around them keep their faces and there is nothing to see through.
+   * Water has its own `underwater` pass a line above, which is the right cover
+   * for it.
+   */
+  _coverAt(sinkCover, sinkColor) {
+    let cover = sinkCover, color = sinkColor;
+    const c = this.camera.position;
+    const k = Math.floor(c.y);
+    if (k >= 0 && k < D) {
+      const id = this.planet.at(colIndex(Math.floor(c.x), Math.floor(c.z)), k);
+      if (SEALS_FACES[id]) { cover = 1; color = BLOCKS[id].particle; }
+    }
+    return cover > 0.002 ? [...color, cover] : null;
+  }
+
   _tickSink(dt) {
     const p = this.player;
     const id = p.inSink;

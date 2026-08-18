@@ -3386,6 +3386,85 @@ export function applyInstancedBlockLight(material) {
 }
 
 /**
+ * The same block-light term, driven by one uniform instead of a per-instance
+ * attribute — for a loose model that is lit as a single body, which is what a
+ * dropped item is.
+ *
+ * ### Why a dropped item stopped being lit as emissive
+ *
+ * It used to write the answer into `emissive`, and emissive is the wrong slot
+ * for grid light: it is added *after* the albedo, so the surface's own colour
+ * never enters it and the shoulder the terrain rolls its highlights off with
+ * never applies. Beside an ordinary torch nothing much shows, because the term
+ * is small. Beside a divider it is not small — a portal is light 15 in violet
+ * at every layer from bedrock to sky, so every cell within a dozen of one is
+ * lit hard — and the two curves come apart exactly where they are read:
+ *
+ * Measured on seed 4242 in an open field five cells east of the Rime divider,
+ * a full stone wall fifteen high standing between the drop and the portal, the
+ * gain uniform at its shipped value:
+ *
+ *   term                     r      g      b
+ *   entity light in         0.64   0.00   0.96
+ *   emissive, as shipped    0.64   0.00   0.96   ← added whole, over albedo
+ *   terrain, same cell      0.26   0.00   0.39   ← albedo, then the shoulder
+ *
+ * The item was carrying two and a half times the violet the wall behind it
+ * carried and carrying it as pure colour, which is the report: "item drops near
+ * portals are coloured purple instead of being just glowed at". The wall in
+ * front changes the level by three and neither reading by much, because a
+ * divider is a wall of light as tall as the world and a wall built in front of
+ * it is not a roof — that half of the report is the flood being right.
+ *
+ * So the light goes where the flora's already goes: multiplied into
+ * `diffuseColor` and rolled off on the same knee, at which point a dropped
+ * flower and the planted one beside it answer the same lamp with the same
+ * number. Whatever emissive the model was authored with is left alone, because
+ * that is the item's own glow and not the world's.
+ *
+ * @param {THREE.Material} material patched in place; clone first if it is
+ *   shared. The level to show is written to `material.userData.blockLight`,
+ *   per channel over fifteen, exactly as the terrain's vertex attribute holds
+ *   it.
+ */
+export function applyEntityBlockLight(material) {
+  const lit = { value: new THREE.Vector3() };
+  material.userData.blockLight = lit;
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    prevCompile.call(material, shader, renderer);
+    shader.uniforms.uBlockIntensity = voxelUniforms.uBlockIntensity;
+    shader.uniforms.uEntityBlock = lit;
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        uniform float uBlockIntensity;
+        uniform vec3 uEntityBlock;
+        const float BLOCK_KNEE = 0.28;
+        const float BLOCK_CEIL = 0.58;
+      `)
+      // Line for line the instanced patch above, uniform for attribute. Same
+      // Lambert factor, same shoulder, same constants: a dropped daisy and a
+      // planted one are the same picture or this is not worth having.
+      .replace('#include <lights_fragment_end>', /* glsl */`
+        #include <lights_fragment_end>
+        vec3 entRad = diffuseColor.rgb * uEntityBlock * uBlockIntensity * RECIPROCAL_PI;
+        float entPeak = max(entRad.r, max(entRad.g, entRad.b));
+        if (entPeak > BLOCK_KNEE) {
+          float entOver = (entPeak - BLOCK_KNEE) / (BLOCK_CEIL - BLOCK_KNEE);
+          entRad *= (BLOCK_KNEE + (BLOCK_CEIL - BLOCK_KNEE) * (1.0 - exp(-entOver))) / entPeak;
+        }
+        reflectedLight.indirectDiffuse += entRad;
+      `);
+  };
+  material.customProgramCacheKey = () => 'eblock|' + prevKey.call(material);
+  material.needsUpdate = true;
+  return material;
+}
+
+/**
  * Stripped-down voxel material for objects rendered outside world space — the
  * first-person viewmodel. Same texture arrays, no fog and no voxel skylight.
  */

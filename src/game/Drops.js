@@ -23,7 +23,7 @@ import { hasModel, worldModel } from '../render/ItemModels.js';
 // The terrain's own live block-light gain, so a dropped cobble and the cobble
 // wall behind it answer by the same number. Read through the uniform rather
 // than copied for the reason `_entityLight` gives: a copy can drift.
-import { voxelUniforms } from '../render/VoxelMaterial.js';
+import { voxelUniforms, applyEntityBlockLight } from '../render/VoxelMaterial.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -342,7 +342,9 @@ export class Drops {
    *    light to raise and the albedo is raised instead. Same trick
    *    `setSkyLevel` already plays, one drop at a time.
    *  - A **model** is MeshStandardMaterial and takes the scene's lights, so it
-   *    takes block light as emissive, exactly as a mob does.
+   *    takes block light through a patch on its own shader — over its albedo
+   *    and on the terrain's own shoulder, which is what the planted copy of the
+   *    same model already gets. See `applyEntityBlockLight`.
    *
    * A model's materials are shared with the template every copy is cloned
    * from, so they have to be cloned here or lighting one dropped torch would
@@ -350,9 +352,10 @@ export class Drops {
    * `Material.clone` does not carry `onBeforeCompile` or
    * `customProgramCacheKey`, and two of the item models depend on both (see
    * the glow shaders in `ItemModels.js`), so those are carried across by hand.
-   * Whatever emissive the material was authored with is kept as a floor rather
-   * than overwritten, for the reason `Mobs` spells out at length: `emissive` is
-   * one slot, and the second thing to assume it owns it puts out the first.
+   * Whatever emissive the material was authored with is left alone, which is
+   * the same point `Mobs` spells out at length from the other side: `emissive`
+   * is one slot, so the world's light does not go in it. That is the item's own
+   * glow and it keeps it.
    */
   _attachLight(drop) {
     const parts = [];
@@ -373,7 +376,7 @@ export class Drops {
       m.customProgramCacheKey = src.customProgramCacheKey;
       seen.set(src, m);
       if (m.isMeshBasicMaterial) parts.push({ card: m });
-      else parts.push({ lit: m, base: m.emissive ? m.emissive.clone() : null });
+      else parts.push({ lit: applyEntityBlockLight(m).userData.blockLight });
       return m;
     };
     drop.mesh.traverse((o) => {
@@ -487,9 +490,10 @@ export class Drops {
         // before any of this existed. A multiplied one would draw it black.
         p.card.color.setRGB(sky + r, sky + g, sky + b);
       } else if (p.lit) {
-        const e = p.base;
-        p.lit.emissive.setRGB(
-          e ? Math.max(e.r, r) : r, e ? Math.max(e.g, g) : g, e ? Math.max(e.b, b) : b);
+        // The level itself, not the gained answer: the patched shader applies
+        // the same `uBlockIntensity * RECIPROCAL_PI` the terrain does, over the
+        // model's own albedo. See `applyEntityBlockLight`.
+        p.lit.value.set(r * inv, g * inv, b * inv);
       }
     }
   }

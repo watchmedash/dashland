@@ -105,9 +105,10 @@ to.
 ## Produce — Fruits and Vegetables by **Squareish Design**
 
 [squareishdesign.com](https://squareishdesign.com) — **CC0**. Four of its 150
-models: the apple, the pumpkin (which is both the vegetable and the roast made
-from it), a raspberry for the berries, and a pod for the cooked green beans. All
-150 share one 8x8 palette texture, which is why a fifth costs nothing but the
+models, and all four are raw produce: the apple, the pumpkin, a raspberry for
+the berries and a pod for the cooked green beans. The roast used to borrow the
+pumpkin and now comes off the food kit with the rest of the cooking. All 150
+share one 8x8 palette texture, which is why a fifth costs nothing but the
 `.gltf` — see `POSE` in `render/ItemModels.js`.
 
 ## Raw materials and reef life — original models, authored in WAM

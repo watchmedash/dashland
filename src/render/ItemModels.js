@@ -748,13 +748,17 @@ export const POSE = {
   // pickaxe reads as a beach ball. `grip` sits at the middle of the fruit
   // rather than at a handle, so it turns in the fist instead of orbiting it.
   apple:  { file: 'applered01', pack: 'produce', height: 0.24, grip: 0.5, rot: [0.10, -0.50, 0.10], pos: [0.017, 0.104, -0.052] },
-  roast:  { file: 'pumpkin01',  pack: 'produce', height: 0.28, grip: 0.5, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
   // The gourd itself, now that it is a vegetable rather than a block (see
-  // `pumpkin` in Items.js). Same model as the roast above and deliberately
-  // larger: a raw pumpkin is the whole thing off the patch, and the roast is a
-  // portion of one, so the pair are told apart by size rather than by an art
-  // budget the pack does not have — there is exactly one pumpkin in it.
-  pumpkin: { file: 'pumpkin01',  pack: 'produce', height: 0.34, grip: 0.5, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
+  // `pumpkin` in Items.js). It takes `pumpkin01`, which the roast used to
+  // borrow, and the roast moves to the food kit's pumpkin — see its line down
+  // there. That is the split the rest of this table already runs on: raw
+  // produce comes off the produce pack, cooked things come off the food kit.
+  //
+  // The two had to stop sharing a mesh whatever the packs. `height` is not what
+  // the icon camera fits — it frames the model to the slot — so a bigger
+  // pumpkin and a smaller one are the *same picture* at 46px, and pumpkin and
+  // roast sit next to each other in one workflow.
+  pumpkin: { file: 'pumpkin01',  pack: 'produce', height: 0.30, grip: 0.5, rot: [0.10, -0.55, 0.10], pos: [0.02, 0.15, -0.06] },
   // The berry. It drew the food kit's cherry bunch until now, which is the same
   // mesh `cherry` carries — two different foods, one object, and no way to tell
   // a handful of berries from a handful of cherries in the toolbar.
@@ -763,10 +767,15 @@ export const POSE = {
   // through to the hand-drawn card. `spin` is the fish's trick and is here for
   // the fish's reason: the pod is authored lying along Z, so without it `height`
   // normalises the wrong axis and `grip` indexes the pod's thickness.
+  // `grip` and `rot` are the raw green bean's, so the pair are held the same
+  // way; gripping the middle of a pod hung half of it below the bottom of the
+  // viewport. The icon takes a roll the held pose does not, for the snow pea's
+  // reason: a pod stood upright is a sliver in a square slot, and the diagonal
+  // is the longest line a slot has.
   cooked_greenbean: {
-    file: 'bean01', pack: 'produce', height: 0.26, grip: 0.5,
+    file: 'bean01', pack: 'produce', height: 0.26, grip: 0.26,
     spin: [-Math.PI / 2, 0, 0],
-    rot: [0.06, -0.48, 0.24], pos: [0.013, 0.082, -0.022], icon: [0.20, 0.44, -0.14],
+    rot: [-0.06, -0.48, 0.24], pos: [0.013, 0.082, -0.022], icon: [0.14, 0.44, -0.62],
   },
 
   // The collectible. Authored upright with the root at the bottom and the tuft
@@ -786,6 +795,12 @@ export const POSE = {
   // 46px in the inventory neither read as what it was.
   // `loaf-round` and not `loaf`: the tin loaf is a brown box with no scoring on
   // it, and in a 46px slot it was indistinguishable from a crate.
+  // The roast, off `pumpkin01` and onto the kit's own pumpkin. It shares that
+  // mesh with the stuffed squash, which is what the kit is for and what half
+  // this list already does — the bowls, the pots and the platters are shared
+  // three ways apiece. Sharing with the *raw* gourd was the one that could not
+  // stand: you smelt one into the other.
+  roast:       food('pumpkin', 0.28, false, { pos: [0.02, 0.15, -0.06] }),
   bread:       food('loaf-round', 0.30, false, { pos: [0.016, 0.103, -0.047] }),
   meat:        food('meat-raw', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
   cooked_meat: food('meat-cooked', 0.30, true, { pos: [0.02, 0.13, -0.06] }),

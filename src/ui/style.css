@@ -2351,6 +2351,43 @@ body.fighting #toasts { top: 172px; }
 .panel .errand-go:hover { filter: brightness(1.06); }
 .panel .errand-go:active { transform: translateY(var(--lip)); box-shadow: 0 0 0 1px var(--brass-line), inset 0 2px 5px rgba(96, 42, 6, .55); }
 
+/* ── verdant's neighbours ──────────────────────────────── */
+/* The merchant's furniture with the money taken out. One counter rather than
+   two, because an offer is a whole exchange already: both halves are fixed
+   against each other, so there is nothing to pick on one side and match on the
+   other. The heading states the rule the counts obey where the purse sat. */
+
+.barter-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 8px; padding: 7px 13px; border-radius: var(--r-md);
+  background: var(--paper-cell); box-shadow: var(--emboss);
+}
+.barter-head b {
+  flex: none; color: var(--ink);
+  font: var(--fw-disp) var(--fs-xs)/1.4 var(--font);
+  letter-spacing: var(--ls-cap); text-transform: uppercase;
+}
+.barter-head span { flex: 1 1 6em; min-width: 0; font-size: var(--fs-sm); color: var(--ink-faint); }
+.barter-head em {
+  flex: none; font: 600 var(--fs-sm) var(--mono); font-style: normal; color: var(--ink-soft);
+}
+
+.barter-list { max-height: min(230px, 34vh); }
+/* Both sides of the swap share the row evenly and both may ellipsis: a
+   40px basis with `1 1` is a zero floor in flex spelling, and without it
+   "16 Cobblestone" held the row wider than a landscape phone. */
+.barter-row { gap: 8px; min-height: 44px; }
+.barter-side { display: flex; align-items: center; gap: 7px; flex: 1 1 40px; min-width: 0; }
+.barter-row .rname { min-width: 0; }
+.barter-arrow { flex: none; color: var(--ink-faint); font-size: var(--fs-md); }
+.barter-tag { flex: none; font: 700 var(--fs-xs) var(--mono); color: var(--accent); }
+/* A line they cannot honour keeps its place and loses its lift: the reason is
+   in the tag, and there is still something to read there. */
+.barter-row.off { opacity: .55; }
+.barter-row.off .barter-tag { color: var(--ink-faint); }
+.barter-row.off:hover { background: var(--paper-cell); transform: none; box-shadow: var(--emboss); }
+.barter-row.off:hover::before { transform: scaleY(0); }
+
 /* ── growth ────────────────────────────────────────────── */
 /* The tree, and nothing else. The aside that used to sit beside it listed
    where XP came from and which firsts were unearned, which is a manual filed

@@ -5868,30 +5868,6 @@ class Game {
       traderIdOf(mob.spec.folkId), index);
   }
 
-  /**
-   * A stand-in for the barter panel, and nothing more.
-   *
-   * It reads the model through the three methods above and says the first
-   * available line out loud. It exists so the whole feature can be seen working
-   * in a running game before the panel is built, and it is meant to be deleted
-   * by whoever builds it.
-   */
-  _barterPeek(mob) {
-    const offers = this.barterOffers(mob);
-    if (!offers) { this.ui.toast('Not now', 0, 1400); return; }
-    for (let i = 0; i < offers.length; i++) {
-      const o = offers[i];
-      if (o.left <= 0) continue;
-      const give = `${o.give.count} ${ITEMS[o.give.item]?.label ?? '?'}`;
-      const take = `${o.take.count} ${ITEMS[o.take.item]?.label ?? '?'}`;
-      const no = this.barterRefusal(mob, i);
-      this.ui.toast(no ? `${give} for ${take}: ${no}` : `${give} for ${take}`,
-        o.take.item, 2600);
-      return;
-    }
-    this.ui.toast('Done trading', 0, 1400);
-  }
-
   /** Take one swap. False if it could not happen; see `barterRefusal`. */
   barterAccept(mob, index) {
     if (this.barterRefusal(mob, index)) return false;
@@ -10102,12 +10078,9 @@ class Game {
         if (mobHit.mob.spec.trader) {
           this.openScreen('shop', mobHit.mob);
         } else if (mobHit.mob.spec.folk) {
-          // PLACEHOLDER, and the only thing in this feature that is one. The
-          // barter panel lives in `src/ui/`, which another hand owns; this is
-          // the call site it replaces, and `barterOffers`/`barterRefusal`/
-          // `barterAccept` above are the whole of what it needs. Until then a
-          // toast is enough to see the model working in a running game.
-          this._barterPeek(mobHit.mob);
+          // An angry one has nothing to say, and `barterOffers` is the whole of
+          // that test: no offers, no panel, no message.
+          if (this.barterOffers(mobHit.mob)) this.openScreen('barter', mobHit.mob);
         } else if (!feedSlot.empty && this.mobs.feed(mobHit.mob, feedSlot.item)) {
           this.inventory.consumeHeld(1, feedSlot);
           this.player.swing();

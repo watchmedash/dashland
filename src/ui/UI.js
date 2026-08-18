@@ -551,10 +551,11 @@ export class UI {
   constructor(game) {
     this.game = game;
     this.icons = null;
-    this.screen = null;               // null | 'inventory' | 'bench' | 'kiln' | 'shop'
+    this.screen = null;               // null | 'inventory' | 'bench' | 'kiln' | 'shop' | 'barter'
     this.stationPos = null;
     this.kiln = null;                 // active kiln state object
     this.shop = null;                 // the merchant being traded with
+    this.folk = null;                 // the neighbour being bartered with
     this._nameTimer = null;
     this._critTimer = null;
     this._cursorXY = { x: 0, y: 0 };
@@ -2309,6 +2310,7 @@ export class UI {
     if (this.crateSlots) this._refreshCrate();
     if (this.offhandEl) this._paint(this.offhandEl, inv.offhand);
     if (this.screen === 'shop') this._refreshShop();
+    else if (this.screen === 'barter') this._refreshBarter();
     else if (this.screenOpen) this._refreshRecipes();
     this._paintCursor();
     // The word on the action button is half a fact about the hand, so it is
@@ -2437,26 +2439,32 @@ export class UI {
   // --- screens --------------------------------------------------------------
 
   /**
-   * @param {string} kind 'inventory' | 'bench' | 'kiln' | 'shop'
-   * @param {*} state the kiln's state object, or the merchant mob for a shop
+   * @param {string} kind 'inventory' | 'bench' | 'kiln' | 'shop' | 'barter'
+   * @param {*} state the kiln's state object, or the mob for a shop or a barter
    */
   openScreen(kind, state) {
     this.screen = kind;
     this.kiln = kind === 'kiln' ? state || null : null;
     this.crate = kind === 'crate' ? state || null : null;
     this.shop = kind === 'shop' ? state || null : null;
+    this.folk = kind === 'barter' ? state || null : null;
+    // The neighbours are people and the panel is titled with the person. They
+    // are not a stall and there is no word for what they are that is not a name.
     this.el.screenTitle.textContent =
       kind === 'bench' ? 'Workbench' : kind === 'kiln' ? 'Kiln'
         : kind === 'kitchen' ? 'Kitchen'
-          : kind === 'shop' ? 'Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
+          : kind === 'barter' ? (this.folk?.spec.label ?? 'Trade')
+            : kind === 'shop' ? 'Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
     this.el.screenTop.innerHTML = '';
     this.craftSlots = null; this.craftMap = null; this.kilnSlots = null; this.craftNote = null;
     this.crateSlots = null; this.offhandEl = null;
     this.shopEls = null;
+    this.barterEls = null;
 
     if (kind === 'kiln') this._buildKilnUI();
     else if (kind === 'crate') this._buildCrateUI();
     else if (kind === 'shop') this._buildShopUI();
+    else if (kind === 'barter') this._buildBarterUI();
     // The kitchen IS the bench screen: three by three cells, a filter on what
     // they take, and a second answer behind the output slot. It holds no state
     // of its own, deliberately. It works out of `inventory.craft` exactly as
@@ -2471,7 +2479,8 @@ export class UI {
     // grid either, so the sidebar sat there answering a question the screen
     // cannot ask, with "Nothing yet, without a bench" against a quarter of the
     // panel's width and nothing to spend it on.
-    this.el.recipePanel.classList.toggle('hidden', kind === 'shop' || kind === 'crate');
+    this.el.recipePanel.classList.toggle('hidden',
+      kind === 'shop' || kind === 'crate' || kind === 'barter');
     // With the sidebar gone the crate is the one screen whose content does not
     // fill an 830px sheet, and it sat in the middle of it with the title a hand
     // away to the left. The shop keeps the full width; its two columns want it.
@@ -2489,6 +2498,8 @@ export class UI {
     this.crateSlots = null;
     this.shop = null;
     this.shopEls = null;
+    this.folk = null;
+    this.barterEls = null;
     this.craftSlots = null;
     this.el.recipePanel.classList.remove('hidden');
     this._hideTooltip();
@@ -2910,6 +2921,108 @@ export class UI {
     for (const l of [wares.list, goods.list]) {
       l.classList.toggle('scrolls', l.scrollHeight > l.clientHeight + 1);
     }
+  }
+
+  // --- barter ---------------------------------------------------------------
+
+  /**
+   * The fourteen neighbours of Verdant, and what they will swap.
+   *
+   * The merchant's screen with one counter instead of two, because there is
+   * only one list to draw: an offer is a whole exchange already, both halves
+   * fixed and priced against each other, so there is nothing to pick from one
+   * side and match against the other. Nothing here carries a coin, and the
+   * heading says the one rule the counts obey rather than a total or a purse.
+   *
+   * A row is a button, for the reason `_shopRow` is one: a swap is a decision
+   * and a click is the confirmation of it. That also makes the whole panel
+   * thumb-usable with plain taps, with no long-press and no drag, which is
+   * right for a screen whose only verb is "yes".
+   */
+  _buildBarterUI() {
+    const head = document.createElement('p');
+    head.className = 'barter-head';
+    head.innerHTML = '<b>Even swaps</b><span>Food for food. Blocks for blocks.</span><em></em>';
+
+    const list = document.createElement('div');
+    list.className = 'shop-list barter-list';
+    const empty = document.createElement('p');
+    empty.className = 'recipe-empty';
+    empty.textContent = 'Nothing to swap';
+
+    this.el.screenTop.append(head, list, empty);
+    this.barterEls = { head, list, empty };
+  }
+
+  /**
+   * One exchange: what leaves your pack, what comes back, and what is left of
+   * it. A refused line stays on the counter greyed with the reason in place of
+   * the count, rather than vanishing — an offer you cannot afford yet is a
+   * thing to go and get, and one they have run out of is why you should leave.
+   */
+  _barterRow(offer, refusal, onClick) {
+    const row = document.createElement('div');
+    row.className = 'recipe-row barter-row';
+    row.classList.toggle('off', !!refusal);
+
+    const side = (what, cls) => {
+      const wrap = document.createElement('span');
+      wrap.className = cls;
+      const img = document.createElement('img');
+      img.src = this.icons.item(what.item);
+      const name = document.createElement('span');
+      name.className = 'rname';
+      name.textContent = `${what.count} ${ITEMS[what.item]?.label ?? '?'}`;
+      wrap.append(img, name);
+      return wrap;
+    };
+    const arrow = document.createElement('span');
+    arrow.className = 'barter-arrow';
+    arrow.textContent = '→';
+
+    const tag = document.createElement('span');
+    tag.className = 'barter-tag';
+    tag.textContent = refusal
+      ? refusal.charAt(0).toUpperCase() + refusal.slice(1)
+      : `${offer.left} left`;
+
+    row.append(side(offer.give, 'barter-side'), arrow, side(offer.take, 'barter-side'), tag);
+    row.addEventListener('click', onClick);
+    return row;
+  }
+
+  _refreshBarter() {
+    const g = this.game;
+    const mob = this.folk;
+    if (!this.barterEls || !this.icons) return;
+    const { head, list, empty } = this.barterEls;
+    // They stop talking if they turn on you while the panel is open. Say so on
+    // the counter rather than closing it out from under a thumb mid-tap.
+    const offers = (mob && g.barterOffers(mob)) || [];
+
+    let left = 0;
+    for (const o of offers) left += Math.max(0, o.left);
+    head.querySelector('em').textContent =
+      offers.length === 0 ? 'Not now' : left > 0 ? `${left} left` : 'Done trading';
+
+    list.innerHTML = '';
+    empty.classList.toggle('hidden', offers.length > 0);
+    for (let i = 0; i < offers.length; i++) {
+      const o = offers[i];
+      const no = g.barterRefusal(mob, i);
+      list.appendChild(this._barterRow(o, no, () => {
+        // A greyed line still answers, because a tap that does nothing at all
+        // reads as a broken button.
+        if (no) {
+          g.audio.deny();
+          this.toast(no.charAt(0).toUpperCase() + no.slice(1), o.take.item, 2200);
+        } else if (g.barterAccept(mob, i)) {
+          this.toast(`Traded for ${ITEMS[o.take.item]?.label ?? '?'}`, o.take.item, 1600);
+        } else g.audio.deny();
+        this.refresh();
+      }));
+    }
+    list.classList.toggle('scrolls', list.scrollHeight > list.clientHeight + 1);
   }
 
   // --- growth ---------------------------------------------------------------

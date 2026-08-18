@@ -111,9 +111,11 @@ const FRAG = /* glsl */`
   const float AERIAL_GAIN = 7.0;
   const float BRIGHTNESS = ${BRIGHTNESS.toFixed(3)};
   const float DAY_GAIN = ${DAY_GAIN.toFixed(3)};
-  // The fraction of the world's haze density the curtain is worth. See the
-  // atmosphere block in main().
+  // The fraction of the world's haze density the curtain is worth, and the
+  // density it thins at when there is no weather to thin it. See the atmosphere
+  // block in main().
   const float AERIAL_PUNCH = 0.35;
+  const float BASE_HAZE = 0.0051;
   const vec3 WATER_EXT = vec3(0.115, 0.052, 0.035);
 
   void main() {
@@ -165,7 +167,16 @@ const FRAG = /* glsl */`
     // worth: a bright emitter carries further through haze than a lit surface
     // does, which is why a city is visible on a night the hills under it are
     // not, and at 1.0 this term deletes the object it is correcting.
-    float ad = uFogDensity * AERIAL_GAIN * AERIAL_PUNCH * dist;
+    // Whichever thins it faster, the weather or its own falloff. uFogDensity is
+    // *zero* in clear weather - the world has no aerial haze at all on a clear
+    // day, the term above is then the identity, and the curtain went straight
+    // back to being a wall. It cannot be left depending on the sky being dirty.
+    //
+    // BASE_HAZE is the honest floor: exp(-(0.0051*d)^2) is 0.47 at the near edge
+    // of the fade, 0.20 at 250, 0.10 at 300 and 0.016 at 400, which is where it
+    // stops being something you can see. A max rather than a sum, so thick
+    // weather still takes it further down and clear weather does not double up.
+    float ad = max(uFogDensity * AERIAL_GAIN * AERIAL_PUNCH, BASE_HAZE) * dist;
     float atten = exp(-ad * ad);
 
     // Water absorbs, and it absorbs far harder than air. Full extinction, not a

@@ -2952,11 +2952,48 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
    to do. What a grid costs is that a short group in a row of tall ones leaves
    air under it, which is a hole in the middle of a screen rather than a fifth
    of one dead down the side. */
+/* Two columns at most, and the type grows with the screen.
+ *
+ * Four passes here tuned the WIDTH and every one of them reported success: four
+ * columns, full bleed, no overflow, all true. The screen still read badly
+ * because the fault was never horizontal. Measured at 1920x1080 with the old
+ * rule: 320px of content in a 993px window - a 32% vertical fill, a thin strip
+ * of 16px type stretched over 1832px with two thirds of the screen empty
+ * parchment underneath it. Filling the width is what MADE that: the more
+ * columns it managed, the shorter and wider the strip got.
+ *
+ * So the columns are capped at two and the type is sized off the viewport. Half
+ * the columns is twice the height; `clamp` on the caps and the labels puts the
+ * words at a size a monitor deserves and leaves them exactly where they were on
+ * a phone. A reference sheet is meant to be read across a room, not audited.
+ */
 .ctl-groups {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  column-gap: 44px; align-content: start;
+  display: grid;
+  /* Fixed count, not `auto-fit`. Auto-fit divides the width by a measure and
+     takes whatever count falls out, which is how this screen kept ending up as
+     four short columns with two thirds of the window empty under them, or three
+     with a hole where the fourth group should be. Four groups laid out as
+     `auto-fit` can never be anything but a rag; two columns of two is the only
+     arrangement of four boxes that is a shape. */
+  grid-template-columns: 1fr 1fr;
+  column-gap: clamp(28px, 3.5vw, 90px);
+  /* Space the two rows over the height rather than stacking them at the top.
+     Four groups in two rows leaves most of a 1080 screen empty underneath, and
+     a reference sheet with its content in the top third reads as a fragment of
+     a page. `space-evenly` puts the air between the rows instead of after
+     them; `start` on a short window keeps the old behaviour so nothing is
+     pushed off the bottom of a phone. */
+  align-content: space-evenly;
+  min-height: min(100%, 620px);
+  /* No max-width and no auto margin. A cap here is the invisible container -
+     "they are inside an invisible container clipping some parts on the sides" -
+     and at 1500px on a 1920px screen it left 210px of dead parchment down both
+     edges while the header rule above it ran the full width. The panel's own
+     gutter is the only inset this wants. */
+  font-size: clamp(15px, 0.62vw + 11px, 22px);
 }
-.ctl-group { padding-bottom: 18px; }
+@media (max-width: 900px) { .ctl-groups { grid-template-columns: 1fr; } }
+.ctl-group { padding-bottom: clamp(18px, 2.4vh, 40px); }
 .ctl-group .ctl-head { margin-top: 0; margin-bottom: 4px; }
 
 /* Two columns inside the group, both left-aligned: caps down one, what they do
@@ -2980,7 +3017,28 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
    in the middle of the rule, and a dotted line with a 14px bite out of it reads
    as two rules rather than one row. */
 .controls-grid {
-  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  display: grid;
+  /* `fit-content`, not `max-content`. The key column is one track shared by
+     every row in the group, so `max-content` sizes it to the widest cap set in
+     it - `Shift + Click` - and then charges that width to `Q` and `F` as well.
+     At two wide columns that put a hand's width of nothing between most keys
+     and the words they belong to. `fit-content` takes the same measurement and
+     then refuses to go past the cap, so the wide rows still fit and the narrow
+     ones stop dragging their labels across the screen. */
+  /* 178, not 108. Tighter caps the gap on the narrow rows but wraps
+     `Shift + Click` onto two lines, and a key that breaks in half is worse
+     than a key with air after it. */
+  /* `minmax(0, max-content)`, and the `minmax` is the whole point.
+     A bare `max-content` label cannot shrink below its longest sentence, so
+     under about 540px the row stayed 471px wide inside a narrower box and the
+     three ancestors with `overflow: hidden` ate the difference silently: text
+     cut off at the edge with nothing to scroll and no sign why. That is the
+     invisible container - "left parts of the menu is being cropped". With a
+     zero floor the track gives way instead, the words wrap, and nothing is
+     ever cut. On a wide screen it still measures to the sentence, so the row
+     is as long as it needs to be and the rule ends where the words do. */
+  grid-template-columns: fit-content(178px) minmax(0, max-content);
+  justify-content: start;
   align-items: center;
 }
 .controls-grid > div > span:first-child { padding-right: 14px; }

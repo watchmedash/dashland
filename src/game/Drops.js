@@ -2,7 +2,10 @@
 // with nearby stacks, and drift into the player once they're close.
 
 import * as THREE from 'three';
-import { GRAVITY, BIOME_COLORS } from '../world/Constants.js';
+import { D, GRAVITY, BIOME_COLORS } from '../world/Constants.js';
+// The single authority on what counts as being under a roof - see the probe in
+// `_applyLight`, and the paragraph on leaves in Lighting.js.
+import { SKY_ATTEN } from '../world/Lighting.js';
 import { wrap } from '../world/Grid.js';
 import { wrapDist, wrapDist2, relTo } from './Wrap.js';
 import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX } from '../world/Blocks.js';
@@ -68,6 +71,20 @@ const FLOW_PUSH = 9;
  * pick-up magnet is refused for the whole of it.
  */
 const BURN_TIME = 0.45;
+/**
+ * How often a drop asks what is over it, and how dark that answer can make it.
+ *
+ * The same two numbers `Mobs.js` keeps, deliberately: a dropped pickaxe and the
+ * cow standing beside it are in the same room and have to be lit as though they
+ * are. 0.6 s because a drop mostly lies still and the sky over it changes when
+ * it is thrown or the roof above it is broken, neither of which is a per-frame
+ * event; jittered at the call site so 260 of them on a floor do not all walk
+ * their column on the same frame. 0.55 because a thing indoors should read as
+ * indoors without becoming invisible - the terrain around it keeps its own
+ * baked light, and the two have to look like they are in the same room.
+ */
+const SKY_PROBE_PERIOD = 0.6;
+const SKY_SHADE_MIN = 0.55;
 
 export class Drops {
   constructor(scene, planet, materials) {
@@ -288,6 +305,9 @@ export class Drops {
     const drop = {
       item: itemId, count, wear, pos, vel, mesh, keep,
       age: 0, spin: Math.random() * 6.28, collected: false, grounded: false, magnet: 0,
+      // Its own sky, answered on the first frame it lives: `skyT` at zero is
+      // "has never asked", and 1 is what it draws as until it has.
+      sky: 1, skyT: 0,
     };
     this.list.push(drop);
     // Its own materials and its own light attribute, so two stacks of the same
@@ -376,7 +396,11 @@ export class Drops {
       m.customProgramCacheKey = src.customProgramCacheKey;
       seen.set(src, m);
       if (m.isMeshBasicMaterial) parts.push({ card: m });
-      else parts.push({ lit: applyEntityBlockLight(m).userData.blockLight });
+      // `base` is the albedo as the model was authored, kept because the sky
+      // factor multiplies it: a model takes the scene's lights, so the only
+      // lever this side of the shader is how much of that light it reflects.
+      // That is the same lever `Mobs` pulls on a body under a roof.
+      else parts.push({ lit: applyEntityBlockLight(m).userData.blockLight, mat: m, base: m.color.clone() });
       return m;
     };
     drop.mesh.traverse((o) => {
@@ -388,7 +412,7 @@ export class Drops {
         if (!g) return;
         o.geometry = g;
         const attr = g.getAttribute('blockLight');
-        if (attr) parts.push({ attr });
+        if (attr) parts.push({ attr, aux: g.getAttribute('aux') });
         return;
       }
       if (Array.isArray(o.material)) o.material = o.material.map(own);
@@ -429,8 +453,20 @@ export class Drops {
     const g = new THREE.BufferGeometry();
     if (src.index) g.setIndex(src.index);
     for (const name of Object.keys(src.attributes)) {
-      if (name === 'blockLight') continue;
+      if (name === 'blockLight' || name === 'aux') continue;
       g.setAttribute(name, src.attributes[name]);
+    }
+    // `aux.z` is the voxel skylight the shader reads as `vSun`, and the shared
+    // geometry has it hard at 1 - which is "under open sky", everywhere, for
+    // every drop of that block in the game. A drop that answers for its own sky
+    // needs its own copy of the word, so it gets one; x, y and w are copied
+    // across untouched, because they are the tile layer, the AO and the wave
+    // code and a drop has no business changing any of them.
+    const srcAux = src.getAttribute('aux');
+    if (srcAux) {
+      const aux = new THREE.Float32BufferAttribute(new Float32Array(srcAux.array), 4);
+      aux.setUsage(THREE.DynamicDrawUsage);
+      g.setAttribute('aux', aux);
     }
     const n = src.getAttribute('blockLight').count;
     const attr = new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3);
@@ -448,6 +484,46 @@ export class Drops {
   }
 
   /**
+   * How much sky this drop has over it, on its own account.
+   *
+   * The scene's entity fill used to answer this for every entity at once, dimmed
+   * by the *player's* sky exposure, so a stone lying in a meadow went dark
+   * because you had walked into a cave. `Sky.js` says what happened to that
+   * term; this is the half that had to exist first.
+   *
+   * It is `Mobs`' probe, line for line, and that is the point: a dropped
+   * pickaxe and a cow standing over it are lit by the same rule. Walk the
+   * column upward from two cells above the body and count what is over it,
+   * giving up at three.
+   *
+   * `SKY_ATTEN` and not `solidAt`, and the distinction is load-bearing. Leaves
+   * are deliberately zero in that table - a canopy is a sieve and not a lid, the
+   * forest floor keeps full sky, and the canopy's own shadow is already drawn
+   * per leaf by the sun's shadow map. Reading solidity instead charges a body
+   * under a tree three blockers for those leaves and cuts it to SKY_SHADE_MIN,
+   * which is how every animal under a wood became a silhouette on lit grass. A
+   * plank roof, a slab, a stair or a stone overhang is still 255 here, so a
+   * thing indoors or in a cave darkens exactly as it should.
+   *
+   * Quantised to sixteenths, because the change guard in `_applyLight` keys on
+   * it and a drop drifting into your hand must not rewrite a vertex buffer every
+   * frame on a rounding difference.
+   */
+  _probeSky(d, dt) {
+    d.skyT -= dt || 0;
+    if (d.skyT > 0) return;
+    d.skyT = SKY_PROBE_PERIOD * (0.75 + Math.random() * 0.5);
+    const cell = this.planet.cellAt(d.pos.x, d.pos.y, d.pos.z);
+    if (!cell) return;
+    let blocked = 0;
+    for (let k = cell.k + 2; k < D; k++) {
+      if (SKY_ATTEN[this.planet.at(cell.col, k)] === 255 && ++blocked >= 3) break;
+    }
+    const open = 1 - Math.min(3, blocked) / 3;
+    d.sky = Math.round((SKY_SHADE_MIN + (1 - SKY_SHADE_MIN) * open) * 16) / 16;
+  }
+
+  /**
    * Paint this frame's light onto one drop.
    *
    * Quantised to sixty-fourths and guarded on the result, so a stack lying
@@ -456,8 +532,9 @@ export class Drops {
    * a card is a `Color.setRGB` and a block is a whole vertex buffer re-upload,
    * and there can be 260 of them.
    */
-  _applyLight(d) {
+  _applyLight(d, dt) {
     if (!d.lit) return;
+    this._probeSky(d, dt);
     let r = 0, g = 0, b = 0;
     if (this.blockLightAt) {
       // A little above the middle of the item, which hovers over the ground:
@@ -467,8 +544,13 @@ export class Drops {
       const l = this.blockLightAt(_lit, _bl);
       r = l.r; g = l.g; b = l.b;
     }
-    const key = ((Math.min(255, r * 64) | 0) << 16) | ((Math.min(255, g * 64) | 0) << 8)
-      | (Math.min(255, b * 64) | 0) | (this._skyGen % 64) * 0x1000000;
+    // The sky factor is in the key as well as the light. It is already
+    // quantised to sixteenths by the probe, so this costs four bits of a word
+    // that had them spare - and left out of it, a drop carried under a roof
+    // would go on wearing the brightness of wherever it was last repainted.
+    const key = (((Math.min(255, r * 64) | 0) << 16) | ((Math.min(255, g * 64) | 0) << 8)
+      | (Math.min(255, b * 64) | 0) | (this._skyGen % 64) * 0x1000000)
+      + ((d.sky * 16) | 0) * 0x100000000;
     if (d.litKey === key) return;
     d.litKey = key;
     // Back into the terrain's own units for the vertex attribute: the shader
@@ -477,12 +559,24 @@ export class Drops {
     // carries.
     const gain = voxelUniforms.uBlockIntensity.value / Math.PI;
     const inv = gain > 1e-6 ? 1 / gain : 0;
-    const sky = this._skyLevel;
+    // Two skies, and they are different things. `_skyLevel` is the time of day,
+    // one number for the whole world; `d.sky` is what is over this drop, and
+    // only the second of them knows about roofs.
+    const own = d.sky;
+    const sky = this._skyLevel * own;
     for (const p of d.lit) {
       if (p.attr) {
         const a = p.attr.array;
         for (let i = 0; i < a.length; i += 3) { a[i] = r * inv; a[i + 1] = g * inv; a[i + 2] = b * inv; }
         p.attr.needsUpdate = true;
+        // Into `vSun`, which is where a wall of the same block carries the
+        // answer, so a dropped cobble in a cave darkens through exactly the
+        // machinery the cave wall behind it darkens through.
+        if (p.aux) {
+          const x = p.aux.array;
+          for (let i = 2; i < x.length; i += 4) x[i] = own;
+          p.aux.needsUpdate = true;
+        }
       } else if (p.card) {
         // Added to the sky term rather than replacing it, and for the same
         // reason `BlockModels` gives: the neutral value of an added term is
@@ -494,6 +588,12 @@ export class Drops {
         // the same `uBlockIntensity * RECIPROCAL_PI` the terrain does, over the
         // model's own albedo. See `applyEntityBlockLight`.
         p.lit.value.set(r * inv, g * inv, b * inv);
+        // And the roof, on the albedo. A model is lit by the scene and the
+        // scene has one entity fill for the whole world, so how much of it this
+        // torch reflects is the only place its own sky can go. Over the
+        // authored colour rather than into it, or a drop that spent a minute in
+        // a cave would come out of it grey.
+        if (p.mat) p.mat.color.copy(p.base).multiplyScalar(own);
       }
     }
   }
@@ -620,9 +720,10 @@ export class Drops {
         }
       }
 
-      // What the torch three cells away is doing to it. After the movement, so
-      // it is sampled where the thing has actually ended up this frame.
-      this._applyLight(d);
+      // What the torch three cells away is doing to it, and what is over it.
+      // After the movement, so both are sampled where the thing has actually
+      // ended up this frame.
+      this._applyLight(d, dt);
 
       // Render transform: hover + spin around the local up.
       // `up` aliases _v, so build the position in its own temp — writing to _v

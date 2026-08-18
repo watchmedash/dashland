@@ -828,12 +828,14 @@ export class Sky {
     }
   }
 
-  /** @param {THREE.Camera} camera @param {THREE.Vector3} playerUp */
   /**
-   * @param {number} shelter 0 with a roof overhead, 1 under open sky. Only the
-   *   entity fill uses it — see below for why a light needs to know.
+   * @param {THREE.Camera} camera @param {THREE.Vector3} playerUp
+   *
+   * No `shelter` any more. The entity fill was the one light that took the
+   * player's own sky exposure, and it does not: every body it lights now
+   * carries its own. See the note on `entityFill.intensity`.
    */
-  update(dt, camera, playerUp, focus, shelter = 1) {
+  update(dt, camera, playerUp, focus) {
     // sunDir is set by setSolarTime from the wall clock
     this.up.copy(playerUp);
     const elev = this.sunDir.dot(playerUp);
@@ -989,10 +991,11 @@ export class Sky {
     // direction and hills should have a moonlit side; it is simply no longer
     // most of the night.
     //
-    // Not shelter-dimmed the way the entity fill below is. That was tried and
-    // is wrong for this light: shelter is the *player's* roof, and dimming a
-    // directional by it would darken the whole moonlit valley the moment you
-    // stepped under a tree. Terrain is protected instead by the shadowGate on
+    // Never dimmed by the player's own roof. That was tried and is wrong for
+    // this light: it is the *player's* roof, and dimming a directional by it
+    // would darken the whole moonlit valley the moment you stepped under a
+    // tree. The entity fill below carried such a term for a while and no longer
+    // does, for a version of the same reason. Terrain is protected instead by the shadowGate on
     // voxel skylight, which knows about the roof over each fragment; what is
     // left over is entities in caves, and that is what the trim is for.
     this.moonLight.intensity = night * 0.13;
@@ -1052,26 +1055,29 @@ export class Sky {
     // a midnight husk lands on the same screen value as the stone and grass
     // around it. Below 0.17 it is a silhouette with nothing in it; above, it
     // starts glowing again, which is the bug this constant was born to fix.
-    // The `shelter` term stays, and that is a decision rather than an oversight
-    // now that every mob carries its own sky exposure (see `SKY_PROBE_PERIOD` in
-    // Mobs.js). The obvious tidy-up is to delete it, on the grounds that a body
-    // dimmed by its own roof and by the player's is dimmed twice - but this
-    // light is not only on mobs. Drops and debris have no probe of their own, so
-    // this term is the only thing that darkens a dropped pickaxe in a cave, and
-    // removing it would trade a mob fault for an item one.
+    // There was a `* (0.25 + 0.75 * shelter)` on the end of this, and it is
+    // gone. `shelter` is the *player's* sky exposure, so it made one global
+    // light for every entity in the world answer a question about where you
+    // happened to be standing: a mushroom in a meadow went flat and grey
+    // because you had stepped into a cave, and the grass beside it did not,
+    // because terrain carries its own baked skylight throughout. That is the
+    // "plants only get their colour back when mined or dropped or lit by a
+    // torch" report, and the torch was the giveaway - block light was reaching
+    // them and sky light was answering for somebody else.
     //
-    // What it costs, stated: outdoors nothing at all, because at shelter 1 the
-    // multiplier is exactly 1.0, so the night floor solved above is untouched
-    // and this is the case the player is in almost all of the time. Indoors, an
-    // animal under its own roof while the player is under theirs is darker than
-    // either fact alone would make it, and an animal in open sunlight while the
-    // player stands in a cave is dimmer than it should be. Both are pre-existing
-    // and both are the rarer arrangement.
+    // It could only go once every body it lit could answer for itself, which is
+    // now the case: mobs probe their own column (`SKY_PROBE_PERIOD` in Mobs.js),
+    // drops do the same (`_probeSky` in Drops.js) and reach all three of their
+    // material kinds with it, and debris takes one probe where it is thrown.
+    // The one thing this term used to be indispensable for - darkening a
+    // dropped pickaxe in a cave - is done better by the pickaxe.
     //
-    // The honest fix is to give drops the same per-body probe and then delete
-    // this term, not to delete it now.
-    this.entityFill.intensity =
-      (0.07 + 0.10 * n2 + p.sunIntensity * 0.93) * (0.25 + 0.75 * shelter);
+    // What changes: outdoors nothing at all, because at shelter 1 the
+    // multiplier was exactly 1.0, so the night floor solved above is untouched
+    // and that is the case the player is in almost all of the time. Indoors,
+    // nothing is dimmed twice any more, and nothing in open sunlight is dimmed
+    // because you are not.
+    this.entityFill.intensity = 0.07 + 0.10 * n2 + p.sunIntensity * 0.93;
   }
 
   setPixelRatio(r) { this.stars.material.uniforms.uPixelRatio.value = r; }

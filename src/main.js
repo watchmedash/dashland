@@ -6803,10 +6803,9 @@ class Game {
     this._safeTick('blockModels', () => this._syncBlockModels());
     this._safeTick('signText', () => this._syncSignText());
     this.sky.setSolarTime(this.player.up, this.skyTimeOfDay());
-    // `shelter` doubles as the entity fill's occlusion — animals cannot read
-    // the voxel light, so a roof over the player is the best signal the sky has
-    // that the thing it is lighting is indoors.
-    this.sky.update(dt, this.camera, this.player.up, this.player.position, this.shelter);
+    // No `shelter` here any more: the entity fill used to be dimmed by the
+    // player's own sky exposure, and every body it lights now probes its own.
+    this.sky.update(dt, this.camera, this.player.up, this.player.position);
     this.particles.update(dt, this.camera, this.player.up, this.sky);
     this._updateSharedUniforms();
     this._updateAudio(biomeId);

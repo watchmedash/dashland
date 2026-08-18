@@ -244,6 +244,93 @@ eq(colHeight.length, W * W, 'one height per column of one map');
 }
 
 // ===========================================================================
+// 2b. NOTHING REACHES OVER A DIVIDER
+// ===========================================================================
+//
+// The wall itself being solid is not the whole rule. A divider is one column
+// thick and a crown reaches five, so the first version of the tree pass - which
+// refused the wall column and nothing else - dropped the leaves INSIDE the wall
+// and kept the ones past it, and they stood in the open air of the next face:
+// "tree leaves/blocks still pokes from other side".
+//
+// Every multi-column decoration pass is replayed here over the columns either
+// side of all twelve divider runs, through a recorder that undoes what it
+// wrote, and every cell it lands in is checked for which face it is on. The
+// replay is over TERRAIN ONLY on purpose: these passes are all specified to
+// decide from the terrain tables alone, and replaying one over a finished
+// world measures nothing, because whatever it would have written is already
+// standing there.
+
+{
+  const blocks = new Uint8Array(CELLS);
+  const NEAR = 6;          // columns swept either side of a wall
+  const STRETCH = 64;      // columns of each run sampled
+
+  // A write crosses when the target's face is not the origin's and either side
+  // is sealed. The five cross faces are one continuous world, so a write
+  // between two of them crosses nothing; every other pair has a wall between
+  // them by construction. This is `crossesDivider` in WorldGen.js, restated
+  // from the coordinate model rather than imported, so the test does not agree
+  // with the fix by definition.
+  const crosses = (ox, oy, tx, ty) => {
+    const a = faceAt(ox, oy), b = faceAt(tx, ty);
+    if (a === b) return false;
+    return SEALED.includes(a) || SEALED.includes(b);
+  };
+
+  const undo = [];
+  const rec = new Proxy(blocks, {
+    get(t, k) { const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; },
+    set(t, k, v) { const i = +k; if (i === i) undo.push(i, t[i]); t[k] = v; return true; },
+  });
+
+  const cols = new Set();
+  for (const f of SEALED) {
+    const o = faceOrigin(f);
+    const mid = F >> 1, half = STRETCH >> 1;
+    // The middle of each of the four sides of the ring, which is one end of
+    // each of the twelve joins - a sealed-to-sealed run is swept twice, once
+    // from each ring, which is what checks the reverse direction as well.
+    const sides = [
+      [o.x + mid, o.y, 0], [o.x + mid, o.y + F - 1, 0],
+      [o.x, o.y + mid, 1], [o.x + F - 1, o.y + mid, 1],
+    ];
+    for (const [wx, wy, ax] of sides) {
+      for (let t = -half; t < half; t++) {
+        for (let n = -NEAR; n <= NEAR; n++) {
+          const x = ax === 0 ? wx + t : wx + n;
+          const y = ax === 0 ? wy + n : wy + t;
+          cols.add(wrap(x) * W + wrap(y));
+        }
+      }
+    }
+  }
+  for (const c of cols) gen.terrainColumn(blocks, c);
+
+  let across = 0, intoWall = 0, wrote = 0, walls = 0;
+  for (const oc of cols) {
+    const oy = oc % W, ox = (oc - oy) / W;
+    if (isWall(ox, oy)) walls++;
+    for (const pass of ['treeAt', 'boulderAt', 'logAt', 'springAt', 'standAt', 'reefAt']) {
+      undo.length = 0;
+      gen[pass](rec, oc, -1);
+      for (let i = 0; i < undo.length; i += 2) {
+        const c = (undo[i] / D) | 0;
+        const ty = c % W, tx = (c - ty) / W;
+        wrote++;
+        if (isWall(tx, ty)) intoWall++;
+        else if (crosses(ox, oy, tx, ty)) across++;
+      }
+      for (let i = undo.length - 2; i >= 0; i -= 2) blocks[undo[i]] = undo[i + 1];
+    }
+  }
+  ok(walls > 1000, `the sweep really straddled the dividers (${walls} wall columns)`);
+  ok(wrote > 20000, `and the passes really ran (${wrote} cells written)`);
+  eq(intoWall, 0, 'no decoration is written into a divider column');
+  eq(across, 0, 'and none reaches over one onto the face on the other side');
+}
+
+// ===========================================================================
 // 3. THE FOUR SEALED FACES
 // ===========================================================================
 //

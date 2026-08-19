@@ -2159,11 +2159,14 @@ body.fighting #toasts { top: 172px; }
 }
 /* The count is the one number the sidebar is about, so it is a chip and not
    part of the heading's own type. */
+/* The count, as a number rather than as a badge. It was a brass pill with a
+   gradient, an inner light and a rim - four effects on a two-digit number
+   sitting beside a heading that is already the quietest type on the screen.
+   It is the same mono the costs below it are set in, one shade up from the
+   heading so it reads as the answer to it. */
 .recipe-panel h3 span {
-  font: 700 var(--fs-xs) var(--mono); color: #fff2e2;
-  background: linear-gradient(180deg, var(--accent-2), var(--accent));
-  padding: 2px 6px; border-radius: var(--r-sm); letter-spacing: 0;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), 0 0 0 1px rgba(140, 74, 26, .4);
+  font: 700 var(--fs-xs) var(--mono); color: var(--ink-soft);
+  letter-spacing: 0;
 }
 /* Two caps, and the smaller wins. The pixel one is a taste limit on a big
    monitor; the viewport one is what stops a list of recipes from being taller
@@ -2181,13 +2184,26 @@ body.fighting #toasts { top: 172px; }
   display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
   max-height: min(330px, 34vh);
 }
+/* A LIST, NOT A STACK OF BUTTONS.
+   Every row used to be a raised card - its own parchment fill and an emboss
+   under it - so a dozen craftables was a dozen objects shouting beside a bag
+   that is already a hundred pockets. The owner: "inventory can craft list also
+   can be fixed and made more subtle".
+
+   The fill and the emboss go and a hairline goes between rows instead. What
+   is left carrying "this is a control" is the hover: the row lifts to a paler
+   parchment and the warm bar wipes in down its leading edge, which is the same
+   mark the toasts use and was already here. On a touch screen there is no
+   hover and there does not need to be one - a list of names with an icon each
+   is legible as a list of things you can make. */
 .recipe-row {
   position: relative; overflow: hidden;
   display: flex; align-items: center; gap: 9px;
-  padding: 5px 7px; border-radius: var(--r-md); cursor: pointer;
-  background: var(--paper-cell); box-shadow: var(--emboss);
-  transition: background var(--t-fast) ease, box-shadow var(--t-fast) ease, transform var(--t-fast) var(--ease);
+  padding: 6px 7px; border-radius: var(--r-sm); cursor: pointer;
+  background: none; box-shadow: none;
+  transition: background var(--t-fast) ease;
 }
+.recipe-row + .recipe-row { box-shadow: inset 0 1px 0 rgba(122, 94, 54, .16); }
 /* A warm bar wipes in down the leading edge on hover: the same "the game is
    offering you this" mark the toasts carry, on the same side. */
 .recipe-row::before {
@@ -2195,11 +2211,11 @@ body.fighting #toasts { top: 172px; }
   background: var(--accent); transform: scaleY(0); transform-origin: 50% 50%;
   transition: transform var(--t-fast) var(--ease);
 }
-.recipe-row:hover {
-  background: #fffdf7; transform: translateY(-1px);
-  box-shadow: var(--emboss-lift);
-}
-.recipe-row:active { transform: translateY(var(--lip)); box-shadow: var(--emboss-press); }
+/* The only weight the row ever carries, and only while it is under the
+   pointer. No lift and no emboss: a row that rises out of a flat list is the
+   card again, one at a time. */
+.recipe-row:hover { background: rgba(255, 253, 247, .9); }
+.recipe-row:active { background: rgba(122, 94, 54, .10); }
 .recipe-row:hover::before { transform: scaleY(1); }
 .recipe-row img { width: 30px; height: 30px; flex: none; }
 /* A floor under the name, and a cost list that wraps rather than taking the
@@ -3482,7 +3498,12 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
   /* Two or three across and as tall as the bag beside it. The 34vh cap was
      set for a strip and left the column two thirds empty next to a bag that
      had grown. */
-  #recipe-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 5px; align-content: start; max-height: min(620px, 62vh); }
+  /* 250, not 190. A recipe row is an icon, a name, a yield and up to three
+     ingredient chips, and 190 could not hold them: at a 420px panel that is
+     two columns of 205 and "Charred Planks" came out "Charred Pla..." while
+     its two chips wrapped onto a second line. At 250 the same panel is one
+     roomy column and a monitor wide enough for two gets two that fit. */
+  #recipe-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0; align-content: start; max-height: min(620px, 62vh); }
 }
 @media (min-width: 1500px) {
   .islot { width: 66px; height: 66px; }

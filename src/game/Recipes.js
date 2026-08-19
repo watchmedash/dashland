@@ -115,6 +115,15 @@ const RAW = [
     { out: `stair_${base}`, count: 4, table: true, shape: ['B  ', 'BB ', 'BBB'], key: { B: base } },
     { out: base, count: 3, in: Array(4).fill(`stair_${base}`), undo: true },
   ]),
+  // Mossy cobble is cut into slabs and NOT into stairs, and it is the only
+  // masonry in the game that is not both. There was no block id left for the
+  // stair - see the seventh column on its row in MASONRY - so a stair recipe
+  // here would name an item that does not exist. Same two rows as every base
+  // above, minus the two the block cannot back.
+  ...['moss_stone'].flatMap((base) => [
+    { out: `slab_${base}`, count: 6, table: true, shape: ['BBB'], key: { B: base } },
+    { out: base, count: 1, in: [`slab_${base}`, `slab_${base}`], undo: true },
+  ]),
   { out: 'brick', count: 4, table: true, shape: ['CC', 'CC'], key: { C: 'clay' } },
   { out: 'iron_block', count: 1, table: true, shape: ['III', 'III', 'III'], key: { I: 'iron_ingot' } },
   { out: 'gold_block', count: 1, table: true, shape: ['GGG', 'GGG', 'GGG'], key: { G: 'gold_ingot' } },

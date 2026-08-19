@@ -348,15 +348,20 @@ const MASONRY = [
   ['planks_birch', 'Birch', 'planks_birch', 2.0, 'axe', 0],
   ['planks_pine', 'Pine', 'planks_pine', 2.0, 'axe', 0],
   ['mossy_stone_brick', 'Mossy Brick', 'mossy_stone_brick', 2.4, 'pick', 0],
-  // MOSSY COBBLE'S SLAB AND STAIR GO HERE, and they are not here, because there
-  // is no room for them: 254 block ids were in use and a voxel is one byte, so
-  // the ceiling is 256. The glass pane took one and this row wants two.
+  // MOSSY COBBLE, and the only row in this table with a seventh column.
   //
-  // Uncommenting it is the whole change once an id is freed. See the note over
-  // N_BLOCKS for the two ways to free one - fold a rarely-varying block into a
-  // per-cell byte (the 28 crop growth stages are the obvious candidates and are
-  // already on the list), or widen the voxel arrays to 16 bits.
-  // ['moss_stone', 'Mossy Cobblestone', 'moss_stone', 2.4, 'pick', 0],
+  // "What's the point of mossy stones? Only for decoration? If so then at least
+  // have mossy stairs/slabs." Both were written; only the slab fits. There were
+  // 254 block ids in use, a voxel is one byte so the ceiling is 256, the glass
+  // pane took one and the pair wanted two. The owner's call was to ship the slab
+  // rather than pay for the room, so the seventh column is `slabOnly` and the
+  // stair loop below skips it.
+  //
+  // Drop the `true` and the stair exists, the day an id is free. See the note
+  // over N_BLOCKS for the two ways to free one - fold a rarely-varying block
+  // into a per-cell byte (the 28 crop growth stages are the obvious candidates
+  // and are already on the list), or widen the voxel arrays to 16 bits.
+  ['moss_stone', 'Mossy Cobblestone', 'moss_stone', 2.4, 'pick', 0, true],
   ['snow_brick', 'Snow Brick', 'snow_brick', 0.7, 'shovel', 0],
   ['packed_ice', 'Packed Ice', 'packed_ice', 1.0, 'pick', 0],
 ];
@@ -863,7 +868,9 @@ export const BLOCKS = [
   // Stairs. Same materials as the slabs — literally the same table — so the two
   // families cover the same palette and a build never runs out of one halfway
   // through.
-  ...MASONRY.map(([base, label, tile, hardness, tool, tier]) => block({
+  // `.filter` and not `.map`: one row is slab-only for want of an id. See the
+  // mossy row in MASONRY.
+  ...MASONRY.filter((r) => !r[6]).map(([base, label, tile, hardness, tool, tier]) => block({
     name: `stair_${base}`, label: `${label} Stairs`, render: R_STAIR, all: tile,
     hardness: hardness * STAIR_HARDNESS, tool, tier, sound: 'stone',
     particle: [0.55, 0.55, 0.55],

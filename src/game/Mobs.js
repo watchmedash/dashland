@@ -34,6 +34,7 @@ import {
   isPassable, CONTACT_HURT, SINK,
 } from '../world/Blocks.js';
 import { SKY_ATTEN, SKY_SHADE_MIN as SHARED_SKY_SHADE_MIN } from '../world/Lighting.js';
+import { applyMobBlockLight } from '../render/VoxelMaterial.js';
 import { itemIdOf } from './Items.js';
 import { rollStock, rollRequest } from './Trade.js';
 import { makeRng, clamp, lerp } from '../util/Noise.js';
@@ -5141,7 +5142,17 @@ export class Mobs {
         // stalker who has stopped being a silhouette. He takes no block light
         // at all — see the guard in _animate — so this slot stays empty, which
         // also means the one `needsUpdate` in this file never fires for him.
-        if (m.map && m.emissive && !spec.shade) { m.emissiveMap = m.map; m.needsUpdate = true; }
+        // ...which is what this USED to do, and the paragraph above is kept
+        // because its arithmetic was right and its conclusion was not.
+        // `emissive * emissiveMap` really is `texel * light` and really is the
+        // same magnitude the terrain adds - but emissive is added after the
+        // light loop and is not light. It does not know which way a surface is
+        // turned and no shadow touches it, so an animal beside a torch came out
+        // as bright on the side facing away from the flame as on the side
+        // facing it: "animals also glow beside a torch instead of just being
+        // shined upon". The clone is ours, so it can take the same term the
+        // terrain and the block models take. See `applyMobBlockLight`.
+        if (m.map && !spec.shade) applyMobBlockLight(m);
         // Darken, before the base colour is captured, so every later read of it
         // — the damage tint, the block light — is already working against the
         // dimmed figure rather than fighting it back to full brightness.
@@ -6429,6 +6440,42 @@ export class Mobs {
    *
    * @returns {number} how many were calmed
    */
+  /**
+   * You died. Nothing is still chasing you.
+   *
+   * A tiger that killed you went on hunting: `angry` and `target` are per-mob
+   * and nothing cleared them, so you woke at your bed and the animal that
+   * finished you was still coming - across the world, through the respawn, with
+   * a grudge it had already collected on. The owner: "animals also stay hostile
+   * to me after my death like the tiger who just killed me still chasing and
+   * attacking me after respawn".
+   *
+   * Everything is calmed, not only the neutrals who were provoked. A husk is
+   * hostile by nature and will find you again the moment you are inside its ring
+   * - that is the monster working - but it has to FIND you, from where you are
+   * now, rather than resume a chase that began at a corpse. `_folkSpread` reads
+   * `angry && target === 'player'` to recruit bystanders, so leaving one angry
+   * body behind would also re-anger the herd around it.
+   *
+   * @returns {number} how many were calmed, for the harness
+   */
+  forgetPlayer() {
+    let n = 0;
+    for (const mob of this.list) {
+      if (!mob.angry && mob.target !== 'player') continue;
+      mob.angry = false;
+      mob.target = null;
+      mob.sighted = false;
+      mob.sightT = 0;
+      mob.state = 'idle';
+      mob.stateT = 0.5;
+      mob.onPath = false;
+      mob.huntCooldown = 0;
+      n++;
+    }
+    return n;
+  }
+
   calmFolk() {
     let n = 0;
     for (const mob of this.list) {
@@ -12917,9 +12964,18 @@ export class Mobs {
       // 0.42 / 0.12 is an ember, so the same green body plus this glow is an
       // orange one, and the change is unmistakable at a glance across a field.
       const gl = spec.glow || 0;
-      const er = Math.max(bl.r, gl, fuse) * tr,
-        eg = Math.max(bl.g, gl, fuse * 0.42) * tg,
-        eb = Math.max(bl.b, gl, fuse * 0.12) * tb;
+      // Emissive keeps only the things that really are emissive - a ghost's
+      // glow and a cinderling's fuse. The block light has moved out of this
+      // slot and into the light loop; see below.
+      const er = Math.max(gl, fuse) * tr,
+        eg = Math.max(gl, fuse * 0.42) * tg,
+        eb = Math.max(gl, fuse * 0.12) * tb;
+      // The cell's light, tinted by the same damage flash the albedo takes so a
+      // struck animal beside a fire still reddens.
+      for (const m of model.owned) {
+        const v = m.userData.mobBlock;
+        if (v) v.set(bl.r * tr, bl.g * tg, bl.b * tb);
+      }
       // A 1/255 deadband. A mob walking past a torch changes this every frame
       // and a herd is ~22 part materials each; the guard means a still animal
       // in an unlit field costs one comparison rather than a write per part.

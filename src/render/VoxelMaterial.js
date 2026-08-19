@@ -113,6 +113,15 @@ export const voxelUniforms = {
   uNight: { value: 0 },
   uBounceColor: { value: new THREE.Color(0.36, 0.30, 0.22) },
   uBlockIntensity: { value: 5.0 },
+  /**
+   * World up, in VIEW space, refreshed once a frame from the camera.
+   *
+   * Only `applyMobBlockLight` reads it, and it reads it because a skinned mesh
+   * has no world-space normal varying to dot against - three hands the fragment
+   * shader a view-space normal, so the comparison is taken in view space
+   * instead. One uniform for every mob in the herd; see `_updateSharedUniforms`.
+   */
+  uUpView: { value: new THREE.Vector3(0, 1, 0) },
   uNormalScale: { value: 0.55 },
   uBreakPos: { value: new THREE.Vector3(-999, -999, -999) },
   uBreakStage: { value: -1 },
@@ -3922,4 +3931,70 @@ export function buildCrackTexture(payload) {
   t.generateMipmaps = false;
   t.needsUpdate = true;
   return t;
+}
+
+/**
+ * Block light on a MOB, as light falling on it rather than light coming out.
+ *
+ * A mob used to take its block light through `emissive * emissiveMap`, which is
+ * `texel * light` and so is arithmetically the same magnitude the terrain adds
+ * for the same cell. That reasoning is sound and the result still looked wrong,
+ * because magnitude is not the whole of it: `emissive` is added AFTER the light
+ * loop and is not light. It does not know which way a surface is turned, it is
+ * not touched by a shadow, and it cannot be occluded - so an animal beside a
+ * torch came out uniformly bright on every side, including the side facing away
+ * from the flame, which is what self-luminous looks like. The owner: "animals
+ * also glow beside a torch instead of just being shined upon".
+ *
+ * This puts the same value where the terrain and the block models put theirs -
+ * into `indirectDiffuse`, through the albedo, on the same 1/PI Lambert factor -
+ * and gives it the hemispheric weighting the terrain's grid light now has, so a
+ * cow's back and the stone beside it answer one torch by the same amount.
+ *
+ * The value is per material and lives in `material.userData.mobBlock`, because
+ * every mob owns its clones (see the traverse in `Mobs.spawn`) and each one is
+ * standing in a different cell. `emissive` keeps the things that really are
+ * emissive: a ghost's glow and a cinderling's fuse.
+ *
+ * @param {THREE.Material} material patched in place; it must already be a clone
+ */
+export function applyMobBlockLight(material) {
+  const light = new THREE.Vector3(0, 0, 0);
+  material.userData.mobBlock = light;
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (prevCompile) prevCompile.call(material, shader, renderer);
+    shader.uniforms.uMobBlock = { value: light };
+    shader.uniforms.uBlockIntensity = voxelUniforms.uBlockIntensity;
+    shader.uniforms.uUpView = voxelUniforms.uUpView;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        uniform vec3 uMobBlock;
+        uniform float uBlockIntensity;
+        uniform vec3 uUpView;
+        const float MOB_BLOCK_KNEE = 0.28;
+        const float MOB_BLOCK_CEIL = 0.58;
+      `)
+      .replace('#include <lights_fragment_end>', /* glsl */`
+        #include <lights_fragment_end>
+        // normal is three's shaded view-space normal at this point in the
+        // chain, which is why the up vector is handed over in view space too.
+        float mobFaceLit = mix(0.58, 1.0, clamp(dot(normal, uUpView) * 0.5 + 0.5, 0.0, 1.0));
+        vec3 mobRad = diffuseColor.rgb * uMobBlock * uBlockIntensity * mobFaceLit * RECIPROCAL_PI;
+        // The same shoulder the terrain and the block models roll off with, for
+        // the same reason: without it an animal standing in a torch's own cell
+        // climbs past the ground it is standing on.
+        float mobPeak = max(mobRad.r, max(mobRad.g, mobRad.b));
+        if (mobPeak > MOB_BLOCK_KNEE) {
+          float mobOver = (mobPeak - MOB_BLOCK_KNEE) / (MOB_BLOCK_CEIL - MOB_BLOCK_KNEE);
+          mobRad *= (MOB_BLOCK_KNEE + (MOB_BLOCK_CEIL - MOB_BLOCK_KNEE) * (1.0 - exp(-mobOver))) / mobPeak;
+        }
+        reflectedLight.indirectDiffuse += mobRad;
+      `);
+  };
+  material.customProgramCacheKey = () => 'moblight|' + (prevKey ? prevKey.call(material) : '');
+  material.needsUpdate = true;
+  return material;
 }

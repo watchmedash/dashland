@@ -4319,6 +4319,8 @@ class Game {
     // hunger which is stupid, we regain full hp but not hunger?" - and there is
     // no argument for the asymmetry. Death is already expensive: it drops your
     // inventory where you fell and puts it a walk away.
+    // Nothing is still hunting the body you left behind. See `forgetPlayer`.
+    this.mobs.forgetPlayer();
     this.energy = 1;
     // Wake up at your bed if you have one and it is still there. Falling back to
     // a fresh random column is only right for a player who has never slept: on a
@@ -11849,6 +11851,13 @@ class Game {
   }
 
   _updateSharedUniforms() {
+    // World up, taken into view space, for the one thing that needs to ask
+    // which way a SKINNED surface is turned: a mob has no world-space normal
+    // varying, so `applyMobBlockLight` dots three's view-space normal against
+    // this instead. `transformDirection` on the view matrix, so it carries no
+    // translation and stays a unit vector.
+    voxelUniforms.uUpView.value.set(0, 1, 0)
+      .transformDirection(this.camera.matrixWorldInverse);
     const p = this.sky.palette;
     const w = this.weather;
     // Everything below that is night-only is weighted by `night` *squared*, and

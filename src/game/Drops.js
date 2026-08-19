@@ -7,6 +7,7 @@ import { D, GRAVITY, BIOME_COLORS } from '../world/Constants.js';
 // `_applyLight`, and the paragraph on leaves in Lighting.js.
 import { SKY_ATTEN, SKY_SHADE_MIN } from '../world/Lighting.js';
 import { wrap } from '../world/Grid.js';
+import { colNeighbor } from '../world/Layout.js';
 import { wrapDist, wrapDist2, relTo } from './Wrap.js';
 import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX, IS_STAIR, STAIR_STRAIGHT } from '../world/Blocks.js';
 
@@ -83,6 +84,14 @@ const BURN_TIME = 0.45;
  * `SKY_SHADE_MIN`, which a planted flower now reads too.
  */
 const SKY_PROBE_PERIOD = 0.6;
+/**
+ * What one lateral step of skylight costs, for the probe above.
+ *
+ * The flood fill loses one level of fifteen per step, so 14/15. Written as the
+ * fraction rather than as 0.93 so it stays tied to MAX_LIGHT if that ever
+ * moves.
+ */
+const LATERAL_SKY_STEP = 14 / 15;
 
 export class Drops {
   constructor(scene, planet, materials) {
@@ -529,11 +538,34 @@ export class Drops {
     d.skyT = SKY_PROBE_PERIOD * (0.75 + Math.random() * 0.5);
     const cell = this.planet.cellAt(d.pos.x, d.pos.y, d.pos.z);
     if (!cell) return;
-    let blocked = 0;
-    for (let k = cell.k + 2; k < D; k++) {
-      if (SKY_ATTEN[this.planet.at(cell.col, k)] === 255 && ++blocked >= 3) break;
+    // SIDEWAYS, AS WELL AS UP.
+    //
+    // This looked straight up its own column and nowhere else, and the terrain
+    // it is lying on does not: skylight is a flood fill, so it comes in from the
+    // side and loses one level a step. Chop a log out of a trunk and the drop
+    // lands at the foot of the tree with the REST OF THE TRUNK directly over it
+    // - three blocked cells, no daylight at all by this rule - while the grass
+    // under it, one lateral step from open sky, is nearly fully lit. "The logs
+    // dropped darker, and when I picked them up and drop them it's light like
+    // they should be": throwing it puts it one cell clear of the trunk, which
+    // is the entire difference.
+    //
+    // The best of the five columns, with a step's worth of loss on the four
+    // neighbours, which is the flood fill's own rule at the resolution this
+    // probe works in.
+    const openAt = (col) => {
+      let blocked = 0;
+      for (let k = cell.k + 2; k < D; k++) {
+        if (SKY_ATTEN[this.planet.at(col, k)] === 255 && ++blocked >= 3) break;
+      }
+      return 1 - Math.min(3, blocked) / 3;
+    };
+    let open = openAt(cell.col);
+    if (open < 1) {
+      for (let dir = 0; dir < 4 && open < 1; dir++) {
+        open = Math.max(open, openAt(colNeighbor(cell.col, dir)) * LATERAL_SKY_STEP);
+      }
     }
-    const open = 1 - Math.min(3, blocked) / 3;
     d.sky = Math.round((SKY_SHADE_MIN + (1 - SKY_SHADE_MIN) * open) * 16) / 16;
   }
 

@@ -47,6 +47,16 @@
   <!-- ── main menu ───────────────────────────────────────── -->
   <div id="menu" class="overlay hidden">
     <div class="menu-card">
+      <!-- The same mark the loading screen carries, so the game has ONE logo
+           rather than a mark on one screen and bare type on the next. Nine
+           tiles: five continuous faces in a plus, four sealed corners, a violet
+           seal between them. See `.world-mark` in style.css. -->
+      <div class="world-mark" aria-hidden="true">
+        <i></i><i></i><i></i>
+        <i></i><i></i><i></i>
+        <i></i><i></i><i></i>
+        <b></b>
+      </div>
       <h1>MOJA<em>ZER</em></h1>
       <p class="tagline">A world, entirely yours.</p>
       <div class="menu-actions">
@@ -54,6 +64,10 @@
         <button id="mm-new">New Game</button>
         <button id="mm-settings">Settings</button>
         <button id="mm-controls">Controls</button>
+        <!-- The app has no window to close and no tab to shut, so it needs a
+             way out of its own. Hidden on the web, where the browser IS the way
+             out and a button that killed the tab would be a surprise. -->
+        <button id="mm-exit" class="hidden">Exit</button>
       </div>
     </div>
   </div>

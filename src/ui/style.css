@@ -427,7 +427,7 @@ html, body {
    minimalistic", and Minecraft's panel is a flat box with one border. The wood
    and the paper stay, because "not a website frontpage" was the other note and
    those two are what carry it; the jewellery goes. */
-.panel, .menu-card, .chargen-card {
+.panel, .menu-card, .chargen-card, .loader-inner {
   position: relative;
   border: var(--frame) solid transparent;
   border-radius: var(--r-lg);
@@ -440,7 +440,7 @@ html, body {
    a bordered box lands exactly on the join, which is the whole reason this is
    one pseudo-element and not a second wrapper. Dark line into the wood, lit
    line onto the paper, and the paper's own edge burn under both. */
-.panel::before, .menu-card::before, .chargen-card::before {
+.panel::before, .menu-card::before, .chargen-card::before, .loader-inner::before {
   content: ''; position: absolute; inset: -1px; pointer-events: none;
   border-radius: var(--r-sm);
   /* One dark hairline where the frame meets the sheet. It used to be three
@@ -501,7 +501,7 @@ html, body {
 .note { margin-top: 14px; font-size: var(--fs-sm); color: var(--ink-soft); line-height: 1.5; }
 
 @media (prefers-reduced-motion: reduce) {
-  .overlay, .panel, .menu-card, .chargen-card { animation: none; }
+  .overlay, .panel, .menu-card, .chargen-card, .loader-inner { animation: none; }
 }
 
 /* The wordmark. It was 200-weight at .26em of tracking, which is a fashion
@@ -733,7 +733,36 @@ button.ghost:active:not(:disabled) {
 }
 #loader.done { animation: fadeout .55s ease forwards; }
 @keyframes fadeout { to { opacity: 0; visibility: hidden } }
-.loader-inner { width: min(400px, 84vw); text-align: center; }
+/* THE LOADING SCREEN IS A SHEET, like every other screen in the game.
+
+   It was type and a bar floating on a black void, which belongs to a different
+   game from the one behind it: everything a player touches here - the bag, the
+   bench, the kiln, the pause card - is parchment on timber with a dark ink line
+   round it. The owner: "our loading screen doesn't really match our UI/HUD".
+
+   The dark ground stays, because a loading screen wants somewhere for the mark
+   to glow against and the menu behind it uses the same. What changes is that
+   the CONTENT now sits on the game's own paper, at card scale, with the game's
+   own emboss and the game's own studded rule under the wordmark. */
+.loader-inner {
+  width: min(400px, 84vw); text-align: center;
+  padding: 26px 24px 20px;
+  animation: rise .34s var(--ease);
+}
+/* Carved into paper rather than stamped on sky - the same two lines the menu
+   card applies for the same reason. */
+.loader-inner h1 { color: var(--ink); text-shadow: var(--carved); }
+.loader-inner h1 em { color: var(--accent-deep); }
+.loader-inner .tagline { color: var(--ink-faint); }
+/* The wordmark's rule, exactly the title card's ornament. One lockup for the
+   game rather than one per screen. */
+.loader-inner .tagline::after {
+  content: ''; display: block; width: 62%; height: 3px; margin: 11px auto 0;
+  border-radius: 2px;
+  background:
+    var(--stud) center / 7px 7px no-repeat,
+    linear-gradient(90deg, rgba(96, 66, 28, 0), rgba(96, 66, 28, .45) 22%, rgba(96, 66, 28, .45) 78%, rgba(96, 66, 28, 0));
+}
 
 /* THE MARK. Nine tiles in a 3x3 and no image file.
    It says the three things the front end had stopped saying. The five faces of
@@ -744,9 +773,13 @@ button.ghost:active:not(:disabled) {
    the plane you cross to reach them. And the light crossing the mark leaves the
    right edge and comes back in on the left, which is the wrap.
    The `--mk` sizes it once; the loader is the only place it is used. */
+/* The mark is on the title card as well as the loader now, so its size is a
+   variable the two screens set rather than a constant. A title screen wants it
+   smaller: the wordmark is the hero there and the mark is its badge, where on a
+   loading screen the mark is all there is to look at. */
 .world-mark {
   --mk: clamp(88px, 24vh, 132px);
-  width: var(--mk); height: var(--mk); margin: 0 auto 30px;
+  width: var(--mk); height: var(--mk); margin: 0 auto var(--mk-gap, 30px);
   position: relative; display: grid;
   grid-template: repeat(3, 1fr) / repeat(3, 1fr);
   border-radius: var(--r-md); overflow: hidden;
@@ -843,24 +876,27 @@ button.ghost:active:not(:disabled) {
 /* The bar is a slot cut in the dark with a brass fill running up it, and the
    head of the fill is the violet the mark is ringed in - the same two lights,
    in the same order, as everything above it. */
+/* A groove cut in the sheet, which is what every other well in this game is -
+   see `--sunk`. It was a black slot with a rainbow in it, which read as a
+   progress bar from a different program. */
 .bar {
-  height: 6px; border-radius: var(--r-sm); margin: 26px 0 12px;
-  background: linear-gradient(180deg, rgba(2, 3, 8, .9), rgba(34, 26, 16, .55));
-  box-shadow:
-    inset 0 0 0 1px rgba(6, 4, 1, .95),
-    inset 0 2px 4px rgba(0, 0, 0, .7),
-    0 1px 0 rgba(255, 240, 214, .09);
+  height: 8px; border-radius: var(--r-sm); margin: 22px 0 12px;
+  background: rgba(46, 30, 12, .30);
+  box-shadow: var(--sunk);
   overflow: hidden;
 }
+/* Brass, like the kiln's arrow and every other thing in the game that fills
+   up. The five-colour gradient it replaces was the only place in the game
+   those colours appeared together. */
 .bar-fill {
   height: 100%; width: 0%; border-radius: 1px;
-  background: linear-gradient(90deg, #7d31c8 0%, #b8532c 34%, var(--accent) 62%, var(--accent-2) 88%, #ffe8bc 100%);
+  background: var(--brass);
   box-shadow:
     inset 0 1px 0 rgba(255, 248, 230, .5),
     0 0 12px rgba(242, 180, 92, .55);
   transition: width .3s cubic-bezier(.3, .9, .3, 1);
 }
-.status { color: rgba(247, 238, 222, .55); }
+.status { color: var(--ink-faint); }
 /* The loader's own status sits under the bar and is the one line on the screen
    that changes, so it is given the room to change in without the layout
    twitching under it. */
@@ -3805,6 +3841,9 @@ button kbd { background: rgba(70, 46, 18, .12); box-shadow: inset 0 0 0 1px rgba
    has to scroll is one scrollbar narrower than that. Clipped, so the two can
    never disagree into a horizontal scrollbar across the title screen. */
 #menu > .menu-card { overflow-x: clip; }
+/* The badge on the title card: smaller than the loader's and tucked up against
+   the wordmark, so the two read as one lockup rather than as two objects. */
+#menu .world-mark { --mk: clamp(56px, 13vh, 78px); --mk-gap: 14px; }
 /* A key's face is `--paper-cell`, which is a translucent white and reads as
    parchment because there has always been parchment under it. There is timber
    under it here, so it has to say parchment itself or the four keys come out

@@ -694,7 +694,7 @@ self.onmessage = (e) => {
     light.live = colLive;
 
     if (msg.type === 'load') {
-      self.postMessage({ type: 'progress', p: 0.58, label: 'Restoring your planet' });
+      self.postMessage({ type: 'progress', p: 0.58, label: 'Restoring your world' });
       if (msg.regions && msg.data) {
         restoreRegions(new Int32Array(msg.regions), new Uint8Array(msg.data));
       } else if (msg.blocks) {

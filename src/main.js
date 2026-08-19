@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
+import { onBackButton } from './Native.js';
 import {
   Player, VIEW_FIRST, VIEW_COUNT, stepZoom, lookScaleFor,
 } from './player/Player.js';
@@ -2217,6 +2218,10 @@ class Game {
     this._initHighlight();
     this._bindPlayerEvents();
     this._bindWindow();
+    // The app's back gesture, which is a no-op on the web. Registered once and
+    // never removed: the listener existing is what stops Android closing the
+    // Activity out from under the world.
+    onBackButton(() => this._back());
     // One pass through the resize path so the sky and particle pixel ratios pick
     // up the saved render scale too, rather than waiting for the first resize.
     this._resize();
@@ -4171,6 +4176,29 @@ class Game {
    * screen, and only then does it pause the game. Death is the one screen it
    * won't dismiss — that needs an actual choice.
    */
+  /**
+   * The Android back gesture, which must never close the game.
+   *
+   * On Android, back closes the Activity when nothing handles it: one unguarded
+   * tap on a button that is always on screen, and the world is gone. Registering
+   * a listener at all is what suppresses that (see `onBackButton`); this decides
+   * what it does instead.
+   *
+   * Which is `_escape` - the same ladder the Escape key walks, because back and
+   * escape are the same intention on two devices and a second ladder is a second
+   * thing to keep in step. The one difference is the bottom of it: Escape at the
+   * title screen does nothing, and back at the title screen is the one place a
+   * player might mean "leave", so it offers the way out rather than taking it.
+   */
+  _back() {
+    if (this.state === 'menu' && !this.ui.anyModalOpen) {
+      const exit = document.getElementById('mm-exit');
+      if (exit && !exit.classList.contains('hidden')) exit.click();
+      return;
+    }
+    this._escape();
+  }
+
   _escape() {
     const ui = this.ui;
     if (ui.anyModalOpen) { ui.closeSettings(); ui.closeControls(); ui.closeAchievements(); return; }
@@ -4788,7 +4816,7 @@ class Game {
         this.ui.setSaveWarning(false);
         this.ui.toast('Saved again, your world is safe');
       } else if (notify) {
-        this.ui.toast('Planet saved');
+        this.ui.toast('World saved');
       }
       return true;
     } catch (err) {

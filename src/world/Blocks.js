@@ -559,7 +559,7 @@ export const BLOCKS = [
   // is a block you cannot pick back up until the tier *after* the one that got
   // you there. Iron is what you have when you arrive.
   block({
-    name: 'hearth', label: 'Planet Hearth', all: 'hearth',
+    name: 'hearth', label: 'World Hearth', all: 'hearth',
     hardness: 28, tool: 'pick', tier: 3, light: 15, lightColor: [1.0, 0.72, 0.36],
     particle: [1, 0.7, 0.3], sound: 'stone',
   }),

@@ -18,6 +18,7 @@ import {
   CharacterPicker, CHARACTER_IDS, characterUrl, characterTextureUrl,
 } from '../player/Character.js';
 import { Save } from '../game/Save.js';
+import { nativeApp, exitApp } from '../Native.js';
 import { BIOME_COLORS, SEA_K } from '../world/Constants.js';
 import { colIndex, delta, faceAt, isSealed, W } from '../world/Grid.js';
 import { compassFrame } from '../render/Sky.js';
@@ -980,6 +981,19 @@ export class UI {
     $('mm-new').onclick = () => this.openSlots('new');
     $('mm-settings').onclick = () => this.openSettings();
     $('mm-controls').onclick = () => this.openControls();
+    // THE WAY OUT, and only in the app.
+    //
+    // A browser tab already has one and always will; the APK does not, so
+    // without this the only exit is the system back gesture, which is exactly
+    // the gesture that must NOT close a game (see `_bindNative` in main). The
+    // confirm is the game's own, not the browser's - see `confirm` above.
+    if (nativeApp()) {
+      const btn = $('mm-exit');
+      btn.classList.remove('hidden');
+      btn.onclick = async () => {
+        if (await this.confirm({ title: 'Exit Mojazer', yes: 'Exit', danger: true })) exitApp();
+      };
+    }
     // No Achievements entry here, unlike the pause menu: the record belongs to
     // a world now, and at the menu there is no world to show one for.
     document.querySelector('[data-close-slots]').onclick = () => this.closeSlots();

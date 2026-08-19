@@ -2982,10 +2982,16 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
       : dir === 2 ? [0, H, H, 1] : [0, 0, H, H];
     const frontHi = dir === 0 ? [H, H, 1, 1] : dir === 1 ? [0, H, H, 1]
       : dir === 2 ? [H, H, 1, 1] : [H, 0, 1, H];
-    // Which of the two perpendicular sides "left" is, in the quarter naming
-    // above: for +i and +j the left-hand quarter is the high one, for -i and
-    // -j it is the low one. Worked out once here rather than four times below.
-    const leftIsHi = dir === 0 || dir === 3;
+    // Which of the two perpendicular quarters "left" names.
+    //
+    // This was `dir === 0 || dir === 3` and it was inverted, which put every
+    // corner quarter on the wrong side. Drawn in plan, a flight climbing +i
+    // and turning +j stepped up on the RIGHT of one cell and on the LEFT of
+    // the next: the two risers did not meet, so the corner read as a notch cut
+    // out of the flight rather than as a turn in it. The test is connectivity -
+    // the quarter a corner keeps has to touch the riser of the step you have
+    // just climbed - and only one of the two answers does.
+    const leftIsHi = dir === 1 || dir === 2;
     const put = (q) => out.push([q[0], q[1], rk0, q[2], q[3], rk1]);
     if (shape === STAIR_OUTER_L || shape === STAIR_OUTER_R) {
       // One quarter: the one on the side the turn goes round.

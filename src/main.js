@@ -70,7 +70,8 @@ import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_FENCE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
-  SLAB_MATE, withSlabMate,
+  SLAB_MATE, withSlabMate, IS_SHAPED,
+  blockBoxes,
   SEALS_FACES,
 } from './world/Blocks.js';
 import {
@@ -2384,9 +2385,29 @@ class Game {
     // 0.022 is about three pixels at arm's length and reads as a drawn edge
     // rather than as a hairline; the standoff is what stops it z-fighting the
     // face it is drawn against.
-    const HL = 0.022, OUT = 0.006;
-    const lo = [x - OUT, k - OUT, y - OUT];
-    const hi = [x + 1 + OUT, k + 1 + OUT, y + 1 + OUT];
+    const HL = 0.009, OUT = 0.004;
+    // THE BLOCK, NOT THE CELL.
+    //
+    // A slab is half a cell and a cell-sized cage floats a clear half-block
+    // over it. The union of the block's own boxes is the honest outline, and
+    // it is the same list the mesher drew from, so the cage cannot disagree
+    // with the shape it is drawn around.
+    const id = this.planet.at(col, k);
+    const boxes = IS_SHAPED[id]
+      ? blockBoxes(id, this.planet.facingAt(col, k), this.planet.shapeAt(col, k))
+      : null;
+    let bx0 = 0, by0 = 0, bz0 = 0, bx1 = 1, by1 = 1, bz1 = 1;
+    if (boxes && boxes.length) {
+      bx0 = by0 = bz0 = Infinity; bx1 = by1 = bz1 = -Infinity;
+      for (const bb of boxes) {
+        // `blockBoxes` is (i, j, k) and the world is (x, y, z) with k as y.
+        bx0 = Math.min(bx0, bb[0]); bx1 = Math.max(bx1, bb[3]);
+        by0 = Math.min(by0, bb[2]); by1 = Math.max(by1, bb[5]);
+        bz0 = Math.min(bz0, bb[1]); bz1 = Math.max(bz1, bb[4]);
+      }
+    }
+    const lo = [x + bx0 - OUT, k + by0 - OUT, y + bz0 - OUT];
+    const hi = [x + bx1 + OUT, k + by1 + OUT, y + bz1 + OUT];
     const arr = this.highlight.geometry.attributes.position.array;
     let n = 0;
     const bar = (min, max) => {
@@ -10438,7 +10459,15 @@ class Game {
       // crack. What goes is the cage, and only for the two classes that are
       // drawn as models rather than as cubes: cross plants (every flower, the
       // flora, the crops, the reef) and the modelled solids (the workbench).
-      if (RENDER_TYPE[hit.id] === R_CROSS || MODEL_KIND[hit.id]) this.highlight.visible = false;
+      // NOT ON THE THINGS THAT ARE NOT BLOCKS. Grass and the flora were
+      // already out; the ladder, the fence, the gate, the sign and the torch
+      // are the rest of the owner's list, and they are the same kind of thing
+      // - a stick or a board in a cell, with the cage round the air beside it.
+      // Slabs and stairs KEEP an outline: they are blocks, and the cage is cut
+      // to their own boxes above rather than to the cell.
+      if (RENDER_TYPE[hit.id] === R_CROSS || MODEL_KIND[hit.id]
+        || IS_LADDER[hit.id] || IS_FENCE[hit.id] || IS_GATE[hit.id]
+        || IS_SIGN[hit.id] || IS_TORCH[hit.id]) this.highlight.visible = false;
       else this._showHighlight(hit.col, hit.k);
       this.ui.setCrosshairActive(true);
     } else {

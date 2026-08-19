@@ -3053,10 +3053,20 @@ button.danger:hover:not(:disabled) { filter: brightness(1.07); }
   width: 40px; height: 40px; transform: translate(-50%, -50%) rotate(-5deg);
 }
 #cursor-stack img { width: 100%; height: 100%; filter: drop-shadow(0 5px 7px rgba(0, 0, 0, .6)); }
+/* The count on a carried stack. Unlike every other count in the game this one
+   has a plate under it, because it is drawn over the world and over whatever
+   slot the cursor is crossing, and bare digits on that are unreadable.
+
+   `:empty` is why the rule is split: carrying ONE of something writes no digits
+   - a lone item needs no count - and the plate went on painting anyway, so a
+   single held block dragged a small dark box around behind it. The plate is a
+   backing for a number, so it exists only when there is a number. */
 #cursor-stack span {
   position: absolute; right: -4px; bottom: -5px;
-  padding: 1px 5px; border-radius: var(--r-sm);
   font: 700 var(--fs-sm) var(--mono); color: #ffd79a;
+}
+#cursor-stack span:not(:empty) {
+  padding: 1px 5px; border-radius: var(--r-sm);
   background: linear-gradient(180deg, rgba(24, 15, 5, .95), rgba(56, 37, 15, .9));
   box-shadow: 0 0 0 1px rgba(12, 7, 2, .9), inset 0 1px 2px rgba(0, 0, 0, .5);
 }

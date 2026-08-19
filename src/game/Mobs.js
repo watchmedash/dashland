@@ -4434,6 +4434,34 @@ const SPAWN_BY_BIOME = {
   BEACH: ['crab', 'crab', 'crab', 'bunny', 'bee', 'parrot'],
 };
 
+/**
+ * Which biomes a species belongs in, inverted from the table above.
+ *
+ * Spawning has always been biome-correct and WANDERING never was, so a polar
+ * bear born on a snowfield walked into the forest and stayed there, a tiger
+ * ended up on the ice, and nothing ever went home. The owner watched it happen
+ * to three species and it is one missing rule, not three.
+ *
+ * Derived rather than written out, so it cannot drift from the spawn table: add
+ * a species to a biome's list and that biome becomes a place it will walk back
+ * to, with nothing else to remember. A species in NO list - anything spawned by
+ * MONSTER_BY_BIOME or by the sea, or a tamed animal - gets an empty set and is
+ * exempt: monsters hunt wherever the hunt goes, and that is not a bug.
+ */
+const HOME_BIOMES = new Map();
+for (const [name, list] of Object.entries(SPAWN_BY_BIOME)) {
+  const id = BIOME[name];
+  if (id === undefined) continue;
+  for (const species of list) {
+    let set = HOME_BIOMES.get(species);
+    if (!set) HOME_BIOMES.set(species, set = new Set());
+    set.add(id);
+  }
+}
+
+/** How far out a lost animal looks for home, in columns, and the step. */
+const HOME_PULL = 24;
+const HOME_STEP = 6;
 // --- the merchant's own spawn path -------------------------------------------
 // Kept out of the biome tables on purpose. Everything else is population: top the
 // world up towards a headcount and pick a species by weight. A merchant is an
@@ -7313,6 +7341,39 @@ export class Mobs {
    * of them picks a new wandering heading. That is a few dozen lookups every
    * few seconds per crab.
    */
+  /**
+   * Which way home is for an animal that has wandered out of its biomes, or
+   * null if it is already in one (or belongs to none).
+   *
+   * The same shape as `_shoreBearing` below and for the same reason: the pull is
+   * applied when a NEW heading is chosen, not as a steady force every frame. A
+   * continuous nudge turns a wandering deer into a deer walking a dead-straight
+   * line home, which trades one wrong picture for another; biasing the direction
+   * of the next wander keeps it meandering and keeps the meander pointed the
+   * right way.
+   *
+   * Rings outward, so it finds the NEAREST acceptable biome rather than the
+   * first direction it happens to test - a bear one column inside a wood should
+   * step back out of it, not set off across the map.
+   */
+  _homeBearing(mob) {
+    const home = HOME_BIOMES.get(mob.type);
+    if (!home || !home.size) return null;
+    const col = this._colOf(mob.cell.x, mob.cell.y);
+    if (home.has(this.planet.colBiome[col])) return null;
+    for (let r = HOME_STEP; r <= HOME_PULL; r += HOME_STEP) {
+      for (let n = 0; n < 8; n++) {
+        const di = RING8[n * 2] * r, dj = RING8[n * 2 + 1] * r;
+        if (!home.has(this.planet.colBiome[stepColumn(col, di, dj)])) continue;
+        return Math.atan2(dj, di);
+      }
+    }
+    // Nothing of its own within two dozen columns. Leave it be rather than
+    // spinning it: an animal that cannot find its way home should look lost,
+    // not possessed.
+    return null;
+  }
+
   _shoreBearing(mob) {
     const col = this._colOf(mob.cell.x, mob.cell.y);
     for (let s = SHORE_STEP; s <= SHORE_PULL; s += SHORE_STEP) {
@@ -11612,6 +11673,13 @@ export class Mobs {
           if (spec.shore) {
             const toWater = this._shoreBearing(mob);
             if (toWater !== null) mob.want = toWater;
+          } else {
+            // ...and the same pull for an animal that has left its biomes
+            // altogether. After the shore rule rather than beside it: a crab's
+            // home is the surf, which is a fact about the column and not about
+            // the biome, and asking both would have the two arguing.
+            const home = this._homeBearing(mob);
+            if (home !== null) mob.want = home;
           }
         }
       }

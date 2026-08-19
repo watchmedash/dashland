@@ -165,6 +165,8 @@ export class TouchControls {
      *  surface for the whole of any moment you would want to sneak through. */
     this.sneak = false;
     this._shown = null;
+    /** Whether the Jump button is up. See `_wantJump`. */
+    this._jumpShown = null;
     /** The hotbar cell being held down, if any. See `_wireHotbar`. */
     this._drop = null;
 
@@ -807,6 +809,14 @@ export class TouchControls {
     // already covers the pause menu and the death card.
     const on = (g.state === 'playing' || g.state === 'spectating')
       && !g.ui.screenOpen && !g.ui.skillsOpen;
+    // The jump button comes and goes with the water and with the setting, which
+    // is a second thing that can change while `on` has not, so it is checked
+    // before the early-out rather than after it.
+    const jump = on && this._wantJump();
+    if (jump !== this._jumpShown) {
+      this._jumpShown = jump;
+      this.buttons.jump.classList.toggle('hidden', !jump);
+    }
     if (on === this._shown) return;
     this._shown = on;
     this.root.classList.toggle('hidden', !on);
@@ -820,6 +830,31 @@ export class TouchControls {
       this.buttons.sneak.classList.toggle('on', this.sneak);
       this.input.hold('ControlLeft', this.sneak);
     }
+  }
+
+  /**
+   * Should the Jump button be on screen at all?
+   *
+   * Normally no. Auto-jump is on by default now, and with it on there is
+   * nothing for the button to do on the ground: a step is walked up, and the
+   * owner's list of what a phone should show is "jump if autojump is off,
+   * sneak and joystick movement".
+   *
+   * WATER IS THE EXCEPTION AND IT IS NOT OPTIONAL. Space is swim-up. Auto-jump
+   * has no opinion about water at all - it is a ledge rule - so hiding the
+   * button unconditionally would leave a player in a lake with no way to reach
+   * the surface, and the breath meter runs out in nine seconds. So the button
+   * comes back while you are in water and goes again when you are out, which is
+   * a control appearing exactly where it is the only way out of something.
+   *
+   * Ladders deliberately do NOT bring it back: climbing is walking into the
+   * ladder, not holding up, so the stick already does it.
+   *
+   * Called once a frame from `sync` and change-checked there, so this is a
+   * couple of field reads on the frames where nothing has moved.
+   */
+  _wantJump() {
+    return !this.game.settings.autoJump || !!this.game.player?.inWater;
   }
 
   _release() {

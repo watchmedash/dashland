@@ -1415,7 +1415,12 @@ const NIGHT_OUTDOORS = 180;
 
 const DEFAULT_SETTINGS = {
   fov: 75, sensitivity: 1.0, renderScale: 1,
-  volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: false,
+  // Auto-jump is ON out of the box, on the owner's call, and the phone is the
+  // reason: with it on there is nothing left for a Jump button to do on flat
+  // ground, so the button can go and the thumb band empties to a stick and a
+  // sneak. A keyboard loses nothing either - Space still jumps, it is simply no
+  // longer needed to walk up a step.
+  volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: true,
   // The two navigation aids, both on.
   //
   // On by default because they are the answer to a problem this planet has and

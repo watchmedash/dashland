@@ -21,7 +21,7 @@ import { wrap, colIndex, colDecode } from './Grid.js';
 import {
   IS_SOLID, BLOCKS_MOTION, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N, ID,
-  IS_FENCE, IS_STAIR, blockBoxes, fenceLinks, stairShape,
+  IS_FENCE, IS_STAIR, IS_GATE, blockBoxes, fenceLinks, stairShape,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID, GROUP_PORTAL, GROUP_COUNT } from './Mesher.js';
 
@@ -662,7 +662,15 @@ export class Planet {
     let byte = 0;
     if (IS_DIRECTIONAL[id] || IS_AXIS[id] || IS_SHAPED[id]) byte = this.facing.get(col * D + k) ?? 0;
     const links = this.shapeAt(col, k);
-    const boxes = blockBoxes(id, byte, links);
+    // A GATE IS THE WHOLE CELL, open or shut.
+    //
+    // Its leaf swings to the side when it opens, so a shape-accurate ray stopped
+    // finding it: you could open a gate from where you stood and then not shut
+    // it without stepping round and aiming at the timber. A gate is a thing you
+    // operate rather than a thing you aim at, and the cell is what you are
+    // pointing at either way — the fence takes the same shortcut for collision,
+    // for the same kind of reason.
+    const boxes = IS_GATE[id] ? [[0, 0, 0, 1, 1, 1]] : blockBoxes(id, byte, links);
     if (!boxes.length) return -1;
     // The cell's own corner, in the ray's unwrapped space.
     const bx = ix, by = k, bz = iz;

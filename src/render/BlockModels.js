@@ -229,6 +229,17 @@ export class BlockModels {
    *   out:THREE.Vector3|null, spin?:number, light?:number}>>} lists one array
    *   per kind key
    */
+  /**
+   * Which cell the player is breaking, or -1. Set by main every frame.
+   *
+   * The crack used to find its instance by comparing world positions in the
+   * shader, and that is a measurement where an identity will do: this layer
+   * BUILDS the instance list and knows the cell each entry came from. A flag
+   * per instance cannot bleed onto a neighbour, cannot drift with a swaying
+   * vertex, and does not care where the model's origin sits inside its cell.
+   */
+  setBreaking(col, k) { this._brkCol = col; this._brkK = k; }
+
   sync(lists) {
     for (const [key, k] of this.kinds) {
       const list = lists[key];
@@ -237,6 +248,7 @@ export class BlockModels {
       const mesh = this._fit(k, n);
       const lit = mesh.geometry.getAttribute('aBlockLight');
       const shade = mesh.geometry.getAttribute('aSkyShade');
+      const crack = mesh.geometry.getAttribute('aCrack');
 
       for (let i = 0; i < n; i++) {
         const t = list[i];
@@ -251,6 +263,8 @@ export class BlockModels {
           if (shade) shade.setX(i, w < 0 ? 0
             : (1 - SKY_SHADE_MIN) * (1 - crossSky(w)));
         }
+        // 1 on the one instance being mined, 0 on every other.
+        if (crack) crack.setX(i, (t.col === this._brkCol && t.k === this._brkK) ? 1 : 0);
         _up.copy(t.up).normalize();
         _lean.copy(_up);
         if (k.lean && t.out) {
@@ -300,6 +314,7 @@ export class BlockModels {
       mesh.count = n;
       mesh.instanceMatrix.needsUpdate = true;
       if (lit) lit.needsUpdate = true;
+      if (crack) crack.needsUpdate = true;
       if (shade) shade.needsUpdate = true;
     }
   }
@@ -424,6 +439,13 @@ export class BlockModels {
       const attr = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
       attr.setUsage(THREE.DynamicDrawUsage);
       mesh.geometry.setAttribute('aBlockLight', attr);
+    }
+    {
+      // Every kind gets this one, not just the lit ones: anything you can
+      // see, you can break.
+      const brk = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);
+      brk.setUsage(THREE.DynamicDrawUsage);
+      mesh.geometry.setAttribute('aCrack', brk);
       // And the roof, in the same shape and with the same neutral value: how
       // much of the scene's indirect light to take away, zero being none.
       const shade = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1);

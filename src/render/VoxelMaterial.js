@@ -3610,6 +3610,10 @@ export function applyInstancedCrack(material) {
         #include <common>
         varying vec3 vCrackWorld;
         varying vec3 vCrackNormal;
+        varying float vCrackOn;
+        #ifdef USE_INSTANCING
+        attribute float aCrack;
+        #endif
       `)
       // `#include <worldpos_vertex>` only emits anything when the material
       // already wanted a world position, so the position is taken here from the
@@ -3620,9 +3624,11 @@ export function applyInstancedCrack(material) {
         #ifdef USE_INSTANCING
         vCrackWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
         vCrackNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * objectNormal);
+        vCrackOn = aCrack;
         #else
         vCrackWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vCrackNormal = normalize(mat3(modelMatrix) * objectNormal);
+        vCrackOn = 0.0;
         #endif
         #include <project_vertex>
       `);
@@ -3635,6 +3641,7 @@ export function applyInstancedCrack(material) {
         uniform float uBreakStage;
         varying vec3 vCrackWorld;
         varying vec3 vCrackNormal;
+        varying float vCrackOn;
         const float CRACK_MAP_W = ${MAP_W}.0;
       `)
       // Dead last, after the fog and the tone map, exactly as the terrain's own
@@ -3643,37 +3650,26 @@ export function applyInstancedCrack(material) {
       // stage of the break the brightest thing on a dark plant.
       .replace('#include <dithering_fragment>', /* glsl */`
         #include <dithering_fragment>
-        if (uBreakStage >= 0.0) {
-          // The map wraps and the models do not, so the block being mined may
-          // be a world away in coordinates and a step away on screen.
-          vec3 bp = uBreakPos;
-          vec2 bd = bp.xz - vCrackWorld.xz;
-          bp.xz -= CRACK_MAP_W * floor(bd / CRACK_MAP_W + 0.5);
-          // THE BROKEN CELL, and nothing near it.
-          //
-          // This was a 1.9-unit sphere, copied from the terrain's own test, and
-          // on the terrain that is right: the voxel path narrows to one cell
-          // afterwards, in TEXTURE space, using the per-quad window. A model has
-          // no such window, so the sphere WAS the test, and a sphere nearly two
-          // cells across cracks every plant in the patch. The owner saw exactly
-          // that - "cracking animations on models also shows on nearby
-          // model/block" - and it is the only report so far that confirms the
-          // crack is drawing on models at all.
-          //
-          // A cell-sized box instead, which is exact. Every modelled block is
-          // instanced from its cell's centre and grows upward from the floor, so
-          // the tallest of them (kelp, a full cell) just touches the lid and
-          // everything else is well inside. The 0.5 is half a cell and is not a
-          // tolerance - a fragment outside it belongs to a different block.
-          vec3 rel = abs(vCrackWorld - bp);
-          if (rel.x < 0.5 && rel.y < 0.5 && rel.z < 0.5) {
-            vec3 an = abs(vCrackNormal);
-            vec2 cuv = an.y > an.x && an.y > an.z ? vCrackWorld.xz
-                     : an.x > an.z ? vCrackWorld.zy
-                     : vCrackWorld.xy;
-            vec4 cr = texture(uCrack, vec3(fract(cuv), uBreakStage));
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, cr.rgb, cr.a * 0.92);
-          }
+        // ONE INSTANCE, NAMED BY THE LAYER THAT BUILT IT.
+        //
+        // This was a world-space box test against uBreakPos, and a world-space
+        // test is a measurement where an identity will do. It kept catching
+        // neighbours - "models and blocks besides them also cracks" - and it
+        // had two ways to be wrong that a flag has none of: the model's origin
+        // is its cell centre horizontally but its FLOOR vertically, and every
+        // plant here is swaying, so the vertex being tested is not where the
+        // plant is standing.
+        //
+        // BlockModels.sync knows the cell of every instance it writes, so it
+        // writes a 1 on the one being mined. Nothing to measure and nothing to
+        // tolerance.
+        if (uBreakStage >= 0.0 && vCrackOn > 0.5) {
+          vec3 an = abs(vCrackNormal);
+          vec2 cuv = an.y > an.x && an.y > an.z ? vCrackWorld.xz
+                   : an.x > an.z ? vCrackWorld.zy
+                   : vCrackWorld.xy;
+          vec4 cr = texture(uCrack, vec3(fract(cuv), uBreakStage));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, cr.rgb, cr.a * 0.92);
         }
       `);
   };

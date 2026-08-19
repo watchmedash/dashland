@@ -2315,8 +2315,30 @@ class Game {
   }
 
   _initHighlight() {
+    // TWELVE BARS, NOT TWELVE LINES.
+    //
+    // `linewidth` on a LineBasicMaterial is one pixel and has been on every
+    // desktop driver for a decade - the spec allows more and nothing
+    // implements it - so the only way to a thicker outline is geometry. Each
+    // edge is a thin box: 12 boxes, 8 corners each, 36 indices each, which is
+    // 432 triangles for the whole thing and is nothing beside a chunk.
+    //
+    // The indices never change (the boxes are always the same boxes), so they
+    // are written once here and only the 96 corner positions are rewritten
+    // when the crosshair moves to another cell.
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(24 * 3), 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12 * 8 * 3), 3));
+    const idx = [];
+    for (let e = 0; e < 12; e++) {
+      const o = e * 8;
+      // Two quads per axis pair, wound out of the 8 corners of a box laid out
+      // as (min/max) in x, then y, then z - the order `_showHighlight` writes.
+      for (const [a0, b0, c0, d0] of [
+        [0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1],
+        [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3],
+      ]) idx.push(o + a0, o + b0, o + c0, o + a0, o + c0, o + d0);
+    }
+    geo.setIndex(idx);
     // THE OUTLINE, IN COLOUR.
     //
     // It was a near-black line at 0.38, which is the outline every voxel game
@@ -2333,9 +2355,12 @@ class Game {
     // point of a colour is lost if it is mixed three-fifths into whatever is
     // behind it - and additive is what keeps it legible on stone AND on snow,
     // which a flat alpha cannot do at any single value.
-    this.highlight = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.85, depthTest: true,
-      blending: THREE.AdditiveBlending,
+    // Ordinary alpha rather than additive, now that it is solid geometry: the
+    // bars overlap at the eight corners, and additive would burn those out to
+    // white while the edges stayed coloured.
+    this.highlight = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.9,
+      depthTest: true, depthWrite: false, side: THREE.DoubleSide,
     }));
     this.highlight.frustumCulled = false;
     this.highlight.visible = false;
@@ -2345,29 +2370,48 @@ class Game {
   }
 
   /** Draw the wireframe of a cell. It is a unit cube, so it is eight corners. */
+  /**
+   * Lay the twelve bars around one cell.
+   *
+   * The cell is axis aligned, so every edge runs along one axis and each bar
+   * is an AABB: full length along its own axis, HL thick on the other two. The
+   * eight corners of each are written in (x, then y, then z) min/max order,
+   * which is the order the fixed index list in `_initHighlight` was wound for.
+   */
   _showHighlight(col, k) {
     const { x, y } = colParts(col);
-    const c = this._hlCorners;
-    cellCorner(x, y, k, c[0]);
-    cellCorner(x + 1, y, k, c[1]);
-    cellCorner(x + 1, y + 1, k, c[2]);
-    cellCorner(x, y + 1, k, c[3]);
-    cellCorner(x, y, k + 1, c[4]);
-    cellCorner(x + 1, y, k + 1, c[5]);
-    cellCorner(x + 1, y + 1, k + 1, c[6]);
-    cellCorner(x, y + 1, k + 1, c[7]);
-    const edges = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7];
+    // Half-thickness of a bar, and how far the whole cage stands off the block.
+    // 0.022 is about three pixels at arm's length and reads as a drawn edge
+    // rather than as a hairline; the standoff is what stops it z-fighting the
+    // face it is drawn against.
+    const HL = 0.022, OUT = 0.006;
+    const lo = [x - OUT, k - OUT, y - OUT];
+    const hi = [x + 1 + OUT, k + 1 + OUT, y + 1 + OUT];
     const arr = this.highlight.geometry.attributes.position.array;
-    // Nudge out from the cell's own centre so the outline never z-fights. The
-    // old version scaled off the world origin, which was a radius.
-    const mx = x + 0.5, my = k + 0.5, mz = y + 0.5;
-    for (let e = 0; e < 24; e++) {
-      const p = c[edges[e]];
-      arr[e * 3] = mx + (p[0] - mx) * 1.012;
-      arr[e * 3 + 1] = my + (p[1] - my) * 1.012;
-      arr[e * 3 + 2] = mz + (p[2] - mz) * 1.012;
+    let n = 0;
+    const bar = (min, max) => {
+      for (let c = 0; c < 8; c++) {
+        arr[n++] = (c & 1) ? max[0] : min[0];
+        arr[n++] = (c & 2) ? max[1] : min[1];
+        arr[n++] = (c & 4) ? max[2] : min[2];
+      }
+    };
+    for (let axis = 0; axis < 3; axis++) {
+      const b = (axis + 1) % 3, c = (axis + 2) % 3;
+      for (let corner = 0; corner < 4; corner++) {
+        const min = [0, 0, 0], max = [0, 0, 0];
+        min[axis] = lo[axis]; max[axis] = hi[axis];
+        const at = (ax, high) => {
+          const v = high ? hi[ax] : lo[ax];
+          min[ax] = v - HL; max[ax] = v + HL;
+        };
+        at(b, !!(corner & 1));
+        at(c, !!(corner & 2));
+        bar(min, max);
+      }
     }
     this.highlight.geometry.attributes.position.needsUpdate = true;
+    this.highlight.geometry.computeBoundingSphere();
     this.highlight.visible = true;
   }
 
@@ -5292,7 +5336,24 @@ class Game {
    */
   _slabHalf(hit, col, k, aim = false) {
     if (!aim && hit.col === col) return hit.k > k ? 1 : 0;   // stacked: fill the near half
-    // Side placement: compare the aim point with the cell's mid-height.
+    // ADDING TO A CELL THAT ALREADY HOLDS A SLAB: there is exactly one free
+    // half, so ask the cell rather than the ray.
+    //
+    // This used to compare the aim point with the cell's mid-height, and that
+    // broke the day the raycast learned block shapes. The ray used to stop at
+    // the cell WALL — hitting a lower slab from above gave a point at k+1,
+    // comfortably over the middle, so "upper half" came back and the two slabs
+    // merged. Now it stops on the slab's own top surface, at exactly k+0.5, and
+    // `> k + 0.5` is false there: every stack read as "lower half", which is
+    // the half already filled, so the merge was refused — and so was every
+    // mixed pair. Two slabs of the same kind stopped combining at all.
+    //
+    // The free half is not a geometry question. A cell holding a lower slab has
+    // exactly one place a second slab can go, and it is the upper one.
+    if (aim && hit.col === col && hit.k === k && IS_SLAB[this.planet.at(col, k)]) {
+      return (this.planet.facingAt(col, k) & 1) ^ 1;
+    }
+    // Side placement into an empty cell: compare the aim point with the mid.
     return (hit.point ?? this.player.eye).y > k + 0.5 ? 1 : 0;
   }
 
@@ -10364,7 +10425,21 @@ class Game {
     this.useCooldown = Math.max(0, this.useCooldown - dt);
 
     if (hit) {
-      this._showHighlight(hit.col, hit.k);
+      // NOT ON THE THINGS THAT ARE NOT BLOCKS.
+      //
+      // A cage round a flower is a cage round mostly air: the model is a third
+      // of a cell tall and the box is the whole cell, so the outline sits well
+      // clear of the thing it is supposed to be pointing at and reads as a
+      // floating frame. Over a meadow, where a step moves the crosshair from
+      // one plant to the next, it is a box flickering around the screen -
+      // "they are distracting", which is exactly it.
+      //
+      // The crosshair still finds them, they still break, they still take a
+      // crack. What goes is the cage, and only for the two classes that are
+      // drawn as models rather than as cubes: cross plants (every flower, the
+      // flora, the crops, the reef) and the modelled solids (the workbench).
+      if (RENDER_TYPE[hit.id] === R_CROSS || MODEL_KIND[hit.id]) this.highlight.visible = false;
+      else this._showHighlight(hit.col, hit.k);
       this.ui.setCrosshairActive(true);
     } else {
       this.highlight.visible = false;
@@ -10481,6 +10556,11 @@ class Game {
     if (stage >= 0 && hit) {
       this.planet.centerOf(hit.col, hit.k, voxelUniforms.uBreakPos.value);
     }
+    // The modelled blocks do not read the position at all - they are told
+    // WHICH instance, by cell, because the layer that builds the instances is
+    // the one that knows. See `setBreaking`.
+    this.blockModels?.setBreaking(stage >= 0 && hit ? hit.col : -1,
+      stage >= 0 && hit ? hit.k : -1);
 
     // Everything below is the right button, and for a bow that is the draw,
     // which `_tickBow` already owns. This sits here rather than at the top of

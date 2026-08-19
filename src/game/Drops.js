@@ -8,7 +8,7 @@ import { D, GRAVITY, BIOME_COLORS } from '../world/Constants.js';
 import { SKY_ATTEN, SKY_SHADE_MIN } from '../world/Lighting.js';
 import { wrap } from '../world/Grid.js';
 import { wrapDist, wrapDist2, relTo } from './Wrap.js';
-import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX } from '../world/Blocks.js';
+import { TILE_TOP, TILE_SIDE, TILE_BOTTOM, TILE_FRONT, TINT_ID, RENDER_TYPE, R_CROSS, ID, blockBoxes, IS_OPAQUE, TILES, TILE_INDEX, IS_STAIR, STAIR_STRAIGHT } from '../world/Blocks.js';
 
 /**
  * Layers that must never take a biome tint, and the white that stands in.
@@ -853,7 +853,18 @@ function getBlockGeo(blockId) {
   if (g) return g;
   const pos = [], nrm = [], tan = [], uv = [], aux = [], blk = [], tint = [], idxs = [];
   const tintv = dropTint(blockId);
-  const boxes = blockBoxes(blockId, 0, 0b0011);
+  // 0b0011 is a FENCE's links - two rails, so a dropped fence is a post with
+  // timber either side rather than a bare stick. It is the third argument of
+  // `blockBoxes`, and that argument stopped meaning one thing the day stairs
+  // started reading it as a corner shape: 0b0011 is 3, and 3 is OUTER_L, so
+  // every dropped and held stair has been a corner piece since. The owner spotted
+  // it from the other end - "dropped stairs should be how a normal stairs should
+  // be".
+  //
+  // A dropped block has no neighbours to take a shape from, so it takes the
+  // plain one: a fence still gets its two rails, and everything with a
+  // neighbour-derived shape gets the shape it has when it stands alone.
+  const boxes = blockBoxes(blockId, 0, IS_STAIR[blockId] ? STAIR_STRAIGHT : 0b0011);
   let v = 0;
   let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const b of boxes) {

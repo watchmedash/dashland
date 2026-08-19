@@ -1587,6 +1587,9 @@ const qualityTier = (settings) => {
   return TouchControls.wanted() ? 'low' : 'high';
 };
 
+/** Scratch for the highlight's per-corner hue. 96 corners a frame, one object. */
+const _hlHue = new THREE.Color();
+
 class Game {
   constructor() {
     this.settings = { ...DEFAULT_SETTINGS, ...(Save.settings() || {}) };
@@ -2329,6 +2332,12 @@ class Game {
     // when the crosshair moves to another cell.
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12 * 8 * 3), 3));
+    // ...and a colour per corner, because the rainbow is around the cage rather
+    // than on it: one uniform colour cycling through the wheel is a cage that
+    // is pink, then blue, then green, and at any instant it is one of those.
+    // What was asked for is all of them at once - "I mean like a rainbow" -
+    // which is a gradient over the geometry, so the hue has to live per vertex.
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(12 * 8 * 3), 3));
     const idx = [];
     for (let e = 0; e < 12; e++) {
       const o = e * 8;
@@ -2360,7 +2369,7 @@ class Game {
     // bars overlap at the eight corners, and additive would burn those out to
     // white while the edges stayed coloured.
     this.highlight = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.9,
+      vertexColors: true, transparent: true, opacity: 0.95,
       depthTest: true, depthWrite: false, side: THREE.DoubleSide,
     }));
     this.highlight.frustumCulled = false;
@@ -2385,7 +2394,7 @@ class Game {
     // 0.022 is about three pixels at arm's length and reads as a drawn edge
     // rather than as a hairline; the standoff is what stops it z-fighting the
     // face it is drawn against.
-    const HL = 0.009, OUT = 0.004;
+    const HL = 0.005, OUT = 0.003;
     // THE BLOCK, NOT THE CELL.
     //
     // A slab is half a cell and a cell-sized cage floats a clear half-block
@@ -2409,12 +2418,25 @@ class Game {
     const lo = [x + bx0 - OUT, k + by0 - OUT, y + bz0 - OUT];
     const hi = [x + bx1 + OUT, k + by1 + OUT, y + bz1 + OUT];
     const arr = this.highlight.geometry.attributes.position.array;
+    const hue = this.highlight.geometry.attributes.color.array;
     let n = 0;
+    // THE RAINBOW, AROUND THE CAGE.
+    //
+    // Hue from where the corner sits in the cell rather than from the clock:
+    // the three axes summed and wrapped, so it runs smoothly from one corner
+    // of the cube to the opposite one and every edge is a gradient rather than
+    // a colour. A slow turn is added off the shader clock so it drifts, which
+    // is what stops it reading as a texture someone painted on.
+    const spin = (voxelUniforms.uTime.value * 0.08) % 1;
     const bar = (min, max) => {
       for (let c = 0; c < 8; c++) {
-        arr[n++] = (c & 1) ? max[0] : min[0];
-        arr[n++] = (c & 2) ? max[1] : min[1];
-        arr[n++] = (c & 4) ? max[2] : min[2];
+        const vx = (c & 1) ? max[0] : min[0];
+        const vy = (c & 2) ? max[1] : min[1];
+        const vz = (c & 4) ? max[2] : min[2];
+        arr[n] = vx; arr[n + 1] = vy; arr[n + 2] = vz;
+        _hlHue.setHSL(((vx - x) + (vy - k) + (vz - y)) / 3 + spin, 1.0, 0.6);
+        hue[n] = _hlHue.r; hue[n + 1] = _hlHue.g; hue[n + 2] = _hlHue.b;
+        n += 3;
       }
     };
     for (let axis = 0; axis < 3; axis++) {
@@ -2432,6 +2454,7 @@ class Game {
       }
     }
     this.highlight.geometry.attributes.position.needsUpdate = true;
+    this.highlight.geometry.attributes.color.needsUpdate = true;
     this.highlight.geometry.computeBoundingSphere();
     this.highlight.visible = true;
   }
@@ -6346,9 +6369,8 @@ class Game {
     // The outline cycles while it is up. Only while it is up: this is one HSL
     // conversion a frame and it is skipped on every frame the crosshair is
     // pointing at nothing, which is most of them.
-    if (this.highlight.visible) {
-      this.highlight.material.color.setHSL((voxelUniforms.uTime.value * 0.25) % 1, 0.85, 0.6);
-    }
+    // The hue is per vertex and is written with the positions - see
+    // `_showHighlight`. Nothing to do per frame.
     this.damageFlash = Math.max(0, this.damageFlash - dt * 1.6);
     // After the update and before the flags are cleared: the layer's visibility
     // is a function of the state this frame just settled on, and anything it

@@ -2680,17 +2680,32 @@ export function stairShape(byte, probe) {
     return ((b >> 2) & 1) === flip ? (b & 3) : -1;
   };
 
-  // In front: an outer corner, unless what is beyond the turn lines up with us.
-  const front = stairAt(dir);
-  if (front >= 0 && perp(front)) {
-    const beyond = stairAt(TURN_BACK[front]);
-    if (beyond !== dir) return front === TURN_L[dir] ? STAIR_OUTER_L : STAIR_OUTER_R;
+  // WHICH NEIGHBOUR IS THE OUTSIDE OF THE TURN.
+  //
+  // Minecraft's rule reads the cell in FACING for an outer corner and the one
+  // opposite for an inner one, and this was a transcription of it - which was
+  // the mistake, because its FACING and this `dir` are not the same end of the
+  // block. Here `dir` is the low side, so the riser is at TURN_BACK[dir], and a
+  // stair only shares a riser edge with the neighbour on THAT side. Reading the
+  // two branches the other way up put an inner corner - three raised quarters -
+  // at every turn a staircase actually makes, which is what the owner kept
+  // seeing and did not want: "4 blocks should be down part 1 block on top the
+  // corner".
+  //
+  // So: the neighbour behind, on the riser side, is the outside of the turn.
+  const behind = stairAt(TURN_BACK[dir]);
+  if (behind >= 0 && perp(behind)) {
+    // ...unless the cell on the far side of that turn runs the same way we do,
+    // in which case we are in the middle of a field of stairs rather than at a
+    // corner. This clause is what stops a 2x2 reading as four corners.
+    const beyond = stairAt(behind);
+    if (beyond !== dir) return behind === TURN_L[dir] ? STAIR_OUTER_L : STAIR_OUTER_R;
   }
-  // Behind: an inner corner, under the mirror of the same clause.
-  const back = stairAt(TURN_BACK[dir]);
-  if (back >= 0 && perp(back)) {
-    const beyond = stairAt(back);
-    if (beyond !== dir) return back === TURN_L[dir] ? STAIR_INNER_L : STAIR_INNER_R;
+  // And the neighbour in front is the inside, filling the notch on the turn.
+  const ahead = stairAt(dir);
+  if (ahead >= 0 && perp(ahead)) {
+    const beyond = stairAt(TURN_BACK[ahead]);
+    if (beyond !== dir) return ahead === TURN_L[dir] ? STAIR_INNER_L : STAIR_INNER_R;
   }
   return STAIR_STRAIGHT;
 }

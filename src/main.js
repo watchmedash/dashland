@@ -1418,8 +1418,6 @@ for (const n of Object.keys(MODELLED_TOPPERS)) if (ID[n]) TOPPER_KIND[ID[n]] = n
 // so the two can be lit differently; one file, loaded once.
 const MODELLED_BLOCKS = {
   bench: { height: 0.880, item: 'bench' },
-  kiln: { height: 1.0, item: 'kiln' },
-  kiln_lit: { height: 1.0, item: 'kiln' },
 };
 const MODEL_KIND = [];
 for (const n of Object.keys(MODELLED_BLOCKS)) if (ID[n]) MODEL_KIND[ID[n]] = n;

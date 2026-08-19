@@ -590,15 +590,20 @@ export const BLOCKS = [
   // alone; the tiles below are kept and still used, by the mining particles and
   // by anything that asks a block for a colour.
   block({ name: 'bench', label: 'Workbench', render: R_MODEL, top: 'bench_top', side: 'bench_side', bottom: 'planks', hardness: 2.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
-  // R_MODEL, like the bench: the geometry in `art/wam/items/kiln.wam` IS the
-  // block, so the fist, the icon, the drop on the ground and the thing standing
-  // in the world are one object. The four tiles stay because the model does not
-  // use them but the break particles, the drop and the icon fallback still do.
+  // A CUBE, wearing the kitchen's face.
   //
-  // `kiln_lit` is the same model. A burning kiln is not a different building; it
-  // is a block state, and what says it is burning is the light it throws.
-  block({ name: 'kiln', label: 'Kiln', render: R_MODEL, top: 'kiln_top', side: 'kiln_side', front: 'kiln_front', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', particle: [0.45, 0.44, 0.46], sound: 'stone' }),
-  block({ name: 'kiln_lit', label: 'Kiln', render: R_MODEL, top: 'kiln_top', side: 'kiln_side', front: 'kiln_front_lit', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', light: 12, lightColor: [1.0, 0.62, 0.28], particle: [0.9, 0.5, 0.2], sound: 'stone' }),
+  // It was briefly `R_MODEL` against a model authored for it, and the model did
+  // not appear at all once placed. The owner's answer to that is the better one
+  // anyway - "we can just use the kitchen model for kiln without the pot on the
+  // top" - and it is better because the two ARE the same building: a brick box
+  // with a fire door, and the pot on the kitchen is the whole of the difference.
+  // Same tiles as `kitchen` below, so the pair read as a set and there is one
+  // less appearance to keep in step.
+  //
+  // `art/wam/items/kiln.wam` and its export stay on disk unused. It is a good
+  // model and it costs nothing sitting there; nothing loads it.
+  block({ name: 'kiln', label: 'Kiln', top: 'hearth', side: 'brick', front: 'kiln_front', bottom: 'brick', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', particle: [0.45, 0.44, 0.46], sound: 'stone' }),
+  block({ name: 'kiln_lit', label: 'Kiln', top: 'hearth', side: 'brick', front: 'kiln_front_lit', bottom: 'brick', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', light: 12, lightColor: [1.0, 0.62, 0.28], particle: [0.9, 0.5, 0.2], sound: 'stone' }),
   // Not `directional`: that flag drives the generic "face the player" placement
   // path, which writes a plain 0-3 and would collide with the 0-means-floor
   // encoding above. A torch is given its byte explicitly when it is placed.

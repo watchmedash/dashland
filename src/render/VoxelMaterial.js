@@ -3507,6 +3507,7 @@ export function applyInstancedBlockLight(material) {
   material.onBeforeCompile = (shader, renderer) => {
     prevCompile.call(material, shader, renderer);
     shader.uniforms.uBlockIntensity = voxelUniforms.uBlockIntensity;
+    shader.uniforms.uUpView = voxelUniforms.uUpView;
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', /* glsl */`
@@ -3536,6 +3537,7 @@ export function applyInstancedBlockLight(material) {
       .replace('#include <common>', /* glsl */`
         #include <common>
         uniform float uBlockIntensity;
+        uniform vec3 uUpView;
         const float BLOCK_KNEE = 0.28;
         const float BLOCK_CEIL = 0.58;
         varying vec3 vInstBlock;
@@ -3571,7 +3573,19 @@ export function applyInstancedBlockLight(material) {
         //
         // Scaled by the max channel, again like the terrain, so only the value
         // moves and firelight keeps its hue.
-        vec3 instRad = diffuseColor.rgb * vInstBlock * uBlockIntensity * RECIPROCAL_PI;
+        // WHICH WAY THE FACE IS TURNED, here too.
+        //
+        // The terrain's grid light got this and a mob's got it, and a modelled
+        // block was the one of the three left flat - so a workbench beside a
+        // torch lit up all over, every face at one brightness including the
+        // ones turned away from the flame, while the stone behind it shaded
+        // properly. The owner: "workbench still glows like shit when light is
+        // nearby and not just side where light hits but whole model lights up".
+        //
+        // Same expression and same constant as the other two. normal is
+        // view-space at this point in the chain, which is why uUpView exists.
+        float instFaceLit = mix(0.58, 1.0, clamp(dot(normal, uUpView) * 0.5 + 0.5, 0.0, 1.0));
+        vec3 instRad = diffuseColor.rgb * vInstBlock * uBlockIntensity * instFaceLit * RECIPROCAL_PI;
         float instPeak = max(instRad.r, max(instRad.g, instRad.b));
         if (instPeak > BLOCK_KNEE) {
           float instOver = (instPeak - BLOCK_KNEE) / (BLOCK_CEIL - BLOCK_KNEE);

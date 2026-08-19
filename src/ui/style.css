@@ -2133,7 +2133,16 @@ body.fighting #toasts { top: 172px; }
   #screen .islot img { width: 28px; height: 28px; }
   #screen .inv-body { gap: 10px; }
 }
-#screen-top { margin-bottom: 16px; }
+/* Full width of the left column, so what is inside it can centre.
+
+   `.inv-left` is a flex column with `align-items: flex-start`, so this box was
+   shrink-wrapped to whatever it held - and a shrink-wrapped box is one its own
+   `margin: 0 auto` cannot move, because there is no slack to divide. The kiln's
+   furnace was therefore pinned to the left edge of the bag under it while the
+   bag itself was centred in the sheet, which is what the owner photographed.
+   Stretching this is the whole fix: the furnace's own auto margins do the rest,
+   and the craft rows that were already centred in it are unaffected. */
+#screen-top { margin-bottom: 16px; align-self: stretch; }
 
 /* Bag and craft list as one group in the middle of the sheet, rather than one
    pinned to each edge of it. The left column used to take all the slack, which

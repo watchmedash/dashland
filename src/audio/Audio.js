@@ -1549,19 +1549,48 @@ export class Audio {
     }
   }
 
+  /**
+   * Something entering the bag. Two sines a fourth apart, which is what it has
+   * always been and is not what changed.
+   *
+   * What changed is that it now moves. Rendered twice through an
+   * OfflineAudioContext with the noise buffer and the reverb impulse held
+   * constant between the two passes, `pickup` came out BIT-IDENTICAL — and of
+   * the whole roster only it, `levelUp` and `saveFail` did. The other two are
+   * meant to be: a fanfare is a tune and an alarm is a signal, and both are
+   * recognised by being the same every time. This one is not. It is the second
+   * most repeated sound in the game after a footstep, dozens of times a minute
+   * for a whole session, and every one of them was the same 1024 samples.
+   *
+   * So: the root moves by 4%, the gap between the two notes by a third, the
+   * level by 15%, and the tail of the second note is a third longer than the
+   * first. Nothing about the interval or the loudness changes — measured before
+   * and after at -22.0 peak — because the point is that it stops being a
+   * machine, not that it becomes a different sound.
+   *
+   * And one tick of noise under the first note, because a thing arriving in a
+   * bag arrives against something. That is the layer a synth pair cannot give
+   * itself, and it is the one a recording would replace first.
+   */
   pickup() {
     if (!this._live() || !this._take('ui', 0.3)) return;
     const t = this.ctx.currentTime;
-    [660, 880].forEach((f, i) => {
+    const root = 660 * (0.98 + Math.random() * 0.04);
+    const gap = 0.05 + Math.random() * 0.025;
+    const amp = 0.14 * (0.92 + Math.random() * 0.16);
+    [root, root * 4 / 3].forEach((f, i) => {
+      const tn = t + i * gap;
+      const d = i ? 0.16 + Math.random() * 0.06 : 0.14;
       const o = this.ctx.createOscillator();
       o.type = 'sine'; o.frequency.value = f;
       const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0, t + i * 0.06);
-      g.gain.linearRampToValueAtTime(0.14, t + i * 0.06 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0005, t + i * 0.06 + 0.16);
+      g.gain.setValueAtTime(0, tn);
+      g.gain.linearRampToValueAtTime(amp, tn + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0005, tn + d);
       o.connect(g).connect(this.uiBus);
-      o.start(t + i * 0.06); o.stop(t + i * 0.06 + 0.2);
+      o.start(tn); o.stop(tn + d + 0.04);
     });
+    this._noiseHit(this.uiBus, t, { gain: 0.035, lo: 900, hi: 4600, q: 1.4, dur: 0.03, at: 0.002 });
   }
 
   /**

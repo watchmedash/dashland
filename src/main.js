@@ -1416,6 +1416,17 @@ for (const n of Object.keys(MODELLED_TOPPERS)) if (ID[n]) TOPPER_KIND[ID[n]] = n
 // a cold one and there is no `kiln_lit` item to hang a pose on - it is a block
 // state, kept out of the item registry on purpose. Two kinds rather than one
 // so the two can be lit differently; one file, loaded once.
+/**
+ * Fuel ticks one dish costs at a kitchen.
+ *
+ * In FUEL's own units, so the table that already says what everything is worth
+ * decides this too: coal is 60, so it cooks fifteen dishes; a plank is 12 and
+ * cooks three; a stick is 4 and cooks one. That is a real cost without being a
+ * chore, and it needs no clock - a kiln waits because smelting takes time, and
+ * standing at a pot does not.
+ */
+const COOK_COST = 4;
+
 const MODELLED_BLOCKS = {
   bench: { height: 0.880, item: 'bench' },
 };
@@ -1633,6 +1644,20 @@ class Game {
     this.barter = newBarterState();
     this._lastFace = -1;
     this.kilns = new Map();
+    /**
+     * A kitchen's fire, per cell.
+     *
+     * The kitchen had no state at all - it works out of `inventory.craft` like
+     * the workbench, which is what let it be built with no save code and no
+     * break-drop. It has one thing now, and only one: fuel. "A kitchen without a
+     * fire is just a pot so cooking really needs fire."
+     *
+     * `burn` is fuel ticks in hand, in the same units FUEL is written in, and it
+     * is spent per dish rather than per second - see COOK_COST. A pot does not
+     * need a furnace's clock: you are standing at it, the dish is instant, and
+     * what the fire has to be is a cost, not a wait.
+     */
+    this.kitchens = new Map();
     // Crate contents, keyed the same way kilns are. Thirty-six carried slots is
     // nothing against a hundred and seventy block types: without somewhere to
     // put things, building anything large means a constant round trip to a hole
@@ -3761,6 +3786,11 @@ class Game {
           progressItem: Slot.fromJSON(k.in).item,
         });
       }
+      for (const k of save.kitchens || []) {
+        this.kitchens.set(k.key, {
+          fuel: Slot.fromJSON(k.fu), burn: k.b || 0, burnMax: k.bm || 1, col: k.c, k: k.k,
+        });
+      }
       for (const c of save.crates || []) {
         this.crates.set(c.key, {
           slots: Array.from({ length: CRATE_SLOTS }, (_, i) => Slot.fromJSON(c.s[i])),
@@ -4655,6 +4685,12 @@ class Game {
       kilns: [...this.kilns].map(([key, k]) => ({
         key, c: k.col, k: k.k, in: k.input.toJSON(), fu: k.fuel.toJSON(), out: k.output.toJSON(),
         b: k.burn, bm: k.burnMax, p: k.progress, pm: k.progressMax,
+      })),
+      // A kitchen is one slot and one number. Empties are written like the
+      // crates' are, and for a weaker version of the same reason: a kitchen with
+      // banked fuel and nothing in the slot is not the same as a cold one.
+      kitchens: [...this.kitchens].map(([key, k]) => ({
+        key, c: k.col, k: k.k, fu: k.fuel.toJSON(), b: k.burn, bm: k.burnMax,
       })),
       // Empty crates are written too, and have to be: an entry existing at all
       // is what records "this one has been dealt with". Drop the empties and a
@@ -6155,6 +6191,20 @@ class Game {
     return ok;
   }
 
+  /**
+   * Put one stack on the floor at the player's feet.
+   *
+   * The tail of `closeScreen` has done this since the craft grid existed; the
+   * kitchen's menu needs it too, because laying out a dish empties the pots
+   * first and the bag may not have room for what comes back. Extracted rather
+   * than duplicated: two places that drop a stack must drop it in the same
+   * place, or one of them is a way to lose an item.
+   */
+  _spillDrop(s) {
+    _v1.copy(this.player.position).addScaledVector(this.player.up, 1);
+    this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count, s.wear || 0);
+  }
+
   closeScreen() {
     if (!this.ui.screenOpen) return;
     const spill = this.inventory.clearCraft();
@@ -6166,10 +6216,8 @@ class Game {
       if (taken < cur.count) spill.push({ item: cur.item, count: cur.count - taken, wear: cur.wear });
       cur.clear();
     }
-    for (const s of spill) {
-      _v1.copy(this.player.position).addScaledVector(this.player.up, 1);
-      this.drops.spawn(_v1.x, _v1.y, _v1.z, s.item, s.count, s.wear || 0);
-    }
+    for (const s of spill) this._spillDrop(s);
+
     this.ui.closeScreen();
     this.ui.refresh();
     if (this.state === 'playing') this.input.requestLock();
@@ -6251,6 +6299,37 @@ class Game {
         if (slot) slot.set(id, Math.min(count, max));
       }
     }
+  }
+
+  _kitchenAt(col, k) {
+    const key = cellIdx(col, k);
+    let s = this.kitchens.get(key);
+    if (!s) {
+      s = { fuel: new Slot(), burn: 0, burnMax: 1, col, k };
+      this.kitchens.set(key, s);
+    }
+    return s;
+  }
+
+  /**
+   * Spend one dish's worth of fire, lighting the next piece of fuel if the last
+   * one has burnt through.
+   *
+   * @returns {boolean} whether the kitchen was lit enough to cook
+   */
+  _burnForCook(kit) {
+    if (!kit) return false;
+    if (kit.burn < COOK_COST) {
+      const f = kit.fuel;
+      const ticks = f.empty ? 0 : (FUEL[f.item] || 0);
+      if (!ticks) return false;
+      f.count--;
+      if (f.count <= 0) f.clear();
+      kit.burn += ticks;
+      kit.burnMax = Math.max(kit.burn, ticks);
+    }
+    kit.burn = Math.max(0, kit.burn - COOK_COST);
+    return true;
   }
 
   _kilnAt(col, k) {
@@ -10822,7 +10901,10 @@ class Game {
         // kitchen you can see from across a room, and clicking it has to open
         // the kitchen or the block is a decoration with a trap in it.
         if (hit.id === ID.kitchen || hit.id === ID.kitchen_top) {
-          this.openScreen('kitchen'); return;
+          // The fire belongs to the lower cell whichever half was clicked.
+          const base = hit.id === ID.kitchen_top ? hit.k - 1 : hit.k;
+          this.openScreen('kitchen', this._kitchenAt(hit.col, base));
+          return;
         }
         if (hit.id === ID.kiln || hit.id === ID.kiln_lit) {
           this.openScreen('kiln', this._kilnAt(hit.col, hit.k));

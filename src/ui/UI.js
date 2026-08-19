@@ -7,6 +7,7 @@ import { Slot, HOTBAR, TOTAL } from '../game/Inventory.js';
 import { BRANCHES } from '../game/Skills.js';
 import {
   findRecipe, availableRecipes, craftFromInventory, kitchenFallback, isKitchenIngredient,
+  FUEL, SMELTING, recipeCost, takeOneInto,
 } from '../game/Recipes.js';
 import { itemIdOf } from '../game/Items.js';
 import {
@@ -2242,6 +2243,14 @@ export class UI {
       const r = this._craftResult();
       if (!r || r.out !== rec.out) break;
       if (!cur.empty && (cur.item !== rec.out || cur.count + rec.count > (ITEMS[rec.out]?.stack ?? 64))) break;
+      // A DISH COSTS FIRE. Checked here rather than at the output slot's own
+      // preview, deliberately: the pot still shows what it WOULD make with no
+      // fuel in the grate, because a kitchen that goes blank when the fire is
+      // out cannot tell you that the fire is why. Taking is what is refused.
+      if (this.kitchen && !g._burnForCook(this.kitchen)) {
+        if (!made) { g.audio.deny(); this.setHint('No fuel'); }
+        break;
+      }
       g.inventory.consumeCraft(size);
       if (cur.empty) cur.set(rec.out, rec.count);
       else cur.count += rec.count;
@@ -2304,10 +2313,19 @@ export class UI {
       el.classList.toggle('sel', i === inv.selected);
     }
     if (this.craftSlots) {
-      this.craftSlots.forEach((el, k) => this._paint(el, this.craftMap[k]));
+      this.craftSlots.forEach((el, k) => {
+        this._paint(el, this.craftMap[k]);
+        // A cell that was asked for an ingredient and did not get one. The slot
+        // itself cannot say this - an empty cell is an empty cell - so the ask
+        // is remembered in `craftWant` when the dish is laid out. Cleared the
+        // moment the cell is filled, however it was filled.
+        const want = this.craftWant?.[k] || 0;
+        el.classList.toggle('missing', !!want && !!this.craftMap[k]?.empty);
+      });
       this._refreshCraftOutput();
     }
     if (this.kilnSlots) this._refreshKiln();
+    if (this.kitchenFuel) this._refreshKitchen();
     if (this.crateSlots) this._refreshCrate();
     if (this.offhandEl) this._paint(this.offhandEl, inv.offhand);
     if (this.screen === 'shop') this._refreshShop();
@@ -2325,6 +2343,19 @@ export class UI {
   _refreshRecipes() {
     const list = this.el.recipeList;
     if (!list || !this.icons) return;
+    // The kiln's column is neither of the other two: nothing there is craftable
+    // and nothing there is pressable, because you smelt by putting a thing in a
+    // slot. It is what the machine can do, so you can find out without owning
+    // the ore first - which is the point of showing it at all.
+    if (this.screen === 'kiln') {
+      if (this.el.recipeHead) this.el.recipeHead.textContent = 'Smelts';
+      this.el.recipeCount.classList.add('hidden');
+      this.el.recipeEmpty.classList.add('hidden');
+      list.classList.remove('recipe-tiles');
+      list.innerHTML = '';
+      this._buildSmeltList(list);
+      return;
+    }
     const station = this._station();
     const hasTable = this._craftSize() === 3;
     // A KITCHEN HAS A MENU; A WORKBENCH HAS A LIST OF WHAT YOU CAN AFFORD.
@@ -2335,6 +2366,7 @@ export class UI {
     // hiding the dishes you are missing an ingredient for means the screen can
     // never tell you what a kitchen is FOR. The owner: "why not show the recipes
     // on right list instead and greyed out what is not cookable".
+
     const menu = station === 'kitchen';
     const options = availableRecipes(this.game.inventory, hasTable, station, menu);
     const canMake = menu ? options.filter((o) => o.have).length : options.length;
@@ -2351,6 +2383,18 @@ export class UI {
     this.el.recipeEmpty.textContent = (hasTable || station) ? 'Nothing yet' : 'Nothing yet, without a bench';
 
     list.innerHTML = '';
+    list.classList.toggle('recipe-tiles', menu);
+    // A KITCHEN'S MENU IS A GRID OF DISHES; A KILN'S AND A BENCH'S ARE LISTS.
+    //
+    // The difference is what you do with the row. A bench's list is a shortcut:
+    // press it and the thing is made, so it has to say what it costs before you
+    // press. A kitchen's is a MENU - press a dish and its ingredients are laid
+    // out in the pots for you - so the cost is about to be shown in the slots
+    // themselves, in the place it actually matters, and repeating it in the row
+    // is the clutter that kept the column from fitting more than a few dishes.
+    // The owner: "remove the ingredients in the list so we can make the recipes
+    // a grid instead of lists".
+    if (menu) { this._buildDishGrid(list, options); return; }
     for (const { recipe, cost, have } of options) {
       const def = ITEMS[recipe.out];
       const row = document.createElement('div');
@@ -2460,6 +2504,9 @@ export class UI {
   openScreen(kind, state) {
     this.screen = kind;
     this.kiln = kind === 'kiln' ? state || null : null;
+    // The kitchen has state now too, and it is one slot and one number: its
+    // fire. See `_kitchenAt` in main.
+    this.kitchen = kind === 'kitchen' ? state || null : null;
     this.crate = kind === 'crate' ? state || null : null;
     this.shop = kind === 'shop' ? state || null : null;
     this.folk = kind === 'barter' ? state || null : null;
@@ -2472,6 +2519,9 @@ export class UI {
             : kind === 'shop' ? 'Merchant' : kind === 'crate' ? 'Crate' : 'Inventory';
     this.el.screenTop.innerHTML = '';
     this.craftSlots = null; this.craftMap = null; this.kilnSlots = null; this.craftNote = null;
+    this.kitchenFuel = null; this.kitchenFlame = null; this.recipeGrid = null;
+    // What the last dish asked for, per cell. A new screen asks for nothing.
+    this.craftWant = null;
     this.crateSlots = null; this.offhandEl = null;
     this.shopEls = null;
     this.barterEls = null;
@@ -2494,12 +2544,14 @@ export class UI {
     // grid either, so the sidebar sat there answering a question the screen
     // cannot ask, with "Nothing yet, without a bench" against a quarter of the
     // panel's width and nothing to spend it on.
-    // The kiln is on this list too. A kiln smelts, it does not craft, and the
-    // recipe book beside it was answering a question the screen cannot ask -
-    // the owner: "kiln has crafting/can craft list". What goes in a kiln is
-    // one slot and one rule, and the screen shows it.
+    // The kiln has a column again, and it is not the craft list it had - that
+    // was the bench's sidebar answering "what can I make", which a kiln cannot
+    // be asked. It is the smelting TABLE: what goes in, what comes out, as a
+    // reference. "Kiln can also have recipe list like the kitchen so players
+    // know what they need to get something but just list no grid and show
+    // ingredients."
     this.el.recipePanel.classList.toggle('hidden',
-      kind === 'shop' || kind === 'crate' || kind === 'barter' || kind === 'kiln');
+      kind === 'shop' || kind === 'crate' || kind === 'barter');
     // With the sidebar gone the crate is the one screen whose content does not
     // fill an 830px sheet, and it sat in the middle of it with the title a hand
     // away to the left. The shop keeps the full width; its two columns want it.
@@ -2533,6 +2585,7 @@ export class UI {
     this.el.screenEl.classList.add('hidden');
     this.screen = null;
     this.kiln = null;
+    this.kitchen = null;
     this.crate = null;
     this.crateSlots = null;
     this.shop = null;
@@ -2593,8 +2646,26 @@ export class UI {
     // It is also half of why the screen was indistinguishable from the
     // workbench - "why does it look like workbench in it's in menu, it shows can
     // craft and off hand slot".
-    if (this.screen === 'kitchen') wrap.append(grid, arrow, outWrap);
-    else wrap.append(this._buildOffhandUI(), grid, arrow, outWrap);
+    if (this.screen === 'kitchen') {
+      // THE FIRE, on the left where the ingredients go in.
+      //
+      // A kitchen had no fuel at all: "a kitchen without a fire is just a pot so
+      // cooking really needs fire". It is the kiln's own flame and the kiln's
+      // own reading - how much charge is left - but there is no progress arrow
+      // beside it, because a dish is instant and the fire here is a cost rather
+      // than a wait. See COOK_COST.
+      const fire = document.createElement('div');
+      fire.className = 'cook-fire';
+      this.kitchenFuel = document.createElement('div');
+      this.kitchenFuel.className = 'islot';
+      this._wireSlot(this.kitchenFuel, () => this.kitchen?.fuel ?? new Slot(),
+        { accepts: (id) => !!FUEL[id] });
+      this.kitchenFlame = document.createElement('div');
+      this.kitchenFlame.className = 'flame-wrap';
+      this.kitchenFlame.innerHTML = '<div class="flame"><i></i></div>';
+      fire.append(this.kitchenFlame, this.kitchenFuel);
+      wrap.append(fire, grid, arrow, outWrap);
+    } else wrap.append(this._buildOffhandUI(), grid, arrow, outWrap);
     this.el.screenTop.appendChild(wrap);
   }
 
@@ -2783,6 +2854,115 @@ export class UI {
     // is a cold kiln rather than an empty grate with a heat haze over it.
     this.kilnFlame.classList.toggle('lit', k.burn > 0);
     this.kilnArrow.querySelector('i').style.width = `${Math.round((k.progress / Math.max(0.001, k.progressMax)) * 100)}%`;
+  }
+
+  /**
+   * Everything a kiln can do, as in-out pairs.
+   *
+   * A reference and not a control: you smelt by putting a thing in the slot, so
+   * there is nothing here to press. What it is for is the question a furnace
+   * cannot otherwise answer - what does this turn into, and what do I need to
+   * go and find.
+   */
+  _buildSmeltList(list) {
+    for (const r of SMELTING) {
+      const inDef = ITEMS[r.in];
+      const outDef = ITEMS[r.out];
+      if (!inDef || !outDef) continue;
+      const row = document.createElement('div');
+      row.className = 'smelt-row';
+      const a = document.createElement('img');
+      a.src = this.icons.item(r.in);
+      a.title = inDef.label;
+      const to = document.createElement('i');
+      to.className = 'smelt-to';
+      const b = document.createElement('img');
+      b.src = this.icons.item(r.out);
+      b.title = outDef.label;
+      const name = document.createElement('span');
+      name.className = 'rname';
+      name.textContent = outDef.label;
+      // How many come out, and only when it is not one.
+      const yield_ = document.createElement('span');
+      yield_.className = 'ryield';
+      yield_.textContent = r.count > 1 ? `x${r.count}` : '';
+      row.append(a, to, b, name, yield_);
+      list.appendChild(row);
+    }
+  }
+  /**
+   * The kitchen's menu: one tile per dish, and pressing one lays its
+   * ingredients into the pots.
+   *
+   * What it does NOT do is cook. Laying the formula out and leaving the last
+   * press to you is the whole point of the mechanic - the grid is where the
+   * improvised dishes live, so a menu that cooked directly would be a second
+   * way to cook that quietly bypassed the first.
+   */
+  _buildDishGrid(list, options) {
+    for (const { recipe, have } of options) {
+      const tile = document.createElement('button');
+      tile.className = have === false ? 'dish out' : 'dish';
+      tile.title = ITEMS[recipe.out]?.label ?? '';
+      const img = document.createElement('img');
+      img.src = this.icons.item(recipe.out);
+      tile.appendChild(img);
+      if (recipe.count > 1) {
+        const n = document.createElement('span');
+        n.textContent = `x${recipe.count}`;
+        tile.appendChild(n);
+      }
+      tile.onclick = () => this._layRecipe(recipe);
+      list.appendChild(tile);
+    }
+  }
+
+  /**
+   * Put a recipe's ingredients into the craft grid, and remember the ones you
+   * have not got.
+   *
+   * Whatever is already in the pots goes back to the bag first, so pressing a
+   * second dish replaces the first rather than fighting it for cells.
+   *
+   * `craftWant` is what the cell was ASKED for, which is the only way an empty
+   * cell can be told from an empty cell: the slot itself has nothing to say
+   * about an ingredient that never arrived. `_paint` reads it to tint the ones
+   * that are missing - "the missing ingredient will have red tint background
+   * suggesting it's missing".
+   */
+  _layRecipe(recipe) {
+    const inv = this.game.inventory;
+    const size = this._craftSize();
+    // Whatever is in the pots goes back to the bag first, so pressing a second
+    // dish replaces the first rather than fighting it for cells. `clearCraft`
+    // is the same call closing the screen makes and returns what would not
+    // fit, which at a counter with the bag right there is nothing worth a
+    // second path - it goes on the floor exactly as it would on close.
+    for (const d of inv.clearCraft()) this.game._spillDrop(d);
+    this.craftWant = new Array(this.craftSlots.length).fill(0);
+    const cost = recipeCost(recipe);
+    let cell = 0;
+    let missing = 0;
+    for (const c of cost) {
+      for (let n = 0; n < c.count && cell < this.craftSlots.length; n++, cell++) {
+        this.craftWant[cell] = c.item;
+        // One at a time, and by family, so a recipe naming oak boards is filled
+        // from whatever boards you actually have - the same rule the recipe
+        // itself is matched by.
+        if (!takeOneInto(inv, this.craftMap[cell], c.item, recipe.exact)) missing++;
+      }
+    }
+    if (missing) this.game.audio.deny(); else this.game.audio.click?.();
+    this.refresh();
+  }
+
+  _refreshKitchen() {
+    const kit = this.kitchen;
+    const burn = kit ? kit.burn : 0;
+    this._paint(this.kitchenFuel, kit ? kit.fuel : null);
+    this.kitchenFlame.querySelector('.flame').style.setProperty('--fuel',
+      `${Math.round(Math.min(1, burn / Math.max(1, kit?.burnMax || 1)) * 100)}%`);
+    this.kitchenFlame.classList.toggle('lit', burn > 0);
   }
 
   // --- shop -----------------------------------------------------------------

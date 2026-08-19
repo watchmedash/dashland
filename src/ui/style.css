@@ -2192,6 +2192,68 @@ body.fighting #toasts { top: 172px; }
    and the eye needs to skip it, not read a reason. */
 .recipe-row.out { opacity: .38; }
 .recipe-row.out:hover { opacity: .55; }
+
+/* The kitchen's menu: tiles, not rows. A dish is its own picture and pressing
+   one lays the ingredients into the pots, so the row had nothing left to say
+   that the slots are not about to say better. */
+/* `#recipe-list.recipe-tiles`, not `.recipe-tiles`: the list is addressed by ID
+   a few rules up, and an id beats a class however far down the file the class
+   sits. Written as a class alone this rule lost every declaration it shares with
+   that one - including `display` - so the tiles stayed in a flex column and each
+   dish stretched to the full width of the sidebar. */
+#recipe-list.recipe-tiles {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+  max-height: min(360px, 38vh); overflow-y: auto;
+}
+.dish {
+  position: relative; aspect-ratio: 1; padding: 4px;
+  border: 0; border-radius: var(--r-sm); cursor: pointer;
+  background: rgba(122, 94, 54, .10);
+  box-shadow: inset 0 0 0 1px rgba(122, 94, 54, .26);
+  display: grid; place-items: center;
+  transition: background var(--t-fast) ease, box-shadow var(--t-fast) ease;
+}
+.dish img { width: 100%; height: 100%; object-fit: contain; }
+.dish span {
+  position: absolute; right: 3px; bottom: 1px;
+  font: 700 var(--fs-xs) var(--mono); color: var(--ink-soft);
+}
+.dish:hover { background: rgba(122, 94, 54, .2); box-shadow: inset 0 0 0 1px rgba(122, 94, 54, .5); }
+/* A dish you have not got the ingredients for. Still on the menu, and still
+   pressable - laying it out is how you find out WHICH ingredient is missing. */
+.dish.out { opacity: .4; }
+.dish.out:hover { opacity: .62; }
+
+/* An ingredient the dish asked for and the bag could not supply. */
+.islot.missing {
+  background: linear-gradient(180deg, rgba(176, 46, 32, .62), rgba(112, 26, 16, .55));
+  box-shadow: var(--pocket), inset 0 0 0 1px rgba(240, 104, 76, .75);
+}
+.islot.missing:hover {
+  background: linear-gradient(180deg, rgba(196, 58, 40, .7), rgba(130, 32, 20, .6));
+}
+
+/* The kitchen's fire: the flame over the fuel pocket, on the feed side of the
+   pots. No progress arrow beside it - a dish is instant and the fire is a cost
+   rather than a wait. */
+.cook-fire { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+
+/* The kiln's reference column: what goes in, what comes out. A row here is not
+   a button - you smelt by filling a slot - so it takes none of the recipe row's
+   hover, and the arrow between the two icons is the whole of the sentence. */
+.smelt-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 2px;
+  border-bottom: 1px solid rgba(122, 94, 54, .16);
+}
+.smelt-row:last-child { border-bottom: 0; }
+.smelt-row img { width: 22px; height: 22px; flex: none; }
+.smelt-row .rname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smelt-to {
+  width: 12px; height: 8px; flex: none;
+  background: var(--ink-faint);
+  clip-path: polygon(0 34%, 58% 34%, 58% 0, 100% 50%, 58% 100%, 58% 66%, 0 66%);
+}
+.recipe-row.out:hover { opacity: .55; }
 /* No well under the list. A recipe row is a button, and a button is a thing
    you press, so IT is the one frame this column is allowed: a tray under a
    stack of buttons is a box round a box for nothing. */

@@ -1129,6 +1129,29 @@ export function kitchenFallback(ids, valueOf, sellPriceOf) {
 }
 
 /** Ingredient multiset a recipe consumes, as [{item, count}]. */
+/**
+ * Move one of `id` (or of its family) out of the bag and into `slot`.
+ *
+ * For the kitchen's menu, which lays a dish's ingredients into the pots a cell
+ * at a time. By family for the same reason every other rule here is: a recipe
+ * naming oak boards is satisfied by birch ones, so filling it from birch is
+ * what the recipe already promised.
+ *
+ * @returns {boolean} whether anything was moved
+ */
+export function takeOneInto(inventory, slot, id, exact = false) {
+  const members = exact ? [id]
+    : familyOf(id).sort((a, b) => (a === id ? 1 : 0) - (b === id ? 1 : 0));
+  for (const m of members) {
+    if (!inventory.count(m)) continue;
+    inventory.remove(m, 1);
+    if (slot.empty) slot.set(m, 1);
+    else slot.count++;
+    return true;
+  }
+  return false;
+}
+
 export function recipeCost(recipe) {
   const need = new Map();
   const ids = recipe.kind === 'shapeless' ? recipe.ingredients : recipe.grid.filter((v) => v);

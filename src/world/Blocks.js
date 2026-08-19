@@ -1573,6 +1573,28 @@ export const BLOCKS = [
 ];
 
 export const BLOCK_ID = Object.fromEntries(BLOCKS.map((b, i) => [b.name, i]));
+
+// A CUT SHAPE IS MADE OF WHAT IT WAS CUT FROM.
+//
+// MASONRY carries a tool and a tier per row and the slab and stair loops read
+// both, but `sound` and `particle` were written into those loops as literals -
+// 'stone' and a grey dust for all eighteen rows, planks included. So an oak
+// slab knocked like rock underfoot, broke into grey chips, and was not fuel,
+// because the fuel table is derived from what a thing is made of and an oak
+// slab claimed to be made of stone. One literal, three wrong answers.
+//
+// The row's base name IS the parent block's name, so there is nothing to add to
+// the table: take the two fields off the parent. The header above that says a
+// derived block inherits its parent's tier, always - this is the same sentence
+// with two more columns in it.
+for (const b of BLOCKS) {
+  const cut = b.render === R_SLAB ? 'slab_' : b.render === R_STAIR ? 'stair_' : null;
+  if (!cut) continue;
+  const parent = BLOCKS[BLOCK_ID[b.name.slice(cut.length)]];
+  if (!parent) continue;
+  b.sound = parent.sound;
+  b.particle = parent.particle;
+}
 export const ID = BLOCK_ID;
 
 // Fast lookup tables the mesher/lighting hot loops read (typed arrays > objects).

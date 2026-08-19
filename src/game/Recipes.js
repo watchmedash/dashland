@@ -2,6 +2,7 @@
 // ones just need the right multiset of ingredients.
 
 import { itemIdOf, FISH_ITEMS, ITEMS, FAMILY_DISH_NAMES } from './Items.js';
+import { BLOCKS, IS_SLAB } from '../world/Blocks.js';
 
 /** @type {Array<{out:string,count:number,shape?:string[],key?:object,in?:string[],table?:boolean}>} */
 const RAW = [
@@ -742,14 +743,39 @@ export const SMELTING = [
 ].map((s) => ({ in: itemIdOf(s.in), out: itemIdOf(s.out), count: s.count, time: s.time }))
   .filter((s) => s.in && s.out);
 
+/**
+ * What burns, and for how long.
+ *
+ * This was a list of names, and a list of names is wrong for the same reason
+ * the masonry table was: it has to be remembered. Slabs, stairs, doors, the
+ * bed, the fence, the sign and every wooden tool were all missing from it, and
+ * the owner found them the only way anyone could - by trying to burn a wooden
+ * shovel and being told no.
+ *
+ * So the wooden half is derived. A block item whose block sounds like wood is
+ * made of wood, which is the same fact the footstep and the break particle read
+ * (see the cut-shape loop in Blocks.js), and a tool on the `wood_` rung of the
+ * ladder is made of wood by its name. Anything wooden added later is fuel on
+ * the day it is added, with nothing to remember.
+ *
+ * The times are by how much timber the thing actually is: a board is 12, half a
+ * board is 6, and a tool is a couple of boards and some sticks. The named rows
+ * below are what is NOT wood - coal and its block, peat, sulfur - plus the two
+ * wooden things whose size the derivation cannot see, a stick and a sapling.
+ */
 export const FUEL = {};
+const PLANKS = 12, HALF_PLANK = 6, WOODEN_TOOL = 10;
+for (const it of ITEMS) {
+  if (!it) continue;
+  if (it.tool && it.name.startsWith('wood_')) { FUEL[it.id] = WOODEN_TOOL; continue; }
+  if (it.block === undefined) continue;
+  const b = BLOCKS[it.block];
+  if (!b || b.sound !== 'wood') continue;
+  FUEL[it.id] = IS_SLAB[it.block] ? HALF_PLANK : PLANKS;
+}
 for (const [name, ticks] of Object.entries({
-  coal: 60, charcoal: 60, oak_planks: 12, stick: 4, log_oak: 12, log_birch: 12, log_pine: 12,
-  crate: 12, bench: 12, sapling: 3, torch: 4,
-  planks_birch: 12, planks_pine: 12, planks_dark: 12, planks_grey: 12,
-  // Nine coal in one slot burns for nine coal's worth. A block of coal is a
-  // way to carry a furnace's worth of fuel, not a discount on it.
-  coal_block: 540, peat: 30, sulfur: 20,
+  coal: 60, charcoal: 60, coal_block: 540, peat: 30, sulfur: 20,
+  stick: 4, sapling: 3, torch: 4,
 })) {
   const id = itemIdOf(name);
   if (id) FUEL[id] = ticks;

@@ -86,7 +86,14 @@ const LIGHT_REACH = MAX_LIGHT;
 function restoreFacing(pairs) {
   facing = new Map();
   if (!pairs || !pairs.length) return;
-  for (const [idx, v] of pairs) facing.set(idx, v & 7);
+  // 0x7FF, not 7. The byte grew when a cell learned to hold two different
+  // slabs - the partner's block id rides above the low three bits, see
+  // SLAB_MATE - and `Planet.applyFacing` was widened for it. These two lines
+  // were not, which is why a mixed pair could be placed and then was not there:
+  // the main thread stored both halves, the WORKER stored the low three bits,
+  // and the worker is what builds the mesh. The second slab was written, mesh
+  // came back with one, and the block was gone from the bag.
+  for (const [idx, v] of pairs) facing.set(idx, v & 0x7FF);
   /**
    * The backfill walks the regions the save actually restored, not the whole
    * planet.
@@ -777,7 +784,7 @@ self.onmessage = (e) => {
       // is also what a brim-full cell should read as. So the default is 0 for
       // everything except a kiln, whose front has to point somewhere.
       if (hasSideData(ed.id)) {
-        facing.set(idx, (ed.facing ?? (IS_DIRECTIONAL[ed.id] ? FACING_DEFAULT : 0)) & 7);
+        facing.set(idx, (ed.facing ?? (IS_DIRECTIONAL[ed.id] ? FACING_DEFAULT : 0)) & 0x7FF);
       } else {
         facing.delete(idx);
       }

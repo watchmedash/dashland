@@ -67,7 +67,8 @@ import { traderIdOf } from './game/Folk.js';
 import { Achievements } from './game/Achievements.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
-  BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
+  BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, R_CUBE, R_GLASS, R_SLAB, R_STAIR,
+  IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_FENCE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
   SLAB_MATE, withSlabMate, IS_SHAPED,
@@ -2319,88 +2320,57 @@ class Game {
   }
 
   _initHighlight() {
-    // TWELVE BARS, NOT TWELVE LINES.
+    // TWELVE LINES, AFTER ALL.
     //
-    // `linewidth` on a LineBasicMaterial is one pixel and has been on every
-    // desktop driver for a decade - the spec allows more and nothing
-    // implements it - so the only way to a thicker outline is geometry. Each
-    // edge is a thin box: 12 boxes, 8 corners each, 36 indices each, which is
-    // 432 triangles for the whole thing and is nothing beside a chunk.
+    // These were twelve thin boxes, because `linewidth` on a LineBasicMaterial
+    // is one pixel on every desktop driver and geometry is the only way to a
+    // thicker line. That was answering the wrong question. A box seen edge-on
+    // shows its own four long edges and its two ends, and where two boxes meet
+    // at a corner of the cell they overlap and double the alpha - so a cage of
+    // twelve of them reads as several parallel lines with bright knots at the
+    // corners, which is exactly what the owner reported: "they look like
+    // multiple lines stripped together".
     //
-    // The indices never change (the boxes are always the same boxes), so they
-    // are written once here and only the 96 corner positions are rewritten
-    // when the crosshair moves to another cell.
+    // One pixel is not a limitation here, it is the ask. Twelve segments, 24
+    // vertices, no overlap anywhere, and a colour per vertex to carry the
+    // rainbow.
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12 * 8 * 3), 3));
-    // ...and a colour per corner, because the rainbow is around the cage rather
-    // than on it: one uniform colour cycling through the wheel is a cage that
-    // is pink, then blue, then green, and at any instant it is one of those.
-    // What was asked for is all of them at once - "I mean like a rainbow" -
-    // which is a gradient over the geometry, so the hue has to live per vertex.
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(12 * 8 * 3), 3));
-    const idx = [];
-    for (let e = 0; e < 12; e++) {
-      const o = e * 8;
-      // Two quads per axis pair, wound out of the 8 corners of a box laid out
-      // as (min/max) in x, then y, then z - the order `_showHighlight` writes.
-      for (const [a0, b0, c0, d0] of [
-        [0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1],
-        [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3],
-      ]) idx.push(o + a0, o + b0, o + c0, o + a0, o + c0, o + d0);
-    }
-    geo.setIndex(idx);
-    // THE OUTLINE, IN COLOUR.
-    //
-    // It was a near-black line at 0.38, which is the outline every voxel game
-    // has and is also the one thing on screen with no colour of its own. The
-    // owner: "can we make it rgb instead of the old plain looking black lines".
-    //
-    // The hue is driven from `uTime` in `_tickHighlight` rather than picked,
-    // so it travels the whole wheel about once every four seconds - slow
-    // enough that it reads as a sheen rather than a strobe, and fast enough
-    // that it is never mistaken for a fixed colour someone chose.
-    //
-    // Opacity goes to 0.85 and the blend to additive with it. At 0.38 a
-    // saturated line over bright grass came out as a grey smudge - the whole
-    // point of a colour is lost if it is mixed three-fifths into whatever is
-    // behind it - and additive is what keeps it legible on stone AND on snow,
-    // which a flat alpha cannot do at any single value.
-    // Ordinary alpha rather than additive, now that it is solid geometry: the
-    // bars overlap at the eight corners, and additive would burn those out to
-    // white while the edges stayed coloured.
-    this.highlight = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.95,
-      depthTest: true, depthWrite: false, side: THREE.DoubleSide,
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(24 * 3), 3));
+    // The rainbow is a gradient around the cage rather than a colour on it: one
+    // uniform hue cycling through the wheel is a cage that is pink, then blue,
+    // then green, and at any instant it is only one of those. All of them at
+    // once is a gradient, and a gradient has to live per vertex.
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(24 * 3), 3));
+    // Opaque. The bars were translucent so the overlaps at the corners would
+    // not burn out; there are no overlaps now, and a line you can see the block
+    // through is a line with less colour in it than it should have.
+    this.highlight = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+      vertexColors: true, depthTest: true, depthWrite: false,
     }));
     this.highlight.frustumCulled = false;
     this.highlight.visible = false;
     this.highlight.renderOrder = 30;
     this.scene.add(this.highlight);
-    this._hlCorners = Array.from({ length: 8 }, () => [0, 0, 0]);
   }
 
-  /** Draw the wireframe of a cell. It is a unit cube, so it is eight corners. */
   /**
-   * Lay the twelve bars around one cell.
+   * Lay the twelve edges around one block.
    *
-   * The cell is axis aligned, so every edge runs along one axis and each bar
-   * is an AABB: full length along its own axis, HL thick on the other two. The
-   * eight corners of each are written in (x, then y, then z) min/max order,
-   * which is the order the fixed index list in `_initHighlight` was wound for.
+   * The cell is axis aligned, so the outline is the twelve edges of the box the
+   * block's own shape fills - not of the cell, which is a clear half-block wide
+   * of a slab.
    */
   _showHighlight(col, k) {
     const { x, y } = colParts(col);
-    // Half-thickness of a bar, and how far the whole cage stands off the block.
-    // 0.022 is about three pixels at arm's length and reads as a drawn edge
-    // rather than as a hairline; the standoff is what stops it z-fighting the
-    // face it is drawn against.
-    const HL = 0.005, OUT = 0.003;
+    // How far the outline stands off the block. Enough to clear the face it is
+    // drawn against without reading as a halo around it.
+    const OUT = 0.002;
     // THE BLOCK, NOT THE CELL.
     //
-    // A slab is half a cell and a cell-sized cage floats a clear half-block
-    // over it. The union of the block's own boxes is the honest outline, and
-    // it is the same list the mesher drew from, so the cage cannot disagree
-    // with the shape it is drawn around.
+    // A slab is half a cell and a cell-sized outline floats a clear half-block
+    // over it. The union of the block's own boxes is the honest one, and it is
+    // the same list the mesher drew from, so the outline cannot disagree with
+    // the shape it is drawn around.
     const id = this.planet.at(col, k);
     const boxes = IS_SHAPED[id]
       ? blockBoxes(id, this.planet.facingAt(col, k), this.planet.shapeAt(col, k))
@@ -2419,38 +2389,31 @@ class Game {
     const hi = [x + bx1 + OUT, k + by1 + OUT, y + bz1 + OUT];
     const arr = this.highlight.geometry.attributes.position.array;
     const hue = this.highlight.geometry.attributes.color.array;
-    let n = 0;
-    // THE RAINBOW, AROUND THE CAGE.
-    //
-    // Hue from where the corner sits in the cell rather than from the clock:
-    // the three axes summed and wrapped, so it runs smoothly from one corner
-    // of the cube to the opposite one and every edge is a gradient rather than
-    // a colour. A slow turn is added off the shader clock so it drifts, which
-    // is what stops it reading as a texture someone painted on.
+    // The hue comes from where a corner sits in the box rather than from the
+    // clock: the three axes summed and wrapped, so it runs from one corner of
+    // the block to the opposite one and every edge is a gradient. A slow drift
+    // off the shader clock is added so it is never mistaken for a fixed colour.
     const spin = (voxelUniforms.uTime.value * 0.08) % 1;
-    const bar = (min, max) => {
-      for (let c = 0; c < 8; c++) {
-        const vx = (c & 1) ? max[0] : min[0];
-        const vy = (c & 2) ? max[1] : min[1];
-        const vz = (c & 4) ? max[2] : min[2];
-        arr[n] = vx; arr[n + 1] = vy; arr[n + 2] = vz;
-        _hlHue.setHSL(((vx - x) + (vy - k) + (vz - y)) / 3 + spin, 1.0, 0.6);
-        hue[n] = _hlHue.r; hue[n + 1] = _hlHue.g; hue[n + 2] = _hlHue.b;
-        n += 3;
-      }
+    const sx = hi[0] - lo[0] || 1, sy = hi[1] - lo[1] || 1, sz = hi[2] - lo[2] || 1;
+    let n = 0;
+    const corner = (cx, cy, cz) => {
+      const px = cx ? hi[0] : lo[0], py = cy ? hi[1] : lo[1], pz = cz ? hi[2] : lo[2];
+      arr[n] = px; arr[n + 1] = py; arr[n + 2] = pz;
+      // Normalised across the box, so a slab's outline runs the whole wheel
+      // exactly as a full block's does rather than showing a third of it.
+      _hlHue.setHSL(((px - lo[0]) / sx + (py - lo[1]) / sy + (pz - lo[2]) / sz) / 3 + spin, 1, 0.6);
+      hue[n] = _hlHue.r; hue[n + 1] = _hlHue.g; hue[n + 2] = _hlHue.b;
+      n += 3;
     };
+    // Twelve edges: four along each axis, each written as its two endpoints.
     for (let axis = 0; axis < 3; axis++) {
-      const b = (axis + 1) % 3, c = (axis + 2) % 3;
-      for (let corner = 0; corner < 4; corner++) {
-        const min = [0, 0, 0], max = [0, 0, 0];
-        min[axis] = lo[axis]; max[axis] = hi[axis];
-        const at = (ax, high) => {
-          const v = high ? hi[ax] : lo[ax];
-          min[ax] = v - HL; max[ax] = v + HL;
-        };
-        at(b, !!(corner & 1));
-        at(c, !!(corner & 2));
-        bar(min, max);
+      for (let c = 0; c < 4; c++) {
+        const e0 = [0, 0, 0], e1 = [0, 0, 0];
+        e0[(axis + 1) % 3] = e1[(axis + 1) % 3] = c & 1;
+        e0[(axis + 2) % 3] = e1[(axis + 2) % 3] = (c >> 1) & 1;
+        e0[axis] = 0; e1[axis] = 1;
+        corner(e0[0], e0[1], e0[2]);
+        corner(e1[0], e1[1], e1[2]);
       }
     }
     this.highlight.geometry.attributes.position.needsUpdate = true;
@@ -2458,7 +2421,6 @@ class Game {
     this.highlight.geometry.computeBoundingSphere();
     this.highlight.visible = true;
   }
-
   _bindPlayerEvents() {
     this.player.onStep = (blockId) => {
       const b = BLOCKS[blockId] || BLOCKS[1];
@@ -10487,9 +10449,25 @@ class Game {
       // - a stick or a board in a cell, with the cage round the air beside it.
       // Slabs and stairs KEEP an outline: they are blocks, and the cage is cut
       // to their own boxes above rather than to the cell.
-      if (RENDER_TYPE[hit.id] === R_CROSS || MODEL_KIND[hit.id]
-        || IS_LADDER[hit.id] || IS_FENCE[hit.id] || IS_GATE[hit.id]
-        || IS_SIGN[hit.id] || IS_TORCH[hit.id]) this.highlight.visible = false;
+      // A WHITELIST, BECAUSE THE LIST OF THINGS THAT ARE NOT BLOCKS HAS NO END.
+      //
+      // This named seven render types and a model flag, and the door was not
+      // among them, so the door kept its outline - the owner's report. It would
+      // have been the next thing after that too, because a list of exceptions
+      // has to be extended every time a block is added that is a stick or a
+      // board in a cell rather than a cube.
+      //
+      // Asked the other way round it is four render types and it is closed: a
+      // cube, a pane of glass, a slab and a stair are the things that are
+      // BLOCKS, and the outline is cut to their own boxes above rather than to
+      // the cell. Everything else - the cross plants, the models, the ladder,
+      // the fence, the gate, the sign, the torch, the door and whatever is
+      // added next - is a thing standing in a cell, and an outline round the
+      // air beside it is what the owner called distracting.
+      const r = RENDER_TYPE[hit.id];
+      const isBlock = (r === R_CUBE || r === R_GLASS || r === R_SLAB || r === R_STAIR)
+        && !MODEL_KIND[hit.id];
+      if (!isBlock) this.highlight.visible = false;
       else this._showHighlight(hit.col, hit.k);
       this.ui.setCrosshairActive(true);
     } else {

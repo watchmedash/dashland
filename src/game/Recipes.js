@@ -1137,23 +1137,34 @@ export function recipeCost(recipe) {
 }
 
 /** Every recipe the player can make right now, cheapest-looking first. */
-export function availableRecipes(inventory, hasTable, station = null) {
+export function availableRecipes(inventory, hasTable, station = null, all = false) {
   const out = [];
   for (const r of RECIPES) {
     if (r.station !== station) continue;
     if (r.table && !hasTable) continue;
     const cost = recipeCost(r);
-    if (cost.every((c) => countFamily(inventory, c.item, r.exact) >= c.count)) out.push({ recipe: r, cost });
+    // `all` keeps the ones you cannot afford, marked. A workbench sidebar is a
+    // list of what your materials allow and is long enough already; a station
+    // with a fixed menu - the kitchen - is a MENU, and a menu that hides the
+    // dishes you have no ingredients for cannot be read as a menu at all. The
+    // owner: "why not show the recipes on right list instead and greyed out what
+    // is not cookable like no ingredients in our inventory".
+    const have = cost.every((c) => countFamily(inventory, c.item, r.exact) >= c.count);
+    if (have || all) out.push({ recipe: r, cost, have });
   }
-  // de-duplicate by output: several recipes make planks, show one entry
+  // de-duplicate by output: several recipes make planks, show one entry.
+  // Sorted so the ones you can make come first when the misses are kept, and
+  // stable otherwise - a menu that reorders itself as you pick things up is a
+  // menu you have to re-read every time.
   const seen = new Set();
-  return out.filter(({ recipe }) => {
+  const rows = out.filter(({ recipe }) => {
     if (seen.has(recipe.out)) return false;
     seen.add(recipe.out);
     return true;
   });
+  if (all) rows.sort((a, b) => (b.have ? 1 : 0) - (a.have ? 1 : 0));
+  return rows;
 }
-
 /**
  * Craft directly out of the inventory, bypassing the grid.
  * @returns {number} how many were produced

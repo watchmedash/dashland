@@ -578,6 +578,7 @@ export class UI {
       cursor: $('cursor-stack'), tooltip: $('tooltip'),
       recipePanel: $('recipe-panel'),
       recipeList: $('recipe-list'), recipeCount: $('recipe-count'), recipeEmpty: $('recipe-empty'),
+      recipeHead: $('recipe-head'),
       pause: $('pause'), settings: $('settings'), controls: $('controls'), death: $('death'),
       achievements: $('achievements'), achList: $('ach-list'), achTally: $('ach-tally'),
       deathCause: $('death-cause'), deathLost: $('death-lost'), dzRespawn: $('dz-respawn'),
@@ -2326,22 +2327,36 @@ export class UI {
     if (!list || !this.icons) return;
     const station = this._station();
     const hasTable = this._craftSize() === 3;
-    const options = availableRecipes(this.game.inventory, hasTable, station);
+    // A KITCHEN HAS A MENU; A WORKBENCH HAS A LIST OF WHAT YOU CAN AFFORD.
+    //
+    // The bench's sidebar answers "what do my materials allow", which is the
+    // right question there - the answer runs to hundreds and nobody wants to
+    // scroll a catalogue. A kitchen's is fixed and short enough to read, and
+    // hiding the dishes you are missing an ingredient for means the screen can
+    // never tell you what a kitchen is FOR. The owner: "why not show the recipes
+    // on right list instead and greyed out what is not cookable".
+    const menu = station === 'kitchen';
+    const options = availableRecipes(this.game.inventory, hasTable, station, menu);
+    const canMake = menu ? options.filter((o) => o.have).length : options.length;
 
-    // An empty badge still paints its background — hide the pill entirely
-    // rather than leaving a stray orange sliver next to the heading.
-    this.el.recipeCount.textContent = options.length || '';
+    // The heading names what the column is, so it cannot read as the bench's.
+    if (this.el.recipeHead) this.el.recipeHead.textContent = menu ? 'Dishes' : 'Can Craft';
+    // The count is what you can make NOW, in both modes - on a menu it is that
+    // out of the whole list, because the second number is the one that changes.
+    this.el.recipeCount.textContent = menu
+      ? (options.length ? `${canMake}/${options.length}` : '')
+      : (options.length || '');
     this.el.recipeCount.classList.toggle('hidden', options.length === 0);
     this.el.recipeEmpty.classList.toggle('hidden', options.length > 0);
-    // Two words, and the second one only when the bench would change the
-    // answer. What a workbench is for is not this label's job.
     this.el.recipeEmpty.textContent = (hasTable || station) ? 'Nothing yet' : 'Nothing yet, without a bench';
 
     list.innerHTML = '';
-    for (const { recipe, cost } of options) {
+    for (const { recipe, cost, have } of options) {
       const def = ITEMS[recipe.out];
       const row = document.createElement('div');
-      row.className = 'recipe-row';
+      // `out` is what the row cannot do rather than a disabled attribute: it is
+      // a div, and the handlers below check the same flag.
+      row.className = have === false ? 'recipe-row out' : 'recipe-row';
 
       const img = document.createElement('img');
       img.src = this.icons.item(recipe.out);
@@ -2570,7 +2585,16 @@ export class UI {
     this.craftNote = document.createElement('span');
     this.craftNote.className = 'craft-note hidden';
     outWrap.appendChild(this.craftNote);
-    wrap.append(this._buildOffhandUI(), grid, arrow, outWrap);
+    // NO OFFHAND AT A KITCHEN.
+    //
+    // The slot is on every inventory screen because every one of them is your
+    // bag with something else beside it. A kitchen is not: it is a counter you
+    // stand at, and what is in your left fist has nothing to do with cooking.
+    // It is also half of why the screen was indistinguishable from the
+    // workbench - "why does it look like workbench in it's in menu, it shows can
+    // craft and off hand slot".
+    if (this.screen === 'kitchen') wrap.append(grid, arrow, outWrap);
+    else wrap.append(this._buildOffhandUI(), grid, arrow, outWrap);
     this.el.screenTop.appendChild(wrap);
   }
 
@@ -2692,48 +2716,59 @@ export class UI {
   }
 
   _buildKilnUI() {
-    // IN, FIRE, FUEL - down one column, then the arrow, then OUT.
+    // THE KILN, AS A KILN.
     //
-    // It was In and Fuel stacked together in one column with the flame parked
-    // underneath the progress bar in the next, which reads as three unrelated
-    // widgets: nothing about it said the fire is what turns the one into the
-    // other. The arrangement everybody already knows puts the fire BETWEEN what
-    // is burning and what is being burnt, and the arrow pointing at what comes
-    // out, and it needs no label to be read.
+    // Three slots, a flame and a bar, laid out in a row inside a beige box: no
+    // part of it said what the machine does, and the owner has now called it
+    // twice. What a furnace screen has to say is one sentence - THIS burns, and
+    // it turns THAT into the thing on the right - and the layout is the whole of
+    // saying it:
+    //
+    //   [ In   ]
+    //   [ fire ]  ===>  [ Out ]
+    //   [ Fuel ]
+    //
+    // The fire sits between what is burning and what is being burnt, so the
+    // column reads top to bottom as one object; the arrow crosses to the result,
+    // which is framed differently from the two you fill because it is the one
+    // you take. Nothing is labelled that the picture already says.
     const k = this.kiln;
     const wrap = document.createElement('div');
     wrap.className = 'smelt-area';
 
-    const col = (label, slot) => {
-      const c = document.createElement('div');
-      c.className = 'smelt-col';
+    const slot = (cls, get) => {
       const d = document.createElement('div');
-      d.className = 'islot';
-      this._wireSlot(d, () => slot);
-      const cap = document.createElement('span');
-      cap.className = 'smelt-label';
-      cap.textContent = label;
-      c.append(d, cap);
-      return { c, d };
+      d.className = `islot ${cls}`;
+      this._wireSlot(d, get);
+      return d;
     };
-    const inp = col('In', k.input);
-    const fuel = col('Fuel', k.fuel);
-    const out = col('Out', k.output);
+    const inp = slot('smelt-in', () => k.input);
+    const fuel = slot('smelt-fuel', () => k.fuel);
+    const out = slot('smelt-out', () => k.output);
 
+    // The glow lives on a wrapper because the flame itself is clipped to its
+    // own silhouette, and a glow cut to a flame shape is not a glow.
     this.kilnFlame = document.createElement('div');
-    this.kilnFlame.className = 'flame';
-    this.kilnFlame.innerHTML = '<i></i>';
+    this.kilnFlame.className = 'flame-wrap';
+    this.kilnFlame.innerHTML = '<div class="flame"><i></i></div>';
     this.kilnArrow = document.createElement('div');
     this.kilnArrow.className = 'progress-arrow';
     this.kilnArrow.innerHTML = '<i></i>';
 
     const stack = document.createElement('div');
-    stack.className = 'smelt-col smelt-stack';
-    stack.append(inp.c, this.kilnFlame, fuel.c);
+    stack.className = 'smelt-stack';
+    stack.append(inp, this.kilnFlame, fuel);
 
-    wrap.append(stack, this.kilnArrow, out.c);
+    // The result stands in its own frame. It is the only slot here you take
+    // out of rather than put into, and a fourth identical pocket in a row of
+    // pockets is the reason nobody could tell which.
+    const outFrame = document.createElement('div');
+    outFrame.className = 'smelt-result';
+    outFrame.appendChild(out);
+
+    wrap.append(stack, this.kilnArrow, outFrame);
     this.el.screenTop.appendChild(wrap);
-    this.kilnSlots = { input: inp.d, fuel: fuel.d, output: out.d };
+    this.kilnSlots = { input: inp, fuel, output: out };
   }
   _refreshKiln() {
     const k = this.kiln;
@@ -2741,7 +2776,9 @@ export class UI {
     this._paint(this.kilnSlots.input, k.input);
     this._paint(this.kilnSlots.fuel, k.fuel);
     this._paint(this.kilnSlots.output, k.output);
-    this.kilnFlame.querySelector('i').style.setProperty('--burn', `${100 - Math.round((k.burn / Math.max(1, k.burnMax)) * 100)}%`);
+    // How much fuel is LEFT, as the height of the fill inside the flame.
+    this.kilnFlame.querySelector('.flame').style.setProperty('--fuel',
+      `${Math.round((k.burn / Math.max(1, k.burnMax)) * 100)}%`);
     // The flicker is on the element rather than always running, so a cold kiln
     // is a cold kiln rather than an empty grate with a heat haze over it.
     this.kilnFlame.classList.toggle('lit', k.burn > 0);

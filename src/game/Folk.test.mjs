@@ -21,20 +21,24 @@
 // unobserved one, and the two ways that quietly stops being true are a sight
 // test that always answers yes and a body that can never satisfy it.
 
-import { register } from 'node:module';
 
 // The same stub `Systems.test.mjs` uses, and for the same reason: `Mobs.js`
 // reads exactly one thing out of `Lighting.js` and that file does not load
 // headless.
-const STUB = 'export const SKY_ATTEN = new Uint8Array(256).fill(255);';
-register('data:text/javascript,' + encodeURIComponent(`
-  export async function resolve(spec, ctx, next) {
-    if (spec.endsWith('/Lighting.js')) {
-      return { url: 'data:text/javascript,${encodeURIComponent(STUB)}', shortCircuit: true };
-    }
-    return next(spec, ctx);
-  }
-`));
+// The `Lighting.js` stub that used to stand here is gone.
+//
+// It answered for that module with a one-export shim, because `Lighting.js`
+// did not load headless when these tests were written, and it said so: "it
+// stops firing the moment Lighting.js loads on its own". That moment has
+// passed - the module imports cleanly on its own now - and the shim had turned
+// from a workaround into a trap: it exported only SKY_ATTEN, so the day `Mobs.js`
+// started reading SKY_SHADE_MIN out of the same file (the fix for models glowing
+// in dark caves), the test failed to LINK and reported the real module as
+// missing an export it plainly has.
+//
+// A stub that lists what the code under test may import is a stub that has to be
+// edited every time that changes, and its failure mode is a lie about the module
+// it stands in for. The real one loads; it can answer for itself.
 
 const THREE = await import('three');
 const { W, D, wrap, faceOrigin, faceAt } = await import('../world/Grid.js');

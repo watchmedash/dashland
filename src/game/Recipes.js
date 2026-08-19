@@ -22,8 +22,18 @@ const RAW = [
   // into a charred board while keeping the coal.
   { out: 'planks_birch', count: 4, in: ['log_birch'] },
   { out: 'planks_pine', count: 4, in: ['log_pine'] },
-  { out: 'oak_planks', count: 1, in: ['planks_birch'] },
-  { out: 'oak_planks', count: 1, in: ['planks_pine'] },
+  // The two 1:1 board conversions - birch to oak and pine to oak - stood here
+  // and are gone on the owner's word: no plank turns into another plank.
+  //
+  // They cost nothing to remove, which is the point. `FAMILY_NAMES` already
+  // makes every `oak_planks` in every recipe below accept all five boards, so
+  // the conversions were never a gate on anything - the comment above says so
+  // in as many words. What they were was a way to destroy the colour you had
+  // gone and found: a stack of birch went in and came back oak, one for one,
+  // with the birch nowhere in the game to get back.
+  //
+  // The two DYED boards below stay. They are not conversions - they take a
+  // second ingredient and make something that has no other source.
   { out: 'planks_dark', count: 1, in: ['oak_planks', 'coal'] },
   { out: 'planks_grey', count: 1, in: ['oak_planks', 'gravel'] },
   { out: 'stick', count: 4, shape: ['P', 'P'], key: { P: 'oak_planks' } },

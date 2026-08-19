@@ -17,10 +17,11 @@ import {
   NUM_REGIONS, REGION_COLS, regionOfCol, regionColumns, chunkIdx, contCell,
   nearOffset,
 } from './Layout.js';
-import { wrap } from './Grid.js';
+import { wrap, colIndex } from './Grid.js';
 import {
   IS_SOLID, BLOCKS_MOTION, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N, ID,
+  IS_FENCE, blockBoxes, fenceLinks,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID, GROUP_PORTAL, GROUP_COUNT } from './Mesher.js';
 
@@ -604,6 +605,62 @@ export class Planet {
 
   // --- raycast --------------------------------------------------------------
 
+/**
+   * Where a ray meets a shaped block's actual timber, or -1 if it misses.
+   *
+   * The boxes come from `blockBoxes`, which is what the mesher draws from, so
+   * this cannot drift out of step with the picture: a shape that changes there
+   * changes here on the same commit. Both extra arguments it needs are the ones
+   * the mesher passes too — the facing byte for anything that turns, and the
+   * neighbour mask for a fence, whose rails only exist on the sides that join.
+   *
+   * The boxes are in cell space (0..1 on each axis), so the ray is put into the
+   * same space by subtracting the cell's corner. `t` and `tEnd` bound the
+   * segment *inside this cell*, which the DDA has already worked out — testing
+   * outside them would let a ray hit a box in a cell it has not entered yet.
+   *
+   * Slab test per box, nearest wins. A shaped block is at most eight boxes (a
+   * fence crossroads), so this is a handful of divides on the rare cells that
+   * reach it; every cube in the world takes the branch above and pays nothing.
+   */
+  _hitShaped(id, col, k, ix, iz, ox, oy, oz, dx, dy, dz, t, tEnd) {
+    let byte = 0;
+    if (IS_DIRECTIONAL[id] || IS_AXIS[id] || IS_SHAPED[id]) byte = this.facing.get(col * D + k) ?? 0;
+    let links = 0b1111;
+    if (IS_FENCE[id]) {
+      links = fenceLinks(
+        this.at(colIndex(ix + 1, iz), k), this.at(colIndex(ix - 1, iz), k),
+        this.at(colIndex(ix, iz + 1), k), this.at(colIndex(ix, iz - 1), k),
+      );
+    }
+    const boxes = blockBoxes(id, byte, links);
+    if (!boxes.length) return -1;
+    // The cell's own corner, in the ray's unwrapped space.
+    const bx = ix, by = k, bz = iz;
+    let best = -1;
+    for (const b of boxes) {
+      // A box is [x0, y0, z0, x1, y1, z1] in cell space, with the cell's own
+      // vertical as the THIRD pair — `blockBoxes` is written in the mesher's
+      // (i, j, k) order, so its z is the world's y.
+      const lo = [bx + b[0], by + b[2], bz + b[1]];
+      const hi = [bx + b[3], by + b[5], bz + b[4]];
+      let t0 = t, t1 = tEnd;
+      const o = [ox, oy, oz], d = [dx, dy, dz];
+      let miss = false;
+      for (let a = 0; a < 3 && !miss; a++) {
+        if (Math.abs(d[a]) < 1e-9) { if (o[a] < lo[a] || o[a] > hi[a]) miss = true; continue; }
+        const inv = 1 / d[a];
+        let n = (lo[a] - o[a]) * inv, f = (hi[a] - o[a]) * inv;
+        if (n > f) { const s = n; n = f; f = s; }
+        if (n > t0) t0 = n;
+        if (f < t1) t1 = f;
+        if (t0 > t1) miss = true;
+      }
+      if (!miss && (best < 0 || t0 < best)) best = t0;
+    }
+    return best;
+  }
+
   /**
    * March a ray through the map.
    *
@@ -700,7 +757,27 @@ export class Planet {
         // which is what a doorway made of light should give it.
         if (id === PORTAL_ID) return null;
         if (id !== 0 && (hitLiquid || RENDER_TYPE[id] !== R_LIQUID)) {
-          if (RENDER_TYPE[id] === R_CROSS) {
+          // A SHAPED BLOCK IS ITS SHAPE, not the cell it stands in.
+          //
+          // Everything that is not a cross used to be a full cube here, and
+          // most of what is not a cross is not a cube: a ladder is 0.12 of a
+          // cell thick against a wall, a sign is a board and a post, a torch is
+          // a stick, a fence is a post with rails. All of them claimed the
+          // whole cell, so the owner's report is exactly what a DDA over cubes
+          // does — "hit box for object are so big like ladder, sign etc, even
+          // though they are transparent I am still hitting them if I trying to
+          // place a block or break an object behind them".
+          //
+          // `blockBoxes` is the same function the mesher builds the geometry
+          // from, so the thing you can hit is now the thing you can see, by
+          // construction rather than by keeping two tables in step. The fence's
+          // rails need to know which neighbours it joins, exactly as the mesher
+          // does, or a post would be hittable and its rails would not.
+          if (IS_SHAPED[id]) {
+            const t2 = this._hitShaped(id, col, iy, ix, iz, ox, oy, oz, dx, dy, dz, t,
+              Math.min(tExit, maxDist));
+            if (t2 >= 0) return hit(col, iy, id, t2, axis, sign);
+          } else if (RENDER_TYPE[id] === R_CROSS) {
             // No volume to enter: walk the segment inside this cell instead.
             const end = Math.min(tExit, maxDist);
             for (let s = t; s <= end; s += CROSS_STEP) {

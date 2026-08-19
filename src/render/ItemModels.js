@@ -82,6 +82,14 @@ const PACKS = {
   // 0.296, wider than it is tall, and fitting its *height* to one would arrive
   // 1.14 cells across and grow through the wall beside it. See `bench` in POSE.
   survival: { atlas: 'survival/Textures/colormap.png', tint: false, nearest: true, ext: 'glb', fitMax: true },
+  // KayKit's furniture, for the bed. Same shape as `survival` above - one atlas
+  // for the whole pack, nearest-filtered because it is a palette strip rather
+  // than a texture - but .gltf + .bin rather than .glb, so no `ext`. `fitMax`
+  // for the same reason the workbench needs it: a bed is far longer than it is
+  // tall, and fitting its height to one cell would arrive three cells long.
+  furniture: { atlas: 'furniture/furniturebits_texture.png', tint: false, nearest: true, fitMax: true },
+  // KayKit's resource bits, for the bale of hide. Same pack shape again.
+  resource: { atlas: 'resource/resource_bits_texture.png', tint: false, nearest: true, fitMax: true },
   // The one collectible, and treated exactly as the fish pack is: GLB, no
   // atlas, no UVs worth keeping, and its two colours (root and leaf) living on
   // `baseColorFactor` rather than on a texture. `bakeColor` moves them onto the
@@ -896,6 +904,24 @@ export const POSE = {
     rot: [0.62, -0.52, 0.10], pos: [0.02, 0.115, -0.053], icon: [0.88, 0.58, 0],
   },
 
+  /**
+   * The bed, and the third pose here that IS the block.
+   *
+   * It was a cube wearing two tiles: "not only is it one block size, its model
+   * is a box lol". KayKit's single bed is a real frame with a mattress, a pillow
+   * and a blanket, and it is two cells long in the world - see the bed's own
+   * note in Blocks.js for how the halves are told apart without a second block
+   * id, which the game has none of left.
+   *
+   * `height` is a bed's height in CELLS and the pack normalises the longest
+   * axis, so this is what makes it two cells long rather than what makes it that
+   * tall. Laid flat in the hand rather than stood on end, because a bed on its
+   * end is a door.
+   */
+  bed: {
+    file: 'furniture/bed_single_A', pack: 'furniture', height: 0.30, grip: 0.5,
+    rot: [0.42, -0.62, 0], pos: [0.02, 0.10, -0.05], icon: [0.34, 0.62, 0],
+  },
   pizza:       food('pizza', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
   burger:      food('burger-cheese', 0.26, false, { pos: [0.02, 0.13, -0.06] }),
 
@@ -1102,7 +1128,12 @@ export const POSE = {
   // from it. At 0.92 the pelt was 54° out of the screen plane and drawn at about
   // three fifths of the length it has. Reduced until it reads as a laid-out
   // skin; the roll, which is the part that was chosen, is untouched.
-  hide:       { file: 'wam/hide',       pack: 'wam', height: 0.26, grip: 0.5, rot: [0.10, -0.50, 1.30],   pos: [0.0114, 0.0636, -0.0285], icon: [0.24, 0.40, 1.32] },
+  // A BALE, not a flap. Ours in WAM was a single hide and read as a brown
+  // smudge at icon size; KayKit's textile stack is a bundle of folded cloth,
+  // which is what a stack of hides in a bag actually looks like and is legible
+  // at 46px. Same numbers as the wam one to start from - a bale is about the
+  // size of a hide.
+  hide:       { file: 'resource/Textiles_Stack_Small', pack: 'resource', height: 0.26, grip: 0.5, rot: [0.10, -0.50, 0.30], pos: [0.0114, 0.0636, -0.0285], icon: [0.24, 0.40, 0] },
   feather:    { file: 'wam/feather',    pack: 'wam', height: 0.32, grip: 0.38, rot: [-0.16, -0.40, 0.36],  pos: [0.0031, 0.0375, -0.0056], icon: [0.06, 0.30, -0.38] },
 
   // The rest of the ladder, on the same three family poses. Ores and the
@@ -1789,6 +1820,11 @@ export const BY_NAME = {
   // to prefer — the same geometry is the fist, the icon, the ground drop and
   // the block in the world.
   bench: 'bench',
+  // ...and the bed, which is the second. Without a line here the pose above is
+  // never reached: `hasModel` asks this map, not POSE, so a pose with no name
+  // mapped to it is a model nothing loads - which is exactly what the bed was
+  // for its first run, template null and no mesh.
+  bed: 'bed',
   pizza: 'pizza',
   burger: 'burger',
   cookie: 'cookie',

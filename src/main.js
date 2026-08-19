@@ -71,7 +71,7 @@ import {
   IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_FENCE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
-  SLAB_MATE, withSlabMate, IS_SHAPED,
+  SLAB_MATE, withSlabMate, IS_SHAPED, BED_HEAD,
   blockBoxes,
   SEALS_FACES,
 } from './world/Blocks.js';
@@ -1429,6 +1429,19 @@ const COOK_COST = 4;
 
 const MODELLED_BLOCKS = {
   bench: { height: 0.880, item: 'bench' },
+  // Two cells LONG, which is not what this number says and is why it is 0.667
+  // rather than 2.
+  //
+  // `prime` scales a model by its Y extent - the note over this list says so -
+  // and the furniture pack's `fitMax` has already normalised the LONGEST axis to
+  // one, which for a bed is its length. So the model arrives 1.0 long and 0.333
+  // tall, and asking for a height of 2.0 gave a bed scaled six times: two cells
+  // TALL, standing on end. The height that makes it two cells long is twice its
+  // own 0.333.
+  //
+  // Measured from the loaded model rather than taken from the pack's docs: scale
+  // came back 6.000 for height 2.0, so the Y extent is 2.0 / 6 = 0.3333.
+  bed: { height: 0.667, item: 'bed' },
 };
 const MODEL_KIND = [];
 for (const n of Object.keys(MODELLED_BLOCKS)) if (ID[n]) MODEL_KIND[ID[n]] = n;
@@ -5449,6 +5462,40 @@ class Game {
   }
 
   /**
+   * The column one step along facing `dir`, which is 0..3 as +x, -x, +y, -y.
+   *
+   * `colNeighbor` numbers its directions differently (see Layout.js), so this
+   * is written out rather than routed through it - two orderings of the same
+   * four steps is exactly the sort of thing that reads correct and is off by a
+   * quarter turn.
+   */
+  _stepCol(col, dir) {
+    const { x, y } = colParts(col);
+    return dir === 0 ? colIndex(x + 1, y)
+      : dir === 1 ? colIndex(x - 1, y)
+        : dir === 2 ? colIndex(x, y + 1)
+          : colIndex(x, y - 1);
+  }
+
+  /**
+   * The other half of the bed at (col, k), or -1.
+   *
+   * The direction is the way the bed POINTS, so the head is one step along it
+   * from the foot and the foot is one step back from the head. Checked to be a
+   * bed of the opposite half rather than assumed: two beds end to end are legal
+   * and each must claim its own partner.
+   */
+  _bedPartner(col, k) {
+    const byte = this.planet.facingAt(col, k);
+    const dir = byte & 3;
+    const head = (byte & BED_HEAD) !== 0;
+    const other = this._stepCol(col, head ? (dir ^ 1) : dir);
+    if (other < 0 || this.planet.at(other, k) !== ID.bed) return -1;
+    const ob = this.planet.facingAt(other, k);
+    if ((ob & 3) !== dir || ((ob & BED_HEAD) !== 0) === head) return -1;
+    return other;
+  }
+  /**
    * Facing 0..3 (+x, -x, +y, -y) for the way the player is looking, back to
    * front: the axis their gaze runs along, pointing back at them.
    */
@@ -5767,6 +5814,12 @@ class Game {
     // The kitchen is the same shape of object and comes down the same way, and
     // it needs no search: the two halves are named blocks, so each one knows
     // which way its partner lies.
+    // A bed comes down whole from either end. Its partner is one step along the
+    // way it points - away from the head cell, back toward it from the foot.
+    if (hit.id === ID.bed) {
+      const other = this._bedPartner(hit.col, hit.k);
+      if (other >= 0) edits.push({ col: other, k: hit.k, id: 0 });
+    }
     if (hit.id === ID.kitchen) edits.push({ col: hit.col, k: hit.k + 1, id: 0 });
     if (hit.id === ID.kitchen_top) edits.push({ col: hit.col, k: hit.k - 1, id: 0 });
 
@@ -6046,6 +6099,18 @@ class Game {
       }
       if (this._intersectsPlayer(col, k + 1)) return false;
     }
+    // A bed lies DOWN, so its second cell is beside it rather than above. Which
+    // side is the head is `_bedOrient`'s answer, and both cells have to be free
+    // and standing on something before either is written.
+    let bedHead = -1;
+    if (id === ID.bed) {
+      const dir = this._facingFromLook();
+      bedHead = this._stepCol(col, dir);
+      if (bedHead < 0 || this.planet.at(bedHead, k) !== 0) return false;
+      if (!this.planet.solidAt(bedHead, k - 1)) return false;
+      if (this._intersectsPlayer(bedHead, k)) return false;
+      this._bedDir = dir;
+    }
 
     // The plant that was standing here comes apart, and it hands over whatever
     // it would have given you if you had punched it — a sapling, some seeds, an
@@ -6077,6 +6142,20 @@ class Game {
     // Both halves carry the same byte, so whichever one you later click or
     // break can answer for the whole door without looking for its other half
     // first.
+    // The bed's two cells carry the same direction and differ by BED_HEAD, so
+    // either one can answer for the whole bed - the door's rule, sideways.
+    if (id === ID.bed) {
+      this._applyEdits([
+        { col, k, id, facing: this._bedDir },
+        { col: bedHead, k, id, facing: this._bedDir | BED_HEAD },
+      ]);
+      this.inventory.consumeHeld(1, held);
+      this.audio.place(BLOCKS[id].sound, this.planet.centerOf(col, k, _v1));
+      this.stats.placed++;
+      this.player.swing();
+      this.viewModel.punch(this._handOf(held));
+      return true;
+    }
     this._applyEdits(IS_DOOR[id]
       ? [edit, { col, k: k + 1, id, facing: edit.facing }]
       : id === ID.kitchen
@@ -9502,10 +9581,26 @@ class Game {
               //
               // Facing 0..3 is +x, -x, +y, -y (see `_facingToward`), and the
               // model is authored looking down +z, which is map +y - facing 2.
-              const face = IS_DIRECTIONAL[id] ? this.planet.facingAt(col, k) & 3 : -1;
+              const byte = IS_DIRECTIONAL[id] ? this.planet.facingAt(col, k) : 0;
+              const face = IS_DIRECTIONAL[id] ? byte & 3 : -1;
               const spin = face < 0 ? 0
                 : (face === 2 ? 0 : face === 3 ? Math.PI
                   : face === 0 ? -Math.PI / 2 : Math.PI / 2);
+              // ONE MODEL PER BED, drawn from the foot.
+              //
+              // Both cells are `bed` and the model spans both, so drawing it per
+              // cell would put two whole beds in the same two cells, half a cell
+              // apart. The head cell draws nothing and the foot draws a model
+              // that reaches into it - which is also why the position below is
+              // nudged half a cell along the facing: the model is centred on its
+              // own length, and its length is the pair.
+              if (id === ID.bed) {
+                if (byte & BED_HEAD) continue;
+                const stepX = face === 0 ? 1 : face === 1 ? -1 : 0;
+                const stepZ = face === 2 ? 1 : face === 3 ? -1 : 0;
+                pos.x += stepX * 0.5;
+                pos.z += stepZ * 0.5;
+              }
               lists[modelled].push({ pos, up, out: null, d2, col, k, light: -1, spin });
               continue;
             }

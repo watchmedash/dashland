@@ -222,6 +222,17 @@ export const TILES = [
   // not read as a material you could build with or mine, it reads as a way
   // through that shows you nothing but itself. `TextureGen.js` owns the look.
   'portal',
+  // A PANE'S OWN GLASS, and the difference from `glass` above is the absence of
+  // the frame.
+  //
+  // A pane is up to five separate boxes - a centre post and an arm to each side
+  // it joins - and every face of every one of them draws the whole tile. The
+  // glass tile has a dark border baked into it, which is what makes a WALL of
+  // glass read as panes in a grid; on the pane itself that border landed on
+  // twenty-odd faces at once and the thing came out as a cage of lines. Appended
+  // rather than inserted: a tile's index IS its layer in the array texture, so
+  // anything before the end renumbers every tile after it.
+  'glass_pane',
 ];
 
 export const TILE_INDEX = Object.fromEntries(TILES.map((t, i) => [t, i]));
@@ -247,7 +258,11 @@ function block(o) {
     // which one of the four tangential faces wears this tile, the other three
     // fall back to `side`. See FACING_* below.
     front: o.front === undefined ? null : T(o.front),
-    directional: o.front !== undefined,
+    // ...and a block may say so outright, which is how a block with no `front`
+    // TILE still stores a facing. The bed is the first: it is drawn as a model,
+    // so it has no tangential faces to wear a tile at all, and what its facing
+    // decides is which way the model is turned and where its other half lies.
+    directional: o.directional ?? (o.front !== undefined),
     // A log's orientation is an axis (upright / along i / along j), not one of
     // four horizontal facings, so it picks its tiles by a different rule.
     axis: o.axis ?? false,
@@ -646,7 +661,24 @@ export const BLOCKS = [
   // Where you wake up. Dying used to drop you on a random column of a planet
   // with a quarter of a million of them, which on a world this size means your
   // house is simply gone.
-  block({ name: 'bed', label: 'Bed', top: 'bed_top', side: 'bed_side', bottom: 'planks', hardness: 0.6, tool: 'axe', particle: [0.7, 0.3, 0.32], sound: 'wood', fuel: 4 }),
+  // A BED IS TWO CELLS, AND ONE BLOCK ID.
+  //
+  // It was a single cube wearing two tiles - "not only is it one block size, its
+  // model is a box lol" - and it is a KayKit frame with a mattress and a pillow
+  // now, two cells long, drawn from the foot.
+  //
+  // The kitchen bought its upper half a block id of its own. This cannot: that
+  // was the 256th and a voxel is one byte. So the two halves share an id and are
+  // told apart by BIT 2 of the side-table byte, which is free here - a bed uses
+  // bits 0-1 for the way it points and nothing else. `BED_HEAD` is that bit.
+  //
+  // Which is the better shape anyway, and the kitchen should probably follow it
+  // one day: one id means one label under the crosshair, one drop, one entry in
+  // every table that keys on a block, and no way for a half to exist without its
+  // partner being the same object.
+  //
+  // `directional` for the facing the model is turned by; see `_bedOrient`.
+  block({ name: 'bed', label: 'Bed', render: R_MODEL, directional: true, top: 'bed_top', side: 'bed_side', bottom: 'planks', hardness: 0.6, tool: 'axe', particle: [0.7, 0.3, 0.32], sound: 'wood', fuel: 4 }),
   // The way back up. Ore sits a dozen blocks under the surface and the caves
   // are dangerous now; without this the only exits from a shaft are pillaring
   // out of it or cutting a staircase you did not want.
@@ -1621,7 +1653,7 @@ export const BLOCKS = [
   // down here is: an id in the middle of the array renumbers chunks, saves and
   // the item table all at once.
   block({
-    name: 'glass_pane', label: 'Glass Pane', render: R_PANE, all: 'glass',
+    name: 'glass_pane', label: 'Glass Pane', render: R_PANE, all: 'glass_pane',
     opaque: false, hardness: 0.4, drop: null,
     particle: [0.8, 0.9, 0.95], sound: 'glass',
   }),
@@ -2174,6 +2206,15 @@ export const FENCE_BLOCK_H = 1.5;
  * the one dimension a pane has to spare.
  */
 export const PANE_THICK = 0.16;
+
+/**
+ * Bit 2 of a bed's side-table byte: set on the HEAD cell, clear on the foot.
+ *
+ * Bits 0-1 are the direction it points, which both halves carry identically so
+ * either one can answer for the whole bed - the same rule the door's two halves
+ * already live by.
+ */
+export const BED_HEAD = 4;
 /**
  * How far off the ground a gate's leaf starts.
  *

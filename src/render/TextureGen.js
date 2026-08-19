@@ -917,6 +917,35 @@ G.glass = (s) => {
   return s;
 };
 
+/**
+ * A pane of glass: the same glass, with no frame on it.
+ *
+ * `G.glass` bakes a dark border into its tile, and that border is doing real
+ * work there - it is what makes a wall of glass blocks read as a grid of panes
+ * rather than one sheet of haze. A PANE is built from up to five boxes, though,
+ * and every face of every one of them draws the whole tile, so the same border
+ * arrived on twenty-odd surfaces and the thing looked like a cage of lines.
+ *
+ * So this is clear all the way to its edges and lets the geometry be the frame.
+ * The only structure left is a very faint vertical draw in the glass, which is
+ * what stops a large window reading as a flat wash of alpha.
+ */
+G.glass_pane = (s) => {
+  const f = fbm(s.size, 9, 3, 547);
+  s.each((i, x, y, u, v) => {
+    const c = mixc(px([200, 228, 240]), px([236, 248, 253]), f[i]);
+    setRGB(s, i, c);
+    // Flatter than the block's centre as well as frameless: a pane is one sheet
+    // of glass and a block is a whole cell of it.
+    s.a[i] = 0.05 + f[i] * 0.03;
+    s.h[i] = 0.5 + f[i] * 0.06;
+    s.rough[i] = 0.04;
+    s.ao[i] = 1;
+  });
+  s.normalStrength = 0.25;
+  return s;
+};
+
 G.lantern = (s) => {
   const f = fbm(s.size, 20, 3, 591);
   s.each((i, x, y, u, v) => {

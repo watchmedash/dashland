@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import {
   BLOCKS, TINT_ID, R_CROSS, R_LIQUID, R_SLAB, R_STAIR,
-  R_LADDER, R_DOOR, R_SIGN, R_FENCE, R_GATE,
+  R_LADDER, R_DOOR, R_SIGN, R_FENCE, R_GATE, R_PANE,
 } from '../world/Blocks.js';
 import { BIOME_COLORS } from '../world/Constants.js';
 import { ITEMS } from '../game/Items.js';
@@ -77,6 +77,15 @@ export const SHAPES = {
   // whole leaf standing off the ground at GATE_LOW, which is exactly the gap
   // that identifies a shut gate in the world. Far stile first, near last, for
   // the reason above.
+  // A PANE, not a cube of glass.
+  //
+  // The item drew as its block, and its block is glass, so a pane and a glass
+  // cube were the same picture in the bar - which is the one thing an icon must
+  // never be. A pane's whole identity is that it is thin, so the icon is the
+  // sheet: full height, full depth, and a sixth of a cell across. It reads at
+  // 46px because the two visible faces are a tall narrow parallelogram rather
+  // than a cube's three-face hexagon.
+  [R_PANE]: [{ x0: 0.42, x1: 0.58, y0: 0, y1: 1, z0: 0, z1: 1 }],
   [R_GATE]: [
     { x0: 0.42, x1: 0.58, y0: 0.30, y1: 1, z0: 0, z1: 0.16 },
     { x0: 0.44, x1: 0.56, y0: 0.36, y1: 0.52, z0: 0, z1: 1 },

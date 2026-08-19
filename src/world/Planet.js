@@ -339,7 +339,16 @@ export class Planet {
       return a & 0x7FF;
     }
     if (!IS_DIRECTIONAL[id]) { this.facing.delete(idx); return -1; }
-    const v = (want ?? this.facing.get(idx) ?? FACING_DEFAULT) & 3;
+    // 0x7FF here too, for the same reason the shaped branch above widened: a
+    // directional block may carry more than the two bits that say which way it
+    // points. The bed is the first - bit 2 is which HALF of the bed this cell is
+    // (see BED_HEAD), because a bed is two cells and the game has no block ids
+    // left to spend on a second one. `& 3` silently deleted that bit, so both
+    // halves claimed to be the foot and each drew a whole bed.
+    //
+    // Nothing else is affected: every other reader of a directional facing masks
+    // `& 3` on the way out and no other block writes above it.
+    const v = (want ?? this.facing.get(idx) ?? FACING_DEFAULT) & 0x7FF;
     this.facing.set(idx, v);
     return v;
   }

@@ -5393,15 +5393,33 @@ class Game {
    * you clicked.
    */
   _stairOrient(hit, col, k) {
-    // The low side faces the player. "Stairs isn't behaving like in minecraft,
-    // placing them is confusing": it used to face *away*, so the tall riser
-    // landed against you and the first thing you built was a wall you could not
-    // step onto - you had to walk round your own staircase to use it.
+    // The low side faces the player, so "stand still, place, walk forward"
+    // builds a flight you ascend rather than a wall of risers facing back.
+    // That much was already right and is Minecraft's rule.
     //
-    // Minecraft puts the low step on the side you placed from, which is what
-    // makes "stand still, place, walk forward" build a flight you ascend. The
-    // whole of the fix is dropping the flip that was here.
-    return this._facingToward(col, k) | (this._slabHalf(hit, col, k) ? 4 : 0);
+    // WHERE you are is the wrong way to work out which way that is, though, and
+    // it is the whole of "the stairs when placed it's facing my direction
+    // instead of the block I attached it to". `_facingToward` takes the vector
+    // from the block to your eye and keeps the larger of its two components, so
+    // a stair placed on a block off to one side - which is most of them, because
+    // you build ahead of yourself and slightly across - snaps to whichever axis
+    // you happen to be furthest along, not the one you are looking down. Stand
+    // north of a cell and place a stair to the east and the low side comes back
+    // pointing north.
+    //
+    // Your yaw is the answer, and it is what Minecraft reads. Negated because
+    // the low side faces you and your look points away from you.
+    return this._facingFromLook() | (this._slabHalf(hit, col, k) ? 4 : 0);
+  }
+
+  /**
+   * Facing 0..3 (+x, -x, +y, -y) for the way the player is looking, back to
+   * front: the axis their gaze runs along, pointing back at them.
+   */
+  _facingFromLook() {
+    const d = this.player.lookDir;
+    if (Math.abs(d.x) >= Math.abs(d.z)) return d.x >= 0 ? 1 : 0;
+    return d.z >= 0 ? 3 : 2;
   }
 
   /**
@@ -5710,6 +5728,11 @@ class Game {
         if (kk !== hit.k) edits.push({ col: hit.col, k: kk, id: 0 });
       }
     }
+    // The kitchen is the same shape of object and comes down the same way, and
+    // it needs no search: the two halves are named blocks, so each one knows
+    // which way its partner lies.
+    if (hit.id === ID.kitchen) edits.push({ col: hit.col, k: hit.k + 1, id: 0 });
+    if (hit.id === ID.kitchen_top) edits.push({ col: hit.col, k: hit.k - 1, id: 0 });
 
     // whatever was resting on top falls with it
     const above = this.planet.at(hit.col, hit.k + 1);
@@ -5979,7 +6002,9 @@ class Game {
     }
 
     // A door is two cells tall, so it needs the headroom before anything else.
-    if (IS_DOOR[id]) {
+    // A door needs the cell above it, and so does a kitchen - the pot stands
+    // there. See `kitchen_top`.
+    if (IS_DOOR[id] || id === ID.kitchen) {
       if (k + 1 >= D || this.planet.at(col, k + 1) !== 0) {
         return false;
       }
@@ -6018,7 +6043,12 @@ class Game {
     // first.
     this._applyEdits(IS_DOOR[id]
       ? [edit, { col, k: k + 1, id, facing: edit.facing }]
-      : [edit]);
+      : id === ID.kitchen
+        // The upper cell is a different block rather than a second kitchen: one
+        // kitchen per kitchen, so the screen, the drop and the crosshair label
+        // all still answer once.
+        ? [edit, { col, k: k + 1, id: ID.kitchen_top, facing: edit.facing }]
+        : [edit]);
     // Register a placed crate as empty straight away. An absent entry is the
     // marker for "worldgen put this here", so a crate you set down yourself
     // would otherwise fill itself with treasure the first time you opened it.
@@ -10217,6 +10247,27 @@ class Game {
    * @param {Slot} slot
    * @param {object|null} hit the cell under the crosshair, if any
    */
+  /**
+   * Does the block under the crosshair claim a right-click for itself?
+   *
+   * A bench, a kiln, a kitchen, a crate, a bed, a door, a gate and a sign all
+   * DO something when you click them, and in this genre that always beats
+   * whatever is in your hand. It did not here: the food branch in `_interact`
+   * returns the moment the acting hand holds anything edible, and it sits above
+   * the block branch, so walking up to a workbench with a loaf in your fist and
+   * tapping it ate the loaf. Every station in the game was unusable while
+   * hungry, which is when you are most likely to be standing at one.
+   *
+   * Crouch is still the override, and it is the caller's to apply - see
+   * `meansBlock`, which also requires something placeable so a latched sneak on
+   * touch cannot silently lock a crate shut.
+   */
+  _blockClaimsUse(id) {
+    return id === ID.bench || id === ID.kitchen || id === ID.kiln || id === ID.kiln_lit
+      || id === ID.kitchen_top || id === ID.crate || id === ID.bed
+      || !!IS_DOOR[id] || !!IS_GATE[id] || !!IS_SIGN[id];
+  }
+
   _hasUse(slot, hit) {
     if (slot.empty) return false;
     switch (useKind(slot.item)) {
@@ -10551,7 +10602,7 @@ class Game {
       // "WEST GATE keep out" and not as "WEST GATEkeep out".
       this.ui.setHint(text ? `"${text.replace(/\s*\n\s*/g, ' ')}"` : 'A blank sign');
     } else if (hit && (hit.id === ID.bench || hit.id === ID.kiln || hit.id === ID.kiln_lit
-                       || hit.id === ID.kitchen)) {
+                       || hit.id === ID.kitchen || hit.id === ID.kitchen_top)) {
       this.ui.setHint(null);
     } else if (needTool || dragHint || tillHint) {
       // Both can be true — a wrong tool on a wet seam is the worst case in the
@@ -10661,8 +10712,13 @@ class Game {
     // plant, and neither needed a new control.
     // `heldSlot`/`heldItem` are the acting hand, resolved with the aim above.
     const edibleBlock = !!(heldItem?.food && heldItem.block !== undefined);
+    // ...and one more exception, which is not about food at all: the block you
+    // are pointing at may want the click more than your mouth does. See
+    // `_blockClaimsUse`. Without this every station in the game was unusable
+    // while hungry.
+    const blockUse = !!hit && !this.player.crouching && this._blockClaimsUse(hit.id);
     if (!edibleBlock) {
-      if (heldItem?.food && input.buttons[2] && input.locked) {
+      if (heldItem?.food && input.buttons[2] && input.locked && !blockUse) {
         this._tickEating(dt, heldSlot, heldItem);
         return;
       }
@@ -10673,7 +10729,9 @@ class Game {
     // Handled before the `hit` gate below, because filling needs a ray that
     // *stops* on liquid — the ordinary interaction ray passes straight through
     // water, so a lake never registers as something you can click.
-    if (input.clicked[2] && input.locked && this.useCooldown === 0
+    // `!blockUse` for the same reason as the food above: a bucket in your hand
+    // is not a reason for a crate to stay shut.
+    if (input.clicked[2] && input.locked && this.useCooldown === 0 && !blockUse
         && (heldSlot.item === itemIdOf('bucket') || heldItem?.carries)) {
       this.useCooldown = 0.28;
       if (this._useBucket(heldSlot)) return;
@@ -10760,7 +10818,12 @@ class Game {
       // it works out of `inventory.craft` exactly as the workbench does, so
       // there is nothing to look up here and nothing to save, and closing the
       // screen already spills whatever is left in the grid onto the floor.
-        if (hit.id === ID.kitchen) { this.openScreen('kitchen'); return; }
+        // Either cell. The pot standing in the upper one is the part of a
+        // kitchen you can see from across a room, and clicking it has to open
+        // the kitchen or the block is a decoration with a trap in it.
+        if (hit.id === ID.kitchen || hit.id === ID.kitchen_top) {
+          this.openScreen('kitchen'); return;
+        }
         if (hit.id === ID.kiln || hit.id === ID.kiln_lit) {
           this.openScreen('kiln', this._kilnAt(hit.col, hit.k));
           return;
@@ -11758,19 +11821,31 @@ class Game {
   }
 
   /**
-   * How exposed to the sky the player is, 0 (fully covered) to 1 (open air).
-   * Counts solid cells in the player's own column above their head; a couple of
-   * blocks of leaf canopy should still let some rain through, a rock ceiling
-   * should not.
+   * How exposed to the sky the player is: 1 under open air, 0 under anything.
+   *
+   * This counted solid cells in the column and returned `1 - blocked / 3`, so a
+   * roof had to be THREE blocks thick before it counted as a roof. A cave with
+   * two layers of stone over it - which is most of a shallow one, and every
+   * tunnel anyone digs in from a hillside - came back 0.33 open, and a third of
+   * a downpour was drawn falling through the ceiling: "while in cave and raining
+   * outside, raindrops are dropping inside". Two blocks of rock is not a third
+   * of a roof.
+   *
+   * One solid cell overhead is a roof, which is Minecraft's rule and the one
+   * every player already has. The grading it replaces bought nothing: nothing
+   * reads this for a soft answer - the rain scales its whole intensity by it,
+   * lightning asks whether it is over 0.55, and the audio's openness eases
+   * toward it over a third of a second anyway.
    */
   _skyExposure() {
     const c = this.player.cell;
     const col = colIndex(c.x, c.y);
-    let blocked = 0;
+    // From two cells up: the cell the player's head is in is their own, and the
+    // one above it is where a hat would be.
     for (let k = c.k + 2; k < D; k++) {
-      if (this.planet.solidAt(col, k)) { blocked++; if (blocked >= 3) return 0; }
+      if (this.planet.solidAt(col, k)) return 0;
     }
-    return 1 - blocked / 3;
+    return 1;
   }
 
   _updateSharedUniforms() {

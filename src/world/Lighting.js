@@ -91,11 +91,23 @@ for (let i = 0; i < N_BLOCKS; i++) {
  * `Mobs.js` and `Particles.js` still keep their own copies of the number. They
  * are not wrong, only unshared, and moving them is a separate edit.
  *
- * 0.55 because a thing indoors should read as indoors without becoming
- * invisible - the terrain around it keeps its own baked light, and the two have
- * to look like they are in the same room.
+ * 0.10, and it is not a taste call - it is the number the TERRAIN already uses.
+ *
+ * This was 0.55, reasoned as "a thing indoors should read as indoors without
+ * becoming invisible". The trouble is that the ground it is standing on does
+ * not agree: the voxel shader floors its own ambient at `sunAmt = 0.10 + ...`,
+ * so in a lightless cave the walls keep a tenth of the outdoor fill and anything
+ * modelled kept five and a half TIMES that. A workbench in a black gallery was
+ * the brightest thing in it, which is the owner's report - "models still glowing
+ * even in dark parts on caves ... even if blocks are clearly dimmed the
+ * workbench stays bright" - and the guess in the same breath, "I am guessing
+ * more models does", is right: every mob and every particle read the same
+ * number out of their own copy of it.
+ *
+ * The two really do have to look like they are in the same room. That was always
+ * the right sentence; 0.55 was not the way to keep it.
  */
-export const SKY_SHADE_MIN = 0.55;
+export const SKY_SHADE_MIN = 0.10;
 
 /**
  * ATTEN for a step taken *up or down* rather than sideways.

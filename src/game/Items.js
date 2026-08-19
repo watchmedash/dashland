@@ -42,6 +42,9 @@ const NOT_OBTAINABLE = new Set([
   // safe) and the *item* id is appended (bags, crates and shop stock are safe).
   // Anything modelled on this machine should do the same.
   'kitchen',
+  // ...and its upper half, which is not a thing you can hold at all: it is the
+  // cell the pot stands in. See `kitchen_top` in Blocks.js.
+  'kitchen_top',
   // The fence gate, for exactly the same reason and by exactly the same
   // machine. Its `add()` is at the foot of this file, under the dishes.
   'fence_gate',

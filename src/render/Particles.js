@@ -6,7 +6,7 @@ import { BLOCKS, ID } from '../world/Blocks.js';
 // What counts as a roof. The same table the terrain's own skylight is flooded
 // with, so a cube of debris and the wall it was chipped off agree - see the
 // probe below, and the paragraph on leaves in Lighting.js.
-import { SKY_ATTEN } from '../world/Lighting.js';
+import { SKY_ATTEN, SKY_SHADE_MIN as SHARED_SKY_SHADE_MIN } from '../world/Lighting.js';
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -29,7 +29,11 @@ const MAX_DEBRIS = 900;
  * things in one room, and three different floors would be three different
  * rooms.
  */
-const SKY_SHADE_MIN = 0.55;
+// Shared now, not copied. Three files held their own 0.55 and the note in
+// Lighting.js called them "not wrong, only unshared" - which stopped being
+// true the moment the number changed there and a mob in a cave went on
+// glowing at five times the brightness of the rock behind it.
+const SKY_SHADE_MIN = SHARED_SKY_SHADE_MIN;
 
 const MAX_BUBBLES = 64;
 

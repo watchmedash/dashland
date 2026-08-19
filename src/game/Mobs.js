@@ -33,7 +33,7 @@ import {
   ID, IS_SHAPED, IS_LEAF, IS_TREE, IS_SOLID, collisionBoxes, LIGHT_EMIT, RENDER_TYPE, R_LIQUID,
   isPassable, CONTACT_HURT, SINK,
 } from '../world/Blocks.js';
-import { SKY_ATTEN } from '../world/Lighting.js';
+import { SKY_ATTEN, SKY_SHADE_MIN as SHARED_SKY_SHADE_MIN } from '../world/Lighting.js';
 import { itemIdOf } from './Items.js';
 import { rollStock, rollRequest } from './Trade.js';
 import { makeRng, clamp, lerp } from '../util/Noise.js';
@@ -755,7 +755,11 @@ const FLY_LAVA_CLEAR = 4;
  * the two have to look like they are in the same room.
  */
 const SKY_PROBE_PERIOD = 0.6;
-const SKY_SHADE_MIN = 0.55;
+// Shared now, not copied. Three files held their own 0.55 and the note in
+// Lighting.js called them "not wrong, only unshared" - which stopped being
+// true the moment the number changed there and a mob in a cave went on
+// glowing at five times the brightness of the rock behind it.
+const SKY_SHADE_MIN = SHARED_SKY_SHADE_MIN;
 
 const FLY_LOOK_NEAR = 1.4;
 const FLY_LOOK_FAR = 2.9;

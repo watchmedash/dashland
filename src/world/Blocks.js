@@ -1365,6 +1365,23 @@ export const BLOCKS = [
   //
   // Directional for the same reason the kiln is: `front` is the fire door, and
   // a cooker whose door faced a wall would read as a plain brick block.
+  // THE KITCHEN IS TWO CELLS, and the cell above holds this.
+  //
+  // The pot on top has always been drawn by `MODELLED_TOPPERS` - an ornament
+  // rendered into the cell above a kitchen, with nothing in that cell. So it was
+  // a picture and only a picture: the owner and every animal walked through it,
+  // which is the report. Mobs decide what they can walk into per CELL (see the
+  // `IS_SOLID && !isPassable` tests in Mobs.js), so a collision box taller than
+  // one cell would have answered for the player and for nobody else. What blocks
+  // a body is a block.
+  //
+  // `R_MODEL` with no entry in `MODELLED_BLOCKS`, which is exactly the case the
+  // note on that list calls "an invisible block you can still walk into" - it is
+  // a hole there and it is the whole point here, because the pot standing in
+  // this cell is already drawn by the topper below it. It follows the door: both
+  // cells are written by one placement and either one broken brings both down.
+  block({ name: 'kitchen_top', label: 'Kitchen', render: R_MODEL, all: 'brick',
+    hardness: 2.4, tool: 'pick', tier: 0, drop: 'kitchen', particle: [0.62, 0.34, 0.26], sound: 'stone' }),
   block({ name: 'kitchen', label: 'Kitchen', top: 'hearth', side: 'brick', front: 'kiln_front', bottom: 'brick', hardness: 2.4, tool: 'pick', tier: 0, drop: 'kitchen', particle: [0.62, 0.34, 0.26], sound: 'stone' }),
 
   // --- the fence gate --------------------------------------------------------

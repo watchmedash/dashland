@@ -2706,35 +2706,21 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     // lines up with the timber either side of it rather than nearly lining up.
     const axis = byte & 3, open = (byte >> 2) & 1;
     /*
-     * THE LEAF HANGS ON A CORNER, AND THE CORNER DOES NOT MOVE.
+     * Shut, the leaf lies across the way you walk, down the middle of the cell.
+     * Open, it lies along the way you walk, against the low side wall.
      *
-     * The two poses are two shapes rather than two ends of an animation — there
-     * is no hinge bit to store and nothing to tween — so the only thing that
-     * makes it read as a *swing* is that the shapes are a rotation of each
-     * other about a point that stays put. They were not, and the owner saw it:
-     * "it opens up but it looks like it only changed angle and shoved to the
-     * left".
+     * The hinge therefore MOVES half a cell as it turns, and that was tried the
+     * other way and rejected. Hanging the leaf on a fixed corner in both poses
+     * makes the swing a true rotation - the hinge stile comes out byte-identical
+     * open and shut - and it costs the shut gate its place on the fence line,
+     * because a leaf a whole cell long that stays inside its cell can only
+     * pivot about a corner. The owner looked at it: "fence gate is disconnected
+     * now". A gate that lines up with the timber either side of it is worth
+     * more than a pivot nobody is watching, so the slide stays.
      *
-     * The leaf used to lie down the middle of the cell when shut (`vc` 0.5) and
-     * against the low wall when open (`vc` half a rail). Both poses are a leaf
-     * a full cell long, so the turn is a right angle either way — but the hinge
-     * stile moved 0.42 of a cell across as it turned, and a hinge that slides
-     * is not a hinge. What you saw was a panel changing angle and sliding.
-     *
-     * `vc` is the same in both poses now, so the hinge stile occupies the same
-     * corner column of the cell open or shut and the leaf is a true 90 degree
-     * rotation about it. Nothing translates.
-     *
-     * THE COST, which is the owner's call and is real: shut, the leaf no longer
-     * runs down the centre line of the cell, so it does not line up with the
-     * rails of the fence either side of it — it hangs against one face of the
-     * gap instead of across the middle of it. That is the trade a one-cell leaf
-     * forces. A leaf hinged at the MIDDLE of an edge swings half its length
-     * outside its own cell, so a pivot that keeps the shut gate centred cannot
-     * exist; the choice was a straight fence line with a sliding gate, or a
-     * true hinge with the gate set a little forward of the line.
+     * What the swing was ACTUALLY glitching on is below - see the rails.
      */
-    const vc = FENCE_RAIL / 2;
+    const vc = open ? FENCE_RAIL / 2 : 0.5;
     const v0 = vc - FENCE_RAIL / 2, v1 = vc + FENCE_RAIL / 2;
     // `u` runs along the leaf and `v` across its thickness; which of those is i
     // and which is j is the axis, flipped by the swing.
@@ -2744,7 +2730,18 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
       : out.push([v0, u0, k0, v1, u1, k1]));
     put(0, FENCE_RAIL, GATE_LOW, FENCE_HEIGHT);            // hinge stile
     put(1 - FENCE_RAIL, 1, GATE_LOW, FENCE_HEIGHT);        // latch stile
-    for (let n = 0; n < 2; n++) put(0, 1, RAIL_K[n], RAIL_K[n] + FENCE_RAIL);
+    // BETWEEN the stiles, not through them. The rails used to span the whole
+    // cell (0 to 1) while the stiles stand at 0..0.16 and 0.84..1 over the same
+    // height band, so every rail drove straight through both stiles and the two
+    // sets of faces fought for the same depth. That is the texture glitch on a
+    // gate, and it is there open or shut, moving or still.
+    //
+    // The fence next door has never had it, and this is why: its rails start at
+    // the face of the post (`p1`) and run outward, so they touch it and stop.
+    // Same rule here.
+    for (let n = 0; n < 2; n++) {
+      put(FENCE_RAIL, 1 - FENCE_RAIL, RAIL_K[n], RAIL_K[n] + FENCE_RAIL);
+    }
     return out;
   }
   if (IS_SIGN[id]) {

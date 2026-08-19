@@ -342,6 +342,25 @@ export class BlockModels {
     // rest reuse it.
     const clone = (m) => {
       const out = m.clone();
+      // `Material.copy()` carries colours, maps and flags and NOT
+      // `onBeforeCompile` or `customProgramCacheKey` — they are plain fields on
+      // the instance and three's copy list simply does not mention them. So a
+      // clone comes back with the default no-op hook and any shader the source
+      // material was carrying is gone, silently, with nothing to catch it.
+      //
+      // That is what turned the torch black. It is the one thing in the world
+      // whose material has a shader of its own (`glowTop` in ItemModels, which
+      // is what puts the flame on the head), and it is neither swaying nor lit,
+      // so until the crack went in it was the one kind that kept the SHARED
+      // material and never hit this path. Cloning every kind for the crack sent
+      // it through, the flame's emissive went with the hook, and what was left
+      // was an unlit stick with a dark lump on top.
+      //
+      // Carried across explicitly, before the patches below layer onto it —
+      // each of those chains through `prevCompile`, so a hook that is missing
+      // here is a hook that is missing from the whole chain.
+      out.onBeforeCompile = m.onBeforeCompile;
+      out.customProgramCacheKey = m.customProgramCacheKey;
       if (k.sway) applyInstancedSway(out, bb.min.y, bb.max.y);
       else if (k.lit) applyInstancedBlockLight(out);
       // Last, so it wraps whatever the two above installed — and so the world

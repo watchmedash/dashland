@@ -328,8 +328,15 @@ export class Planet {
     // every placed stair fell through to the delete below.
     if (IS_AXIS[id] || IS_SHAPED[id] || RENDER_TYPE[id] === R_LIQUID) {
       const a = want ?? this.facing.get(idx) ?? 0;
-      if (a) this.facing.set(idx, a & 7); else this.facing.delete(idx);
-      return a & 7;
+      // 0x7FF, not 7. The low three bits are what they always were - a half,
+      // an axis, a swing - and every existing reader masks them off and is
+      // unaffected. Bits 3..10 are a second BLOCK ID, which is how a cell
+      // holds two different slabs; see SLAB_MATE in Blocks.js. Widening the
+      // write mask is the whole of the storage change, because `facing` is
+      // already a plain int map and is already shipped to the worker and to
+      // the save as [cell, value] pairs.
+      if (a) this.facing.set(idx, a & 0x7FF); else this.facing.delete(idx);
+      return a & 0x7FF;
     }
     if (!IS_DIRECTIONAL[id]) { this.facing.delete(idx); return -1; }
     const v = (want ?? this.facing.get(idx) ?? FACING_DEFAULT) & 3;

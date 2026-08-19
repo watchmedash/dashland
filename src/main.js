@@ -70,6 +70,7 @@ import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
   IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_FENCE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
+  SLAB_MATE, withSlabMate,
   SEALS_FACES,
 } from './world/Blocks.js';
 import {
@@ -5634,6 +5635,21 @@ class Game {
     for (const d of computeDrops(hit.id, heldDef)) {
       this.drops.spawn(center.x, center.y, center.z, d.item, d.count);
     }
+    // A cell holding two different slabs gives back BOTH of them, and goes to
+    // air in one blow rather than leaving the other half floating.
+    //
+    // Breaking the half you aimed at and keeping the other would be the truer
+    // model and is not worth what it costs: the raycast reports a cell, not a
+    // height within it, so "which half did they hit" would have to be inferred
+    // from the ray - and a player who mines a stacked pair and gets one slab
+    // back plus a half-cell of something they now have to hit again has been
+    // given a puzzle, not a mechanic.
+    const mate = SLAB_MATE(this.planet.facingAt(hit.col, hit.k));
+    if (mate && IS_SLAB[hit.id]) {
+      for (const d of computeDrops(mate, heldDef)) {
+        this.drops.spawn(center.x, center.y, center.z, d.item, d.count);
+      }
+    }
 
     this._emptyContainer(hit.col, hit.k, hit.id, center);
 
@@ -5731,6 +5747,38 @@ class Game {
     // the full block rather than a second slab going somewhere else.
     if (IS_SLAB[id] && !replacing) {
       const there = this.planet.at(hit.col, hit.k);
+      // TWO DIFFERENT SLABS SHARE THE CELL.
+      //
+      // The merge below turns two of the SAME material into their full block,
+      // which is right - a stack of oak boards is a plank. Two of different
+      // materials matched none of it and fell through to the ordinary place,
+      // which refuses an occupied cell, so the answer was simply "no". They
+      // stack now, and stay two halves: "they will be just slabs on top of
+      // each other anyway not combine to a single plank".
+      //
+      // The partner rides in the facing byte above the bits that hold the
+      // half - see SLAB_MATE - so this is one write to a side table that was
+      // already saved and already shipped to the worker.
+      if (IS_SLAB[there] && there !== id) {
+        const cur = this.planet.facingAt(hit.col, hit.k);
+        const adding = this._slabHalf(hit, hit.col, hit.k, true);
+        if (!SLAB_MATE(cur) && adding !== (cur & 1)) {
+          // The edit carries the facing, which is the only door the side table
+          // has: `_applyEdits` -> `applyFacing` writes it, tells the worker and
+          // marks the region dirty. Writing the map directly would have done
+          // none of those three.
+          this._applyEdits([{ col: hit.col, k: hit.k, id: there,
+            facing: withSlabMate(cur, id) }]);
+          this.audio.place(BLOCKS[id].sound,
+            this.planet.centerOf(hit.col, hit.k, new THREE.Vector3()));
+          held.count--;
+          if (held.count <= 0) held.clear();
+          this.inventory.changed();
+          this.player.swing();
+          this.viewModel.punch(this._handOf(held));
+          return true;
+        }
+      }
       if (IS_SLAB[there] && there === id) {
         const full = ID[BLOCKS[id].name.slice(5)];
         const filled = this.planet.facingAt(hit.col, hit.k) & 1;   // 1 upper, 0 lower

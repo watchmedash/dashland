@@ -805,7 +805,11 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, cx, cy, ck)
           continue;
         }
         if (IS_SHAPED[id]) {
-          const byte = (facing?.get(col * D + k) ?? 0) & 7;
+          // 0x7FF: the low three bits are the facing every shape reads, and
+          // bits 3..10 are the second slab a cell may be holding. Masking to 7
+          // here would draw the cell as a single half and leave the other one
+          // stored, invisible and solid.
+          const byte = (facing?.get(col * D + k) ?? 0) & 0x7FF;
           // A fence has no stored orientation: its shape is its neighbours, and
           // those are already resolved for this column.
           // A fence has no stored orientation: its shape is its neighbours, and
@@ -872,7 +876,12 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, cx, cy, ck)
             if (bj0 === 0 && SEALS_FACES[at(nMy, k)]) skip.mj = 1;
             if (bk1 === 1 && SEALS_FACES[at(col, k + 1)]) skip.up = 1;
             if (bk0 === 0 && SEALS_FACES[at(col, k - 1)]) skip.dn = 1;
-            emitBox(grp, id, biomeId, x, y, k,
+            // A box may name its own block to be drawn as, and exactly one
+            // thing uses it: the second half of a cell holding two different
+            // slabs. It takes that block's tiles AND that block's draw group,
+            // so an oak slab under a glass one comes out timber under glass.
+            const bid = boxes[b][7] || id;
+            emitBox(bid === id ? grp : groups[GROUP[bid]], bid, biomeId, x, y, k,
               [bi0, bj0, bk0], [bi1, bj1, bk1], -1, skip, boxes[b][6]);
           }
           continue;

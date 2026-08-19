@@ -2940,6 +2940,21 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
   if (IS_SLAB[id]) {
     const up = byte & 1;
     out.push([0, 0, up ? 0.5 : 0, 1, 1, up ? 1 : 0.5]);
+    // ...and the other half, if a slab of a DIFFERENT kind is sharing the cell.
+    //
+    // Two slabs of the same material merge into their full block, which is
+    // right - a stack of oak boards is a plank. Two of different materials had
+    // nowhere to go and the placement was simply refused, which is the owner's
+    // report. They live here instead, as two halves that stay two halves:
+    // "they will be just slabs on top of each other anyway not combine to a
+    // single plank".
+    //
+    // The eighth element of a box is the id to DRAW it with, and it is only
+    // ever set here. Everything that reads these boxes for shape - collision,
+    // the crosshair, the ground scan - sees a full cell and does not care
+    // which timber each half is.
+    const mate = SLAB_MATE(byte);
+    if (mate) out.push([0, 0, up ? 0 : 0.5, 1, 1, up ? 0.5 : 1, 0, mate]);
     return out;
   }
   if (IS_STAIR[id]) {
@@ -3051,16 +3066,33 @@ export function collisionBoxes(id, byte = 0, shape = 0) {
 // `up` is the slab's stored side-table byte: 0 lower half, 1 upper half.
 // ---------------------------------------------------------------------------
 
+/**
+ * The OTHER slab sharing this cell, or 0. Bits 3..10 of the facing byte.
+ *
+ * Above the three bits every other reader masks off, so nothing that already
+ * reads a facing had to learn about it: a slab's half is still bit 0 and a
+ * `byte & 7` anywhere in the codebase still answers exactly what it did.
+ */
+export const SLAB_MATE = (byte) => (byte >> 3) & 0xFF;
+/** ...and how one is written in. */
+export const withSlabMate = (byte, id) => (byte & 7) | ((id & 0xFF) << 3);
+
 /** Height of the block's top surface above the cell floor, 0..1. */
-export function blockTop(id, up = 0) {
+export function blockTop(id, byte = 0) {
   if (!IS_SLAB[id]) return 1;
-  return up ? 1 : 0.5;
+  // `byte & 1`, not `byte`. The half is bit 0 and the rest of the byte is a
+  // partner slab now, so a truthiness test on the whole thing reads every
+  // paired LOWER slab as an upper one - and `crowds` asks this to decide
+  // whether a cell is walled to the ceiling.
+  if (SLAB_MATE(byte)) return 1;         // two halves: the cell is full
+  return (byte & 1) ? 1 : 0.5;
 }
 
 /** Height of the block's bottom surface above the cell floor, 0..1. */
-export function blockBottom(id, up = 0) {
+export function blockBottom(id, byte = 0) {
   if (!IS_SLAB[id]) return 0;
-  return up ? 0.5 : 0;
+  if (SLAB_MATE(byte)) return 0;         // ...and it starts at the floor
+  return (byte & 1) ? 0.5 : 0;
 }
 
 // Two helpers were deleted from here rather than wired up: `sealsTop`, a

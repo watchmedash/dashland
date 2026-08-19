@@ -2099,7 +2099,10 @@ export class UI {
 
   /** What a press on a slot does, once its meaning is known. */
   _slotAction(getSlot, opts, mod) {
-    if (opts.output) { this._takeOutput(mod !== 'plain'); return; }
+    // Shift on an output cell means "give me all of it, in my bag" - the
+    // stack-on-the-cursor version leaves you holding sixty-four of something
+    // with nowhere to put it down.
+    if (opts.output) { this._takeOutput(mod !== 'plain', mod === 'bulk'); return; }
     // Both bulk moves want an empty hand: with a stack on the cursor the press
     // means "put this down", which is what the last line does.
     const bulk = mod === 'bulk' && this.game.inventory.cursor.empty;
@@ -2187,8 +2190,27 @@ export class UI {
     // Shift-clicking a helmet used to mean "wear it". There is nowhere to wear
     // it any more, so a piece of armour now shift-moves like anything else you
     // are carrying — which is what it is.
+    // WHERE A SHIFTED STACK GOES, screen by screen. Only the crate was here,
+    // so a kiln, a kitchen and a bench all fell through to the bag-to-hotbar
+    // move and looked like shift doing nothing at all.
     if (this.crate) this._pour(src, this.crate.slots);
-    else {
+    else if (this.kiln) {
+      // Fuel to the grate, everything else to the hopper. That is the only
+      // sorting a furnace can do and it is the one everybody expects: coal
+      // goes under the fire, ore goes over it.
+      this._pour(src, FUEL[src.item] ? [this.kiln.fuel] : [this.kiln.input]);
+    } else if (this.kitchen && FUEL[src.item] && !this.game.inventory.craft.some((c) => !c.empty)) {
+      // At a kitchen, fuel goes to the grate - but only while the pots are
+      // empty. With a dish laid out, shift-clicking a plank is far more likely
+      // to mean "put this away" than "burn it", and a mis-sort there costs a
+      // laid-out recipe.
+      this._pour(src, [this.kitchen.fuel]);
+    } else if (this.screenOpen && this.craftSlots && !this.kitchen) {
+      // A bench: into the grid, left to right. Not at a kitchen, where the
+      // menu lays the pots out for you and a stack arriving in cell 1 would
+      // fight it.
+      this._pour(src, this.craftMap);
+    } else {
       const toStorage = index < HOTBAR;
       this._pour(src, inv.slots.slice(toStorage ? HOTBAR : 0, toStorage ? TOTAL : HOTBAR));
     }
@@ -2232,7 +2254,11 @@ export class UI {
     if (src.count <= 0) src.clear();
   }
 
-  _takeOutput(all) {
+  /**
+   * @param {boolean} all keep going while the grid still makes the same thing
+   * @param {boolean} toBag put the results in the bag instead of on the cursor
+   */
+  _takeOutput(all, toBag = false) {
     const g = this.game;
     const size = this._craftSize();
     const rec = this._craftResult();
@@ -2242,7 +2268,12 @@ export class UI {
     do {
       const r = this._craftResult();
       if (!r || r.out !== rec.out) break;
-      if (!cur.empty && (cur.item !== rec.out || cur.count + rec.count > (ITEMS[rec.out]?.stack ?? 64))) break;
+      // Room to put it: the bag when shift asked for the bag, the cursor
+      // otherwise. Checked before the ingredients are spent, or a full bag eats
+      // the batch.
+      if (toBag) {
+        if (!g.inventory.roomFor(rec.out, rec.count)) break;
+      } else if (!cur.empty && (cur.item !== rec.out || cur.count + rec.count > (ITEMS[rec.out]?.stack ?? 64))) break;
       // A DISH COSTS FIRE. Checked here rather than at the output slot's own
       // preview, deliberately: the pot still shows what it WOULD make with no
       // fuel in the grate, because a kitchen that goes blank when the fire is
@@ -2252,7 +2283,8 @@ export class UI {
         break;
       }
       g.inventory.consumeCraft(size);
-      if (cur.empty) cur.set(rec.out, rec.count);
+      if (toBag) g.inventory.add(rec.out, rec.count);
+      else if (cur.empty) cur.set(rec.out, rec.count);
       else cur.count += rec.count;
       made++;
     } while (all && made < 64);
@@ -2636,7 +2668,7 @@ export class UI {
     indices.forEach((gi, k) => {
       const d = document.createElement('div');
       d.className = 'islot';
-      this._wireSlot(d, () => inv.craft[gi], { accepts });
+      this._wireSlot(d, () => inv.craft[gi], { accepts, container: true });
       grid.appendChild(d);
       this.craftSlots.push(d);
       this.craftMap.push(inv.craft[gi]);
@@ -2677,7 +2709,7 @@ export class UI {
       this.kitchenFuel = document.createElement('div');
       this.kitchenFuel.className = 'islot';
       this._wireSlot(this.kitchenFuel, () => this.kitchen?.fuel ?? new Slot(),
-        { accepts: (id) => !!FUEL[id] });
+        { accepts: (id) => !!FUEL[id], container: true });
       this.kitchenFlame = document.createElement('div');
       this.kitchenFlame.className = 'flame-wrap';
       this.kitchenFlame.innerHTML = '<div class="flame"><i></i></div>';
@@ -2828,7 +2860,11 @@ export class UI {
     const slot = (cls, get) => {
       const d = document.createElement('div');
       d.className = `islot ${cls}`;
-      this._wireSlot(d, get);
+      // `container`, so shift sends the stack back to the bag - see
+      // `_shiftTake`. Every slot that is not the bag needs this and only the
+      // crate had it, which is the whole of "shift+lmb doesn't work in kiln,
+      // crafting table, crate, kitchen".
+      this._wireSlot(d, get, { container: true });
       return d;
     };
     const inp = slot('smelt-in', () => k.input);

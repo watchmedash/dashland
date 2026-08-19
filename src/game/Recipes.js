@@ -2,7 +2,7 @@
 // ones just need the right multiset of ingredients.
 
 import { itemIdOf, FISH_ITEMS, ITEMS, FAMILY_DISH_NAMES } from './Items.js';
-import { BLOCKS, IS_SLAB } from '../world/Blocks.js';
+import { BLOCKS, IS_SLAB, IS_SUBMERGED, RENDER_TYPE, R_CROSS } from '../world/Blocks.js';
 
 /** @type {Array<{out:string,count:number,shape?:string[],key?:object,in?:string[],table?:boolean}>} */
 const RAW = [
@@ -302,6 +302,26 @@ const RAW = [
   // sweetener. Birds drop eggs now and bees drop honeycomb, so both branches
   // are written out below and `shopOnly` is down to the two imports the planet
   // genuinely cannot make (see Items.js).
+  /**
+   * Fifteen species, ONE recipe, and it belongs to the kitchen.
+   *
+   * This was sixteen rows in the smelting table - one per species plus the
+   * plain fish - so the kiln's list opened with sixteen identical "Grilled
+   * Fish" entries and the owner asked the obvious question. A fillet off a fire
+   * is a fillet: the species is a fact about the water you pulled it out of, and
+   * the pan is where that stops mattering.
+   *
+   * One row does all sixteen because `fish` is a FAMILY (see FAMILY_OF_NAME),
+   * and a recipe naming a family member is satisfied by any of them - the same
+   * machinery that lets a recipe naming oak boards take birch. Nothing
+   * downstream changed: the sandwich, the stew and the burger all ask for
+   * `cooked_fish` and always did.
+   *
+   * At the kitchen rather than the kiln because that is where cooking is, and
+   * because a kiln is for ore and clay. It costs fuel either way - see
+   * COOK_COST.
+   */
+  { out: 'cooked_fish', count: 1, station: 'kitchen', in: ['fish'] },
   { out: 'bread', count: 1, station: 'kitchen', in: ['wheat', 'wheat', 'wheat'] },
   { out: 'salad', count: 1, station: 'kitchen', in: ['carrot', 'tomato', 'corn'] },
   { out: 'soup', count: 1, station: 'kitchen', in: ['mushroom', 'mushroom', 'carrot'] },
@@ -580,9 +600,25 @@ const FAMILY_NAMES = [
   ['oak_planks', 'planks_birch', 'planks_pine', 'planks_dark', 'planks_grey'],
 ];
 
+/**
+ * The substitution families, which is FAMILY_NAMES plus the fish.
+ *
+ * The fish are here rather than in the list above because that list drives TWO
+ * things and the fish only want one of them. `speciesTyped` reads it to decide
+ * whether a recipe's match should be narrowed, and it matches a name that ENDS
+ * IN `_<member>` - which is right for `slab_planks_birch` and catastrophic for
+ * fish, because `cooked_fish` ends in `_fish`. Adding them up there marked the
+ * grilled-fish recipe as species-typed, so it demanded the exact plain `fish`
+ * and none of the fifteen species could be grilled at all.
+ *
+ * Nothing in this game is named `<something>_tetra`, so the fish never need the
+ * suffix rule. They need the other half: may a tetra stand in for a fish.
+ */
+const SUBSTITUTABLE = [...FAMILY_NAMES, ['fish', ...FISH_ITEMS]];
+
 const FAMILY = new Map();      // canonical id -> Set of accepted ids
 const MEMBER_OF = new Map();   // any id -> canonical id
-for (const names of FAMILY_NAMES) {
+for (const names of SUBSTITUTABLE) {
   const ids = names.map(itemIdOf).filter(Boolean);
   if (ids.length < 2) continue;
   const set = new Set(ids);
@@ -711,7 +747,7 @@ export const SMELTING = [
   { in: 'log_pine', out: 'charcoal', count: 1, time: 7 },
   { in: 'pumpkin', out: 'roast', count: 1, time: 7 },
   { in: 'meat', out: 'cooked_meat', count: 1, time: 6 },
-  { in: 'fish', out: 'cooked_fish', count: 1, time: 6 },
+
   // Smaller animals cook faster, which is the only mechanical difference
   // between the three meats — the rest is that you can tell what you shot.
   { in: 'poultry', out: 'cooked_poultry', count: 1, time: 5 },
@@ -740,24 +776,8 @@ export const SMELTING = [
   // counterplay to a hazard must never be a chore, or the hazard is just a tax
   // on a crop nobody plants twice. 2 → 6 keeps the ladder's invariant.
   { in: 'greenbean', out: 'cooked_greenbean', count: 1, time: 4 },
-  /**
-   * Fifteen species, one grilled fish.
-   *
-   * The alternative was a cooked item per species, and it is thirty items and a
-   * thirty-line larder against one honest observation: **a fillet off a fire is
-   * a fillet.** The species is a fact about the water you pulled it out of, and
-   * the pan is where that stops mattering. Nothing downstream had to learn a new
-   * name either — the sandwich, the stew and the burger all ask for
-   * `cooked_fish` and all fifteen now feed them.
-   *
-   * It is also what keeps the ladder's one invariant intact for free. Cooking
-   * has to beat raw, and the raw band here runs 3 to 5 against a grilled fish at
-   * 8: strictly more from every rung, including the abyss species, which are the
-   * only raw food on the planet above the foraging ceiling of 4.
-   *
-   * Six seconds each, the same as `fish`, because they are the same fillet.
-   */
-  ...FISH_ITEMS.map((name) => ({ in: name, out: 'cooked_fish', count: 1, time: 6 })),
+  // GRILLED FISH IS NOT SMELTED, and the fifteen rows that used to be here are
+  // one row in the kitchen now. See `cooked_fish` in RAW.
 ].map((s) => ({ in: itemIdOf(s.in), out: itemIdOf(s.out), count: s.count, time: s.time }))
   .filter((s) => s.in && s.out);
 
@@ -782,14 +802,34 @@ export const SMELTING = [
  * wooden things whose size the derivation cannot see, a stick and a sapling.
  */
 export const FUEL = {};
-const PLANKS = 12, HALF_PLANK = 6, WOODEN_TOOL = 10;
+const PLANKS = 12, HALF_PLANK = 6, WOODEN_TOOL = 10, KINDLING = 2;
 for (const it of ITEMS) {
   if (!it) continue;
   if (it.tool && it.name.startsWith('wood_')) { FUEL[it.id] = WOODEN_TOOL; continue; }
   if (it.block === undefined) continue;
   const b = BLOCKS[it.block];
-  if (!b || b.sound !== 'wood') continue;
-  FUEL[it.id] = IS_SLAB[it.block] ? HALF_PLANK : PLANKS;
+  if (!b) continue;
+  if (b.sound === 'wood') { FUEL[it.id] = IS_SLAB[it.block] ? HALF_PLANK : PLANKS; continue; }
+  // KINDLING. "Since flowers exist wouldn't it make more sense if they can also
+  // be used as fuels?" - yes, and the rule that says so is the same shape as
+  // the wooden one above: a dry land plant is dry plant matter and dry plant
+  // matter burns.
+  //
+  // Three exclusions, and each one is a different reason. A SUBMERGED plant is
+  // wet - kelp and coral do not light. FOOD is not fuel: a game where you can
+  // burn your dinner to cook your dinner is a game with no hunger in it, and
+  // the improvised-bowl rule means almost anything edible is a meal here. And a
+  // crop's growth STAGES are not a thing you hold - they exist so a field can
+  // be half grown - so they are excluded by their `_0`.. names rather than
+  // left to burn as if they were harvests.
+  //
+  // KINDLING is 2, half a stick: a fistful of dried flowers is not a log, and
+  // at COOK_COST 4 it takes two of them to cook one dish. That is deliberately
+  // a poor trade against a plank at 12 - it is what you burn when you have
+  // nothing else.
+  const dryFlora = RENDER_TYPE[it.block] === R_CROSS && b.sound === 'grass'
+    && !IS_SUBMERGED[it.block] && !it.food && !/_[0-9]$/.test(it.name);
+  if (dryFlora) FUEL[it.id] = KINDLING;
 }
 for (const [name, ticks] of Object.entries({
   coal: 60, charcoal: 60, coal_block: 540, peat: 30, sulfur: 20,

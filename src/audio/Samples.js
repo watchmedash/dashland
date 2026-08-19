@@ -70,6 +70,34 @@ export const SAMPLES = {
   punch: 'punch.ogg',
   arrowHit: 'arrow_hit.ogg',
   blastCrack: 'blast_crack.ogg',
+
+  // ---------------------------------------------------------------------------
+  // NOT SHIPPED YET. Every name below is wired at its play site and every one
+  // of them 404s today, which is the designed outcome and not a fault: `load`
+  // resolves a miss to null, `has` stays false, and the synthesised voice that
+  // has always made the sound goes on making it. Dropping the file into
+  // public/audio/ is the whole of the work needed to turn each one on.
+  //
+  // The nine boots. One clean hit per surface, dry, no variation set needed:
+  // `step()` randomises pitch, level and the scuff behind it per play, so five
+  // stone footsteps are generated from one good stone footstep. This is the
+  // single largest remaining win in the mix — nine surfaces, several times a
+  // second, for the whole game.
+  stepStone: 'step_stone.ogg',
+  stepSoil: 'step_soil.ogg',
+  stepGrass: 'step_grass.ogg',
+  stepSand: 'step_sand.ogg',
+  stepSnow: 'step_snow.ogg',
+  stepWood: 'step_wood.ogg',
+  stepGlass: 'step_glass.ogg',
+  stepMetal: 'step_metal.ogg',
+  stepWater: 'step_water.ogg',
+
+  // Layered over the two loudest new voices, and only over their leading edge.
+  // The synthesised tails must stay: they re-roll on every call and a recorded
+  // tail is the part a player would learn.
+  portalWhoosh: 'portal_whoosh.ogg',
+  bossRoar: 'boss_roar.ogg',
 };
 
 /**
@@ -87,6 +115,11 @@ export const LOAD_ORDER = [
   'shriekBug', 'wailGhost', 'gurgleDeep', 'exhaleHusk', 'yellPain',
   'swingAir', 'hitFlesh', 'punch', 'arrowHit', 'blastCrack',
   'foliage', 'crickets', 'cicada',
+  // Last, and every one of them absent today. They are at the end because a
+  // 404 costs a round trip and these are the twelve most likely to be it; the
+  // fifteen above are all present and must not queue behind them.
+  'stepStone', 'stepGrass', 'stepWood', 'stepSand', 'stepSnow', 'stepSoil',
+  'stepGlass', 'stepMetal', 'stepWater', 'portalWhoosh', 'bossRoar',
 ];
 
 export class Samples {

@@ -79,6 +79,20 @@ const MATERIAL_TUNING = {
   water: { lo: 300, hi: 2600, decay: 0.22, tone: 0.10, noise: 1.0, body: 0 },
 };
 
+/**
+ * Which recording a footstep on each material layers, once one exists.
+ *
+ * Keyed off MATERIAL_TUNING's own nine, which is not quite the nine a player
+ * would name: there is no `gravel` row in this engine and there IS a `water`
+ * one, because a puddle is a surface you walk on and `_waterStep` is what
+ * answers it.
+ */
+const STEP_SAMPLE = {
+  stone: 'stepStone', soil: 'stepSoil', grass: 'stepGrass', sand: 'stepSand',
+  snow: 'stepSnow', wood: 'stepWood', glass: 'stepGlass', metal: 'stepMetal',
+  water: 'stepWater',
+};
+
 // Distance law shared by every positional source. Inverse rolloff, so a sound
 // at `REF_DISTANCE` plays at full level and falls away as roughly ref/dist
 // beyond it: 4/(4 + 1.1*(d-4)) → 1.00 at 4m, 0.28 at 15m, 0.09 at 40m.
@@ -1010,6 +1024,24 @@ export class Audio {
     g.gain.exponentialRampToValueAtTime(0.0004, t + d);
     src.connect(bp).connect(g).connect(out);
     src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+
+    // A recorded boot layered ON TOP of the synthesised one, per surface, if
+    // and when one exists.
+    //
+    // None of the nine files is shipped today and this line is a no-op until
+    // one is: `_shot` returns false with no buffer, exactly as it does for the
+    // monster throats before they land. It is wired now rather than later
+    // because the slot names and the rate spread are the part that has to be
+    // decided once, and a footstep is the one sound in the game a recording
+    // most improves — nine surfaces, several times a second, for the whole
+    // game, and grain is the thing synthesis cannot give it.
+    //
+    // Started at the burst's own onset rather than at `t`, which is 12-32ms
+    // late: the scuff is deliberately behind the boot and the recording is the
+    // boot. Rate spread is deliberately narrow — a footstep pitched around by
+    // 20% stops sounding like the same person.
+    this._shot(STEP_SAMPLE[mat], out, this.ctx.currentTime,
+      { gain: 0.42 * trim, rate: [0.94, 1.08] });
   }
 
   /**
@@ -1112,6 +1144,10 @@ export class Audio {
     g.gain.exponentialRampToValueAtTime(0.0004, t + d);
     src.connect(bp).connect(g).connect(out);
     src.start(t, Math.random() * 2); src.stop(t + d + 0.05);
+    // The tenth boot. `step()` hands water off here before it reaches its own
+    // layer, so the slot has to be read in both places or a puddle is the one
+    // surface a recording never reaches.
+    this._shot('stepWater', out, t, { gain: 0.40, rate: [0.94, 1.08] });
   }
 
   /**
@@ -3287,6 +3323,11 @@ export class Audio {
     air.connect(abp).connect(ag).connect(out);
     air.start(t, Math.random() * 2); air.stop(t + 0.3);
 
+    // The recorded leading edge, if one ever lands. Over the top of the intake
+    // rather than instead of it: everything below re-rolls per play and only
+    // the first 200ms of this sound is the same shape twice.
+    this._shot('portalWhoosh', out, t, { gain: 0.5, rate: [0.92, 1.10] });
+
     // the swallow
     const sw = this.ctx.createBufferSource();
     sw.buffer = this.noiseBuf;
@@ -3412,6 +3453,10 @@ export class Audio {
       if (this.reverbGain) g.connect(this.reverbGain);
       o.start(t + 0.05); o.stop(t + 0.1 + d);
     }
+
+    // Same contract as the portal's: a recording thickens the throat and never
+    // replaces it, and the rate follows `pitch` so the sixteen stay sixteen.
+    this._shot('bossRoar', out, t + 0.18, { gain: 0.45, rate: [pitch * 0.92, pitch * 1.08] });
 
     // the roar: noise through two formants, chopped
     const n = this.ctx.createBufferSource();

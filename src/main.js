@@ -83,7 +83,7 @@ import {
   FACE_PHYSICS, FACE_NAME,
 } from './world/Constants.js';
 import {
-  W, SEA_K, colIndex, faceAt, delta,
+  W, SEA_K, colIndex, faceAt, delta, isWall,
 } from './world/Grid.js';
 import {
   colParts, colNeighbor, stepColumn, cellIdx, cellCorner,
@@ -209,6 +209,9 @@ function bossPitch(type) {
   for (let i = 0; i < (type || '').length; i++) h = (h * 31 + type.charCodeAt(i)) | 0;
   return 0.72 + ((h >>> 0) % 64) / 64 * 0.63;
 }
+
+/** Columns out from a divider that the portal hum can still be heard at. */
+const HUM_R = 8;
 
 const CRUMB_FALLBACK = [0.60, 0.44, 0.28];
 function foodCrumbColor(item) {
@@ -7041,6 +7044,9 @@ class Game {
       this.breath = 1;
       this._drownTimer = 0;
       this._drownSaid = false;
+      // `_tickMoveSound` does not run for a spectator, so the divider hum would
+      // otherwise hold at whatever level the body died at, for ever.
+      this.audio.portalHum(0);
       this.player.burning = 0;
       this.soakT = 0;
       // A spectator's `headInSink` is stale for the same reason `headInWater`
@@ -7532,6 +7538,26 @@ class Game {
         this.audio.ladder(p.position);
       }
     } else this._rungY = null;
+
+    // The hum off a divider you are standing near.
+    //
+    // A level rather than an event, and the only continuous sound in the game
+    // that answers a place rather than a condition. Probed on the four
+    // cardinals rather than over a ring because a divider is a straight run one
+    // column thick, so the nearest one is always on an axis from where you are
+    // standing — 32 modular compares, on a quarter-second timer, instead of a
+    // 17x17 square every frame.
+    this._humT = (this._humT || 0) - dt;
+    if (this._humT <= 0) {
+      this._humT = 0.25;
+      const cx = p.cell.x, cy = p.cell.y;
+      let near = 0;
+      for (let r = 0; r <= HUM_R; r++) {
+        if (isWall(cx + r, cy) || isWall(cx - r, cy)
+          || isWall(cx, cy + r) || isWall(cx, cy - r)) { near = 1 - r / HUM_R; break; }
+      }
+      this.audio.portalHum(near);
+    }
   }
 
   /**

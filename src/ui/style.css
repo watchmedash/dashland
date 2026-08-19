@@ -2072,7 +2072,50 @@ body.fighting #toasts { top: 172px; }
 
 .inv-panel { width: min(830px, 100%); }
 /* Set for the crate, which has no sidebar and no craft grid. See openScreen. */
-#screen.snug .inv-panel { width: fit-content; max-width: min(830px, 100%); }
+/* The crate keeps a narrow column, and now it is CENTRED in the sheet.
+   `width: fit-content` was written when a panel was a card floating on a dim,
+   where the card's own auto margins centred it for free. The panel is the sheet
+   now — the overlay rule above gives it `width: 100%` — so shrinking it left a
+   499px box hard against the left edge of a 929px screen with the world showing
+   beside it, which is what the owner opened a crate and found. The margin is
+   the whole fix; the width was never the problem. */
+#screen.snug .inv-panel {
+  width: fit-content; max-width: min(830px, 100%);
+  margin-inline: auto;
+}
+
+/* ── a short window ─────────────────────────────────────── */
+/* The bag screens are the tallest thing in the game: a crate is 27 cells over
+   the player's own 36, which is seven rows of pockets before the header. At the
+   desktop's 46px that is 392px of content, and a phone held sideways has 393px
+   of SCREEN. So the panel scrolled by a few pixels, the last row was cut
+   through the middle, and on a touch device there is no scrollbar to say so.
+
+   The cells come down instead of the screen scrolling, because a bag you scroll
+   is a bag you cannot see, and the whole point of opening a crate is comparing
+   two grids at a glance. 38px still takes a thumb — Material's floor for a
+   touch target is 48px including its spacing, and the gap plus the cell's own
+   border clears that.
+
+   Keyed on height alone. A short WIDE window is a phone held sideways, which is
+   exactly the case, and a short narrow one is a desktop window dragged small,
+   where the same fix is just as welcome. */
+@media (max-height: 620px) {
+  #screen .islot { width: 38px; height: 38px; }
+  #screen .islot img { width: 32px; height: 32px; }
+  #screen .inv-grid { gap: 3px; }
+  #screen .inv-section { padding: 6px; }
+  #screen .inv-body { gap: 14px; }
+  #screen .panel { padding: 8px 14px; }
+  #screen .panel header { margin-bottom: 6px; padding-bottom: 6px; }
+}
+/* ...and one step tighter for the shortest phones, where 38 still would not
+   fit: 393px of height against a header and seven rows. */
+@media (max-height: 440px) {
+  #screen .islot { width: 33px; height: 33px; }
+  #screen .islot img { width: 28px; height: 28px; }
+  #screen .inv-body { gap: 10px; }
+}
 #screen-top { margin-bottom: 16px; }
 
 /* Bag and craft list as one group in the middle of the sheet, rather than one

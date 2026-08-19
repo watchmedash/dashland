@@ -112,6 +112,19 @@ export class Endgame {
   onWin = null;
   /** Raised once, the frame the sixteen are placed. */
   onBegin = null;
+  /**
+   * Raised each time one of the sixteen materialises in front of the player,
+   * and each time one goes down. Hooks rather than a `game` handle in the
+   * constructor, matching `onWin`/`onBegin` above: this class knows about a
+   * planet and a mob manager and nothing else, and the only consumer that
+   * wants these is the one that owns the audio engine.
+   *
+   * `onBoss` is NOT once per boss. A body is despawned when you walk away and
+   * re-made when you come back, so this fires on every materialisation, which
+   * is the right rate for a sound: the arrival is the news either way.
+   */
+  onBoss = null;
+  onDown = null;
 
   reset() {
     this.triggered = false;
@@ -291,6 +304,7 @@ export class Endgame {
       if (r.hp > 0) mob.health = Math.min(mob.health, r.hp);
       else r.hp = mob.health;
       r.live = mob;
+      this.onBoss?.(mob);
     }
   }
 
@@ -316,6 +330,7 @@ export class Endgame {
     r.dead = true;
     r.hp = 0;
     r.live = null;
+    this.onDown?.(mob);
     if (this.standing === 0 && !this.won) {
       this.won = true;
       this.onWin?.();

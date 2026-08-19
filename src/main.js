@@ -194,6 +194,22 @@ const CORNER_STEPS = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
  * to a dull crust brown rather than to white, because a white crumb reads as a
  * spark and the one thing these must not look like is fire.
  */
+/**
+ * A boss's vocal register, from its species name.
+ *
+ * Sixteen bosses sharing one horn is sixteen renders of the same animal, and
+ * the sound is the only thing that arrives before the model does. A hash of the
+ * name rather than the roster index so a boss keeps its voice if the roster is
+ * ever reordered, and a range of 0.72 to 1.35 because that is a little under an
+ * octave: wide enough that no two of the sixteen are confusable, narrow enough
+ * that the bottom one is still a throat and not a foghorn.
+ */
+function bossPitch(type) {
+  let h = 0;
+  for (let i = 0; i < (type || '').length; i++) h = (h * 31 + type.charCodeAt(i)) | 0;
+  return 0.72 + ((h >>> 0) % 64) / 64 * 0.63;
+}
+
 const CRUMB_FALLBACK = [0.60, 0.44, 0.28];
 function foodCrumbColor(item) {
   const hex = item?.color;
@@ -2083,7 +2099,10 @@ class Game {
     // explanations. Where they are and what they do is the game's to show.
     this.endgame.onBegin = () => {
       this.ui.toast('The sixteen are awake.', itemIdOf('gold_carrot'), 6000);
-      this.audio.ui(320);
+      // Was `ui(320)`, the same 90ms menu blip that answers a tab change. The
+      // horn is pitched low because this one is the whole roster waking, not
+      // one animal: the per-boss arrivals below are all above it.
+      this.audio.bossSpawn(null, 0.78);
     };
     // The mark itself is set by `Achievements.scan` off `endgame.won`, on the
     // same once-a-second sweep every other flag is found by. This is only the
@@ -2092,6 +2111,17 @@ class Game {
       this.ui.toast('All sixteen down.', itemIdOf('gold_carrot'), 9000);
       this.audio.ui(720);
     };
+    // A boss arriving, and a boss dying. Both were silent, which for the
+    // sixteen things the whole game is pointed at is the largest single hole in
+    // the mix. `_bossPitch` spreads them over an octave off the species name so
+    // the arrivals are not sixteen renders of one animal; see below.
+    this.endgame.onBoss = (mob) => this.audio.bossSpawn(mob.position, bossPitch(mob.type));
+    this.endgame.onDown = (mob) => this.audio.bossDeath(mob.position, bossPitch(mob.type));
+    // Stepping through a face divider. `Player.onPortal` has existed since the
+    // nine-face rewrite with the comment "Fired on a transit, so the Game can
+    // play it" and nothing has ever assigned it, so the most dramatic thing in
+    // the game happened in complete silence.
+    this.player.onPortal = () => this.audio.portal();
     // The player's body. Built after Drops because it borrows the same factory
     // the drops use — what you carry and what you dropped are the same mesh.
     this.character = new PlayerCharacter(this.scene, (id) => this.drops.createItemMesh(id));
@@ -8003,7 +8033,21 @@ class Game {
     const mins = this.settings.dayMinutes;
     const days = mins > 0 ? dt / (mins * 60) : dt / 86400;
     if (mins > 0) this.dayT = (this.dayT + days) % 1;
+    // The season turning, which had no sound and no event of any kind: the
+    // whole system is recomputed getters, so nothing anywhere in the game knew
+    // that a season had ended.
+    //
+    // Latched here rather than in `_pushSeason`, which is also called on world
+    // load and on New Game and would announce whatever season the save was
+    // resumed in. `_seasonAt` is undefined on the first tick, so the guard is
+    // false exactly once and no world ever opens with a chime.
+    const was = this.seasons.index;
+    const wasCold = this.seasons.cold;
     this.seasons.advance(days);
+    if (this._seasonAt === was && this.seasons.index !== was) {
+      this.audio.season(this.seasons.cold > wasCold);
+    }
+    this._seasonAt = this.seasons.index;
     this._pushSeason();
     this._tickSunTurn();
   }

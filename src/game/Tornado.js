@@ -382,6 +382,8 @@ export class Tornado {
     this.age = 0;
     this.life = LIFE[0] + Math.random() * (LIFE[1] - LIFE[0]);
     this.strength = 0;
+    /** Countdown to the next re-fire of the roar bed; see `update`. */
+    this._roarT = 0;
     this.dead = false;
     /** Radius the player's feet were at when the core first took them. */
     this._heldFrom = 0;
@@ -478,6 +480,20 @@ export class Tornado {
       if (w) {
         const near = 1 - Math.min(1, far / 60);
         w.wind = Math.max(w.wind, w.wind + (WIND_PEAK - w.wind) * near * this.strength);
+      }
+
+      // The funnel's own roar. Until now the whole event had exactly one sound
+      // in it, the `squall` gust on formation, and then a mile-wide column of
+      // air crossed the map in silence. `Audio.tornado` is built like `churn`,
+      // as a condition rather than an event, so it is re-fired on a timer and
+      // approach makes it LOUDER rather than more frequent. The period is
+      // shorter than the voice's own 2.4-3.2s length so the beds overlap and
+      // the roar never gaps.
+      this._roarT -= dt;
+      if (this._roarT <= 0 && this.strength > 0.04) {
+        this._roarT = 1.7 + Math.random() * 0.5;
+        this.game.audio?.tornado(
+          Math.min(1, (1 - Math.min(1, far / 90)) * this.strength), this.pos);
       }
     }
 

@@ -3022,6 +3022,474 @@ export class Audio {
     return true;
   }
 
+  // --- world events ----------------------------------------------------------
+  //
+  // Everything below this line answers an event that used to happen in complete
+  // silence. They are grouped rather than filed next to their nearest relative
+  // because that is the useful fact about them: the game had nine systems
+  // (portals, bosses, achievements, trade, barter, farming, seasons, lightning,
+  // the player's own status effects) that made no sound of any kind, and a
+  // player could not tell any of them had happened without watching the HUD.
+
+  /**
+   * Stepping through a face divider. The most dramatic thing in the game and it
+   * was the quietest: you walked into a wall of light and arrived somewhere
+   * else with no more sound than a footstep.
+   *
+   * Three layers, and the order is the gesture. A short intake FIRST — a
+   * bandpass sweeping UP and cut off before it lands, which is air being pulled
+   * in rather than pushed out; then the swallow, a long noise body through a
+   * band falling from 3.4kHz to 140Hz, which is the same descending-band trick
+   * `churn` uses to mean "something closing over you"; and under both of them a
+   * detuned pair dropping a seventh, because a tuned interval is the only thing
+   * in the palette that says a machine did this rather than the weather.
+   *
+   * The pair is deliberately NOT in unison: 7 cents apart beats at about 3Hz
+   * over the second, which is what stops it reading as a synth pad note.
+   * Non-positional by default — the portal you took is not somewhere else.
+   */
+  portal(pos = null) {
+    if (!this._live() || !this._take('weather', 1.6)) return;
+    const t = this.ctx.currentTime;
+    const d = 0.85 + Math.random() * 0.25;
+    const out = this._dest(pos, d + 0.6);
+
+    // the intake: bright, short, and cut before it resolves
+    const air = this.ctx.createBufferSource();
+    air.buffer = this.noiseBuf;
+    air.playbackRate.value = 1.2 + Math.random() * 0.5;
+    const abp = this.ctx.createBiquadFilter();
+    abp.type = 'bandpass'; abp.Q.value = 1.4;
+    abp.frequency.setValueAtTime(700, t);
+    abp.frequency.exponentialRampToValueAtTime(4200 + Math.random() * 1200, t + 0.18);
+    const ag = this.ctx.createGain();
+    ag.gain.setValueAtTime(0.0001, t);
+    ag.gain.linearRampToValueAtTime(0.16, t + 0.05);
+    ag.gain.exponentialRampToValueAtTime(0.0004, t + 0.22);
+    air.connect(abp).connect(ag).connect(out);
+    air.start(t, Math.random() * 2); air.stop(t + 0.3);
+
+    // the swallow
+    const sw = this.ctx.createBufferSource();
+    sw.buffer = this.noiseBuf;
+    sw.loop = true;
+    sw.playbackRate.value = 0.55 + Math.random() * 0.25;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.8;
+    bp.frequency.setValueAtTime(3400 * (0.85 + Math.random() * 0.3), t + 0.10);
+    bp.frequency.exponentialRampToValueAtTime(140, t + 0.10 + d);
+    const sg = this.ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t + 0.10);
+    sg.gain.linearRampToValueAtTime(0.30, t + 0.20);
+    sg.gain.exponentialRampToValueAtTime(0.0004, t + 0.10 + d);
+    sw.connect(bp).connect(sg).connect(out);
+    sw.start(t + 0.10, Math.random() * 2); sw.stop(t + 0.15 + d);
+
+    // the machine underneath it
+    const f0 = 330 * (0.94 + Math.random() * 0.12);
+    for (const cents of [-7, 7]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'triangle';
+      o.detune.value = cents;
+      o.frequency.setValueAtTime(f0, t + 0.06);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.56, t + 0.06 + d * 0.9);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + 0.06);
+      g.gain.linearRampToValueAtTime(0.13, t + 0.14);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + 0.06 + d);
+      o.connect(g).connect(out);
+      if (this.reverbGain) g.connect(this.reverbGain);
+      o.start(t + 0.06); o.stop(t + 0.10 + d);
+    }
+  }
+
+  /**
+   * Standing near a divider. A level, not an event: the caller passes 0..1 for
+   * how close the player is and this holds a hum there.
+   *
+   * Built once and left running at a gain of zero rather than started and
+   * stopped, because a portal is something you walk towards and away from
+   * dozens of times and every start/stop of an oscillator pair is a click. Two
+   * oscillators and one filtered noise source is a fixed cost of three nodes
+   * for the whole session, which is less than one footstep builds.
+   *
+   * A perfect fifth, not a unison and not an octave: an octave reads as one
+   * note and disappears under the wind, and a fifth is the widest interval that
+   * still sounds like one object rather than two.
+   */
+  portalHum(level = 0) {
+    if (!this.ctx) return;
+    if (!this._hum) {
+      const g = this.ctx.createGain();
+      g.gain.value = 0.0001;
+      g.connect(this.ambBus || this.master);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.7;
+      lp.connect(g);
+      for (const f of [82.4, 123.5]) {
+        const o = this.ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.value = f;
+        // A slow wander so it is never quite a held note. 0.07Hz is one cycle
+        // every fourteen seconds, well under the rate the ear tracks as vibrato.
+        const lfo = this.ctx.createOscillator();
+        lfo.type = 'sine'; lfo.frequency.value = 0.07 + Math.random() * 0.05;
+        const dep = this.ctx.createGain(); dep.gain.value = 4;
+        lfo.connect(dep).connect(o.detune);
+        const og = this.ctx.createGain(); og.gain.value = 0.5;
+        o.connect(og).connect(lp);
+        o.start(); lfo.start();
+      }
+      const n = this.ctx.createBufferSource();
+      n.buffer = this.noiseBuf; n.loop = true; n.playbackRate.value = 0.22;
+      const nbp = this.ctx.createBiquadFilter();
+      nbp.type = 'bandpass'; nbp.frequency.value = 420; nbp.Q.value = 0.9;
+      const ng = this.ctx.createGain(); ng.gain.value = 0.35;
+      n.connect(nbp).connect(ng).connect(lp);
+      n.start(0, Math.random() * 2);
+      this._hum = g;
+    }
+    const want = Math.max(0.0001, Math.min(1, level) * 0.055);
+    this._hum.gain.setTargetAtTime(want, this.ctx.currentTime, 0.25);
+  }
+
+  /**
+   * One of the sixteen bosses arriving.
+   *
+   * The brief asked for a roar or a horn and the answer is both, because they
+   * do different halves of the job: the horn is tuned and therefore reads as
+   * intent, and the roar is broadband and therefore reads as size. A horn alone
+   * is a fanfare and a roar alone is just a louder mob.
+   *
+   * `pitch` is the one knob the caller has, so the sixteen do not all arrive as
+   * the same animal — it multiplies the horn's root and the roar's formants
+   * together, which keeps the two layers reading as one throat.
+   *
+   * The horn falls a minor third rather than holding: a held note is a signal
+   * and a falling one is a creature. The roar is chopped at 7Hz by an LFO on
+   * its own gain, the same `rough` mechanism the mob roars use, which is what
+   * separates a bellow from a wall of noise.
+   */
+  bossSpawn(pos = null, pitch = 1) {
+    if (!this._live() || !this._take('weather', 3.2)) return;
+    const t = this.ctx.currentTime;
+    const d = 2.2 + Math.random() * 0.5;
+    const out = this._dest(pos, d + 0.8, false, true);
+
+    // the horn: three partials, all falling together
+    const root = 72 * pitch * (0.94 + Math.random() * 0.12);
+    for (const [mul, amt, type] of [[1, 1, 'sawtooth'], [2, 0.45, 'triangle'], [3, 0.22, 'sine']]) {
+      const o = this.ctx.createOscillator();
+      o.type = type;
+      o.frequency.setValueAtTime(root * mul, t + 0.05);
+      o.frequency.exponentialRampToValueAtTime(root * mul * 0.84, t + 0.05 + d * 0.8);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 1400 * pitch; lp.Q.value = 0.8;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + 0.05);
+      // A slow swell, not a hit. Something this size is heard arriving.
+      g.gain.linearRampToValueAtTime(0.20 * amt, t + 0.42);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + 0.05 + d);
+      o.connect(lp).connect(g).connect(out);
+      if (this.reverbGain) g.connect(this.reverbGain);
+      o.start(t + 0.05); o.stop(t + 0.1 + d);
+    }
+
+    // the roar: noise through two formants, chopped
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf; n.loop = true;
+    n.playbackRate.value = 0.5 + Math.random() * 0.2;
+    const f1 = this.ctx.createBiquadFilter();
+    f1.type = 'bandpass'; f1.frequency.value = 320 * pitch; f1.Q.value = 3.2;
+    const f2 = this.ctx.createBiquadFilter();
+    f2.type = 'bandpass'; f2.frequency.value = 760 * pitch; f2.Q.value = 2.4;
+    const mix = this.ctx.createGain();
+    n.connect(f1).connect(mix);
+    n.connect(f2).connect(mix);
+    const rg = this.ctx.createGain();
+    rg.gain.setValueAtTime(0.0001, t + 0.18);
+    rg.gain.linearRampToValueAtTime(0.34, t + 0.55);
+    rg.gain.exponentialRampToValueAtTime(0.0004, t + 0.18 + d * 0.85);
+    // the chop
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine'; lfo.frequency.value = 6 + Math.random() * 4;
+    const dep = this.ctx.createGain(); dep.gain.value = 0.35;
+    lfo.connect(dep).connect(rg.gain);
+    mix.connect(rg).connect(out);
+    n.start(t + 0.18, Math.random() * 2); n.stop(t + 0.25 + d);
+    lfo.start(t + 0.18); lfo.stop(t + 0.25 + d);
+
+    // and the pressure under all of it
+    const sub = this.ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(46 * pitch, t);
+    sub.frequency.exponentialRampToValueAtTime(30 * pitch, t + d * 0.6);
+    const sg = this.ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t);
+    sg.gain.linearRampToValueAtTime(0.30, t + 0.20);
+    sg.gain.exponentialRampToValueAtTime(0.0004, t + d * 0.75);
+    sub.connect(sg).connect(out);
+    sub.start(t); sub.stop(t + d * 0.8);
+  }
+
+  /**
+   * A boss dying. `bossSpawn` run backwards in every respect that carries the
+   * meaning, which is the same relationship `kiln(false)` has to `kiln(true)`.
+   *
+   * The horn RISES on the way in and then collapses, rather than swelling: a
+   * death is a thing losing control, so the pitch envelope is a long
+   * exponential fall to a quarter of where it started with no floor under it.
+   * The roar chop SLOWS as it goes, from 11Hz to 3Hz, which is a throat running
+   * out of air. Then rubble, borrowed in spirit from `blast`, because sixteen
+   * tons of something has to land.
+   */
+  bossDeath(pos = null, pitch = 1) {
+    if (!this._live() || !this._take('weather', 3.6)) return;
+    const t = this.ctx.currentTime;
+    const d = 2.6 + Math.random() * 0.6;
+    const out = this._dest(pos, d + 0.9, false, true);
+
+    const root = 96 * pitch * (0.94 + Math.random() * 0.12);
+    for (const [mul, amt] of [[1, 1], [1.5, 0.4], [2.02, 0.25]]) {
+      const o = this.ctx.createOscillator();
+      o.type = mul === 1 ? 'sawtooth' : 'triangle';
+      o.frequency.setValueAtTime(root * mul, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(22, root * mul * 0.24), t + d);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(2200 * pitch, t);
+      lp.frequency.exponentialRampToValueAtTime(180, t + d);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.22 * amt, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+      o.connect(lp).connect(g).connect(out);
+      if (this.reverbGain) g.connect(this.reverbGain);
+      o.start(t); o.stop(t + d + 0.1);
+    }
+
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf; n.loop = true;
+    n.playbackRate.value = 0.45 + Math.random() * 0.2;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 2.0;
+    bp.frequency.setValueAtTime(620 * pitch, t);
+    bp.frequency.exponentialRampToValueAtTime(150, t + d * 0.8);
+    const rg = this.ctx.createGain();
+    rg.gain.setValueAtTime(0.0001, t);
+    rg.gain.linearRampToValueAtTime(0.26, t + 0.06);
+    rg.gain.exponentialRampToValueAtTime(0.0004, t + d * 0.8);
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(11, t);
+    lfo.frequency.linearRampToValueAtTime(3, t + d * 0.8);
+    const dep = this.ctx.createGain(); dep.gain.value = 0.30;
+    lfo.connect(dep).connect(rg.gain);
+    n.connect(bp).connect(rg).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + d * 0.85);
+    lfo.start(t); lfo.stop(t + d * 0.85);
+
+    // what is left of it hitting the ground
+    const bits = 3 + ((Math.random() * 4) | 0);
+    for (let i = 0; i < bits; i++) {
+      const st = t + 0.5 + Math.random() * 1.2;
+      this._noiseHit(out, st, {
+        gain: 0.06 + Math.random() * 0.07, lo: 90, hi: 500 + Math.random() * 600,
+        q: 1.2, dur: 0.10 + Math.random() * 0.12,
+      });
+    }
+  }
+
+  /**
+   * The strike itself, which is not the thunder.
+   *
+   * `thunder()` is the sky: a long low roll delayed behind the flash by how far
+   * away it was. This is the arc landing on the ground twenty metres from you,
+   * and the two are different sounds for a physical reason — you hear a nearby
+   * strike as a rip and a sizzle long before the rumble arrives, because the
+   * rip is the channel itself and the rumble is the air column behind it.
+   *
+   * So: an almost instant highpassed rip (2ms attack, no swell at all), a
+   * sizzle of irregular ticks after it, and one short sub for the ground. It is
+   * positional and `thunder` is not, which is the other half of the difference.
+   */
+  strike(pos = null, strength = 1) {
+    if (!this._live() || !this._take('sky', 1.6)) return;
+    const t = this.ctx.currentTime;
+    const amp = Math.min(1, strength);
+    const out = this._dest(pos, 1.8);
+
+    const rip = this.ctx.createBufferSource();
+    rip.buffer = this.noiseBuf;
+    rip.playbackRate.value = 1.7 + Math.random() * 0.6;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(3800, t);
+    hp.frequency.exponentialRampToValueAtTime(420, t + 0.22);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.46 * amp, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0006, t + 0.30);
+    rip.connect(hp).connect(g).connect(out);
+    rip.start(t, Math.random() * 2); rip.stop(t + 0.35);
+
+    // the sizzle: what is still arcing a moment after the channel closes
+    const ticks = 5 + ((Math.random() * 6) | 0);
+    for (let i = 0; i < ticks; i++) {
+      const st = t + 0.03 + Math.random() * 0.5;
+      this._noiseHit(out, st, {
+        gain: (0.04 + Math.random() * 0.06) * amp, lo: 1800,
+        hi: 6000 + Math.random() * 3000, q: 2.4, dur: 0.03 + Math.random() * 0.05,
+        at: 0.002,
+      });
+    }
+
+    const sub = this.ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(120, t + 0.01);
+    sub.frequency.exponentialRampToValueAtTime(34, t + 0.30);
+    const sg = this.ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t + 0.01);
+    sg.gain.linearRampToValueAtTime(0.34 * amp, t + 0.016);
+    sg.gain.exponentialRampToValueAtTime(0.0004, t + 0.55);
+    sub.connect(sg).connect(out);
+    sub.start(t + 0.01); sub.stop(t + 0.6);
+  }
+
+  /**
+   * A tornado, as a bed rather than an event.
+   *
+   * The system had exactly one call in it (a `squall` on formation) which is a
+   * gust: it announces the front and then the funnel crosses the map in total
+   * silence. This is the opposite kind of sound and is built the way `churn`
+   * is, as a condition the caller re-fires on a timer so that a funnel coming
+   * towards you gets LOUDER rather than more frequent.
+   *
+   * Three bands, because a real one is three noises stacked: a sub-bass roar
+   * that carries a mile, a mid body that is the debris, and a high howl that
+   * only appears when it is close. The howl is gated on `near` above a half for
+   * exactly that reason — hearing the top end of it at distance is what makes a
+   * synth funnel sound like a hairdryer.
+   *
+   * @param {number} near 0..1 — 0 is on the horizon, 1 is on top of you
+   */
+  tornado(near = 0.5, pos = null) {
+    if (!this._live() || !this._take('weather', 3.2)) return;
+    const t = this.ctx.currentTime;
+    const d = 2.4 + Math.random() * 0.8;
+    const out = this._dest(pos, d + 0.4, false, true);
+    const amp = 0.25 + near * 0.75;
+
+    const sub = this.ctx.createBufferSource();
+    sub.buffer = this.noiseBuf; sub.loop = true;
+    sub.playbackRate.value = 0.13 + Math.random() * 0.06;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 90 + near * 60; lp.Q.value = 0.8;
+    const sg = this.ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t);
+    sg.gain.linearRampToValueAtTime(0.16 * amp, t + d * 0.4);
+    sg.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    sub.connect(lp).connect(sg).connect(out);
+    sub.start(t, Math.random() * 2); sub.stop(t + d + 0.1);
+
+    const mid = this.ctx.createBufferSource();
+    mid.buffer = this.noiseBuf; mid.loop = true;
+    mid.playbackRate.value = 0.38 + Math.random() * 0.2;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.55;
+    // Wanders rather than sits. A fixed band is a fan; a moving one is a mass
+    // of air changing shape.
+    bp.frequency.setValueAtTime(240 + Math.random() * 120, t);
+    bp.frequency.linearRampToValueAtTime(420 + Math.random() * 260, t + d * 0.5);
+    bp.frequency.linearRampToValueAtTime(200 + Math.random() * 120, t + d);
+    const mg = this.ctx.createGain();
+    mg.gain.setValueAtTime(0.0001, t);
+    mg.gain.linearRampToValueAtTime(0.13 * amp, t + d * 0.35);
+    mg.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    mid.connect(bp).connect(mg).connect(out);
+    mid.start(t, Math.random() * 2); mid.stop(t + d + 0.1);
+
+    if (near > 0.5) {
+      const hi = this.ctx.createBufferSource();
+      hi.buffer = this.noiseBuf; hi.loop = true;
+      hi.playbackRate.value = 1.1 + Math.random() * 0.4;
+      const hbp = this.ctx.createBiquadFilter();
+      hbp.type = 'bandpass'; hbp.Q.value = 2.6;
+      hbp.frequency.setValueAtTime(1100 + Math.random() * 400, t);
+      hbp.frequency.linearRampToValueAtTime(1900 + Math.random() * 500, t + d);
+      const hg = this.ctx.createGain();
+      hg.gain.setValueAtTime(0.0001, t);
+      hg.gain.linearRampToValueAtTime(0.05 * (near - 0.5) * 2, t + d * 0.45);
+      hg.gain.exponentialRampToValueAtTime(0.0004, t + d);
+      hi.connect(hbp).connect(hg).connect(out);
+      hi.start(t, Math.random() * 2); hi.stop(t + d + 0.1);
+    }
+  }
+
+  /**
+   * The season turning. One gesture, played in two directions, like `kiln`.
+   *
+   * `toCold` runs a filtered sweep DOWN under a falling minor third and adds a
+   * brittle high shimmer; the other direction runs up under a rising major
+   * third with no shimmer at all. The shimmer is the whole tell: a high, thin,
+   * slightly detuned pair is what the ear has always read as cold, and its
+   * absence is what makes the warm turn feel like a weight coming off.
+   *
+   * Deliberately long and quiet. A season is not an event you react to, it is
+   * one you notice, so this sits under the wind rather than over it.
+   */
+  season(toCold = true) {
+    if (!this._live() || !this._take('sky', 2.6)) return;
+    const t = this.ctx.currentTime;
+    const d = 1.9 + Math.random() * 0.4;
+    const out = this.sfxBus;
+
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf; n.loop = true;
+    n.playbackRate.value = 0.3 + Math.random() * 0.2;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.7;
+    bp.frequency.setValueAtTime(toCold ? 2200 : 300, t);
+    bp.frequency.exponentialRampToValueAtTime(toCold ? 260 : 2600, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.085, t + d * 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    n.connect(bp).connect(g).connect(out);
+    if (this.reverbGain) g.connect(this.reverbGain);
+    n.start(t, Math.random() * 2); n.stop(t + d + 0.1);
+
+    const a = toCold ? 392 : 330;
+    const b = toCold ? 330 : 415.3;
+    [[a, 0], [b, 0.34]].forEach(([f, dt]) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f;
+      const og = this.ctx.createGain();
+      og.gain.setValueAtTime(0.0001, t + dt);
+      og.gain.linearRampToValueAtTime(0.075, t + dt + 0.06);
+      og.gain.exponentialRampToValueAtTime(0.0004, t + dt + 1.1);
+      o.connect(og).connect(out);
+      if (this.reverbGain) og.connect(this.reverbGain);
+      o.start(t + dt); o.stop(t + dt + 1.2);
+    });
+
+    if (toCold) {
+      for (const det of [-9, 11]) {
+        const o = this.ctx.createOscillator();
+        o.type = 'triangle';
+        o.frequency.value = 2093;
+        o.detune.value = det;
+        const og = this.ctx.createGain();
+        og.gain.setValueAtTime(0.0001, t + 0.5);
+        og.gain.linearRampToValueAtTime(0.022, t + 0.9);
+        og.gain.exponentialRampToValueAtTime(0.0004, t + 2.0);
+        o.connect(og).connect(out);
+        if (this.reverbGain) og.connect(this.reverbGain);
+        o.start(t + 0.5); o.stop(t + 2.1);
+      }
+    }
+  }
+
   // --- weather ---------------------------------------------------------------
 
   /**

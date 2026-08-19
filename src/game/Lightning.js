@@ -175,6 +175,13 @@ export function strikeLightning(game) {
   if (wet) game.particles?.splash(_p, _up, 1.1);
   else game.particles?.blast(_p, _up, 0.3);
 
+  // The arc landing, which is not the thunder below. The rumble is delayed by
+  // the distance and is the whole sky; this is the channel itself hitting the
+  // ground at a place, so it is positional and it is immediate. Before this a
+  // bolt that struck ten metres away made no sound at all for the second and a
+  // half it took the thunder to arrive.
+  game.audio?.strike(_p, 0.7 + 0.3 * near);
+
   // The whole-sky flash. Distant strikes light the ground too, less: main.js
   // only spends the sun spike above 0.5, so the floor here is what decides
   // whether a bolt on the horizon is felt indoors as well as seen.

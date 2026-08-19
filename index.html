@@ -345,6 +345,10 @@
         <label class="row"><input id="set-bob" type="checkbox" checked /> Head movement while walking</label>
         <label class="row"><input id="set-minimap" type="checkbox" checked /> Minimap</label>
         <label class="row"><input id="set-compass" type="checkbox" checked /> Compass</label>
+        <!-- The readout for a device with no console. Unchecked, and it stays
+             unchecked between sessions unless you tick it: it is a tool for
+             reporting a fault, not a thing to leave on. See ui/Diagnostics.js. -->
+        <label class="row"><input id="set-diag" type="checkbox" /> Diagnostics</label>
 
         <h3 class="set-head">Movement</h3>
         <label class="row"><input id="set-autojump" type="checkbox" /> Step up onto ledges automatically</label>

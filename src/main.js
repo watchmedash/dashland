@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { Planet } from './world/Planet.js';
 import { onBackButton } from './Native.js';
+import { Diagnostics } from './ui/Diagnostics.js';
 import {
   Player, VIEW_FIRST, VIEW_COUNT, stepZoom, lookScaleFor,
 } from './player/Player.js';
@@ -2341,6 +2342,11 @@ class Game {
     // animation callback stops the rAF chain for good: the picture freezes,
     // input dies, and the only clue is a line in the console. Log it once per
     // distinct error and keep drawing — a glitched frame beats a dead tab.
+    // The readout for a device with no console. Off unless asked for; see
+    // `Diagnostics`. `?diag=1` anywhere, and a row in Settings on the app.
+    this.diag = new Diagnostics();
+    if (new URLSearchParams(location.search).get('diag') === '1'
+        || localStorage.getItem('mojazer.diag') === '1') this.diag.show(true);
     this._frameErrors = new Set();
     this.renderer.setAnimationLoop(() => {
       try {
@@ -2351,6 +2357,11 @@ class Game {
           this._frameErrors.add(key);
           console.error('[frame]', err);
         }
+        // ...and on screen, because on a phone the line above goes nowhere.
+        // Every frame, not just the first: a readout that shows the error and
+        // then loses it the moment a second one arrives is a readout that
+        // tells you about the wrong error.
+        this.diag.note(err?.message ?? String(err));
       }
     });
   }
@@ -6594,6 +6605,9 @@ class Game {
 
   _frame() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    // First line of the frame, so a readout of how the frame is going is taken
+    // even on a frame that throws further down. Costs one boolean while off.
+    this.diag.tick(dt, this);
     this.frameTimes.push(dt);
     if (this.frameTimes.length > 60) this.frameTimes.shift();
 

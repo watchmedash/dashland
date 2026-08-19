@@ -1097,6 +1097,13 @@ export class UI {
     // back or takes it away.
     bind('set-minimap', 'change', (e) => { s.minimap = e.target.checked; g.persistSettings(); });
     bind('set-compass', 'change', (e) => { s.compass = e.target.checked; g.persistSettings(); });
+    // Not a game setting, so it is not in `settings` and is not persisted with
+    // them: it is a switch on a diagnostic tool, remembered on its own so that
+    // a fault which only shows up on the next launch can still be caught.
+    bind('set-diag', 'change', (e) => {
+      g.diag.show(e.target.checked);
+      try { localStorage.setItem('mojazer.diag', e.target.checked ? '1' : '0'); } catch { /* private mode */ }
+    });
 
     // `pointermove`, so the carried stack follows a thumb as well as a mouse.
     // A finger raises no mouse events while it is down, so the ghost used to sit
@@ -1130,6 +1137,7 @@ export class UI {
     $('set-autojump').checked = !!s.autoJump;
     $('set-minimap').checked = s.minimap !== false;
     $('set-compass').checked = s.compass !== false;
+    $('set-diag').checked = !!this.game.diag?.on;
     $('pz-map').textContent = s.minimap === false ? 'Show Map' : 'Hide Map';
   }
 

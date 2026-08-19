@@ -4587,6 +4587,18 @@ export class Mobs {
      * does not spend the herd's call budget.
      */
     this.onSound = null;
+    /**
+     * (kind, mob) => void — 'feed' | 'breed' | 'birth'. The three moments a
+     * herd has, none of which made a sound: an animal accepting food, a pair
+     * going into breeding, and a calf arriving all borrowed the species' idle
+     * call, which is the noise it makes standing still.
+     */
+    this.onHerd = null;
+    /**
+     * (mob) => void — a heavy animal put a foot down. Only bodies over 1.8m
+     * ever raise it; see the gate in `_animate`.
+     */
+    this.onStep = null;
     /** (damage, mob) => void — a hostile landed a blow on the player. */
     this.onAttack = null;
     /**
@@ -12821,6 +12833,30 @@ export class Mobs {
     } else if (act) {
       act.setEffectiveTimeScale(1);
     }
+
+    // --- a heavy animal putting a foot down ---------------------------------
+    //
+    // The big ones walked in silence. An elephant is three metres tall and
+    // crosses the ground beside you making less noise than the grass does,
+    // which is the one thing about it a player is guaranteed to notice.
+    //
+    // Gated on HEIGHT rather than on a list of names, so the giraffe, the
+    // elephant, the polar bear and anything later that is built at that scale
+    // all qualify and nothing under 1.8m ever does: forty sheep on one screen
+    // is exactly the case a footstep budget cannot survive. The grown height,
+    // not the spec's, so a calf is quiet until it is not.
+    //
+    // Driven by DISTANCE off the same `legs` the animation is, so one stride
+    // every 1.1m holds when the same body breaks into a run. `Audio.thud` takes
+    // the shared `step` budget, which the player's own boots have priority in.
+    if (walking && !paddling && this.onStep) {
+      const tall = mob.baseHeight ? mob.baseHeight * mob.grown : spec.height;
+      if (tall >= 1.8) {
+        mob.stepD = (mob.stepD || 0) + legs * dt;
+        if (mob.stepD >= 1.1) { mob.stepD = 0; this.onStep(mob); }
+      }
+    }
+
     model.mixer.update(dt);
 
     // --- damage and fire tint ---
@@ -13127,6 +13163,7 @@ export class Mobs {
       mob.baby = Math.max(0, mob.baby - BABY_SECONDS * 0.28);
       mob.love = 0;
       if (this.onSound) this.onSound('idle', mob);
+      this.onHerd?.('feed', mob);
       return true;
     }
     if (mob.love > 0 || mob.breedCooldown > 0) return false;
@@ -13134,6 +13171,11 @@ export class Mobs {
     mob.state = 'idle';
     mob.stateT = 0.5;
     if (this.onSound) this.onSound('idle', mob);
+    // Over the top of the species' own call rather than instead of it: the
+    // animal answering is the half a player already had, and the half that was
+    // missing is that the offer was ACCEPTED. A bleat alone is what a sheep
+    // does when it is standing there.
+    this.onHerd?.('feed', mob);
     return true;
   }
 
@@ -13159,6 +13201,7 @@ export class Mobs {
         m.love = 0; o.love = 0;
         m.breedCooldown = BREED_COOLDOWN;
         o.breedCooldown = BREED_COOLDOWN;
+        this.onHerd?.('breed', m);
         const calf = this.spawn(m.type, this._colOf(m.cell.x, m.cell.y),
           Math.floor(m.cell.k));
         if (calf) {
@@ -13166,6 +13209,7 @@ export class Mobs {
           calf.breedCooldown = BABY_SECONDS + BREED_COOLDOWN;
           mobGrow(calf, 0);
           if (this.onSound) this.onSound('idle', calf);
+          this.onHerd?.('birth', calf);
         }
         break;
       }

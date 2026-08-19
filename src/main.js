@@ -2003,6 +2003,16 @@ class Game {
     // Creatures speak for themselves — idle calls, pain and death, all anchored
     // in the world so you can hear which direction the herd is in.
     this.mobs.onSound = (kind, mob) => this.audio.mob(mob.type, kind, mob.position);
+    // The three moments a herd has, none of which had a sound of its own.
+    this.mobs.onHerd = (kind, mob) => {
+      if (kind === 'feed') this.audio.tame(mob.position);
+      else if (kind === 'breed') this.audio.breed(mob.position);
+      else this.audio.birth(mob.position);
+    };
+    // And the weight of the big ones. `size` is the body's grown height in
+    // half-metres, which is what `thud` scales its pitch and level off.
+    this.mobs.onStep = (mob) => this.audio.thud(mob.position,
+      (mob.baseHeight ? mob.baseHeight * mob.grown : mob.spec.height) / 2);
     // Difficulty lives here, on the one wire every mob blow crosses, and not
     // inside `_takeHit`.
     //
@@ -7030,6 +7040,7 @@ class Game {
     if (ghost) {
       this.breath = 1;
       this._drownTimer = 0;
+      this._drownSaid = false;
       this.player.burning = 0;
       this.soakT = 0;
       // A spectator's `headInSink` is stale for the same reason `headInWater`
@@ -7053,6 +7064,11 @@ class Game {
       // would be describing the tree rather than the dive.
       this.breath = Math.max(0, this.breath - dt / (9 * this.skills.breathScale));
       if (this.breath <= 0) {
+        // The warning, once, on the air running out — not on every 0.7s tick of
+        // damage after it. Same latch shape `_tickChill` uses for the cold, and
+        // for the same reason: the news is that you are out of air, and it is
+        // news exactly once.
+        if (!this._drownSaid) { this._drownSaid = true; this.audio.drown(); }
         this._drownTimer = (this._drownTimer || 0) + dt;
         if (this._drownTimer > 0.7) {
           this._drownTimer = 0;
@@ -7065,10 +7081,12 @@ class Game {
     } else {
       this.breath = Math.min(1, this.breath + dt / 3);
       this._drownTimer = 0;
+      this._drownSaid = false;
     }
 
     if (!ghost) {
       this._tickFire(dt);
+      this._tickMoveSound(dt);
       this._tickContact(dt);
       this._tickSoak(dt);
       this._tickSink(dt);
@@ -7458,7 +7476,62 @@ class Game {
         if (Math.random() < dt * 12) this.particles.embers(p.eye, p.up, 1, 0.8);
       }
     }
+    // Being alight, as a bed. The `fire` sample and the ambient fire bed are
+    // both PLACED — they belong to a torch or a lava lake and they fall away as
+    // you walk from them — and the thing burning here is you, so this one is
+    // non-positional and re-fired on its own timer for as long as it lasts. The
+    // period is under the voice's own second so the crackle never gaps.
+    if (p.burning > 0 || p.inLava) {
+      this._burnSndT = (this._burnSndT || 0) - dt;
+      if (this._burnSndT <= 0) {
+        this._burnSndT = 0.7;
+        this.audio.burn(p.inLava ? 1 : Math.min(1, p.burning / 3));
+      }
+    } else this._burnSndT = 0;
     this.damageFlash = Math.max(this.damageFlash, p.burning > 0 ? 0.14 : 0);
+  }
+
+  /**
+   * The two things a moving body does that have never made a sound: falling a
+   * long way, and climbing.
+   *
+   * Both are here rather than on `Player`, which holds no reference to the game
+   * and reaches the world only through the four callbacks in
+   * `_bindPlayerEvents`. Both facts this needs are already on the player for
+   * other reasons, so this is a read and a timer and nothing else.
+   */
+  _tickMoveSound(dt) {
+    const p = this.player;
+
+    // The air on the way down. `fallStart` is the highest point of the current
+    // fall, kept by `Player.update` for the landing severity, so the drop so
+    // far is free to read. Four cells before it starts: below that every jump
+    // in the game would whistle. Re-fired at 0.5s under the voice's own 0.7,
+    // and `windRush` takes how fast you are going, so a drop that keeps going
+    // keeps getting louder and the landing arrives out of something.
+    const drop = p.fallStart != null ? p.fallStart - p.position.y : 0;
+    if (drop > 4 && !p.grounded) {
+      this._fallSndT = (this._fallSndT || 0) - dt;
+      if (this._fallSndT <= 0) {
+        this._fallSndT = 0.5;
+        this.audio.windRush(Math.min(1, (drop - 4) / 14));
+      }
+    } else this._fallSndT = 0;
+
+    // Rungs. `onStep` is gated on being grounded, so a thirty-cell climb was
+    // silent all the way up and all the way down.
+    //
+    // Spaced by DISTANCE rather than by time, which is the only version that
+    // survives the ladder being climbed at different speeds: a rung every 0.55
+    // cells is about the rate a hand actually moves, and a slow climb is then a
+    // slow ladder rather than a fast one played quietly.
+    if (p.onLadder && Math.abs(p.vel.y) > 0.15) {
+      if (this._rungY == null) this._rungY = p.position.y;
+      if (Math.abs(p.position.y - this._rungY) > 0.55) {
+        this._rungY = p.position.y;
+        this.audio.ladder(p.position);
+      }
+    } else this._rungY = null;
   }
 
   /**
@@ -7652,10 +7725,15 @@ class Game {
     // than more frequent, which is what a large thing sounds like.
     this._whirlSndT = (this._whirlSndT || 0) - dt;
     if (this._whirlSndT <= 0) {
-      this._whirlSndT = 1.9 + Math.random() * 0.6;
+      // Faster and at full strength while the funnel actually has hold of you.
+      // The proximity cue and being dragged were the same sound at the same
+      // rate, so the one moment the player has to act on was the one moment the
+      // audio did not change.
+      this._whirlSndT = (p.whirlPull > 0 ? 1.0 : 1.9) + Math.random() * 0.6;
       const eyePos = this.planet.centerOf(eye, K_SEA, _v1);
       const d = wrapDist(eyePos, p.position);
-      this.audio.churn(eyePos, Math.max(0.15, 1 - d / (WHIRL_CUE + WHIRL_R)));
+      this.audio.churn(eyePos,
+        p.whirlPull > 0 ? 1 : Math.max(0.15, 1 - d / (WHIRL_CUE + WHIRL_R)));
     }
   }
 
@@ -7698,7 +7776,9 @@ class Game {
     // Once, on crossing into the warning band, not per frame. `Audio.ice` is
     // the freezing half of a sound the game already has and it is the right
     // one: this is water in your clothes going hard.
-    if (!this._chillSaid) { this._chillSaid = true; this.audio.ice(true, p.position); }
+    // Was `ice(true, pos)`, which is a lake freezing over: a thing happening in
+    // the world rather than to you. `chill()` is a shiver and is on the body.
+    if (!this._chillSaid) { this._chillSaid = true; this.audio.chill(); }
     if (Math.random() < dt * 5) this.particles.steam(p.eye, p.up, 0.3, 0.5);
     if (this.chillT < CHILL_BITE) return;
 
@@ -7780,6 +7860,9 @@ class Game {
     // clamped inside `_takeHit` for the reason the scald tests it, so the flash
     // and the hurt sound still fire on every tick above it.
     if (p.health <= 1) return;
+    // Before the hit, not after: `_takeHit` can return having killed you, and
+    // the tick that killed you is the one that most wanted naming.
+    this.audio.poison();
     this._takeHit(1, 'Poisoned', false, 'poison');
   }
 
@@ -8620,6 +8703,9 @@ class Game {
         this._starve = 0;
         p.health = Math.max(1, p.health - 1);
         this.damageFlash = 0.35;
+        // This path never went through `_takeHit`, so starving was the one
+        // damage source in the game with no sound of any kind on it at all.
+        this.audio.starve();
       }
     } else this._starve = 0;
   }
@@ -11147,6 +11233,17 @@ class Game {
     if (input.buttons[2] && hit && this.placeCooldown === 0 && input.locked) {
       placed = this._placeBlock(hit, heldSlot);
       this.placeCooldown = placed ? 0.2 : 0.12;
+      // A refusal. Every one of the six ways `_placeBlock` says no — no floor
+      // under it, nothing it will grow on, no room above for the door, a bed
+      // with no second half — was a bare `return false` with no sound, so a
+      // player holding the button at a wall that will not take a sapling got
+      // the same nothing as a player pointing at the sky.
+      //
+      // Rate-limited on its own timer rather than on the voice budget: this
+      // runs at up to eight a second for as long as the button is held, and a
+      // refusal that machine-guns is worse than a silent one.
+      this._refuseT = Math.max(0, (this._refuseT || 0) - dt);
+      if (!placed && this._refuseT <= 0) { this._refuseT = 0.55; this.audio.deny(); }
     }
 
     // The other half of the edible-block rule (see the eating note above).
@@ -11212,7 +11309,10 @@ class Game {
     this.player.health = Math.min(this.player.maxHealth,
       this.player.health + Math.ceil(heldItem.food * 0.35));
     this.inventory.consumeHeld(1, heldSlot);
-    this.audio.pickup();
+    // Was `pickup()`, which is a thing entering your bag, on the frame a thing
+    // leaves it. The meal takes 1.3 seconds and `eat()` fires at the start of
+    // it, so the moment the food was actually consumed had nothing on it.
+    this.audio.swallow();
     this.ui.toast(`Ate ${heldItem.label}`, heldSlot.item, 1400);
     // The bill, and it arrives *after* the food has been paid out rather than
     // instead of it. Raw green beans and a raw pufferfish still feed and still
@@ -11798,6 +11898,9 @@ class Game {
       this.drops.spawn(_v1.x, _v1.y, _v1.z, id, count - taken);
     }
     this.ui.toast(`Caught ${ITEMS[id]?.label}`, id, 2000);
+    // The fish coming out of the water, and then the fish going in the bag.
+    // `pickup` alone said the second half of that and never the first.
+    this.audio.reel(this.fishing?.pos);
     this.audio.pickup();
     this.stats.fished = (this.stats.fished ?? 0) + 1;
     // No xp. A fish used to pay 8, which is a coal seam for standing still, and
@@ -11922,6 +12025,9 @@ class Game {
       // the sight goes away for the same span. Both are "there is a cast out",
       // said once here and undone once in `_stopFishing`.
       this.viewModel.setCast(true, f.hand);
+      // The throw. Here rather than in `_rodClick`, because this is the frame
+      // the float actually leaves the hand — the click before it is the wind-up.
+      this.audio.cast(this.player.position);
       this._syncCrosshair();
     }
     if (c.t < c.dur) {

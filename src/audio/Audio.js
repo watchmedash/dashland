@@ -4131,6 +4131,491 @@ export class Audio {
     }
   }
 
+  // --- the body ---------------------------------------------------------------
+  //
+  // Six ways to die and the game told you about exactly one of them by ear.
+  // `hurt()` answered a blow, a burn, a fall, a poison tick and starvation with
+  // the same 220Hz saw, so the only way to learn WHY your health was going down
+  // was to read it off the screen — which is the one thing a player being
+  // killed by something is not doing.
+  //
+  // These are all warnings rather than injuries, and they all share a shape for
+  // that reason: no hard transient, a slow swell, and a register of their own
+  // well away from the blow. A hit is a thing that happened. These are things
+  // that are happening.
+
+  /**
+   * The breath bar running out. Heard from inside a head, so everything in it
+   * is muffled: the heartbeat is a pair of 58Hz thumps with no click on the
+   * front, and the whine over them is what pressure does to your ears rather
+   * than a tone anything in the world is making.
+   */
+  drown() {
+    if (!this._live() || !this._take('player', 1.4)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    for (let i = 0; i < 2; i++) {
+      const tn = t + i * (0.26 + Math.random() * 0.04);
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      const f = 58 * (0.94 + Math.random() * 0.12);
+      o.frequency.setValueAtTime(f * 1.5, tn);
+      o.frequency.exponentialRampToValueAtTime(f, tn + 0.10);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tn);
+      // 25ms rather than 4: a heartbeat has no attack, and the click one gets
+      // from a fast ramp is what made the first cut of this read as a kick drum.
+      g.gain.linearRampToValueAtTime(0.34 * (i ? 0.7 : 1), tn + 0.025);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + 0.22);
+      o.connect(g).connect(out);
+      o.start(tn); o.stop(tn + 0.26);
+    }
+    const w = this.ctx.createOscillator();
+    w.type = 'sine';
+    w.frequency.setValueAtTime(380, t);
+    w.frequency.linearRampToValueAtTime(760 + Math.random() * 200, t + 0.9);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 1200;
+    const wg = this.ctx.createGain();
+    wg.gain.setValueAtTime(0.0001, t);
+    wg.gain.linearRampToValueAtTime(0.055, t + 0.5);
+    wg.gain.exponentialRampToValueAtTime(0.0004, t + 1.0);
+    w.connect(lp).connect(wg).connect(out);
+    w.start(t); w.stop(t + 1.05);
+  }
+
+  /**
+   * The chill clock biting. `ice()` was standing in for this and `ice()` is a
+   * lake freezing over, which is a thing happening in the world rather than to
+   * you.
+   *
+   * A shiver, and it is the tremolo that makes it one: a thin band of noise up
+   * at 4kHz chopped at 13Hz, which is the rate a jaw actually goes at. The low
+   * tone under it does not fall — cold does not resolve.
+   */
+  chill() {
+    if (!this._live() || !this._take('player', 1.6)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    const d = 1.1 + Math.random() * 0.3;
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf; n.loop = true;
+    n.playbackRate.value = 1.2 + Math.random() * 0.5;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 3.4;
+    bp.frequency.value = 3600 + Math.random() * 1200;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.075, t + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine'; lfo.frequency.value = 11 + Math.random() * 5;
+    const dep = this.ctx.createGain(); dep.gain.value = 0.055;
+    lfo.connect(dep).connect(g.gain);
+    n.connect(bp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + d + 0.1);
+    lfo.start(t); lfo.stop(t + d + 0.1);
+    // the weight of it, holding rather than falling
+    const o = this.ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = 87 * (0.97 + Math.random() * 0.06);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.linearRampToValueAtTime(0.16, t + 0.18);
+    og.gain.exponentialRampToValueAtTime(0.0004, t + d * 0.9);
+    o.connect(og).connect(out);
+    o.start(t); o.stop(t + d);
+  }
+
+  /**
+   * A poison tick. The only voice in this file that is deliberately OUT OF
+   * TUNE with itself: two saws six Hz apart, which beat against each other at
+   * walking pace and never settle. Everything else here either holds a pitch or
+   * falls to one, and that is what makes this one read as wrong rather than as
+   * low.
+   */
+  poison() {
+    if (!this._live() || !this._take('player', 0.9)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    const base = 168 * (0.94 + Math.random() * 0.12);
+    for (const off of [0, 6]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(base + off, t);
+      o.frequency.exponentialRampToValueAtTime((base + off) * 0.72, t + 0.5);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 700; lp.Q.value = 2.2;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.10, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + 0.55);
+      o.connect(lp).connect(g).connect(out);
+      o.start(t); o.stop(t + 0.6);
+    }
+    // one wet grain on top, so it has a body and is not just a synth note
+    this._noiseHit(out, t + 0.02, { gain: 0.06, lo: 260, hi: 1500, q: 1.6, dur: 0.09, at: 0.02 });
+  }
+
+  /**
+   * Starving. A hollow knock and nothing else: dry, dark, no tail worth the
+   * name, and a resonance under it that rings a little too long for its size,
+   * which is what an empty thing sounds like when you hit it.
+   */
+  starve() {
+    if (!this._live() || !this._take('player', 0.8)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    const f = 96 * (0.9 + Math.random() * 0.2);
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 0.62, t + 0.14);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.18);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.2);
+    // the empty room inside it
+    const r = this.ctx.createBufferSource();
+    r.buffer = this.noiseBuf;
+    r.playbackRate.value = 0.4 + Math.random() * 0.2;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 9; bp.frequency.value = 205 + Math.random() * 60;
+    const rg = this.ctx.createGain();
+    rg.gain.setValueAtTime(0.0001, t);
+    rg.gain.linearRampToValueAtTime(0.13, t + 0.008);
+    rg.gain.exponentialRampToValueAtTime(0.0004, t + 0.42);
+    r.connect(bp).connect(rg).connect(out);
+    r.start(t, Math.random() * 2); r.stop(t + 0.46);
+  }
+
+  /**
+   * Being on fire, as a bed rather than an event, and on the PLAYER rather than
+   * in the world.
+   *
+   * The `fire` sample and the ambient fire bed are placed sounds: they belong to
+   * a torch or a lava lake and they fall away as you walk from them. This one
+   * cannot, because the thing burning is you, so it is non-positional and it is
+   * re-fired by the caller on a timer for as long as it lasts.
+   *
+   * Crackles rather than a hiss. A continuous band of noise is a gas ring; what
+   * makes fire read as fire is that it is made of irregular events, so the
+   * count, the spacing, the pitch and the length of every tick below are rolled
+   * per call and nothing in it repeats.
+   */
+  burn(level = 1) {
+    if (!this._live() || !this._take('player', 1.2)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    const amp = Math.max(0.25, Math.min(1, level));
+    const ticks = 5 + ((Math.random() * 6) | 0);
+    for (let i = 0; i < ticks; i++) {
+      this._noiseHit(out, t + Math.random() * 0.85, {
+        gain: (0.03 + Math.random() * 0.06) * amp,
+        lo: 700, hi: 2600 + Math.random() * 3400,
+        q: 1.8 + Math.random() * 1.5, dur: 0.02 + Math.random() * 0.05, at: 0.002,
+      });
+    }
+    // the body of it: low, wide, and never quite steady
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf; n.loop = true;
+    n.playbackRate.value = 0.5 + Math.random() * 0.2;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 900 + Math.random() * 400; lp.Q.value = 0.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.085 * amp, t + 0.2);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.95);
+    n.connect(lp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 1.0);
+  }
+
+  /**
+   * The air on the way down. Re-fired by the caller, and `speed` is how fast
+   * the body is actually falling, so a drop that keeps going keeps getting
+   * louder and brighter and the landing arrives out of something rather than
+   * out of nothing.
+   *
+   * No transient at all, and the band RISES: that is the whole difference
+   * between this and `squall`, which is a gust arriving at you. This is you
+   * arriving at the air.
+   */
+  windRush(speed = 1) {
+    if (!this._live() || !this._take('player', 1.0)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    const s = Math.max(0, Math.min(1, speed));
+    const d = 0.7 + Math.random() * 0.2;
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf; n.loop = true;
+    n.playbackRate.value = 0.8 + s * 0.6;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.55;
+    bp.frequency.setValueAtTime(300 + s * 300, t);
+    bp.frequency.linearRampToValueAtTime(900 + s * 1800, t + d);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.10 * (0.3 + s * 0.7), t + d * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + d);
+    n.connect(bp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + d + 0.1);
+  }
+
+  /**
+   * One rung of a ladder. `onStep` is gated on being grounded, so climbing has
+   * always been silent — you go up thirty cells and hear nothing.
+   *
+   * Built quiet and dry, because it repeats about twice a second for as long as
+   * the climb lasts, and built out of the wood the ladder is: a short knock
+   * with a scuff of boot on it and no ring whatsoever.
+   */
+  ladder(pos = null) {
+    if (!this._live() || !this._take('step', 0.3)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.35);
+    const f = 250 * (0.82 + Math.random() * 0.36);
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 0.6, t + 0.07);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.11, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.09);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.11);
+    this._noiseHit(out, t + 0.01, {
+      gain: 0.05, lo: 400, hi: 2200 + Math.random() * 900, q: 1.1, dur: 0.06,
+    });
+  }
+
+  /**
+   * Casting, and reeling in. The rod had a bite, a lost line and a splash, and
+   * neither of the two things the player's own hands do.
+   *
+   * The cast is a whip and then the reel paying out: a band sweeping UP through
+   * the air, and behind it four or five clicks that get FURTHER apart, because
+   * a spool is slowing down the whole time the float is in the air.
+   */
+  cast(pos = null) {
+    if (!this._live() || !this._take('player', 0.8)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.9);
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 1.0 + Math.random() * 0.5;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 1.3;
+    bp.frequency.setValueAtTime(420, t);
+    bp.frequency.exponentialRampToValueAtTime(2800 + Math.random() * 900, t + 0.14);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.15, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.20);
+    n.connect(bp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 0.24);
+    let tn = t + 0.10;
+    let gap = 0.028;
+    for (let i = 0; i < 5; i++) {
+      this._noiseHit(out, tn, {
+        gain: 0.045, lo: 2200, hi: 6800, q: 2.6, dur: 0.014, at: 0.001,
+      });
+      tn += gap;
+      gap *= 1.28 + Math.random() * 0.15;
+    }
+  }
+
+  /**
+   * Reeling a fish in. The inverse of the cast's spool: the clicks get CLOSER
+   * together, because you are winding rather than paying out, and the wet lift
+   * at the end is the fish leaving the water.
+   */
+  reel(pos = null) {
+    if (!this._live() || !this._take('player', 1.2)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 1.3);
+    let tn = t;
+    let gap = 0.075;
+    for (let i = 0; i < 9 + ((Math.random() * 4) | 0); i++) {
+      this._noiseHit(out, tn, {
+        gain: 0.05 + Math.random() * 0.02, lo: 1800, hi: 6200 + Math.random() * 1500,
+        q: 2.4, dur: 0.016, at: 0.001,
+      });
+      tn += gap;
+      gap *= 0.90;
+      if (tn > t + 0.75) break;
+    }
+    // the fish coming out
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 0.9 + Math.random() * 0.4;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.7;
+    bp.frequency.setValueAtTime(700, tn);
+    bp.frequency.exponentialRampToValueAtTime(2600 + Math.random() * 900, tn + 0.22);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, tn);
+    g.gain.linearRampToValueAtTime(0.19, tn + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0004, tn + 0.26);
+    n.connect(bp).connect(g).connect(out);
+    n.start(tn, Math.random() * 2); n.stop(tn + 0.3);
+  }
+
+  /**
+   * The three moments a herd has: an animal accepting food, a pair going into
+   * breeding, and a calf arriving. All positional, all short, all deliberately
+   * WARM — every one of them is a good thing happening, and there is nothing
+   * else in this file below the merchant's bell that is unambiguously good.
+   *
+   * They are one family on purpose: a rising interval on two soft oscillators,
+   * getting higher and shorter as you go from the feed to the pairing to the
+   * birth, so a paddock reads as one system rather than three noises.
+   */
+  tame(pos = null) {
+    if (!this._live() || !this._take('mob', 0.7)) return;
+    this._warm(pos, 392, 1.26, 0.30, 0.085);
+  }
+
+  breed(pos = null) {
+    if (!this._live() || !this._take('mob', 1.0)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 1.1);
+    // two soft thumps under it, which is the one thing the other two do not get
+    for (let i = 0; i < 2; i++) {
+      const tn = t + i * 0.20;
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(120, tn);
+      o.frequency.exponentialRampToValueAtTime(74, tn + 0.12);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, tn);
+      g.gain.linearRampToValueAtTime(0.16, tn + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + 0.16);
+      o.connect(g).connect(out);
+      o.start(tn); o.stop(tn + 0.18);
+    }
+    this._warm(pos, 523, 1.5, 0.45, 0.075);
+  }
+
+  birth(pos = null) {
+    if (!this._live() || !this._take('mob', 0.8)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.9);
+    // the calf itself: a squeak that goes up and then gives up
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    const f = 780 * (0.88 + Math.random() * 0.24);
+    o.frequency.setValueAtTime(f * 0.7, t);
+    o.frequency.exponentialRampToValueAtTime(f * 1.35, t + 0.09);
+    o.frequency.exponentialRampToValueAtTime(f * 0.9, t + 0.22);
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 2.2; bp.frequency.value = f * 1.4;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.15, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.24);
+    o.connect(bp).connect(g).connect(out);
+    o.start(t); o.stop(t + 0.26);
+    this._warm(pos, 784, 1.5, 0.22, 0.055, 0.16);
+  }
+
+  /** The rising interval the three herd voices share. */
+  _warm(pos, root, ratio, tail, gain, delay = 0) {
+    const t = this.ctx.currentTime + delay;
+    const out = this._dest(pos, tail + delay + 0.3);
+    const f = root * (0.97 + Math.random() * 0.06);
+    [[f, 0], [f * ratio, 0.075]].forEach(([hz, dt]) => {
+      for (const [type, amt] of [['sine', 1], ['triangle', 0.35]]) {
+        const o = this.ctx.createOscillator();
+        o.type = type; o.frequency.value = hz;
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t + dt);
+        g.gain.linearRampToValueAtTime(gain * amt, t + dt + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0004, t + dt + tail);
+        o.connect(g).connect(out);
+        if (this.reverbGain) g.connect(this.reverbGain);
+        o.start(t + dt); o.stop(t + dt + tail + 0.05);
+      }
+    });
+  }
+
+  /**
+   * A heavy animal putting a foot down.
+   *
+   * `step()` is a boot and it is built out of MATERIAL_TUNING, which is a table
+   * about what you are standing ON. This one is about what is standing: an
+   * elephant on grass and an elephant on stone are the same event to everything
+   * a player cares about, which is that three tons just moved.
+   *
+   * `size` scales the pitch inversely and the level directly, so the giraffe
+   * (3.9 tall) lands lower and louder than the polar bear (1.9). Positional and
+   * on the cheap `step` budget, because a herd of them must never be able to
+   * outbid the player's own footsteps.
+   */
+  thud(pos = null, size = 1) {
+    if (!this._live() || !this._take('step', 0.5)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.6);
+    const s = Math.max(0.5, Math.min(2.5, size));
+    const f = (74 / s) * (0.9 + Math.random() * 0.2);
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f * 1.6, t);
+    o.frequency.exponentialRampToValueAtTime(f, t + 0.09);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.20 * Math.min(1.6, s), t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.22);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.24);
+    // the ground taking it
+    this._noiseHit(out, t, {
+      gain: 0.09 * Math.min(1.5, s), lo: 90, hi: 620 + Math.random() * 300,
+      q: 0.9, dur: 0.11 + Math.random() * 0.06,
+    });
+  }
+
+  /**
+   * The end of a meal. `eat()` fires once when the meal STARTS and carries its
+   * own small gulp at the end of its chew, but the meal takes 1.3s and the
+   * moment the food is actually consumed had nothing on it at all — so the item
+   * left the slot in silence, a second after the last chewing sound.
+   *
+   * Bigger than the gulp inside `eat()`, and it has to be: this one is the last
+   * thing the player hears about the meal, and it is the one that means it
+   * worked.
+   */
+  swallow() {
+    if (!this._live() || !this._take('player', 0.7)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(130 * (0.92 + Math.random() * 0.16), t);
+    o.frequency.exponentialRampToValueAtTime(480 + Math.random() * 120, t + 0.16);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.20);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.22);
+    // the throat closing around it
+    this._noiseHit(out, t, { gain: 0.07, lo: 240, hi: 1100, q: 1.8, dur: 0.14, at: 0.02 });
+    // and the breath after
+    const b = this.ctx.createBufferSource();
+    b.buffer = this.noiseBuf;
+    b.playbackRate.value = 0.8 + Math.random() * 0.4;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.9; bp.frequency.value = 900 + Math.random() * 400;
+    const bg = this.ctx.createGain();
+    bg.gain.setValueAtTime(0.0001, t + 0.20);
+    bg.gain.linearRampToValueAtTime(0.05, t + 0.28);
+    bg.gain.exponentialRampToValueAtTime(0.0004, t + 0.48);
+    b.connect(bp).connect(bg).connect(out);
+    b.start(t + 0.20, Math.random() * 2); b.stop(t + 0.52);
+  }
+
   // --- weather ---------------------------------------------------------------
 
   /**

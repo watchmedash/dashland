@@ -2706,41 +2706,68 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     // lines up with the timber either side of it rather than nearly lining up.
     const axis = byte & 3, open = (byte >> 2) & 1;
     /*
-     * Shut, the leaf lies across the way you walk, down the middle of the cell.
-     * Open, it lies along the way you walk, against the low side wall.
+     * TWO LEAVES, EACH HANGING ON ITS OWN STILE — a gate that splits.
      *
-     * The hinge therefore MOVES half a cell as it turns, and that was tried the
-     * other way and rejected. Hanging the leaf on a fixed corner in both poses
-     * makes the swing a true rotation - the hinge stile comes out byte-identical
-     * open and shut - and it costs the shut gate its place on the fence line,
-     * because a leaf a whole cell long that stays inside its cell can only
-     * pivot about a corner. The owner looked at it: "fence gate is disconnected
-     * now". A gate that lines up with the timber either side of it is worth
-     * more than a pivot nobody is watching, so the slide stays.
+     * One leaf a whole cell long cannot swing inside one cell: hinged at the
+     * middle of an edge it sweeps half its length out into the neighbour, so
+     * every single-leaf pose has to cheat, and the cheat is a hinge that slides
+     * half a cell as it turns. That was the "changed angle and shoved to the
+     * left". Hanging it on a corner instead made the pivot honest and took the
+     * shut gate off the fence line, which was worse.
      *
-     * What the swing was ACTUALLY glitching on is below - see the rails.
+     * Splitting it removes the constraint rather than trading against it, and
+     * it is what the owner asked for: "minecraft was better as theirs gates
+     * splits open". Each leaf is half a cell long and pivots about a post at
+     * its own outer end, so the sweep is half a cell and it lands inside the
+     * cell it started in. Nothing has to be fudged.
+     *
+     *   shut   the two leaves meet in the middle, thickness centred on the
+     *          fence line, so the gate lines up with the timber either side of
+     *          it exactly as a single leaf did.
+     *   open   each swings back against its own side wall and lies along the
+     *          way you walk, both to the same side, leaving the middle clear.
+     *
+     * The pivot is the post at u = 0 for the near leaf and u = 1 for the far
+     * one, on the fence line — which is where a real gate's hinge is, and is
+     * the reason this reads as a swing where the old one read as a slide. What
+     * travel is left is half a rail's thickness, 0.08, against the 0.42 before.
+     *
+     * The stiles are the hinge posts and the rails run BETWEEN them, never
+     * through: two boxes that share solid volume fight for the same depth, and
+     * that fight was the texture glitch on the old gate.
      */
-    const vc = open ? FENCE_RAIL / 2 : 0.5;
-    const v0 = vc - FENCE_RAIL / 2, v1 = vc + FENCE_RAIL / 2;
-    // `u` runs along the leaf and `v` across its thickness; which of those is i
-    // and which is j is the axis, flipped by the swing.
-    const uIsI = axis < 2 ? !!open : !open;
-    const put = (u0, u1, k0, k1) => (uIsI
+    const r = FENCE_RAIL, half = 0.5;
+    // `u` runs along the fence line and `v` across the way you walk; which of
+    // those is i and which is j is the axis the gate was placed on.
+    const uIsI = axis < 2;
+    const put = (u0, v0, u1, v1, k0, k1) => (uIsI
       ? out.push([u0, v0, k0, u1, v1, k1])
       : out.push([v0, u0, k0, v1, u1, k1]));
-    put(0, FENCE_RAIL, GATE_LOW, FENCE_HEIGHT);            // hinge stile
-    put(1 - FENCE_RAIL, 1, GATE_LOW, FENCE_HEIGHT);        // latch stile
-    // BETWEEN the stiles, not through them. The rails used to span the whole
-    // cell (0 to 1) while the stiles stand at 0..0.16 and 0.84..1 over the same
-    // height band, so every rail drove straight through both stiles and the two
-    // sets of faces fought for the same depth. That is the texture glitch on a
-    // gate, and it is there open or shut, moving or still.
-    //
-    // The fence next door has never had it, and this is why: its rails start at
-    // the face of the post (`p1`) and run outward, so they touch it and stop.
-    // Same rule here.
-    for (let n = 0; n < 2; n++) {
-      put(FENCE_RAIL, 1 - FENCE_RAIL, RAIL_K[n], RAIL_K[n] + FENCE_RAIL);
+
+    if (!open) {
+      // Shut. Thickness centred on the fence line; the two leaves meet at u=0.5.
+      const v0 = half - r / 2, v1 = half + r / 2;
+      put(0, v0, r, v1, GATE_LOW, FENCE_HEIGHT);           // near hinge post
+      put(1 - r, v0, 1, v1, GATE_LOW, FENCE_HEIGHT);       // far hinge post
+      for (let n = 0; n < 2; n++) {
+        // One rail per leaf, stopping at the post rather than running into it.
+        put(r, v0, half, v1, RAIL_K[n], RAIL_K[n] + r);
+        put(half, v0, 1 - r, v1, RAIL_K[n], RAIL_K[n] + r);
+      }
+      return out;
+    }
+
+    // Open. Each leaf has turned a right angle about its own post, so it now
+    // runs across the way you walk and is only as thick as a rail along the
+    // fence line. Both swing the same way, to the low side, so the pair reads
+    // as one pair of doors rather than as two gates disagreeing.
+    for (const [u0, u1] of [[0, r], [1 - r, 1]]) {
+      // The post stays where the post was: hard against the fence line, which
+      // is what makes the turn a hinge.
+      put(u0, half - r, u1, half, GATE_LOW, FENCE_HEIGHT);
+      for (let n = 0; n < 2; n++) {
+        put(u0, 0, u1, half - r, RAIL_K[n], RAIL_K[n] + r);
+      }
     }
     return out;
   }

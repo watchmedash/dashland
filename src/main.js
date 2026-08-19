@@ -4120,7 +4120,7 @@ class Game {
     // different pitch is a refusal the player has to already know to listen for.
     if (!this.skills.buy(key)) { this.audio.deny(); return false; }
     this._applySkills();
-    this.audio.ui(720);
+    this.audio.uiPress(760);
     this.ui.refreshSkills();
     return true;
   }
@@ -4135,7 +4135,7 @@ class Game {
     // Strictly after the reset: `_applySkills` is what clamps a player who was
     // standing at 30 health down to the 20 they now have room for.
     this._applySkills();
-    this.audio.ui(420);
+    this.audio.uiPress(420);
     this.ui.toast('Points refunded', 0, 3200);
     this.ui.refreshSkills();
   }
@@ -5591,7 +5591,7 @@ class Game {
         if (text) this.signs.set(key, text);
         else this.signs.delete(key);
         this.signSeq++;
-        this.audio.ui(620);
+        this.audio.uiPress(620);
       }
       this.state = 'playing';
       this.input.requestLock();
@@ -6263,7 +6263,7 @@ class Game {
   openScreen(kind, state) {
     this.ui.openScreen(kind, state);
     this.input.exitLock();
-    this.audio.ui(560);
+    this.audio.uiOpen();
   }
 
   /**
@@ -6357,6 +6357,10 @@ class Game {
 
     this.ui.closeScreen();
     this.ui.refresh();
+    // Opening a screen has made a noise since the benches were written and
+    // closing one never has, which left the one action a player takes hundreds
+    // of times a session as the only unanswered half of a pair.
+    this.audio.uiClose();
     if (this.state === 'playing') this.input.requestLock();
   }
 
@@ -6368,7 +6372,7 @@ class Game {
   openSkills() {
     this.ui.openSkills();
     this.input.exitLock();
-    this.audio.ui(560);
+    this.audio.uiOpen();
   }
 
   closeSkills() {
@@ -10214,7 +10218,8 @@ class Game {
    */
   swapOffhand() {
     this.inventory.swapOffhand();
-    this.audio.ui(520);
+    // A thing arriving in your hand, which is the lifting half of the slot pair.
+    this.audio.uiSlot(false);
     this._announceHeld();
   }
 

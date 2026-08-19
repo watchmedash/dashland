@@ -1390,7 +1390,7 @@ export class UI {
     // The main menu is behind this screen and its Continue button may have
     // just become the last thing pointing at nothing.
     this._syncContinue();
-    this.game.audio.ui(320);
+    this.game.audio.uiPress(320);
   }
 
   // --- the New Game character picker ----------------------------------------
@@ -1575,7 +1575,10 @@ export class UI {
     // no. `deny()` is a flat two-tone fall and is unmistakably not a yes.
     else { this.game.audio.deny(); return; }
     this._syncKit();
-    this.game.audio.ui(at >= 0 ? 380 : 620);
+    // A loadout tile is a setting, so it is the toggle rather than the generic
+    // blip at two pitches. `at >= 0` means it was in the loadout and has just
+    // come out of it, which is the off direction.
+    this.game.audio.uiToggle(at < 0);
   }
 
   _syncKit() {
@@ -1619,7 +1622,7 @@ export class UI {
     sel.onchange = () => {
       this._difficulty = sel.value;
       this._syncDeathRuleShown();
-      this.game.audio.ui(560);
+      this.game.audio.uiTab();
     };
     this._syncDifficulty();
   }
@@ -1696,7 +1699,7 @@ export class UI {
       b.onclick = () => {
         this._deathRule = d.key;
         this._syncDeathRule();
-        this.game.audio.ui(560);
+        this.game.audio.uiTab();
       };
       bar.appendChild(b);
     }
@@ -1733,7 +1736,7 @@ export class UI {
     this._chosen = id;
     this._picker?.setSelected(id, snap);
     this._syncCharacterName();
-    this.game.audio.ui(560);
+    this.game.audio.uiPress(560);
   }
 
   /**
@@ -2164,9 +2167,15 @@ export class UI {
     // rule any future slot with a filter has to follow — the offhand's comment
     // explains why *it* deliberately has none.
     if (!cur.empty && accepts && !accepts(cur.item)) {
-      this.game.audio.ui(200);
+      // Was `ui(200)`, the confirmation blip at a low pitch, which is exactly the
+      // thing the rest of this file stopped doing when `deny()` was written.
+      this.game.audio.deny();
       return;
     }
+    // Which half of the slot pair this is, read before the branches move it.
+    // Lifting a stack out and setting one down were the same 430Hz blip for all
+    // four cases below, and sorting a bag is fifty of them in twenty seconds.
+    const lifting = cur.empty;
     if (cur.empty) {
       if (slot.empty) return;
       const take = right ? Math.ceil(slot.count / 2) : slot.count;
@@ -2188,7 +2197,7 @@ export class UI {
       slot.set(cur.item, cur.count, cur.wear);
       cur.set(t.item, t.count, t.wear);
     }
-    this.game.audio.ui(430);
+    this.game.audio.uiSlot(!lifting);
     this.refresh();
   }
 
@@ -2233,7 +2242,9 @@ export class UI {
       const toStorage = index < HOTBAR;
       this._pour(src, inv.slots.slice(toStorage ? HOTBAR : 0, toStorage ? TOTAL : HOTBAR));
     }
-    this.game.audio.ui(500);
+    // Shift-move is a stack leaving your hand for somewhere else, so it is the
+    // setting-down half of the pair rather than the lifting one.
+    this.game.audio.uiSlot(true);
     inv.changed();
     this.refresh();
   }
@@ -2242,7 +2253,7 @@ export class UI {
   _shiftTake(slot) {
     if (slot.empty) return;
     this._pour(slot, this.game.inventory.slots);
-    this.game.audio.ui(500);
+    this.game.audio.uiSlot(true);
     this.game.inventory.changed();
     this.refresh();
   }
@@ -3097,7 +3108,7 @@ export class UI {
       if (!takeOneInto(inv, k.input, itemId, true)) break;
       room--; moved++;
     }
-    if (moved) this.game.audio.ui?.(720); else this.game.audio.deny();
+    if (moved) this.game.audio.uiSlot(true); else this.game.audio.deny();
     this.refresh();
   }
 

@@ -1529,20 +1529,42 @@ export class Audio {
   }
 
   /**
-   * The generic interface blip. Still one square, because dozens of call sites
-   * pass nothing but a frequency and expect a click — but now with a fast pitch
-   * drop and a lowpass on it, which is the difference between a click and the
-   * flat beep this used to be. Everything menu-shaped runs through here.
+   * The interface, which used to be one sound.
+   *
+   * `ui(freq)` answered twenty different actions — every button, every screen
+   * opening and closing, every tab, every toggle, every stack picked up and put
+   * down, the bed you claimed and the offhand you swapped — at nothing but a
+   * different pitch, and `deny()` answered thirteen refusals. A pitch is not a
+   * meaning: a player cannot learn that 430Hz is "moved a stack" and 500Hz is
+   * "poured a stack", and nobody ever has.
+   *
+   * So it is seven voices now, built as three PAIRS plus a press, because the
+   * actions come in pairs and the pairs are what carry the meaning: open/close,
+   * lift/set down, on/off. Each pair is one gesture in two directions, which is
+   * the same trick `kiln` and `season` use and the only one that survives being
+   * heard four hundred times an hour.
+   *
+   * They also all jitter. Measured, the old `ui()` rendered BIT-IDENTICAL twice
+   * running — the single most-played sound in the game had no per-play variation
+   * of any kind, which is exactly what makes a menu blip feel like a machine.
+   * Every voice below moves its pitch by a few percent per play.
+   *
+   * `ui(freq)` is kept as an alias of `uiPress` so that any call site not
+   * rewired still makes a sensible noise rather than throwing.
    */
-  ui(freq = 520) {
+  ui(freq = 520) { this.uiPress(freq); }
+
+  /** A button. One square with a fast drop, and a tick on the front of it. */
+  uiPress(freq = 520) {
     if (!this._live() || !this._take('ui', 0.15)) return;
     const t = this.ctx.currentTime;
+    const f = freq * (0.97 + Math.random() * 0.06);
     const o = this.ctx.createOscillator();
     o.type = 'square';
-    o.frequency.setValueAtTime(freq * 1.06, t);
-    o.frequency.exponentialRampToValueAtTime(freq, t + 0.03);
+    o.frequency.setValueAtTime(f * 1.06, t);
+    o.frequency.exponentialRampToValueAtTime(f, t + 0.03);
     const lp = this.ctx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = Math.min(9000, freq * 5.5); lp.Q.value = 0.7;
+    lp.type = 'lowpass'; lp.frequency.value = Math.min(9000, f * 5.5); lp.Q.value = 0.7;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0, t);
     // 0.05 measured at -51.5 weighted, the quietest thing in the game bar the
@@ -1551,13 +1573,170 @@ export class Audio {
     g.gain.exponentialRampToValueAtTime(0.0004, t + 0.09);
     o.connect(lp).connect(g).connect(this.uiBus);
     o.start(t); o.stop(t + 0.1);
+    // The physical half. A square with an envelope is a beep; the 6ms band of
+    // noise in front of it is what makes it read as a key going down.
+    this._noiseHit(this.uiBus, t, { gain: 0.035, lo: 900, hi: 5200, q: 1.2, dur: 0.02, at: 0.001 });
   }
 
-  /** Refused. A flat, dull two-tone fall; unmistakably not a confirmation. */
+  /**
+   * A screen opening, and a screen closing. The same two notes in the two
+   * orders, plus a breath of air that swells in and falls out with them.
+   *
+   * A fourth rather than a fifth or an octave: wide enough to hear the
+   * direction at a glance and narrow enough that it is not a fanfare. This is
+   * furniture, not an event.
+   */
+  uiOpen() {
+    if (!this._live() || !this._take('ui', 0.4)) return;
+    this._screen(true);
+  }
+
+  uiClose() {
+    if (!this._live() || !this._take('ui', 0.4)) return;
+    this._screen(false);
+  }
+
+  _screen(open) {
+    const t = this.ctx.currentTime;
+    const root = 440 * (0.98 + Math.random() * 0.04);
+    const pair = open ? [root, root * 4 / 3] : [root * 4 / 3, root];
+    pair.forEach((f, i) => {
+      const tn = t + i * 0.055;
+      const o = this.ctx.createOscillator();
+      o.type = 'triangle'; o.frequency.value = f;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, tn);
+      g.gain.linearRampToValueAtTime(0.075, tn + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + (i ? 0.20 : 0.10));
+      o.connect(g).connect(this.uiBus);
+      o.start(tn); o.stop(tn + 0.24);
+    });
+    // The air. Opens upward, closes downward, and is the layer that stops the
+    // pair sounding like two notes on a phone.
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 0.9 + Math.random() * 0.4;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 1.1;
+    bp.frequency.setValueAtTime(open ? 700 : 3000, t);
+    bp.frequency.exponentialRampToValueAtTime(open ? 3200 : 640, t + 0.18);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.05, t + (open ? 0.05 : 0.008));
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.20);
+    n.connect(bp).connect(g).connect(this.uiBus);
+    n.start(t, Math.random() * 2); n.stop(t + 0.24);
+  }
+
+  /**
+   * A stack lifted out of a slot, and a stack set down into one.
+   *
+   * The shortest pair here, because it is the most repeated action in the game
+   * bar walking: sorting a full bag is fifty of these in twenty seconds, and
+   * anything with a tail on it turns that into mud. Under 90ms, and the whole
+   * difference between the two is the direction of a 40ms chirp plus a low
+   * knock that only the setting-down has — a thing leaving your hand lands on
+   * something and a thing entering it does not.
+   */
+  uiSlot(down = false) {
+    if (!this._live() || !this._take('ui', 0.2)) return;
+    const t = this.ctx.currentTime;
+    const f = (down ? 620 : 780) * (0.94 + Math.random() * 0.12);
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(down ? f * 1.35 : f * 0.8, t);
+    o.frequency.exponentialRampToValueAtTime(down ? f * 0.85 : f * 1.3, t + 0.04);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.075, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.07);
+    o.connect(g).connect(this.uiBus);
+    o.start(t); o.stop(t + 0.09);
+    this._noiseHit(this.uiBus, t, {
+      gain: 0.04, lo: down ? 700 : 1600, hi: down ? 2600 : 5000, q: 1.3, dur: 0.025, at: 0.001,
+    });
+    if (down) {
+      const k = this.ctx.createOscillator();
+      k.type = 'sine';
+      k.frequency.setValueAtTime(150 * (0.9 + Math.random() * 0.2), t);
+      k.frequency.exponentialRampToValueAtTime(90, t + 0.06);
+      const kg = this.ctx.createGain();
+      kg.gain.setValueAtTime(0, t);
+      kg.gain.linearRampToValueAtTime(0.085, t + 0.003);
+      kg.gain.exponentialRampToValueAtTime(0.0004, t + 0.07);
+      k.connect(kg).connect(this.uiBus);
+      k.start(t); k.stop(t + 0.09);
+    }
+  }
+
+  /**
+   * A tab or a page changing. The smallest sound in the game on purpose: a tab
+   * is not a decision, it is a place you were already going, and it wants to be
+   * felt more than heard.
+   */
+  uiTab() {
+    if (!this._live() || !this._take('ui', 0.12)) return;
+    const t = this.ctx.currentTime;
+    this._noiseHit(this.uiBus, t, { gain: 0.055, lo: 1400, hi: 6400, q: 1.6, dur: 0.028, at: 0.001 });
+    const o = this.ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = 1180 * (0.95 + Math.random() * 0.1);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 3600;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.045, t + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.035);
+    o.connect(lp).connect(g).connect(this.uiBus);
+    o.start(t); o.stop(t + 0.05);
+  }
+
+  /**
+   * A setting switching. Two clicks, not one: a real switch makes a noise going
+   * down and a different one arriving, and the interval between them going up
+   * for on and down for off is the whole state readout.
+   */
+  uiToggle(on = true) {
+    if (!this._live() || !this._take('ui', 0.25)) return;
+    const t = this.ctx.currentTime;
+    const base = 560 * (0.96 + Math.random() * 0.08);
+    const pair = on ? [base, base * 1.5] : [base * 1.5, base];
+    pair.forEach((f, i) => {
+      const tn = t + i * 0.045;
+      const o = this.ctx.createOscillator();
+      o.type = 'square'; o.frequency.value = f;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 2800; lp.Q.value = 0.7;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, tn);
+      g.gain.linearRampToValueAtTime(i ? 0.07 : 0.045, tn + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + 0.05);
+      o.connect(lp).connect(g).connect(this.uiBus);
+      o.start(tn); o.stop(tn + 0.07);
+    });
+    this._noiseHit(this.uiBus, t, { gain: 0.03, lo: 1200, hi: 4800, q: 1.4, dur: 0.02, at: 0.001 });
+  }
+
+  /**
+   * `UI.js` has called `audio.click?.()` since the crafting grid was written and
+   * there has never been a `click` on this class, so the optional-call swallowed
+   * it and filling a recipe from the book made no sound at all. It is a button,
+   * so it is the button.
+   */
+  click() { this.uiPress(660); }
+
+  /**
+   * Refused. A flat, dull two-tone fall; unmistakably not a confirmation.
+   *
+   * Now jittered per play, which it was not: thirteen call sites share this and
+   * a player who mashes a refused button heard the identical waveform every
+   * time, which is the sound of a broken interface rather than a firm one.
+   */
   deny() {
     if (!this._live() || !this._take('ui', 0.3)) return;
     const t = this.ctx.currentTime;
-    [[230, 0], [172, 0.075]].forEach(([f, dt]) => {
+    const k = 0.96 + Math.random() * 0.08;
+    [[230 * k, 0], [172 * k, 0.075]].forEach(([f, dt]) => {
       const o = this.ctx.createOscillator();
       o.type = 'square'; o.frequency.value = f;
       const lp = this.ctx.createBiquadFilter();
@@ -1569,6 +1748,45 @@ export class Audio {
       o.connect(lp).connect(g).connect(this.uiBus);
       o.start(t + dt); o.stop(t + dt + 0.12);
     });
+  }
+
+  /**
+   * Refused because there is no room, which is the one refusal a player can act
+   * on and the one they get most often.
+   *
+   * `deny()` says no. This says no AND says why, by being heavier rather than
+   * merely lower: a dull lowpassed thump under the two tones, and a third tone
+   * that does not fall any further. A bag that is full is a solid object, not a
+   * button that will not press.
+   */
+  denyFull() {
+    if (!this._live() || !this._take('ui', 0.4)) return;
+    const t = this.ctx.currentTime;
+    const k = 0.96 + Math.random() * 0.08;
+    [[196 * k, 0], [196 * k, 0.10]].forEach(([f, dt]) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'square'; o.frequency.value = f;
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 800;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, t + dt);
+      g.gain.linearRampToValueAtTime(0.05, t + dt + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + dt + 0.11);
+      o.connect(lp).connect(g).connect(this.uiBus);
+      o.start(t + dt); o.stop(t + dt + 0.13);
+    });
+    // the weight
+    const th = this.ctx.createOscillator();
+    th.type = 'sine';
+    th.frequency.setValueAtTime(120 * k, t);
+    th.frequency.exponentialRampToValueAtTime(62, t + 0.16);
+    const tg = this.ctx.createGain();
+    tg.gain.setValueAtTime(0, t);
+    tg.gain.linearRampToValueAtTime(0.11, t + 0.006);
+    tg.gain.exponentialRampToValueAtTime(0.0004, t + 0.22);
+    th.connect(tg).connect(this.uiBus);
+    th.start(t); th.stop(t + 0.24);
+    this._noiseHit(this.uiBus, t, { gain: 0.05, lo: 160, hi: 900, q: 1.0, dur: 0.09, at: 0.003 });
   }
 
   /** Something went wrong and the player needs to know without reading. */

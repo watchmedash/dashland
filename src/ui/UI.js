@@ -7,7 +7,7 @@ import { Slot, HOTBAR, TOTAL } from '../game/Inventory.js';
 import { BRANCHES } from '../game/Skills.js';
 import {
   findRecipe, availableRecipes, craftFromInventory, kitchenFallback, isKitchenIngredient,
-  FUEL, SMELTING, recipeCost, takeOneInto,
+  FUEL, SMELTING, recipeCost, takeOneInto, familyOf,
 } from '../game/Recipes.js';
 import { itemIdOf } from '../game/Items.js';
 import {
@@ -2024,7 +2024,7 @@ export class UI {
       if (!held) act('plain');
     });
     el.addEventListener('pointercancel', () => { if (this._hold?.el === el) this._clearHold(); });
-    el.addEventListener('mouseenter', () => this._showTooltip(getSlot()));
+    el.addEventListener('mouseenter', () => this._showTooltip(getSlot(), el));
     el.addEventListener('mouseleave', () => this._hideTooltip());
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -2369,7 +2369,21 @@ export class UI {
         // still reads as empty - it is a label for the hole, not a stack.
         const ghost = document.createElement('img');
         ghost.className = 'ghost';
-        ghost.src = this.icons.item(want);
+        // ONE ICON WHEN THERE IS ONE ANSWER, ALL OF THEM WHEN THERE ARE MANY.
+        //
+        // A recipe that names a family is satisfied by any member, and drawing
+        // the canonical one says the opposite: a grilled fish asks for `fish`
+        // and a lone fish icon reads as "that exact fish and no other". The
+        // owner: "it should keep swapping the fish icons telling player any fish
+        // can be cooked". The swap IS the sentence - there is no room in a slot
+        // for a caption, and the tooltip says it in words for anyone who stops.
+        //
+        // Driven off the shared clock in `_tickGhosts` rather than a timer per
+        // image, so every fish cell in the grid changes on the same beat and a
+        // screen with none of them costs nothing.
+        const fam = familyOf(want);
+        if (fam.length > 1) ghost.dataset.family = fam.join(',');
+        ghost.src = this.icons.item(fam.length > 1 ? fam[this._ghostPhase % fam.length] : want);
         ghost.alt = ITEMS[want]?.label || '';
         el.appendChild(ghost);
       });
@@ -2407,8 +2421,22 @@ export class UI {
       this.el.recipeCount.classList.add('hidden');
       this.el.recipeEmpty.classList.add('hidden');
       list.classList.remove('recipe-tiles');
-      list.innerHTML = '';
-      this._buildSmeltList(list);
+      // BUILT ONCE, RESTATED AFTERWARDS.
+      //
+      // `_tickKilns` calls `ui.refresh()` on every frame the kiln screen is
+      // open - it has to, the flame and the arrow are live - and this method
+      // used to empty the column and build it again each time. A click needs
+      // its mousedown and its mouseup to land on the SAME element, and the
+      // element was being replaced sixty times a second in between, so pressing
+      // a row did nothing at all: "clicking a recipe in kiln doesn't send the
+      // ingredients on smelting slots".
+      //
+      // The rows are also not re-sorted after the first build. A list that
+      // reorders itself as your bag changes is a list you have to re-read every
+      // time, and it moves the row out from under the cursor on the frame you
+      // reach for it - the same fault by a slower route.
+      if (!this._smeltRows) { list.innerHTML = ''; this._buildSmeltList(list); }
+      else this._restateSmeltList();
       return;
     }
     const station = this._station();
@@ -2515,7 +2543,28 @@ export class UI {
     this.el.cursor.style.top = `${this._cursorXY.y}px`;
   }
 
-  _showTooltip(slot) {
+  /**
+   * @param {Slot} slot what is in the cell
+   * @param {HTMLElement} [el] the cell itself, so an EMPTY one can still speak
+   */
+  _showTooltip(slot, el) {
+    // A cell waiting for an ingredient it has not got. It is empty, so the
+    // ordinary path says nothing at all, and the owner is right that it has to:
+    // "icons could look the same" - a red square with a picture of a root in it
+    // does not tell you WHICH root, and that is exactly the moment you need the
+    // name. Read off the cell rather than the slot because the slot has nothing
+    // to say; `craftWant` is what the laid-out dish asked for.
+    if ((!slot || slot.empty) && el && el.classList.contains('missing')) {
+      const k = this.craftSlots?.indexOf(el) ?? -1;
+      const want = k >= 0 ? (this.craftWant?.[k] || 0) : 0;
+      const def = want && ITEMS[want];
+      if (def) {
+        // Named as what is MISSING rather than as the item, because the cell is
+        // a hole and the tooltip is about the hole.
+        this._paintTooltip(def.label, 'Missing', this._familyOfWant(want));
+        return;
+      }
+    }
     if (!slot || slot.empty) return this._hideTooltip();
     const def = ITEMS[slot.item];
     let sub = '';
@@ -2542,10 +2591,29 @@ export class UI {
     // Pufferfish (Poisonous)" in a hint line is an explanation of a system,
     // which the house style forbids. One word, on the line that already exists.
     if (def.poison) sub = sub ? `${sub} · Poisonous` : 'Poisonous';
-    this.el.tooltip.innerHTML = `${def.label}${sub ? `<em>${sub}</em>` : ''}`;
+    this._paintTooltip(def.label, sub);
+  }
+
+  /** One place that writes the tooltip, so the two callers cannot drift. */
+  _paintTooltip(label, sub, note) {
+    this.el.tooltip.innerHTML = label
+      + (sub ? `<em>${sub}</em>` : '')
+      + (note ? `<em>${note}</em>` : '');
     this.el.tooltip.classList.remove('hidden');
     this.el.tooltip.style.left = `${this._cursorXY.x}px`;
     this.el.tooltip.style.top = `${this._cursorXY.y}px`;
+  }
+
+  /**
+   * "...or any fish", for an ingredient that a whole family satisfies.
+   *
+   * Only worth saying when the family is big enough that the icon cannot say it
+   * - which today is the fish and the boards.
+   */
+  _familyOfWant(id) {
+    const fam = familyOf(id);
+    if (!fam || fam.length < 2) return '';
+    return `Any of ${fam.length}`;
   }
 
   _hideTooltip() { this.el.tooltip.classList.add('hidden'); }
@@ -2575,6 +2643,8 @@ export class UI {
     this.el.screenTop.innerHTML = '';
     this.craftSlots = null; this.craftMap = null; this.kilnSlots = null; this.craftNote = null;
     this.kitchenFuel = null; this.kitchenFlame = null; this.recipeGrid = null;
+    // The kiln's column is built once per screen; see `_refreshRecipes`.
+    this._smeltRows = null;
     // What the last dish asked for, per cell. A new screen asks for nothing.
     this.craftWant = null;
     this.crateSlots = null; this.offhandEl = null;
@@ -2633,10 +2703,17 @@ export class UI {
     this.el.screenEl.classList.toggle('trading', kind === 'shop' || kind === 'barter');
 
     this.el.screenEl.classList.remove('hidden');
+    // The family ghosts' beat. One interval for the screen rather than one per
+    // image, and only while a screen is up.
+    this._ghostPhase = 0;
+    clearInterval(this._ghostTimer);
+    this._ghostTimer = setInterval(() => this._tickGhosts(), 1500);
     this.refresh();
   }
 
   closeScreen() {
+    clearInterval(this._ghostTimer);
+    this._ghostTimer = null;
     this.el.screenEl.classList.add('hidden');
     this.screen = null;
     this.kiln = null;
@@ -2936,6 +3013,7 @@ export class UI {
     // the same reason - the half of the list you can act on should not be
     // scattered through the half you cannot.
     rows.sort((a, b) => (b.have ? 1 : 0) - (a.have ? 1 : 0));
+    this._smeltRows = [];
     for (const { r, have } of rows) {
       const row = document.createElement('div');
       // Pressable when the ore is in the bag, and it LOADS the kiln rather than
@@ -2958,8 +3036,22 @@ export class UI {
       yield_.className = 'ryield';
       yield_.textContent = r.count > 1 ? `x${r.count}` : '';
       row.append(a, to, b, name, yield_);
-      if (have) row.onclick = () => this._loadKiln(r.in);
+      // The handler is attached whatever the state and asks at press time
+      // instead. A row that gains its handler only once you own the ore would
+      // need the rebuild this method exists to avoid.
+      row.onclick = () => this._loadKiln(r.in);
       list.appendChild(row);
+      this._smeltRows.push({ row, item: r.in });
+    }
+  }
+
+  /** Re-grey the smelt rows against the bag, without touching the DOM. */
+  _restateSmeltList() {
+    const inv = this.game.inventory;
+    for (const { row, item } of this._smeltRows) {
+      const have = inv.count(item) > 0;
+      row.classList.toggle('can', have);
+      row.classList.toggle('out', !have);
     }
   }
 
@@ -2973,6 +3065,9 @@ export class UI {
   _loadKiln(itemId) {
     const k = this.kiln;
     if (!k) return;
+    // Asked here rather than by withholding the handler - see the note in
+    // `_buildSmeltList` about why these rows are never rebuilt.
+    if (this.game.inventory.count(itemId) <= 0) { this.game.audio.deny(); return; }
     const inv = this.game.inventory;
     if (!k.input.empty && k.input.item !== itemId) {
       const taken = inv.add(k.input.item, k.input.count, k.input.wear);
@@ -3056,6 +3151,24 @@ export class UI {
     }
     if (missing) this.game.audio.deny(); else this.game.audio.click?.();
     this.refresh();
+  }
+
+  /**
+   * Advance the family ghosts by one member.
+   *
+   * A slow beat - a second and a half - because it is a label rather than an
+   * animation: fast enough that a player who looks twice sees it change, slow
+   * enough that it is never the thing moving on the screen. Only walks the
+   * images that actually carry a family, so it is free on every other screen.
+   */
+  _tickGhosts() {
+    this._ghostPhase = (this._ghostPhase || 0) + 1;
+    const imgs = document.querySelectorAll('.islot .ghost[data-family]');
+    if (!imgs.length || !this.icons) return;
+    for (const img of imgs) {
+      const fam = img.dataset.family.split(',');
+      img.src = this.icons.item(+fam[this._ghostPhase % fam.length]);
+    }
   }
 
   _refreshKitchen() {

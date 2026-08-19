@@ -197,7 +197,13 @@ export class TouchControls {
     // no other code learns that phones exist.
     this.game.settings.minimap = false;
     this.game.persistSettings?.();
-    document.getElementById('set-minimap')?.closest('label')?.remove();
+    // HIDDEN, NOT REMOVED, and the difference cost the phone build its pause
+    // menu. `syncSettings` writes to every row by id; deleting one left it
+    // setting `.checked` on null, which threw inside `openPause` before the card
+    // could be shown. The switch is just as gone from the player's point of
+    // view - which was the whole requirement - and the element is still there
+    // for the code that addresses it.
+    document.getElementById('set-minimap')?.closest('label')?.classList.add('hidden');
 
     // ...and the camera, which had nowhere to live on a phone at all: the view
     // cycle is V, and a thumb has no keyboard. It goes in Settings rather than
@@ -290,17 +296,23 @@ export class TouchControls {
     //   long press mine, held for as long as the thumb is down.
     //   drag       look.
     //
-    // What is lost with the button is the WORD that was on it, and that word
-    // was carrying real weight: a tap that places a block and a tap that
-    // punches a cow are the same gesture, and the player has to know which one
-    // they are about to make. So the verb survives as a hint under the
-    // crosshair — same vocabulary, same `bindAction` plumbing, painted by the
-    // UI exactly as before, but a label rather than a control.
+    // The word under the crosshair is GONE, and the reasoning that put it there
+    // is left standing above because it was not wrong - it was answering a real
+    // question, just in the worst possible place. A tap that places a block and
+    // a tap that punches a cow are the same gesture, so the game did need to say
+    // which; printing "Place" in the middle of the screen under the crosshair
+    // meant saying it constantly, in the one spot the player is always looking.
+    // The owner: "there's a literal place text under crosshair when I am holding
+    // an object, remove it it's distracting as fck".
+    //
+    // The element stays and is never shown. `bindAction` still runs, the UI
+    // still computes the verb, and `actionVerb` - which the tap fork reads to
+    // decide between placing and hitting - is unchanged. Deleting the binding
+    // instead would have taken that fork with it and made every tap a punch.
     this.hint = document.createElement('span');
     this.hint.id = 'tc-hint';
+    this.hint.hidden = true;
     root.appendChild(this.hint);
-    // `bindAction` wants a button to put a class on. It gets the hint itself,
-    // which is harmless — the class is only ever used to show the word.
     this.verb = this.hint;
     mk('jump', 'jump', 'Jump');
     mk('sneak', 'arrow down', 'Sneak');
@@ -835,26 +847,26 @@ export class TouchControls {
   /**
    * Should the Jump button be on screen at all?
    *
-   * Normally no. Auto-jump is on by default now, and with it on there is
-   * nothing for the button to do on the ground: a step is walked up, and the
-   * owner's list of what a phone should show is "jump if autojump is off,
-   * sneak and joystick movement".
+   * ALWAYS, now.
    *
-   * WATER IS THE EXCEPTION AND IT IS NOT OPTIONAL. Space is swim-up. Auto-jump
-   * has no opinion about water at all - it is a ledge rule - so hiding the
-   * button unconditionally would leave a player in a lake with no way to reach
-   * the surface, and the breath meter runs out in nine seconds. So the button
-   * comes back while you are in water and goes again when you are out, which is
-   * a control appearing exactly where it is the only way out of something.
+   * It used to be "only when auto-jump is off, or you are in water", on the
+   * reasoning that auto-jump leaves the button nothing to do on flat ground and
+   * the thumb band is better empty. Two things were wrong with that. Auto-jump
+   * only walks you up a STEP - it has never jumped a gap, jumped for height, or
+   * jumped on the spot - so the button had plenty left to do. And it was on by
+   * default, so the phone shipped with no jump button at all and no way to
+   * discover that jumping exists.
    *
-   * Ladders deliberately do NOT bring it back: climbing is walking into the
-   * ladder, not holding up, so the stick already does it.
+   * The owner: "default to not auto jump so always show the jump button". The
+   * default has moved too (see DEFAULT_SETTINGS), but the default alone would
+   * not have reached anyone already playing - their setting is saved, and a
+   * saved `autoJump: true` would have gone on hiding the button forever.
    *
-   * Called once a frame from `sync` and change-checked there, so this is a
-   * couple of field reads on the frames where nothing has moved.
-   */
-  _wantJump() {
-    return !this.game.settings.autoJump || !!this.game.player?.inWater;
+   * Water was the old exception and needed no argument: Space is swim-up, and a
+   * hidden button there is a player in a lake with nine seconds of breath and no
+   * way to the surface. It is covered by the same `true` now.
+   */  _wantJump() {
+    return true;
   }
 
   _release() {

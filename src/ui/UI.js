@@ -1121,26 +1121,49 @@ export class UI {
     });
   }
 
+  /**
+   * Push the stored settings into the settings screen's controls.
+   *
+   * EVERY LOOKUP IS OPTIONAL, and that is not defensiveness for its own sake.
+   * This function threw on every touch device in the game, on every call, for as
+   * long as the phone build has existed: the touch layer REMOVES the minimap row
+   * (a switch that cannot do anything is worse than no switch) and this then set
+   * `.checked` on the null it left behind.
+   *
+   * What that cost was invisible from here. `openPause()` calls this BEFORE it
+   * un-hides the pause card, and `pause()` had already set the state - so on a
+   * phone the pause button paused the game, the touch controls hid themselves
+   * because the game was paused, the card never appeared, and there was no
+   * control left on screen to undo any of it. The owner: "nothing opens and then
+   * all controls disappear and that is the stuck part". Settings went the same
+   * way from the title screen, through the same line.
+   *
+   * The row is hidden rather than removed now (see `TouchControls`), so this
+   * finds it either way. The optional chaining stays regardless: a screen-sync
+   * that assumes every row exists is a trap for whoever hides the next one.
+   */
   syncSettings() {
     const s = this.game.settings;
-    $('set-sens').value = s.sensitivity; $('sens-val').textContent = s.sensitivity.toFixed(2);
-    $('set-vol').value = Math.round(s.volume * 100); $('vol-val').textContent = Math.round(s.volume * 100);
-    $('set-mus').value = Math.round(s.music * 100); $('mus-val').textContent = Math.round(s.music * 100);
+    const val = (id, v) => { const e = $(id); if (e) e.value = v; };
+    const text = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+    const check = (id, v) => { const e = $(id); if (e) e.checked = v; };
+    val('set-sens', s.sensitivity); text('sens-val', s.sensitivity.toFixed(2));
+    val('set-vol', Math.round(s.volume * 100)); text('vol-val', Math.round(s.volume * 100));
+    val('set-mus', Math.round(s.music * 100)); text('mus-val', Math.round(s.music * 100));
     // The resolved tier, never `s.quality`: the stored value is 'auto' until
     // somebody touches this box, and a checkbox cannot say 'auto'. On a phone
     // it therefore opens already ticked, which is the truth about what the
     // session is running.
-    $('set-lowspec').checked = this.game.qualityTier === 'low';
-    $('set-post').checked = s.post;
-    $('set-bob').checked = s.bob;
-    $('set-invert').checked = s.invertY;
-    $('set-autojump').checked = !!s.autoJump;
-    $('set-minimap').checked = s.minimap !== false;
-    $('set-compass').checked = s.compass !== false;
-    $('set-diag').checked = !!this.game.diag?.on;
-    $('pz-map').textContent = s.minimap === false ? 'Show Map' : 'Hide Map';
+    check('set-lowspec', this.game.qualityTier === 'low');
+    check('set-post', s.post);
+    check('set-bob', s.bob);
+    check('set-invert', s.invertY);
+    check('set-autojump', !!s.autoJump);
+    check('set-minimap', s.minimap !== false);
+    check('set-compass', s.compass !== false);
+    check('set-diag', !!this.game.diag?.on);
+    text('pz-map', s.minimap === false ? 'Show Map' : 'Hide Map');
   }
-
   // --- the game's own yes/no ------------------------------------------------
 
   /**

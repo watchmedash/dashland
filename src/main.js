@@ -1476,12 +1476,17 @@ const NIGHT_OUTDOORS = 180;
 
 const DEFAULT_SETTINGS = {
   fov: 75, sensitivity: 1.0, renderScale: 1,
-  // Auto-jump is ON out of the box, on the owner's call, and the phone is the
-  // reason: with it on there is nothing left for a Jump button to do on flat
-  // ground, so the button can go and the thumb band empties to a stick and a
-  // sneak. A keyboard loses nothing either - Space still jumps, it is simply no
-  // longer needed to walk up a step.
-  volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: true,
+  // Auto-jump is OFF out of the box, on the owner's second call, and the phone
+  // is still the reason - just read the other way round. It was on so that the
+  // Jump button could disappear and leave the thumb band as a stick and a sneak;
+  // what that actually produced was a phone with no jump button and a player who
+  // could not tell whether jumping existed. "Default to not auto jump so always
+  // show the jump button."
+  //
+  // The button's visibility is derived from this setting rather than set beside
+  // it (see `_wantsJump` in TouchControls), so this one word is the whole change
+  // and the two can never disagree.
+  volume: 0.7, music: 0.35, post: true, bob: true, invertY: false, autoJump: false,
   // The two navigation aids, both on.
   //
   // On by default because they are the answer to a problem this planet has and

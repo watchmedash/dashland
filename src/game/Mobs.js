@@ -4096,7 +4096,53 @@ const footCaps = (drawnHeight) => ({
  * against the seabed clamp, which is measured in the same units.
  */
 const FOOT_TUCK = 0.56;
-const tuckW = (spec, drawn) => (spec.aquatic ? drawn : drawn * FOOT_TUCK);
+
+/**
+ * ...and the width above which the tuck stops being paid for.
+ *
+ * The whole argument for shrinking a body below what is drawn is the doorway:
+ * a one-cell gap takes a half-width under about 0.5, and at 0.56 a cow (0.821
+ * drawn) comes down to 0.46 and walks through one. Fine. But the tuck was
+ * applied to EVERY land body at the same rate, including the ones it cannot
+ * possibly get under a door, and for those it buys nothing at all and costs
+ * the thing the owner reported: "some parts of them are still passing through
+ * blocks like tree trunks and this is also problem for animals that are big
+ * like giraffe and elephant".
+ *
+ * Measured in a live world, drawn half-width against the ground it claimed:
+ *
+ *   fox        0.267 -> 0.149     doorway: yes
+ *   husk       0.593 -> 0.332     yes
+ *   cow        0.821 -> 0.460     yes
+ *   panda mon. 0.968 -> 0.542     NO, and never could
+ *   dragon     1.147 -> 0.642     no
+ *   elephant   1.578 -> 0.884     no        0.69 of a cell of flank in the wall
+ *   giraffe    1.612 -> 0.903     no        0.71
+ *
+ * TUCK_FULL is the widest body the tuck can still squeeze under a door -
+ * 0.5 / 0.56, near enough 0.9 - so everything at or under it keeps exactly the
+ * allowance it has today and nothing that walks through a doorway now stops.
+ * Past it the allowance is handed back over TUCK_NONE, at which point a body
+ * collides with the world at the size it is drawn.
+ *
+ * Ramped rather than switched because a step here is a cliff between species
+ * a hand-width apart: the cactus monster (0.888) and the panda monster (0.968)
+ * would have taken 0.497 and 0.968, which is the kind of line that reads as a
+ * bug from the far side of it.
+ *
+ * THE COST, and it is the giants who pay it: an elephant now needs its full
+ * 1.58 of clearance rather than 0.88, so it will refuse gaps in a wood that it
+ * used to walk through - and walk through visibly, which is the complaint.
+ * `radius`, and every body-against-body distance in this file, still reads
+ * `drawW` and is unchanged.
+ */
+const TUCK_FULL = 0.90;
+const TUCK_NONE = 1.30;
+const tuckW = (spec, drawn) => {
+  if (spec.aquatic) return drawn;
+  const t = clamp((drawn - TUCK_FULL) / (TUCK_NONE - TUCK_FULL), 0, 1);
+  return drawn * (FOOT_TUCK + (1 - FOOT_TUCK) * t);
+};
 
 /**
  * Horizontal half-extents of a built model, in cells, along its own axes.

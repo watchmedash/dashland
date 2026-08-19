@@ -138,6 +138,18 @@ export const R_GATE = 12;
  * `MODELLED_BLOCKS` in main.js and a `POSE` — and nothing at all in the light.
  */
 export const R_MODEL = 13;
+/**
+ * A pane of glass: a thin sheet standing in the middle of its cell, reaching
+ * out to whatever it can join on each of its four sides.
+ *
+ * The same neighbour-read shape a fence has, through the same `links` argument,
+ * and deliberately NOT a fence: a fence joins fences and a pane joins panes, so
+ * the two families do not weld themselves to each other across a farmyard. What
+ * differs beyond that is the profile - a fence is a post with rails at two
+ * heights and a gap you can see through, a pane is a full-height sheet - and the
+ * draw group, which is glass's.
+ */
+export const R_PANE = 14;
 
 // ---------------------------------------------------------------------------
 // Tiles — index in this array is the texture-array layer.
@@ -336,6 +348,15 @@ const MASONRY = [
   ['planks_birch', 'Birch', 'planks_birch', 2.0, 'axe', 0],
   ['planks_pine', 'Pine', 'planks_pine', 2.0, 'axe', 0],
   ['mossy_stone_brick', 'Mossy Brick', 'mossy_stone_brick', 2.4, 'pick', 0],
+  // MOSSY COBBLE'S SLAB AND STAIR GO HERE, and they are not here, because there
+  // is no room for them: 254 block ids were in use and a voxel is one byte, so
+  // the ceiling is 256. The glass pane took one and this row wants two.
+  //
+  // Uncommenting it is the whole change once an id is freed. See the note over
+  // N_BLOCKS for the two ways to free one - fold a rarely-varying block into a
+  // per-cell byte (the 28 crop growth stages are the obvious candidates and are
+  // already on the list), or widen the voxel arrays to 16 bits.
+  // ['moss_stone', 'Mossy Cobblestone', 'moss_stone', 2.4, 'pick', 0],
   ['snow_brick', 'Snow Brick', 'snow_brick', 0.7, 'shovel', 0],
   ['packed_ice', 'Packed Ice', 'packed_ice', 1.0, 'pick', 0],
 ];
@@ -433,7 +454,13 @@ export const BLOCKS = [
   // that is mostly stone, none of it. The moss is already the right green in the
   // tile; it simply does not follow the season now, which is the price and is
   // much the smaller of the two.
-  block({ name: 'moss_stone', label: 'Mossy Stone', all: 'moss_stone', hardness: 2.4, tool: 'pick', particle: [0.36, 0.44, 0.3], sound: 'stone' }),
+  // "Why we getting mossy stone instead of mossy cobblestone?" - because the
+  // label said so and nothing else did. The tile has been composed over
+  // COBBLESTONE since it was baked (see the decal table in bake-textures.mjs),
+  // so the block has always looked like mossy cobble and read as mossy stone.
+  // The internal name stays `moss_stone`: it is in the generator, in three soil
+  // lists and in the decal table, and none of them are what a player reads.
+  block({ name: 'moss_stone', label: 'Mossy Cobblestone', all: 'moss_stone', hardness: 2.4, tool: 'pick', particle: [0.36, 0.44, 0.3], sound: 'stone' }),
   block({ name: 'basalt', label: 'Basalt', all: 'basalt', hardness: 2.6, tool: 'pick', particle: [0.26, 0.26, 0.29], sound: 'stone' }),
   // Difficulty is `tier`, not `hardness`: hardness only sets how long the swing
   // takes, while tier decides whether anything drops. These four predate that
@@ -1583,6 +1610,14 @@ export const BLOCKS = [
     hardness: -1, drop: null, particle: [0.88, 0.93, 1.0], sound: 'glass',
   }),
 
+  // Glass, in a sheet rather than a cube. Appended for the reason every block
+  // down here is: an id in the middle of the array renumbers chunks, saves and
+  // the item table all at once.
+  block({
+    name: 'glass_pane', label: 'Glass Pane', render: R_PANE, all: 'glass',
+    opaque: false, hardness: 0.4, drop: null,
+    particle: [0.8, 0.9, 0.95], sound: 'glass',
+  }),
   // THE KITCHEN IS TWO CELLS, and the cell above holds this.
   //
   // APPENDED, like the kitchen's own item and the gate's and the quicksand's,
@@ -1755,6 +1790,7 @@ export const IS_STAIR = new Uint8Array(N_BLOCKS);
 export const IS_SHAPED = new Uint8Array(N_BLOCKS);
 export const IS_LADDER = new Uint8Array(N_BLOCKS);
 export const IS_DOOR = new Uint8Array(N_BLOCKS);
+export const IS_PANE = new Uint8Array(N_BLOCKS);
 export const IS_SIGN = new Uint8Array(N_BLOCKS);
 export const IS_FENCE = new Uint8Array(N_BLOCKS);
 export const IS_GATE = new Uint8Array(N_BLOCKS);
@@ -2123,6 +2159,15 @@ export const FENCE_RAIL = 0.16;
 export const FENCE_HEIGHT = 1.0;
 export const FENCE_BLOCK_H = 1.5;
 /**
+ * How thick a pane of glass is.
+ *
+ * Minecraft's is 2/16. This is a shade fatter because the collision test is a
+ * discrete overlap and a sprinting body covers more ground between frames than
+ * an eighth of a cell - the same reasoning FENCE_BLOCK_H is written out of, at
+ * the one dimension a pane has to spare.
+ */
+export const PANE_THICK = 0.16;
+/**
  * How far off the ground a gate's leaf starts.
  *
  * Minecraft's is 5/16 and this is 0.30, which is the same gap read to two
@@ -2169,6 +2214,16 @@ export const fenceJoins = (id) => IS_FENCE[id] === 1
  * blockBoxes wants: bit 0 +i, 1 -i, 2 +j, 3 -j, matching the facing order used
  * everywhere else.
  */
+/**
+ * What a PANE reaches out to: another pane, or anything solid it can sit flush
+ * against. Not a fence - see R_PANE.
+ */
+export const paneJoins = (id) => IS_PANE[id] === 1 || (crowds(id) && !IS_DOOR[id]);
+
+export function paneLinks(idPi, idMi, idPj, idMj) {
+  return (paneJoins(idPi) ? 1 : 0) | (paneJoins(idMi) ? 2 : 0)
+    | (paneJoins(idPj) ? 4 : 0) | (paneJoins(idMj) ? 8 : 0);
+}
 export function fenceLinks(idPi, idMi, idPj, idMj) {
   return (fenceJoins(idPi) ? 1 : 0) | (fenceJoins(idMi) ? 2 : 0)
     | (fenceJoins(idPj) ? 4 : 0) | (fenceJoins(idMj) ? 8 : 0);
@@ -2512,6 +2567,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_GATE[i] = b.render === R_GATE ? 1 : 0;
   IS_TORCH[i] = b.render === R_TORCH ? 1 : 0;
   IS_MODEL[i] = b.render === R_MODEL ? 1 : 0;
+  IS_PANE[i] = b.render === R_PANE ? 1 : 0;
   // The portal is back in, and the story is worth the four lines because the
   // exception that stood here was real and is now unnecessary.
   //
@@ -2547,6 +2603,7 @@ for (let i = 0; i < N_BLOCKS; i++) {
   IS_SHAPED[i] = (b.render === R_SLAB || b.render === R_STAIR
     || b.render === R_LADDER || b.render === R_DOOR || b.render === R_SIGN
     || b.render === R_FENCE || b.render === R_TORCH
+    || b.render === R_PANE
     || b.render === R_GATE) ? 1 : 0;
   TINT_ID[i] = b.tint ? TINTS[b.tint] : 0;
 }
@@ -2845,6 +2902,19 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
       if (links & 4) out.push([r0, p1, k0, r1, 1, k1]);
       if (links & 8) out.push([r0, 0, k0, r1, p0, k1]);
     }
+    return out;
+  }
+  if (IS_PANE[id]) {
+    // A sheet through the middle of the cell, and arms out to each side it
+    // joins. A lone pane keeps the centre only, which is a short post of glass -
+    // the same thing Minecraft draws and for the same reason: a pane with no
+    // neighbours is a pane, not a full square of window.
+    const t0 = 0.5 - PANE_THICK / 2, t1 = 0.5 + PANE_THICK / 2;
+    out.push([t0, t0, 0, t1, t1, 1]);
+    if (links & 1) out.push([t1, t0, 0, 1, t1, 1]);
+    if (links & 2) out.push([0, t0, 0, t0, t1, 1]);
+    if (links & 4) out.push([t0, t1, 0, t1, 1, 1]);
+    if (links & 8) out.push([t0, 0, 0, t1, t0, 1]);
     return out;
   }
   if (IS_GATE[id]) {

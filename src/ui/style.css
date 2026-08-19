@@ -2229,6 +2229,14 @@ body.fighting #toasts { top: 172px; }
   background: linear-gradient(180deg, rgba(176, 46, 32, .62), rgba(112, 26, 16, .55));
   box-shadow: var(--pocket), inset 0 0 0 1px rgba(240, 104, 76, .75);
 }
+/* The ingredient a red cell is waiting for. Ghosted hard: the cell has to go on
+   reading as EMPTY - it is a label for the hole, not a stack sitting in it - so
+   this is well under the weight of a real icon and takes no count badge. */
+.islot .ghost {
+  opacity: .34; filter: grayscale(.45);
+  width: 68%; height: 68%; object-fit: contain;
+  pointer-events: none;
+}
 .islot.missing:hover {
   background: linear-gradient(180deg, rgba(196, 58, 40, .7), rgba(130, 32, 20, .6));
 }
@@ -2246,6 +2254,13 @@ body.fighting #toasts { top: 172px; }
   border-bottom: 1px solid rgba(122, 94, 54, .16);
 }
 .smelt-row:last-child { border-bottom: 0; }
+/* A row you can act on. It loads the kiln, so it gets the recipe row's own
+   hover and nothing louder - the column is a reference first. */
+.smelt-row.can { cursor: pointer; border-radius: var(--r-sm); }
+.smelt-row.can:hover { background: rgba(122, 94, 54, .16); }
+/* ...and one you have no ore for. Listed, because knowing what a kiln can do
+   before you own the ore is the whole point of the column. */
+.smelt-row.out { opacity: .38; }
 .smelt-row img { width: 22px; height: 22px; flex: none; }
 .smelt-row .rname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smelt-to {

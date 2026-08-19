@@ -61,6 +61,12 @@ const NOT_OBTAINABLE = new Set([
   // an item at 232 exactly as an appended hazard block does. Its `add()` is at
   // the foot of this file, under the two hazards.
   'deathcap',
+  // The glass pane, and the fifth time this trap has been walked round. Its
+  // BLOCK is appended, which keeps chunks and saves safe; its ITEM would land
+  // at the end of the block-item range, which is the middle of this array, and
+  // push every material, tool and dish along by one. Its `add()` is at the foot
+  // of this file with the others.
+  'glass_pane',
 ]);
 
 /**
@@ -1208,6 +1214,8 @@ add({ name: 'powder_snow', label: 'Powder Snow', block: ID.powder_snow, sound: '
 // cannot be eaten either way - `_interact` only offers the chew for an item with
 // `food` - so this is a label and not a behaviour.
 add({ name: 'deathcap', label: 'Deathcap', block: ID.deathcap, sound: 'grass', poison: true });
+
+add({ name: 'glass_pane', label: 'Glass Pane', block: ID.glass_pane, sound: 'glass' });
 
 // The counterplay to the beans, and the one new food this brings. Six, which is
 // the bottom of the simple-cooked band and level with a fried egg: a fire on a

@@ -2313,6 +2313,7 @@ export class UI {
       el.classList.toggle('sel', i === inv.selected);
     }
     if (this.craftSlots) {
+      let short = 0;
       this.craftSlots.forEach((el, k) => {
         this._paint(el, this.craftMap[k]);
         // A cell that was asked for an ingredient and did not get one. The slot
@@ -2320,8 +2321,25 @@ export class UI {
         // is remembered in `craftWant` when the dish is laid out. Cleared the
         // moment the cell is filled, however it was filled.
         const want = this.craftWant?.[k] || 0;
-        el.classList.toggle('missing', !!want && !!this.craftMap[k]?.empty);
+        const missing = !!want && !!this.craftMap[k]?.empty;
+        el.classList.toggle('missing', missing);
+        if (!missing) return;
+        short++;
+        // ...and WHICH ingredient. A red square says a cell is wrong; it does
+        // not say what would fix it, and the owner asked for the second thing:
+        // "it only shows the red tint background but not showing the
+        // ingredients on the slots". The icon goes in ghosted, so the cell
+        // still reads as empty - it is a label for the hole, not a stack.
+        const ghost = document.createElement('img');
+        ghost.className = 'ghost';
+        ghost.src = this.icons.item(want);
+        ghost.alt = ITEMS[want]?.label || '';
+        el.appendChild(ghost);
       });
+      // The result is missing too, and says so the same way. A recipe you
+      // cannot complete has an empty output slot, which on its own is
+      // indistinguishable from a grid you have not filled in yet.
+      this.craftOut?.classList.toggle('missing', short > 0);
       this._refreshCraftOutput();
     }
     if (this.kilnSlots) this._refreshKiln();
@@ -2865,31 +2883,74 @@ export class UI {
    * go and find.
    */
   _buildSmeltList(list) {
+    const inv = this.game.inventory;
+    const rows = [];
     for (const r of SMELTING) {
       const inDef = ITEMS[r.in];
       const outDef = ITEMS[r.out];
       if (!inDef || !outDef) continue;
+      rows.push({ r, have: inv.count(r.in) > 0 });
+    }
+    // What you can smelt now, first. Same rule as the kitchen's menu and for
+    // the same reason - the half of the list you can act on should not be
+    // scattered through the half you cannot.
+    rows.sort((a, b) => (b.have ? 1 : 0) - (a.have ? 1 : 0));
+    for (const { r, have } of rows) {
       const row = document.createElement('div');
-      row.className = 'smelt-row';
+      // Pressable when the ore is in the bag, and it LOADS the kiln rather than
+      // smelting: the fire and the fuel decide the rest, exactly as they do
+      // when you drag it in yourself. "Kiln recipe should be clickable if have
+      // ingredients on our inventory and greyed out if not enough materials."
+      row.className = have ? 'smelt-row can' : 'smelt-row out';
       const a = document.createElement('img');
       a.src = this.icons.item(r.in);
-      a.title = inDef.label;
+      a.title = ITEMS[r.in].label;
       const to = document.createElement('i');
       to.className = 'smelt-to';
       const b = document.createElement('img');
       b.src = this.icons.item(r.out);
-      b.title = outDef.label;
+      b.title = ITEMS[r.out].label;
       const name = document.createElement('span');
       name.className = 'rname';
-      name.textContent = outDef.label;
-      // How many come out, and only when it is not one.
+      name.textContent = ITEMS[r.out].label;
       const yield_ = document.createElement('span');
       yield_.className = 'ryield';
       yield_.textContent = r.count > 1 ? `x${r.count}` : '';
       row.append(a, to, b, name, yield_);
+      if (have) row.onclick = () => this._loadKiln(r.in);
       list.appendChild(row);
     }
   }
+
+  /**
+   * Move as much of one item as the kiln's input slot will take.
+   *
+   * Whatever is in there already goes back to the bag first, so pressing a
+   * second row swaps the load rather than refusing it - the same shape as the
+   * kitchen's menu replacing a laid-out dish.
+   */
+  _loadKiln(itemId) {
+    const k = this.kiln;
+    if (!k) return;
+    const inv = this.game.inventory;
+    if (!k.input.empty && k.input.item !== itemId) {
+      const taken = inv.add(k.input.item, k.input.count, k.input.wear);
+      if (taken < k.input.count) {
+        this.game._spillDrop({ item: k.input.item, count: k.input.count - taken, wear: k.input.wear });
+      }
+      k.input.clear();
+    }
+    const stack = ITEMS[itemId]?.stack ?? 64;
+    let room = stack - (k.input.empty ? 0 : k.input.count);
+    let moved = 0;
+    while (room > 0 && inv.count(itemId) > 0) {
+      if (!takeOneInto(inv, k.input, itemId, true)) break;
+      room--; moved++;
+    }
+    if (moved) this.game.audio.ui?.(720); else this.game.audio.deny();
+    this.refresh();
+  }
+
   /**
    * The kitchen's menu: one tile per dish, and pressing one lays its
    * ingredients into the pots.

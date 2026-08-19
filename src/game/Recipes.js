@@ -8,6 +8,15 @@ import { BLOCKS, IS_SLAB } from '../world/Blocks.js';
 const RAW = [
   // --- wood chain ---
   { out: 'oak_planks', count: 4, in: ['log_oak'] },
+  // Mossy cobble, made rather than only found. "What's the point of mossy
+  // stones? Only for decoration?" - it was decoration you could not make, which
+  // is worse: a boulder yields a handful and there was no way to get more. Moss
+  // on cobble is the recipe everyone already knows.
+  { out: 'moss_stone', count: 1, in: ['cobblestone', 'moss_block'] },
+  // And the glass pane. Six sheets into sixteen, which is Minecraft's own
+  // exchange rate and the reason panes are what you actually glaze with: glass
+  // costs a smelt each, and a window of cubes costs sixteen of them.
+  { out: 'glass_pane', count: 16, table: true, shape: ['###', '###'], key: { '#': 'glass' } },
   // Birch and pine break down into their own boards. Every recipe below names
   // `oak_planks`, and FAMILY_NAMES makes that name accept any of the five, so
   // the 1:1 conversions here are a convenience rather than a gate — spawning in

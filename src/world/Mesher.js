@@ -28,6 +28,7 @@ import {
   IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
   IS_SUBMERGED,
   FACING_DEFAULT, sideTile, capTile, axisOf, blockBoxes, IS_FENCE, fenceLinks,
+  IS_PANE, paneLinks,
   IS_STAIR, stairShape,
   TILES, TILE_INDEX,
 } from './Blocks.js';
@@ -104,6 +105,8 @@ for (let i = 0; i < N_BLOCKS; i++) {
   // ignored, so the gaps between the rungs came out as solid timber.
   else if (b.render === R_LADDER) GROUP[i] = GROUP_CUTOUT;
   else if (b.render === R_GLASS) GROUP[i] = b.name.startsWith('leaves') ? GROUP_CUTOUT : GROUP_TRANSPARENT;
+  // A pane is glass and draws with the glass.
+  else if (b.render === R_PANE) GROUP[i] = GROUP_TRANSPARENT;
   else GROUP[i] = GROUP_OPAQUE;
 }
 
@@ -819,6 +822,10 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, cx, cy, ck)
           const nbCols = [nPx, nMx, nPy, nMy];
           const links = IS_FENCE[id]
             ? fenceLinks(at(nPx, k), at(nMx, k), at(nPy, k), at(nMy, k))
+            : IS_PANE[id]
+              // Same shape of question, different family: a pane joins panes
+              // and solid walls, never a fence. See `paneJoins`.
+              ? paneLinks(at(nPx, k), at(nMx, k), at(nPy, k), at(nMy, k))
             : IS_STAIR[id]
               ? stairShape(byte, (d) => [at(nbCols[d], k),
                 (facing?.get(nbCols[d] * D + k) ?? 0) & 7])

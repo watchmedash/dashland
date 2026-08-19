@@ -902,7 +902,13 @@ G.glass = (s) => {
     const frame = smoothstep(0.055, 0.028, border);
     const c = mixc(px([196, 226, 238]), px([232, 246, 252]), f[i]);
     setRGB(s, i, mixc(c, px([176, 200, 210]), frame));
-    s.a[i] = lerp(0.16, 0.72, frame);
+    // 0.07 through the pane, not 0.16. "Glass blocks should be more
+    // transparent", and a pane you cannot see through is a pane doing the one
+    // thing glass exists not to do. The FRAME keeps most of its weight - it is
+    // what makes a wall of these read as panes in a grid rather than as one
+    // sheet of haze, and dropping it with the middle is what turns a window
+    // into a hole.
+    s.a[i] = lerp(0.07, 0.66, frame);
     s.h[i] = frame * 0.5 + f[i] * 0.1;
     s.rough[i] = 0.05 + frame * 0.2;
     s.ao[i] = 1;

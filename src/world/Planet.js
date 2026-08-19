@@ -21,7 +21,7 @@ import { wrap, colIndex, colDecode } from './Grid.js';
 import {
   IS_SOLID, BLOCKS_MOTION, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N, ID,
-  IS_FENCE, IS_STAIR, IS_GATE, blockBoxes, fenceLinks, stairShape,
+  IS_FENCE, IS_STAIR, IS_GATE, IS_PANE, blockBoxes, fenceLinks, paneLinks, stairShape,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID, GROUP_PORTAL, GROUP_COUNT } from './Mesher.js';
 
@@ -645,6 +645,15 @@ export class Planet {
     if (IS_FENCE[id]) {
       const { x, y } = colDecode(col);
       return fenceLinks(
+        this.at(colIndex(x + 1, y), k), this.at(colIndex(x - 1, y), k),
+        this.at(colIndex(x, y + 1), k), this.at(colIndex(x, y - 1), k),
+      );
+    }
+    // A pane asks the same question of its four neighbours and gets a different
+    // answer: it joins panes and walls, not fences. See `paneJoins`.
+    if (IS_PANE[id]) {
+      const { x, y } = colDecode(col);
+      return paneLinks(
         this.at(colIndex(x + 1, y), k), this.at(colIndex(x - 1, y), k),
         this.at(colIndex(x, y + 1), k), this.at(colIndex(x, y - 1), k),
       );

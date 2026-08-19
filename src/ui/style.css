@@ -2072,16 +2072,33 @@ body.fighting #toasts { top: 172px; }
 
 .inv-panel { width: min(830px, 100%); }
 /* Set for the crate, which has no sidebar and no craft grid. See openScreen. */
-/* The crate keeps a narrow column, and now it is CENTRED in the sheet.
-   `width: fit-content` was written when a panel was a card floating on a dim,
-   where the card's own auto margins centred it for free. The panel is the sheet
-   now — the overlay rule above gives it `width: 100%` — so shrinking it left a
-   499px box hard against the left edge of a 929px screen with the world showing
-   beside it, which is what the owner opened a crate and found. The margin is
-   the whole fix; the width was never the problem. */
+/* THE CRATE'S COLUMN, AND THE PADDING THAT WAS EATING IT.
+
+   The overlay rule above centres a screen's content by PADDING the panel:
+   `max(gutter, (100% - sheet) / 2)`, where 100% is the panel's containing
+   block. That is the whole window, not the panel - so on a 1920px screen the
+   bag's 1240px sheet resolves to 340px of padding down each side. Correct,
+   and invisible, while the panel is the full 1920 wide.
+
+   The crate is the one screen that narrows its panel, and the padding does
+   not narrow with it: 760px of panel minus 680px of padding is an 80px
+   content box, into which nine columns of pockets were drawn and then clipped
+   by the panel's own `overflow: hidden`. That is the strip the owner
+   photographed, and neither of the two things tried before this touched it -
+   `fit-content` collapsed for a different reason and `margin-inline: auto`
+   centred a box that was already the wrong size inside.
+
+   So the narrowed panel drops the centring padding and keeps a plain gutter.
+   Its job is done by the margin instead: the padding centres a column inside
+   a full-width sheet, and there is no full-width sheet here to centre in.
+
+   760 is the widest the grid ever needs - nine cells at their largest (66px
+   on a 1500px window), eight 4px gaps and the section padding is about 682 -
+   and at every smaller cell size the grid centres inside it. */
 #screen.snug .inv-panel {
-  width: fit-content; max-width: min(830px, 100%);
+  width: min(760px, 100%); max-width: min(830px, 100%);
   margin-inline: auto;
+  padding-inline: var(--gutter);
 }
 
 /* ── a short window ─────────────────────────────────────── */

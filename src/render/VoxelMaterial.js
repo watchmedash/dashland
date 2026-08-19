@@ -2436,7 +2436,27 @@ const LIGHTS_END = /* glsl */`
   // gPortalGlow is 1.0 everywhere except on a divider seen from far off, where
   // it takes the block's own light back out of it. Only the grid term: a torch
   // you are carrying still lights a portal, because you are standing at it.
-  vec3 blockRad = (diffuseColor.rgb * vBlock * uBlockIntensity * gPortalGlow * mix(0.65, 1.0, aoTotal)
+  // WHICH WAY A FACE IS TURNED, FOR THE GRID LIGHT TOO.
+  //
+  // The grid's block light is a scalar per corner with no direction in it at
+  // all, and it was going into the shader that way: a cube in a torch-lit cave
+  // had its top, its side and its underside at the same brightness, so the
+  // whole gallery came out flat and evenly bright however it was shaped. The
+  // owner: "torch lights up all blocks it reaches ... but the problem is there
+  // are no shadows". The sun's shadow map is what draws form everywhere else,
+  // and underground there is no sun for it to draw with.
+  //
+  // A flood fill cannot say where its light came from, but it does not have to:
+  // firelight in a rock chamber arrives off every surface around it, and a
+  // hemispheric weighting is what that looks like. Up faces keep all of it,
+  // undersides keep the least, walls sit between - which is the same ordering
+  // Minecraft's fixed per-face shades have and for the same reason.
+  //
+  // On the grid term only. A flame you are carrying already has a real
+  // direction and a real lambert (see flameLight) and must not be shaded twice.
+  float faceLit = mix(0.58, 1.0, clamp(flameN.y * 0.5 + 0.5, 0.0, 1.0));
+  vec3 blockRad = (diffuseColor.rgb * vBlock * uBlockIntensity * gPortalGlow
+                     * mix(0.65, 1.0, aoTotal) * faceLit
                  + diffuseColor.rgb * moving) * RECIPROCAL_PI;
   // Scaled by the max channel rather than clamped per channel, so the roll-off
   // moves the value and leaves the hue and saturation of firelight alone.

@@ -895,6 +895,21 @@ export const POSE = {
     file: 'survival/workbench', pack: 'survival', height: 0.30, grip: 0.5,
     rot: [0.62, -0.52, 0.10], pos: [0.02, 0.115, -0.053], icon: [0.88, 0.58, 0],
   },
+
+  /**
+   * The kiln, and the second pose here that IS the block - see `bench` above
+   * for what that means and why it was worth building.
+   *
+   * Ours, authored in `art/wam/items/kiln.wam`, so it is a full cell tall in
+   * its own units and `MODELLED_BLOCKS` asks for exactly that. Stood upright
+   * rather than tilted: the bench is tilted because everything that says
+   * workbench is on its top, and everything that says kiln - the mouth, the
+   * soot, the lintel - is on its front.
+   */
+  kiln: {
+    file: 'wam/kiln', pack: 'wam', height: 0.34, grip: 0.5,
+    rot: [0.18, -0.42, 0], pos: [0.02, 0.12, -0.055], icon: [0.16, 0.52, 0],
+  },
   pizza:       food('pizza', 0.30, true, { pos: [0.02, 0.13, -0.06] }),
   burger:      food('burger-cheese', 0.26, false, { pos: [0.02, 0.13, -0.06] }),
 

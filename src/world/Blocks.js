@@ -590,8 +590,15 @@ export const BLOCKS = [
   // alone; the tiles below are kept and still used, by the mining particles and
   // by anything that asks a block for a colour.
   block({ name: 'bench', label: 'Workbench', render: R_MODEL, top: 'bench_top', side: 'bench_side', bottom: 'planks', hardness: 2.5, tool: 'axe', particle: [0.55, 0.4, 0.24], sound: 'wood', fuel: 4 }),
-  block({ name: 'kiln', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', particle: [0.45, 0.44, 0.46], sound: 'stone' }),
-  block({ name: 'kiln_lit', label: 'Kiln', top: 'kiln_top', side: 'kiln_side', front: 'kiln_front_lit', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', light: 12, lightColor: [1.0, 0.62, 0.28], particle: [0.9, 0.5, 0.2], sound: 'stone' }),
+  // R_MODEL, like the bench: the geometry in `art/wam/items/kiln.wam` IS the
+  // block, so the fist, the icon, the drop on the ground and the thing standing
+  // in the world are one object. The four tiles stay because the model does not
+  // use them but the break particles, the drop and the icon fallback still do.
+  //
+  // `kiln_lit` is the same model. A burning kiln is not a different building; it
+  // is a block state, and what says it is burning is the light it throws.
+  block({ name: 'kiln', label: 'Kiln', render: R_MODEL, top: 'kiln_top', side: 'kiln_side', front: 'kiln_front', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', particle: [0.45, 0.44, 0.46], sound: 'stone' }),
+  block({ name: 'kiln_lit', label: 'Kiln', render: R_MODEL, top: 'kiln_top', side: 'kiln_side', front: 'kiln_front_lit', bottom: 'kiln_top', hardness: 2.6, tool: 'pick', tier: 1, drop: 'kiln', light: 12, lightColor: [1.0, 0.62, 0.28], particle: [0.9, 0.5, 0.2], sound: 'stone' }),
   // Not `directional`: that flag drives the generic "face the player" placement
   // path, which writes a plain 0-3 and would collide with the 0-means-floor
   // encoding above. A torch is given its byte explicitly when it is placed.

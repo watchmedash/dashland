@@ -1406,7 +1406,21 @@ for (const n of Object.keys(MODELLED_TOPPERS)) if (ID[n]) TOPPER_KIND[ID[n]] = n
  * model's 0.88 would be a gameplay change nobody asked for; the cost is that
  * standing on one puts you 0.12 of a cell over the top, which is 12 cm.
  */
-const MODELLED_BLOCKS = { bench: 0.880 };
+// A block whose model IS the block, and how tall it arrives in the model's own
+// units. The kiln is 1.0 because ours was authored to fill the cell (see
+// `art/wam/items/kiln.wam`); the bench comes out of a pack that normalises the
+// longest axis, which for it is X.
+//
+// `item` is which item's pose to load the geometry from, and it is only ever
+// different from the key for the lit kiln: a burning kiln is the same object as
+// a cold one and there is no `kiln_lit` item to hang a pose on - it is a block
+// state, kept out of the item registry on purpose. Two kinds rather than one
+// so the two can be lit differently; one file, loaded once.
+const MODELLED_BLOCKS = {
+  bench: { height: 0.880, item: 'bench' },
+  kiln: { height: 1.0, item: 'kiln' },
+  kiln_lit: { height: 1.0, item: 'kiln' },
+};
 const MODEL_KIND = [];
 for (const n of Object.keys(MODELLED_BLOCKS)) if (ID[n]) MODEL_KIND[ID[n]] = n;
 
@@ -9318,7 +9332,8 @@ class Game {
     // and it has to put a shadow on the ground, or it is the one thing in a
     // sunlit clearing with nothing under it.
     for (const n in MODELLED_BLOCKS) {
-      bm.prime(n, itemIdOf(n), { height: MODELLED_BLOCKS[n], lit: true, shadow: true });
+      const spec = MODELLED_BLOCKS[n];
+      bm.prime(n, itemIdOf(spec.item), { height: spec.height, lit: true, shadow: true });
     }
 
     const c = this.player.cell;
@@ -9371,7 +9386,18 @@ class Game {
               // billboard it replaced; a workbench is furniture, and furniture
               // turned to a random angle in a room the player squared off is
               // the same fault the other way round.
-              lists[modelled].push({ pos, up, out: null, d2, col, k, light: -1 });
+              // A KILN HAS A FRONT, so it is turned to the facing it was placed
+              // with. The bench has none and takes no turn: furniture spun to a
+              // random angle in a room the player squared off is the same fault
+              // as a meadow of identical stamps, the other way round.
+              //
+              // Facing 0..3 is +x, -x, +y, -y (see `_facingToward`), and the
+              // model is authored looking down +z, which is map +y - facing 2.
+              const face = IS_DIRECTIONAL[id] ? this.planet.facingAt(col, k) & 3 : -1;
+              const spin = face < 0 ? 0
+                : (face === 2 ? 0 : face === 3 ? Math.PI
+                  : face === 0 ? -Math.PI / 2 : Math.PI / 2);
+              lists[modelled].push({ pos, up, out: null, d2, col, k, light: -1, spin });
               continue;
             }
 

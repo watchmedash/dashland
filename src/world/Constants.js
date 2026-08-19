@@ -193,7 +193,7 @@ export const CHUNK_KEEP_DIST = 243;
  * an older save could survive and none was offered — see NINE-FACES.md section
  * 6, which says so in advance.
  */
-export const GEN_VERSION = 12;
+export const GEN_VERSION = 13;
 
 // --- biomes ------------------------------------------------------------------
 

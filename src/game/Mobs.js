@@ -8586,8 +8586,26 @@ export class Mobs {
         }
         mob.speedNow *= 0.9;
       } else {
-        mob.want = wrapAngle(mob.heading
-          + (Math.random() < 0.5 ? -1 : 1) * (1.1 + Math.random() * 0.9));
+        // LOOK BEFORE TURNING, the same way a hunter does.
+        //
+        // This rolled a side at random and committed to it for WALL_SLIDE_TIME
+        // without ever asking whether that side was open either. In the middle
+        // of a wall it works out - one of the two is along the wall - but in a
+        // CORNER, or a doorway, or a pen, both rolls are into stone, so the
+        // animal turned from one wall into the other and back for as long as
+        // anyone watched: "even though their way is blocked they still keep
+        // trying to go through that direction". The hunter above already has
+        // the answer and has had it for a while - a fan of headings, take the
+        // straightest one that is actually clear - and the only reason it was
+        // not used here is that it was written aiming at the player.
+        // `_probeAround` takes an explicit aim, so a wanderer can point it
+        // wherever it was already trying to go.
+        const probed = this._probeAround(mob, c, here, null, mob.heading);
+        mob.want = probed !== null ? probed
+          // Boxed in on every whisker. Now the random turn is right - there is
+          // nothing to choose between and something has to change.
+          : wrapAngle(mob.heading
+            + (Math.random() < 0.5 ? -1 : 1) * (1.1 + Math.random() * 0.9));
         mob.speedNow *= 0.35;
         // ...and hold it, against whatever keeps re-aiming this body at the
         // obstacle. A wandering animal has nothing to argue with — its heading

@@ -2316,8 +2316,25 @@ class Game {
   _initHighlight() {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(24 * 3), 3));
+    // THE OUTLINE, IN COLOUR.
+    //
+    // It was a near-black line at 0.38, which is the outline every voxel game
+    // has and is also the one thing on screen with no colour of its own. The
+    // owner: "can we make it rgb instead of the old plain looking black lines".
+    //
+    // The hue is driven from `uTime` in `_tickHighlight` rather than picked,
+    // so it travels the whole wheel about once every four seconds - slow
+    // enough that it reads as a sheen rather than a strobe, and fast enough
+    // that it is never mistaken for a fixed colour someone chose.
+    //
+    // Opacity goes to 0.85 and the blend to additive with it. At 0.38 a
+    // saturated line over bright grass came out as a grey smudge - the whole
+    // point of a colour is lost if it is mixed three-fifths into whatever is
+    // behind it - and additive is what keeps it legible on stone AND on snow,
+    // which a flat alpha cannot do at any single value.
     this.highlight = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
-      color: 0x08080d, transparent: true, opacity: 0.38, depthTest: true,
+      color: 0xffffff, transparent: true, opacity: 0.85, depthTest: true,
+      blending: THREE.AdditiveBlending,
     }));
     this.highlight.frustumCulled = false;
     this.highlight.visible = false;
@@ -6196,6 +6213,12 @@ class Game {
     // After the camera has settled for the frame, so the bars sit on the heads
     // they belong to rather than one frame behind them.
     this.combatBars.update(dt, this.camera, this.state === 'playing');
+    // The outline cycles while it is up. Only while it is up: this is one HSL
+    // conversion a frame and it is skipped on every frame the crosshair is
+    // pointing at nothing, which is most of them.
+    if (this.highlight.visible) {
+      this.highlight.material.color.setHSL((voxelUniforms.uTime.value * 0.25) % 1, 0.85, 0.6);
+    }
     this.damageFlash = Math.max(0, this.damageFlash - dt * 1.6);
     // After the update and before the flags are cleared: the layer's visibility
     // is a function of the state this frame just settled on, and anything it

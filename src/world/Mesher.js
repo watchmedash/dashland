@@ -28,6 +28,7 @@ import {
   IS_DIRECTIONAL, IS_AXIS, IS_SLAB, IS_SHAPED,
   IS_SUBMERGED,
   FACING_DEFAULT, sideTile, capTile, axisOf, blockBoxes, IS_FENCE, fenceLinks,
+  IS_STAIR, stairShape,
   TILES, TILE_INDEX,
 } from './Blocks.js';
 
@@ -807,9 +808,17 @@ export function meshChunk(blocks, colBiome, colWater, light, facing, cx, cy, ck)
           const byte = (facing?.get(col * D + k) ?? 0) & 7;
           // A fence has no stored orientation: its shape is its neighbours, and
           // those are already resolved for this column.
+          // A fence has no stored orientation: its shape is its neighbours, and
+          // those are already resolved for this column. A stair has a stored
+          // facing AND a neighbour-read corner, and the corner rides the same
+          // argument - see `stairShape`.
+          const nbCols = [nPx, nMx, nPy, nMy];
           const links = IS_FENCE[id]
             ? fenceLinks(at(nPx, k), at(nMx, k), at(nPy, k), at(nMy, k))
-            : 0;
+            : IS_STAIR[id]
+              ? stairShape(byte, (d) => [at(nbCols[d], k),
+                (facing?.get(nbCols[d] * D + k) ?? 0) & 7])
+              : 0;
           const boxes = blockBoxes(id, byte, links);
           // Light comes from the cell: a shaped block sits in open air by
           // definition. Occlusion cannot be left flat, though - a slab rendered

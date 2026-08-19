@@ -8883,7 +8883,7 @@ export class Mobs {
   _topOf(col, k) {
     const id = this.planet.at(col, k);
     if (!IS_SHAPED[id]) return 1;
-    const boxes = collisionBoxes(id, this.planet.facingAt(col, k));
+    const boxes = collisionBoxes(id, this.planet.facingAt(col, k), this.planet.shapeAt(col, k));
     let top = 0;
     for (let b = 0; b < boxes.length; b++) if (boxes[b][5] > top) top = boxes[b][5];
     return top;

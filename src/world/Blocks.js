@@ -2621,6 +2621,81 @@ export function setPlantMasks(albedo, size, layers, cutoff = 107) {
 }
 
 /**
+ * The four ways a stair can turn, and how a corner is worked out.
+ *
+ * A stair used to be one shape: a half-height step with a riser over the half of
+ * the footprint away from the way it faces. Run two of them into each other at a
+ * right angle and you get the join Minecraft solved twenty years ago and this
+ * did not - a notch missing on the outside of the turn, and a block of nothing
+ * on the inside.
+ *
+ * Nothing is stored. The shape is read from the neighbours at mesh time, exactly
+ * as a fence reads which sides to grow a rail on, and it travels through the
+ * same `links` argument `blockBoxes` already takes. That is the whole reason it
+ * needs no save migration, no new bits in the facing byte (which is masked to
+ * three and had none spare) and no update pass when a neighbour changes: a
+ * changed cell re-meshes its neighbours already.
+ *
+ * The rule is Minecraft's, and it is worth stating because it is not "is there a
+ * stair next to me":
+ *
+ *   OUTER  the stair IN FRONT (the way my low side faces) runs across me, and
+ *          nothing behind it lines up with me. The turn goes round the outside,
+ *          so my riser shrinks to the one quarter on that side.
+ *   INNER  the stair BEHIND me runs across me. The turn goes round the inside,
+ *          so my riser grows an extra quarter to wrap it.
+ *
+ * The "and nothing lines up" clause is what stops a 2x2 block of stairs from
+ * reading as four corners, and a spiral from notching itself at every step.
+ */
+export const STAIR_STRAIGHT = 0;
+export const STAIR_INNER_L = 1;
+export const STAIR_INNER_R = 2;
+export const STAIR_OUTER_L = 3;
+export const STAIR_OUTER_R = 4;
+
+/** Facing 0..3 as (di, dj): +i, -i, +j, -j. The order every other block uses. */
+const STAIR_STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+/** A quarter turn to the left, and to the right, in that same numbering. */
+const TURN_L = [2, 3, 1, 0];
+const TURN_R = [3, 2, 0, 1];
+/** The way back. */
+const TURN_BACK = [1, 0, 3, 2];
+
+/**
+ * What shape this stair is, given a way to ask about a neighbour.
+ *
+ * `probe(dir)` hands back `[id, byte]` for the cell one step in that direction,
+ * so the mesher can answer from its own column cache and the main thread can
+ * answer from the block array without either of them growing a copy of the
+ * other's lookup.
+ */
+export function stairShape(byte, probe) {
+  const dir = byte & 3, flip = (byte >> 2) & 1;
+  const perp = (d) => (d >> 1) !== (dir >> 1);
+  const stairAt = (d) => {
+    const [id, b] = probe(d);
+    if (!IS_STAIR[id]) return -1;
+    // A stair the other way up is a different object and does not join.
+    return ((b >> 2) & 1) === flip ? (b & 3) : -1;
+  };
+
+  // In front: an outer corner, unless what is beyond the turn lines up with us.
+  const front = stairAt(dir);
+  if (front >= 0 && perp(front)) {
+    const beyond = stairAt(TURN_BACK[front]);
+    if (beyond !== dir) return front === TURN_L[dir] ? STAIR_OUTER_L : STAIR_OUTER_R;
+  }
+  // Behind: an inner corner, under the mirror of the same clause.
+  const back = stairAt(TURN_BACK[dir]);
+  if (back >= 0 && perp(back)) {
+    const beyond = stairAt(back);
+    if (beyond !== dir) return back === TURN_L[dir] ? STAIR_INNER_L : STAIR_INNER_R;
+  }
+  return STAIR_STRAIGHT;
+}
+
+/**
  * The solid boxes a block occupies inside its own cell, as [i0,j0,k0,i1,j1,k1]
  * in 0..1 cell coordinates. One box for anything ordinary, two for a stair.
  *
@@ -2871,13 +2946,50 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
     const dir = byte & 3, flip = (byte >> 2) & 1;
     // The step: half height, full footprint, on the floor — or the ceiling.
     out.push(flip ? [0, 0, 0.5, 1, 1, 1] : [0, 0, 0, 1, 1, 0.5]);
-    // The riser: the other half height, over the half of the footprint away
-    // from the direction the low side faces.
     const rk0 = flip ? 0 : 0.5, rk1 = flip ? 0.5 : 1;
-    if (dir === 0) out.push([0, 0, rk0, 0.5, 1, rk1]);        // low side faces +i
-    else if (dir === 1) out.push([0.5, 0, rk0, 1, 1, rk1]);
-    else if (dir === 2) out.push([0, 0, rk0, 1, 0.5, rk1]);
-    else out.push([0, 0.5, rk0, 1, 1, rk1]);
+    // THE RISER, in quarters.
+    //
+    // Straight it is the half of the footprint away from the way the low side
+    // faces, which is what it always was. A corner is the same half with one
+    // quarter taken off the outside of the turn, or one added on the inside -
+    // so the whole of the shape work is choosing which of the four quarters
+    // are in. `links` carries the answer; see `stairShape`, which reads it off
+    // the neighbours rather than off anything stored.
+    const shape = links & 7;
+    // The two quarters of the back half, and the two of the front half, in
+    // (i, j) as [i0, j0, i1, j1]. `lo` is the half the riser normally fills.
+    const H = 0.5;
+    const backLo = dir === 0 ? [0, 0, H, H] : dir === 1 ? [H, 0, 1, H]
+      : dir === 2 ? [0, 0, H, H] : [0, H, H, 1];
+    const backHi = dir === 0 ? [0, H, H, 1] : dir === 1 ? [H, H, 1, 1]
+      : dir === 2 ? [H, 0, 1, H] : [H, H, 1, 1];
+    const frontLo = dir === 0 ? [H, 0, 1, H] : dir === 1 ? [0, 0, H, H]
+      : dir === 2 ? [0, H, H, 1] : [0, 0, H, H];
+    const frontHi = dir === 0 ? [H, H, 1, 1] : dir === 1 ? [0, H, H, 1]
+      : dir === 2 ? [H, H, 1, 1] : [H, 0, 1, H];
+    // Which of the two perpendicular sides "left" is, in the quarter naming
+    // above: for +i and +j the left-hand quarter is the high one, for -i and
+    // -j it is the low one. Worked out once here rather than four times below.
+    const leftIsHi = dir === 0 || dir === 3;
+    const put = (q) => out.push([q[0], q[1], rk0, q[2], q[3], rk1]);
+    if (shape === STAIR_OUTER_L || shape === STAIR_OUTER_R) {
+      // One quarter: the one on the side the turn goes round.
+      const left = shape === STAIR_OUTER_L;
+      put(left === leftIsHi ? backHi : backLo);
+    } else if (shape === STAIR_STRAIGHT) {
+      // One box, not two quarters. They would abut exactly and draw the same
+      // shape, but it is two more quads on the commonest block of the five and
+      // a seam down the middle of every step in the game.
+      put([Math.min(backLo[0], backHi[0]), Math.min(backLo[1], backHi[1]),
+        Math.max(backLo[2], backHi[2]), Math.max(backLo[3], backHi[3])]);
+    } else {
+      put(backLo); put(backHi);
+      if (shape === STAIR_INNER_L || shape === STAIR_INNER_R) {
+        // ...and a third, wrapping into the front half on the turn side.
+        const left = shape === STAIR_INNER_L;
+        put(left === leftIsHi ? frontHi : frontLo);
+      }
+    }
     return out;
   }
   out.push([0, 0, 0, 1, 1, 1]);
@@ -2901,7 +3013,14 @@ export function blockBoxes(id, byte = 0, links = 0b1111) {
  * Everything else returns its real shape, because for everything else the shape
  * is thick enough to be honest.
  */
-export function collisionBoxes(id, byte = 0) {
+/**
+ * @param {number} shape the neighbour-derived shape, for the blocks that have
+ *   one - a fence's links, a stair's corner. It has to be the SAME number the
+ *   mesher drew with or a body collides with a shape nobody can see; both
+ *   sides get it from `Planet.shapeAt`, which is the one place it is worked
+ *   out on the main thread.
+ */
+export function collisionBoxes(id, byte = 0, shape = 0) {
   if (IS_FENCE[id]) return [[0, 0, 0, 1, 1, FENCE_BLOCK_H]];
   // A gate is a fence with a state, and it takes the fence's answer twice over.
   //
@@ -2918,7 +3037,7 @@ export function collisionBoxes(id, byte = 0) {
   // past it. Nobody has ever wanted to bump into an open gate, and the empty
   // list also stops you standing on one: the ground scan reads these boxes too.
   if (IS_GATE[id]) return ((byte >> 2) & 1) ? [] : [[0, 0, 0, 1, 1, FENCE_BLOCK_H]];
-  return blockBoxes(id, byte);
+  return blockBoxes(id, byte, shape);
 }
 
 // ---------------------------------------------------------------------------

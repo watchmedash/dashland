@@ -17,11 +17,11 @@ import {
   NUM_REGIONS, REGION_COLS, regionOfCol, regionColumns, chunkIdx, contCell,
   nearOffset,
 } from './Layout.js';
-import { wrap, colIndex } from './Grid.js';
+import { wrap, colIndex, colDecode } from './Grid.js';
 import {
   IS_SOLID, BLOCKS_MOTION, RENDER_TYPE, R_LIQUID, R_CROSS, IS_DIRECTIONAL, IS_AXIS, IS_SHAPED, FACING_DEFAULT,
   plantMask, plantBox, PLANT_MASK_N, ID,
-  IS_FENCE, blockBoxes, fenceLinks,
+  IS_FENCE, IS_STAIR, blockBoxes, fenceLinks, stairShape,
 } from './Blocks.js';
 import { GROUP_OPAQUE, GROUP_CUTOUT, GROUP_LIQUID, GROUP_PORTAL, GROUP_COUNT } from './Mesher.js';
 
@@ -623,16 +623,38 @@ export class Planet {
    * fence crossroads), so this is a handful of divides on the rare cells that
    * reach it; every cube in the world takes the branch above and pays nothing.
    */
+  /**
+   * The shape a block takes from its neighbours: a fence's links, a stair's
+   * corner, 0 for everything else.
+   *
+   * THE ONE PLACE this is worked out on the main thread, and it has to be:
+   * the mesher computes the same number in the worker to draw with, and if
+   * collision or the crosshair computed a different one you would walk into a
+   * corner that is not drawn or through one that is. Player.js, Mobs.js and
+   * the raycast below all come here.
+   */
+  shapeAt(col, k) {
+    const id = this.blocks[col * D + k];
+    if (IS_FENCE[id]) {
+      const { x, y } = colDecode(col);
+      return fenceLinks(
+        this.at(colIndex(x + 1, y), k), this.at(colIndex(x - 1, y), k),
+        this.at(colIndex(x, y + 1), k), this.at(colIndex(x, y - 1), k),
+      );
+    }
+    if (IS_STAIR[id]) {
+      const { x, y } = colDecode(col);
+      const nb = [colIndex(x + 1, y), colIndex(x - 1, y), colIndex(x, y + 1), colIndex(x, y - 1)];
+      return stairShape(this.facingAt(col, k),
+        (d) => [this.at(nb[d], k), this.facingAt(nb[d], k)]);
+    }
+    return 0;
+  }
+
   _hitShaped(id, col, k, ix, iz, ox, oy, oz, dx, dy, dz, t, tEnd) {
     let byte = 0;
     if (IS_DIRECTIONAL[id] || IS_AXIS[id] || IS_SHAPED[id]) byte = this.facing.get(col * D + k) ?? 0;
-    let links = 0b1111;
-    if (IS_FENCE[id]) {
-      links = fenceLinks(
-        this.at(colIndex(ix + 1, iz), k), this.at(colIndex(ix - 1, iz), k),
-        this.at(colIndex(ix, iz + 1), k), this.at(colIndex(ix, iz - 1), k),
-      );
-    }
+    const links = this.shapeAt(col, k);
     const boxes = blockBoxes(id, byte, links);
     if (!boxes.length) return -1;
     // The cell's own corner, in the ray's unwrapped space.

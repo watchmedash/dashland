@@ -861,7 +861,7 @@ export class Player {
           // assuming k..k+1 — otherwise you would stand a full block above a
           // half slab and walk into the empty air over a stair's low side.
           const boxes = IS_SHAPED[bid]
-            ? collisionBoxes(bid, p.facingAt(col, k))
+            ? collisionBoxes(bid, p.facingAt(col, k), p.shapeAt(col, k))
             : FULL_BOX;
           for (let b = 0; b < boxes.length; b++) {
             const [bx0, bz0, bk0, bx1, bz1, bk1] = boxes[b];
@@ -946,7 +946,7 @@ export class Player {
           // beat a `worst` of zero and the box test would never run on one.
           if (hurt <= worst && !(pois && !poison)) continue;
           const boxes = IS_SHAPED[bid]
-            ? collisionBoxes(bid, p.facingAt(col, k))
+            ? collisionBoxes(bid, p.facingAt(col, k), p.shapeAt(col, k))
             : FULL_BOX;
           for (let b = 0; b < boxes.length; b++) {
             const [bx0, bz0, bk0, bx1, bz1, bk1] = boxes[b];
@@ -1033,7 +1033,7 @@ export class Player {
         for (let k = Math.floor(y + FOOT); k >= Math.floor(y + FOOT) - 1; k--) {
           const id = p.at(col, k);
           if (!IS_SOLID[id]) continue;
-          const boxes = IS_SHAPED[id] ? collisionBoxes(id, p.facingAt(col, k)) : FULL_BOX;
+          const boxes = IS_SHAPED[id] ? collisionBoxes(id, p.facingAt(col, k), p.shapeAt(col, k)) : FULL_BOX;
           for (let b = 0; b < boxes.length; b++) {
             const [bx0, bz0, , bx1, bz1, bk1] = boxes[b];
             // Only a box actually under the feet counts. A stair's riser is at

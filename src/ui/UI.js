@@ -2205,10 +2205,15 @@ export class UI {
       // to mean "put this away" than "burn it", and a mis-sort there costs a
       // laid-out recipe.
       this._pour(src, [this.kitchen.fuel]);
-    } else if (this.screenOpen && this.craftSlots && !this.kitchen) {
-      // A bench: into the grid, left to right. Not at a kitchen, where the
-      // menu lays the pots out for you and a stack arriving in cell 1 would
-      // fight it.
+    } else if (this.screen === 'bench') {
+      // A bench: into the grid, left to right.
+      //
+      // `this.screen === 'bench'` and NOT `this.craftSlots`, which is the trap
+      // here: the plain inventory screen builds a craft grid too - the 2x2 one -
+      // so testing for the grid would have sent every shift-click in the BAG
+      // into those four cells, and the bag-to-hotbar move is the one thing that
+      // was already working. Not at a kitchen either, where the menu lays the
+      // pots out for you and a stack arriving in cell 1 would fight it.
       this._pour(src, this.craftMap);
     } else {
       const toStorage = index < HOTBAR;

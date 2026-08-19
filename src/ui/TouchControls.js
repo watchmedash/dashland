@@ -111,6 +111,21 @@ const DROP_SLOP = 16;
 const TAP_TRAVEL = 8;
 const TAP_MS = 200;
 
+/**
+ * How long a thumb has to stay put before a press becomes a dig, in ms.
+ *
+ * 260, and it is bounded on both sides. Under TAP_MS (200) it would race the
+ * tap and a slow but ordinary press would dig instead of placing; much over
+ * about 300 and a player who means to mine sits there wondering whether the
+ * game heard them. 260 leaves 60ms of daylight over a tap, which is longer
+ * than the spread on a deliberate one.
+ *
+ * It costs nothing when it is wrong, which is what makes the number safe: an
+ * accidental dig is a block you put back, and the crack is on screen from the
+ * first frame so you can see it starting before anything is lost.
+ */
+const HOLD_MS = 260;
+
 export class TouchControls {
   /**
    * Returns true only for a device whose *primary* pointer is a finger.
@@ -158,13 +173,63 @@ export class TouchControls {
     // The UI paints the verb, because the UI is what the game tells about the
     // crosshair. Handed the two elements rather than looked up by id there, so
     // nothing in UI.js has to know that this layer exists at all until it does.
-    game.ui?.bindAction?.(this.buttons.use, this.verb);
+    game.ui?.bindAction?.(this.hint, this.verb);
 
     // Two words on a screen the player will open once. "Mouse" over a
     // sensitivity slider on a phone is simply wrong, and the slider is the one
     // setting a thumb genuinely needs to reach.
     const h = document.getElementById('set-head-look');
     if (h) h.textContent = 'Look';
+
+    // THE MAP IS OFF ON A PHONE, AND IS NOT A CHOICE.
+    //
+    // "map should always be disabled in mobile and never toggleable along."
+    // Both halves are here: the setting is forced off whatever the save or the
+    // last session said, and the row that would let it back on is removed from
+    // the settings screen rather than merely unchecked. A switch that is
+    // present and does nothing is worse than no switch.
+    //
+    // Turned off through the same field the checkbox writes, so everything
+    // downstream — the minimap's own visibility, the toast stack's left edge,
+    // the fishing bar's top — reads the state it already knows how to read and
+    // no other code learns that phones exist.
+    this.game.settings.minimap = false;
+    this.game.persistSettings?.();
+    document.getElementById('set-minimap')?.closest('label')?.remove();
+
+    // ...and the camera, which had nowhere to live on a phone at all: the view
+    // cycle is V, and a thumb has no keyboard. It goes in Settings rather than
+    // on the HUD because it is a preference you set once, not a control you
+    // reach for — and a sixth button in the thumb band is exactly what the
+    // Mine and Place deletion just bought back.
+    this._addCameraRow();
+  }
+
+  /**
+   * A Camera row in Settings, because V is not reachable from a thumb.
+   *
+   * A button rather than a checkbox: the view is a CYCLE of three (first
+   * person, then the two shoulder distances), so there is no on and off to
+   * tick. It prints the mode it will move to, which is the shape a cycle
+   * wants — the label answers "what does pressing this do", not "what am I
+   * looking through", and the second question is answered by the screen.
+   */
+  _addCameraRow() {
+    const host = document.querySelector('#settings .settings');
+    if (!host || document.getElementById('set-camera')) return;
+    const row = document.createElement('label');
+    row.className = 'row';
+    const btn = document.createElement('button');
+    btn.id = 'set-camera';
+    btn.type = 'button';
+    btn.className = 'ghost';
+    btn.textContent = 'Change camera';
+    btn.onclick = () => { this.game._cycleView?.(); };
+    row.append(btn, document.createTextNode(' Camera'));
+    // Under Picture, beside the two rows it belongs with. The compass row is
+    // the anchor because the minimap row above it has just been removed.
+    const compass = document.getElementById('set-compass')?.closest('label');
+    if (compass) compass.after(row); else host.appendChild(row);
   }
 
   // --- markup ---------------------------------------------------------------
@@ -209,26 +274,32 @@ export class TouchControls {
       this.buttons[id] = b;
       return b;
     };
-    mk('mine', 'mine', 'Mine', 'big');
-    // The action button.
+    // Mine and Place are GONE, and the world surface does both.
     //
-    // It is the Place button, and that is the whole design rather than a
-    // shortcut taken to save a button. Every contextual verb the player was
-    // asking for — trade, open, sleep, cast, eat, feed — is the right mouse
-    // button in main.js, the same button Place already is. A second control
-    // that fired button 2 would be two buttons doing one thing, and it would
-    // have to go somewhere, and there is nowhere: the right hand already has
-    // four and the two nearest the thumb are pressed constantly. So nothing is
-    // added to the HUD and nothing is moved. What changes is that the button
-    // now says what pressing it will do, which is the part that was missing —
-    // a hand glyph is a verb the player has to already know.
+    // The owner: "there should be no place and attack button, if we are holding
+    // placeable item and block it should be placed unless it's unplaceable or
+    // we long press which is the thing that should break things". So the two
+    // biggest buttons on the screen are deleted and the gesture goes on the
+    // thing the gesture is about — see the look handlers in `_wire`:
     //
-    // The word is painted by `UI.setAction`; see `bindAction` there for why the
-    // vocabulary lives on that side and not here.
-    const use = mk('use', 'use', 'Place', 'big');
-    this.verb = document.createElement('span');
-    this.verb.className = 'tc-verb';
-    use.appendChild(this.verb);
+    //   tap        do the thing. Place a block, eat the food, open the bench,
+    //              trade with the merchant — or, when the crosshair offers
+    //              none of those, swing at what is in front of you.
+    //   long press mine, held for as long as the thumb is down.
+    //   drag       look.
+    //
+    // What is lost with the button is the WORD that was on it, and that word
+    // was carrying real weight: a tap that places a block and a tap that
+    // punches a cow are the same gesture, and the player has to know which one
+    // they are about to make. So the verb survives as a hint under the
+    // crosshair — same vocabulary, same `bindAction` plumbing, painted by the
+    // UI exactly as before, but a label rather than a control.
+    this.hint = document.createElement('span');
+    this.hint.id = 'tc-hint';
+    root.appendChild(this.hint);
+    // `bindAction` wants a button to put a class on. It gets the hint itself,
+    // which is harmless — the class is only ever used to show the word.
+    this.verb = this.hint;
     mk('jump', 'jump', 'Jump');
     mk('sneak', 'arrow down', 'Sneak');
     mk('bag', 'bag', 'Inventory', 'chip');
@@ -295,10 +366,25 @@ export class TouchControls {
 
     // ---- look --------------------------------------------------------------
     this.look.addEventListener('pointerdown', (e) => {
-      this._take(e, {
+      const c = {
         kind: 'look', x: e.clientX, y: e.clientY,
-        t: performance.now(), travel: 0,
-      });
+        t: performance.now(), travel: 0, mining: false,
+        // Stops the dig on every exit there is: a finger lifted, a gesture the
+        // browser took, a screen opening under the thumb. A held Mine that is
+        // never released is a player digging through the planet from inside
+        // the inventory.
+        release: () => {
+          clearTimeout(c.timer);
+          if (c.mining) { this.input.buttons[0] = false; c.mining = false; }
+        },
+      };
+      c.timer = setTimeout(() => {
+        if (c.travel > TAP_TRAVEL) return;
+        c.mining = true;
+        this.input.buttons[0] = true;
+        this.input.clicked[0] = true;
+      }, HOLD_MS);
+      this._take(e, c);
       this.look.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
@@ -316,22 +402,43 @@ export class TouchControls {
       // and accumulated rather than compared: see TAP_TRAVEL.
       c.travel += Math.hypot(e.clientX - c.x, e.clientY - c.y);
       c.x = e.clientX; c.y = e.clientY;
+      // Past the tap threshold this is a look and nothing else. Cancelled
+      // rather than tested at fire time so the timer cannot outlive the
+      // gesture that armed it.
+      if (c.travel > TAP_TRAVEL && !c.mining) clearTimeout(c.timer);
       e.preventDefault();
     });
-    // A press that never became a drag is a tap, and a tap swings at whatever
-    // is under the crosshair. Mine stays a hold — a block takes many frames and
-    // this is one — so this adds the *other* half: the thing you do to a husk,
-    // which is one blow and was previously only reachable through a button the
-    // thumb has to leave the world for.
-    //
-    // Resolved here, on release, and not on press: press cannot know yet, which
-    // is the same reason the hotbar and the bag resolve late. `pointercancel`
-    // is emphatically not this handler — a gesture the browser took away is not
-    // a gesture the player finished.
+    /*
+     * A press that never became a drag is a tap, and a press that outlasts
+     * HOLD_MS is a mine. Both live here now, because the Mine and Place buttons
+     * are gone and the world surface is the only thing left to press.
+     *
+     * The three outcomes, resolved in the order they can be known:
+     *
+     *   moved       it is a look, and it was already being handled as one. The
+     *               mine timer is cancelled the moment the travel passes
+     *               TAP_TRAVEL, so dragging the camera can never start digging.
+     *   held        mine, from HOLD_MS until the thumb comes off. `buttons[0]`
+     *               stays down across every frame of it, which is what a block
+     *               taking many frames to break requires.
+     *   released    the ACTION, and which action it is comes from the same
+     *               vocabulary the button used to print: if the crosshair
+     *               offers a verb (Place, Eat, Open, Trade, Feed, Cast) the tap
+     *               is button 2, and if it offers none the tap is a swing.
+     *
+     * That last line is the owner's rule exactly — "if we are holding placeable
+     * item and block it should be placed unless it's unplaceable" — and it is
+     * read off `ui.actionVerb`, so the tap and the hint under the crosshair can
+     * never disagree about what is about to happen.
+     *
+     * `pointercancel` is emphatically not the release handler: a gesture the
+     * browser took away is not a gesture the player finished. It still has to
+     * stop the mining, which `release` on the claim does for every path.
+     */
     this.look.addEventListener('pointerup', (e) => {
       const c = this.claims.get(e.pointerId);
-      if (c && c.kind === 'look'
-        && c.travel <= TAP_TRAVEL && performance.now() - c.t <= TAP_MS) this._swing();
+      if (c && c.kind === 'look' && !c.mining
+        && c.travel <= TAP_TRAVEL && performance.now() - c.t <= TAP_MS) this._act();
       this._give(e, 'look');
     });
     this.look.addEventListener('pointercancel', (e) => this._give(e, 'look'));
@@ -367,8 +474,7 @@ export class TouchControls {
     // saplings going down. The `clicked` flag on press is what the one-shot
     // uses (a door, a bed, a merchant) read instead, and setting both is
     // exactly what a real mouse button does.
-    this._holdBtn(this.buttons.mine, 0);
-    this._holdBtn(this.buttons.use, 2);
+    // Mine and Place were wired here. Both live on the look surface now.
     this._keyBtn(this.buttons.jump, 'Space');
     // Escape and E go through `justPressed` for one frame, which is how the
     // keyboard delivers them, so the same handler in main.js opens the same
@@ -483,13 +589,42 @@ export class TouchControls {
    * The Mine test is the other half: a tap while the Mine button is held must
    * not lift Mine's own hold out from under it.
    */
+  /**
+   * A tap on the world: do the thing, or hit the thing.
+   *
+   * The fork is the owner's rule — a placeable block is placed, and only when
+   * there is nothing to do does the tap become a punch. It asks the UI rather
+   * than working it out here, because the UI is already answering exactly this
+   * question every frame to paint the hint under the crosshair (see
+   * `_verbFor`), and two answers to one question is how the label and the
+   * gesture drift apart.
+   *
+   * `clicked` AND `buttons` together, held for one frame, is what a real mouse
+   * click delivers: the one-shots in main.js (a door, a bed, a merchant) read
+   * `clicked`, and placing reads `buttons`. Cleared on the second frame for
+   * the reason `_swing` clears its own — one rAF is the frame the press is in,
+   * and the release has to land after the game has read it.
+   */
+  _act() {
+    if (this.game.ui?.actionVerb) {
+      this.input.buttons[2] = true;
+      this.input.clicked[2] = true;
+      cancelAnimationFrame(this._actRaf);
+      this._actRaf = requestAnimationFrame(() => {
+        this._actRaf = requestAnimationFrame(() => { this.input.buttons[2] = false; });
+      });
+      return;
+    }
+    this._swing();
+  }
+
   _swing() {
     this.input.buttons[0] = true;
     this.input.clicked[0] = true;
     cancelAnimationFrame(this._swingRaf);
     this._swingRaf = requestAnimationFrame(() => {
       this._swingRaf = requestAnimationFrame(() => {
-        if (!this.buttons.mine.classList.contains('on')) this.input.buttons[0] = false;
+        this.input.buttons[0] = false;
       });
     });
   }

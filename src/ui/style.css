@@ -3952,24 +3952,42 @@ body.touch, body.touch #view, body.touch #touch {
    exactly one centred icon and nothing about its size, its hit area or its
    pressed state depends on whether there is a word today. The icon slides up to
    make room only when there is. */
-.tc-verb {
+/* THE WORD UNDER THE CROSSHAIR.
+   This used to be printed on the face of the Place button. The button is gone
+   and the word is not, because it is carrying the one thing a gesture cannot
+   say for itself: a tap that places a block and a tap that punches a cow are
+   the same tap, and the player has to know which one is about to happen. Same
+   vocabulary and the same `bindAction` plumbing — see `_verbFor` in UI.js —
+   just no longer a control.
+
+   Under the crosshair rather than over it, so it never sits on the thing being
+   aimed at, and `pointer-events: none` because the surface behind it is the
+   control now and a word that swallowed a tap would be the worst of both. */
+#tc-hint {
   position: absolute;
-  left: 0; right: 0; bottom: 8px;
-  font-size: 10px; font-weight: 700; line-height: 1;
-  letter-spacing: .05em; text-transform: uppercase; text-align: center;
+  left: 0; right: 0; top: calc(50% + 20px);
+  font-size: 11px; font-weight: 700; line-height: 1;
+  letter-spacing: .06em; text-transform: uppercase; text-align: center;
   color: var(--accent-hi);
-  text-shadow: 0 1px 0 rgba(20, 10, 2, .85);
+  text-shadow: 0 1px 2px rgba(10, 6, 2, .95), 0 0 6px rgba(10, 6, 2, .7);
   pointer-events: none;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--t-fast) ease;
 }
-.tc-btn.verbed .tc-ico { transform: translateY(-6px); width: 38%; height: 38%; }
+/* `verbed` is set by `_paintAction` whenever there is a word to show, which is
+   exactly when the tap will act rather than swing. Nothing is drawn when the
+   answer is "you will hit it" — a crosshair over a husk needs no caption. */
+#tc-hint.verbed { opacity: 1; }
 
-/* The cluster, right hand. Nearest the resting thumb are the two the player
-   presses every few seconds; the two that are occasional sit further in. */
-#tc-use { right: 16px; bottom: 22px; }
-#tc-mine { right: 16px; bottom: 104px; }
-#tc-jump { right: 100px; bottom: 26px; }
-#tc-sneak { right: 100px; bottom: 100px; }
+/* The cluster, right hand, and it is two buttons now rather than four.
+   Mine and Place are gone — the world surface does both, by tap and by hold —
+   so what is left is the pair that genuinely cannot live on the crosshair: a
+   jump has to be available while you are already dragging the camera, and
+   sneak latches. They take the two nearest-the-thumb slots the deleted pair
+   used to hold. */
+#tc-jump { right: 16px; bottom: 22px; }
+#tc-sneak { right: 16px; bottom: 104px; }
 /* Sneak latches, so it also has to *look* latched while nothing is touching it.
    The brass rim, which is the same one a selected hotbar cell wears. */
 #tc-sneak.on {
@@ -3979,9 +3997,15 @@ body.touch, body.touch #view, body.touch #touch {
 
 /* Bag and pause are not thumb-cluster buttons. They open a screen, which ends
    whatever you were doing, and a screen you can open by fumbling is worse than
-   one that takes a deliberate reach. Top right, under the chips, quiet. */
-#tc-bag { right: 8px; top: 84px; }
-#tc-pause { right: 8px; top: 138px; }
+   one that takes a deliberate reach.
+
+   The top right CORNER, on the owner's word, and side by side rather than
+   stacked down the edge. They used to sit at y 84 and 138, under the status
+   chips, which put pause a third of the way down the screen and left the
+   corner itself — the one place on a phone that every app puts exactly this —
+   holding nothing. The status rail moves down under them to make room. */
+#tc-bag { right: calc(var(--tc-chip) + 14px); top: 8px; }
+#tc-pause { right: 8px; top: 8px; }
 
 /* ── the chrome shrinks ────────────────────────────────── */
 /* Every cluster in the HUD is a hard-pixel layout anchored to a corner, so it
@@ -4040,10 +4064,21 @@ body.touch #bottom {
      bottom edge so the rack stays on the floor of the cluster as it shrinks. */
   transform: translateX(-50%) scale(var(--hud-scale));
   transform-origin: bottom center;
-  /* Lifted clear of the band the thumbs own. A hotbar under the stick is a
-     hotbar you select from by accident. */
-  bottom: var(--tc-band);
+  /* Back on the floor of the screen, where the owner wants it and where every
+     other game puts it: "tool bar in middle of screen instead of middle
+     bottom".
+
+     It was lifted by --tc-band (210px, 128 on a small screen) to clear the
+     thumb cluster, and that was right while Mine and Place were two 80px
+     buttons stacked up the right edge — a hotbar behind them is a hotbar you
+     select from by accident. Both are gone. What is left in the band is the
+     stick in the left corner and jump/sneak in the right, and the rack is
+     centred between them with its own width to spare. */
+  bottom: 14px;
 }
+/* The status rail comes down from the corner the two chips now own. 8px of gap
+   above it and the chip's own height, so the two never overlap at any scale. */
+body.touch #status-bar { top: calc(var(--tc-chip) + 16px); }
 /* The crosshair does not shrink. It is already 11px, it is what you aim with,
    and on a phone it is the only thing saying where the Mine button will act. */
 

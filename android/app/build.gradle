@@ -33,6 +33,10 @@ repositories {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    // Declared rather than inherited through appcompat. MainActivity uses
+    // WindowInsetsControllerCompat directly to hide the system bars, and a
+    // transitive dependency is one an upgrade upstream is allowed to drop.
+    implementation "androidx.core:core:$androidxCoreVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')

@@ -3259,6 +3259,16 @@ export class UI {
    * `ITEMS` are already imported, and none of that is true of a file whose job
    * is pointer ids.
    */
+  /**
+   * What a tap on the world will do, or null if it would only swing.
+   *
+   * The touch layer's fork between "place it" and "hit it" reads this, so the
+   * word under the crosshair and the gesture are answering one question with
+   * one answer. Public because `_actVerb` is a paint cache and nothing outside
+   * should be reaching into it.
+   */
+  get actionVerb() { return this._actVerb || null; }
+
   bindAction(btn, verbEl) {
     this._actBtn = btn;
     this._actVerbEl = verbEl;

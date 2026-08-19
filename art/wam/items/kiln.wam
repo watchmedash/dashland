@@ -1,0 +1,133 @@
+# Kiln — a squat brick furnace, and the first model here that is a *building*
+# rather than a thing you hold.
+#
+# **It is authored to the cell, not to the hand.** `height 1.0` is the meter
+# value, so every fraction below reads directly as a fraction of the block it
+# has to live in: `w 0.98` is a wall that stops a hair short of the cell face,
+# the fire mouth at `y 0.34` is a third of the way up the block, and nothing in
+# the file needs converting in anyone's head to check it fits. `BlockModels`
+# normalises on the Y extent, so the number that actually matters is that the
+# body spans exactly 0..1 in y and that width and depth both come in *under*
+# it — a prop as wide as it is tall arrives filling its cell edge to edge and
+# grows into its neighbours.
+#
+# **It has a front and the front is +Z**, which is the direction the language
+# already calls forward. Three separate cues say so, because a block you can
+# rotate is a block whose facing has to be legible from across a room:
+#
+#   * the mouth, a short tube pushed out through the front wall and capped
+#     flat in near-black. A hole cannot be modelled as a hole — an inner tube
+#     inside an outer one is a part buried in another part, which the lint
+#     rejects and which renders nothing from any angle. Capping the protruding
+#     end dark is the sea sponge's throat trick, and it reads the same way:
+#     from anywhere in front you are looking into darkness, and from the side
+#     the surround stands proud of the wall.
+#   * the lintel and the sill, two stone slabs bracketing the mouth and
+#     protruding exactly as far as it does, so the front wall has a step in it
+#     even in silhouette, which is the only cue that survives at distance.
+#   * the soot, a `material_arc` stain confined to the front face and only
+#     above the lintel. Arcs are measured from the ring's depth frame, and for
+#     a vertical loft that frame is +Z, so 90 degrees *is* the front — the
+#     stain cannot drift onto a side wall the way a separately-authored slab
+#     could.
+#
+# **No `textures` section, deliberately.** It is the one thing here that
+# departs from `zombie.wam`, and it is forced: `art/wam/scripts/export_items.py`
+# bakes each material's `baseColorFactor` into a COLOR_0 attribute, and
+# `wam/gltf.py` writes that factor as flat white the moment a model carries a
+# baked atlas. A textured kiln would compile to a handsome render sheet and
+# export into the game as a white box. Every other item model in this directory
+# is flat-palette for the same reason; the hand-painted look here comes from
+# banding the palette along the loft and arcing it around, which survives the
+# export because it is expressed as materials.
+
+model kiln
+  height 1.0
+  style chunky
+
+palette
+  Brick  #a05c40
+  Plinth #6f6a63
+  Cap    #7c766d
+  Stone  #8a837a
+  Scorch #6b3a28
+  Soot   #3a332e
+  Mouth  #241c17
+
+skeleton
+  root hearth at 0.0
+  # The stack is the whole block: one bone, ground to ceiling, so every ring
+  # `t` below is literally its height in the cell.
+  bone stack parent=hearth dir=up len=1.0
+  # The fire mouth. Rooted inside the wall and aimed out through it, which is
+  # what puts the dark cap in front of the brick instead of inside it.
+  bone door parent=hearth up=0.34 fwd=0.34 dir=fwd len=0.16
+
+parts
+  # The body. Eight-sided and `shape=box`: a four-sided loft would be a bare
+  # cube with its faces flat against the cell walls, and at that point the model
+  # is the mesher's job, not ours. Eight chamfers the vertical corners just
+  # enough to catch a different value on each and read as masonry.
+  #
+  # The profile is a plinth, a battered wall, and a flared cap — the three
+  # courses every real kiln has, and the cheapest way to stop a stack of rings
+  # reading as a barrel. The last ring steps sharply in to a dark flat cap,
+  # which is the flue seen from above.
+  loft body bones=hearth..stack material=Brick sides=8 shape=box
+    ring 0.00 w=0.98 d=0.92 material=Plinth
+    ring 0.07 w=0.98 d=0.92
+    ring 0.10 w=0.90 d=0.84 material=Brick
+    ring 0.62 w=0.90 d=0.84 material_arc=Scorch:68-112
+    ring 0.72 w=0.89 d=0.83
+    ring 0.80 w=0.86 d=0.80
+    ring 0.86 w=0.96 d=0.90 material=Cap
+    ring 0.95 w=0.96 d=0.90
+    ring 1.00 w=0.58 d=0.54 material=Mouth
+    cap start=flat end=flat
+
+  # The fire mouth. `frame=up` because the tube runs along +Z, the axis where
+  # the automatic depth frame flips: without it `d` would span left-to-right
+  # and the opening would come out lying on its side. `cap start=none` leaves
+  # the buried end open — there is nothing behind it but brick.
+  loft firedoor bones=door..door material=Soot frame=up sides=8 shape=squarish
+    ring 0.00 w=0.50 d=0.40
+    ring 0.45 w=0.50 d=0.40
+    ring 0.75 w=0.46 d=0.36
+    ring 1.00 w=0.40 d=0.30 material=Mouth
+    cap start=none end=flat
+
+  # Lintel and sill. Both are `attach box`, whose origin is the *top* face
+  # centre and whose `h` hangs below it, and both reach z=0.50 — the same plane
+  # the mouth ends on, so the three of them form one flat step out of the wall
+  # rather than three separate lumps.
+  attach lintel bone=stack at=0.62 offset=(0,0,0.42) kind=box w=0.66 h=0.09 d=0.16 material=Stone
+  attach sill   bone=door  at=0.00 offset=(0,-0.21,0.08) kind=box w=0.66 h=0.08 d=0.16 material=Stone
+
+checks
+  # It sits on the floor of its cell and fills it to the ceiling.
+  assert bottom(body) < 0.01
+  assert top(body) > 0.99
+  # ...and stays inside it in the other two axes. This is the check the model
+  # exists to satisfy: the game scales by the Y extent, so anything over 1.0
+  # here is a kiln that overhangs into the next block.
+  assert height / width in 1.0..1.15
+  assert height / depth in 1.0..1.15
+  # Squat: the widest course is the plinth, at the bottom.
+  assert width(body) > width(firedoor) * 1.7
+  # The front is the front. The mouth and both slabs stand proud of the wall,
+  # and the mouth is the frontmost thing on the model.
+  assert zmax(firedoor) > zmax(body)
+  assert zmax(firedoor) >= zmax(lintel)
+  assert zmax(lintel) > 0.45
+  assert zmax(sill) > 0.45
+  # The opening is above the sill and below the lintel, or it is not a doorway.
+  assert ymin(firedoor) > ymax(sill) - 0.02
+  assert ymax(firedoor) < ymin(lintel) + 0.02
+  # Six materials, and the two dark ones are the read. If a ring edit ever
+  # drops `Mouth` the fire door caps in soot grey and the block becomes a
+  # plain chimney.
+  assert materials == 7
+  assert parts == 4
+  assert tris < 500
+  measure aspect width / height
+  measure mouthheight height(firedoor)

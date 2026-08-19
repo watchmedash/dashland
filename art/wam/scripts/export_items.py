@@ -151,6 +151,13 @@ ITEMS = [
     # exported by hand and a full rebuild would drop all five. Left alone here
     # because they are not this change's to fix, but they are a real gap.
     "watermelon",
+    # The kiln. The first entry here that is a *building* rather than something
+    # held: a block-sized prop authored to fill its cell, with a front that
+    # matters, since the block it backs is directional. Item-only in the sense
+    # that nothing else shares the model, but unlike a drop it is world geometry
+    # wherever it is placed, so a rebuild that skipped it would leave every kiln
+    # already standing in a world with nothing to draw.
+    "kiln",
     # The seven farm crops' STAGE models are NOT listed here, and that omission
     # is deliberate
     # rather than an oversight. Every other name in this list is a file: the

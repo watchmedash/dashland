@@ -97,6 +97,22 @@ export class Drops {
     this.group.name = 'drops';
     scene.add(this.group);
     this.materials = materials;
+    /**
+     * Blocks in the air on their way down, as
+     * `{mesh, from, to, t, secs}` in world space.
+     *
+     * A collapsing dune used to be drawn by the debris particle system: one
+     * flat-coloured cube per block, in the block's *particle* colour rather
+     * than its texture, which then SHRANK to a third of its size on the way
+     * down (debris does, it is meant to be a chip of stone) and BOUNCED off
+     * whatever it hit (debris does that too). A cube of average grey shrinking
+     * and bouncing down a shaft is not a falling block, and the owner said so.
+     *
+     * A falling block is the block. It takes the same geometry a dropped one
+     * takes - real tiles, real shape, off the cache in `getBlockGeo` - and
+     * simply travels.
+     */
+    this.falling = [];
     this.spriteCache = new Map();
     /** Last value handed to setSkyLevel; 1 is "as the texture was authored". */
     this._skyLevel = 1;
@@ -618,7 +634,47 @@ export class Drops {
     d.vel.addScaledVector(_flow, FLOW_PUSH * fl.s * dt);
   }
 
+  /**
+   * Send one block down a shaft: from `from` to `to`, arriving in `secs`.
+   *
+   * The caller has already emptied the cells it left and will fill the ones it
+   * lands in when the clock runs out (see `_settleGravity` in main), so this
+   * owns nothing but the picture in between. It is driven off elapsed time
+   * rather than off an acceleration so that it ARRIVES when it is supposed to:
+   * the fall is capped at FALL_MAX_SECONDS for a long drop, and a simulated
+   * block would still be in the air when its landing was applied.
+   */
+  fallingBlock(blockId, from, to, secs) {
+    const geo = getBlockGeo(blockId);
+    if (!geo) return;
+    const mesh = new THREE.Mesh(geo,
+      IS_OPAQUE[blockId] ? this.materials.opaque : this.materials.cutout);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.position.copy(from);
+    // A hair under a full cell so it never z-fights the walls of the shaft.
+    mesh.scale.setScalar(0.98);
+    this.group.add(mesh);
+    this.falling.push({ mesh, from: from.clone(), to: to.clone(), t: 0, secs });
+  }
+
+  _tickFalling(dt) {
+    for (let i = this.falling.length - 1; i >= 0; i--) {
+      const f = this.falling[i];
+      f.t += dt;
+      const u = Math.min(1, f.t / f.secs);
+      // Squared, which is what constant acceleration is: it leaves slowly and
+      // arrives fast, and it arrives exactly at u = 1.
+      f.mesh.position.lerpVectors(f.from, f.to, u * u);
+      if (u >= 1) {
+        this.group.remove(f.mesh);
+        this.falling.splice(i, 1);
+      }
+    }
+  }
+
   update(dt, player, { collect, hasRoom }) {
+    this._tickFalling(dt);
     const g = GRAVITY * 0.85;
     for (let i = this.list.length - 1; i >= 0; i--) {
       const d = this.list[i];

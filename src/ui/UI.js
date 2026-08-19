@@ -2479,8 +2479,12 @@ export class UI {
     // grid either, so the sidebar sat there answering a question the screen
     // cannot ask, with "Nothing yet, without a bench" against a quarter of the
     // panel's width and nothing to spend it on.
+    // The kiln is on this list too. A kiln smelts, it does not craft, and the
+    // recipe book beside it was answering a question the screen cannot ask -
+    // the owner: "kiln has crafting/can craft list". What goes in a kiln is
+    // one slot and one rule, and the screen shows it.
     this.el.recipePanel.classList.toggle('hidden',
-      kind === 'shop' || kind === 'crate' || kind === 'barter');
+      kind === 'shop' || kind === 'crate' || kind === 'barter' || kind === 'kiln');
     // With the sidebar gone the crate is the one screen whose content does not
     // fill an 830px sheet, and it sat in the middle of it with the title a hand
     // away to the left. The shop keeps the full width; its two columns want it.
@@ -2688,6 +2692,14 @@ export class UI {
   }
 
   _buildKilnUI() {
+    // IN, FIRE, FUEL - down one column, then the arrow, then OUT.
+    //
+    // It was In and Fuel stacked together in one column with the flame parked
+    // underneath the progress bar in the next, which reads as three unrelated
+    // widgets: nothing about it said the fire is what turns the one into the
+    // other. The arrangement everybody already knows puts the fire BETWEEN what
+    // is burning and what is being burnt, and the arrow pointing at what comes
+    // out, and it needs no label to be read.
     const k = this.kiln;
     const wrap = document.createElement('div');
     wrap.className = 'smelt-area';
@@ -2708,25 +2720,21 @@ export class UI {
     const fuel = col('Fuel', k.fuel);
     const out = col('Out', k.output);
 
-    const mid = document.createElement('div');
-    mid.className = 'smelt-col';
     this.kilnFlame = document.createElement('div');
     this.kilnFlame.className = 'flame';
     this.kilnFlame.innerHTML = '<i></i>';
     this.kilnArrow = document.createElement('div');
     this.kilnArrow.className = 'progress-arrow';
     this.kilnArrow.innerHTML = '<i></i>';
-    mid.append(this.kilnArrow, this.kilnFlame);
 
-    const left = document.createElement('div');
-    left.className = 'smelt-col';
-    left.append(inp.c, fuel.c);
+    const stack = document.createElement('div');
+    stack.className = 'smelt-col smelt-stack';
+    stack.append(inp.c, this.kilnFlame, fuel.c);
 
-    wrap.append(left, mid, out.c);
+    wrap.append(stack, this.kilnArrow, out.c);
     this.el.screenTop.appendChild(wrap);
     this.kilnSlots = { input: inp.d, fuel: fuel.d, output: out.d };
   }
-
   _refreshKiln() {
     const k = this.kiln;
     if (!k) return;
@@ -2734,6 +2742,9 @@ export class UI {
     this._paint(this.kilnSlots.fuel, k.fuel);
     this._paint(this.kilnSlots.output, k.output);
     this.kilnFlame.querySelector('i').style.setProperty('--burn', `${100 - Math.round((k.burn / Math.max(1, k.burnMax)) * 100)}%`);
+    // The flicker is on the element rather than always running, so a cold kiln
+    // is a cold kiln rather than an empty grate with a heat haze over it.
+    this.kilnFlame.classList.toggle('lit', k.burn > 0);
     this.kilnArrow.querySelector('i').style.width = `${Math.round((k.progress / Math.max(0.001, k.progressMax)) * 100)}%`;
   }
 

@@ -734,37 +734,6 @@ export class Particles {
    * mouthful goes. `col` is the item's palette colour, so an apple sheds red
    * and bread sheds brown without a table mapping one to the other.
    */
-  /**
-   * One block-sized cube falling under its own weight.
-   *
-   * Gravity blocks used to arrive by teleport - the edit that emptied the old
-   * cell and the edit that filled the new one landed on the same frame, so a
-   * collapsing dune blinked rather than fell. This is the thing you watch on
-   * the way down, and it rides the ordinary particle pool: same integrator,
-   * same gravity, so it falls at the rate everything else in the world does.
-   *
-   * Untextured, like the debris cubes, and tinted with the block's own
-   * `particle` colour - which is already the answer to "what does a handful of
-   * this look like", so a falling grain and the dust it kicks up match.
-   *
-   * @param {number} secs how long it has to fall, so it is removed as it lands
-   */
-  fallingBlock(pos, up, col, secs) {
-    const p = this._spawn();
-    if (!p) return;
-    p.alive = true;
-    p.pos.copy(pos);
-    p.vel.set(0, 0, 0);
-    p.rot.setFromEuler(new THREE.Euler(0, 0, 0));
-    p.spin.set(0, 0, 0);
-    p.life = 0;
-    p.maxLife = secs;
-    // A shade under a full cell, so it never z-fights the walls of the shaft it
-    // is falling down.
-    p.size = 0.94;
-    p.color.setRGB(col[0], col[1], col[2]);
-  }
-
   crumbs(pos, up, col) {
     for (let i = 0; i < 2; i++) {
       const p = this._spawn();

@@ -952,6 +952,7 @@ const NEW_WORLD_GRACE = 180;
  */
 const FALL_MAX_SECONDS = 0.55;
 const _fallPos = new THREE.Vector3();
+const _fallTo = new THREE.Vector3();
 
 /**
  * The hour the cinderlands are permanently held at.
@@ -5269,8 +5270,13 @@ class Game {
       const drop = k - dest;
       const secs = Math.min(FALL_MAX_SECONDS, Math.sqrt(2 * drop / GRAVITY));
       for (let n = 0; n < run.length; n++) {
+        // The block itself goes down the shaft, with its own tiles and its own
+        // shape. This was a debris particle - one flat cube in the block's
+        // average colour, which then shrank and bounced, because that is what
+        // debris does. See `Drops.fallingBlock`.
         this.planet.centerOf(col, k + n, _fallPos);
-        this.particles.fallingBlock(_fallPos, this.player.up, BLOCKS[run[n]].particle, secs);
+        this.planet.centerOf(col, dest + n, _fallTo);
+        this.drops.fallingBlock(run[n], _fallPos, _fallTo, secs);
         this._settling.push({ col, k: dest + n, id: run[n], t: secs });
       }
     }

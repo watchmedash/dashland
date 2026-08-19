@@ -2484,7 +2484,12 @@ export class UI {
     // With the sidebar gone the crate is the one screen whose content does not
     // fill an 830px sheet, and it sat in the middle of it with the title a hand
     // away to the left. The shop keeps the full width; its two columns want it.
-    this.el.screenEl.classList.toggle('snug', kind === 'crate');
+    // The crate used to narrow its panel, and that narrowing is what three
+    // separate bugs came out of - a collapsed `fit-content`, a box centred at
+    // the wrong size, and 340px of centring padding eating an 80px content
+    // box. The owner has ruled: "why is crate menu not full screen". It is a
+    // screen like every other screen now, and `snug` is nobody's.
+    this.el.screenEl.classList.remove('snug');
     // Trading is a screen of two lists and nothing else. The bag underneath it
     // is 36 pockets of dead weight: the owner's words are 'I don't even know
     // why our inventory grid is there when we should just list items we can buy

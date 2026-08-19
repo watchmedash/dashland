@@ -1320,6 +1320,31 @@ add({
   color: '#d9791c', shine: '#f2b356',
 });
 
+/**
+ * Forged cinder, and the reason the top tool tier is no longer the cheapest.
+ *
+ * Cinder is the night's payoff - see `cinder` above, which exists so that
+ * walling up until dawn is not strictly the better play - and it was ALSO the
+ * material of every tier 5 tool. Those two jobs pull opposite ways: the payoff
+ * has to be common or the night pays nothing, and the top tier has to be dear
+ * or the ladder means nothing. Common won, and the owner found it: a husk
+ * drops 0-1 cinder, an axe takes three, so about six husks bought the best axe
+ * in the game on the first night. Tier 4 wants a deep cave and a tier-3 pick.
+ *
+ * So the material stays common and the TIER gets expensive. Five cinder are
+ * worked into one bar and the tools take bars, which is the same shape as
+ * `raw_iron` into `iron_ingot` and needs no new rule: an axe is 15 cinder,
+ * about thirty husks, or ten kills on Pyre where the monsters drop 1-2 each -
+ * which is the right way round for a metal named after the cinderlands.
+ *
+ * Appended at the end of the registry ON PURPOSE. Adding an item anywhere else
+ * renumbers every id after it, and an id is what a saved bag stores.
+ */
+add({
+  name: 'cinder_bar', label: 'Cinder Steel', art: 'iron_ingot',
+  color: '#c2451f', shine: '#ffbe7a',
+});
+
 /** The improvised rungs, lowest first. `Recipes.kitchenFallback` walks it. */
 export const IMPROVISED_NAMES = IMPROVISED.map((d) => d.name);
 

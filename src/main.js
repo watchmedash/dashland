@@ -68,7 +68,7 @@ import { Achievements } from './game/Achievements.js';
 import { smeltingFor, FUEL } from './game/Recipes.js';
 import {
   BLOCKS, ID, IS_SOLID, IS_OPAQUE, RENDER_TYPE, R_LIQUID, R_CROSS, IS_TORCH, DROWNS, IS_DIRECTIONAL, IS_AXIS, IS_SLAB,
-  IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
+  IS_STAIR, IS_LADDER, IS_DOOR, IS_GATE, IS_FENCE, IS_SIGN, SIGN_WALL, FACING_DEFAULT, NEEDS_ROOM, crowds,
   NEEDS_FLOOR, supports, growsOn, IS_SUBMERGED, IS_REPLACEABLE, HAS_GRAVITY, N_BLOCKS,
   SEALS_FACES,
 } from './world/Blocks.js';
@@ -4859,6 +4859,46 @@ class Game {
    * and a save writes `planet.blocks` directly. That is what keeps a generated
    * stack from demolishing itself the first time it comes into range.
    */
+  /**
+   * Break any ladder these edits have just unbolted from its wall.
+   *
+   * `_dropUnsupported` below asks one question - is there a FLOOR under this -
+   * and a ladder does not stand on a floor, it is nailed to the side of
+   * something. So it is not NEEDS_FLOOR, nothing else re-asked what it was
+   * nailed to, and mining the wall left the ladder hanging in the air. It is
+   * not solid either, so you then walk straight through it: "I can also pass
+   * through ladders if I break the block they were attached to".
+   *
+   * A ladder's `facing` names the wall - 0..3 is +x, -x, +y, -y, the order in
+   * TORCH_WALL_STEP - so this is the same walk `_dropUnsupported` does, turned
+   * sideways: for each cell an edit changed, look at the four neighbours and
+   * condemn any ladder pointing back at it that is no longer held.
+   *
+   * The whole column above it goes with it, exactly as a run of NEEDS_FLOOR
+   * blocks does: a ladder is climbed as a run, and one still bolted to rock
+   * three cells up is fine and stays.
+   */
+  _dropUnattached(edits) {
+    let doomed = null;
+    for (const e of edits) {
+      for (let d = 0; d < 4; d++) {
+        const step = TORCH_WALL_STEP[d];
+        const col = stepColumn(e.col, step[0], step[1]);
+        const id = this.planet.at(col, e.k);
+        if (!IS_LADDER[id]) continue;
+        // Does that ladder point back at the cell that just changed? Its
+        // facing names the wall, and the wall from IT to US is the reverse of
+        // the step we took to reach it.
+        if ((this.planet.facingAt(col, e.k) & 3) !== (d ^ 1)) continue;
+        if (supports(this.planet.at(e.col, e.k), 0)) continue;
+        if (!doomed) doomed = new Map();
+        doomed.set(cellIdx(col, e.k), { col, k: e.k, id });
+      }
+    }
+    if (!doomed) return;
+    this._breakWhereItStands(doomed.values());
+  }
+
   _dropUnsupported(edits) {
     let doomed = null;
     for (const e of edits) {
@@ -4982,6 +5022,7 @@ class Game {
     // runs for the original batch those cells are already air, so nothing is
     // dropped twice.
     this._dropUnsupported(edits);
+    this._dropUnattached(edits);
     // Then any field these edits have just roofed over.
     this._uncoverFarmland(edits);
     // And finally the sand. Queued rather than done here: see `_seedGravity`.
@@ -5444,6 +5485,34 @@ class Game {
     return this.planet.solidAt(wall, k);
   }
 
+  /**
+   * Which way a gate hangs: along the fence it is joining, if there is one.
+   *
+   * A gate is the hole in a fence line, so the line is the better authority
+   * than the player - you place one by walking up to a run of fence and
+   * clicking a gap in it, and where you happen to be standing when you do is
+   * not always square to it. Read the four neighbours; if one axis has timber
+   * on it and the other does not, the leaf runs along that axis.
+   *
+   * With nothing to join - a gate on its own, or a gate at a crossroads where
+   * both axes have fence - it falls back to the player, and INVERTS them.
+   * `_facingToward` answers "which side of the block are you on", and a player
+   * standing to the +X side of a gate walks through it along X, which means
+   * the fence it belongs to runs along Y and the leaf has to run along Y with
+   * it. Handing that answer straight through is what would put every gate
+   * across the path instead of closing it.
+   */
+  _gateFacing(col, k) {
+    const rail = (di, dj) => {
+      const id = this.planet.at(stepColumn(col, di, dj), k);
+      return IS_FENCE[id] === 1 || IS_GATE[id] === 1;
+    };
+    const alongI = rail(1, 0) || rail(-1, 0);
+    const alongJ = rail(0, 1) || rail(0, -1);
+    if (alongI !== alongJ) return alongI ? 0 : 2;
+    return this._facingToward(col, k) < 2 ? 2 : 0;
+  }
+
   _facingToward(col, k) {
     // block -> player, flattened onto the ground plane
     const b = this.planet.centerOf(col, k, _v2);
@@ -5782,6 +5851,12 @@ class Game {
     else if (IS_LADDER[id]) edit.facing = this._ladderFacing(hit, col, k);
     else if (IS_SIGN[id]) edit.facing = signByte;
     else if (IS_DOOR[id]) edit.facing = this._facingToward(col, k) & 3;
+    // A GATE HAD NO BRANCH AT ALL, so `facing` was never set and every gate on
+    // the planet was placed on axis 0 whichever way you were standing. That is
+    // the whole of "gate is wrong angle when placed" - it is not a bad rule, it
+    // is no rule. A gate is not IS_DIRECTIONAL (that flag drives a different
+    // shape), so it fell past every test here and took the default.
+    else if (IS_GATE[id]) edit.facing = this._gateFacing(col, k);
     else if (IS_DIRECTIONAL[id]) edit.facing = this._facingToward(col, k);
     else if (IS_AXIS[id]) edit.facing = this._axisFromFace(hit, col, k);
     else if (IS_SLAB[id]) edit.facing = this._slabHalf(hit, col, k);

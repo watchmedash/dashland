@@ -481,7 +481,17 @@ const RAW = [
   { out: 'kitchen', count: 1, table: true, shape: ['PPP', 'CCC'], key: { P: 'oak_planks', C: 'cobblestone' } },
 
   // --- tools ---
-  ...['wood:oak_planks', 'stone:cobblestone', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder'].flatMap((spec) => {
+  // Five cinder into one bar, and the cinder tools take bars.
+  //
+  // Cinder drops from thirteen species and two of them - the husk and the
+  // drowned - are the commonest things in the world after dark. That is
+  // deliberate (it is what makes a night worth going out in) and it made the
+  // TOP tool tier the cheapest one in the game: three cinder for an axe, about
+  // six husks. The bar leaves the drop alone and moves the cost onto the tier,
+  // exactly as raw iron pays for an iron ingot.
+  { out: 'cinder_bar', count: 1, table: true, in: ['cinder', 'cinder', 'cinder', 'cinder', 'cinder'] },
+
+  ...['wood:oak_planks', 'stone:cobblestone', 'iron:iron_ingot', 'crystal:crystal', 'cinder:cinder_bar'].flatMap((spec) => {
     const [tier, mat] = spec.split(':');
     return [
       { out: `${tier}_pick`, count: 1, table: true, shape: ['MMM', ' S ', ' S '], key: { M: mat, S: 'stick' } },

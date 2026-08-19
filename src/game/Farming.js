@@ -75,6 +75,9 @@ export function roofsSoil(id) {
 }
 
 export class Farming {
+  /** Raised when one crop reaches the last rung of its family. */
+  onRipe = null;
+
   constructor(planet, applyEdits) {
     this.planet = planet;
     this.applyEdits = applyEdits;
@@ -208,6 +211,14 @@ export class Farming {
       if (c.t >= STAGE_SECONDS) {
         c.t = 0;
         this.applyEdits([{ col: c.col, k: c.k, id: cur + 1 }]);
+        // A field ripening. Only the LAST rung is announced: a crop climbs
+        // three or four stages and only one of them is news, and a cue on
+        // every stage would make a planted field a metronome.
+        //
+        // A hook rather than a `game` handle in the constructor, matching the
+        // `applyEdits` function this class is already built around: it knows
+        // about a planet and nothing else.
+        if (cur + 1 === fam.last) this.onRipe?.(c.col, c.k);
       }
     }
 

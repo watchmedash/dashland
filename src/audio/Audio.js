@@ -3708,6 +3708,429 @@ export class Audio {
     }
   }
 
+  /**
+   * An achievement coming in.
+   *
+   * Deliberately NOT the level-up, which is a four-note rising arpeggio with a
+   * bell on the last note. Two things separate them and both are structural
+   * rather than a matter of pitch: this is a struck bell and level-up is a
+   * played phrase, and this arrives all at once where level-up climbs. A phrase
+   * says "you are progressing"; a bell says "that is done".
+   *
+   * The interval is an octave plus a fifth, struck together and about a fifth
+   * of a second apart. The low bloom under it is what stops a pair of high
+   * sines sounding like a phone notification: it gives the strike a body to
+   * have come out of.
+   */
+  achieve() {
+    if (!this._live() || !this._take('ui', 1.8)) return;
+    const t = this.ctx.currentTime;
+    const root = 880 * (0.99 + Math.random() * 0.02);
+    // Two strikes, and the partials of each are inharmonic on purpose: a bell
+    // is not a harmonic series and stacking exact multiples gives an organ.
+    [[root, 0, 1], [root * 3, 0.19, 0.55]].forEach(([f, dt, amt]) => {
+      for (const [mul, a] of [[1, 1], [2.76, 0.30], [5.4, 0.12]]) {
+        const o = this.ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = f * mul * (0.998 + Math.random() * 0.004);
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0, t + dt);
+        g.gain.linearRampToValueAtTime(0.075 * amt * a, t + dt + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0004, t + dt + 1.1 / (1 + mul * 0.4));
+        o.connect(g).connect(this.uiBus);
+        if (this.reverbGain) g.connect(this.reverbGain);
+        o.start(t + dt); o.stop(t + dt + 1.3);
+      }
+    });
+    const b = this.ctx.createOscillator();
+    b.type = 'triangle';
+    b.frequency.setValueAtTime(root / 8, t);
+    const bg = this.ctx.createGain();
+    bg.gain.setValueAtTime(0, t);
+    bg.gain.linearRampToValueAtTime(0.09, t + 0.03);
+    bg.gain.exponentialRampToValueAtTime(0.0004, t + 0.9);
+    b.connect(bg).connect(this.uiBus);
+    b.start(t); b.stop(t + 1.0);
+  }
+
+  /**
+   * A trade closing with the merchant, and a barter closing with the Verdant
+   * folk. The brief asked for these to differ and they differ by MATERIAL,
+   * which is the only difference a player will hear reliably.
+   *
+   * The merchant deals in coins, so `trade` is metal: five or six short
+   * inharmonic pings well above 1.5kHz, irregularly spaced because a handful of
+   * coins does not land on a grid, over a soft pouch thump. Nothing else in the
+   * game is metal at that pitch except the merchant's own bell, which is the
+   * point — he already sounds like that.
+   *
+   * The folk deal in goods, so `barter` is wood and breath: two dull clacks, no
+   * metal anywhere in it, and a hummed rising whole tone that is as close as
+   * this game gets to a voice. If you can hear which of the two happened
+   * without looking, both are doing their job.
+   */
+  trade() {
+    if (!this._live() || !this._take('ui', 0.9)) return;
+    const t = this.ctx.currentTime;
+    const coins = 4 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < coins; i++) {
+      const tn = t + i * (0.015 + Math.random() * 0.045);
+      const f = 1700 + Math.random() * 1900;
+      const d = 0.05 + Math.random() * 0.09;
+      const o = this.ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(f, tn);
+      o.frequency.exponentialRampToValueAtTime(f * 0.94, tn + d);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, tn);
+      g.gain.linearRampToValueAtTime(0.055 * (0.6 + Math.random() * 0.6), tn + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + d);
+      o.connect(g).connect(this.uiBus);
+      if (this.reverbGain) g.connect(this.reverbGain);
+      o.start(tn); o.stop(tn + d + 0.02);
+      this._noiseHit(this.uiBus, tn, {
+        gain: 0.022, lo: 1800, hi: 7000, q: 2.2, dur: 0.02, at: 0.001,
+      });
+    }
+    // the pouch they land in
+    this._noiseHit(this.uiBus, t + 0.02, { gain: 0.06, lo: 110, hi: 700, q: 0.9, dur: 0.14, at: 0.01 });
+  }
+
+  barter() {
+    if (!this._live() || !this._take('ui', 0.9)) return;
+    const t = this.ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const tn = t + i * (0.07 + Math.random() * 0.05);
+      const f = 380 * (0.85 + Math.random() * 0.3) * (i ? 0.78 : 1);
+      const o = this.ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(f, tn);
+      o.frequency.exponentialRampToValueAtTime(f * 0.6, tn + 0.09);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, tn);
+      g.gain.linearRampToValueAtTime(0.10, tn + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0004, tn + 0.10);
+      o.connect(g).connect(this.uiBus);
+      o.start(tn); o.stop(tn + 0.12);
+      this._noiseHit(this.uiBus, tn, { gain: 0.045, lo: 300, hi: 2200, q: 1.1, dur: 0.05 });
+    }
+    // the hum: a rising whole tone through a vowel-ish formant
+    const hz = 196 * (0.95 + Math.random() * 0.1);
+    const o = this.ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(hz, t + 0.10);
+    o.frequency.linearRampToValueAtTime(hz * 1.122, t + 0.42);
+    const fm = this.ctx.createBiquadFilter();
+    fm.type = 'bandpass'; fm.frequency.value = 620; fm.Q.value = 2.6;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0, t + 0.10);
+    g.gain.linearRampToValueAtTime(0.085, t + 0.20);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.55);
+    o.connect(fm).connect(g).connect(this.uiBus);
+    o.start(t + 0.10); o.stop(t + 0.58);
+  }
+
+  /**
+   * A trader saying no. Not `deny()`, which is the interface refusing a click:
+   * this is a person refusing an offer, so it is made of the same wood and
+   * breath `barter` is and it FALLS a minor second, which is the smallest
+   * interval that still reads as a turn away rather than as a mistake.
+   */
+  tradeRefuse() {
+    if (!this._live() || !this._take('ui', 0.6)) return;
+    const t = this.ctx.currentTime;
+    const hz = 240 * (0.95 + Math.random() * 0.1);
+    [[hz, 0], [hz * 0.944, 0.11]].forEach(([f, dt]) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth'; o.frequency.value = f;
+      const fm = this.ctx.createBiquadFilter();
+      fm.type = 'bandpass'; fm.frequency.value = 520; fm.Q.value = 3.0;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, t + dt);
+      g.gain.linearRampToValueAtTime(0.075, t + dt + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + dt + 0.16);
+      o.connect(fm).connect(g).connect(this.uiBus);
+      o.start(t + dt); o.stop(t + dt + 0.18);
+    });
+    this._noiseHit(this.uiBus, t, { gain: 0.05, lo: 200, hi: 1400, q: 1.0, dur: 0.07 });
+  }
+
+  /**
+   * Farming, which had no sounds of its own at all: planting borrowed
+   * `place('grass')`, a crop ripening was invisible unless you were looking at
+   * it, and a harvest was the generic block break.
+   *
+   * All three are soil and leaf and nothing else, and all three are quiet.
+   * A field is a place you spend a long time in.
+   */
+  plant(pos = null) {
+    if (!this._live() || !this._take('block', 0.5)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.6);
+    // the soil closing over it: slow in, no transient, dark
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 0.4 + Math.random() * 0.2;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 700 + Math.random() * 300; lp.Q.value = 0.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.17, t + 0.025);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.22);
+    n.connect(lp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 0.26);
+    // and one dry leaf on top of it
+    this._noiseHit(out, t + 0.03, { gain: 0.05, lo: 1200, hi: 4800, q: 1.4, dur: 0.07, at: 0.01 });
+  }
+
+  /**
+   * A field ripening. The softest cue in the game on purpose: it is news you
+   * are pleased to get and never news you must act on, so it must survive being
+   * heard while you are doing something else.
+   *
+   * A rising fifth on two sines with a 90ms attack — nothing in it is struck,
+   * because a struck sound is a demand.
+   */
+  ripen(pos = null) {
+    if (!this._live() || !this._take('block', 1.2)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 1.4);
+    const root = 523 * (0.98 + Math.random() * 0.04);
+    [[root, 0], [root * 1.5, 0.13]].forEach(([f, dt]) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t + dt);
+      g.gain.linearRampToValueAtTime(0.075, t + dt + 0.09);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + dt + 0.65);
+      o.connect(g).connect(out);
+      if (this.reverbGain) g.connect(this.reverbGain);
+      o.start(t + dt); o.stop(t + dt + 0.7);
+    });
+    // a breath of leaf under it, opening rather than closing
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 0.7 + Math.random() * 0.3;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 1.0;
+    bp.frequency.setValueAtTime(900, t);
+    bp.frequency.exponentialRampToValueAtTime(3000, t + 0.5);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.05, t + 0.22);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.55);
+    n.connect(bp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 0.6);
+  }
+
+  /** Pulling a ripe crop: the tear first, then the stalk giving. */
+  harvest(pos = null) {
+    if (!this._live() || !this._take('block', 0.7)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.8);
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 0.9 + Math.random() * 0.5;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.9;
+    // Falls, and fast. A rising tear is a zip; a falling one is fibre parting.
+    bp.frequency.setValueAtTime(3800 + Math.random() * 1400, t);
+    bp.frequency.exponentialRampToValueAtTime(500, t + 0.22);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.22, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.24);
+    n.connect(bp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 0.28);
+    // the snap at the end of the pull, a beat late and a fifth of the level
+    const st = t + 0.09 + Math.random() * 0.06;
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    const f = 420 * (0.85 + Math.random() * 0.3);
+    o.frequency.setValueAtTime(f, st);
+    o.frequency.exponentialRampToValueAtTime(f * 0.5, st + 0.06);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, st);
+    og.gain.linearRampToValueAtTime(0.09, st + 0.003);
+    og.gain.exponentialRampToValueAtTime(0.0004, st + 0.07);
+    o.connect(og).connect(out);
+    o.start(st); o.stop(st + 0.09);
+  }
+
+  /**
+   * A crate opening and closing. It was `ui(560)` open and nothing at all
+   * closed, which is the same blip a settings tab makes.
+   *
+   * Opening is a creak then a knock: the lid complains, then it stops against
+   * something. Closing is the knock alone, harder, with no creak in front of
+   * it, because a lid dropped shut does not have time to complain.
+   */
+  crate(open = true, pos = null) {
+    if (!this._live() || !this._take('block', 0.8)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 0.9);
+    if (open) {
+      // The creak. A sawtooth through a high-Q bandpass, pitch wandering up:
+      // the wander is the whole of it, because a steady tone here is a horn.
+      const o = this.ctx.createOscillator();
+      o.type = 'sawtooth';
+      const f = 118 * (0.85 + Math.random() * 0.3);
+      o.frequency.setValueAtTime(f, t);
+      o.frequency.linearRampToValueAtTime(f * (1.25 + Math.random() * 0.3), t + 0.22);
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.Q.value = 7; bp.frequency.value = 640 + Math.random() * 320;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.13, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + 0.24);
+      o.connect(bp).connect(g).connect(out);
+      o.start(t); o.stop(t + 0.26);
+    }
+    const kt = open ? t + 0.22 : t;
+    const k = this.ctx.createOscillator();
+    k.type = 'sine';
+    const kf = 190 * (0.9 + Math.random() * 0.2);
+    k.frequency.setValueAtTime(kf, kt);
+    k.frequency.exponentialRampToValueAtTime(kf * 0.55, kt + 0.10);
+    const kg = this.ctx.createGain();
+    kg.gain.setValueAtTime(0.0001, kt);
+    kg.gain.linearRampToValueAtTime(open ? 0.14 : 0.22, kt + 0.004);
+    kg.gain.exponentialRampToValueAtTime(0.0004, kt + 0.12);
+    k.connect(kg).connect(out);
+    k.start(kt); k.stop(kt + 0.14);
+    this._noiseHit(out, kt, {
+      gain: open ? 0.07 : 0.11, lo: 220, hi: 2400, q: 1.0, dur: 0.09,
+    });
+  }
+
+  /**
+   * A dish coming out of the kitchen. `craft()` is two knocks and a scrape,
+   * which is a bench: nothing you cook is made by hitting it.
+   *
+   * So this is the three things a plate of food actually is — the ring of the
+   * fired dish, the steam coming off it, and the weight of it being set down —
+   * and the ring is inharmonic and short so it is crockery rather than a bell.
+   */
+  dish(pos = null) {
+    if (!this._live() || !this._take('block', 1.0)) return;
+    const t = this.ctx.currentTime;
+    const out = this._dest(pos, 1.2);
+    const f = 1150 * (0.9 + Math.random() * 0.2);
+    for (const [mul, amt] of [[1, 1], [2.41, 0.35], [3.86, 0.16]]) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f * mul;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0, t + 0.06);
+      g.gain.linearRampToValueAtTime(0.075 * amt, t + 0.064);
+      g.gain.exponentialRampToValueAtTime(0.0004, t + 0.06 + 0.42 / (1 + mul * 0.5));
+      o.connect(g).connect(out);
+      o.start(t + 0.06); o.stop(t + 0.55);
+    }
+    // the steam: the only bright continuous thing, and it comes first
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 1.3 + Math.random() * 0.5;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.8;
+    bp.frequency.setValueAtTime(2600, t);
+    bp.frequency.exponentialRampToValueAtTime(5200 + Math.random() * 1500, t + 0.35);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.055, t + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.40);
+    n.connect(bp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 0.44);
+    // and the plate meeting the counter
+    this._noiseHit(out, t + 0.06, { gain: 0.07, lo: 200, hi: 1300, q: 1.1, dur: 0.08 });
+  }
+
+  /**
+   * A tool reaching zero durability in your hand.
+   *
+   * This is the one event in the game the player is guaranteed not to be
+   * looking at: it happens on the swing after the one they were watching, and
+   * the only tell was the item quietly leaving the slot. So it is the loudest
+   * thing in this batch and it is deliberately unpleasant — a dry crack, a
+   * ring falling away, and two pieces of it landing.
+   */
+  toolBreak() {
+    if (!this._live() || !this._take('player', 1.0)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    // the crack
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 1.4 + Math.random() * 0.6;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(2200, t);
+    hp.frequency.exponentialRampToValueAtTime(400, t + 0.12);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.30, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.16);
+    n.connect(hp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 0.2);
+    // the ring going away with it, falling far too fast to be a bell
+    const o = this.ctx.createOscillator();
+    o.type = 'triangle';
+    const f = 900 * (0.85 + Math.random() * 0.3);
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.exponentialRampToValueAtTime(f * 0.28, t + 0.30);
+    const og = this.ctx.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.linearRampToValueAtTime(0.15, t + 0.005);
+    og.gain.exponentialRampToValueAtTime(0.0004, t + 0.34);
+    o.connect(og).connect(out);
+    o.start(t); o.stop(t + 0.36);
+    // the pieces
+    for (let i = 0; i < 2 + ((Math.random() * 2) | 0); i++) {
+      this._noiseHit(out, t + 0.09 + Math.random() * 0.22, {
+        gain: 0.05 + Math.random() * 0.05, lo: 300, hi: 2600 + Math.random() * 2000,
+        q: 1.6, dur: 0.05 + Math.random() * 0.05, at: 0.002,
+      });
+    }
+  }
+
+  /**
+   * Claiming a bed. There is no sleeping in this game — a bed sets where you
+   * wake up — so this is not a night passing, it is cloth being pressed and a
+   * place being settled on.
+   *
+   * `claimed` false is the same bed clicked twice. It gets the cloth and no
+   * interval at all: nothing happened, and a confirmation for nothing happening
+   * is how an interface teaches a player to stop listening to it.
+   */
+  sleep(claimed = true) {
+    if (!this._live() || !this._take('player', 1.0)) return;
+    const t = this.ctx.currentTime;
+    const out = this.sfxBus;
+    const n = this.ctx.createBufferSource();
+    n.buffer = this.noiseBuf;
+    n.playbackRate.value = 0.55 + Math.random() * 0.25;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 1500; lp.Q.value = 0.7;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 0.40);
+    n.connect(lp).connect(g).connect(out);
+    n.start(t, Math.random() * 2); n.stop(t + 0.44);
+    const root = 262 * (0.99 + Math.random() * 0.02);
+    const notes = claimed ? [[root * 1.5, 0.06], [root * 1.2, 0.30]] : [[root, 0.06]];
+    for (const [f, dt] of notes) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine'; o.frequency.value = f;
+      const og = this.ctx.createGain();
+      og.gain.setValueAtTime(0.0001, t + dt);
+      og.gain.linearRampToValueAtTime(0.085, t + dt + 0.05);
+      og.gain.exponentialRampToValueAtTime(0.0004, t + dt + 0.55);
+      o.connect(og).connect(out);
+      if (this.reverbGain) og.connect(this.reverbGain);
+      o.start(t + dt); o.stop(t + dt + 0.6);
+    }
+  }
+
   // --- weather ---------------------------------------------------------------
 
   /**

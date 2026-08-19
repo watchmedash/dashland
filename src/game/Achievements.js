@@ -300,6 +300,10 @@ export class Achievements {
       for (const k of Object.keys(rec.f)) rec.f[k] = raw.f?.[k] ? 1 : 0;
     }
     this.rec = rec;
+    // A different record is a different set of standing marks, so the diff in
+    // `scan` has to re-seed rather than announce the new world's marks as if
+    // they had just been earned.
+    this._done = null;
     this._ore = new Set(rec.ore);
     this._item = new Set(rec.item);
     this._face = new Set(rec.face);
@@ -396,7 +400,28 @@ export class Achievements {
     // `endgame` is world state — and now the mark it sets is too.
     if (game.endgame?.won) this.rec.f.endgame = 1;
     if ((game._nightOut ?? 0) >= NIGHT_SECONDS) this.rec.f.night = 1;
+
+    // Say so when one comes in.
+    //
+    // There was no unlocked EVENT anywhere: the screen recomputed every mark
+    // from scratch when it was opened, so the only way to learn you had earned
+    // one was to go and look. `progress()` is that same computation and this
+    // runs once a second, off the same sweep that found the flags above.
+    //
+    // The first sweep after a load seeds the set in silence. A save with twelve
+    // marks already standing must not chime twelve times on the loading screen,
+    // which is exactly what a naive diff against an empty set would do.
+    const seeding = !this._done;
+    if (seeding) this._done = new Set();
+    for (const r of this.progress()) {
+      if (!r.done || this._done.has(r.key)) continue;
+      this._done.add(r.key);
+      if (!seeding) this.onUnlock?.(r);
+    }
   }
+
+  /** Raised once per mark, the sweep it comes true on. See the tail of `scan`. */
+  onUnlock = null;
 
   /** Where one mark stands. */
   have(mark) {

@@ -2321,7 +2321,9 @@ export class UI {
     // No xp. A trip to the bench used to pay 3, flat, to stop a shift-click of
     // 64 planks being the best-paying craft in the game; the whole question is
     // moot now that nothing but a kill pays. `crafted` is still counted.
-    if (made) { g.audio.craft(); g.stats.crafted += made; }
+    // A dish is not bench work. `craft()` is two knocks and a scrape and
+    // nothing you cook is made by hitting it.
+    if (made) { if (this.kitchen) g.audio.dish(); else g.audio.craft(); g.stats.crafted += made; }
     this.refresh();
   }
 
@@ -3290,7 +3292,10 @@ export class UI {
     // offered. Two words, on the counter's own toast line.
     go.addEventListener('click', () => {
       if (fulfilRequest(g.inventory, req, this.shop?.purse)) {
-        g.audio.pickup();
+        // Was `pickup()`, the same two sines that answer a stick landing in your
+        // bag. Coins changing hands is the one transaction in the game and it
+        // is now made of metal, which nothing else here is.
+        g.audio.trade();
         g.ui.toast(`Paid ${req.reward} coins`, COIN_ITEM, 2600);
         g.inventory.changed();
         this.refresh();
@@ -3361,9 +3366,9 @@ export class UI {
       wares.list.appendChild(this._shopRow(line.item, price, line.count, (n) => {
         const got = buyFrom(g.inventory, mob.stock, line.item, n);
         if (got) {
-          g.audio.pickup();
+          g.audio.trade();
             this.toast(`Bought ${ITEMS[line.item].label}`, line.item, 1400);
-        } else g.audio.deny();
+        } else g.audio.tradeRefuse();
         this.refresh();
       }));
     }
@@ -3383,7 +3388,7 @@ export class UI {
         const before = mob?.purse?.coins ?? 0;
         const sold = sellTo(g.inventory, item, n, mob?.purse);
         if (sold) {
-          g.audio.pickup();
+          g.audio.trade();
           // Any hand that changes counts as a trade — see MARKS.trade. Buying,
           // selling and filling his errand are three ways of doing the one
           // thing the mark is for, which is meeting the merchant at all.
@@ -3394,8 +3399,8 @@ export class UI {
           }
         } else if (mob?.purse && before < sellPriceOf(item)) {
           this.toast('Out of coin', COIN_ITEM, 2200);
-          g.audio.deny();
-        } else g.audio.deny();
+          g.audio.tradeRefuse();
+        } else g.audio.tradeRefuse();
         this.refresh();
       }));
     }
@@ -3502,11 +3507,14 @@ export class UI {
         // A greyed line still answers, because a tap that does nothing at all
         // reads as a broken button.
         if (no) {
-          g.audio.deny();
+          // The folk are people, not a button: `deny()` is the interface saying
+          // no and `tradeRefuse()` is a trader saying it, made of the same wood
+          // and breath their `barter` is.
+          g.audio.tradeRefuse();
           this.toast(no.charAt(0).toUpperCase() + no.slice(1), o.take.item, 2200);
         } else if (g.barterAccept(mob, i)) {
           this.toast(`Traded for ${ITEMS[o.take.item]?.label ?? '?'}`, o.take.item, 1600);
-        } else g.audio.deny();
+        } else g.audio.tradeRefuse();
         this.refresh();
       }));
     }

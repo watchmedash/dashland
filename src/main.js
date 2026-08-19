@@ -46,7 +46,7 @@ import { Mobs, MOB_MODEL_URLS } from './game/Mobs.js';
 import { Endgame } from './game/Endgame.js';
 import * as MobModels from './game/MobModels.js';
 import { explode } from './game/Explosion.js';
-import { Farming, roofsSoil, cropFirstId } from './game/Farming.js';
+import { Farming, roofsSoil, cropFirstId, cropFamily } from './game/Farming.js';
 import { Water, BioWake, LEVEL_MAX } from './game/Water.js';
 import { Whirlpools, WHIRL_R, WHIRL_CUE, K_SEA } from './game/Whirlpool.js';
 import { Save } from './game/Save.js';
@@ -1899,11 +1899,17 @@ class Game {
      * fills it. See the head of `Achievements.js`.
      */
     this.achievements = new Achievements();
+    // Earning one made no sound and raised no event; the screen recomputed the
+    // whole set when you opened it and that was the only way to find out.
+    this.achievements.onUnlock = () => this.audio.achieve();
     /** Seconds until the next `skills.observe`. See `_tickSkills`. */
     this._skillTimer = 0;
 
     this._initRenderer();
     this.inventory = new Inventory();
+    // A tool wearing out. Set here and again in `_newWorld`, which builds a
+    // fresh Inventory and would otherwise drop the hook with the old one.
+    this.inventory.onBreak = () => this.audio.toolBreak();
     this.ui = new UI(this);
     this.audio = new Audio();
     this.audio.setVolumes(this.settings.volume, this.settings.music);
@@ -2109,7 +2115,7 @@ class Game {
     // moment.
     this.endgame.onWin = () => {
       this.ui.toast('All sixteen down.', itemIdOf('gold_carrot'), 9000);
-      this.audio.ui(720);
+      this.audio.achieve();
     };
     // A boss arriving, and a boss dying. Both were silent, which for the
     // sixteen things the whole game is pointed at is the largest single hole in
@@ -2170,6 +2176,8 @@ class Game {
      */
     this.editedRegions = new Set();
     this.farming = new Farming(this.planet, (edits) => this._applyEdits(edits));
+    // A field ripening, which nothing outside Farming has ever been told about.
+    this.farming.onRipe = (col, k) => this.audio.ripen(this.planet.centerOf(col, k, _v1));
     this.water = new Water(this.planet, (edits) => this._applyEdits(edits));
     /** The glowing trail a swimmer leaves. Fed below, read by the water shader. */
     this.bioWake = new BioWake();
@@ -3023,6 +3031,7 @@ class Game {
     this._pushSeason();
     this.inventory = new Inventory();
     this.inventory.onChange = () => this.ui.refresh();
+    this.inventory.onBreak = () => this.audio.toolBreak();
     this.stats = { mined: 0, placed: 0, crafted: 0 };
     // Verdant's memory, and it is a fresh one per planet. `used` is a count of
     // swaps taken this visit and nothing else - the offers themselves are
@@ -4550,7 +4559,7 @@ class Game {
     this.homeSpawn = { col, k };
     this.ui.toast(claimed ? 'You will wake up here.' : 'This is already your home.',
       itemIdOf('bed'), 2600);
-    this.audio.ui(claimed ? 620 : 420);
+    this.audio.sleep(claimed);
   }
 
   /**
@@ -5920,7 +5929,11 @@ class Game {
     // `Particles.blockBreak` went with the call: it had no other caller, and an
     // unreachable method reads as a live one to everybody who meets it later.
     // Footsteps, embers and bubbles have their own methods and are untouched.
-    this.audio.break_(b.sound, center);
+    // A ripe crop is pulled, not broken. The same generic burst answered
+    // stone, glass and a head of grain.
+    const ripe = cropFamily(hit.id);
+    if (ripe && hit.id === ripe.last) this.audio.harvest(center);
+    else this.audio.break_(b.sound, center);
     this.stats.mined++;
     // The seam, not the drop. A deep coal seam and an ordinary one both give
     // coal, so the eighteen ores would collapse to twelve if this counted what
@@ -6263,7 +6276,12 @@ class Game {
   openScreen(kind, state) {
     this.ui.openScreen(kind, state);
     this.input.exitLock();
-    this.audio.uiOpen();
+    // A crate is a physical object and the rest are panels. One lid in the
+    // whole set, and it is the one the player opens most.
+    if (kind === 'crate' && state && state.col !== undefined) {
+      this.audio.crate(true, this.planet.centerOf(state.col, state.k, _v1));
+    } else if (kind === 'crate') this.audio.crate(true);
+    else this.audio.uiOpen();
   }
 
   /**
@@ -6324,7 +6342,7 @@ class Game {
     if (this.barterRefusal(mob, index)) return false;
     const ok = accept(this.inventory, this.barter, this.seed,
       traderIdOf(mob.spec.folkId), index);
-    if (ok) this.audio.ui(720);
+    if (ok) this.audio.barter();
     return ok;
   }
 
@@ -6344,6 +6362,8 @@ class Game {
 
   closeScreen() {
     if (!this.ui.screenOpen) return;
+    // Read before `ui.closeScreen` clears it; see the tail of this method.
+    const kind = this.ui.screen;
     const spill = this.inventory.clearCraft();
     const cur = this.inventory.cursor;
     if (!cur.empty) {
@@ -6360,7 +6380,8 @@ class Game {
     // Opening a screen has made a noise since the benches were written and
     // closing one never has, which left the one action a player takes hundreds
     // of times a session as the only unanswered half of a pair.
-    this.audio.uiClose();
+    if (kind === 'crate') this.audio.crate(false);
+    else this.audio.uiClose();
     if (this.state === 'playing') this.input.requestLock();
   }
 
@@ -7996,7 +8017,7 @@ class Game {
     // second line spelling out that it keeps the night away is the game
     // playing itself. Let them plant it and find out.
     this.ui.toast('The core is warm to the touch.', itemIdOf('hearth'), 5000);
-    this.audio.ui(880);
+    this.audio.achieve();
   }
 
   /**
@@ -11113,7 +11134,9 @@ class Game {
       const seedling = this._seedlingOf(heldSlot.item);
       if (seedling !== 0 && this.farming.plant(hit.col, hit.k, seedling)) {
         this.inventory.consumeHeld(1, heldSlot);
-        this.audio.place('grass');
+        // Was `place('grass')`, a block being set down. A seed is pressed into
+        // soil and the soil closes over it, which is the opposite envelope.
+        this.audio.plant(this.planet.centerOf(hit.col, hit.k + 1, _v1));
         this.player.swing();
         this.viewModel.punch(this._handOf(heldSlot));
         this.ui.toast('Planted', heldSlot.item, 1200);

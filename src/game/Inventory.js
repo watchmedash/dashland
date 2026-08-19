@@ -113,6 +113,8 @@ export class Inventory {
     this.cursor = new Slot();
     this.selected = 0;
     this.onChange = null;
+    /** Raised when a tool wears out in the hand. See `damageHeld`. */
+    this.onBreak = null;
   }
 
   changed() { this.onChange?.(); }
@@ -373,7 +375,17 @@ export class Inventory {
     const def = ITEMS[s.item];
     if (!def?.tool) return false;
     s.wear += amount;
-    if (s.wear >= def.tool.durability) { s.clear(); this.changed(); return true; }
+    if (s.wear >= def.tool.durability) {
+      s.clear();
+      // The one event in the game the player is guaranteed not to be looking
+      // at: it happens on the swing after the one they were watching, and six
+      // call sites take this method's return value and none of them read it.
+      // A hook here rather than a test at all six, for the same reason
+      // `onChange` is a hook.
+      this.onBreak?.();
+      this.changed();
+      return true;
+    }
     this.changed();
     return false;
   }
